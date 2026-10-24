@@ -92,3 +92,19 @@ Ship gives each undone item a disposition, but a nit approved unfixed lives only
 registry that crashes `status` when it isn't UTF-8; 005's `left` that builds up across checks, its
 timeout output kept as bytes, and checks that inherit stdin. Carry nits like undone items, and fix
 these five. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] Release bumps uv.lock with the version files
+
+`release.version_files` bumps `pyproject.toml` but not `uv.lock`, so after 1.1.0 the lock still
+says `version = "1.0.0"` for `sdlc`, and every `uv run` in this repo rewrites it, leaving a
+modified file in the tree that each change has to revert by hand (008 did, twice). Either list the
+lock where release can bump it, or have release refresh it after the bump. Raised at the ship of
+008-drift-gate.
+
+## [2026-10-24] [seed] The drift gate's message names the right fix
+
+008's `test_this_repos_setup_record_is_current` tells you to run `record` whatever failed, but
+`record` can't clear a malformed product or project doc (in `breaking`, each with its own `fix`)
+or an `unknown` key in `config.toml`. Print the entry's `fix` when it has one, and suggest
+`record` only for drift it clears. A nit approved unfixed at 008's ship, so one more for "Carry
+a ship's unfixed nits forward". Raised at the ship of 008-drift-gate.
