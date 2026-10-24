@@ -283,3 +283,24 @@ def test_a_copy_that_drops_a_section_fails() -> None:
     assert not _in_order(["## A", "## B"], ["## B", "## A"])
     assert not _in_order(["## A", "## B"], ["## A"])
     assert _in_order(["## A", "## B"], ["## A", "## Own", "## B"])
+
+
+def test_this_repos_setup_record_is_current() -> None:
+    """`.sdlc/setup.json` holds the defaults this repo was last set up from. A change that edits
+    `defaults/` and doesn't rerun `record` leaves drift for a later change to trip over at close;
+    after a fresh record, `drift` reports nothing at all."""
+    found = sdlc.drift(ROOT)
+    assert found["base"] == "manifest", ".sdlc/setup.json is missing or won't parse"
+    stale = [
+        f"{r['path']}: {u['unit']} ({u['class']})" for r in found["refresh"] for u in r["units"]
+    ]
+    stale += [
+        f"{e['where']}: {e.get('unit') or e.get('class') or e['detail']}"
+        + (f" ({e['class']})" if e.get("unit") else "")
+        for e in found["breaking"] + found["report"]
+    ]
+    assert not stale, (
+        "this repo's setup has drifted from defaults/: bring .sdlc/ in step, then run "
+        "`uv run --quiet --script scripts/sdlc.py record` from this checkout\n  "
+        + "\n  ".join(stale)
+    )

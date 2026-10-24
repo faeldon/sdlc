@@ -214,7 +214,9 @@ Changing a skill or the script usually means satisfying these, so know them befo
   `.sdlc/REVIEW.md` are this repo's filled-in copies of `defaults/SDLC.md` and `defaults/REVIEW.md`.
   They keep every default heading in order and every default review bullet word for word, adding
   their own between. An improvement to either that any repo could use goes into the default in the
-  same change; only what is true of this plugin alone stays in the copy.
+  same change; only what is true of this plugin alone stays in the copy. A change that edits
+  `defaults/` also runs `scripts/sdlc.py record` from its own checkout, so `.sdlc/setup.json`
+  matches what it ships: the gate fails while `sdlc.py drift` reports anything here.
 - **`stamp_shipped` edits frontmatter lines in place.** Do not refactor it to round-trip through
   `frontmatter.dumps()`: that turns `id: 001` into `1`, reorders keys and writes `idea: null`.
   `tests/test_sdlc.py` pins this.

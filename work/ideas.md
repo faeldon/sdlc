@@ -92,10 +92,3 @@ Ship gives each undone item a disposition, but a nit approved unfixed lives only
 registry that crashes `status` when it isn't UTF-8; 005's `left` that builds up across checks, its
 timeout output kept as bytes, and checks that inherit stdin. Carry nits like undone items, and fix
 these five. Raised by the retrospective of 2026-10-24.
-
-## [2026-10-24] [seed] This repo's gate fails when its setup record drifts
-
-Every change that edits a default must run `sdlc.py record` by hand, and nothing fails when one
-forgets: `f341a83` refreshed the record after the fact, straight on `main`, and 005 had to be
-rebased and shipped again before it could close. A gate test that `sdlc.py drift` reports nothing in this repo would catch it
-in the change that caused it. Raised by the retrospective of 2026-10-24.
