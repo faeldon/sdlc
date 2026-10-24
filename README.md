@@ -40,9 +40,6 @@ claude plugin install sdlc@sdlc
 claude plugin install sdlc-factory@sdlc   # optional: agents for the change loop
 ```
 
-The repo is private, so adding it needs git access to it (`gh auth login` as an account that has
-it).
-
 ## Set up an existing project
 
 From your repo's root, in Claude Code:
