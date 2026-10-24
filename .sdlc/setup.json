@@ -55,7 +55,7 @@
         "## Running the stages > ### Stage 4 \u2014 Test > - **The slower check**": "sha256:b5a8c7a5ad6ea1c4",
         "## Running the stages > ### Stage 4 \u2014 Test > - **Regression:**": "sha256:959db961d83e4790",
         "## Running the stages > ### Stage 4 \u2014 Test > - **Compatibility:**": "sha256:a91cbe1694fe5448",
-        "## Running the stages > ### Stage 4 \u2014 Test > - **Acceptance:**": "sha256:d573326ff0b19666",
+        "## Running the stages > ### Stage 4 \u2014 Test > - **Acceptance:**": "sha256:ff24123f28b62e49",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship`": "sha256:7a1b49b4360d3fbc",
         "## Running the stages > ### Closing and the archive \u2192 `/sdlc:close`": "sha256:b218343b104a03d9",
         "## Running the stages > ### Dropping a change \u2192 `/sdlc:drop`": "sha256:98d05de155596ea5",
@@ -78,11 +78,11 @@
       "default": "REVIEW.md",
       "units": {
         "#": "sha256:983f9684c4177c25",
-        "## Pass 1 \u2014 Correctness": "sha256:e1ab6575a8a4bfe5",
+        "## Pass 1 \u2014 Correctness": "sha256:0adf0b09645cb3cb",
         "## Pass 1 \u2014 Correctness > - **An error swallowed.**": "sha256:13d6164be9381b57",
         "## Pass 1 \u2014 Correctness > - **An edge case the requirements name and the code doesn't handle:**": "sha256:3050208ea6d61a53",
         "## Pass 1 \u2014 Correctness > - **A test that can't fail.**": "sha256:2b92ea90eb058b84",
-        "## Pass 1 \u2014 Correctness > - **A test only a revert can fail.**": "sha256:8592bb14d1e39419",
+        "## Pass 1 \u2014 Correctness > - **A test only a revert can fail.**": "sha256:6c077663fdac2bbf",
         "## Pass 1 \u2014 Correctness > - **Behaviour changed where the diff doesn't say so:**": "sha256:5ba4499acd5557f7",
         "## Pass 1 \u2014 Correctness > - **Bad input that crashes.**": "sha256:e2e3fc1515a26c6b",
         "## Pass 1 \u2014 Correctness > - **Works only here.**": "sha256:39ccb514e648cc3a",
@@ -113,6 +113,7 @@
     }
   },
   "templates": {
+    "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:3ca66395f1541f47",
     "ideas.md": "sha256:8a10397f7c439cd1",
     "intent.md": "sha256:bfb0464c4b5e5f71",

@@ -15,6 +15,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py context *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
@@ -117,6 +118,22 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check --strict
 
 **Report the test count the gate printed, if it ran tests,** and what they cover. Say what ran; a
 green gate is evidence about what it checks and silence about everything else.
+
+**Then the change's own acceptance checks,** the `## ` sections of its `checks.md`: proof that
+only a revert could break, kept out of the suite and rerun here because review fixes and a rebase
+may have touched what they check. List them first; this runs nothing:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks <NNN>
+```
+
+With none listed, say "no acceptance checks" and go on. Otherwise show each check's name and its
+command, as listed, and only then run `sdlc.py accept <NNN>`, the same way. It has no rule here on
+purpose: an agent may have written those commands, so the person sees them above and answers the
+prompt it raises. It runs each from the checkout root and must exit 0. A check fails when its
+command exits non-zero, times out, or leaves the working tree changed (`left`). **A failure stops
+here, as a failing gate does:** report each failing check's name, `output` and `left`. A problem in
+`checks.md` itself, which `checks` reports, stops here too.
 
 ## Step 2 — If the diff calls for it, run the build check
 
@@ -296,8 +313,8 @@ ignored file in the staged list means the ignore file lost a rule: say so rather
 
 ## Step 7 — Report and stop
 
-Report: the commit sha and subject, which checks ran and their results, whether the build check
-ran and what it said, how many findings there were by pass, which context docs were updated (or
+Report: the commit sha and subject, which checks ran and their results, each acceptance check by
+name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by pass, which context docs were updated (or
 that none needed it), the release impact recorded, each undone
 item and where it went (the seed's title, or dropped and why), and anything else deliberately
 deferred. Be explicit that nothing was pushed and nothing was deployed.

@@ -134,7 +134,9 @@ written from a real artifact.
 
 `ideas.md` here replaces what `work/ideas.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
-or the factory first writes one. Neither has prompts: its note carries the rules.
+or the factory first writes one. Neither has prompts: its note carries the rules. `checks.md`
+is what a change's acceptance checks start as; its one example section's prompts make an untouched
+copy a scaffold, which `sdlc.py check` reports rather than runs.
 
 `issue.md` here replaces the layout of the change's issue. Its placeholders are `{{title}}`,
 `{{name}}`, `{{tier}}`, `{{stage}}`, `{{impact}}`, `{{branch}}`, `{{commit}}`, `{{depends_on}}`,
@@ -200,6 +202,16 @@ untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
 with finished changes: the change's commit keeps them in history. `work/ideas.md` is committed
 too; a closed seed is deleted from it, history keeping that as well.
+
+A change may keep its **acceptance checks** in `work/NNN-slug/checks.md`: proof that only a
+deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one
+check holding one `sh` block, which passes when it exits 0 within 300 seconds and leaves the
+working tree as it found it. `sdlc.py checks NNN` lists them and runs nothing; `sdlc.py accept NNN`
+runs each from the change's checkout root. `/sdlc:ship` lists them after the gate, shows each
+command, then runs `accept`, which no skill and no setup allow rule ever pre-approves: an agent may
+have written them, so a person sees them and answers the prompt. A failing check stops ship like a
+failing gate. The file reaches history and the change's issue with the folder; a check that can't
+run (looking at a rendered page) is written in `notes.md` instead.
 
 `.claude/worktrees/` belongs in `.gitignore`, and `work/` must not be in it: `sdlc.py new` refuses
 an ignored `work/`, and `sdlc.py check` flags it. The main checkout stays on `main`: close

@@ -236,9 +236,9 @@ DOC_FILES = ("process", "review", "policy", "health", "direction", "project", "p
 PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
-# layout of a change's tracker issue, and the two files a skill starts when a change first needs
-# one: `work/ideas.md` and a change's `notes.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", "ideas.md", "notes.md")
+# layout of a change's tracker issue, and the files a skill starts when a change first needs one:
+# `work/ideas.md`, a change's `notes.md` and its `checks.md`.
+DOC_TEMPLATES = ("direction.md", "issue.md", "ideas.md", "notes.md", "checks.md")
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -788,6 +788,68 @@ def open_items(folder: Path) -> list[dict]:
     return out
 
 
+# A change's acceptance checks: each `## ` section of its checks.md, holding one `sh` block that
+# exits 0 while the outcome holds. `accept` runs them; it has no allow rule, so a person always
+# sees the commands and answers a prompt before they run.
+CHECKS = "checks.md"
+SH_FENCE_RE = re.compile(r"^\s*(```|~~~)\s*sh\s*$")
+CHECK_TIMEOUT = 300  # seconds for one check; a hung one fails rather than holds ship
+CHECK_OUTPUT_LINES = 40
+
+
+def acceptance(folder: Path) -> dict:
+    """A change's acceptance checks, in file order, and what's wrong with its checks.md. Never
+    raises: an unreadable or malformed file is a problem, and a section with one is left out."""
+    path = folder / CHECKS
+    out: dict = {"path": CHECKS, "exists": path.is_file(), "checks": [], "problems": []}
+    if not out["exists"]:
+        return out
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        out["problems"].append(f"{CHECKS} can't be read: {e}")
+        return out
+    if is_unfilled(path):
+        out["problems"].append(f"{CHECKS} is still the template: fill it or delete it")
+        return out
+    sections: list[tuple[str | None, list[str]]] = [(None, [])]
+    fence: list[str] | None = None
+    sh = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            if fence is None:
+                fence, sh = [], bool(SH_FENCE_RE.match(line))
+            else:
+                if sh:
+                    sections[-1][1].append("\n".join(fence))
+                fence = None
+            continue
+        if fence is not None:
+            fence.append(line)
+        elif line.startswith("## "):
+            sections.append((line[3:].strip(), []))
+    if fence is not None:
+        out["problems"].append(f"{CHECKS}: a fenced block is never closed")
+        return out
+    seen: set[str] = set()
+    for name, blocks in sections:
+        if name is None:
+            if blocks:
+                out["problems"].append(f"{CHECKS}: an `sh` block above the first `## ` check")
+            continue
+        wrong = []
+        if name in seen:
+            wrong.append("its name is used twice")
+        if len(blocks) != 1:
+            wrong.append(f"holds {len(blocks)} `sh` blocks, not one")
+        seen.add(name)
+        if wrong:
+            out["problems"] += [f"{CHECKS}: ## {name}: {w}" for w in wrong]
+            continue
+        out["checks"].append({"name": name, "command": blocks[0]})
+    return out
+
+
 def _age_days(rec: dict, today: date) -> int | None:
     try:
         return (today - date.fromisoformat(rec["created"])).days
@@ -862,6 +924,8 @@ def analyze(root: Path, today: date | None = None) -> dict:
                     }
                 )
             continue
+        for detail in acceptance(folder)["problems"]:
+            problems.append({"dir": where, "kind": "checks", "detail": detail})
         if tier is None or stage is None:
             continue
         for name, due_from in (("spec.md", SPEC_REQUIRED_FROM), ("plan.md", PLAN_REQUIRED_FROM)):
@@ -1286,6 +1350,66 @@ def cmd_undone(root: Path, ident: str) -> int:
         )
     )
     return 0
+
+
+def cmd_checks(root: Path, ident: str) -> int:
+    """A change's acceptance checks as JSON, for /sdlc:ship to show before it runs them. Runs
+    nothing and writes nothing, so it is allowed without a prompt; `accept` is not."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    found = acceptance(path)
+    print(json.dumps({"change": path.name, **found}, indent=2, ensure_ascii=False))
+    return 1 if found["problems"] else 0
+
+
+def _status_lines(checkout: Path) -> set[str]:
+    return set((_git(checkout, "status", "--porcelain") or "").splitlines())
+
+
+def cmd_accept(root: Path, ident: str) -> int:
+    """Run a change's acceptance checks from its checkout root, each through `sh -c`, and say
+    which pass. A check passes when it exits 0 within CHECK_TIMEOUT and leaves the working tree as
+    it found it: ship commits that tree. Never in ALLOW_RULES or a skill's allowed-tools, since an
+    agent may have written the commands: a person sees them listed and answers a prompt first."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    found = acceptance(path)
+    checkout = path.parent.parent
+    before = _status_lines(checkout)
+    results = []
+    for check in found["checks"]:
+        start = datetime.now(UTC)
+        try:
+            run = subprocess.run(
+                ["sh", "-c", check["command"]],
+                cwd=checkout,
+                capture_output=True,
+                text=True,
+                timeout=CHECK_TIMEOUT,
+            )
+            code, output = run.returncode, run.stdout + run.stderr
+        except subprocess.TimeoutExpired as e:
+            code = None
+            output = f"{e.stdout or ''}{e.stderr or ''}\ntimed out after {CHECK_TIMEOUT}s"
+        seconds = round((datetime.now(UTC) - start).total_seconds(), 1)
+        left = sorted(_status_lines(checkout) - before)
+        results.append(
+            {
+                "name": check["name"],
+                "command": check["command"],
+                "exit": code,
+                "passed": code == 0 and not left,
+                "seconds": seconds,
+                "left": left,
+                "output": "\n".join(output.splitlines()[-CHECK_OUTPUT_LINES:]),
+            }
+        )
+    passed = not found["problems"] and all(r["passed"] for r in results)
+    report = {"change": path.name, "checks": results, "passed": passed}
+    print(json.dumps({**report, "problems": found["problems"]}, indent=2, ensure_ascii=False))
+    return 0 if passed else 1
 
 
 def cmd_ship(root: Path, ident: str) -> int:
@@ -2143,7 +2267,7 @@ ISSUE_FIELDS = (
     "title", "name", "tier", "stage", "impact", "branch", "commit", "depends_on", "updated",
     "problem", "outcome", "artifacts",
 )  # fmt: skip
-ARTIFACT_ORDER = {"intent.md": 0, "spec.md": 1, "plan.md": 2, "notes.md": 3}
+ARTIFACT_ORDER = {"intent.md": 0, "spec.md": 1, "plan.md": 2, "notes.md": 3, "checks.md": 4}
 HEADING_RE = re.compile(r"^(#{1,6}) ")
 
 
@@ -3688,9 +3812,10 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # The script's subcommands that only read, which setup proposes allowing without a prompt. The `*`
 # before the path stands in for wherever the plugin is installed, which differs per machine and
 # changes when it updates; a plugin can't ship permission rules of its own. Nothing that writes
-# is here: new, ship and close keep asking.
+# is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
-    "status", "check", "config", "next", "undone", "context", "readiness", "unreleased", "drift",
+    "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
+    "drift",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -4625,6 +4750,16 @@ def main() -> int:
     )
     p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
 
+    p_checks = sub.add_parser(
+        "checks", help="a change's acceptance checks in checks.md, as JSON; runs nothing"
+    )
+    p_checks.add_argument("id", help="the 3-digit id, e.g. 025")
+
+    p_accept = sub.add_parser(
+        "accept", help="run a change's acceptance checks from its checkout; never pre-approved"
+    )
+    p_accept.add_argument("id", help="the 3-digit id, e.g. 025")
+
     p_drop = sub.add_parser(
         "drop", help="stamp the change dropped and commit its folder on its branch, for close"
     )
@@ -4741,6 +4876,10 @@ def main() -> int:
         return 0
     if args.cmd == "undone":
         return cmd_undone(root, args.id)
+    if args.cmd == "checks":
+        return cmd_checks(root, args.id)
+    if args.cmd == "accept":
+        return cmd_accept(root, args.id)
     if args.cmd == "drop":
         return cmd_drop(root, args.id, args.check)
     if args.cmd == "base":

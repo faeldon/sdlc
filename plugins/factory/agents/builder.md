@@ -51,6 +51,28 @@ Keep the tree working after every slice. Touch only what the slice needs; a refa
 you notice on the way goes into `notes.md` as an unticked `- [ ]` line, not into this change.
 Test behaviour, not implementation; prefer real code over mocks except at real boundaries.
 
+A requirement only a deliberate revert could break (a file moved, a key renamed, a line added) is
+proved by an acceptance check, not a test in the suite. Write it as a `## ` section of
+`work/NNN-slug/checks.md`, one `sh` block that exits 0 while the outcome holds and leaves the tree
+unchanged; `/sdlc:ship` reruns it. Start the file from this text, replacing its prompts:
+
+````markdown
+# Checks
+
+> The change's acceptance checks: each `## ` section is one, which only a deliberate revert could
+> fail, so it stays out of the suite. `/sdlc:ship` reruns every one from the checkout root before
+> it commits, and a check passes when its one `sh` block exits 0 and leaves the working tree as it
+> found it. `sdlc.py` reads each section's name and that block, nothing else.
+
+## <What the check proves, as its name>
+
+<Why only a revert could fail it, in a sentence.>
+
+```sh
+<the command, asserting inside itself: grep -q, test, a script's exit code>
+```
+````
+
 When the build departs from `plan.md`, update `plan.md`: a plan that no longer says what was built
 misleads the review that reads it.
 

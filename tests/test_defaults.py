@@ -232,6 +232,12 @@ def test_the_factory_starts_notes_from_the_same_text_as_the_template() -> None:
     assert "unticked `- [ ]` line" in factory.NOTES_HEAD
 
 
+def test_the_factory_builder_starts_checks_from_the_same_text_as_the_template() -> None:
+    """The factory's cached copy has no `templates/`, so the builder carries the text itself."""
+    builder = (ROOT / "plugins" / "factory" / "agents" / "builder.md").read_text(encoding="utf-8")
+    assert f"````markdown\n{_text('templates/checks.md')}````" in builder
+
+
 # This repo's own copies of the defaults it ships. An improvement made to one that any repo could
 # use belongs in the default too, so the two are held together: the copy keeps every heading of
 # the default in order (adding its own between them), and every review bullet word for word.

@@ -56,11 +56,3 @@ reviews through pull requests would want ship to push the branch and open a PR (
 PR's review to stand alongside ship's. An opt-in way of landing, not a default, and an exception
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
-
-## [2026-10-24] [seed] Acceptance checks kept in the change folder, run by ship
-
-Stage 4 records an acceptance check in the change's `notes.md` as prose: what ran and what it
-showed. Keeping the check itself in `work/NNN-slug/` instead, run by `/sdlc:ship` and archived by
-close with the folder, would make it rerunnable at ship and still out of the suite. It changes the
-`work/` layout and what ship runs in a host, so it is a Tier 2 of its own. Left from the
-test-lifetimes change (`work/003-test-lifetimes/notes.md` in its commit). Raised 2026-10-24.

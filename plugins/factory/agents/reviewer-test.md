@@ -28,8 +28,9 @@ The change folder and round in the prompt. Read `spec.md` (Tier 2) or the intent
   test, a case skipped by a condition that is always true, a run that collected zero tests: each
   is a test that can't fail, and a finding.
 - **How each test could fail.** A test in the suite that only reverting the change could fail (a
-  file moved, a key renamed) is an acceptance check: ask for it to be run once and recorded in
-  `notes.md` instead of kept in the suite. A requirement proved that way is covered.
+  file moved, a key renamed) is an acceptance check: ask for it as a section of the change's
+  `checks.md` instead of a test in the suite, and run each section's `sh` block yourself from the
+  repo root; it must exit 0 and leave the tree unchanged. A requirement proved that way is covered.
 - **The edge cases the spec names**: empty, missing, boundary, error path, a second run of
   something meant to run once.
 - **The right level.** Pure logic in unit tests; a boundary crossed in an integration test; mocks

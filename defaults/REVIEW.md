@@ -13,7 +13,8 @@ a blocking finding — fix it and re-run rather than accumulating a long list.
 Does the change do what `intent.md` (Tier 1) or `spec.md`'s numbered requirements (Tier 2) said?
 Walk the requirements one at a time; **a requirement with no corresponding code is a finding.** A
 requirement with code but no test that would fail without it is one too, unless only a revert
-could fail it and `notes.md` records the check that proved it.
+could fail it and the change's `checks.md` holds the check that proves it (`notes.md` when it
+can't run).
 
 Then look for the failures that don't announce themselves:
 
@@ -24,8 +25,8 @@ Then look for the failures that don't announce themselves:
 - **A test that can't fail.** A glob that matches nothing, an assertion on a mock of the thing under
   test, a case skipped by a condition that is always true.
 - **A test only a revert can fail.** A test in the suite that checks a file moved, a key renamed or
-  a line added: nothing but undoing the change breaks it, so it is an acceptance check, run once
-  and recorded in the change's `notes.md`.
+  a line added: nothing but undoing the change breaks it, so it is an acceptance check, kept in
+  the change's `checks.md` (or `notes.md` when it can't run).
 - **Behaviour changed where the diff doesn't say so:** a default, an order, a rename that something
   else still reads by its old name.
 - **Bad input that crashes.** Input a person or another system can get wrong (a config file, a

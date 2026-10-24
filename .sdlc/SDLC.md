@@ -252,9 +252,11 @@ then fix the code without editing the test.
   which names the version that removes it, in `release.deprecations` when the repo keeps one,
   else in a comment; the test goes with the shim.
 - **Acceptance:** only a deliberate revert breaks it: a file moved, a key renamed, a section
-  added. Run it once here, as a command or a throwaway test, and record what ran and what it
-  showed in the change's `notes.md`. It reaches history with the folder and stays out of the
-  suite, where every later run would pay for a check nothing can break by accident.
+  added. Write it as a `## ` section of the change's `checks.md`, one `sh` block that exits 0
+  while the outcome holds; `/sdlc:ship` reruns it before it commits. One that can't run, such as
+  looking at a rendered page, is recorded in `notes.md`: what was done and what it showed. Either
+  way it reaches history with the folder and stays out of the suite, where every later run would
+  pay for a check nothing can break by accident.
 
 A test run that collected nothing is a failure, not a pass: it means discovery broke, and a green
 gate that ran zero tests is the quietest way for a broken change to reach `main`.

@@ -516,6 +516,24 @@ def test_ship_reads_the_agents_verdicts() -> None:
     assert "never stands in" in step4
 
 
+def test_ship_lists_then_runs_the_changes_checks_under_a_prompt() -> None:
+    """After the gate and before the build check: the checks are listed, shown, then run by
+    `accept`, which ship names without a rule, so the person answers a prompt with them in view."""
+    text = BY_ID["sdlc:ship"].read_text(encoding="utf-8")
+    step1 = text.split("## Step 1")[1].split("## Step 2")[0]
+    order = ("commands.check", "sdlc.py checks <NNN>", "sdlc.py accept <NNN>")
+    gate, listed, run = (step1.find(s) for s in order)
+    assert -1 < gate < listed < run, "the gate, then the listing, then the run"
+    assert "**A failure stops" in step1 and "no acceptance checks" in step1
+
+
+@pytest.mark.parametrize("skill", SKILLS, ids=_id)
+def test_no_skill_lets_accept_run_unasked(skill: Path) -> None:
+    accept = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py accept 005'
+    granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(accept)]
+    assert not granted, f"{_id(skill)} would run a change's own checks without a prompt"
+
+
 def test_the_build_session_brings_the_persons_decisions_to_them() -> None:
     """Agents can't talk to the person; the build session can. A blocking decision stops the loop
     (`next: decide`) and is asked, never answered by the session itself; ship and the approver read

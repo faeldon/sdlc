@@ -160,6 +160,12 @@ recorded) and refuses while any change is live. The nudge in `status` is never a
 `CLAUDE.md` or `AGENTS.md` above a changed path, with the lines naming a deleted or renamed path.
 Ship shows any edit with its findings and commits it with the change; close has no `Edit`.
 
+**Acceptance checks: `acceptance()`.** A change's `checks.md`, one `## ` section and one `sh` block
+per check. `checks` lists them (read-only, allowed); `accept` runs them from the change's checkout
+and fails one that exits non-zero, times out or leaves the tree changed. `accept` is never in
+`ALLOW_RULES` or a skill's `allowed-tools` (`test_no_skill_lets_accept_run_unasked`): ship names it
+in prose, so the harness asks with the commands just shown. They are never rerun by a later change.
+
 **The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
 cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`). Its
 mechanism is `factory.py`, because its own cached copy has no `sdlc.py`. Agents that judge have
