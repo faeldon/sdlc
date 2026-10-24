@@ -86,7 +86,9 @@ it as not planned`).
 
 1. If this session is in the change's worktree (as `/sdlc:intent` leaves it), call
    `ExitWorktree` with `action: "keep"` first, so the session is back in the main checkout before
-   its worktree goes. Never `"remove"`: that deletes the branch whether or not it's merged.
+   its worktree goes. Never `"remove"`: that deletes the branch whether or not it's merged. If it
+   answers `No-op: there is no active EnterWorktree session`, the session came in by `cd` or
+   started there: go on to 2, where exit 3 is that case.
 2. Run it from wherever the session now is:
 
    ```bash

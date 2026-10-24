@@ -86,7 +86,9 @@ planned, `.
    refusals exactly and stop.
 3. If this session is in the change's worktree, call `ExitWorktree` with `action: "keep"`, so the
    session is back in the main checkout before its worktree goes. Never `"remove"`: that deletes
-   the branch whether or not anything keeps its commits.
+   the branch whether or not anything keeps its commits. If it answers `No-op: there is no active
+   EnterWorktree session`, the session came in by `cd` or started there: go on to 4, where exit 3
+   is that case.
 4. Close it:
 
    ```bash

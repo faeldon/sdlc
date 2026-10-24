@@ -179,9 +179,11 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py new <slug> --tie
 It prints the folder's path and the worktree's, and the issue's URL when it opened one. If it
 refuses because GitHub can't be reached, stop and say so: it never falls back to a local number,
 which could later collide with an issue's. If `config` named a `commands.worktree_setup`, run it from the
-**main checkout** next, with `{worktree}` replaced by that path — a worktree lacks every gitignored
-thing the repo's tools need, and that command is the repo's own account of what those are. With
-none configured, skip it and say so.
+**main checkout** next, in a subshell, `(<command>)`, with `{worktree}` replaced by that path — a
+worktree lacks every gitignored thing the repo's tools need, and that command is the repo's own
+account of what those are. The subshell keeps a `cd` in it from moving this session into the
+worktree before `EnterWorktree` does, which would leave close nothing to exit. With none
+configured, skip it and say so.
 
 Then move **this session** into the worktree, so the human never has to start another:
 `EnterWorktree` with `path` set to the worktree path `new` printed. If the tool isn't available

@@ -200,6 +200,13 @@ def test_intent_moves_the_session_and_close_brings_it_back() -> None:
     assert "EnterWorktree" in intent["allowed-tools"] and "EnterWorktree" in intent.content
     assert "ExitWorktree" in close["allowed-tools"]
     assert '"keep"' in close.content
+    # A `cd` in the host's setup would move the session first, and close would have nothing to exit.
+    step5 = intent.content.split("## Step 5")[1].split("## Step 6")[0]
+    assert "subshell, `(<command>)`" in step5
+    assert step5.index("worktree_setup") < step5.index("`EnterWorktree` with")
+    drop = (ROOT / "skills" / "drop" / "SKILL.md").read_text(encoding="utf-8")
+    for text in (close.content, drop):
+        assert "No-op: there is no active EnterWorktree session" in " ".join(text.split())
     # The cleanup is handed over, never run: close may not hold the tool that would run it.
     assert "close_cleanup" in close.content
     assert any(t.startswith("Bash(") for t in close["allowed-tools"])
