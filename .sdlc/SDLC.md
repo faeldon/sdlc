@@ -180,7 +180,10 @@ changes: `/sdlc:intent` writes it in the change's worktree and the change's comm
 
 **The main checkout stays on `main`.** Changes are merged there: `/sdlc:close` fast-forwards `main`
 in the main checkout, and refuses while it is on another branch or has uncommitted changes. Start
-new changes from it too; `sdlc.py status` there lists the open changes in every worktree.
+new changes from it too; `sdlc.py status` there lists the open changes in every worktree,
+marking a branch `main` has moved past. `/sdlc:ship` brings such a branch up to date before the
+gate runs, so the tests and the review see what will land, and stops, touching nothing, when
+that would conflict.
 
 A fresh worktree needs nothing: `uv run` builds its own `.venv` the first time the gate runs.
 The session itself runs the *installed* plugin, not the worktree's copy, so to try an edited skill

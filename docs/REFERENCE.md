@@ -191,7 +191,12 @@ and commits nothing. A later setup numbers on from that history.
 `work/` is committed. A change's folder, `work/NNN-slug/`, lives on its own branch, in its own
 worktree (`.claude/worktrees/NNN-slug`), so the session working on it writes its artifacts where
 it works, and `/sdlc:ship` commits them with the code: the review reads the spec next to what was
-built. `sdlc.py status` lists the open changes in every worktree, from any of them. Once a change
+built. `sdlc.py status` lists the open changes in every worktree, from any of them, and marks
+one whose branch lacks commits `main` has (`behind main by N`). Since close only fast-forwards,
+`/sdlc:ship` brings such a branch up to date before the gate runs (`sdlc.py base`): a
+fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
+clean tree, reported with the command that undoes it. Anything that would conflict is refused,
+untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
 with finished changes: the change's commit keeps them in history. `work/ideas.md` is committed
 too; a closed seed is deleted from it, history keeping that as well.

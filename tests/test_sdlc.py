@@ -949,6 +949,201 @@ def test_close_refuses_before_writing_anything(
     assert _git(root, "rev-parse", "main") == main_before and tree.is_dir()
 
 
+def test_behind_main_counts_what_the_branch_lacks(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    assert sdlc.cmd_new(root, "thing", 1, None, worktree=True) == 0
+    tree = root / ".claude" / "worktrees" / "001-thing"
+    assert sdlc.behind_main(root, "001-thing") == 0
+    _diverge(root, tree)
+    _git(root, "commit", "-q", "--allow-empty", "-m", "main moved again")
+    assert sdlc.behind_main(root, "001-thing") == 2
+    assert sdlc.behind_main(root, "002-nothing") is None
+
+
+def test_status_marks_a_stale_base_and_check_ignores_it(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """Ship stops on the mark before the gate runs; close would refuse the branch anyway. A nudge,
+    never a problem: `check --strict` is a gate."""
+    root = _repo(tmp_path)
+    assert sdlc.cmd_new(root, "open-one", 1, None, worktree=True) == 0
+    _shipped_change(root, "shipped-one")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "status"])
+    capsys.readouterr()
+    assert sdlc.main() == 0
+    assert "behind main" not in capsys.readouterr().out
+
+    _diverge(root, root)
+    assert sdlc.main() == 0
+    out = capsys.readouterr().out
+    open_line = next(ln for ln in out.splitlines() if "open-one" in ln)
+    assert "behind main by 1: /sdlc:ship brings it up to date" in open_line
+    ready_line = next(ln for ln in out.splitlines() if "shipped-one" in ln and "/sdlc:close" in ln)
+    assert "(behind main by 1: rebase and ship again)" in ready_line
+
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    sdlc.main()
+    assert "behind main" not in capsys.readouterr().out
+
+
+def _base(root: Path, ident, capsys) -> tuple[int, dict]:
+    capsys.readouterr()
+    code = sdlc.cmd_base(root, ident)
+    return code, json.loads(capsys.readouterr().out)
+
+
+def _opened(root: Path) -> Path:
+    assert sdlc.cmd_new(root, "thing", 1, None, worktree=True) == 0
+    return root / ".claude" / "worktrees" / "001-thing"
+
+
+def _commit_on_main(root: Path, path: str, text: str) -> None:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(text, encoding="utf-8")
+    _git(root, "add", path)
+    _git(root, "commit", "-q", "-m", f"main changes {path}")
+
+
+def test_base_is_current_when_main_hasnt_moved(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _base(tree, None, capsys)
+    assert code == 0 and out["action"] == "current" and out["behind"] == 0
+    assert _git(tree, "rev-parse", "HEAD") == head
+
+
+def test_base_fast_forwards_and_carries_uncommitted_edits(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our edit\n", encoding="utf-8")
+    (tree / "new.txt").write_text("new\n", encoding="utf-8")
+    _commit_on_main(root, "other.txt", "theirs\n")
+    main_sha, main_status = _git(root, "rev-parse", "main"), _git(root, "status", "--porcelain")
+
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "fast-forwarded" and out["behind"] == 1, out
+    assert _git(tree, "rev-parse", "HEAD") == main_sha == out["to"]
+    assert (tree / "README.md").read_text(encoding="utf-8") == "our edit\n"
+    assert (tree / "new.txt").read_text(encoding="utf-8") == "new\n"
+    assert (tree / "other.txt").read_text(encoding="utf-8") == "theirs\n"
+    assert _git(root, "rev-parse", "main") == main_sha
+    assert _git(root, "status", "--porcelain") == main_status
+    assert _base(tree, "001", capsys)[1]["action"] == "current"
+
+
+def test_base_refuses_when_main_touched_a_file_the_work_did(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our edit\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "their edit\n")
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _base(tree, "001", capsys)
+    assert code == 1 and out["action"] == "refused" and "README.md" in out["reason"], out
+    assert _git(tree, "rev-parse", "HEAD") == head == out["to"]
+    assert (tree / "README.md").read_text(encoding="utf-8") == "our edit\n"
+
+
+def test_base_rebases_a_clean_branch_with_commits(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "ours.txt").write_text("ours\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    _commit_on_main(root, "theirs.txt", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "rebased", out
+    assert _git(tree, "merge-base", "--is-ancestor", "main", "HEAD") == ""
+    assert (tree / "ours.txt").is_file() and (tree / "theirs.txt").is_file()
+
+
+def test_base_aborts_a_conflicting_rebase(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("ours\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    head = _git(tree, "rev-parse", "HEAD")
+    _commit_on_main(root, "README.md", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 1 and out["action"] == "refused" and "aborted" in out["reason"], out
+    assert _git(tree, "rev-parse", "HEAD") == head
+    assert _git(tree, "status", "--porcelain") == ""
+    assert not Path(_git(tree, "rev-parse", "--git-path", "rebase-merge")).exists()
+
+
+def test_base_refuses_commits_plus_uncommitted_work(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    head = _git(tree, "rev-parse", "HEAD")
+    (tree / "wip.txt").write_text("wip\n", encoding="utf-8")
+    _commit_on_main(root, "theirs.txt", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 1 and "commit the work" in out["reason"], out
+    assert _git(tree, "rev-parse", "HEAD") == head and (tree / "wip.txt").is_file()
+
+
+@pytest.mark.parametrize("theirs, kept", [("007\n", 7), ("000\n", 1)])
+def test_base_keeps_the_higher_counter(tmp_path: Path, capsys, theirs: str, kept: int) -> None:
+    """Under local numbering `new` leaves the counter untracked in the worktree; a change closed
+    meanwhile committed main's. Neither number may go backwards."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    assert (tree / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
+    _commit_on_main(root, ".sdlc/last-id", theirs)
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "fast-forwarded", out
+    assert sdlc._read_number(tree / ".sdlc" / "last-id") == kept  # the worktree's, not main's
+
+
+def test_base_puts_the_counter_back_when_it_refuses(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our edit\n", encoding="utf-8")
+    _commit_on_main(root, ".sdlc/last-id", "007\n")
+    _commit_on_main(root, "README.md", "their edit\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 1 and out["action"] == "refused", out
+    assert (tree / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
+
+
+def test_base_carries_a_factory_run_intact(tmp_path: Path, capsys) -> None:
+    """The factory leaves everything uncommitted for ship: all of it survives the update."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    folder = tree / "work" / "001-thing"
+    files = {
+        folder / "decision.md": "DECISION: READY\n",
+        folder / "decisions.md": "- [x] D1 (scope, default): kept small\n",
+        folder / "reviews" / "round-1" / "code.md": "VERDICT: PASS\n",
+        tree / "code.py": "print('built')\n",
+    }
+    for path, text in files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    _commit_on_main(root, "other.txt", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "fast-forwarded", out
+    assert {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()} == before
+    assert (tree / "code.py").read_text(encoding="utf-8") == "print('built')\n"
+
+
+def test_base_undo_puts_the_branch_back(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our edit\n", encoding="utf-8")
+    _commit_on_main(root, "other.txt", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 0
+    subprocess.run(out["undo"].split(), check=True, capture_output=True)
+    assert _git(tree, "rev-parse", "HEAD") == out["from"]
+    assert (tree / "README.md").read_text(encoding="utf-8") == "our edit\n"
+
+
 def test_close_from_inside_the_worktree_merges_then_keeps_it(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

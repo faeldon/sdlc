@@ -1511,6 +1511,93 @@ def ready_to_close(root: Path) -> list[dict]:
     return out
 
 
+def behind_main(main: Path, branch: str) -> int | None:
+    """How many of `main`'s commits `branch` lacks; None when either isn't a local branch. 0 is
+    close's precondition, `main` an ancestor of the branch, so a fast-forward is possible. Status
+    shows anything else, and ship stops on it, before the gate and the review run on a base that
+    close would refuse."""
+    out = _git(main, "rev-list", "--count", f"refs/heads/{branch}..refs/heads/main")
+    return int(out) if out and out.isdigit() else None
+
+
+def cmd_base(root: Path, ident: str | None) -> int:
+    """Bring a change's branch up to date with `main` in its own worktree, or refuse, as JSON.
+    /sdlc:ship runs it at Step 0, so the gate and the review see what close will fast-forward.
+
+    The one write a skill makes before its WAIT, by a named exception (004's spec): it moves only
+    the change's own local branch onto `main`, only when nothing conflicts, and prints the command
+    that undoes it. A branch with no commits of its own, the usual case at ship and always after a
+    factory run, fast-forwards, and git carries the uncommitted work or refuses to overwrite it.
+    One with commits rebases, from a clean tree only, and a conflict is aborted. Never a stash:
+    the stack is shared with every worktree. Never a merge of `main` into the branch: close would
+    put it on main's first-parent line, which `closed_changes()` walks."""
+    trees = [(t, b) for t, b in worktrees(root) if DIR_RE.match(b)]
+    if ident is None:
+        here = _git(root, "branch", "--show-current") or ""
+        ident = here if DIR_RE.match(here) else None
+    found = [(t, b) for t, b in trees if names_change(b, ident)] if ident else []
+    main = main_root(root)
+    report: dict = {"change": ident, "branch": None, "behind": None, "action": "current",
+                    "from": None, "to": None, "undo": None, "reason": None}  # fmt: skip
+
+    def emit(code: int) -> int:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return code
+
+    if len(found) != 1 or found[0][0].resolve() == main.resolve():
+        report["reason"] = "not in a change's worktree: nothing to bring up to date"
+        return emit(0)
+    tree, branch = found[0]
+    before = _git(tree, "rev-parse", "HEAD")
+    behind = behind_main(main, branch)
+    report.update(change=branch, branch=branch, behind=behind, **{"from": before, "to": before})
+
+    def refuse(reason: str) -> int:
+        report.update(action="refused", reason=reason, to=_git(tree, "rev-parse", "HEAD"))
+        return emit(1)
+
+    if behind is None:
+        return refuse("no local main branch to bring it up to date with")
+    if behind == 0:
+        return emit(0)
+    own = _git(main, "rev-list", "--count", f"refs/heads/main..refs/heads/{branch}")
+    if own and own != "0":
+        if _dirty_paths(tree):
+            return refuse(
+                f"{branch} has commits of its own and uncommitted work, so it can't rebase: "
+                "commit the work, then run /sdlc:ship again"
+            )
+        err = _git_err(tree, "rebase", "-q", "main")
+        if err:
+            _git_err(tree, "rebase", "--abort")
+            return refuse(f"rebasing onto main conflicts, so it was aborted: {err}")
+        report["action"] = "rebased"
+    else:
+        # The counter `new` wrote beside the folder is untracked until ship commits it, and a
+        # change closed meanwhile under local numbering committed main's: git would refuse to
+        # overwrite ours. Set it aside, and keep the higher number.
+        counter = tree / ".sdlc" / LAST_ID
+        kept = None
+        if (
+            counter.is_file()
+            and _git(tree, "ls-files", "--error-unmatch", f".sdlc/{LAST_ID}") is None
+            and _git(main, "cat-file", "-e", f"main:.sdlc/{LAST_ID}") is not None
+        ):
+            kept = counter.read_text(encoding="utf-8")
+            counter.unlink()
+        err = _git_err(tree, "merge", "--ff-only", "-q", "main")
+        if err:
+            if kept is not None:
+                counter.write_text(kept, encoding="utf-8")
+            return refuse(f"main changed what this change's uncommitted work changes: {err}")
+        ours = int(kept.strip()) if kept is not None and kept.strip().isdigit() else 0
+        if kept is not None and (_read_number(counter) or 0) < ours:
+            _write_state(tree, LAST_ID, kept)
+        report["action"] = "fast-forwarded"
+    report.update(to=_git(tree, "rev-parse", "HEAD"), undo=f"git -C {tree} reset --keep {before}")
+    return emit(0)
+
+
 def _close_times(main: Path) -> dict[str, datetime]:
     """When each change's `Close` commit landed on main, by the change's name."""
     log = _git(main, "log", "--first-parent", "--format=%cI%x00%s", "main") or ""
@@ -1876,7 +1963,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
                 f"{branch} is already on main with no {DROP_PREFIX}{branch} commit: it landed, "
                 "so it isn't a drop"
             )
-    elif not landed and _git(main, "merge-base", "--is-ancestor", "main", branch) is None:
+    elif not landed and behind_main(main, branch) != 0:
         report["refusals"].append(
             f"main has moved past {branch}'s base, so it can't fast-forward; rebase {branch} "
             "onto main in its worktree and ship again"
@@ -4435,6 +4522,8 @@ def print_status(a: dict) -> None:
         undone = f"  · {len(rec['undone'])} undone" if rec.get("undone") else ""
         if rec.get("open_questions"):
             undone += f"  · {rec['open_questions']} open question(s)"
+        if rec.get("behind"):
+            undone += f"  · behind main by {rec['behind']}: /sdlc:ship brings it up to date"
         print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
         if rec["title"]:
             print(f"                              {rec['title']}")
@@ -4454,6 +4543,8 @@ def print_status(a: dict) -> None:
         print(f"\n■ Ready to close: {len(a['ready'])}")
         for rec in a["ready"]:
             mark = "  (dropped)" if rec.get("kind") == "dropped" else ""
+            if rec.get("behind") and rec.get("kind") != "dropped":
+                mark = f"  (behind main by {rec['behind']}: rebase and ship again)"
             print(f"    {rec['id']}  {rec['slug']:<28} → /sdlc:close {rec['id']}{mark}")
 
     # Left out where releasing isn't set up and nothing has landed: most repos, most of the time.
@@ -4539,6 +4630,11 @@ def main() -> int:
     )
     p_drop.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
     p_drop.add_argument("--check", action="store_true", help="preconditions only, write nothing")
+
+    p_base = sub.add_parser(
+        "base", help="bring a change's branch up to date with main in its worktree, or refuse"
+    )
+    p_base.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
 
     p_close = sub.add_parser(
         "close",
@@ -4647,6 +4743,8 @@ def main() -> int:
         return cmd_undone(root, args.id)
     if args.cmd == "drop":
         return cmd_drop(root, args.id, args.check)
+    if args.cmd == "base":
+        return cmd_base(root, args.id)
     if args.cmd == "close":
         return cmd_close(root, args.id, args.check)
     if args.cmd == "unreleased":
@@ -4674,6 +4772,9 @@ def main() -> int:
         return 1 if (args.strict and a["problems"]) else 0
 
     a["ready"] = ready_to_close(root)
+    # Here, not in `analyze()`: a stale base is a nudge, and `check` is a gate.
+    for rec in a["open"] + a["ready"]:
+        rec["behind"] = behind_main(home, f"{rec['id']}-{rec['slug']}")
     # Unconfigured, status shows only a count, so the intents behind it aren't read.
     cfg = load_config(home)[0]
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]

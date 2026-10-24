@@ -93,6 +93,14 @@ it after their WAIT. The project doc (`docs.project`, off while absent) turns on
 `project` and `assignees`, each mirrored exactly, each in its own `gh issue edit` so a refusal is
 skipped, never fatal.
 
+**Bringing a branch up to date: `cmd_base()`.** Ship's Step 0 runs it before the gate, since
+close only fast-forwards: the branch fast-forwards to `main` when it has no commits of its own
+(git carries the uncommitted work or refuses), rebases from a clean tree when it has, and any
+conflict is aborted and refused. It is the one write a skill makes before its WAIT, by a named
+exception to confirm-before-writing: it moves only the change's own branch and prints the undo.
+Never a stash (the stack is shared across worktrees), and never a merge of `main` into the
+branch, which close would put on `main`'s first-parent line, where `closed_changes()` walks.
+
 **Closing: `cmd_close()`.** Steps in order: `merge --ff-only`, `verify`, `measure`, `archive`
 (the tracker's `archive()`, read back), `remove folder` (`_close_commit()`), `remove worktree`,
 `delete branch`. A failed step stops there and a rerun resumes, skipping what is done. Close

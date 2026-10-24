@@ -13,6 +13,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py context *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
@@ -55,6 +56,21 @@ plain `git diff` calls rather than an `if`, so the skill's allowed tools cover i
 
 `config` gives the commands Steps 1 and 2 run and the review Step 3 works through. Keep its output
 in view; nothing below names the repo's tools any other way.
+
+**Then bring the branch up to date with `main`**, before anything is checked or reviewed:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base <NNN>
+```
+
+`/sdlc:close` only fast-forwards, so a gate and a review run on a base `main` has moved past are
+spent on code that never lands, and run again after the rebase. This is the one write this skill
+makes before its WAIT, without asking, because it touches nothing unless it is clean: a
+fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
+clean tree. `current` needs no mention. `fast-forwarded` or `rebased`: say so, with `behind` (the
+commits that came in) and the `undo` line, and carry on. **`refused`: stop here,** before Step 1,
+with its `reason`; the person resolves it and runs `/sdlc:ship` again. Never resolve a conflict,
+stash, or retry it by hand from this skill.
 
 **`work/` in this skill is `work.dir` from `config`**: this checkout's. The change's folder,
 `work/NNN-slug/`, is part of the diff and of the commit: the review reads the artifacts alongside
