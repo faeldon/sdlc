@@ -24,8 +24,10 @@ the person running it keeps paying.
   `tests/test_adoption.py` passing, and issues filed against setup, `new` or close per release
 - O2. **Nothing lost.** No host loses a change's work or gets one number twice. Measured by: issues
   reporting either, which stays at zero
-- O3. **Few stops.** Each change costs its person few stops: one at spec and one at ship. Measured
-  by: the stops and extra prompts close records per change, by tier and way of running
+- O3. **Few stops.** Each change stops its person at the gates its tier passes and at most one
+  more (Tier 1 by hand: intent, ship and close, plus plan when plan mode ran; Tier 2: intent, spec,
+  plan, ship and close). Measured by: the stops above that target close records per change, by
+  tier and way of running
 - O4. **Evidence-led direction.** A retrospective sets direction from evidence about the product,
   not only process counts. Measured by: the share of direction goals that cite an outcome and the
   evidence behind it

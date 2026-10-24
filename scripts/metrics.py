@@ -596,7 +596,9 @@ def summarize(
         "blocked": sum(s["blocked"] for s in stages.values()),
         "stops": sum(s["gate"] + s["question"] + s["extra"] for s in stages.values()),
         "required": len(required),
-        "target": cfg["target_stops"],
+        # Measured against its own gates: a change that stops only at them is on target.
+        "target": len(required) + cfg["stop_allowance"],
+        "allowance": cfg["stop_allowance"],
         "permission": sum(s["permission"] for s in stages.values()),
         "ship_runs": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:ship"),
         "reenter": reenter,
@@ -623,7 +625,12 @@ def history_summary(elapsed_seconds: float, way: str, tier: int, cfg: dict, reas
     """What history alone gives when the transcripts can't be read: elapsed time, the way of
     running and the gates it requires. Says why."""
     required = REQUIRED.get((way, tier), REQUIRED[("manual", 2)])
-    totals = {"elapsed": elapsed_seconds, "required": len(required), "target": cfg["target_stops"]}
+    totals = {
+        "elapsed": elapsed_seconds,
+        "required": len(required),
+        "target": len(required) + cfg["stop_allowance"],
+        "allowance": cfg["stop_allowance"],
+    }
     return {
         "mode": way,
         "coverage": f"none: {reason}",

@@ -680,15 +680,19 @@ def test_an_open_items_own_words_are_its_title_not_a_status() -> None:
 # ---------------------------------------------------------------- what close measured
 
 
-def _measured(root: Path, name: str, agent: int, stops: int, extra: tuple = ()) -> None:
-    """Close a change, then give its `Close` commit the trailers close writes."""
+def _measured(
+    root: Path, name: str, agent: int, stops: int, extra: tuple = (), targets: str = "target=2"
+) -> None:
+    """Close a change, then give its `Close` commit the trailers close writes. `targets` is how
+    its `Sdlc-Totals` states the target: one flat `target=2`, as close wrote before it recorded an
+    allowance, unless a test says otherwise."""
     _close(root, name, tier=2)
     close = _git(root, "log", "-1", "--format=%B")
     _git(root, "commit", "-q", "--amend", "-m", close + "\n\n" + "\n".join([
         "Sdlc-Mode: manual",
         "Sdlc-Coverage: transcripts=2 stages=design,ship",
         f"Sdlc-Totals: elapsed=90 agent={agent} response=10 away=0 blocked=0 stops={stops} "
-        "required=5 target=2 permission=1 ship_runs=1 reenter=0 in=1 cache_read=100 out=10",
+        f"required=5 {targets} permission=1 ship_runs=1 reenter=0 in=1 cache_read=100 out=10",
         f"Sdlc-Stage: design segments=1 elapsed=30 agent={agent} gate=1 extra=1 cache_read=50",
         f"Sdlc-Role: builder runs=1 agent={agent} cache_read=20 out=5",
         *extra,
@@ -728,9 +732,23 @@ def test_retro_reads_what_close_measured_and_counts_what_it_didnt(tmp_path: Path
     group = out["groups"]["tier 2, manual"]
     assert group["changes"] == 2
     assert group["median"]["agent"] == 15 and group["median"]["stops"] == 7
-    assert group["target"] == 2
+    assert group["target"] == 6, "an old flat target=2 is worked out again from required=5"
+    assert group["median"]["over"] == 1
     assert group["stages"]["design"]["agent"] == 15
     assert group["roles"]["builder"] == {"runs": 2, "agent": 30, "cache_read": 40, "out": 10}
+
+
+def test_old_and_new_trailers_read_against_their_own_targets(tmp_path: Path) -> None:
+    """A commit that recorded its allowance is read as written; one from before is read against
+    its own gates plus the allowance retro is given, never against its flat target=2."""
+    root = _repo(tmp_path)
+    _measured(root, "001-keep-one-draft", agent=10, stops=9)  # old: required=5 target=2
+    _measured(root, "002-draft-titles", agent=10, stops=6, targets="target=5 allowance=0")
+    changes = sdlc.closed_changes(root, None)
+    group = sdlc.metrics_summary(changes, allowance=1)["groups"]["tier 2, manual"]
+    assert group["target"] == 5.5, "6 for the old commit, 5 as the new one recorded"
+    assert group["median"]["over"] == 2, "9 - 6 and 6 - 5"
+    assert sdlc.metrics_summary(changes, allowance=3)["groups"]["tier 2, manual"]["target"] == 6.5
 
 
 def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> None:

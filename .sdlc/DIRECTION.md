@@ -58,10 +58,10 @@ Groups: "Evidence for this repo's retrospective"
 
 ### M2. The stop target and the gates agree
 
-O3's target and `metrics.target_stops` match the WAITs a change actually passes, and the median
+O3's target and `metrics.stop_allowance` match the WAITs a change actually passes, and the median
 Tier 1 change meets it.
 
-Groups: "Reconcile O3's two-stop target with the gates a change passes", "Ship does its own landing edits"
+Groups: 007, "Ship does its own landing edits"
 
 ### M3. The loop's numbers are honest
 

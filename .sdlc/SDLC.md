@@ -429,7 +429,8 @@ retrospective, and says which it can't.
   from this repo's session transcripts (numbers only; `metrics.transcripts` turns it off): per
   stage, the clocks (elapsed, agent, the person's response, away and blocked), the stops that
   waited on the person, and tokens. Time that piles up in response and away is the person's
-  queue; stops above the gates are the loop circling.
+  queue. Each change's stops are measured against its own gates plus `metrics.stop_allowance`, and
+  those above that are the loop circling.
 - **First time through, and rework within a change.** Close records, beside the cost, whether
   each stage went through first time (`Sdlc-Happy`) and the trial and error inside it
   (`Sdlc-Rework`); a spike's is in neither. A rising first-time rate is the loop getting better

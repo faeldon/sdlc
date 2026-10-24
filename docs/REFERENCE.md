@@ -65,7 +65,7 @@ evidence = ["./scripts/usage-summary.sh"]   # optional: what users did, printed 
 [metrics]
 transcripts = true                          # the default: close reads this repo's transcripts, numbers only
 idle_minutes = 30                           # the default: a longer wait is the person away, not answering
-target_stops = 2                            # the default: how often a change should stop for its person
+stop_allowance = 1                          # the default: stops beyond a change's gates its person should expect
 ```
 
 The placeholders:
@@ -170,7 +170,7 @@ recorded hash, and sorts what it finds:
 
 Whitespace alone is never drift. `breaking` is kept apart from all of that: what the plugin would
 now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py` names its
-replacement), a template override lacking a heading, frontmatter key or placeholder the script
+replacement: `metrics.target_stops` became `metrics.stop_allowance` in 2.0.0), a template override lacking a heading, frontmatter key or placeholder the script
 reads (`TEMPLATE_READS`), or a project or product doc it can't parse. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
@@ -407,7 +407,7 @@ machine, for numbers only: never message text, a path or a session id
 
 Waits while a `depends_on:` change is still open count as **blocked**. It also records the stops
 (gates, questions and anything else that waited on the person) against the gates the way of
-running requires (by hand or by the factory) and `metrics.target_stops`, and tokens per stage and
+running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
 per sub-agent role. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
 commit.
 

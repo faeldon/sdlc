@@ -23,7 +23,7 @@ BRANCH = "012-reopen-drafts"
 OTHER = "013-draft-titles"
 SENTINEL = "words only the person typed"
 T0 = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-CFG = {"idle_minutes": 30, "target_stops": 2}
+CFG = {"idle_minutes": 30, "stop_allowance": 1}
 
 
 def _at(minutes: float) -> str:
@@ -298,6 +298,14 @@ def test_the_gates_each_way_of_running_requires(tmp_path, way, tier, plan, requi
         entries.append(asst(1, "m1", [tool("ExitPlanMode", "x1")]))
     s = _summary(_events(tmp_path, entries), way=way, tier=tier)
     assert s["totals"]["required"] == required
+    assert s["totals"]["target"] == required + 1, "measured against its own gates, plus one"
+    assert s["totals"]["allowance"] == 1
+
+
+def test_an_allowance_of_zero_targets_the_gates_alone(tmp_path: Path) -> None:
+    events = _events(tmp_path, [cmd(0, "sdlc:intent")])
+    s = metrics.summarize(events, {}, {**CFG, "stop_allowance": 0}, "manual", 1)
+    assert s["totals"]["target"] == s["totals"]["required"] == 3
 
 
 # ---------------------------------------------------------------- trailers
@@ -318,6 +326,7 @@ def test_trailers_hold_numbers_and_names_and_read_back(tmp_path: Path) -> None:
     assert back["mode"] == "manual"
     assert back["coverage"] == "transcripts=1 stages=design,ship"
     assert back["totals"]["agent"] == 7 and back["totals"]["required"] == 5
+    assert (back["totals"]["target"], back["totals"]["allowance"]) == (6, 1)
     assert back["stages"]["design"]["reply"] == ["approve"]
     assert back["stages"]["design"]["edits"] is None
     assert back["blocked"] == {"011-first": 0}
@@ -327,7 +336,7 @@ def test_history_alone_says_why_and_still_reads_back() -> None:
     s = metrics.history_summary(3 * 3600, "factory", 2, CFG, "no transcripts for this change")
     back = metrics.parse_trailers("\n".join(metrics.trailers(s)))
     assert back["coverage"] == "none: no transcripts for this change"
-    assert back["totals"] == {"elapsed": 180, "required": 5, "target": 2}
+    assert back["totals"] == {"elapsed": 180, "required": 5, "target": 6, "allowance": 1}
     assert back["mode"] == "factory"
 
 

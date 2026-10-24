@@ -161,17 +161,19 @@ def test_retro_after_releases_is_a_whole_number(tmp_path: Path, capsys):
 
 def test_metrics_reads_transcripts_by_default_and_a_host_can_turn_it_off(tmp_path: Path, capsys):
     _, out = _config(tmp_path, capsys)
-    assert out["metrics"] == {"transcripts": True, "idle_minutes": 30, "target_stops": 2}
+    assert out["metrics"] == {"transcripts": True, "idle_minutes": 30, "stop_allowance": 1}
     host = tmp_path / ".sdlc"
     host.mkdir()
     toml = host / "config.toml"
-    toml.write_text("[metrics]\ntranscripts = false\nidle_minutes = 45\ntarget_stops = 0\n")
+    toml.write_text("[metrics]\ntranscripts = false\nidle_minutes = 45\nstop_allowance = 0\n")
     _, out = _config(tmp_path, capsys)
-    assert out["metrics"] == {"transcripts": False, "idle_minutes": 45, "target_stops": 0}
+    assert out["metrics"] == {"transcripts": False, "idle_minutes": 45, "stop_allowance": 0}
     assert not any("metrics" in w for w in out["warnings"])
-    toml.write_text('[metrics]\ntranscripts = "no"\nidle_minutes = 0\n')
+    toml.write_text('[metrics]\ntranscripts = "no"\nidle_minutes = 0\nstop_allowance = -1\n')
     _, out = _config(tmp_path, capsys)
     assert out["metrics"]["transcripts"] is True and out["metrics"]["idle_minutes"] == 30
+    assert out["metrics"]["stop_allowance"] == 1
+    assert "metrics.stop_allowance must be a whole number, 0 or more" in out["warnings"]
     assert "metrics.transcripts must be true or false" in out["warnings"]
     assert "metrics.idle_minutes must be a whole number, 1 or more" in out["warnings"]
 

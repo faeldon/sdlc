@@ -217,7 +217,9 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
     "metrics": {
         "transcripts": True,  # read this repo's Claude Code transcripts, for numbers only
         "idle_minutes": 30,  # a wait longer than this is the person away, not answering
-        "target_stops": 2,  # how often a change should stop for its person, gates included
+        # The stops beyond a change's gates its person should expect: each change's target is the
+        # gates its tier and way of running pass, plus this.
+        "stop_allowance": 1,
     },
 }
 # Each tracker is a module in scripts/trackers/, so adding one adds a target. GitHub first, as the
@@ -245,7 +247,7 @@ DOC_LISTS = ("read_before_design", "context")
 COMMAND_LISTS = ("evidence",)
 LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS)
 # Every key that holds a whole number, with its least value where that isn't 0.
-INT_KEYS = ("after_releases", "idle_minutes", "target_stops")
+INT_KEYS = ("after_releases", "idle_minutes", "stop_allowance")
 INT_MIN = {"idle_minutes": 1}
 # Every key that holds true or false.
 BOOL_KEYS = ("transcripts",)
@@ -3459,14 +3461,31 @@ COMPARED = (
 )  # fmt: skip
 
 
-def metrics_summary(changes: list[dict]) -> dict:
+def _stop_target(totals: dict, allowance: int) -> int | None:
+    """The stops a change was measured against: its own gates plus the allowance. A `Close`
+    commit from before `allowance=` was recorded carries one flat `target=` for every change, so
+    its target is worked out again from its own `required=` and today's allowance."""
+    if "allowance" in totals:
+        return totals.get("target")
+    required = totals.get("required")
+    return required + allowance if isinstance(required, int) else None
+
+
+def metrics_summary(
+    changes: list[dict], allowance: int = CONFIG_KEYS["metrics"]["stop_allowance"]
+) -> dict:
     """What the `Close` trailers of the changes in range add up to: per tier and way of running,
-    the median of each total, tokens and agent time per stage and role, and ship's findings.
-    Changes close couldn't measure are counted, not guessed at."""
+    the median of each total, its stop target and the stops over it, tokens and agent time per
+    stage and role, and ship's findings. Changes close couldn't measure are counted, not guessed
+    at."""
 
     def median(values: list) -> float | None:
         values = [v for v in values if isinstance(v, int)]
         return statistics.median(values) if values else None
+
+    def over(totals: dict) -> int | None:
+        target, stops = _stop_target(totals, allowance), totals.get("stops")
+        return stops - target if isinstance(stops, int) and isinstance(target, int) else None
 
     captured = [c for c in changes if (c.get("metrics") or {}).get("totals")]
     groups: dict[str, dict] = {}
@@ -3488,8 +3507,11 @@ def metrics_summary(changes: list[dict]) -> dict:
         roles = sorted({r for m in ms for r in m["roles"]})
         out["groups"][key] = {
             "changes": len(ms),
-            "median": {k: median([m["totals"].get(k) for m in ms]) for k in COMPARED},
-            "target": ms[-1]["totals"].get("target"),
+            "median": {
+                **{k: median([m["totals"].get(k) for m in ms]) for k in COMPARED},
+                "over": median([over(m["totals"]) for m in ms]),
+            },
+            "target": median([_stop_target(m["totals"], allowance) for m in ms]),
             "stages": {
                 s: {
                     k: median([(m["stages"].get(s) or {}).get(k) for m in ms])
@@ -3660,7 +3682,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "releases": _release_tags(home, cfg, since),
         "unmeasured": UNMEASURED,
         "direction": direction,
-        "metrics": metrics_summary(changes),
+        "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,
         "prose": prose_metrics(home, cfg),
     }
@@ -4009,7 +4031,14 @@ HOST_DOCS = {
 # None, "since": the version, "do": what a host does about it}. A host still setting one has a
 # setting the plugin no longer reads, which is breaking. Add to it, never prune it: a host can be
 # several releases behind.
-RETIRED_KEYS: dict[str, dict[str, str | None]] = {}
+RETIRED_KEYS: dict[str, dict[str, str | None]] = {
+    "metrics.target_stops": {
+        "now": "metrics.stop_allowance",
+        "since": "2.0.0",
+        "do": "Delete it. A change's target is now its gates plus `stop_allowance` (1 by default); "
+        "set that instead if you want a different allowance.",
+    },
+}
 # What the script reads from each template, so a host's override that lacks one would be misread.
 # Frontmatter keys, `## ` headings and literal placeholders; a template with nothing read has no
 # entry.

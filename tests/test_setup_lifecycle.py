@@ -280,10 +280,20 @@ def test_unknown_key_is_reported(repo: Path, plugin: Path) -> None:
 
 def test_new_keys_listed(repo: Path, plugin: Path) -> None:
     manifest = _record(repo)
-    manifest["config_keys"].remove("metrics.target_stops")
+    manifest["config_keys"].remove("metrics.stop_allowance")
     (repo / ".sdlc" / "setup.json").write_text(json.dumps(manifest), encoding="utf-8")
     (new,) = [r for r in sdlc.drift(repo)["report"] if r["class"] == "new"]
-    assert new["where"] == "metrics.target_stops" and new["default"] == 2
+    assert new["where"] == "metrics.stop_allowance" and new["default"] == 1
+
+
+def test_a_host_still_setting_target_stops_is_told(repo: Path, plugin: Path) -> None:
+    """The flat target was retired for each change's own gates plus an allowance: a host's old
+    setting is read by nothing now, so setup's drift says so, with what replaced it."""
+    config = repo / ".sdlc" / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8") + "\n[metrics]\ntarget_stops = 2\n")
+    assert "unknown key metrics.target_stops" in sdlc.load_config(repo)[1]
+    (found,) = [b for b in sdlc.drift(repo)["breaking"] if b["where"] == "metrics.target_stops"]
+    assert found["now"] == "metrics.stop_allowance" and "Delete it" in found["fix"]
 
 
 def test_retired_keys_point_at_live_keys() -> None:
