@@ -359,6 +359,64 @@ def test_check_writes_nothing_and_version_overrides_upward_only(tmp_path: Path, 
     assert code == 0 and _git(root, "tag", "-l", "v1.0.0") == "v1.0.0"
 
 
+# ---------------------------------------------------------------- after the bump
+
+
+def _locked(tmp_path: Path, after_bump: str) -> Path:
+    """A repo with a tracked lock file, `release.after_bump` set, and a patch to release."""
+    root = _repo(tmp_path, config=CONFIG + f"after_bump = {json.dumps(after_bump)}\n")
+    (root / "uv.lock").write_text('version = "0.4.2"\n', encoding="utf-8")
+    _git(root, "add", "uv.lock")
+    _git(root, "commit", "-q", "-m", "a lock")
+    _close(root, "002-reopen-drafts", "patch")
+    return root
+
+
+def test_after_bump_runs_with_the_version_and_its_changes_are_committed(tmp_path, capsys):
+    root = _locked(tmp_path, "echo {version} >> uv.lock")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    assert out["done"] == ["version files", "after bump", "commit", "tag"]
+    assert (root / "uv.lock").read_text(encoding="utf-8").endswith("\n0.4.3\n")
+    changed = _git(root, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert sorted(changed) == ["pkg.json", "pyproject.toml", "uv.lock"]
+    assert _git(root, "status", "--porcelain") == ""
+
+
+def test_files_after_bump_creates_are_reported_not_committed(tmp_path: Path, capsys) -> None:
+    root = _locked(tmp_path, "touch made.txt")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    assert out["untracked"] == ["made.txt"] and (root / "made.txt").exists()
+    assert "made.txt" not in _git(root, "show", "--name-only", "--format=", "HEAD")
+
+
+def test_a_failed_after_bump_puts_everything_back(tmp_path: Path, capsys) -> None:
+    root = _locked(tmp_path, "echo x >> uv.lock; echo broke >&2; exit 1")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1
+    assert out["refusals"] == ["after bump failed: release.after_bump exited 1: broke"]
+    assert out["done"] == ["version files"]
+    assert out["skipped"] == ["after bump", "commit", "tag"]
+    assert _git(root, "rev-parse", "HEAD") == head and _git(root, "tag", "-l", "v0.4.3") == ""
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_check_shows_after_bump_and_runs_nothing(tmp_path: Path, capsys) -> None:
+    root = _locked(tmp_path, "touch ran; echo {version} {tag}")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 0 and out["after_bump"] == "touch ran; echo 0.4.3 v0.4.3"
+    assert "after bump (--check)" in out["skipped"] and not (root / "ran").exists()
+
+
+def test_after_bump_stays_out_of_the_report_when_unset(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _close(root, "002-reopen-drafts", "patch")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 0 and "after_bump" not in out and "untracked" not in out
+
+
 # ---------------------------------------------------------------- publish
 
 

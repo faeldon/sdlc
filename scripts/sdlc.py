@@ -200,6 +200,9 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         "version_files": [],  # each holds one `version` line, edited in place; they must agree
         "tag": "v{version}",  # the release tag, and the next release's boundary
         "changelog": None,  # a file the notes are added to the top of, in the release commit
+        # Run by /sdlc:release after the bump, before the commit, which takes the tracked files it
+        # changes too: a lock file regenerated from the new version. {version}, {tag}
+        "after_bump": None,
         "remote": "origin",  # where /sdlc:publish pushes main and the tag
         "publish": None,  # run by /sdlc:publish after the push; {version}, {tag}
         # The shims the host keeps and the version that removes each, which release refuses to
@@ -2494,6 +2497,8 @@ def _read_text(path: Path) -> str | None:
 # Not `target-version = ...`: the key must open the line.
 VERSION_RE = re.compile(r'^([ \t]*"?version"?[ \t]*[:=][ \t]*")([^"\n]+)(".*)$', re.M)
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# Seconds before `release.after_bump` is stopped: a lock refresh may resolve over the network.
+AFTER_BUMP_TIMEOUT = 600
 # Lowest first, so the index is the rank. `none` is listed in a release but never bumps it.
 BUMPS = ("patch", "minor", "major")
 CLOSE_PREFIX = "Close "
@@ -2837,6 +2842,12 @@ def _release_refusals(root: Path, home: Path) -> list[str]:
     return refusals
 
 
+def _untracked(home: Path) -> set[str]:
+    """The untracked files git doesn't ignore, by path from the repo root."""
+    out = _git(home, "ls-files", "--others", "--exclude-standard", "-z") or ""
+    return {p for p in out.split("\0") if p}
+
+
 def cmd_unreleased(root: Path) -> int:
     """The changes since the last release, as JSON. Writes nothing."""
     home = main_root(root)
@@ -2911,6 +2922,11 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
             refusals.append(f"tag {tag} already exists")
         report.update(next=new, tag=tag, undo=f"git tag -d {tag} && git reset --keep HEAD~1")
         report["notes"] = release_notes(u["changes"], ids_mode(home, cfg) == "github")
+        if rel["after_bump"]:
+            report["after_bump"] = rel["after_bump"].format(
+                version=shlex.quote(new), tag=shlex.quote(tag)
+            )
+            report["untracked"] = []
     if refusals:
         return emit(1)
 
@@ -2928,19 +2944,48 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         path.write_bytes(with_changelog(text, new, notes, date.today().isoformat()).encode())
         return None
 
+    def restore() -> None:
+        # Put the files back, so a rerun finds main clean and the same release to make.
+        _git(home, "reset", "-q", "HEAD", "--", *report["files"])
+        _git(home, "checkout", "-q", "--", *report["files"])
+
+    def after_bump() -> str | None:
+        # Main had no uncommitted tracked changes (`_release_refusals`), so every tracked file
+        # changed now beyond the release's own is the command's. New untracked files are listed,
+        # never committed: they may be anything the command leaves behind.
+        before = _untracked(home)
+        err = None
+        try:
+            ran = subprocess.run(
+                report["after_bump"], shell=True, cwd=home, capture_output=True, text=True,
+                errors="replace", timeout=AFTER_BUMP_TIMEOUT,
+            )  # fmt: skip
+            if ran.returncode != 0:
+                why = ran.stderr.strip()[:500] or "no output"
+                err = f"release.after_bump exited {ran.returncode}: {why}"
+        except subprocess.TimeoutExpired:
+            err = f"release.after_bump timed out after {AFTER_BUMP_TIMEOUT}s"
+        except OSError as e:
+            err = f"release.after_bump didn't run: {e}"
+        changed = (_git(home, "diff", "--name-only", "-z") or "").split("\0")
+        report["files"] += [p for p in changed if p and p not in report["files"]]
+        report["untracked"] = sorted(_untracked(home) - before)
+        if err:
+            restore()
+        return err
+
     def commit() -> str | None:
         err = _git_err(home, "add", "--", *report["files"]) or _git_err(
             home, "commit", "-q", "-m", f"Release {new}", "-m", notes
         )
         if err:
-            # Put the files back, so a rerun finds main clean and the same release to make.
-            _git(home, "reset", "-q", "HEAD", "--", *report["files"])
-            _git(home, "checkout", "-q", "--", *report["files"])
+            restore()
         return err
 
     steps = [
         ("version files", bump),
         *([("changelog", changelog)] if rel["changelog"] else []),
+        *([("after bump", after_bump)] if rel["after_bump"] else []),
         ("commit", commit),
         ("tag", lambda: _git_err(home, "tag", "-a", tag, "-m", tag, "-m", notes)),
     ]

@@ -54,6 +54,7 @@ command = "my-tracker save {dir} {id}"      # target = "command": archive {dir},
 version_files = ["package.json"]            # each with one `version` line, edited in place; unset = no releases
 tag = "v{version}"                          # the default: the release tag, and the next release's boundary
 changelog = "CHANGELOG.md"                  # optional: the notes are added to the top of it
+after_bump = "uv lock"                      # optional: run by /sdlc:release after the bump; the tracked files it changes are committed too; {version}, {tag}
 remote = "origin"                           # the default: where /sdlc:publish pushes main and the tag
 publish = "npm publish"                     # optional: run by /sdlc:publish after the push; {version}, {tag}
 deprecations = ".sdlc/deprecations.toml"    # the default: each shim and the version that removes it; off while absent
@@ -345,8 +346,11 @@ release:
 the version the repo is on, and the change's own commit before it. `/sdlc:release` proposes the
 version they add up to (the highest impact; below 1.0 a `major` is released as `minor`), and
 after one approval sets it in `release.version_files`, adds the notes to `release.changelog` if
-set, commits `Release X.Y.Z` and tags it, all locally: until it is published,
-`git tag -d <tag> && git reset --keep HEAD~1` takes it back. `/sdlc:publish`, behind an approval
+set, runs `release.after_bump` if set (a lock file regenerated from the new version, which can't
+be a version file when it holds a `version` line per package), commits `Release X.Y.Z` with
+every tracked file that changed, and tags it, all locally. The command must leave committing and
+pushing to the plugin; a new untracked file it makes is listed, never committed. Until it is
+published, `git tag -d <tag> && git reset --keep HEAD~1` takes it back. `/sdlc:publish`, behind an approval
 of its own, pushes `main` and the tag, never forced, and runs `release.publish` if the repo has
 one. It is the only step in the plugin that pushes. A repo without a tag for its current version
 is told the `git tag -a` command that makes one; a repo with no `version_files` gets the listing

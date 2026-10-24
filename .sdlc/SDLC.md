@@ -327,9 +327,11 @@ person authorizes it**, in two steps with an approval each:
 1. **`/sdlc:release`** lists every change landed since the last release, read from history: each
    `Close NNN-slug` commit names one, and the change's own commit before it holds the `impact:`
    ship settled. It proposes the version they add up to, and after one approval sets it in each
-   file `release.version_files` names, adds the notes to `release.changelog` if one is set,
-   commits `Release X.Y.Z` and tags it (`release.tag`, `v{version}` by default). All local: until
-   it is published, `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
+   file `release.version_files` names, adds the notes to `release.changelog` if one is set, runs
+   `release.after_bump` if one is set (a lock file regenerated from the new version, say),
+   commits `Release X.Y.Z` with what all of that changed, and tags it (`release.tag`,
+   `v{version}` by default). All local: until it is published,
+   `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
 2. **`/sdlc:publish`** pushes `main` and the tag to `release.remote` (never forced: a remote that
    has moved is refused), then runs `release.publish`, the repo's own delivery, if it has one: an
    upload, a GitHub release, a deploy. It is the one step that sends anything anywhere, and it

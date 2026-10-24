@@ -94,7 +94,12 @@ READS_CONFIG = {
     "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target"],
     "sdlc:drop": ["archive.target"],
     "sdlc:uninstall": ["archive.target", "docs.policy", "docs.context"],
-    "sdlc:release": ["release.version_files", "release.tag", "release.changelog"],
+    "sdlc:release": [
+        "release.version_files",
+        "release.tag",
+        "release.changelog",
+        "release.after_bump",
+    ],
     "sdlc:publish": ["release.remote", "release.publish"],
     "sdlc:health": ["commands.scan", "docs.health"],
     "sdlc:retro": [

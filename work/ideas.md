@@ -92,11 +92,3 @@ Ship gives each undone item a disposition, but a nit approved unfixed lives only
 registry that crashes `status` when it isn't UTF-8; 005's `left` that builds up across checks, its
 timeout output kept as bytes, and checks that inherit stdin. Carry nits like undone items, and fix
 these five. Raised by the retrospective of 2026-10-24.
-
-## [2026-10-24] [seed] Release bumps uv.lock with the version files
-
-`release.version_files` bumps `pyproject.toml` but not `uv.lock`, so after 1.1.0 the lock still
-says `version = "1.0.0"` for `sdlc`, and every `uv run` in this repo rewrites it, leaving a
-modified file in the tree that each change has to revert by hand (008 did, twice). Either list the
-lock where release can bump it, or have release refresh it after the bump. Raised at the ship of
-008-drift-gate.

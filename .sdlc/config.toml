@@ -26,3 +26,6 @@ version_files = [
   "plugins/factory/.claude-plugin/plugin.json",
   "pyproject.toml",
 ]
+# uv.lock records pyproject.toml's version, so it's regenerated in the release commit; otherwise
+# every `uv run` after a release rewrites it.
+after_bump = "uv lock"
