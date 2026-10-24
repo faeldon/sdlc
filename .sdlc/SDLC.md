@@ -72,8 +72,8 @@ takes in what the loop inside it produced:
 | Loop | Runs | Takes in | Leaves | Gate |
 |---|---|---|---|---|
 | **Change** | once per change, several in parallel | an idea, a finding, a seed | a reviewed commit on `main` (ship), its folder archived (close) | one WAIT each at intent, spec, ship, close |
-| **Release** | once per batch of closed changes | the `impact:` of each change closed since the last tag | a version, a tag and its notes (release); then the push to `faeldon/sdlc`, which users update from (publish) | one WAIT at release, one at publish: reversible and irreversible kept apart |
-| **Retro** | when `status` says Retro due (2 releases, or a major one), or when the direction is unclear | the history since the last retrospective, its releases, this file and `AGENTS.md`, `.sdlc/PRODUCT.md` and what each change served, the skills, and what each change cost | `.sdlc/DIRECTION.md` (goals, milestones, the next major release), `.sdlc/PRODUCT.md`'s outcome lines, and seeds in `work/ideas.md` | one WAIT |
+| **Release** | once per batch of closed changes | the `impact:` of each change closed since the last tag | a version, a tag and its notes (release); then the push and the host's publish (publish) | one WAIT at release, one at publish: reversible and irreversible kept apart |
+| **Retro** | when `status` says Retro due (2 releases, or a major one), or when the direction is unclear | the history since the last retrospective, its releases, the process and policy docs, the product doc (if any) with its evidence and what each change served, the skills, and what each change cost | the direction doc (goals, milestones, the next major release), the product doc's outcome lines, and seeds in `work/ideas.md` | one WAIT |
 
 **No loop reaches past the one inside it.** A release only takes changes that have closed. A
 retrospective never edits code or skills; what it finds goes back in as a seed and comes out the
@@ -323,18 +323,20 @@ person authorizes it**, in two steps with an approval each:
 
 1. **`/sdlc:release`** lists every change landed since the last release, read from history: each
    `Close NNN-slug` commit names one, and the change's own commit before it holds the `impact:`
-   ship settled. It proposes the version they add up to, and after one approval sets it in both
-   plugins' `plugin.json` and `pyproject.toml` (`release.version_files`), commits
-   `Release X.Y.Z` and tags it `vX.Y.Z`. All local: until it is published,
-   `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
-2. **`/sdlc:publish`** pushes `main` and the tag to `origin`, never forced. That is the whole of
-   publishing here (`release.publish` is unset): users take a release from the marketplace, which
-   is this repo on GitHub. It can't be taken back: a published release that turns out wrong is
-   followed by a new patch release.
+   ship settled. It proposes the version they add up to, and after one approval sets it in each
+   file `release.version_files` names, adds the notes to `release.changelog` if one is set,
+   commits `Release X.Y.Z` and tags it (`release.tag`, `v{version}` by default). All local: until
+   it is published, `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
+2. **`/sdlc:publish`** pushes `main` and the tag to `release.remote` (never forced: a remote that
+   has moved is refused), then runs `release.publish`, the repo's own delivery, if it has one: an
+   upload, a GitHub release, a deploy. It is the one step that sends anything anywhere, and it
+   can't be taken back: a published release that turns out wrong is followed by a new patch
+   release, not withdrawn.
 
-The boundary is the tag for the version the files hold now. `v1.0.0` is tagged on the repo's
-first commit; each release since is tagged by `/sdlc:release`. Changes still open are listed and
-left out.
+The boundary is the tag for the version the files hold now, so a release is always everything
+since the version this repo is on. Changes still open are listed and left out. With no
+`release.version_files`, nothing is bumped or pushed: `sdlc.py unreleased` and `/sdlc:status` still
+list what has landed, and say what to set.
 
 **Which part to bump.** A change records at ship, as `impact:`, what it did **as seen by someone
 holding the previous release**:
@@ -349,7 +351,8 @@ holding the previous release**:
 **It isn't the tier.** Tier measures risk and how much ceremony a change owes; impact measures what
 its users notice. `/sdlc:ship` proposes it from the diff, and `sdlc.py ship` refuses a change
 without one. A release takes the highest impact among the changes since the last one, `none`
-counting for nothing, and below 1.0, `major` is released as `minor`.
+counting for nothing, and below 1.0, `major` is released as `minor`, since 1.0.0 is its own
+decision, made on purpose with `/sdlc:release 1.0.0`.
 
 ### Stage 6 — Maintain → `/sdlc:health`
 
@@ -380,8 +383,9 @@ tiers, impacts, sizes and problems, rework, open changes and seeds, releases, an
 skill is. The skill makes four passes over that and the docs: **cost** (prose doing what a script could),
 **architecture**, **process** (the signals below) and **direction** (goals, milestones, the next
 major release). Every finding becomes a seed, an intent title, or is dropped with its reason. After
-one approval it rewrites `.sdlc/DIRECTION.md` and appends the seeds, and `sdlc.py retro-commit`
-commits those two files and nothing else. That commit is the next retrospective's boundary.
+one approval it rewrites the direction doc (`docs.direction`) and appends the seeds, and
+`sdlc.py retro-commit` commits those two files and nothing else. That commit is the next
+retrospective's boundary.
 
 **It closes its own loop.** Goals (`- G1. …`) and milestones (`### M1. …`, with a `Groups:` line
 naming the changes and seeds they gather) carry ids from one retrospective to the next. Each run

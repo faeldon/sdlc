@@ -45,7 +45,7 @@
         "## Tiers: the overhead control": "sha256:8a4e4c90c2038227",
         "## Tiers: the overhead control > - **Anything with a live consumer.**": "sha256:77afd3ac322f6666",
         "## The artifacts": "sha256:dd6fbbe5273365c7",
-        "## Where a change is worked: one worktree per change": "sha256:e7751b16ec0c0edd",
+        "## Where a change is worked: one worktree per change": "sha256:4d301b37d067feb1",
         "## Running the stages": "sha256:da203639fdf8b497",
         "## Running the stages > ### Stage 1 \u2014 Plan \u2192 `/sdlc:intent`": "sha256:e3cd993c0e013aa9",
         "## Running the stages > ### Stage 2 \u2014 Design \u2192 `/sdlc:spec`": "sha256:27ea4cf293a689df",
