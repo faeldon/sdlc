@@ -285,22 +285,63 @@ def test_a_copy_that_drops_a_section_fails() -> None:
     assert _in_order(["## A", "## B"], ["## A", "## Own", "## B"])
 
 
+# What `sdlc.py record` clears, by drift class: it makes each default block the new base, re-lists
+# the config keys and template hashes, and stamps this plugin's version and each doc's path. The
+# rest (everything `breaking`, and an `unknown` key or template) it leaves as it found them.
+RECORD_CLEARS = {
+    *("added", "refreshed", "removed", "conflict", "differs"),
+    *("new", "changed", "moved", "downgrade", "unreadable"),
+}
+RECORD = "`uv run --quiet --script scripts/sdlc.py record`"
+
+
+def _drift_lines(found: dict) -> tuple[list[str], bool]:
+    """A line per entry `drift` reports, each with what fixes it, and whether any needs `record`."""
+    entries = [{**u, "where": r["path"]} for r in found["refresh"] for u in r["units"]]
+    lines, needs_record = [], False
+    for e in entries + found["breaking"] + found["report"]:
+        where = f"{e['where']}: {e['unit']}" if e.get("unit") else e["where"]
+        if e.get("fix"):
+            fix = e["fix"]
+        elif e.get("class") in RECORD_CLEARS:
+            fix, needs_record = "record", True
+        else:
+            fix = e.get("detail") or "see `sdlc.py drift`"
+        lines.append(f"{where} ({e.get('class') or 'breaking'}): {fix}")
+    return lines, needs_record
+
+
 def test_this_repos_setup_record_is_current() -> None:
     """`.sdlc/setup.json` holds the defaults this repo was last set up from. A change that edits
     `defaults/` and doesn't rerun `record` leaves drift for a later change to trip over at close;
     after a fresh record, `drift` reports nothing at all."""
     found = sdlc.drift(ROOT)
-    assert found["base"] == "manifest", ".sdlc/setup.json is missing or won't parse"
-    stale = [
-        f"{r['path']}: {u['unit']} ({u['class']})" for r in found["refresh"] for u in r["units"]
-    ]
-    stale += [
-        f"{e['where']}: {e.get('unit') or e.get('class') or e['detail']}"
-        + (f" ({e['class']})" if e.get("unit") else "")
-        for e in found["breaking"] + found["report"]
-    ]
-    assert not stale, (
-        "this repo's setup has drifted from defaults/: bring .sdlc/ in step, then run "
-        "`uv run --quiet --script scripts/sdlc.py record` from this checkout\n  "
-        + "\n  ".join(stale)
+    assert found["base"] == "manifest", f".sdlc/setup.json is missing or won't parse: run {RECORD}"
+    lines, needs_record = _drift_lines(found)
+    advice = (
+        f"; for each `record` line, bring .sdlc/ in step with defaults/, then run {RECORD} from "
+        "this checkout"
+        if needs_record
+        else ""
     )
+    assert not lines, (
+        "this repo's setup has drifted from defaults/" + advice + "\n  " + "\n  ".join(lines)
+    )
+
+
+def test_drift_lines_name_each_fix() -> None:
+    unknown = {"what": "config", "where": "commands.foo", "class": "unknown", "detail": "unread"}
+    retired = {"what": "config", "where": "metrics.x", "detail": "retired", "fix": "Delete it."}
+    conflict = {"what": "doc", "where": ".sdlc/REVIEW.md", "unit": "## B", "class": "conflict"}
+    refresh = [{"path": ".sdlc/SDLC.md", "units": [{"unit": "## A", "class": "refreshed"}]}]
+    found = {"refresh": refresh, "breaking": [retired], "report": [conflict, unknown]}
+    assert _drift_lines(found) == (
+        [
+            ".sdlc/SDLC.md: ## A (refreshed): record",
+            "metrics.x (breaking): Delete it.",
+            ".sdlc/REVIEW.md: ## B (conflict): record",
+            "commands.foo (unknown): unread",
+        ],
+        True,
+    )
+    assert _drift_lines({"refresh": [], "breaking": [retired], "report": [unknown]})[1] is False
