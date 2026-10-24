@@ -202,6 +202,9 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         "changelog": None,  # a file the notes are added to the top of, in the release commit
         "remote": "origin",  # where /sdlc:publish pushes main and the tag
         "publish": None,  # run by /sdlc:publish after the push; {version}, {tag}
+        # The shims the host keeps and the version that removes each, which release refuses to
+        # cut while one is due. Off while the file doesn't exist.
+        "deprecations": ".sdlc/deprecations.toml",
     },
     # When `status` says a retrospective is due. A major release always makes one due.
     "retro": {
@@ -2329,6 +2332,64 @@ def write_version(text: str, version: str) -> str:
     return VERSION_RE.sub(lambda m: m.group(1) + version + m.group(3), text, count=1)
 
 
+# What one `[[shim]]` in `release.deprecations` holds: the first three always, `test` when a
+# compatibility test covers it, so the test goes with the shim.
+SHIM_KEYS = ("name", "remove_in", "where", "test")
+SHIM_REQUIRED = SHIM_KEYS[:3]
+# How `status` names each kind of shim `unreleased()` lists, in the order it prints them.
+SHIM_STATES = {"overdue": " is overdue", "due": "", "unversioned": " (no version to compare)"}
+
+
+def deprecations(home: Path, cfg: dict) -> dict:
+    """The shims the host keeps, and what's wrong with its registry. Never raises: a bad entry is
+    a problem naming it, and is left out of `shims`. `remove_in` must be a quoted X.Y.Z, so TOML
+    can't read `1.10` as the number 1.1."""
+    rel = cfg["release"]["deprecations"]
+    out: dict = {"path": rel, "exists": False, "shims": [], "problems": []}
+    path = home / rel
+    if not path.is_file():
+        return out
+    out["exists"] = True
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        out["problems"].append(f"{rel} won't parse: {e}")
+        return out
+    entries = data.get("shim", [])
+    if set(data) - {"shim"} or not isinstance(entries, list):
+        out["problems"].append(f"{rel} may hold only [[shim]] tables")
+        return out
+    seen: set[str] = set()
+    for n, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict):
+            out["problems"].append(f"{rel}: shim {n} isn't a table")
+            continue
+        label = f"shim {n}" + (f" ({entry['name']})" if isinstance(entry.get("name"), str) else "")
+        wrong = [f"{k} is missing" for k in SHIM_REQUIRED if k not in entry]
+        wrong += [f"{k} isn't a key a shim has" for k in entry if k not in SHIM_KEYS]
+        for k in SHIM_KEYS:
+            if k in entry and not isinstance(entry[k], str):
+                wrong.append(f"{k} must be a " + ("quoted X.Y.Z" if k == "remove_in" else "string"))
+        if isinstance(entry.get("remove_in"), str) and not SEMVER_RE.match(entry["remove_in"]):
+            wrong.append(f"remove_in {entry['remove_in']!r} isn't X.Y.Z")
+        if isinstance(entry.get("name"), str) and entry["name"] in seen:
+            wrong.append("its name is used twice")
+        if wrong:
+            out["problems"] += [f"{rel}: {label}: {w}" for w in dict.fromkeys(wrong)]
+            continue
+        seen.add(entry["name"])
+        out["shims"].append({k: entry.get(k) for k in SHIM_KEYS})
+    return out
+
+
+def shims_due(shims: list[dict], current: str | None, nxt: str | None) -> tuple[list, list]:
+    """(overdue, due): the shims a version already released still carries, `remove_in` at or
+    below `current`, and those the next release, `nxt`, would carry."""
+    overdue = [s for s in shims if current and not _older(current, s["remove_in"])]
+    due = [s for s in shims if s not in overdue and nxt and not _older(nxt, s["remove_in"])]
+    return overdue, due
+
+
 def next_version(version: str, impacts: list[str]) -> tuple[str | None, str | None]:
     """(the part bumped, the new version) for these impacts; (None, None) when none counts. Below
     1.0.0 a `major` is released as `minor`: 1.0.0 is its own decision, made with `--version`."""
@@ -2508,12 +2569,18 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
     if open_ids is None:
         open_ids = [f"{r['id']}-{r['slug']}" for r in analyze(home)["open"]]
     out["open"] = open_ids
+    # A bad registry blocks the bump the way a bad intent does: release can't tell what is due.
+    reg = deprecations(home, cfg)
+    out["problems"] += reg["problems"]
 
     if out["version"] and not out["missing"] and not out["problems"]:
         out["bump"], out["next"] = next_version(
             out["version"], [c["impact"] for c in out["changes"]]
         )
         out["nothing"] = out["next"] is None
+    overdue, due = shims_due(reg["shims"], out["version"], out["next"])
+    unversioned = [] if out["version"] else reg["shims"]
+    out["deprecations"] = {"overdue": overdue, "due": due, "unversioned": unversioned}
     return out
 
 
@@ -2617,6 +2684,14 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         refusals.append(
             f"nothing to release: no change since {u['since']} has an impact other than none"
         )
+    # Against the version this release cuts, so a --version past a shim's remove_in is caught too.
+    if new:
+        overdue, due = shims_due(deprecations(home, cfg)["shims"], u["version"], new)
+        for s in overdue + due:
+            test = f"; its test: {s['test']}" if s["test"] else ""
+            refusals.append(
+                f"shim {s['name']} is due by {new}: remove it first ({s['where']}{test})"
+            )
     if new and not refusals:
         tag, _ = _release_tag(rel, new)  # a bad template is already one of `problems`
         if tag and _git(home, "rev-parse", "-q", "--verify", f"refs/tags/{tag}") is not None:
@@ -4383,7 +4458,8 @@ def print_status(a: dict) -> None:
 
     # Left out where releasing isn't set up and nothing has landed: most repos, most of the time.
     rel = a.get("release")
-    if rel and (rel["changes"] or not rel["configure"]):
+    shims = rel.get("deprecations", {}) if rel else {}
+    if rel and (rel["changes"] or not rel["configure"] or any(shims.values())):
         print(f"\n■ Unreleased: {len(rel['changes'])}")
         if rel["configure"]:
             print("    set release.version_files in .sdlc/config.toml to release them")
@@ -4397,6 +4473,10 @@ def print_status(a: dict) -> None:
             print(f"    nothing to release since {rel['since']}")
         else:
             print(f"    since {rel['since']} → {rel['next']} ({rel['bump']})  /sdlc:release")
+        # Warned about, never a problem: an overdue shim mustn't fail every change's gate.
+        for kind, state in SHIM_STATES.items():
+            for s in shims.get(kind, []):
+                print(f"    ⚠  shim {s['name']}{state}: remove in {s['remove_in']} ({s['where']})")
         for c in rel["changes"]:
             landed = "" if c["closed"] else "  (landed, not closed)"
             print(f"    {c['id']}  {c['slug']:<28} {c['impact'] or '?'}{landed}")

@@ -220,7 +220,7 @@ def test_close_lands_mirrors_and_removes_through_the_script_and_never_by_hand() 
     """Land, mirror, remove: one command, so the removal can't run without the other two."""
     text = (ROOT / "skills" / "close" / "SKILL.md").read_text(encoding="utf-8")
     assert "sdlc.py close <NNN> --check" in text and "sdlc.py close <NNN>\n" in text
-    assert "sdlc.py archive" not in text and "rm -" not in text
+    assert "rm -" not in text
     wait = text.split("## Step 2")[1].split("## Step 3")[0]
     assert "archive it to" in wait and '"Close NNN-slug"' in wait, (
         "the one approval covers the mirror and the commit that removes the folder"
@@ -265,10 +265,7 @@ def test_retro_closes_its_own_loop_and_release_says_when_one_is_due() -> None:
     step0 = text.split("## Step 0")[1].split("## Step 1")[0]
     assert "`direction`" in step0 and "`next_ids`" in step0 and "`vanished`" in step0
     direction = text.split("5. **Direction.**")[1].split("## Step 3")[0]
-    assert (
-        "Since\n   the last retrospective" in direction
-        or "Since the last retrospective" in direction
-    )
+    assert "Since the last retrospective" in " ".join(direction.split())
     assert direction.index("close the loop") < direction.index("propose up to three open goals")
     wait = text.split("## Step 5")[1].split("## Step 6")[0]
     assert "status changes" in wait
@@ -340,7 +337,7 @@ def test_no_skill_writes_the_ideas_heading_itself(name: str) -> None:
 def test_skills_show_an_outcome_by_its_name_beside_its_id(name: str) -> None:
     """An id alone (`O3`) means nothing to someone without the product doc open."""
     text = BY_ID[name].read_text(encoding="utf-8")
-    assert "`name`" in text and "O1 (Unaided setup)" in text, f"{name}: show `O1 (<name>)`"
+    assert "`name`" in text and re.search(r"O\d+ \([A-Z][\w ]+\)", text), f"{name}: `O1 (<name>)`"
 
 
 def test_setup_drafts_from_readiness_and_never_commits() -> None:
@@ -360,9 +357,11 @@ def test_setup_asks_what_kind_of_repo_first() -> None:
     # keyed on the config file alone: a rerun never asks again.
     assert "`config` item is `missing`" in step2
     # The profile is guessed from readiness and the repo's files, never from history or the tracker:
-    # either would need a rule of its own, and a change to a skill's allowed-tools is Tier 2. The
-    # three beyond the first five are setup's lifecycle: drift, record and reset.
-    assert len(_bash_rules(skill)) == 8
+    # either would need a rule of its own, and a change to a skill's allowed-tools is Tier 2.
+    reads_history = [
+        r for r in _bash_rules(skill) if ("git " in r and "rev-parse" not in r) or "gh " in r
+    ]
+    assert not reads_history, reads_history
 
 
 # ---------------------------------------------------------------- allowed-tools
@@ -567,4 +566,3 @@ def test_uninstall_plans_before_its_gate_and_removes_after() -> None:
     before, after = text.split("WAIT for explicit approval")
     assert "sdlc.py uninstall --check" in before and "sdlc.py uninstall --check" not in after
     assert "sdlc.py uninstall\n" in after
-    assert "claude plugin uninstall sdlc@sdlc" in after

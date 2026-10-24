@@ -57,16 +57,10 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-24] [seed] Enforce test lifetimes: shim deadlines, acceptance checks in the change folder
+## [2026-10-24] [seed] Acceptance checks kept in the change folder, run by ship
 
-The test-triage change wrote the triage rule into Stage 4 and the review: a compatibility test
-lives as long as its shim, and an acceptance check runs once and is recorded in the change's
-`notes.md`. Nothing enforces either yet:
-1. A `DEPRECATIONS` registry in `sdlc.py`, a `compat` pytest marker per shim, and one test that
-   fails once a shim's `remove_in` is at or below the version in `plugin.json`, so a release
-   can't carry an overdue shim; `release` and `status` list what's due.
-2. Acceptance checks live in `work/NNN-slug/`, run by ship and archived by close with the folder,
-   in place of the record in `notes.md`.
-3. Sweep `tests/` for acceptance-only tests already there, and move each to a record.
-
-Raised 2026-10-24.
+Stage 4 records an acceptance check in the change's `notes.md` as prose: what ran and what it
+showed. Keeping the check itself in `work/NNN-slug/` instead, run by `/sdlc:ship` and archived by
+close with the folder, would make it rerunnable at ship and still out of the suite. It changes the
+`work/` layout and what ship runs in a host, so it is a Tier 2 of its own. Left from the
+test-lifetimes change (`work/003-test-lifetimes/notes.md` in its commit). Raised 2026-10-24.

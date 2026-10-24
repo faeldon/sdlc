@@ -56,6 +56,7 @@ tag = "v{version}"                          # the default: the release tag, and 
 changelog = "CHANGELOG.md"                  # optional: the notes are added to the top of it
 remote = "origin"                           # the default: where /sdlc:publish pushes main and the tag
 publish = "npm publish"                     # optional: run by /sdlc:publish after the push; {version}, {tag}
+deprecations = ".sdlc/deprecations.toml"    # the default: each shim and the version that removes it; off while absent
 
 [retro]
 after_releases = 2                          # the default: releases before status says Retro due; 0 = only a major one
@@ -333,6 +334,26 @@ of its own, pushes `main` and the tag, never forced, and runs `release.publish` 
 one. It is the only step in the plugin that pushes. A repo without a tag for its current version
 is told the `git tag -a` command that makes one; a repo with no `version_files` gets the listing
 and nothing else. Dropped changes are never released.
+
+**Shims: `release.deprecations`.** A shim is code kept working for something older: an old key
+still read, an old name still accepted. Each one the repo keeps is a `[[shim]]` in
+`.sdlc/deprecations.toml`, with the release that drops it:
+
+```toml
+[[shim]]
+name = "old-flag"                                  # unique
+remove_in = "2.0.0"                                # quoted X.Y.Z
+where = "src/config.py"                            # where the shim is
+test = "tests/test_config.py::test_old_flag_reads" # optional: the compatibility test that goes with it
+```
+
+`sdlc.py unreleased` lists each shim as `overdue` (the current version still carries it), `due`
+(the next release would) or `unversioned` (no `version_files` to compare with). `/sdlc:release`
+refuses to cut any version at or past a shim's `remove_in`, a `--version` included, until the shim
+and its test are gone and the entry with them. `/sdlc:status` shows the overdue and due ones under
+*Unreleased*; it never counts them as problems, so `check --strict` stays a gate for the change in
+hand. A bad entry is reported, and blocks a release, rather than raised. Without the file nothing
+changes. A path kept for good is not a shim and has no entry.
 
 ## Retrospectives
 

@@ -125,7 +125,6 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
     assert "stage: shipped" in _git(root, "show", f"{tip}:work/001-first-change/intent.md")
     assert (root / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
     assert _git(root, "status", "--porcelain") == ""
-    assert not (root / ".git" / "sdlc").exists()
     nxt = _run(root, "next")
     assert nxt.stdout.strip() == "002", "the committed counter holds 001 with the folder gone"
 

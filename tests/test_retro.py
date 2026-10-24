@@ -135,7 +135,6 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
         "since", "changes", "dropped", "dropped_at_counts", "problems", "rework", "open",
         "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
     }  # fmt: skip
-    assert "tokens" not in out
     assert _state(root) == before
 
 

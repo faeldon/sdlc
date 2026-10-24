@@ -246,7 +246,8 @@ then fix the code without editing the test.
 
 - **Regression:** a later change breaks it by accident. It goes in the suite and stays.
 - **Compatibility:** it fails when a shim stops working. It lives exactly as long as the shim,
-  which names in a comment the version that removes it; the test goes with the shim.
+  which names the version that removes it, in `release.deprecations` when the repo keeps one,
+  else in a comment; the test goes with the shim.
 - **Acceptance:** only a deliberate revert breaks it: a file moved, a key renamed, a section
   added. Run it once here, as a command or a throwaway test, and record what ran and what it
   showed in the change's `notes.md`. It reaches history with the folder and stays out of the

@@ -114,7 +114,9 @@ the tag for the version `release.version_files` hold now; a missing tag is repor
 `git tag -a` command, never guessed. `closed_changes(home, base)` is the one walk over landed
 changes: each `Close` commit on `main`'s first-parent line names a change, and its intent is read
 from that commit's parent. `cmd_release` edits the version lines in place, commits and tags,
-locally. `cmd_publish` is the only code that pushes.
+locally. `cmd_publish` is the only code that pushes. A shim in `sdlc.py` gets an entry in
+`.sdlc/deprecations.toml`, and `cmd_release` refuses a version that would still carry it. A
+path kept for good (the no-manifest drift, `RETIRED_KEYS`) is not a shim and has none.
 
 **Retrospectives: `retro()`.** The outermost loop, read-only, bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,

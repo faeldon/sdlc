@@ -452,6 +452,16 @@ def test_uninstall_keeps_a_preexisting_ignore_line(repo: Path, plugin: Path) -> 
     assert not (repo / ".sdlc").exists()
 
 
+def test_uninstall_without_a_manifest_leaves_the_ignore_line(repo: Path, plugin: Path) -> None:
+    """With no record of what setup added, the line may be the host's own: it stays, said so."""
+    _setup(repo, line=True)
+    _git(repo, "rm", "-q", str(sdlc.MANIFEST))
+    _git(repo, "commit", "-q", "-m", "lose the record")
+    assert sdlc.cmd_uninstall(repo) == 0
+    assert ".claude/worktrees/" in (repo / ".gitignore").read_text(encoding="utf-8")
+    assert not (repo / ".sdlc").exists()
+
+
 def test_uninstall_leaves_what_git_doesnt_hold(repo: Path, plugin: Path) -> None:
     (repo / ".gitignore").write_text(".claude/worktrees/\n.sdlc/terms.local\n")
     (repo / ".sdlc" / "terms.local").write_text("a term\n")
@@ -564,7 +574,9 @@ def test_a_repeated_key_is_its_own_block(repo: Path, plugin: Path) -> None:
 
 
 def test_the_shipped_defaults_have_one_block_per_key() -> None:
-    for path in sorted((ROOT / "defaults").glob("*.md")):
+    paths = sorted((ROOT / "defaults").glob("*.md"))
+    assert paths, "the defaults were found"
+    for path in paths:
         keys = [k for k, _ in sdlc.doc_units(path.read_text(encoding="utf-8"))]
         assert not [k for k in keys if k.endswith(")") and k.rsplit(" (", 1)[0] in keys], path
 

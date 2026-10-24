@@ -222,6 +222,7 @@ def test_the_release_section_resolves_with_its_defaults(tmp_path: Path, capsys):
         "changelog": None,
         "remote": "origin",
         "publish": None,
+        "deprecations": ".sdlc/deprecations.toml",
     }
     (tmp_path / ".sdlc").mkdir()
     (tmp_path / ".sdlc" / "config.toml").write_text(

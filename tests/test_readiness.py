@@ -127,7 +127,7 @@ def test_permissions_are_read_from_the_shared_settings(tmp_path: Path, capsys) -
 
 
 def test_the_allowlist_covers_only_subcommands_that_read() -> None:
-    for writer in ("new", "ship", "close", "archive", "release", "publish", "retro-commit"):
+    for writer in ("new", "ship", "close", "release", "publish", "retro-commit"):
         assert not any(f"sdlc.py {writer} " in r for r in sdlc.ALLOW_RULES)
     # `retro` writes nothing, but it runs the host's `retro.evidence`: outside the skill, it asks.
     assert not any("sdlc.py retro" in r for r in sdlc.ALLOW_RULES)
@@ -136,8 +136,6 @@ def test_the_allowlist_covers_only_subcommands_that_read() -> None:
 def test_the_defaults_setup_copies_from_exist(tmp_path: Path, capsys) -> None:
     out = _readiness(_repo(tmp_path), capsys)
     assert Path(out["defaults"]["process"]).is_file() and Path(out["defaults"]["review"]).is_file()
-    text = (sdlc.DEFAULTS_DIR / "SDLC.md").read_text(encoding="utf-8")
-    assert "### Stage 4 — Test" in text and "/sdlc:setup" in text
 
 
 def test_the_project_doc_is_off_until_it_exists_and_warned_when_it_wont_read(

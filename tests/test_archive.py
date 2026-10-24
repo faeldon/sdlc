@@ -820,7 +820,7 @@ def test_a_dropped_change_is_recorded_on_main_and_its_issue_closed_not_planned(
     assert _git(root, "log", "-1", "--format=%s", "main") == f"Drop {name}"
     assert _parents(root, "main") == [before, tip]
     changed = _git(root, "diff", "--name-only", "main^1", "main").split()
-    assert set(changed) <= {".sdlc/ids", ".sdlc/last-id"}, changed
+    assert set(changed) <= {".sdlc/last-id"}, changed
     body = _git(root, "log", "-1", "--format=%b", "main")
     assert "The drafts it reopens are gone." in body and "More." not in body
     assert "Dropped at build" in body

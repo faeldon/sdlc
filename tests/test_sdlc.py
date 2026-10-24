@@ -352,7 +352,6 @@ def test_new_seeds_a_missing_counter_from_the_folders_then_writes_it(tmp_path: P
     assert (tmp_path / "work" / "008-z").is_dir()
     assert (tmp_path / ".sdlc" / "last-id").read_text(encoding="utf-8") == "008\n"
     assert not (tmp_path / ".sdlc" / "last-id.tmp").exists()
-    assert not (tmp_path / "work" / ".last-id").exists()
 
 
 def test_a_number_is_never_reused_after_its_folder_is_deleted(tmp_path: Path) -> None:
@@ -757,7 +756,6 @@ def test_new_worktree_writes_the_counter_in_the_worktree_not_under_git(tmp_path:
     untracked = {ln[3:] for ln in _git(tree, "status", "--porcelain").splitlines()}
     assert {".sdlc/", "work/"} <= untracked
     assert not (root / ".sdlc" / "last-id").exists()
-    assert not (Path(_git(root, "rev-parse", "--absolute-git-dir")) / "sdlc").exists()
 
 
 def test_an_open_change_holds_its_number_with_main_counter_behind(tmp_path: Path) -> None:
