@@ -17,7 +17,8 @@ Everything below exists to put a checkable claim between a change and the people
 skills are `/sdlc:setup`, `/sdlc:intent`, `/sdlc:spec`, `/sdlc:ship`, `/sdlc:close`, `/sdlc:drop`,
 `/sdlc:release`, `/sdlc:publish`, `/sdlc:retro`, `/sdlc:status`, `/sdlc:health` and
 `/sdlc:uninstall`. The plugin owns *mechanism*; this repo owns *policy*: this
-file, `CLAUDE.md` (the invariants a design stays inside), the review passes (`.sdlc/REVIEW.md`) and
+file, the policy doc (`[docs] policy`, `CLAUDE.md`, or `AGENTS.md` when that is the only one),
+which holds the invariants a design stays inside, the review passes (`.sdlc/REVIEW.md`) and
 `.sdlc/config.toml`, which names the commands the skills run. The skills read all of it through
 `sdlc.py config`.
 
@@ -26,7 +27,7 @@ file, `CLAUDE.md` (the invariants a design stays inside), the review passes (`.s
 | Stage | What it is here | Artifact |
 |---|---|---|
 | **1 Plan** | Capture why a change is worth making, in your own words | `intent.md` |
-| **2 Design** | Requirements and design, inside the invariants in `CLAUDE.md` | `spec.md` (Tier 2) |
+| **2 Design** | Requirements and design, inside the invariants in the policy doc | `spec.md` (Tier 2) |
 | **3 Build** | Claude Code plan mode, then implementation | `plan.md` (Tier 2) |
 | **4 Test** | The gate, and the slower check when the diff calls for it | <the commands> |
 | **5 Ship** | A reviewed commit | the commit |
@@ -100,7 +101,7 @@ abandoned in a fortnight. Most changes are Tier 1.
 |---|---|---|
 | **0 — trivial** | a typo, a comment, a one-line fix nothing depends on | **none.** No folder. Commit directly. |
 | **1 — small** | a field added, a test added, a doc section, a flag | `intent.md` only; its **Approach** section stands in for spec and plan |
-| **2 — substantial** | anything that changes what something already relied on means, anything an invariant in `CLAUDE.md` comes near, anything with a live consumer | `intent.md` + `spec.md` + `plan.md` |
+| **2 — substantial** | anything that changes what something already relied on means, anything an invariant in the policy doc comes near, anything with a live consumer | `intent.md` + `spec.md` + `plan.md` |
 
 When it's borderline, **pick the lower tier**. A Tier 1 that grows can be promoted by editing
 `tier:` and running `/sdlc:spec`. A Tier 2 that didn't need to be one just doesn't get written.
@@ -192,7 +193,7 @@ first, when that's how changes are numbered) and **stops**. If the change came f
 
 ### Stage 2 — Design → `/sdlc:spec`
 
-Tier 2 only. Reads `intent.md` and the invariants in `CLAUDE.md`, resolves the intent's open
+Tier 2 only. Reads `intent.md` and the invariants in the policy doc, resolves the intent's open
 questions (striking them `~~like this~~` rather than deleting them), drafts `spec.md`, gates, and
 advances `stage: design`. **The invariants are this repo's policy.** A spec that can't stay inside
 them is telling you something: change the invariant on purpose, with its own reasoning, or change
@@ -208,7 +209,7 @@ without an accepted plan.** A Tier 2 change owes `plan.md` from `stage: build` o
 files. When the build departs from the plan, update `plan.md` in the same commit: a plan that no
 longer says what was built misleads the review that reads it.
 
-**`CLAUDE.md` is the standing context**: under a page, checked into git. When Claude makes the same
+**The policy doc is the standing context**: under a page, checked into git. When Claude makes the same
 mistake twice, the correction goes into it; `/sdlc:ship`'s context pass is where that is weighed.
 A skill is a control, but an advisory one: a rule that must always hold needs a hook or a test
 behind it, not only a sentence in a skill.
@@ -225,7 +226,7 @@ Advance `stage: test` and run what proves the change. **Two kinds of check, spli
   when `build_when` is unset.
 
 <The two commands here, and what each covers.> Always give Claude a way to verify its own work:
-`CLAUDE.md` says what healthy output from each looks like.
+the policy doc says what healthy output from each looks like.
 
 **A bug fix starts with a failing test.** Commit the test that fails because of the bug first,
 then fix the code without editing the test.
@@ -255,8 +256,8 @@ naming the change (`Refs #NNN` when its number is a GitHub issue), carrying the 
 docs and the change's folder. `/sdlc:ship` never pushes and never deploys.
 
 **The review** has four passes. The first three are `.sdlc/REVIEW.md`'s: **correctness** against
-the numbered requirements · **contract** against the invariants in `CLAUDE.md` · **cost and
-simplification**. The fourth is the plugin's: **context**, whether `CLAUDE.md` and the other docs
+the numbered requirements · **contract** against the invariants in the policy doc · **cost and
+simplification**. The fourth is the plugin's: **context**, whether the policy doc and the other docs
 that give a session its context still tell the truth after the diff. Findings are Important or Nit;
 nits cap at 5, and more than 5 means the change is too big.
 

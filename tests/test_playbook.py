@@ -68,7 +68,7 @@ PRESCRIPTIONS = [
         "Claude turns the accepted intent into spec.md, inside the organisation's policies",
         [
             r"/sdlc:spec",
-            r"inside the invariants in `CLAUDE\.md`",
+            r"inside the invariants in the policy doc",
             r"Requirements · Design · Contracts touched",
         ],
     ),
@@ -117,7 +117,7 @@ PRESCRIPTIONS = [
     (
         "Test",
         "Healthy outputs are listed in CLAUDE.md",
-        [r"`CLAUDE\.md` says what healthy output"],
+        [r"the policy doc says what healthy output"],
     ),
     (
         "Test",
