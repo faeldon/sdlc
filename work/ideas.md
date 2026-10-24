@@ -56,3 +56,46 @@ reviews through pull requests would want ship to push the branch and open a PR (
 PR's review to stand alongside ship's. An opt-in way of landing, not a default, and an exception
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
+
+## [2026-10-24] [seed] Evidence for this repo's retrospective
+
+`retro.evidence` is empty, so the retrospective can score none of O1–O4 and every outcome is
+carried. Add read-only commands for this repo that print what the product doc's measures name:
+issues filed against setup, `new` or close per release (O1), issues reporting lost work or a
+number given twice (O2), and the stops close records per change by tier (O3). Raised by the
+retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] Ship does its own landing edits
+
+`/sdlc:ship` Step 6 asks the model to delete the seed entry the change's `idea:` line names and to
+build the `git add` list of every path the change touched. Both are mechanical, and in 001, 003
+and 005 each took a hand-written script or a 9–22-path command. `sdlc.py ship <NNN>` could delete
+the entry and print the paths to stage. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] Rework ignores shared docs and the setup record
+
+The first retrospective's rework list held 12 pairs, all same-day, all from `defaults/SDLC.md` or
+`.sdlc/setup.json`: files nearly every change edits. None was a follow-up fix, so the signal the
+process doc watches says nothing. Count rework on code and tests, or leave out the files most
+changes touch. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] A change's size counts every commit on its branch
+
+`retro` reads a change's files and lines from the one commit before its `Close`, so 002, two
+commits and about 1,700 lines on its branch, reads as 1 file and 9 lines. Count the branch's whole
+diff against the base it was shipped on. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] Carry a ship's unfixed nits forward
+
+Ship gives each undone item a disposition, but a nit approved unfixed lives only in the
+`Sdlc-Findings` count. Five are open now: 003's status test whose patched half can't fail, and its
+registry that crashes `status` when it isn't UTF-8; 005's `left` that builds up across checks, its
+timeout output kept as bytes, and checks that inherit stdin. Carry nits like undone items, and fix
+these five. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-24] [seed] This repo's gate fails when its setup record drifts
+
+Every change that edits a default must run `sdlc.py record` by hand, and nothing fails when one
+forgets: `f341a83` refreshed the record after the fact, straight on `main`, and 005 had to be
+rebased and shipped again before it could close. A gate test that `sdlc.py drift` reports nothing in this repo would catch it
+in the change that caused it. Raised by the retrospective of 2026-10-24.
