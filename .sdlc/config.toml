@@ -1,0 +1,28 @@
+# The sdlc plugin run on its own repo. Only the keys that differ from their defaults;
+# `sdlc.py config` shows every setting as resolved.
+
+[commands]
+# The whole gate: ruff, the formatter check, pytest (test_adoption's bare-repo run and
+# test_archive's fake `gh` included, so it stays offline) and `claude plugin validate --strict`.
+check = "./check.sh"
+
+[docs]
+# The invariants live in AGENTS.md under "Invariants the tests enforce". The root CLAUDE.md only
+# imports it (`@AGENTS.md`), so pinned here: the policy is the file that holds them.
+policy = "AGENTS.md"
+# A diff that changes what sdlc.py reads or does can make any of these false: the README (what a
+# user does), docs/REFERENCE.md (every key and default) and docs/CONTRIBUTING.md (how it's built).
+context = ["AGENTS.md", "README.md", "docs/REFERENCE.md", "docs/CONTRIBUTING.md"]
+
+[archive]
+# Numbered by GitHub issues on faeldon/sdlc, and archived to them.
+target = "github"
+
+[release]
+# The plugins' version lives in their manifests and in pyproject.toml, bumped together: sdlc and
+# the optional sdlc-factory always release as one version.
+version_files = [
+  ".claude-plugin/plugin.json",
+  "plugins/factory/.claude-plugin/plugin.json",
+  "pyproject.toml",
+]

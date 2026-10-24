@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "sdlc-factory",
+  "displayName": "SDLC Factory",
+  "version": "1.0.0",
+  "description": "An optional software factory over the sdlc change loop: a spec-writer, a builder, code, security and test reviewers, and an approver run a change's spec, plan, build and review, behind the same human gates. Install it only where you want agents to do that; sdlc works the same without it.",
+  "author": {
+    "name": "James Faeldon",
+    "email": "111378+altcoder@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/faeldon/sdlc/tree/main/plugins/factory",
+  "repository": "https://github.com/faeldon/sdlc",
+  "keywords": ["sdlc", "agents", "factory", "review"],
+  "dependencies": ["sdlc"]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "sdlc",
+  "displayName": "SDLC",
+  "version": "1.0.0",
+  "description": "The AI-native SDLC as a change pipeline: numbered intent/spec/plan artifacts under work/, tier-sized overhead, and a human gate at every stage that writes. Repo-agnostic mechanism; each repo supplies its own policy, commands and templates through .sdlc/config.toml.",
+  "author": {
+    "name": "James Faeldon",
+    "email": "111378+altcoder@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/faeldon/sdlc",
+  "repository": "https://github.com/faeldon/sdlc",
+  "keywords": ["sdlc", "process", "change-management", "review"]
+}
