@@ -1,7 +1,7 @@
 ---
 name: setup
-description: Set a repo up for the sdlc plugin, or check that it still is — first asks whether it's a lightweight repo or a product, run by one person or a team, tracked on GitHub or locally, then gitignores the change worktrees, writes .sdlc/config.toml with the commands the repo's own task files suggest and the numbering the answers pick, scaffolds the process doc and the review passes from the plugin's defaults, generates an AGENTS.md (imported by a one-line CLAUDE.md) when the repo has neither, or proposes additions to the one there is, and allowlists the plugin's read-only commands; for a product it interviews for the product doc (users, outcomes, the evidence commands the retrospective reads), and for a team on GitHub it drafts the project doc (issue fields). Drafts everything, writes after one approval, and commits nothing. Use before a repo's first /sdlc:intent, when /sdlc:status says the repo isn't set up, or with `product` or `project` to add that doc to a repo already set up. Not for opening a change (/sdlc:intent) or for the repo's drift scans (/sdlc:health).
-argument-hint: "[product | project — add that doc to a repo already set up]"
+description: Set a repo up for the sdlc plugin, or check that it still is, and after a plugin update refresh what the update changed under it — first asks whether it's a lightweight repo or a product, run by one person or a team, tracked on GitHub or locally, then gitignores the change worktrees, writes .sdlc/config.toml with the commands the repo's own task files suggest and the numbering the answers pick, scaffolds the process doc and the review passes from the plugin's defaults, generates an AGENTS.md (imported by a one-line CLAUDE.md) when the repo has neither, or proposes additions to the one there is, and allowlists the plugin's read-only commands; for a product it interviews for the product doc (users, outcomes, the evidence commands the retrospective reads), and for a team on GitHub it drafts the project doc (issue fields). Drafts everything, writes after one approval, and commits nothing. Use before a repo's first /sdlc:intent, when /sdlc:status says the repo isn't set up, after `claude plugin update`, with `product` or `project` to add that doc to a repo already set up, or with `reset` to put a doc or template override back to the plugin's default. Not for opening a change (/sdlc:intent), the repo's own drift scans (/sdlc:health), or taking the plugin back out (/sdlc:uninstall).
+argument-hint: "[product | project — add that doc | reset <doc | template | all>]"
 allowed-tools:
   - Read
   - Write
@@ -13,13 +13,17 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
 disable-model-invocation: true
 ---
 
 # Setup — make a repo ready for the change pipeline
 
-Runs once per repo, and again whenever someone wants to know whether it is still set up. On a repo
-that already is, it reports that and offers only what's missing. **It writes nothing until the
+Runs once per repo, and again whenever someone wants to know whether it is still set up, which is
+always worth doing after the plugin updates. On a repo that already is, it reports that and offers
+only what's missing, and what the update changed under the docs it copied. **It writes nothing until the
 human has seen every file and every edit and said yes**, and it never commits: the pipeline can't
 ship its own setup, because it needs the setup first.
 
@@ -28,18 +32,47 @@ ship its own setup, because it needs the setup first.
 ```bash
 cd "$(git rev-parse --show-toplevel)" && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift
 ```
 
 `readiness` lists each item with `ok`, `missing`, `warn` or `n/a`, the commands the repo's own task
 files suggest (`candidates`), the permission rules it proposes, and the plugin's default docs to
 draft from (`defaults`). `config` gives every path and setting as resolved now.
 
-If every item is `ok`, say so, list anything still at its default that a repo usually sets, and
-stop. Nothing to write is a finished setup. **Unless the argument is `product` or `project`**:
+`drift` compares what setup copied with this plugin's defaults, block by block (each section, each
+`- **lead**` bullet), against the record `.sdlc/setup.json` keeps of what setup last offered. It
+sorts what it finds three ways, and Step 3 keeps them apart in that order:
+
+- **`breaking`**: what the plugin would now misread: a config key a release retired, a template
+  override in `.sdlc/templates/` that lacks a heading or key the script reads, a project or product
+  doc it can't parse. Each comes with its `fix`.
+- **`refresh`**: per host doc, the blocks the plugin changed that the host never touched
+  (`added`, `refreshed`, `removed`), and `proposed`, the whole doc with them taken and every
+  other block exactly as the host wrote it.
+- **`report`**: what only a person can decide: a block both sides changed (`conflict`), a block
+  that differs where there's no record to say who changed it (`differs`, `base: none`), a config
+  key the plugin doesn't read (`unknown`) or one new since the record (`new`), a plugin template
+  that changed under an override (`changed`).
+
+Blocks the host wrote (`own`), edited (`edited`) or took out (`host-removed`) are listed under
+`docs` and never proposed back.
+
+If every item is `ok` and `drift` has nothing in `breaking`, `refresh` or `report`, say so, list
+anything still at its default that a repo usually sets, and stop. Nothing to write is a finished
+setup. **Unless the argument is `product` or `project`**:
 then that doc is the one item to draft, even though `readiness` reports it `ok` while it's off, and
 Steps 1 to 6 run for it alone, without the profile round. A doc that already exists is never
-rewritten: propose additions as a diff.
+rewritten: propose additions as a diff. **Or `reset`**, below.
+
+**`reset <doc | template | all>`** puts the plugin's default back where the host changed it: a doc
+by its `docs` key (`process`, `review`, `health`, `product`, `project`), a template override by its
+file name (`intent.md`), or `all` of both. For a doc, the draft is its default again with every
+`<` prompt filled the way a first setup fills it (Steps 1 to 3), and above it the blocks the reset
+loses: each one `drift` lists as `own` or `edited`, shown as a diff, so nobody loses an edit
+without seeing it. For an override, there's nothing to draft: the reset deletes it and the
+plugin's template is used again, so show the override against `templates[...]` in `config` and
+what it loses. A reset is a write like any other, behind Step 4.
 
 ## Step 1 — Learn the repo
 
@@ -159,6 +192,15 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   `permissions.allow`, keeping everything already there. They cover only the script's read-only
   subcommands; everything that writes keeps asking. Say that the file is shared: it is committed
   and applies to everyone who works in the repo.
+- **What the plugin update changed** (`drift`), on a repo already set up. Show `breaking` first,
+  each with what it breaks and its `fix`: a retired key is edited to the key that replaced it, an
+  override lacking a heading or key gets it back (or a `reset`). Then each `refresh` doc as one
+  diff from the host's text to its `proposed`, naming each block taken and whether the plugin
+  `added`, `refreshed` or `removed` it. Then `report`, with no edit drafted: for a `conflict`,
+  both texts side by side, for the human to merge by hand or leave; for `differs`, that there is
+  no record of who changed the block, so it's theirs to judge; for `new` keys, the default and
+  where `docs/REFERENCE.md` says what it does. A `report` item the human asks to take becomes a
+  draft like any other, and goes back through Step 4.
 
 ## Step 4 — WAIT for explicit approval
 
@@ -171,14 +213,26 @@ Ask literally, listing every path:
 
 ## Step 5 — Write and prove it
 
-Write each file, `Edit` each existing one exactly as approved. Then:
+Write each file, `Edit` each existing one exactly as approved: a `refresh` doc is written as its
+approved `proposed` text. A template override being reset is deleted by the script, which takes
+only a file name in `.sdlc/templates/` and refuses one with uncommitted edits:
 
 ```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset <name>
+```
+
+Then record what setup offered, so the next `drift` compares against it. `--created` names each
+file this run created (none on a refresh), and `--gitignore-line` is given when this run added the
+`.claude/worktrees/` line to `.gitignore`: `/sdlc:uninstall` removes only what the record says
+setup wrote. Then prove it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check
 ```
 
-Every item written should now be `ok`. One that isn't is a draft that didn't do what it said: say
+Every item written should now be `ok`, `drift` included unless the human left a `refresh` out. One that isn't is a draft that didn't do what it said: say
 which, rather than reporting success. If a gate command was set, run it once and say whether it
 passed; a gate that fails on a clean tree isn't one yet.
 
@@ -190,11 +244,14 @@ it, what was left at its default and why, and anything the
 human still has to do (a `<` line left in a doc, `gh auth login`). After a product doc, name
 each open change `check` reported for a missing `serves:` line: its intent is in its own worktree,
 so the human adds the line there (an outcome, or `none`). End with the commit, for the human to
-run, naming exactly the paths written:
+run, naming exactly the paths written, `.sdlc/setup.json` among them:
 
 ```
 git add <the paths> && git commit -m "Set the repo up for the sdlc plugin"
 ```
+
+After a refresh or a reset, report what was taken, what was left in `report` and why, and the same
+commit with `-m "Refresh the sdlc setup for <plugin version>"`.
 
 Then the next step: `/sdlc:intent` for the first change.
 
@@ -202,6 +259,8 @@ Then the next step: `/sdlc:intent` for the first change.
 
 - Committing, pushing, or opening an issue. The human commits; `/sdlc:intent` opens the first issue.
 - Rewriting an existing `CLAUDE.md`, `AGENTS.md`, review or process doc. Additions are proposed as diffs.
-- Templates in `.sdlc/templates/`. The plugin's are generic and work; a repo adds its own later.
+- Writing templates in `.sdlc/templates/`. The plugin's are generic and work; a repo adds its own
+  later, and `reset` only removes one.
+- Removing the setup. That's `/sdlc:uninstall`.
 - Allowing anything that writes. `new`, `ship`, `close` and `archive` keep asking.
 - Recording the profile. The answers steer the drafts; no config key keeps them.

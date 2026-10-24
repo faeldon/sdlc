@@ -49,7 +49,18 @@ sdlc = _load()
 GATED = {
     *(
         f"sdlc:{n}"
-        for n in ("intent", "spec", "ship", "close", "drop", "setup", "release", "publish", "retro")
+        for n in (
+            "intent",
+            "spec",
+            "ship",
+            "close",
+            "drop",
+            "setup",
+            "release",
+            "publish",
+            "retro",
+            "uninstall",
+        )  # fmt: skip
     ),
     "sdlc-factory:spec",
     "sdlc-factory:build",
@@ -82,6 +93,7 @@ READS_CONFIG = {
     ],
     "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target"],
     "sdlc:drop": ["archive.target"],
+    "sdlc:uninstall": ["archive.target", "docs.policy", "docs.context"],
     "sdlc:release": ["release.version_files", "release.tag", "release.changelog"],
     "sdlc:publish": ["release.remote", "release.publish"],
     "sdlc:health": ["commands.scan", "docs.health"],
@@ -116,7 +128,7 @@ READS_CONFIG = {
 def test_skills_were_found() -> None:
     """A glob that matches nothing makes every test below vacuously pass."""
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
-    assert {f"sdlc:{n}" for n in names | {"publish", "retro", "drop"}} | {
+    assert {f"sdlc:{n}" for n in names | {"publish", "retro", "drop", "uninstall"}} | {
         "sdlc-factory:spec", "sdlc-factory:build"
     } == set(BY_ID)  # fmt: skip
 
@@ -348,8 +360,9 @@ def test_setup_asks_what_kind_of_repo_first() -> None:
     # keyed on the config file alone: a rerun never asks again.
     assert "`config` item is `missing`" in step2
     # The profile is guessed from readiness and the repo's files, never from history or the tracker:
-    # either would need a rule of its own, and a change to a skill's allowed-tools is Tier 2.
-    assert len(_bash_rules(skill)) == 5
+    # either would need a rule of its own, and a change to a skill's allowed-tools is Tier 2. The
+    # three beyond the first five are setup's lifecycle: drift, record and reset.
+    assert len(_bash_rules(skill)) == 8
 
 
 # ---------------------------------------------------------------- allowed-tools
@@ -533,3 +546,25 @@ def test_intent_never_picks_what_a_change_serves() -> None:
     step1 = text.split("## Step 1")[1].split("## Step 2")[0]
     assert "**What it serves**" in step1 and "Never pick for the human" in step1
     assert "`none`" in step1 and "**Moves O1:**" in step1
+
+
+def test_setup_checks_and_records_what_it_offered() -> None:
+    """A rerun after a plugin update is how a host hears what changed under its docs, and the
+    record is what the next rerun compares against: setup runs `drift` before drafting and
+    `record` after writing."""
+    text = (ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    step0 = text.split("## Step 0")[1].split("## Step 1")[0]
+    step5 = text.split("## Step 5")[1].split("## Step 6")[0]
+    assert "sdlc.py drift" in step0
+    assert "sdlc.py record" in step5 and "sdlc.py reset" in step5
+    assert "uninstall" not in " ".join(
+        frontmatter.load(ROOT / "skills/setup/SKILL.md")["allowed-tools"]
+    )
+
+
+def test_uninstall_plans_before_its_gate_and_removes_after() -> None:
+    text = (ROOT / "skills" / "uninstall" / "SKILL.md").read_text(encoding="utf-8")
+    before, after = text.split("WAIT for explicit approval")
+    assert "sdlc.py uninstall --check" in before and "sdlc.py uninstall --check" not in after
+    assert "sdlc.py uninstall\n" in after
+    assert "claude plugin uninstall sdlc@sdlc" in after

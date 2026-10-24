@@ -8,6 +8,7 @@ the repo is set up.
 - [Configuration: `.sdlc/config.toml`](#configuration-sdlcconfigtoml)
 - [The docs](#the-docs)
 - [Templates: `.sdlc/templates/`](#templates-sdlctemplates)
+- [After an update: refresh, reset, uninstall](#after-an-update-refresh-reset-uninstall)
 - [`work/` and worktrees](#work-and-worktrees)
 - [Numbering](#numbering)
 - [Trackers](#trackers)
@@ -138,6 +139,51 @@ or the factory first writes one. Neither has prompts: its note carries the rules
 `{{name}}`, `{{tier}}`, `{{stage}}`, `{{impact}}`, `{{branch}}`, `{{commit}}`, `{{depends_on}}`,
 `{{updated}}`, `{{problem}}`, `{{outcome}}` and `{{artifacts}}`. The marker line that ties the
 issue to its change is written above it by `sdlc.py`, so no template can lose it.
+
+## After an update: refresh, reset, uninstall
+
+The docs setup copies from the plugin's defaults are yours once copied, so updating the plugin
+never touches them. Rerun `/sdlc:setup` after `claude plugin update`: it shows what the new version
+changed under them, and drafts the changes you haven't made yourself, behind its one approval.
+
+**`.sdlc/setup.json`** is setup's record, written by `sdlc.py record` each time setup writes, and
+committed with the rest. It holds the plugin version, the config keys that version knew, a hash
+of each block of each default behind one of your docs (`process`, `review`, `health`, `product`,
+`project`), a hash of each plugin template, the files setup created, and whether it added the
+`.claude/worktrees/` line to `.gitignore`. A block is a `##`, `###` or `####` section, or a
+`- **lead**` bullet. Nothing else reads it, and `sdlc.py status` names it when it is older than
+the plugin, or missing.
+
+**`sdlc.py drift`** (read-only, JSON) compares each block of your doc with the default now and the
+recorded hash, and sorts what it finds:
+
+| Found | Means | Setup |
+|---|---|---|
+| `added`, `refreshed`, `removed` | the plugin changed a block you never touched | drafts it, in `refresh` |
+| `conflict` | you both changed it | shows both, in `report`; you merge it |
+| `differs` | no record to say who changed it (set up before the record existed) | shows both, in `report` |
+| `own`, `edited`, `host-removed` | yours: written, reworded or taken out | leaves it |
+| `current` | the same | nothing |
+
+Whitespace alone is never drift. `breaking` is kept apart from all of that: what the plugin would
+now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py` names its
+replacement), a template override lacking a heading, frontmatter key or placeholder the script
+reads (`TEMPLATE_READS`), or a project or product doc it can't parse. `report` also lists config
+keys the plugin doesn't read, keys new since the record (with their default; this page says what
+each does), and plugin templates that changed under one of your overrides.
+
+**`/sdlc:setup reset <doc | template | all>`** puts the default back: a doc with its prompts
+filled as a first setup fills them, after a diff of every block of yours it loses; a template
+override by deleting it (`sdlc.py reset <name>`, which refuses any other path, and an override with
+uncommitted edits).
+
+**`/sdlc:uninstall`** removes what setup wrote: the committed files in `.sdlc/`, the plugin's
+allow rules in `.claude/settings.json` (every other key and rule kept), and the
+`.claude/worktrees/` line when the record says setup added it. It refuses while a change is open,
+stands in a worktree, or is shipped and not closed, and while anything it would remove has
+uncommitted edits, so history keeps everything it removes. It leaves `work/`, `AGENTS.md` and
+`CLAUDE.md` (listing their lines that name the plugin), the tracker's issues, tags and history,
+and commits nothing. A later setup numbers on from that history.
 
 ## `work/` and worktrees
 

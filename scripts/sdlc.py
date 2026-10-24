@@ -78,6 +78,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -2080,6 +2081,50 @@ def _section(text: str, heading: str) -> str:
     return "\n".join(out).strip()
 
 
+BULLET_RE = re.compile(r"^- \*\*(.+?)\*\*")
+
+
+def doc_units(text: str) -> list[tuple[str, str]]:
+    """A doc's body cut into (key, text) blocks that run, in order, to the next block: what
+    setup's drift compares one at a time. A block starts at a heading of level 2 to 4 or at a
+    `- **lead**` bullet, outside code fences; what comes before the first is the preamble (`#`,
+    the title and its note). A key is the path of headings above it, a bullet's ending with its
+    lead, so two sections' `### Examples` stay apart. The blocks joined with newlines are the
+    body again, which is what lets a refresh rewrite one and keep the rest as written."""
+    units: list[tuple[str, list[str]]] = [("#", [])]
+    path: list[tuple[int, str]] = []
+    fenced = False
+    for line in _body_of(text).splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        elif not fenced and (m := HEADING_RE.match(line)) and 2 <= len(m.group(1)) <= 4:
+            depth = len(m.group(1))
+            path = [p for p in path if p[0] < depth] + [(depth, line.strip())]
+            units.append((" > ".join(h for _, h in path), [line]))
+            continue
+        elif not fenced and (b := BULLET_RE.match(line)):
+            where = " > ".join(h for _, h in path)
+            units.append(((f"{where} > " if where else "") + f"- **{b.group(1)}**", [line]))
+            continue
+        units[-1][1].append(line)
+    # A key met again (two `### Examples` under one section, a lead used twice) is numbered, so
+    # every block is compared, and rewritten, on its own.
+    seen: Counter[str] = Counter()
+    out = []
+    for key, lines in units:
+        seen[key] += 1
+        out.append((key if seen[key] == 1 else f"{key} ({seen[key]})", "\n".join(lines)))
+    return out if out[0][1].strip() else out[1:]
+
+
+def unit_hash(text: str) -> str:
+    """A block's hash, blind to trailing spaces and to how many blank lines separate things, so
+    reflowing a doc's whitespace isn't drift."""
+    lines = [line.rstrip() for line in text.strip("\n").splitlines()]
+    squeezed = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))
+    return "sha256:" + hashlib.sha256(squeezed.encode("utf-8")).hexdigest()[:16]
+
+
 def _artifact_block(name: str, text: str) -> str:
     """One artifact as a collapsed section: its `# ` title dropped (the issue's title holds it),
     its headings demoted two levels so they sit under the issue's own, code fences untouched."""
@@ -3482,7 +3527,9 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # before the path stands in for wherever the plugin is installed, which differs per machine and
 # changes when it updates; a plugin can't ship permission rules of its own. Nothing that writes
 # is here: new, ship and close keep asking.
-READ_ONLY = ("status", "check", "config", "next", "undone", "context", "readiness", "unreleased")
+READ_ONLY = (
+    "status", "check", "config", "next", "undone", "context", "readiness", "unreleased", "drift",
+)  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
 
@@ -3627,6 +3674,19 @@ def cmd_readiness(root: Path) -> int:
         for name, status, detail in tracker(home, cfg).readiness():
             item(name, status, detail)
     item(*permissions_status(root))
+    if not cfg_file.is_file():
+        item("drift", "n/a", "not set up yet")
+    else:
+        found = drift(root)
+        changed = len(found["breaking"]) + len(found["refresh"])
+        item(
+            "drift",
+            "warn" if changed else "ok",
+            f"{len(found['breaking'])} breaking, {len(found['refresh'])} doc(s) to refresh, "
+            f"{len(found['report'])} to look at"
+            if changed
+            else "setup matches this plugin's defaults",
+        )
 
     out = {
         "ready": all(i["status"] in ("ok", "n/a") for i in items if i["required"]),
@@ -3638,15 +3698,566 @@ def cmd_readiness(root: Path) -> int:
             "missing": [r for r in ALLOW_RULES if r not in _allowed(root)],
         },
         # What setup copies from, when the repo has none of its own.
-        "defaults": {
-            "process": str(DEFAULTS_DIR / "SDLC.md"),
-            "review": str(DEFAULTS_DIR / "REVIEW.md"),
-            "project": str(DEFAULTS_DIR / "PROJECT.md"),
-            "product": str(DEFAULTS_DIR / "PRODUCT.md"),
-            "health": str(DEFAULTS_DIR / "HEALTH.md"),
-        },
+        "defaults": {key: str(DEFAULTS_DIR / name) for key, name in HOST_DOCS.items()},
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+# Setup's life after the first run. A host owns the docs setup copied from `defaults/`, so a newer
+# plugin can't just overwrite them; `record` keeps a hash of each block of each default as it was
+# copied, and `drift` compares three ways (the default now, that hash, the host's text) to tell
+# what the plugin changed from what the host did. Neither writes a host doc: setup drafts the
+# refresh, behind its one WAIT.
+MANIFEST = Path(HOST_DIR) / "setup.json"
+# Each [docs] key setup fills from a default, and the default it copies.
+HOST_DOCS = {
+    "process": "SDLC.md",
+    "review": "REVIEW.md",
+    "project": "PROJECT.md",
+    "product": "PRODUCT.md",
+    "health": "HEALTH.md",
+}
+# A config key a release renamed or removed: `section.old` → {"now": the key that replaced it, or
+# None, "since": the version, "do": what a host does about it}. A host still setting one has a
+# setting the plugin no longer reads, which is breaking. Add to it, never prune it: a host can be
+# several releases behind.
+RETIRED_KEYS: dict[str, dict[str, str | None]] = {}
+# What the script reads from each template, so a host's override that lacks one would be misread.
+# Frontmatter keys, `## ` headings and literal placeholders; a template with nothing read has no
+# entry.
+TEMPLATE_READS: dict[str, dict[str, tuple[str, ...]]] = {
+    "intent.md": {
+        "keys": (
+            "id",
+            "slug",
+            "tier",
+            "impact",
+            "stage",
+            "created",
+            "updated",
+            "idea",
+            "depends_on",
+        ),
+        "headings": ("Problem", "Outcome", "Open questions"),
+    },
+    "issue.md": {"placeholders": ("{{artifacts}}",)},
+}
+# Classes a refresh proposes text for; the rest are reported or left alone.
+PROPOSED = ("added", "refreshed", "removed")
+WORKTREES_LINE = ".claude/worktrees/"
+# A line in a context doc that names the plugin, which uninstall lists rather than edits.
+MENTIONS_RE = re.compile(r"/sdlc:|\.sdlc/|(?<![\w.])work/")
+PLUGIN_RULE_RE = re.compile(r"^Bash\(uv run --quiet --script \*/scripts/sdlc\.py [a-z-]+ \*\)$")
+
+
+def plugin_version() -> str | None:
+    """The version in this copy of the plugin's manifest."""
+    try:
+        path = PLUGIN_DIR / ".claude-plugin" / "plugin.json"
+        return json.loads(path.read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _older(a: str | None, b: str | None) -> bool:
+    """Whether version `a` comes before `b`; False when either isn't X.Y.Z."""
+    try:
+        return _semver(a or "") < _semver(b or "")
+    except ValueError:
+        return False
+
+
+def read_manifest(root: Path) -> tuple[dict | None, str | None]:
+    """(the manifest, why it couldn't be read). Neither when there is none: a repo set up before
+    the manifest existed, which drift compares two ways."""
+    path = root / MANIFEST
+    if not path.is_file():
+        return None, None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        return None, f"{MANIFEST} won't parse: {e}"
+    if not isinstance(data, dict) or not isinstance(data.get("docs", {}), dict):
+        return None, f"{MANIFEST} isn't a manifest"
+    return data, None
+
+
+def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
+    """Write `.sdlc/setup.json`: this plugin's version, its config keys, and a hash of each block
+    of each default behind a host doc, as of now. Writes nothing else. Setup runs it after every
+    write, so the next drift compares against what the host was last offered."""
+    if not (root / HOST_DIR / "config.toml").is_file():
+        print(f"⚠  no {HOST_DIR}/config.toml: run /sdlc:setup first", file=sys.stderr)
+        return 1
+    bad = [p for p in created if Path(p).is_absolute() or ".." in Path(p).parts]
+    if bad:
+        print(f"⚠  --created takes paths inside the repo: {', '.join(bad)}", file=sys.stderr)
+        return 1
+    cfg = load_config(root)[0]
+    before = read_manifest(root)[0] or {}
+    docs = {}
+    for key, name in HOST_DOCS.items():
+        rel = cfg["docs"][key]
+        if rel and (root / rel).is_file():
+            text = (DEFAULTS_DIR / name).read_text(encoding="utf-8")
+            units = {k: unit_hash(v) for k, v in doc_units(text)}
+            docs[key] = {"path": rel, "default": name, "units": units}
+    manifest = {
+        "version": plugin_version(),
+        "config_keys": sorted(f"{s}.{k}" for s, keys in CONFIG_KEYS.items() for k in keys),
+        "docs": docs,
+        "templates": {
+            p.name: unit_hash(p.read_text(encoding="utf-8"))
+            for p in sorted(TEMPLATE_DIR.glob("*.md"))
+        },
+        "created": sorted({*before.get("created", []), *(Path(p).as_posix() for p in created)}),
+        "gitignore_line": bool(before.get("gitignore_line")) or gitignore_line,
+    }
+    (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"  wrote  {MANIFEST}  (plugin {manifest['version']}, {len(docs)} doc(s))")
+    return 0
+
+
+def _classify(
+    default: list[tuple[str, str]], host: list[tuple[str, str]], base: dict[str, str] | None
+) -> list[dict]:
+    """Each block of a host doc against its default, by key: what the plugin changed (`added`,
+    `refreshed`, `removed`), what the host did (`own`, `edited`, `host-removed`), both (`conflict`),
+    or neither (`current`). With no base, only `current`, `added`, `own` and `differs`."""
+    d, h = dict(default), dict(host)
+    out = []
+    for key in dict.fromkeys([k for k, _ in default] + [k for k, _ in host]):
+        dt, ht = d.get(key), h.get(key)
+        dh, hh = (unit_hash(t) if t is not None else None for t in (dt, ht))
+        bh = base.get(key) if base is not None else None
+        if dt is not None and ht is not None:
+            if dh == hh:
+                cls = "current"
+            elif base is None:
+                cls = "differs"
+            elif bh == hh:
+                cls = "refreshed"
+            elif bh == dh:
+                cls = "edited"
+            else:
+                cls = "conflict"
+        elif dt is not None:
+            cls = "host-removed" if bh is not None else "added"
+        elif base is None or bh is None:
+            cls = "own"
+        else:
+            cls = "removed" if bh == hh else "conflict"
+        out.append({"unit": key, "class": cls, "host": ht, "default": dt})
+    return out
+
+
+def _apply(host_text: str, default: list[tuple[str, str]], entries: list[dict]) -> str:
+    """The host doc with each proposed block taken: a refreshed one replaced, a removed one
+    dropped, an added one put after the nearest block before it in the default that the host
+    has. Every other block stays exactly as the host wrote it."""
+    by = {e["unit"]: e for e in entries if e["class"] in PROPOSED}
+    blocks: list[list] = []  # [key, text, touched]
+    for key, text in doc_units(host_text):
+        e = by.get(key)
+        if e is None:
+            blocks.append([key, text, False])
+        elif e["class"] == "refreshed":
+            blocks.append([key, e["default"], True])
+    for i, (key, text) in enumerate(default):
+        e = by.get(key)
+        if not e or e["class"] != "added":
+            continue
+        keys = [b[0] for b in blocks]
+        anchor = next((k for k, _ in reversed(default[:i]) if k in keys), None)
+        e["anchor"] = anchor
+        at = keys.index(anchor) + 1 if anchor else int(bool(keys) and keys[0] == "#")
+        blocks.insert(at, [key, text, True])
+    # Where a taken block meets its neighbour, a blank line before a heading and none between two
+    # bullets, so a list stays tight. Elsewhere the host's spacing is left as it is.
+    texts = []
+    for i, (_, text, touched) in enumerate(blocks):
+        last = i == len(blocks) - 1
+        if last and touched:
+            text = text.rstrip("\n")
+        elif not last and (touched or blocks[i + 1][2]):
+            text = text.rstrip("\n") + ("" if blocks[i + 1][0].endswith("**") else "\n")
+        texts.append(text)
+    body = _body_of(host_text)
+    head = host_text[: len(host_text) - len(body)]
+    return head + "\n".join(texts) + ("\n" if host_text.endswith("\n") else "")
+
+
+def _template_misses(name: str, text: str) -> list[str]:
+    reads = TEMPLATE_READS.get(name, {})
+    lines = {line.strip().lower() for line in text.splitlines()}
+    return [
+        *(
+            f"the `{k}:` frontmatter key"
+            for k in reads.get("keys", ())
+            if frontmatter_list(text, k) is None
+        ),
+        *(
+            f"the `## {h}` heading"
+            for h in reads.get("headings", ())
+            if f"## {h}".lower() not in lines
+        ),
+        *(f"the `{p}` placeholder" for p in reads.get("placeholders", ()) if p not in text),
+    ]
+
+
+def drift(root: Path) -> dict:
+    """What a newer plugin changed under a host's setup, read-only. `breaking` is what the plugin
+    would now misread (a retired config key, an override lacking what the script reads, a doc the
+    script can't parse); `refresh` the blocks of each host doc it can propose text for, with the
+    doc as it would read (`proposed`); `report` the rest a person should see and decide."""
+    cfg, _, parsed = load_config(root)
+    manifest, unreadable = read_manifest(root)
+    plugin = plugin_version()
+    version = (manifest or {}).get("version")
+    out: dict = {
+        "base": "manifest" if manifest else "none",
+        "version": {"manifest": version, "plugin": plugin},
+        "breaking": [],
+        "refresh": [],
+        "report": [],
+        "docs": {},
+    }
+    if unreadable:
+        out["report"].append(
+            {
+                "what": "manifest",
+                "where": str(MANIFEST),
+                "class": "unreadable",
+                "detail": unreadable,
+            }
+        )
+    downgrade = _older(plugin, version)
+    if downgrade:
+        out["report"].append(
+            {
+                "what": "manifest",
+                "where": str(MANIFEST),
+                "class": "downgrade",
+                "detail": f"recorded by {version}, newer than this {plugin}: nothing proposed",
+            }
+        )
+
+    for key, name in HOST_DOCS.items():
+        rel = cfg["docs"][key]
+        if not rel or not (root / rel).is_file():
+            continue
+        host_text = (root / rel).read_text(encoding="utf-8")
+        default = doc_units((DEFAULTS_DIR / name).read_text(encoding="utf-8"))
+        recorded = (manifest or {}).get("docs", {}).get(key)
+        if recorded and recorded.get("path") != rel:
+            out["report"].append(
+                {
+                    "what": "doc",
+                    "where": rel,
+                    "class": "moved",
+                    "detail": f"recorded at {recorded.get('path')}, now docs.{key} = {rel}",
+                }
+            )
+        entries = _classify(default, doc_units(host_text), recorded["units"] if recorded else None)
+        classes: dict[str, list[str]] = {}
+        for e in entries:
+            classes.setdefault(e["class"], []).append(e["unit"])
+        out["docs"][key] = {"path": rel, "default": name, "classes": classes}
+        changes = [e for e in entries if e["class"] in PROPOSED]
+        if changes and not downgrade:
+            proposed = _apply(host_text, default, changes)
+            out["refresh"].append({"doc": key, "path": rel, "units": changes, "proposed": proposed})
+        out["report"] += [
+            {
+                "what": "doc",
+                "where": rel,
+                "class": e["class"],
+                "unit": e["unit"],
+                "host": e["host"],
+                "default": e["default"],
+            }
+            for e in entries
+            if e["class"] in ("conflict", "differs")
+        ]
+
+    cfg_file = root / HOST_DIR / "config.toml"
+    if cfg_file.is_file() and not parsed:
+        out["breaking"].append(
+            {
+                "what": "config",
+                "where": str(cfg_file.relative_to(root)),
+                "detail": "won't parse",
+                "fix": "fix the TOML",
+            }
+        )
+    elif cfg_file.is_file():
+        data = tomllib.loads(cfg_file.read_text(encoding="utf-8"))
+        for section, values in data.items():
+            keys = values if isinstance(values, dict) else {None: values}
+            for k in keys:
+                where = f"{section}.{k}" if k is not None else f"[{section}]"
+                if section in CONFIG_KEYS and k in CONFIG_KEYS[section]:
+                    continue
+                if where in RETIRED_KEYS:
+                    r = RETIRED_KEYS[where]
+                    out["breaking"].append(
+                        {
+                            "what": "config",
+                            "where": where,
+                            "now": r.get("now"),
+                            "detail": f"retired in {r.get('since')}: the plugin no longer reads it",
+                            "fix": r.get("do"),
+                        }
+                    )
+                else:
+                    out["report"].append(
+                        {
+                            "what": "config",
+                            "where": where,
+                            "class": "unknown",
+                            "detail": "the plugin doesn't read it",
+                        }
+                    )
+    if manifest:
+        known = set(manifest.get("config_keys", []))
+        for section, keys in CONFIG_KEYS.items():
+            for k, value in keys.items():
+                if f"{section}.{k}" not in known:
+                    out["report"].append(
+                        {
+                            "what": "config",
+                            "where": f"{section}.{k}",
+                            "class": "new",
+                            "default": value,
+                            "detail": f"new since {version}; docs/REFERENCE.md says what it does",
+                        }
+                    )
+
+    templates = root / HOST_DIR / "templates"
+    for p in sorted(templates.glob("*.md")) if templates.is_dir() else []:
+        where = f"{HOST_DIR}/templates/{p.name}"
+        plugin_t = TEMPLATE_DIR / p.name
+        if not plugin_t.is_file():
+            out["report"].append(
+                {
+                    "what": "template",
+                    "where": where,
+                    "class": "unknown",
+                    "detail": "no plugin template has this name: nothing reads it",
+                }
+            )
+            continue
+        for miss in _template_misses(p.name, p.read_text(encoding="utf-8")):
+            out["breaking"].append(
+                {
+                    "what": "template",
+                    "where": where,
+                    "detail": f"lacks {miss}, which the plugin reads",
+                    "fix": f"add it back, or `/sdlc:setup reset {p.name}` to use the plugin's",
+                }
+            )
+        recorded = (manifest or {}).get("templates", {}).get(p.name)
+        now = unit_hash(plugin_t.read_text(encoding="utf-8"))
+        if recorded and recorded != now:
+            out["report"].append(
+                {
+                    "what": "template",
+                    "where": where,
+                    "class": "changed",
+                    "detail": f"the plugin's {p.name} changed since {version}",
+                    "plugin": str(plugin_t),
+                }
+            )
+
+    out["breaking"] += [
+        {
+            "what": "doc",
+            "where": f"docs.project ({cfg['docs']['project']})",
+            "detail": problem,
+            "fix": "fix the doc's frontmatter",
+        }
+        for problem in project_doc(root, cfg)[1]
+    ]
+    product = product_doc(root, cfg)
+    out["breaking"] += [
+        {
+            "what": "doc",
+            "where": f"docs.product ({cfg['docs']['product']})",
+            "detail": problem,
+            "fix": "fix the outcome lines",
+        }
+        for problem in (product or {"problems": []})["problems"]
+    ]
+    return out
+
+
+def cmd_drift(root: Path) -> int:
+    print(json.dumps(drift(root), indent=2, ensure_ascii=False))
+    return 0
+
+
+def setup_nudge(root: Path) -> str | None:
+    """One line for status when setup hasn't seen this plugin version; None when it has, or the
+    repo isn't set up."""
+    if not (root / HOST_DIR / "config.toml").is_file():
+        return None
+    manifest, unreadable = read_manifest(root)
+    plugin = plugin_version()
+    if unreadable:
+        return f"{unreadable}  /sdlc:setup"
+    if manifest is None:
+        return f"no record of the plugin version that set this repo up (now {plugin})  /sdlc:setup"
+    if _older(manifest.get("version"), plugin):
+        return f"set up with {manifest.get('version')}, the plugin is {plugin}  /sdlc:setup"
+    return None
+
+
+def _tracked(home: Path, rel: str) -> list[str]:
+    return [p for p in (_git(home, "ls-files", "--", rel) or "").splitlines() if p]
+
+
+def cmd_reset(root: Path, name: str, check_only: bool = False) -> int:
+    """Delete one template override in `.sdlc/templates/`, so the plugin's own is used again. It
+    takes a bare file name and refuses anything else, and an override with uncommitted edits,
+    which history couldn't bring back."""
+    rel = f"{HOST_DIR}/templates/{name}"
+    if not name or name != Path(name).name or name in (".", "..") or not name.endswith(".md"):
+        print(
+            f"⚠  reset takes a template's file name, e.g. intent.md, not {name!r}", file=sys.stderr
+        )
+        return 1
+    if not (root / rel).is_file():
+        print(f"⚠  no override {rel}: the plugin's own {name} is in use", file=sys.stderr)
+        return 1
+    if rel in _dirty_paths(root):
+        print(f"⚠  {rel} has uncommitted edits: commit or discard them first", file=sys.stderr)
+        return 1
+    print(json.dumps({"remove": [rel], "then": str(TEMPLATE_DIR / name)}, indent=2))
+    if not check_only:
+        (root / rel).unlink()
+    return 0
+
+
+def uninstall_plan(root: Path) -> dict:
+    """What `uninstall` would remove and what it leaves, and why it refuses, if it does. It
+    removes only setup's: `.sdlc/`'s committed files, the plugin's allow rules, and the worktrees
+    ignore line when setup recorded adding it. A change still open, standing in a worktree or
+    shipped and not closed refuses it, as does an uncommitted edit to anything it would remove:
+    what it removes has to be in history."""
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    manifest = read_manifest(home)[0] or {}
+    refused, named = [], set()
+    for rec in analyze(home)["open"]:
+        named.add(f"{rec['id']}-{rec['slug']}")
+        refused.append(f"{rec['id']}-{rec['slug']} is open: ship and close it, or drop it")
+    for rec in ready_to_close(home):
+        named.add(rec["branch"])
+        refused.append(f"{rec['branch']} is {rec['kind']} but not closed: /sdlc:close {rec['id']}")
+    for tree, branch in worktrees(home):
+        if DIR_RE.match(branch) and tree.resolve() != home.resolve() and branch not in named:
+            refused.append(f"worktree {branch} still stands at {tree}")
+    settings = home / SETTINGS
+    touched = (f"{HOST_DIR}/", str(SETTINGS), ".gitignore")
+    refused += [
+        f"{p} has uncommitted changes: commit or discard them first"
+        for p in _dirty_paths(home)
+        if p.startswith(touched[0]) or p in touched[1:]
+    ]
+    plan: dict = {"refused": refused, "remove": _tracked(home, HOST_DIR), "edit": [], "left": []}
+    left = (
+        sorted(
+            str(p.relative_to(home))
+            for p in (home / HOST_DIR).rglob("*")
+            if p.is_file() and str(p.relative_to(home)) not in plan["remove"]
+        )
+        if (home / HOST_DIR).is_dir()
+        else []
+    )
+    plan["left"] += [{"path": p, "why": "not in git, so not setup's to remove"} for p in left]
+    try:
+        allow = json.loads(settings.read_text(encoding="utf-8"))["permissions"]["allow"]
+        rules = [r for r in allow if isinstance(r, str) and PLUGIN_RULE_RE.match(r)]
+    except (OSError, ValueError, KeyError, TypeError):
+        rules = []
+    if rules:
+        created = str(SETTINGS) in manifest.get("created", [])
+        plan["edit"].append(
+            {"path": str(SETTINGS), "remove_rules": rules, "remove_if_empty": created}
+        )
+    ignore = home / ".gitignore"
+    if ignore.is_file() and WORKTREES_LINE in ignore.read_text(encoding="utf-8").splitlines():
+        if manifest.get("gitignore_line"):
+            # Setup's own file goes too, once its line was all it held.
+            created = ".gitignore" in manifest.get("created", [])
+            plan["edit"].append(
+                {"path": ".gitignore", "remove_line": WORKTREES_LINE, "remove_if_empty": created}
+            )
+        else:
+            plan["left"].append(
+                {
+                    "path": ".gitignore",
+                    "why": f"no record that setup added "
+                    f"{WORKTREES_LINE}: remove the line yourself if it did",
+                }
+            )
+    plan["left"].append({"path": "work/", "why": "the repo's record of its changes"})
+    if cfg["archive"]["target"] != "none":
+        plan["left"].append(
+            {
+                "path": f"{cfg['archive']['target']} issues",
+                "why": "the archive: nothing on the tracker is touched",
+            }
+        )
+    mentions = []
+    for rel in dict.fromkeys([cfg["docs"]["policy"], *cfg["docs"]["context"]]):
+        path = home / rel if rel else None
+        if path and path.is_file():
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if MENTIONS_RE.search(line):
+                    mentions.append({"path": rel, "line": n, "text": line.strip()})
+    plan["mentions"] = mentions
+    return plan
+
+
+def cmd_uninstall(root: Path, check_only: bool = False) -> int:
+    """Take setup back out of the main checkout, after `uninstall_plan()`'s refusals. Commits
+    nothing, and leaves `work/`, the context docs and the tracker alone."""
+    home = main_root(root)
+    plan = uninstall_plan(root)
+    print(json.dumps(plan, indent=2, ensure_ascii=False))
+    if plan["refused"]:
+        return 1
+    if check_only:
+        return 0
+    for rel in plan["remove"]:
+        (home / rel).unlink(missing_ok=True)
+    for folder in sorted((home / HOST_DIR).rglob("*"), reverse=True):
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+    if (home / HOST_DIR).is_dir() and not any((home / HOST_DIR).iterdir()):
+        (home / HOST_DIR).rmdir()
+    for edit in plan["edit"]:
+        path = home / edit["path"]
+        if "remove_rules" in edit:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            allow = data["permissions"]["allow"]
+            data["permissions"]["allow"] = [r for r in allow if r not in edit["remove_rules"]]
+            # Setup's own file goes too, once its rules were all it held.
+            stub = data == {"permissions": {"allow": []}}
+            if edit.get("remove_if_empty") and stub:
+                path.unlink()
+            else:
+                text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+                path.write_text(text, encoding="utf-8")
+        else:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            kept = [ln for ln in lines if ln.rstrip("\r\n") != edit["remove_line"]]
+            if edit.get("remove_if_empty") and not "".join(kept).strip():
+                path.unlink()
+            else:
+                path.write_text("".join(kept), encoding="utf-8")
     return 0
 
 
@@ -3790,7 +4401,10 @@ def print_status(a: dict) -> None:
             landed = "" if c["closed"] else "  (landed, not closed)"
             print(f"    {c['id']}  {c['slug']:<28} {c['impact'] or '?'}{landed}")
 
-    # A nudge, not a gate: one line, only when a rule fired, and nothing runs.
+    # Nudges, not gates: one line each, only when it applies, and nothing runs. Never a problem:
+    # `check --strict` is a gate, and a plugin update mustn't fail every host's.
+    if a.get("setup"):
+        print(f"\n■ Setup: {a['setup']}")
     due = a.get("retro_due")
     if due and due["due"]:
         print(f"\n■ Retro due: {'; '.join(due['why'])}  /sdlc:retro")
@@ -3871,6 +4485,24 @@ def main() -> int:
         "readiness", help="whether this repo is set up for the plugin, as JSON; writes nothing"
     )
 
+    sub.add_parser(
+        "drift", help="what changed under this repo's setup since it ran, as JSON; writes nothing"
+    )
+    p_record = sub.add_parser(
+        "record", help="write .sdlc/setup.json: the defaults setup offered, for the next drift"
+    )
+    p_record.add_argument("--created", nargs="*", default=[], help="the paths setup created")
+    p_record.add_argument(
+        "--gitignore-line", action="store_true", help=f"setup added {WORKTREES_LINE} to .gitignore"
+    )
+    p_reset = sub.add_parser("reset", help="delete one .sdlc/templates/ override")
+    p_reset.add_argument("name", help="the template's file name, e.g. intent.md")
+    p_reset.add_argument("--check", action="store_true", help="preconditions only, write nothing")
+    p_uninstall = sub.add_parser(
+        "uninstall", help="remove what setup wrote, refusing while any change is live"
+    )
+    p_uninstall.add_argument("--check", action="store_true", help="the plan only, write nothing")
+
     p_context = sub.add_parser(
         "context", help="the context docs this checkout's diff could have made wrong, as JSON"
     )
@@ -3907,6 +4539,14 @@ def main() -> int:
         return cmd_context(root, args.base)
     if args.cmd == "readiness":
         return cmd_readiness(root)
+    if args.cmd == "drift":
+        return cmd_drift(root)
+    if args.cmd == "record":
+        return cmd_record(root, args.created, args.gitignore_line)
+    if args.cmd == "reset":
+        return cmd_reset(root, args.name, args.check)
+    if args.cmd == "uninstall":
+        return cmd_uninstall(root, args.check)
     if args.cmd == "new":
         return cmd_new(root, args.slug, args.tier, args.title, args.worktree, args.base)
     if args.cmd == "ship":
@@ -3959,6 +4599,7 @@ def main() -> int:
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
     a["retro_due"] = retro_due(home, cfg)
+    a["setup"] = setup_nudge(root)
     print_status(a)
     return 0
 

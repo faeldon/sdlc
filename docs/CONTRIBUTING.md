@@ -96,7 +96,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 | `scripts/trackers/` | one module per tracker, loaded by path only when `archive.target` names it |
 | `scripts/metrics.py` | what a change cost, measured at close |
 | `templates/` | the shape of a file the plugin writes itself, each time it creates or rewrites one (the change artifacts, direction doc, issue, `ideas.md`, `notes.md`); a host overrides one in `.sdlc/templates/`; one shape, see `AGENTS.md` |
-| `defaults/` | a doc `/sdlc:setup` copies into a host once, after which the host owns it and the plugin only reads it (the process, review, project, product and health docs); one shape, see `AGENTS.md` |
+| `defaults/` | a doc `/sdlc:setup` copies into a host once, after which the host owns it: the plugin reads it, and a rerun of setup only proposes what a newer default changed (`drift`, against `.sdlc/setup.json`) (the process, review, project, product and health docs); one shape, see `AGENTS.md` |
 | `plugins/factory/` | `sdlc-factory`, a second plugin with its own skills, agents and `factory.py`; its [README](../plugins/factory/README.md) describes it |
 | `.claude-plugin/` | `plugin.json` and `marketplace.json`: this repo is its own marketplace |
 | `.sdlc/` | this repo's own config and process docs |

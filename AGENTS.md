@@ -134,6 +134,18 @@ are a contract: extend them, never redefine. Measuring never refuses: a failure 
 `Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,
 `Sdlc-Happy`, `Sdlc-Spike`) is apart from `retro`'s rework, and spikes are never rework.
 
+**Setup's record: `drift()`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup writes:
+the plugin version, its config keys, and a hash of each block (`doc_units()`: a section or a
+`- **lead**` bullet) of each default behind a host doc. `drift` compares three ways (the default
+now, that hash, the host's text), so a block the plugin changed and the host never touched is
+proposed (the whole doc, as `proposed`, every other block as the host wrote it), and one the host
+changed never is. `breaking` is only what the plugin would now misread: a key in `RETIRED_KEYS`,
+an override lacking what `TEMPLATE_READS` names. Rename or drop a config key, or make the script
+read a new template heading, and that table gets the entry in the same change. `uninstall`
+removes only setup's (git's files in `.sdlc/`, the plugin's allow rules, the ignore line when
+recorded) and refuses while any change is live. The nudge in `status` is never a problem:
+`check --strict` is a gate.
+
 **Context docs are checked at ship, not close.** `sdlc.py context` lists `docs.context` and each
 `CLAUDE.md` or `AGENTS.md` above a changed path, with the lines naming a deleted or renamed path.
 Ship shows any edit with its findings and commits it with the change; close has no `Edit`.
@@ -152,7 +164,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, and the factory's `spec` and `build`) have exactly one heading
+  `setup`, `release`, `publish`, `retro`, `uninstall`, and the factory's `spec` and `build`) have exactly one heading
   containing `WAIT`. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill

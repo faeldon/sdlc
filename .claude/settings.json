@@ -7,7 +7,9 @@
       "Bash(uv run --quiet --script */scripts/sdlc.py next *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py undone *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py context *)",
-      "Bash(uv run --quiet --script */scripts/sdlc.py readiness *)"
+      "Bash(uv run --quiet --script */scripts/sdlc.py readiness *)",
+      "Bash(uv run --quiet --script */scripts/sdlc.py unreleased *)",
+      "Bash(uv run --quiet --script */scripts/sdlc.py drift *)"
     ]
   }
 }

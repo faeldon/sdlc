@@ -8,7 +8,7 @@ rely on gets a spec and a plan.
 
 | Skill | When |
 |---|---|
-| `/sdlc:setup` | once per repo: set it up for the plugin, or check that it still is |
+| `/sdlc:setup` | once per repo, and after each update: set it up, or refresh what the update changed |
 | `/sdlc:status` | any time: where every change stands, and the one thing to do next. Read-only |
 | `/sdlc:intent` | to start a change: say why, in your words; it gets its own worktree and branch |
 | `/sdlc:spec` | for a substantial (Tier 2) change: numbered requirements and the design |
@@ -20,6 +20,7 @@ rely on gets a spec and a plan.
 | `/sdlc:release` | after a batch of changes: the version they add up to, committed and tagged |
 | `/sdlc:publish` | after release: push `main` and the tag, then run your publish command |
 | `/sdlc:retro` | after a few releases: look back across them and set the direction |
+| `/sdlc:uninstall` | when a repo stops using the plugin: remove what setup wrote, once nothing is open |
 
 Every skill that writes shows you exactly what it will write and asks a literal yes/no question
 first. Nothing is pushed except by `/sdlc:publish`.
@@ -142,6 +143,11 @@ release bumps that version:
 claude plugin marketplace update sdlc
 claude plugin update sdlc@sdlc     # "already at the latest version" until the version moves
 ```
+
+Then run `/sdlc:setup` in each repo that uses it. The docs it copied are yours, so an update
+never changes them; setup shows what the new defaults changed, drafts the blocks you never edited,
+and lists apart anything the plugin would now misread. `/sdlc:setup reset <doc>` puts one back to
+the default. See [After an update](docs/REFERENCE.md#after-an-update-refresh-reset-uninstall).
 
 ## More
 

@@ -239,7 +239,9 @@ OWN_COPIES = {"defaults/SDLC.md": ".sdlc/SDLC.md", "defaults/REVIEW.md": ".sdlc/
 
 
 def _headings(text: str) -> list[str]:
-    return [line for line in text.splitlines() if re.match(r"#{1,4} ", line)]
+    """The title, then every heading block's key, in order: what setup's drift compares too."""
+    title = [line for line in sdlc._body_of(text).splitlines() if line.startswith("# ")][:1]
+    return title + [key for key, _ in sdlc.doc_units(text) if not key.endswith("**")]
 
 
 def _in_order(wanted: list[str], have: list[str]) -> bool:
@@ -255,8 +257,17 @@ def test_this_repos_copy_keeps_the_defaults_sections(default: str, copy: str) ->
     assert not [ln for ln in _text(copy).splitlines() if ln == "---"], f"{copy} has a `---` rule"
 
 
+def _bullets(text: str) -> list[str]:
+    """Each `- **lead**` bullet's first paragraph, as written."""
+    return [
+        re.split(r"\n(?=- |\n|$)", body, maxsplit=1)[0]
+        for key, body in sdlc.doc_units(text)
+        if key.endswith("**")
+    ]
+
+
 def test_this_repos_review_keeps_every_default_failure_class() -> None:
-    bullets = re.findall(r"^- \*\*.*?(?=\n(?:- |\n|$))", _text("defaults/REVIEW.md"), re.M | re.S)
+    bullets = _bullets(_text("defaults/REVIEW.md"))
     assert bullets, "the default's bullets were read"
     missing = [b.splitlines()[0] for b in bullets if b not in _text(".sdlc/REVIEW.md")]
     assert not missing, f".sdlc/REVIEW.md differs from defaults/REVIEW.md at: {missing}"

@@ -333,3 +333,55 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
     out, body = land("plain", lambda tree: (tree / "feature.txt").write_text("x\n"), by=stale)
     assert out["ran"] == "main's code" and "Sdlc-Probe: second" in body
     assert _git(root, "status", "--porcelain") == ""
+
+
+def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Path) -> None:
+    """The plugin updates under a host that set up from it: `drift`, run the way the skills run
+    it, from the new copy, names the one block the update changed, and `uninstall` then leaves
+    the repo as it was before setup."""
+    plugin = _plugin_copy(tmp_path / "plugin")
+    script = plugin / "scripts" / "sdlc.py"
+    root = tmp_path / "host"
+    root.mkdir()
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    before = sorted(p.name for p in root.iterdir() if p.name != ".git")
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"} | GIT_ID
+        return subprocess.run(
+            ["uv", "run", "--quiet", "--script", str(script), *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
+    shutil.copy(plugin / "defaults" / "REVIEW.md", root / ".sdlc" / "REVIEW.md")
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    created = (".sdlc/config.toml", ".sdlc/REVIEW.md", ".gitignore")
+    made = run("record", "--created", *created, "--gitignore-line")
+    assert made.returncode == 0, made.stderr
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Set the repo up for the sdlc plugin")
+
+    review = plugin / "defaults" / "REVIEW.md"
+    text = review.read_text(encoding="utf-8")
+    first = next(line for line in text.splitlines() if line.startswith("## "))
+    review.write_text(text.replace(first, f"{first}\n\nOne more sentence.", 1), encoding="utf-8")
+    found = run("drift")
+    assert found.returncode == 0, found.stderr
+    drift = json.loads(found.stdout)
+    assert drift["breaking"] == [] and drift["base"] == "manifest"
+    assert [(u["unit"], u["class"]) for r in drift["refresh"] for u in r["units"]] == [
+        (first, "refreshed")
+    ]
+
+    gone = run("uninstall")
+    assert gone.returncode == 0, gone.stdout + gone.stderr
+    after = sorted(p.name for p in root.iterdir() if p.name != ".git")
+    assert after == before, "setup's .sdlc/ and the .gitignore it created holding one line are gone"

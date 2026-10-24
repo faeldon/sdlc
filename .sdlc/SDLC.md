@@ -18,7 +18,8 @@ put a checkable claim between a change and the people who rely on it.
 
 **The process is a plugin.** The stage machinery lives in the `sdlc` Claude Code plugin, whose
 skills are `/sdlc:setup`, `/sdlc:intent`, `/sdlc:spec`, `/sdlc:ship`, `/sdlc:close`, `/sdlc:drop`,
-`/sdlc:release`, `/sdlc:publish`, `/sdlc:retro`, `/sdlc:status` and `/sdlc:health`. The plugin owns *mechanism*; this repo owns *policy*: this
+`/sdlc:release`, `/sdlc:publish`, `/sdlc:retro`, `/sdlc:status`, `/sdlc:health` and
+`/sdlc:uninstall`. The plugin owns *mechanism*; this repo owns *policy*: this
 file, `AGENTS.md` (the invariants a design stays inside), the review passes (`.sdlc/REVIEW.md`) and
 `.sdlc/config.toml`, which names the commands the skills run. The skills read all of it through
 `sdlc.py config`.
