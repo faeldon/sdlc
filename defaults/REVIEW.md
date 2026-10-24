@@ -12,7 +12,8 @@ a blocking finding — fix it and re-run rather than accumulating a long list.
 
 Does the change do what `intent.md` (Tier 1) or `spec.md`'s numbered requirements (Tier 2) said?
 Walk the requirements one at a time; **a requirement with no corresponding code is a finding.** A
-requirement with code but no test that would fail without it is one too.
+requirement with code but no test that would fail without it is one too, unless only a revert
+could fail it and `notes.md` records the check that proved it.
 
 Then look for the failures that don't announce themselves:
 
@@ -22,6 +23,9 @@ Then look for the failures that don't announce themselves:
   a second run of something meant to run once.
 - **A test that can't fail.** A glob that matches nothing, an assertion on a mock of the thing under
   test, a case skipped by a condition that is always true.
+- **A test only a revert can fail.** A test in the suite that checks a file moved, a key renamed or
+  a line added: nothing but undoing the change breaks it, so it is an acceptance check, run once
+  and recorded in the change's `notes.md`.
 - **Behaviour changed where the diff doesn't say so:** a default, an order, a rename that something
   else still reads by its old name.
 - **Bad input that crashes.** Input a person or another system can get wrong (a config file, a
@@ -50,6 +54,9 @@ Two apply everywhere:
 - **Reuse over reimplementation.** An existing function or tool before a new one.
 - **Nothing speculative.** Configuration nobody sets, a layer with one caller, a flag for a case
   that doesn't exist yet.
+- **A shim with no removal version.** Code kept for compatibility (an old key still read, an old
+  name still accepted) that doesn't name the version that removes it, or a compatibility test that
+  outlives its shim.
 - **Altitude:** does the new code sit at the same level of abstraction as its neighbours?
 
 ## Reporting rules

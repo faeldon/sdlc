@@ -57,24 +57,16 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-24] [seed] Triage tests by how long they should live
+## [2026-10-24] [seed] Enforce test lifetimes: shim deadlines, acceptance checks in the change folder
 
-Tests pile up that only mattered while a change was being built, and shims kept "for one release"
-outlive it because nothing enforces the deadline. Ask of each test how it could ever fail:
-- **Regression**: a later change breaks it by accident. Kept in `tests/` for good.
-- **Compatibility**: a shim stops working. Lives exactly as long as the shim, which names the
-  version it's removed in.
-- **Acceptance**: only a deliberate revert breaks it (a file moved, a key renamed). Proves the
-  change once and stays out of `tests/`.
-
-In three steps:
-1. Write the rule into Stage 4 — Test, and two findings into review Pass 1 and Pass 3 (a test in
-   `tests/` only a revert can fail; a shim with no removal version). Each edit goes in both
-   `defaults/` and this repo's `.sdlc/`, and `AGENTS.md` gains the rule that a change editing a
-   default edits this repo's copy too, and the other way round.
-2. A `DEPRECATIONS` registry in `sdlc.py`, a `compat` pytest marker per shim, and one test that
+The test-triage change wrote the triage rule into Stage 4 and the review: a compatibility test
+lives as long as its shim, and an acceptance check runs once and is recorded in the change's
+`notes.md`. Nothing enforces either yet:
+1. A `DEPRECATIONS` registry in `sdlc.py`, a `compat` pytest marker per shim, and one test that
    fails once a shim's `remove_in` is at or below the version in `plugin.json`, so a release
    can't carry an overdue shim; `release` and `status` list what's due.
-3. Acceptance checks live in `work/NNN-slug/`, run by ship and archived by close with the folder.
+2. Acceptance checks live in `work/NNN-slug/`, run by ship and archived by close with the folder,
+   in place of the record in `notes.md`.
+3. Sweep `tests/` for acceptance-only tests already there, and move each to a record.
 
 Raised 2026-10-24.

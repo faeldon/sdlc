@@ -241,6 +241,16 @@ service. Always give Claude a way to verify its own work:
 **A bug fix starts with a failing test.** Commit the test that fails because of the bug first,
 then fix the code without editing the test.
 
+**Ask of each test how it could ever fail**, because that decides how long it lives:
+
+- **Regression:** a later change breaks it by accident. It goes in the suite and stays.
+- **Compatibility:** it fails when a shim stops working. It lives exactly as long as the shim,
+  which names in a comment the version that removes it; the test goes with the shim.
+- **Acceptance:** only a deliberate revert breaks it: a file moved, a key renamed, a section
+  added. Run it once here, as a command or a throwaway test, and record what ran and what it
+  showed in the change's `notes.md`. It reaches history with the folder and stays out of the
+  suite, where every later run would pay for a check nothing can break by accident.
+
 A test run that collected nothing is a failure, not a pass: it means discovery broke, and a green
 gate that ran zero tests is the quietest way for a broken change to reach `main`.
 
