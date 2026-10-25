@@ -227,8 +227,11 @@ but the ones a session makes for a skill (ship's commit, the factory's build) ta
 `Co-Authored-By:` line and, on a pull request, its "Generated with Claude Code" footer. This repo
 forbids them in AGENTS.md; a host gets them unless it writes the same rule. Make it a config key
 (`[git] attribution = false` by default) that setup turns into Claude Code's own `attribution`
-setting in the host's `.claude/settings.json` (empty `commit` and `pr`), beside the allow rules it
-already writes there, and records, so `uninstall` takes it out and `drift()` sees a host that
-changed it. Have the skills that commit say the same in prose, since a setting a host overrides
-locally wins. Ask at setup rather than assume: some teams want the line. Also decide whether the
+setting in the host's `.claude/settings.json`, beside the allow rules it already writes there, and
+records, so `uninstall` takes it out and `drift()` sees a host that changed it. The object form,
+`{"commit": "", "pr": "", "sessionUrl": false}` (an empty string hides that line, `sessionUrl`
+the session link a cloud session appends), not `"attribution": false`: Claude Code before
+v2.1.281 rejects that and skips the whole settings file, allow rules and all. Have the skills that
+commit say the same in prose, since `.claude/settings.local.json` and managed settings override
+the project file. Ask at setup rather than assume: some teams want the line. Also decide whether the
 text the plugin writes into issues follows the same key. Raised 2026-10-25.
