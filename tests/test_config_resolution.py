@@ -223,6 +223,7 @@ def test_the_release_section_resolves_with_its_defaults(tmp_path: Path, capsys):
         "tag": "v{version}",
         "changelog": None,
         "after_bump": None,
+        "prepare": None,
         "remote": "origin",
         "publish": None,
         "deprecations": ".sdlc/deprecations.toml",

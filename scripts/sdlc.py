@@ -213,6 +213,10 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # Run by /sdlc:release after the bump, before the commit, which takes the tracked files it
         # changes too: a lock file regenerated from the new version. {version}, {tag}
         "after_bump": None,
+        # Run by /sdlc:release after `after_bump`, before the commit, to build what
+        # /sdlc:publish will upload, into untracked or ignored paths only: its output is shown
+        # at publish's approval. {version}, {tag}
+        "prepare": None,
         "remote": "origin",  # where /sdlc:publish pushes main and the tag
         "publish": None,  # run by /sdlc:publish after the push; {version}, {tag}
         # The shims the host keeps and the version that removes each, which release refuses to
@@ -2843,8 +2847,42 @@ def _read_text(path: Path) -> str | None:
 # Not `target-version = ...`: the key must open the line.
 VERSION_RE = re.compile(r'^([ \t]*"?version"?[ \t]*[:=][ \t]*")([^"\n]+)(".*)$', re.M)
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-# Seconds before `release.after_bump` is stopped: a lock refresh may resolve over the network.
+# Seconds before `release.after_bump` or `release.prepare` is stopped: a lock refresh or a build
+# may resolve over the network.
 AFTER_BUMP_TIMEOUT = 600
+# Where release keeps what `release.prepare` printed, on the tag, for publish's approval to show:
+# a ref of its own, since publish reads its `sdlc` note for the word `published`. Its last lines.
+PREPARED_REF = "sdlc-prepared"
+PREPARED_LINES = 40
+PREPARED_CHARS = 4000
+
+
+def _host_command(rel: dict, key: str, version: str, tag: str) -> tuple[str | None, str | None]:
+    """`release.<key>` with `{version}` and `{tag}` filled in, shell-quoted, and None; or None and
+    why, when the text holds a brace that isn't one of them (`${VAR}`, `{ …; }`), which
+    `format()` would raise on."""
+    try:
+        return rel[key].format(version=shlex.quote(version), tag=shlex.quote(tag)), None
+    except (KeyError, IndexError, ValueError):
+        return None, (
+            f"release.{key} may hold only {{version}} and {{tag}}: write a brace the shell needs "
+            "as {{ or }}"
+        )
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _tail(text: str) -> str:
+    """The end of a host command's output, as much as an approval can show."""
+    kept = "\n".join(text.rstrip().splitlines()[-PREPARED_LINES:])
+    return kept[-PREPARED_CHARS:]
+
+
 # Lowest first, so the index is the rank. `none` is listed in a release but never bumps it.
 BUMPS = ("patch", "minor", "major")
 CLOSE_PREFIX = "Close "
@@ -3268,10 +3306,12 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
             refusals.append(f"tag {tag} already exists")
         report.update(next=new, tag=tag, undo=f"git tag -d {tag} && git reset --keep HEAD~1")
         report["notes"] = release_notes(u["changes"], ids_mode(home, cfg) == "github")
+        for key in ("after_bump", "prepare"):
+            if rel[key]:
+                report[key], problem = _host_command(rel, key, new, tag)
+                if problem:
+                    refusals.append(problem)
         if rel["after_bump"]:
-            report["after_bump"] = rel["after_bump"].format(
-                version=shlex.quote(new), tag=shlex.quote(tag)
-            )
             report["untracked"] = []
     if refusals:
         return emit(1)
@@ -3304,7 +3344,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         try:
             ran = subprocess.run(
                 report["after_bump"], shell=True, cwd=home, capture_output=True, text=True,
-                errors="replace", timeout=AFTER_BUMP_TIMEOUT,
+                errors="replace", timeout=AFTER_BUMP_TIMEOUT, stdin=subprocess.DEVNULL,
             )  # fmt: skip
             if ran.returncode != 0:
                 why = ran.stderr.strip()[:500] or "no output"
@@ -3320,6 +3360,53 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
             restore()
         return err
 
+    def tracked_changes() -> set[str]:
+        return {p for p in (_git(home, "diff", "--name-only", "-z") or "").split("\0") if p}
+
+    def prepare() -> str | None:
+        # A build, never part of the release commit: every tracked file it changes is put back
+        # and refused, so the commit still holds only what the release meant.
+        before = tracked_changes()
+        # The release's own files are changed already, so a further edit shows only in their text.
+        held = {p: _read_bytes(home / p) for p in report["files"]}
+        err = None
+        try:
+            ran = subprocess.run(
+                report["prepare"], shell=True, cwd=home, capture_output=True, text=True,
+                errors="replace", timeout=AFTER_BUMP_TIMEOUT, stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+            if ran.returncode != 0:
+                why = ran.stderr.strip()[:500] or "no output"
+                err = f"release.prepare exited {ran.returncode}: {why}"
+            else:
+                report["prepared"] = _tail(ran.stdout)
+        except subprocess.TimeoutExpired:
+            err = f"release.prepare timed out after {AFTER_BUMP_TIMEOUT}s"
+        except OSError as e:
+            err = f"release.prepare didn't run: {e}"
+        others = tracked_changes() - before - set(report["files"])
+        touched = sorted(others | {p for p, b in held.items() if _read_bytes(home / p) != b})
+        if others:
+            _git(home, "checkout", "-q", "--", *sorted(others))
+        if touched:
+            err = err or (
+                f"release.prepare changed tracked files: {', '.join(touched)}; build into an "
+                "untracked or ignored path"
+            )
+        if err:
+            report.pop("prepared", None)
+            restore()
+        return err
+
+    def note() -> str | None:
+        # The tag exists now, so a failure here can't stop a release that a rerun would refuse:
+        # it is said, and publish shows nothing prepared.
+        text = report.get("prepared") or "(no output)"
+        err = _git_err(home, "notes", "--ref", PREPARED_REF, "add", "-f", "-m", text, tag)
+        if err:
+            report["note_error"] = err
+        return None
+
     def commit() -> str | None:
         err = _git_err(home, "add", "--", *report["files"]) or _git_err(
             home, "commit", "-q", "-m", f"Release {new}", "-m", notes
@@ -3332,8 +3419,10 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         ("version files", bump),
         *([("changelog", changelog)] if rel["changelog"] else []),
         *([("after bump", after_bump)] if rel["after_bump"] else []),
+        *([("prepare", prepare)] if rel["prepare"] else []),
         ("commit", commit),
         ("tag", lambda: _git_err(home, "tag", "-a", tag, "-m", tag, "-m", notes)),
+        *([("note", note)] if rel["prepare"] else []),
     ]
     if check_only:
         report["skipped"] = [f"{name} (--check)" for name, _ in steps]
@@ -3390,6 +3479,8 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     if problem:
         refusals.append(problem)
         return emit(1)
+    # What release's `release.prepare` built for this tag, for the approval to show.
+    report["prepared"] = _git(home, "notes", "--ref", PREPARED_REF, "show", tag)
     tagged = _git(home, "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}")
     if tagged is None:
         refusals.append(f"no tag {tag}: run /sdlc:release first")
@@ -3401,9 +3492,9 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     if _git(home, "remote", "get-url", remote) is None:
         refusals.append(f"no remote {remote!r}: set release.remote")
     if rel["publish"]:
-        report["command"] = rel["publish"].format(
-            version=shlex.quote(version), tag=shlex.quote(tag)
-        )
+        report["command"], problem = _host_command(rel, "publish", version, tag)
+        if problem:
+            refusals.append(problem)
     if refusals:
         return emit(1)
 
@@ -3414,9 +3505,11 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
         return "published" in (_git(home, "notes", "--ref", "sdlc", "show", tag) or "")
 
     def run_command() -> str | None:
+        # No terminal and no stdin: the approval came before, so a command that asks fails now.
         ran = subprocess.run(
-            report["command"], shell=True, cwd=home, capture_output=True, text=True
-        )
+            report["command"], shell=True, cwd=home, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL,
+        )  # fmt: skip
         if ran.returncode != 0:
             return f"release.publish exited {ran.returncode}: {ran.stderr.strip()}"
         return _git_err(home, "notes", "--ref", "sdlc", "add", "-f", "-m", "published", tag)

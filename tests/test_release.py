@@ -536,3 +536,177 @@ def test_release_check_leaves_the_due_state_out(tmp_path: Path, capsys) -> None:
     _close(root, "002-reopen-drafts", "minor")
     code, out = _run(capsys, sdlc.cmd_release, root, True)
     assert code == 0 and "retro_due" not in out
+
+
+# ---------------------------------------------------------------- preparing the upload
+
+
+def _prepared(tmp_path: Path, prepare: str, publish: str | None = None) -> Path:
+    """A repo with `release.prepare` (and maybe `release.publish`) set and a patch to release."""
+    config = CONFIG + f"prepare = {json.dumps(prepare)}\n"
+    config += f"publish = {json.dumps(publish)}\n" if publish else ""
+    root = _repo(tmp_path, config=config)
+    _close(root, "002-reopen-drafts", "patch")
+    return root
+
+
+BUILD = "mkdir -p dist && touch dist/pkg-{version}.tgz && ls dist"
+
+
+def test_prepare_runs_after_the_bump_and_its_output_is_noted_on_the_tag(tmp_path, capsys):
+    root = _prepared(tmp_path, BUILD)
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    assert out["done"] == ["version files", "prepare", "commit", "tag", "note"]
+    assert out["prepare"] == "mkdir -p dist && touch dist/pkg-0.4.3.tgz && ls dist"
+    assert out["prepared"] == "pkg-0.4.3.tgz"
+    assert _git(root, "notes", "--ref", sdlc.PREPARED_REF, "show", "v0.4.3") == "pkg-0.4.3.tgz"
+    assert _git(root, "notes", "--ref", "sdlc", "list") == "", "publish's own note untouched"
+    changed = _git(root, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert sorted(changed) == ["pkg.json", "pyproject.toml"], "the build is never committed"
+
+
+def test_prepare_runs_after_after_bump(tmp_path: Path, capsys) -> None:
+    config = CONFIG + 'after_bump = "true"\nprepare = "echo built"\n'
+    root = _repo(tmp_path, config=config)
+    _close(root, "002-reopen-drafts", "patch")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 0
+    assert out["skipped"] == [
+        "version files (--check)", "after bump (--check)", "prepare (--check)",
+        "commit (--check)", "tag (--check)", "note (--check)",
+    ]  # fmt: skip
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert out["done"] == ["version files", "after bump", "prepare", "commit", "tag", "note"]
+
+
+def test_check_shows_prepare_and_runs_nothing(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, "touch ran")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 0 and out["prepare"] == "touch ran" and not (root / "ran").exists()
+
+
+def test_a_prepare_that_changes_a_tracked_file_is_refused_and_put_back(tmp_path, capsys):
+    root = _prepared(tmp_path, "echo x >> README.md")
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    _git(root, "add", "README.md")
+    _git(root, "commit", "-q", "-m", "a readme")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1
+    assert out["refusals"] == [
+        "prepare failed: release.prepare changed tracked files: README.md; build into an "
+        "untracked or ignored path"
+    ]
+    assert "prepared" not in out
+    assert _git(root, "rev-parse", "HEAD") == head and _git(root, "tag", "-l", "v0.4.3") == ""
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_a_failed_prepare_puts_everything_back_and_release_runs_again(tmp_path, capsys):
+    root = _prepared(tmp_path, "test -f go || (echo broke >&2; exit 1)")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1
+    assert out["refusals"] == ["prepare failed: release.prepare exited 1: broke"]
+    assert out["skipped"] == ["prepare", "commit", "tag", "note"]
+    assert _git(root, "rev-parse", "HEAD") == head and _git(root, "tag", "-l", "v0.4.3") == ""
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+    (root / "go").write_text("")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+
+
+def test_only_the_end_of_a_long_prepare_is_kept(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, "seq 1 100")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    assert out["prepared"].splitlines() == [str(n) for n in range(61, 101)]
+
+
+def test_a_prepare_that_asks_for_input_fails_at_once(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, "read answer")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1 and "release.prepare exited 1" in out["refusals"][0]
+
+
+def test_prepare_stays_out_of_the_report_when_unset(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _close(root, "002-reopen-drafts", "patch")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0 and "prepare" not in out and "prepared" not in out
+    assert out["done"] == ["version files", "commit", "tag"]
+
+
+def _remote(tmp_path: Path, root: Path) -> Path:
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    _git(root, "remote", "add", "origin", str(remote))
+    _git(root, "push", "-q", "origin", "main", "v0.4.2")
+    return remote
+
+
+def test_publish_shows_what_release_prepared(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, BUILD, publish="ls dist > uploaded.log")
+    _remote(tmp_path, root)
+    assert sdlc.cmd_release(root) == 0
+    capsys.readouterr()
+    code, out = _run(capsys, sdlc.cmd_publish, root, True)
+    assert code == 0 and out["prepared"] == "pkg-0.4.3.tgz"
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0, out["refusals"]
+    assert out["prepared"] == "pkg-0.4.3.tgz" and out["done"][-1] == "publish command"
+    assert (root / "uploaded.log").read_text() == "pkg-0.4.3.tgz\n"
+
+
+def test_publish_with_nothing_prepared_says_none(tmp_path: Path, capsys) -> None:
+    root, _ = _released(tmp_path, capsys, "touch published")
+    code, out = _run(capsys, sdlc.cmd_publish, root, True)
+    assert code == 0 and out["prepared"] is None
+
+
+def test_a_publish_command_that_asks_for_input_fails_at_once(tmp_path: Path, capsys) -> None:
+    root, _ = _released(tmp_path, capsys, "read answer && touch published")
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 1 and "release.publish exited 1" in out["refusals"][0]
+    assert not (root / "published").exists()
+
+
+@pytest.mark.parametrize("key", ["after_bump", "prepare"])
+def test_a_stray_brace_in_a_release_command_is_refused_not_raised(tmp_path, capsys, key):
+    root = _repo(tmp_path, config=CONFIG + f"{key} = {json.dumps('echo ${HOME}')}\n")
+    _close(root, "002-reopen-drafts", "patch")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 1
+    assert out["refusals"] == [
+        f"release.{key} may hold only {{version}} and {{tag}}: write a brace the shell needs as "
+        "{{ or }}"
+    ]
+
+
+def test_a_doubled_brace_reaches_the_shell_as_one(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, "echo ${{HOME}} {version}")
+    code, out = _run(capsys, sdlc.cmd_release, root, True)
+    assert code == 0 and out["prepare"] == "echo ${HOME} 0.4.3"
+
+
+def test_a_stray_brace_in_the_publish_command_is_refused_not_raised(tmp_path, capsys):
+    root, _ = _released(tmp_path, capsys, "echo ${HOME}")
+    code, out = _run(capsys, sdlc.cmd_publish, root, True)
+    assert code == 1 and out["refusals"] == [
+        "release.publish may hold only {version} and {tag}: write a brace the shell needs as "
+        "{{ or }}"
+    ]
+
+
+def test_a_prepare_that_edits_a_file_the_release_changed_is_refused(tmp_path, capsys):
+    root = _prepared(tmp_path, "echo extra >> pkg.json")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1
+    assert out["refusals"] == [
+        "prepare failed: release.prepare changed tracked files: pkg.json; build into an "
+        "untracked or ignored path"
+    ]
+    assert _git(root, "rev-parse", "HEAD") == head and _git(root, "tag", "-l", "v0.4.3") == ""
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""

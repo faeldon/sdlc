@@ -129,6 +129,9 @@ the tag for the version `release.version_files` hold now; a missing tag is repor
 changes: each `Close` commit on `main`'s first-parent line names a change, and its intent is read
 from that commit's parent. `cmd_release` edits the version lines in place, runs the host's
 `release.after_bump` and takes every tracked file it changed into the commit, then tags, locally.
+Then `release.prepare`, which must change no tracked file (one it changes is put back and refused),
+and whose output's tail is noted on the tag under `refs/notes/sdlc-prepared` for publish's approval:
+its own notes ref, since `cmd_publish` reads the `sdlc` ref for the word `published`.
 That is safe only because `_release_refusals()` refuses a main checkout with uncommitted tracked
 changes: loosen that and the release commit sweeps up unrelated work. `cmd_publish` is the only
 code that pushes. A shim in `sdlc.py` gets an entry in

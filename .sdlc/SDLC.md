@@ -347,7 +347,8 @@ person authorizes it**, in two steps with an approval each:
    ship settled. It proposes the version they add up to, and after one approval sets it in each
    file `release.version_files` names, adds the notes to `release.changelog` if one is set, runs
    `release.after_bump` if one is set (a lock file regenerated from the new version, say),
-   commits `Release X.Y.Z` with what all of that changed, and tags it (`release.tag`,
+   then `release.prepare` if one is set (a build of what publish will upload, into untracked or
+   ignored paths only), commits `Release X.Y.Z` with what all of that changed, and tags it (`release.tag`,
    `v{version}` by default). All local: until it is published,
    `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
 2. **`/sdlc:publish`** pushes `main` and the tag to `release.remote` (never forced: a remote that

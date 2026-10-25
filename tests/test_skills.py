@@ -101,8 +101,9 @@ READS_CONFIG = {
         "release.tag",
         "release.changelog",
         "release.after_bump",
+        "release.prepare",
     ],
-    "sdlc:publish": ["release.remote", "release.publish"],
+    "sdlc:publish": ["release.remote", "release.publish", "release.prepare"],
     "sdlc:health": ["commands.scan", "docs.health"],
     "sdlc:retro": [
         "docs.process",

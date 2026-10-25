@@ -33,7 +33,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py unreleased
 `config`'s `release` section says where the version lives (`release.version_files`), what the tag
 is called (`release.tag`, `v{version}` by default), whether the notes also go to a file
 (`release.changelog`), and the command, if any, that runs after the bump (`release.after_bump`:
-a lock file regenerated from the new version, say). `unreleased` lists each change since the tag (`changes`: id, title,
+a lock file regenerated from the new version, say), and the command, if any, that builds what
+`/sdlc:publish` will upload (`release.prepare`). `unreleased` lists each change since the tag (`changes`: id, title,
 impact, and `closed: false` for one whose close stopped after its merge), the ones still open in
 worktrees (`open`, not in this release), and the proposed `next` version with its `bump`.
 
@@ -61,7 +62,10 @@ Show the human: the current version and the next, the bump and the changes that 
 line each, with impact), the changes still open and left out, the files that will change, the
 notes exactly as they will read, and the tag. When `after_bump` is in the output, show it too:
 it runs after the version files are set, every tracked file it changes goes into the release
-commit with them, and anything new it leaves untracked is listed, never committed. If `refusals` is non-empty, show them and stop: each
+commit with them, and anything new it leaves untracked is listed, never committed. When
+`prepare` is in the output, show it too: it runs after `after_bump`, builds into untracked or
+ignored paths only (a tracked file it changes is put back and refused), and the end of what it
+prints is kept on the tag, for `/sdlc:publish` to show at its approval. If `refusals` is non-empty, show them and stop: each
 says what it needs (the main checkout, on `main`, committed; a tag that doesn't exist yet;
 something with an impact other than `none`).
 
@@ -72,7 +76,8 @@ Ask literally:
 > `Release <next>: set it in <files>, commit "Release <next>" with these notes, and tag it <tag>? Nothing is pushed. (yes / release as another version / no)`
 
 With `after_bump` set, say it after the files: `…set it in <files>, run <after_bump> and commit
-what it changes, commit "Release <next>"…`.
+what it changes, commit "Release <next>"…`. With `prepare` set, say it after that: `…, run
+<prepare> to build what publish will upload, commit "Release <next>"…`.
 
 **Do nothing more until the human says yes.** Approval is for this release only. Another version
 is a new plan: run Step 1 again with `--version` and ask again.
@@ -84,14 +89,17 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py release
 ```
 
 With `--version X.Y.Z` exactly as approved, if one was. Exit 0 is `done`: the version files, the
-changelog when configured, the `after_bump` command when configured, the commit, the tag. Exit 1
-reports the step that failed and what it said, in `refusals`; the files are put back when the
-`after_bump` command or the commit fails, so a rerun finds `main` as it was, apart from any
+changelog when configured, the `after_bump` command when configured, the `prepare` command when
+configured, the commit, the tag, and the `note` of what was prepared. Exit 1 reports the step
+that failed and what it said, in `refusals`; the files are put back when the `after_bump` or
+`prepare` command or the commit fails, so a rerun finds `main` as it was, apart from any
 `untracked` file the command left, which the output lists.
 
 ## Step 4 — Report and stop
 
-Report the version, the commit and tag, the notes, and the `undo` the output gives: until
+Report the version, the commit and tag, the notes, what was prepared (`prepared`, and
+`note_error` if the note couldn't be kept, in which case publish will show nothing prepared), and
+the `undo` the output gives: until
 `/sdlc:publish` pushes it, `git tag -d <tag> && git reset --keep HEAD~1` takes the release back.
 That command is the human's to run, not this skill's.
 

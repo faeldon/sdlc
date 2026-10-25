@@ -29,18 +29,23 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py publish --check
 
 `config`'s `release` section names the remote (`release.remote`, `origin` by default) and the
 host's own command for delivering a release (`release.publish`, with `{version}` and `{tag}`):
-a package upload, a `gh release create`, a deploy. With none set, publishing is the push alone,
+a package upload, a `gh release create`, a deploy. It runs with no terminal and stdin closed,
+after this skill's one approval, so it must never ask for anything: what it uploads is built
+beforehand by `release.prepare`, which `/sdlc:release` runs. With none set, publishing is the push alone,
 which is how a repo whose users pull from it, a plugin marketplace among them, releases.
 
-`publish --check` gives the version, the tag, the remote, the command as it will run, and every
-refusal: not the main checkout, not on `main` or uncommitted changes, no tag for the current
+`publish --check` gives the version, the tag, the remote, the command as it will run, what
+`/sdlc:release` prepared for this tag (`prepared`: the end of `release.prepare`'s output, or null),
+and every refusal: not the main checkout, not on `main` or uncommitted changes, no tag for the current
 version (`/sdlc:release` first), `main` moved past the tag (changes were closed after the
 release; release again so they are in it), or no such remote.
 
 ## Step 1 — Show it
 
 Show the human the version and tag, the remote, what will be pushed (`main` and the tag), and the
-publish command exactly as it will run, or that there is none. **If there are refusals, stop
+publish command exactly as it will run, or that there is none. When `prepared` is set, show it
+as what the command will upload; when `release.prepare` is set and `prepared` is null, say this
+release has nothing prepared, so the command runs on whatever it finds. **If there are refusals, stop
 here** and say what each needs.
 
 ## Step 2 — WAIT for explicit approval
@@ -49,7 +54,8 @@ Ask literally:
 
 > `Publish <tag>: push main and <tag> to <remote>, then run <command>? This can't be taken back. (yes / no)`
 
-Leave out `, then run <command>` when `release.publish` is unset.
+Leave out `, then run <command>` when `release.publish` is unset. When `prepared` is set, say
+`…, then run <command> to upload what was prepared, shown above?`.
 
 **Do nothing more until the human says yes.** Approval is for this release and this remote only.
 

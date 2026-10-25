@@ -55,8 +55,9 @@ version_files = ["package.json"]            # each with one `version` line, edit
 tag = "v{version}"                          # the default: the release tag, and the next release's boundary
 changelog = "CHANGELOG.md"                  # optional: the notes are added to the top of it
 after_bump = "uv lock"                      # optional: run by /sdlc:release after the bump; the tracked files it changes are committed too; {version}, {tag}
+prepare = "npm pack"                        # optional: run by /sdlc:release after after_bump; builds into untracked or ignored paths only; what it prints is shown at /sdlc:publish; {version}, {tag}
 remote = "origin"                           # the default: where /sdlc:publish pushes main and the tag
-publish = "npm publish"                     # optional: run by /sdlc:publish after the push; {version}, {tag}
+publish = "npm publish"                     # optional: run by /sdlc:publish after the push, with no terminal and stdin closed; {version}, {tag}
 deprecations = ".sdlc/deprecations.toml"    # the default: each shim and the version that removes it; off while absent
 
 [retro]
@@ -355,10 +356,16 @@ after one approval sets it in `release.version_files`, adds the notes to `releas
 set, runs `release.after_bump` if set (a lock file regenerated from the new version, which can't
 be a version file when it holds a `version` line per package), commits `Release X.Y.Z` with
 every tracked file that changed, and tags it, all locally. The command must leave committing and
-pushing to the plugin; a new untracked file it makes is listed, never committed. Until it is
+pushing to the plugin; a new untracked file it makes is listed, never committed. Then it runs
+`release.prepare` if set: a build of what publish will upload, which must change no tracked file
+(one it changes is put back and the release refused), and the end of whose output is kept on the
+tag as a git note (`refs/notes/sdlc-prepared`). Until it is
 published, `git tag -d <tag> && git reset --keep HEAD~1` takes it back. `/sdlc:publish`, behind an approval
 of its own, pushes `main` and the tag, never forced, and runs `release.publish` if the repo has
-one. It is the only step in the plugin that pushes. A repo without a tag for its current version
+one, showing at that approval what `release.prepare` built. Every command release and publish
+run (`after_bump`, `prepare`, `publish`) runs non-interactively, with no terminal, stdin closed
+and its output captured: one that asks a question fails at once, so give it its non-interactive
+flag, or build in `prepare` and keep `publish` to the upload. It is the only step in the plugin that pushes. A repo without a tag for its current version
 is told the `git tag -a` command that makes one; a repo with no `version_files` gets the listing
 and nothing else. Dropped changes are never released.
 
