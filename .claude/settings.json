@@ -11,5 +11,10 @@
       "Bash(uv run --quiet --script */scripts/sdlc.py unreleased *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py drift *)"
     ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
   }
 }
