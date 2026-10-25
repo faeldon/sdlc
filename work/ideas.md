@@ -175,11 +175,23 @@ triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` s
 
 After: "A bugs register beside the ideas register"
 
-## [2026-10-25] [seed] Rework pairs on files, too coarse for a busy week
+## [2026-10-25] [seed] Rework as a declared fix, with surviving lines as the cross-check
 
-With the common files left out (021), the window of 14 changes still holds 24 rework pairs,
-mostly same-week changes sharing a skill or a test file, not follow-up fixes. Pair on the hunks
-a later change rewrites, or count only changes that fix a bug. See work/021-rework-shared-files/.
+Retro pairs any two changes closed within a week that share a file. With the common files left
+out (021), the 17 changes since the last retrospective still hold 42 pairs, nearly all same-week
+changes adding to a shared skill or test file, not one fixing another. Reframe it in two parts:
+- **Declared, the signal.** A later change names what it fixes, in a `fixes:` frontmatter line
+  (one or more change ids, read as text like `depends_on:`), which intent asks for when the
+  problem traces to an earlier change. Retro counts these links, whatever the gap in days, and
+  `check` refuses an id that names no change.
+- **Inferred, the cross-check.** Lines an earlier change added that a later one modifies or
+  deletes within the window, found by blaming the earlier change's hunks. Appending to a shared
+  file no longer counts; replacing what the earlier change wrote does. A hit with no `fixes:`
+  link is a question for the retrospective (an undeclared fix, or a planned follow-up), never a
+  count.
+The file pairs, `REWORK_DAYS` as a match rule and `rework_common` go. Close's in-change rework
+(`Sdlc-Rework`) is untouched. Pairs with the bugs register, whose fixes are declared the same way.
+See work/021-rework-shared-files/.
 
 ## [2026-10-25] [seed] Push at close and at release, not only at publish
 
