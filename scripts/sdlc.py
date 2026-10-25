@@ -2196,16 +2196,21 @@ def _own_repo(main: Path) -> bool:
     )
 
 
+def _script_cmd() -> list[str]:
+    """How a copy of this script is run, as the skills run it: `uv run --script`, or this
+    interpreter where there is no `uv`."""
+    uv = shutil.which("uv")
+    return [uv, "run", "--quiet", "--script"] if uv else [sys.executable]
+
+
 def _handoff(main: Path, argv: list[str], ran: str, report: dict) -> int:
     """Run this close again with the main checkout's `scripts/sdlc.py`, as the skills run it, and
     give its report and exit code as this one's. A close is safe to rerun at any step, so the
     second one finds what this one did and carries on. If it prints no report (it didn't start),
     say so in `report` and stop: never carry on with the code this process loaded."""
     script = main / "scripts" / "sdlc.py"
-    uv = shutil.which("uv")
-    cmd = [uv, "run", "--quiet", "--script"] if uv else [sys.executable]
     made = subprocess.run(
-        [*cmd, str(script), "close", *argv],
+        [*_script_cmd(), str(script), "close", *argv],
         capture_output=True,
         text=True,
         env=os.environ | {HANDOFF_ENV: ran},
@@ -2470,6 +2475,77 @@ def _reaches(main: Path, branch: str) -> dict | None:
         return landing_reach(names.splitlines()) or None
     except Exception as e:
         return {"unknown": f"reading the change's paths failed: {type(e).__name__}"}
+
+
+# In the plugin's own repo, the commands that write from a change's worktree run the change's own
+# `scripts/` once it edits them, so a change to ship or sync runs on its own code before it lands.
+# The variable stops a second handoff, and set to anything by hand (`off`) skips the first.
+OWN_SCRIPT_ENV = "SDLC_OWN_SCRIPT"
+OWN_SCRIPT_CMDS = ("ship", "drop", "base", "sync")
+OWN_RAN = "the change's own code"
+
+
+def _own_script(root: Path) -> Path | None:
+    """The change's own `scripts/sdlc.py` when this command should run it: in the plugin's own
+    repo (`_own_repo()`, read from its files, so never a host), from a change's checkout whose
+    branch edits `scripts/` against its merge base with `main`, when that copy isn't the one
+    running. None otherwise, and on any failure: a handoff is never a refusal."""
+    try:
+        if os.environ.get(OWN_SCRIPT_ENV):
+            return None
+        if not DIR_RE.match(_git(root, "branch", "--show-current") or ""):
+            return None
+        if not _own_repo(main_root(root)):
+            return None
+        base = _git(root, "merge-base", "main", "HEAD")
+        if base is None:
+            return None
+        edited = _git(root, "diff", "--quiet", base, "--", "scripts") is None or bool(
+            _git(root, "ls-files", "--others", "--exclude-standard", "--", "scripts")
+        )
+        script = root / "scripts" / "sdlc.py"
+        running = (PLUGIN_DIR / "scripts" / "sdlc.py").resolve()
+        return script if edited and script.is_file() and script.resolve() != running else None
+    except Exception:
+        return None
+
+
+def _run_own(script: Path, argv: list[str]) -> int | None:
+    """Run this command again as the change's own script, and give its output, saying so, and its
+    exit code as this one's. None when that script crashed before it could answer (a traceback,
+    or a failure with nothing said in the script's own voice: no stdout and no `⚠` line, as when
+    `uv` can't start it), so the caller runs the command itself and the stage is never blocked by
+    a half-built script. A refusal it prints, a `⚠` on stderr as ship's are, is its answer, never
+    retried here with code that may not know to refuse."""
+    made = subprocess.run(
+        [*_script_cmd(), str(script), *argv],
+        capture_output=True,
+        text=True,
+        env=os.environ | {OWN_SCRIPT_ENV: "ran"},
+    )
+    voiced = made.stdout.strip() or any(
+        ln.lstrip().startswith("⚠") for ln in made.stderr.splitlines()
+    )
+    if "Traceback (most recent call last)" in made.stderr or (made.returncode != 0 and not voiced):
+        said = [ln for ln in made.stderr.splitlines() if ln.strip()]
+        why = said[-1].strip() if said else f"exited {made.returncode}"
+        print(
+            f"⚠  the change's own {script} didn't run ({why}); running this copy instead",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        out = json.loads(made.stdout)
+    except ValueError:
+        out = None
+    if isinstance(out, dict):
+        out.setdefault("ran", OWN_RAN)
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        print(made.stdout, end="")
+        print(f"  ran {OWN_RAN}: {script}")
+    print(made.stderr, end="", file=sys.stderr)
+    return made.returncode
 
 
 def _merged_scripts(main: Path, before: str | None) -> bool:
@@ -5197,6 +5273,10 @@ def main() -> int:
     # from here in every checkout (`change_dirs`). `config` reads this checkout's .sdlc/, which a
     # change's branch may be editing.
     home = main_root(root)
+    if args.cmd in OWN_SCRIPT_CMDS and (own := _own_script(root)):
+        code = _run_own(own, sys.argv[1:])
+        if code is not None:
+            return code
     if args.cmd == "config":
         return cmd_config(root)
     if args.cmd == "context":

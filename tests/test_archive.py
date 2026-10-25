@@ -517,6 +517,164 @@ def test_mains_script_that_wont_start_does_nothing(tmp_path, gh, capsys, monkeyp
     assert _git(root, "rev-parse", "main") != _git(root, "rev-parse", name)
 
 
+# ---------------------------------------------------------------- the change's own script
+
+
+@pytest.fixture
+def own_tree(tmp_path, monkeypatch):
+    """A change's worktree in a scratch plugin repo, run from a copy that isn't its own."""
+    root = _own(_repo(tmp_path, github=False))
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "elsewhere")
+    monkeypatch.delenv(sdlc.OWN_SCRIPT_ENV, raising=False)
+    return root, _open(root).parent.parent
+
+
+@pytest.mark.parametrize("how", ["committed", "uncommitted", "untracked"])
+def test_a_change_that_edits_scripts_runs_its_own(own_tree, how) -> None:
+    _, tree = own_tree
+    path = tree / "scripts" / ("new.py" if how == "untracked" else "sdlc.py")
+    path.write_text("print('the change')\n", encoding="utf-8")
+    if how == "committed":
+        _git(tree, "commit", "-qam", "edit the script")
+    assert sdlc._own_script(tree) == tree / "scripts" / "sdlc.py"
+
+
+def test_no_handoff_when_the_change_leaves_scripts_alone(own_tree) -> None:
+    _, tree = own_tree
+    (tree / "feature.txt").write_text("x\n", encoding="utf-8")
+    assert sdlc._own_script(tree) is None
+
+
+def test_no_handoff_when_the_running_copy_is_the_changes(own_tree, monkeypatch) -> None:
+    _, tree = own_tree
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", tree)
+    assert sdlc._own_script(tree) is None
+
+
+@pytest.mark.parametrize("value", ["ran", "off"])
+def test_the_variable_stops_a_second_handoff_and_turns_the_first_off(
+    own_tree, monkeypatch, value
+) -> None:
+    _, tree = own_tree
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    monkeypatch.setenv(sdlc.OWN_SCRIPT_ENV, value)
+    assert sdlc._own_script(tree) is None
+
+
+def test_no_handoff_off_a_change_branch(own_tree) -> None:
+    root, _ = own_tree
+    (root / "scripts" / "sdlc.py").write_text("print('on main')\n", encoding="utf-8")
+    assert sdlc._own_script(root) is None
+
+
+@pytest.mark.parametrize("manifest", [None, '{"name": "other"}', "{not json"])
+def test_a_host_never_runs_a_changes_own_script(tmp_path, monkeypatch, manifest) -> None:
+    root = _repo(tmp_path, github=False)
+    if manifest:
+        _own(root, manifest=manifest)
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "elsewhere")
+    monkeypatch.delenv(sdlc.OWN_SCRIPT_ENV, raising=False)
+    tree = _open(root).parent.parent
+    (tree / "scripts").mkdir(exist_ok=True)
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    assert sdlc._own_script(tree) is None
+
+
+def _script(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "own" / "sdlc.py"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_json_report_says_the_changes_own_code_ran(tmp_path, capsys, monkeypatch) -> None:
+    monkeypatch.delenv(sdlc.OWN_SCRIPT_ENV, raising=False)
+    script = _script(
+        tmp_path,
+        "import json, os, sys\n"
+        "print(json.dumps({'args': sys.argv[1:], 'env': os.environ['SDLC_OWN_SCRIPT']}))\n",
+    )
+    assert sdlc._run_own(script, ["sync", "001"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out == {"args": ["sync", "001"], "env": "ran", "ran": sdlc.OWN_RAN}
+
+
+def test_a_text_report_ends_with_which_code_ran(tmp_path, capsys) -> None:
+    script = _script(tmp_path, "print('■ shipped 001-thing')\n")
+    assert sdlc._run_own(script, ["ship", "001"]) == 0
+    out = capsys.readouterr().out
+    assert out == f"■ shipped 001-thing\n  ran {sdlc.OWN_RAN}: {script}\n"
+
+
+def test_a_refusal_from_the_changes_own_code_stands(tmp_path, capsys) -> None:
+    script = _script(
+        tmp_path, "import sys\nprint('■ refused')\nprint('⚠  no', file=sys.stderr)\nsys.exit(1)\n"
+    )
+    assert sdlc._run_own(script, ["ship", "001"]) == 1
+    captured = capsys.readouterr()
+    assert "■ refused" in captured.out and "⚠  no" in captured.err
+    assert "running this copy instead" not in captured.err
+
+
+def test_a_refusal_said_only_on_stderr_stands(tmp_path, capsys) -> None:
+    """Ship's refusals are a `⚠` on stderr and nothing on stdout: never taken for a crash, or the
+    old code would run and write what the new code refused."""
+    script = _script(
+        tmp_path,
+        "import sys\nprint('⚠  001-thing: refused. Not stamping.', file=sys.stderr)\nsys.exit(1)\n",
+    )
+    assert sdlc._run_own(script, ["ship", "001"]) == 1
+    err = capsys.readouterr().err
+    assert "Not stamping." in err and "running this copy instead" not in err
+
+
+def test_a_change_script_that_cant_start_hands_back(tmp_path, capsys) -> None:
+    script = _script(
+        tmp_path, "import sys\nprint('error: no solution found', file=sys.stderr)\nsys.exit(2)\n"
+    )
+    assert sdlc._run_own(script, ["ship", "001"]) is None
+    err = capsys.readouterr().err
+    assert "didn't run (error: no solution found)" in err and "running this copy instead" in err
+
+
+def test_a_change_script_that_crashes_hands_back(tmp_path, capsys) -> None:
+    script = _script(tmp_path, "import no_such_module_anywhere\n")
+    assert sdlc._run_own(script, ["ship", "001"]) is None
+    err = capsys.readouterr().err
+    assert "didn't run (ModuleNotFoundError" in err and "running this copy instead" in err
+
+
+@pytest.mark.parametrize("answer", [0, None])
+def test_main_runs_the_changes_own_script_or_carries_on(
+    own_tree, monkeypatch, capsys, answer
+) -> None:
+    _, tree = own_tree
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    calls: list[tuple[Path, list[str]]] = []
+
+    def run_own(script, argv):
+        calls.append((script, argv))
+        return answer
+
+    monkeypatch.setattr(sdlc, "_run_own", run_own)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "sync", "001"])
+    monkeypatch.chdir(tree)
+    assert sdlc.main() == 0
+    assert calls == [(tree / "scripts" / "sdlc.py", ["sync", "001"])]
+    said = capsys.readouterr().out
+    assert ("nothing to sync" in said.lower() or '"change"' in said) == (answer is None)
+
+
+def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -> None:
+    _, tree = own_tree
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    monkeypatch.setattr(sdlc, "_run_own", lambda *a: pytest.fail("handed off"))
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "status"])
+    monkeypatch.chdir(tree)
+    assert sdlc.main() == 0
+
+
 # ---------------------------------------------------------------- what a landed change reaches
 
 

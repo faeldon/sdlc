@@ -285,7 +285,8 @@ def _probe(tree: Path, word: str) -> None:
 
 def _by(script: Path, cwd: Path, *args: str, ran: str | None = None):
     """`_run` with a given copy of the script, and the handoff marker set or cleared."""
-    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "SDLC_CLOSE_RAN")}
+    dropped = ("VIRTUAL_ENV", "SDLC_CLOSE_RAN", "SDLC_OWN_SCRIPT")
+    env = {k: v for k, v in os.environ.items() if k not in dropped}
     env |= GIT_ID | ({"SDLC_CLOSE_RAN": ran} if ran else {})
     return subprocess.run(
         ["uv", "run", "--quiet", "--script", str(script), *args],
@@ -313,7 +314,11 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
         intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
         edit(tree)
         number = tree.name.split("-")[0]
-        assert _by(script, tree, "ship", number).returncode == 0
+        shipped = _by(script, tree, "ship", number)
+        assert shipped.returncode == 0, shipped.stderr
+        # A change that edits scripts/ ships on its own code; one that doesn't, on main's.
+        edits_scripts = bool(_git(tree, "status", "--porcelain", "--", "scripts"))
+        assert ("ran the change's own code" in shipped.stdout) == edits_scripts, shipped.stdout
         _git(tree, "add", "-A")
         _git(tree, "commit", "-q", "-m", f"ship {tree.name}")
         closed = _by(by, root, "close", number, ran=ran)
