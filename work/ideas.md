@@ -219,3 +219,16 @@ the window, so a move needs either a reader that looks in both places or a recor
 and records it, what `drift()` makes of a host on the old path, and whether the key is ever
 retired. Worktrees follow the folder, since each holds its own `<work>/<branch>/`. Tier 2: it
 changes where every host's artifacts live. Raised 2026-10-25.
+
+## [2026-10-25] [seed] Agent attribution in a host's commits, off by default
+
+The commits `sdlc.py` makes (`Close`, `Drop`, release, retro) carry only the `Sdlc-*` trailers,
+but the ones a session makes for a skill (ship's commit, the factory's build) take the harness's
+`Co-Authored-By:` line and, on a pull request, its "Generated with Claude Code" footer. This repo
+forbids them in AGENTS.md; a host gets them unless it writes the same rule. Make it a config key
+(`[git] attribution = false` by default) that setup turns into Claude Code's own `attribution`
+setting in the host's `.claude/settings.json` (empty `commit` and `pr`), beside the allow rules it
+already writes there, and records, so `uninstall` takes it out and `drift()` sees a host that
+changed it. Have the skills that commit say the same in prose, since a setting a host overrides
+locally wins. Ask at setup rather than assume: some teams want the line. Also decide whether the
+text the plugin writes into issues follows the same key. Raised 2026-10-25.
