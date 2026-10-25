@@ -171,6 +171,16 @@ to count apart). Feature requests stay seeds either way. Then: what status and r
 (open bugs by severity, age), how `/sdlc:intent` promotes one, and whether a fix's ship retires
 it as it does a nit. Raised 2026-10-25.
 
+Track fixes through the change cycle, for the retrospective. A change that fixes a bug names it
+(`fixes: [B3]` in the intent, set when `/sdlc:intent` promotes the entry), ship retires the entry,
+and close writes an `Sdlc-Fixes:` trailer (extending the trailer contract, not redefining it), so
+history keeps the link. Triage may record `introduced_by:` the change that let the bug through:
+that splits escaped bugs from retro's rework, which can't tell a planned follow-up from a defect.
+Retro then counts bugs reported and fixed in its window by severity, time from report to fix, open
+bugs by age, and escapes per introducing change against its tier; the product doc may own a
+measure such as escaped bugs per release. This leans the choice above toward the separate
+register: tags in `work/ideas.md` give retro nothing to count or link a fix to. Raised 2026-10-25.
+
 After: "A local channel for bug reports and feature requests from other sessions"
 
 ## [2026-10-25] [seed] GitHub issues as the intake for bugs and requests, in hosts too
