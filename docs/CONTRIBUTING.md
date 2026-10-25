@@ -33,6 +33,27 @@ without touching your registration:
 claude --plugin-dir .claude/worktrees/NNN-slug
 ```
 
+### When a change lands
+
+Sessions read the plugin from the clone's main checkout, so a change reaches them when
+`/sdlc:close` fast-forwards `main`, never while it is still in its worktree. What each session
+or host does then depends on what the change touched:
+
+| The change touched | Open sessions see it | What to do |
+|---|---|---|
+| `scripts/` (and the factory's) | at once: every skill runs the script from the clone | nothing |
+| `skills/`, the factory's `agents/` | when the session starts | `/reload-plugins` in each open session, or restart it |
+| `defaults/`, `templates/`, a config key | never: the host owns its copies | `/sdlc:setup` in each host repo |
+
+Reload between stages, never during one. A session halfway through `/sdlc:ship` keeps its old
+skill text while calling the new script, and a renamed subcommand or flag breaks it partway.
+A host gets no `status` nudge between releases either: `setup_nudge()` compares versions, and
+the version moves only at a release. A config key's rename lives in `scripts/sdlc.py` with its
+`RETIRED_KEYS` entry, so it needs setup too, which reports it as breaking.
+
+Close's report lists all of it, as `reaches`, in this repo only: whether scripts changed, which
+skills and agents, and which of setup's files, or `unknown` and why when it couldn't tell.
+
 ## The gate
 
 ```bash

@@ -109,7 +109,10 @@ the `Close` commit's message, so GitHub closes it when the commit reaches the de
 (where that isn't `main`, close closes it itself). In the plugin's own repo only, `_handoff()`
 reruns close through `main`'s script when this copy is a stale cache, and through the merged
 script after a merge that brought `scripts/`, so a change closes on its own code;
-`SDLC_CLOSE_RAN` stops a loop.
+`SDLC_CLOSE_RAN` stops a loop. There too, `reaches` (`landing_reach()`, over the change's whole
+diff) tells the person what the landed change asks of the sessions and hosts running the plugin
+from a clone: scripts live at once, skills and the factory's agents at `/reload-plugins`,
+setup's files at `/sdlc:setup`, or `unknown` and why.
 
 **Dropping.** `/sdlc:drop` writes the reason as the intent's `## Dropped` section; `sdlc.py drop`
 stamps `stage: dropped` and commits the folder on its branch. Close then records it on `main` as

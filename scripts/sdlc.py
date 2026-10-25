@@ -1915,19 +1915,24 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     }
 
 
-def _change_diff(main: Path, branch: str) -> int | None:
-    """Lines added to code and tests by the change: from the parent of the commit that first holds
-    its intent (ship's, since nothing commits before ship) to the branch's tip, so the answer
-    is the same before close fast-forwards `main` and after, and on a rerun. Files are named by
-    `metrics.artifact`, as the edits were; the plugin's own state in `.sdlc/` (the counter `new`
-    writes in the change's worktree) is nobody's code."""
+def _change_base(main: Path, branch: str) -> str | None:
+    """Where a change starts: the parent of the commit that first holds its intent (ship's, since
+    nothing commits before ship), so the answer is the same before close fast-forwards `main` and
+    after, and on a rerun. None when no commit holds it."""
     added = _git(
         main, "log", "--diff-filter=A", "--format=%H", "--reverse", branch, "--",
         f"work/{branch}/intent.md",
     )  # fmt: skip
     if not added:
         return None
-    base = _git(main, "rev-parse", "--verify", "-q", f"{added.split()[0]}^")
+    return _git(main, "rev-parse", "--verify", "-q", f"{added.split()[0]}^")
+
+
+def _change_diff(main: Path, branch: str) -> int | None:
+    """Lines added to code and tests by the change, from `_change_base()` to the branch's tip.
+    Files are named by `metrics.artifact`, as the edits were; the plugin's own state in `.sdlc/`
+    (the counter `new` writes in the change's worktree) is nobody's code."""
+    base = _change_base(main, branch)
     numstat = _git(main, "diff", "--numstat", "--no-renames", base, branch) if base else None
     if numstat is None:
         return None
@@ -2231,6 +2236,8 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         )
     if report["refusals"]:
         return emit(1)
+    if own and kind == "shipped" and (reaches := _reaches(main, branch)):
+        report["reaches"] = reaches
 
     sha = _git(main, "rev-parse", "--short", branch) or "?"
     kept: dict = {}
@@ -2332,6 +2339,48 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             report["skipped"] = [n for n, _ in steps[i + 1 :]]
             return _handoff(main, [branch], "merged", report)
     return emit(0)
+
+
+def landing_reach(paths: list[str]) -> dict:
+    """What a landed change to this plugin asks of the sessions and hosts running it from a clone:
+    `scripts` are live in every session at once, `skills` and the factory's `agents` (by
+    namespaced name) are read when a session starts, so need `/reload-plugins`, and `hosts`
+    (setup's defaults and templates) need `/sdlc:setup` in each host. Only the kinds the paths
+    touch."""
+    scripts, skills, agents, hosts = False, set(), set(), []
+    for path in paths:
+        parts = path.split("/")
+        if parts[0] == "scripts" or parts[:3] == ["plugins", "factory", "scripts"]:
+            scripts = True
+        elif parts[0] == "skills" and len(parts) > 2:
+            skills.add(f"sdlc:{parts[1]}")
+        elif parts[:3] == ["plugins", "factory", "skills"] and len(parts) > 4:
+            skills.add(f"sdlc-factory:{parts[3]}")
+        elif parts[:3] == ["plugins", "factory", "agents"] and path.endswith(".md"):
+            agents.add(f"sdlc-factory:{parts[-1].removesuffix('.md')}")
+        elif parts[0] in ("defaults", "templates"):
+            hosts.append(path)
+    found = {
+        "scripts": scripts, "skills": sorted(skills), "agents": sorted(agents),
+        "hosts": sorted(hosts),
+    }  # fmt: skip
+    return {k: v for k, v in found.items() if v}
+
+
+def _reaches(main: Path, branch: str) -> dict | None:
+    """`landing_reach()` over everything the change's branch touched; None when it touched
+    nothing that reaches anyone. Never a refusal: a change whose paths can't be read lands, and
+    `unknown` says why, so "nothing to do" is never a guess."""
+    try:
+        base = _change_base(main, branch)
+        if base is None:
+            return {"unknown": f"no commit on {branch} holds its intent"}
+        names = _git(main, "diff", "--name-only", "--no-renames", base, branch)
+        if names is None:
+            return {"unknown": f"git couldn't diff {branch} against its base"}
+        return landing_reach(names.splitlines()) or None
+    except Exception as e:
+        return {"unknown": f"reading the change's paths failed: {type(e).__name__}"}
 
 
 def _merged_scripts(main: Path, before: str | None) -> bool:

@@ -437,6 +437,7 @@ def test_a_host_repo_never_hands_off(tmp_path, gh, capsys, handoffs, monkeypatch
     code, out = _close(root, capsys, "001")
     assert code == 0 and out["done"][-1] == "delete branch", out
     assert handoffs == [] and "ran" not in out and not _on_main(root, name)
+    assert "reaches" not in out, "only the plugin's own close says what reaches its sessions"
 
 
 @pytest.mark.parametrize("check", [False, True])
@@ -514,6 +515,72 @@ def test_mains_script_that_wont_start_does_nothing(tmp_path, gh, capsys, monkeyp
     assert code == 1 and out["done"] == [], out
     assert any(r.startswith("main's sdlc.py didn't run:") for r in out["refusals"])
     assert _git(root, "rev-parse", "main") != _git(root, "rev-parse", name)
+
+
+# ---------------------------------------------------------------- what a landed change reaches
+
+
+@pytest.mark.parametrize(
+    "paths, reaches",
+    [
+        (["scripts/sdlc.py", "scripts/trackers/github.py"], {"scripts": True}),
+        (["plugins/factory/scripts/factory.py"], {"scripts": True}),
+        (
+            ["skills/ship/SKILL.md", "skills/close/SKILL.md"],
+            {"skills": ["sdlc:close", "sdlc:ship"]},
+        ),
+        (["plugins/factory/skills/build/SKILL.md"], {"skills": ["sdlc-factory:build"]}),
+        (["plugins/factory/agents/reviewer-code.md"], {"agents": ["sdlc-factory:reviewer-code"]}),
+        (
+            ["templates/intent.md", "defaults/SDLC.md"],
+            {"hosts": ["defaults/SDLC.md", "templates/intent.md"]},
+        ),
+        (
+            ["scripts/sdlc.py", "skills/ship/SKILL.md", "defaults/REVIEW.md", "README.md"],
+            {"scripts": True, "skills": ["sdlc:ship"], "hosts": ["defaults/REVIEW.md"]},
+        ),
+        (["README.md", "docs/CONTRIBUTING.md", "work/001-thing/intent.md", "tests/t.py"], {}),
+    ],
+)
+def test_landing_reach_sorts_paths_into_what_each_needs(paths, reaches) -> None:
+    assert sdlc.landing_reach(paths) == reaches
+
+
+def test_the_plugins_own_close_reports_what_reaches_its_sessions(
+    tmp_path, gh, capsys, handoffs, monkeypatch
+) -> None:
+    root = _own(_repo(tmp_path))
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
+    _landing(root, {"skills/ship/SKILL.md": "x\n", "defaults/SDLC.md": "# Process\n"})
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and handoffs == [], out
+    assert out["reaches"] == {"skills": ["sdlc:ship"], "hosts": ["defaults/SDLC.md"]}
+
+
+def test_a_close_that_cant_read_the_changes_paths_says_so(
+    tmp_path, gh, capsys, handoffs, monkeypatch
+) -> None:
+    root = _own(_repo(tmp_path))
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
+    _landing(root, {"skills/ship/SKILL.md": "x\n"})
+
+    def broken(main, branch):
+        raise OSError("disk")
+
+    monkeypatch.setattr(sdlc, "_change_base", broken)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, "never a refusal"
+    assert out["reaches"] == {"unknown": "reading the change's paths failed: OSError"}
+
+
+def test_a_change_that_reaches_nothing_reports_no_reaches(
+    tmp_path, gh, capsys, handoffs, monkeypatch
+) -> None:
+    root = _own(_repo(tmp_path))
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
+    _landing(root, {"docs/notes.md": "x\n"})
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and "reaches" not in out, out
 
 
 # ---------------------------------------------------------------- what close measures
