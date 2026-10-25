@@ -207,8 +207,11 @@ the approved issue fields' lines and the `serves:` line under `depends_on:`, exa
 Step 3.
 
 If the change came from a `work/ideas.md` seed: set `idea:` in the frontmatter to that entry's
-heading, and `Edit` the seed's status tag in the worktree's `work/ideas.md` to `[building]` with a
-pointer to the new folder, so the tag lands with the change. Leave the seed's prose alone.
+title alone, without its `## `, date or tag (`idea: Keep drafts` for `## [2026-10-01] [seed] Keep
+drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit` the entry in the worktree's
+`work/ideas.md`: its heading's tag becomes `[building]`, the rest of the heading unchanged, and
+`Building in work/NNN-slug/.` becomes its first body line, so the tag lands with the change. Never
+put the pointer in the heading. Leave the seed's prose alone.
 
 Then mirror the written intent to the change's issue, which until now says only that it was
 opened. With no tracker, or a change that gets its issue at close, it says there is nothing to

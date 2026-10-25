@@ -46,7 +46,7 @@
         "## Three loops > ### Where the playbook fits": "sha256:89d308063381923a",
         "## Tiers: the overhead control": "sha256:49dfbb654da6058d",
         "## Tiers: the overhead control > - **Anything with a live consumer.**": "sha256:77afd3ac322f6666",
-        "## The artifacts": "sha256:dd6fbbe5273365c7",
+        "## The artifacts": "sha256:990f7454f096398a",
         "## Where a change is worked: one worktree per change": "sha256:4d301b37d067feb1",
         "## Running the stages": "sha256:da203639fdf8b497",
         "## Running the stages > ### Stage 1 \u2014 Plan \u2192 `/sdlc:intent`": "sha256:e3cd993c0e013aa9",

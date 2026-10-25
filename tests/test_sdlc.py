@@ -1738,6 +1738,7 @@ def _staged(root: Path) -> list[str]:
     [
         "Reopen drafts",
         '"## [2026-10-02] [seed] Reopen drafts"',
+        '"[2026-10-02] [seed] Reopen drafts"',
         "Reopen drafts → work/001-reopen-drafts/",
     ],
 )
@@ -1756,6 +1757,36 @@ def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
     assert "Reopen drafts" not in (root / "work" / "ideas.md").read_text(encoding="utf-8")
+
+
+def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer(tmp_path) -> None:
+    ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
+    root, _ = _seeded(tmp_path, '"[2026-10-02] [seed] Reopen drafts"', ideas)
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == (
+        "# Ideas\n\n> Seeds, not a backlog.\n\n"
+        "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
+        "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+    )
+
+
+def test_a_title_holding_an_arrow_is_kept_whole(tmp_path: Path) -> None:
+    ideas = IDEAS.replace("[seed] Keep drafts", "[seed] Map intent").replace(
+        "Reopen drafts\n", "Map intent → spec\n"
+    )
+    root, _ = _seeded(tmp_path, "Map intent → spec", ideas)
+    assert sdlc.cmd_ship(root, "001") == 0
+    text = (root / "work" / "ideas.md").read_text(encoding="utf-8")
+    assert "Map intent → spec" not in text and "## [2026-10-01] [seed] Map intent\n" in text
+
+
+def test_a_body_line_shaped_like_a_heading_is_never_a_seed(tmp_path: Path) -> None:
+    ideas = IDEAS.replace("The first.", "[2026-10-02] [seed] Reopen drafts, as said.").replace(
+        "[building] Reopen drafts", "[building] Rename drafts"
+    )
+    root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == ideas
 
 
 def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path) -> None:
@@ -1810,6 +1841,26 @@ def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, ca
     ]  # fmt: skip
     assert "  staged with space.txt" in capsys.readouterr().out
     assert _git(root, "rev-parse", "HEAD") == head, "ship never commits"
+
+
+def test_ship_stages_beside_a_deletion_already_staged(tmp_path: Path, capsys) -> None:
+    root, _ = _seeded(tmp_path, "Reopen drafts")
+    for name in ("gone.txt", "half.txt"):
+        (root / name).write_text("x\n", encoding="utf-8")
+    _git(root, "add", "gone.txt", "half.txt")
+    _git(root, "commit", "-q", "-m", "two files")
+    _git(root, "rm", "-q", "gone.txt")
+    (root / "half.txt").write_text("y\n", encoding="utf-8")
+    _git(root, "add", "half.txt")
+    (root / "half.txt").write_text("z\n", encoding="utf-8")
+    (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert _staged(root) == [
+        "drafts.py", "gone.txt", "half.txt",
+        "work/001-reopen-drafts/intent.md", "work/ideas.md",
+    ]  # fmt: skip
+    assert _git(root, "diff", "--name-only") == "", "the later edit is staged too"
+    assert "  staged gone.txt" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("left", ["./unrelated.txt", "unrelatd.txt"])

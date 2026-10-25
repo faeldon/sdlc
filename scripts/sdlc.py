@@ -1076,9 +1076,10 @@ def analyze(root: Path, today: date | None = None) -> dict:
     entries = idea_entries(root)
     ideas = [i for i in entries if is_building(i)]
     slugs = {rec["slug"] for rec in changes}
-    # The explicit link: /sdlc:intent writes the seed's heading into `idea:`. It keeps the status
-    # tag the heading had at promotion (`[seed]`) while ideas.md moves on to `[building]`, so match
-    # on the title alone. A dropped change is building nothing and can't vouch for a seed.
+    # The explicit link: /sdlc:intent writes the seed's title into `idea:`, and older intents the
+    # whole heading, with the status tag it had at promotion (`[seed]`) while ideas.md moved on to
+    # `[building]`, so match on the title alone. A dropped change is building nothing and can't
+    # vouch for a seed.
     linked = [rec["idea"] for rec in changes if rec["idea"] and rec["stage"] != "dropped"]
     for idea in ideas:
         # Substring either way, deliberately loose: a folder slug is usually a shortening of the
@@ -1658,12 +1659,13 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
 
 
 def _seed_title(text: str) -> str:
-    """A seed's title from its heading, or from an `idea:` line holding the title or the whole
-    heading: without the `## [date] [tag]` prefix, or the ` → <folder>` pointer a tag may carry."""
+    """A seed's title from its heading, or from an `idea:` line holding the title or the heading,
+    with or without its `## `: without the `[date] [tag]` prefix, or the ` → work/<folder>` pointer
+    an older intent put in the heading. An arrow in the title itself stays."""
     text = text.strip()
-    m = IDEA_RE.match(text)
+    m = IDEA_RE.match(text) or IDEA_RE.match(f"## {text}")
     title = m.group(3) if m else text
-    return title.split(" → ")[0].strip()
+    return title.split(" → work/")[0].strip()
 
 
 def _seed_lines(ideas: Path, idea: str) -> list[int]:
@@ -1690,11 +1692,12 @@ def _drop_seed(ideas: Path, start: int) -> None:
 
 def _stage_change(tree: Path, leave: list[str] | tuple[str, ...]) -> tuple[list[str], str | None]:
     """Stage every path the checkout has uncommitted, untracked ones included, but `leave`, and
-    never by `-A`: the paths are named after `--`. Nothing outside git."""
-    paths = [p for p in _dirty_paths(tree) if p not in leave]
-    if not paths:
-        return [], None
-    return paths, _git_err(tree, "add", "--", *paths)
+    never by `-A`: the paths are named after `--`. Nothing outside git. A path already staged as
+    it is in the tree is listed but not added: git refuses a staged deletion's path."""
+    entries = [(xy, p) for xy, p in _status_entries(tree) if p not in leave]
+    add = [p for xy, p in entries if xy[1] != " "]
+    paths = [p for _, p in entries]
+    return paths, (_git_err(tree, "add", "--", *add) if add else None)
 
 
 # A dropped change says why under this heading of its intent, and its frontmatter's `dropped_at:`
@@ -1712,8 +1715,14 @@ def dropped_reason(text: str) -> str:
 
 
 def _dirty_paths(tree: Path) -> list[str]:
-    """Every path `git status` lists in `tree`, untracked files one by one. Read raw: `_git`
-    strips the leading space a status line starts with."""
+    """Every path `git status` lists in `tree`, untracked files one by one."""
+    return [p for _, p in _status_entries(tree)]
+
+
+def _status_entries(tree: Path) -> list[tuple[str, str]]:
+    """Each path `git status` lists in `tree` with its two status letters (`XY`: the index's, then
+    the tree's), untracked files one by one. Read raw: `_git` strips the leading space a status
+    line starts with."""
     made = subprocess.run(
         ["git", "-C", str(tree), "status", "--porcelain", "-z", "--untracked-files=all"],
         capture_output=True,
@@ -1724,7 +1733,7 @@ def _dirty_paths(tree: Path) -> list[str]:
     while i < len(entries):
         entry = entries[i]
         if len(entry) > 3:
-            paths.append(entry[3:])
+            paths.append((entry[:2], entry[3:]))
             if entry[0] in "RC":
                 i += 1  # a rename's source follows it
         i += 1
@@ -3813,7 +3822,10 @@ def _milestone_verdicts(home: Path, items: list[dict], open_names: list[str]) ->
             else:
                 rows.append({"entry": ident, "kind": "change", "verdict": "unknown"})
         for seed in item["groups"]["seeds"]:
-            shipped = next((c for c in history if c["idea"] == seed), None)
+            title = _seed_title(seed)
+            shipped = next(
+                (c for c in history if c["idea"] and _seed_title(c["idea"]) == title), None
+            )
             if shipped:
                 rows.append({"entry": seed, "kind": "seed", "verdict": "shipped",
                              "change": shipped["name"], "date": shipped["close_date"]})  # fmt: skip

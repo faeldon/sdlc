@@ -81,13 +81,3 @@ The WAIT variant and a Step 1 line added for `after_bump`.
 
 `nits_summary` compares `raised` strings, so an entry with a malformed date (which `check` already
 reports) can be taken as its theme's oldest, leaving `age_days` null.
-
-## 014-1 [robustness] A seed title with an arrow is cut short
-
-- **raised:** 2026-10-25 by 014-ship-landing-edits (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** low
-
-`_seed_title()` cuts at the first ` → `, so "Map intent → spec" reads as "Map intent". Two seeds
-sharing the part before the arrow refuse rather than delete the wrong one; cutting at ` → work/`
-only would fix it.

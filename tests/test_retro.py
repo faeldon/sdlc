@@ -554,6 +554,18 @@ def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> Non
     }
 
 
+def test_a_seed_shipped_by_an_idea_holding_its_heading_reads_shipped(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "011-keep-one-draft", idea="[2026-10-01] [seed] Reopen drafts from the list")
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "DIRECTION.md").write_text(
+        '## Milestones\n\n### M1. Drafts\n\nGroups: "Reopen drafts from the list"\n',
+        encoding="utf-8",
+    )
+    rows = _retro(root)["direction"]["milestones"]["M1"]
+    assert [(r["verdict"], r.get("change")) for r in rows] == [("shipped", "011-keep-one-draft")]
+
+
 def _committed_direction(root: Path, text: str) -> None:
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text(text, encoding="utf-8")
