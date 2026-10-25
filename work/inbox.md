@@ -139,7 +139,9 @@ bug entry behind one approval. A report never names the host in what lands here 
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 
-## [2026-10-25-11] [idea] GitHub issues as the intake for bugs and requests, in hosts too
+## [2026-10-25-11] [building] GitHub issues as the intake for bugs and requests, in hosts too
+
+Building in work/026-github-intake/.
 
 Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
 session through `gh`) is the remote form of the local channel: triage reads open issues that no

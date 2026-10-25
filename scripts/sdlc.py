@@ -144,9 +144,12 @@ UNFILLED_THRESHOLD = 2
 ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\s*(.+)$")
 # The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
 # seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
-# milestone's `Groups:` line has them, and status holds it back while one is still open; the rest
+# milestone's `Groups:` line has them, and status holds it back while one is still open; `Issue:`
+# names the tracker issues it was filed from, `#12, #15`, the first the others' parent; the rest
 # are a bug's or a nit's own.
-BODY_KEYS = ("After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by")
+BODY_KEYS = (
+    "After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by", "Issue",
+)  # fmt: skip
 BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
 # A reference to an entry, on an `idea:`, `fixes:`, `After:` or `Groups:` line, is its id, written
 # bare, or its title, quoted. Titles are read for good: the intents in history name seeds by them.
@@ -696,6 +699,7 @@ def load_change(
         "fields": {},
         "serves": None,
         "fixes": [],
+        "closes": [],
         "errors": [],
     }
     intent = path / "intent.md"
@@ -780,6 +784,15 @@ def load_change(
                 rec["errors"].append(
                     f"fixes: {f!r} isn't a [bug] in work/{register_path(path.parent).name}"
                 )
+    # The tracker issues the change closes when it lands, whatever their kind, by number: those
+    # triage attached to it, and those its seed or bug carried on an `Issue:` line.
+    for value in frontmatter_list(text, "closes") or []:
+        if not value.isdigit():
+            rec["errors"].append(f"closes: {value!r} isn't an issue number: write it bare, `12`")
+        elif int(value) == int(m.group(1)):
+            rec["errors"].append("closes: names this change's own issue")
+        else:
+            rec["closes"].append(int(value))
     return rec
 
 
@@ -1052,6 +1065,24 @@ def ref_matches(ref: str, entry: dict) -> bool:
 def same_ref(a: str, b: str) -> bool:
     """Whether two references name the same thing as written: id to id, title to title."""
     return entry_ref(a) == entry_ref(b)
+
+
+ISSUE_REF_RE = re.compile(r"^#(\d+)$")
+
+
+def entry_issues(entry: dict) -> list[int] | None:
+    """The issue numbers an entry's `Issue:` line names, in order, the first the others' parent;
+    [] with no line, None when a value on it isn't `#N`."""
+    raw = entry["fields"].get("Issue")
+    if not raw:
+        return []
+    out = []
+    for part in raw.split(","):
+        m = ISSUE_REF_RE.match(part.strip())
+        if not m:
+            return None
+        out.append(int(m.group(1)))
+    return out
 
 
 def intent_idea(text: str) -> str:
@@ -1375,6 +1406,30 @@ def analyze(root: Path, today: date | None = None) -> dict:
                     "detail": f"[{idea['status']}] {idea['title']} — no work/ folder",
                 }
             )
+    # One issue, one record: an entry's `Issue:` line, or an open change's `closes:`.
+    filed: dict[int, list[str]] = {}
+    for e in entries:
+        name = e["id"] or e["title"]
+        issues = entry_issues(e)
+        if issues is None:
+            got = e["fields"]["Issue"]
+            detail = f"{name}: Issue: names each issue as #N, got {got!r}"
+            problems.append({"dir": register, "kind": "issue", "detail": detail})
+        for n in issues or []:
+            filed.setdefault(n, []).append(name)
+    for n, names in sorted(filed.items()):
+        if len(names) > 1:
+            detail = f"#{n} is on {len(names)} entries: {', '.join(names)}"
+            problems.append({"dir": register, "kind": "issue", "detail": detail})
+    closing: dict[int, list[str]] = {}
+    for rec in changes:
+        if rec["stage"] not in ("shipped", "dropped"):
+            for n in rec.get("closes") or []:
+                closing.setdefault(n, []).append(f"{rec['id']}-{rec['slug']}")
+    for n, names in sorted(closing.items()):
+        if len(names) > 1:
+            detail = f"#{n} is on the closes: line of {', '.join(names)}"
+            problems.append({"dir": "work/", "kind": "closes", "detail": detail})
     for detail in nit_entries(root)[1]:
         problems.append({"dir": register, "kind": "nits", "detail": detail})
     bugs, bug_problems = bug_entries(root)
