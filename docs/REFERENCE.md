@@ -446,7 +446,8 @@ changes. A path kept for good is not a shim and has no entry.
 by default), or after any major release, and never runs it for you. `sdlc.py retro` counts, from
 history, everything since the last `Retrospective YYYY-MM-DD` commit: the changes closed and
 dropped (tier, impact, size, days open, the first paragraph of each problem, what they cost),
-rework, open changes and seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
+rework (leaving out the files more than a third of them touch, listed apart), open changes and
+seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
 trailers.
 
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),

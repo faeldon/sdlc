@@ -72,7 +72,7 @@
         "## Confirm before write": "sha256:9b5320766c47b7ef",
         "## Signals worth watching": "sha256:9134ceb0391e178c",
         "## Signals worth watching > - **Age of open intents.**": "sha256:c6587bc95e8bd363",
-        "## Signals worth watching > - **Rework.**": "sha256:4bab06018e393d2c",
+        "## Signals worth watching > - **Rework.**": "sha256:0e93eb5a7525271a",
         "## Signals worth watching > - **Findings caught at ship vs. found later by someone else.**": "sha256:54c53d48bc335e77",
         "## Signals worth watching > - **Tier drift.**": "sha256:a656ebdb137d5236",
         "## Signals worth watching > - **Where a change's time and tokens go.**": "sha256:abe6d9a799ed2670",
@@ -122,7 +122,7 @@
   "templates": {
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:3ca66395f1541f47",
-    "ideas.md": "sha256:8a10397f7c439cd1",
+    "ideas.md": "sha256:b35cb3d8ae7c71ee",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:4c0f2bfd4c54e4a3",
     "nits.md": "sha256:52ba163c34fd84ed",

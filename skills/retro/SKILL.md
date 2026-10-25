@@ -48,7 +48,9 @@ What `retro` gives:
   of its problem, days open, files and lines, `release` (the first release tag holding it, null
   while none does: its users haven't had it yet), `serves` (the outcomes its intent named, `none`,
   or null for no line) and `moves` (its `**Moves O1:**` lines: what should change if it works).
-- `rework`: later changes that touched an earlier one's code within days.
+- `rework`: later changes that touched an earlier one's code within days, leaving out
+  `rework_common`: the files more than a third of the window's changes touched (once there are
+  six), each with how many, since sharing one of them says nothing.
 - `open`, `ideas` (seed count, oldest), `tiers`, `impacts`, and `releases` since `since`.
 - `nits`: the nits ship left open in `work/nits.md`, by theme, each theme's `count` and its
   oldest's date and `age_days`.
@@ -114,8 +116,11 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 2. **Architecture.** Structural problems the counts or the docs point at: one file or function
    doing several jobs, a boundary missing (something wired in where it should be behind an
    interface), the same logic in two places. Name the files and say what shape would fix it.
-3. **Process.** The process doc's signals, computed: change age, `rework`, the tier mix (tier
-   drift: is everything becoming Tier 2?), impacts per release. Say what each one says. Also
+   A code file in `rework_common` is one most changes had to touch: say whether that is a
+   boundary missing.
+3. **Process.** The process doc's signals, computed: change age, `rework` (naming what
+   `rework_common` left out), the tier mix (tier drift: is everything becoming Tier 2?),
+   impacts per release. Say what each one says. Also
    each `unmeasured` signal, and whether it's worth a seed to measure it. From `metrics`:
    - where a change's time goes (agent against the human's response, away and blocked);
    - how far stops are above `required` and `target`;

@@ -442,7 +442,8 @@ retrospective, and says which it can't.
 - **Age of open intents.** `/sdlc:status` prints it. An intent at `stage: plan` for a month is a
   decision nobody has made.
 - **Rework.** Changes that ship and need a follow-up fix within a week. A cluster means Stage 2 is
-  being skipped.
+  being skipped. A file more than a third of the window's changes touch is left out, once there are
+  six: sharing it says nothing, and the retrospective lists it apart as one most changes touch.
 - **Findings caught at ship vs. found later by someone else.** The ratio is what the review buys.
 - **Tier drift.** If everything is becoming Tier 2, the tier rule has stopped controlling overhead
   and needs re-drawing.

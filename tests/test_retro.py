@@ -132,8 +132,8 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     assert sdlc.cmd_retro(root) == 0
     out = json.loads(capsys.readouterr().out)
     assert set(out) >= {
-        "since", "changes", "dropped", "dropped_at_counts", "problems", "rework", "open",
-        "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
+        "since", "changes", "dropped", "dropped_at_counts", "problems", "rework", "rework_common",
+        "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
     }  # fmt: skip
     assert _state(root) == before
 
@@ -273,6 +273,34 @@ def test_sharing_only_the_docs_every_change_updates_is_not_rework(tmp_path: Path
     _close(root, "001-reopen-drafts", files=("CLAUDE.md", ".sdlc/SDLC.md", "a.py"))
     _close(root, "002-keep-one-draft", files=("CLAUDE.md", ".sdlc/SDLC.md", "b.py"))
     assert _retro(root)["rework"] == []
+
+
+def test_a_file_most_of_the_window_touches_is_common_not_rework(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _drop(root, "001-draft-sync", dropped="2026-10-02", files=("NEWS.md", "src/sync.py"))
+    _close(root, "002-reopen-drafts", closed="2026-10-03", files=("NEWS.md", "src/drafts.py"))
+    _close(root, "003-keep-one-draft", closed="2026-10-04", files=("NEWS.md", "src/drafts.py"))
+    _close(root, "004-draft-titles", closed="2026-10-05", files=("NEWS.md", "src/sync.py"))
+    _close(root, "005-draft-export", closed="2026-10-06", files=("NEWS.md", "src/export.py"))
+    _close(root, "006-draft-search", closed="2026-10-07", files=("src/search.py",))
+    out = _retro(root)
+    pairs = [(r["change"], r["reworks"], r["files"]) for r in out["rework"]]
+    # NEWS.md is in five of six, the dropped change counted; code two of them share is rework.
+    assert pairs == [
+        ("003-keep-one-draft", "002-reopen-drafts", ["src/drafts.py"]),
+        ("004-draft-titles", "001-draft-sync", ["src/sync.py"]),
+    ]
+    assert out["rework_common"] == [{"file": "NEWS.md", "changes": 5}]
+
+
+def test_a_window_too_small_to_say_what_is_common_counts_every_shared_file(tmp_path) -> None:
+    root = _repo(tmp_path)
+    slugs = ("reopen-drafts", "keep-one-draft", "draft-titles", "draft-export", "draft-search")
+    for n, slug in enumerate(slugs):
+        _close(root, f"00{n + 1}-{slug}", closed=f"2026-10-0{n + 2}", files=("NEWS.md",))
+    out = _retro(root)
+    assert len(out["rework"]) == 10, "five changes on one file make every pair"
+    assert out["rework_common"] == []
 
 
 def test_counts_tiers_impacts_and_what_history_cannot_measure(tmp_path: Path) -> None:

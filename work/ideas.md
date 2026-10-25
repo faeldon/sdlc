@@ -57,13 +57,6 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-24] [seed] Rework ignores shared docs and the setup record
-
-The first retrospective's rework list held 12 pairs, all same-day, all from `defaults/SDLC.md` or
-`.sdlc/setup.json`: files nearly every change edits. None was a follow-up fix, so the signal the
-process doc watches says nothing. Count rework on code and tests, or leave out the files most
-changes touch. Raised by the retrospective of 2026-10-24.
-
 ## [2026-10-24] [seed] A change's size counts every commit on its branch
 
 `retro` reads a change's files and lines from the one commit before its `Close`, so 002, two
@@ -187,3 +180,9 @@ triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` s
 2026-10-25.
 
 After: "A bugs register beside the ideas register"
+
+## [2026-10-25] [seed] Rework pairs on files, too coarse for a busy week
+
+With the common files left out (021), the window of 14 changes still holds 24 rework pairs,
+mostly same-week changes sharing a skill or a test file, not follow-up fixes. Pair on the hunks
+a later change rewrites, or count only changes that fix a bug. See work/021-rework-shared-files/.

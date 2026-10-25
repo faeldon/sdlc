@@ -3657,6 +3657,10 @@ RETRO_PREFIX = "Retrospective "
 RETRO_RE = re.compile(r"^Retrospective (\d{4}-\d{2}-\d{2})$")
 # A later change touching an earlier one's files within this many days reads as rework.
 REWORK_DAYS = 7
+# A file touched by more than this share of the window's changes is common to them, not rework:
+# sharing it says nothing. Only once the share holds a pair (six changes, at a third), since in a
+# smaller window the two changes of any pair would already be more than it.
+REWORK_COMMON_SHARE = 1 / 3
 # Each evidence command's limits: seconds before it's stopped, and characters of output kept.
 EVIDENCE_TIMEOUT = 60
 EVIDENCE_LIMIT = 20_000
@@ -4348,11 +4352,18 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             f for f in files if not f.startswith("work/") and f not in every_change
         }
         rec["files"] = len(files)
+    counts = Counter(f for files in touched.values() for f in files)
+    window = len(changes) + len(dropped)
+    common = (
+        {f: n for f, n in counts.items() if n > window * REWORK_COMMON_SHARE}
+        if window * REWORK_COMMON_SHARE >= 2
+        else {}
+    )
     rework = []
     for i, earlier in enumerate(changes):
         for later in changes[i + 1 :]:
             gap = _days_between(earlier["close_date"], later["close_date"])
-            shared = sorted(touched[earlier["name"]] & touched[later["name"]])
+            shared = sorted(touched[earlier["name"]] & touched[later["name"]] - common.keys())
             if gap is not None and gap <= REWORK_DAYS and shared:
                 rework.append(
                     {"change": later["name"], "reworks": earlier["name"], "days": gap,
@@ -4362,7 +4373,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     for gone in dropped:
         for later in changes:
             gap = _days_between(gone["drop_date"], later["close_date"])
-            shared = sorted(touched[gone["name"]] & touched[later["name"]])
+            shared = sorted(touched[gone["name"]] & touched[later["name"]] - common.keys())
             if gap is not None and 0 <= gap <= REWORK_DAYS and shared:
                 rework.append(
                     {"change": later["name"], "reworks": gone["name"], "days": gap,
@@ -4384,6 +4395,10 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "dropped_cost": dropped_cost(dropped),
         "problems": problems,
         "rework": rework,
+        "rework_common": [
+            {"file": f, "changes": n}
+            for f, n in sorted(common.items(), key=lambda c: (-c[1], c[0]))
+        ],
         "open": [
             {
                 "name": f"{r['id']}-{r['slug']}",
