@@ -85,8 +85,10 @@ def _close(
     files: tuple[str, ...] = (),
     intent: str | None = None,
     idea: str = "",
+    later: tuple[str, ...] = (),
 ) -> None:
-    """A change's own commit, with its intent and the files it touches, then its `Close`."""
+    """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
+    is a second commit on the change, touching those files, before it closes."""
     nid, slug = name.split("-", 1)
     folder = root / "work" / name
     folder.mkdir(parents=True)
@@ -103,6 +105,13 @@ def _close(
     when = f"{closed}T12:00:00"
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}", when=when)
+    if later:
+        for rel in later:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{path.read_text() if path.exists() else ''}{name}\n", "utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", f"follow up {name}", when=when)
     _git(root, "rm", "-r", "-q", f"work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}", when=when)
 
@@ -168,6 +177,38 @@ def test_each_change_carries_its_fields_and_problem(tmp_path: Path) -> None:
     assert change["problem"] == "Drafts reopen as empty when saved twice."
     assert change["files"] == 3  # its intent too
     assert change["lines"] >= 3
+
+
+def test_a_change_is_sized_by_every_commit_on_its_branch(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/a.py", "src/b.py"), later=("src/c.py",))
+    (change,) = _retro(root)["changes"]
+    # The intent and a.py, b.py from the first commit, c.py from the second: not c.py alone.
+    assert change["files"] == 4 and change["lines"] > 3
+
+
+def test_rework_sees_a_file_only_an_earlier_commit_touched(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",), later=("src/other.py",))
+    _close(root, "002-keep-one-draft", closed="2026-10-04", files=("src/drafts.py",))
+    pairs = [(r["change"], r["reworks"], r["files"]) for r in _retro(root)["rework"]]
+    assert pairs == [("002-keep-one-draft", "001-reopen-drafts", ["src/drafts.py"])]
+
+
+def test_a_change_with_no_start_has_no_size(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",))
+    _close(root, "002-keep-one-draft", closed="2026-10-04", files=("src/drafts.py",))
+    monkeypatch.setattr(sdlc, "_change_base", lambda *a: None)
+    out = _retro(root)
+    assert all(c["files"] is None and c["lines"] is None for c in out["changes"])
+    assert [p for p in out["problems"] if "size is unknown" in p] == [
+        "001-reopen-drafts: no commit holds work/001-reopen-drafts/intent.md, so its size is "
+        "unknown",
+        "002-keep-one-draft: no commit holds work/002-keep-one-draft/intent.md, so its size is "
+        "unknown",
+    ]
+    assert len(out["rework"]) == 1, "the last commit still says what each change touched"
 
 
 def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:

@@ -1031,7 +1031,12 @@ def nits_summary(nits: list[dict], today: date) -> dict:
     for n in nits:
         t = themes.setdefault(n["theme"], {"count": 0, "oldest": None})
         t["count"] += 1
-        if n["raised"] and (t["oldest"] is None or n["raised"] < t["oldest"]):
+        # As dates: a malformed one, which `check` reports, is never the oldest.
+        try:
+            raised = date.fromisoformat(n["raised"])
+        except (TypeError, ValueError):
+            continue
+        if t["oldest"] is None or raised < date.fromisoformat(t["oldest"]):
             t["oldest"] = n["raised"]
     for t in themes.values():
         t["age_days"] = _age_days({"created": t["oldest"] or ""}, today)
@@ -2100,12 +2105,13 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     }
 
 
-def _change_base(main: Path, branch: str) -> str | None:
+def _change_base(main: Path, branch: str, rev: str | None = None) -> str | None:
     """Where a change starts: the parent of the commit that first holds its intent (ship's, since
     nothing commits before ship), so the answer is the same before close fast-forwards `main` and
-    after, and on a rerun. None when no commit holds it."""
+    after, and on a rerun. `rev` is the change's own commit once its branch is gone, as retro
+    reads it. None when no commit holds it."""
     added = _git(
-        main, "log", "--diff-filter=A", "--format=%H", "--reverse", branch, "--",
+        main, "log", "--diff-filter=A", "--format=%H", "--reverse", rev or branch, "--",
         f"work/{branch}/intent.md",
     )  # fmt: skip
     if not added:
@@ -4350,7 +4356,17 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     every_change = {*cfg["docs"]["context"], cfg["docs"]["process"], cfg["docs"]["policy"]}
     for rec in changes:
         problems += rec.pop("problems")
-        numstat = _git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
+        # A change ships as one commit or several, and its size is all of them: its branch from
+        # where it started. Without that start, the last commit still says what it touched.
+        base = _change_base(home, rec["name"], rec["sha"])
+        if base:
+            numstat = _git(home, "diff", "--numstat", "--no-renames", base, rec["sha"]) or ""
+        else:
+            numstat = _git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
+            name = rec["name"]
+            problems.append(
+                f"{name}: no commit holds work/{name}/intent.md, so its size is unknown"
+            )
         files, lines = [], 0
         for row in numstat.splitlines():
             parts = row.split("\t")
@@ -4362,8 +4378,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             f for f in files if not f.startswith("work/") and f not in every_change
         }
         rec.update(
-            files=len(files),
-            lines=lines,
+            files=len(files) if base else None,
+            lines=lines if base else None,
             days_open=_days_between(rec["created"], rec["close_date"]),
             release=_release_of(home, cfg, rec["sha"]),
         )

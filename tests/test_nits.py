@@ -182,6 +182,12 @@ def test_retro_counts_open_nits_by_theme_and_age(tmp_path: Path) -> None:
     assert sdlc.retro(empty, sdlc.load_config(empty)[0])["nits"] == {"open": 0, "themes": {}}
 
 
+def test_a_malformed_raised_date_is_never_a_themes_oldest() -> None:
+    nits = [{"theme": "x", "raised": "2026-00-01"}, {"theme": "x", "raised": "2026-10-04"}]
+    got = sdlc.nits_summary(nits, date(2026, 10, 24))
+    assert got["themes"]["x"] == {"count": 2, "oldest": "2026-10-04", "age_days": 20}
+
+
 def test_this_repos_register_reads_clean() -> None:
     nits, problems = sdlc.nit_entries(ROOT)
     assert problems == []

@@ -57,12 +57,6 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-24] [seed] A change's size counts every commit on its branch
-
-`retro` reads a change's files and lines from the one commit before its `Close`, so 002, two
-commits and about 1,700 lines on its branch, reads as 1 file and 9 lines. Count the branch's whole
-diff against the base it was shipped on. Raised by the retrospective of 2026-10-24.
-
 ## [2026-10-25] [seed] A process map of the three loops, kept true by the gate
 
 A map of the change loop (intent → spec → plan → build → ship → close), the release loop (release

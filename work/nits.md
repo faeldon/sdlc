@@ -29,14 +29,6 @@ The set is built from two unpacked tuples where one set literal reads plainer.
 
 The WAIT variant and a Step 1 line added for `after_bump`.
 
-## 012-1 [robustness] Retro's oldest nit is picked by comparing dates as text
-- **raised:** 2026-10-25 by 012-nits-register (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** low
-
-`nits_summary` compares `raised` strings, so an entry with a malformed date (which `check` already
-reports) can be taken as its theme's oldest, leaving `age_days` null.
-
 ## 019-1 [robustness] A mistyped After: title makes a seed "next in series"
 
 - **raised:** 2026-10-25 by 019-status-next-work (correctness)
@@ -81,3 +73,13 @@ call it several times; nothing is slow yet, but one resolved value could be pass
 
 `restore()` after a later failure unstages it into an untracked file, but `untracked` was taken
 at after-bump, so the report never names it.
+
+## 023-1 [robustness] A change sized from an intent committed to main early counts others' commits
+- **raised:** 2026-10-25 by 023-branch-size (correctness)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+`_change_base` takes the parent of the commit that first added the intent. If that commit landed
+on main before other changes closed (an intent committed outside its branch), the range from it
+to the change's commit spans their commits too, in `retro`'s size and in close's `_change_diff`.
+A `Close` or `Drop` commit inside the range would show it.

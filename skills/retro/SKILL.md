@@ -45,7 +45,8 @@ What `retro` gives:
 
 - `since`: the last retrospective (null: the whole history is in range).
 - `changes`: each change closed since then, with id, title, tier, impact, the first paragraph
-  of its problem, days open, files and lines, `release` (the first release tag holding it, null
+  of its problem, days open, files and lines (over every commit on its branch; null, with a
+  problem, when its start can't be found), `release` (the first release tag holding it, null
   while none does: its users haven't had it yet), `serves` (the outcomes its intent named, `none`,
   or null for no line) and `moves` (its `**Moves O1:**` lines: what should change if it works).
 - `rework`: later changes that touched an earlier one's code within days, leaving out
