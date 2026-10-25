@@ -148,3 +148,36 @@ Not an automatic `after_close` command: `close_cleanup` stays the person's to ru
 on the old one. `commands.worktree_setup` gets `{worktree}` but not `{main}`, so a host linking
 untracked data from the main checkout works the path out from `git rev-parse --git-common-dir`.
 Tier 1 together. Raised 2026-10-25 by a host.
+
+## [2026-10-25] [seed] A local channel for bug reports and feature requests from other sessions
+
+Working locally across several repos, a session in a host that hits a plugin bug or wants a
+feature has no channel but the person: they copy what it wrote into the plugin's session, which
+files it by hand. Give it one: a host session sends a report (what happened, the repro, the
+plugin version, the host's change) to a live session working on the plugin, by cross-session
+message or a drop folder the plugin's session reads, and that session triages it into a seed or a
+bug entry behind one approval. A report never names the host in what lands here (the repo's
+nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
+and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
+
+## [2026-10-25] [seed] A bugs register beside the ideas register
+
+A bug isn't a seed: it has a severity, a repro and something already broken, and wants triage
+before it waits its turn, where a seed waits until someone wants it. Weigh a `work/bugs.md` shaped
+like `work/nits.md` (`## <id> [<severity>] <title>`, `reported`, `repro`, `paths`, read as text by
+`sdlc.py`, written by skills behind a WAIT), against tagging bugs inside `work/ideas.md`
+(`[bug]`, one register, no new reader, but no severity to sort by and nothing for status or retro
+to count apart). Feature requests stay seeds either way. Then: what status and retro show
+(open bugs by severity, age), how `/sdlc:intent` promotes one, and whether a fix's ship retires
+it as it does a nit. Raised 2026-10-25.
+
+## [2026-10-25] [seed] GitHub issues as the intake for bugs and requests, in hosts too
+
+Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
+session through `gh`) is the remote form of the local channel: triage reads open issues that no
+change claims (no `sdlc` archive label), and files each as a seed or a bug entry, or links it to
+the change that takes it on. This serves hosts as much as the plugin: a host's own users file
+issues, and its sessions triage them the same way, so the design is a host feature first, with
+this repo as its first user. Phases: the plugin's own local intake, the register, then GitHub
+triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` skill). Raised
+2026-10-25.
