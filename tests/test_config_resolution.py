@@ -196,7 +196,11 @@ def test_a_review_in_work_is_read_in_the_checkout_it_runs_in(tmp_path: Path, cap
     code, out = _config(tree, capsys)
     assert code == 0
     assert out["docs"]["review"] == {"path": "work/REVIEW.md", "exists": True, "source": "host"}
-    assert out["work"] == {"dir": str(tree / "work"), "ignored": False}
+    assert out["work"] == {
+        "dir": str(tree / "work"),
+        "ignored": False,
+        "register": str(tree / "work" / "inbox.md"),
+    }
 
 
 def test_an_unknown_key_or_wrong_type_is_a_warning(tmp_path: Path, capsys):

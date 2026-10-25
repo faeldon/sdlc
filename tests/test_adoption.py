@@ -84,7 +84,11 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert out["config_file"] is None
     assert all(v is None for v in out["commands"].values())
     assert out["docs"]["review"]["source"] == "plugin"
-    assert out["work"] == {"dir": str(root / "work"), "ignored": False}
+    assert out["work"] == {
+        "dir": str(root / "work"),
+        "ignored": False,
+        "register": str(root / "work" / "inbox.md"),
+    }
     assert out["git"] == {"base": trunk, "base_source": "detected"}
 
     def main_checkout() -> tuple[str, list[str]]:

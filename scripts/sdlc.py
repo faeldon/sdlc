@@ -513,7 +513,13 @@ def cmd_config(root: Path) -> int:
     out = {
         "config_file": f"{HOST_DIR}/config.toml" if cfg_file.is_file() else None,
         # This checkout's: a change's folder is committed on its branch, in its worktree.
-        "work": {"dir": str(work_dir(root)), "ignored": ignored},
+        # The file entries go in: `work/inbox.md`, or `work/ideas.md` until a repo migrates, so
+        # a skill never starts a second register beside the one being read.
+        "work": {
+            "dir": str(work_dir(root)),
+            "ignored": ignored,
+            "register": str(register_path(work_dir(root))),
+        },
         "commands": cfg["commands"],
         "docs": docs,
         # Whether close can archive here, and why not when it can't; no network is touched.
@@ -763,11 +769,13 @@ def load_change(
     rec["fixes"] = frontmatter_list(text, "fixes") or []
     if rec["fixes"] and rec["stage"] not in ("shipped", "dropped"):
         open_bugs = {e["id"] for e in inbox_entries(path.parent.parent) if is_bug(e)}
-        rec["errors"] += [
-            f"fixes: {f!r} isn't a [bug] in work/{register_path(path.parent).name}"
-            for f in rec["fixes"]
-            if f not in open_bugs
-        ]
+        for f in rec["fixes"]:
+            if not ENTRY_ID_RE.match(f):
+                rec["errors"].append(f"fixes: {f!r} isn't an id: name each bug by its YYYY-MM-DD-n")
+            elif f not in open_bugs:
+                rec["errors"].append(
+                    f"fixes: {f!r} isn't a [bug] in work/{register_path(path.parent).name}"
+                )
     return rec
 
 
@@ -1901,6 +1909,13 @@ def cmd_migrate_inbox(root: Path) -> int:
         refusals.append(f"commit or put back these first: {', '.join(dirty)}")
     if (work / OLD_INBOX).is_file() and (work / INBOX).is_file():
         refusals.append(f"both work/{OLD_INBOX} and work/{INBOX} exist: merge them by hand")
+    # Every file it rewrites read first, so one that can't be is refused before anything moves.
+    for path in touched:
+        try:
+            if path.is_file():
+                path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            refusals.append(f"{_shown(path, root)} can't be read: {e}")
     old_nits: list[dict] = []
     if (work / OLD_NITS).is_file():
         try:
@@ -1910,6 +1925,13 @@ def cmd_migrate_inbox(root: Path) -> int:
         refusals += [f"work/{OLD_NITS}: {p}" for p in problems]
     if refusals:
         return emit(1)
+    # An open change in another worktree keeps its title `idea:`: its seed reads `vanished`, not
+    # `shipped`, in a milestone's verdicts once it lands against a `Groups:` line rewritten here.
+    report["elsewhere"] = [
+        d.name
+        for d in change_dirs(root)
+        if d.parent.resolve() != work.resolve() and _stage(d) not in ("shipped", "dropped")
+    ]
 
     def tracked(path: Path) -> bool:
         return bool(_git(tree, "ls-files", "--", _shown(path.resolve(), tree.resolve())))
@@ -2197,7 +2219,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
         print(f"  no seed to remove: work/{ideas.name} has no entry named {entry_ref(idea)[1]!r}")
     # Each bug the change fixes leaves with it, found afresh after every deletion.
     for fixed in frontmatter_list(stamped, "fixes") or []:
-        lines = _seed_lines(ideas, fixed)
+        lines = _seed_lines(ideas, fixed) if ENTRY_ID_RE.match(fixed) else []
         if lines:
             _drop_seed(ideas, lines[0])
             print(f"  removed bug {fixed} from work/{ideas.name}")
@@ -5029,7 +5051,10 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
     history = {c["name"]: c for c in closed_changes(home, None, trunk, read=True)}
     escapes: dict[str, dict] = {}
     unattributed = 0
-    for source in [*fixed, *({"introduced_by": b["introduced_by"]} for b in open_bugs)]:
+    opened = ({"introduced_by": b["introduced_by"], "reported": b["reported"]} for b in open_bugs)
+    for source in [*fixed, *opened]:
+        if not in_window(source.get("reported")):
+            continue
         by = source.get("introduced_by")
         if not by or by == "unknown":
             unattributed += 1
@@ -5373,7 +5398,20 @@ def cmd_readiness(root: Path) -> int:
     else:
         item("work", "missing", IGNORED, required=True)
     todo = inbox_migration(root)
-    if todo:
+    elsewhere = [
+        d.name
+        for d in change_dirs(root)
+        if d.parent.resolve() != work_dir(root).resolve()
+        and _stage(d) not in ("shipped", "dropped")
+    ]
+    if todo and elsewhere:
+        item(
+            "inbox",
+            "warn",
+            "; ".join(todo) + ": `sdlc.py migrate-inbox` does it, best with no change open; "
+            f"{', '.join(elsewhere)} would keep a title `idea:`",
+        )
+    elif todo:
         item("inbox", "warn", "; ".join(todo) + ": `sdlc.py migrate-inbox` does it")
     else:
         item("inbox", "ok", f"work/{INBOX} is the register, every entry with an id")

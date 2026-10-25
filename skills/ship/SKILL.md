@@ -303,18 +303,22 @@ them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
 
+**The register is the file `config`'s `work.register` names:** `work/inbox.md`, or
+`work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
+second file beside it, which would hide every entry the first one holds.
+
 First, the undone items, exactly as approved:
 
-- **Carried:** append each seed to `work/inbox.md` as `## [<id>] [seed] <its title>`, with the id
-  Step 4 took for it. If there's no `work/inbox.md`, `Write` it first from `templates["inbox.md"]`
-  in `config`, as it is, then append. Its body says what is left to do and points at
+- **Carried:** append each seed to the register as `## [<id>] [seed] <its title>`, with the id
+  Step 4 took for it. If it doesn't exist, `Write` it at that path first from
+  `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do and points at
   `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
   `- [x] <text> → seed: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
 
-Then the nits, exactly as approved: append each new entry to `work/inbox.md` after its last one,
-and delete each retired entry, heading to the line before the next `## `. If there's no
-`work/inbox.md`, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then append.
+Then the nits, exactly as approved: append each new entry to the register after its last one,
+and delete each retired entry, heading to the line before the next `## `. If it doesn't exist,
+`Write` it at that path first from `templates["inbox.md"]` in `config`, as it is, then append.
 
 Then make the approved context edits, exactly as shown, in this checkout: they land in the same
 commit as the code they describe.

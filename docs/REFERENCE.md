@@ -243,7 +243,9 @@ reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers
 over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
 into `[nit]` entries, and rewrites the titles that name an open entry to its id, in `After:`, the
 direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
-of those files has uncommitted edits. The findings `/sdlc:ship` approved unfixed are entries there too,
+of those files has uncommitted edits, or one it can't read. Run it with no change open: one in
+another worktree keeps a title `idea:`. Until a repo migrates, `sdlc.py config`'s `work.register`
+names `work/ideas.md`, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
 tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
 lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
 the same paths, retired by the ship whose diff fixes it, and counted by theme and age by

@@ -222,8 +222,11 @@ it again and ask again.
 ## Step 6 — Write and record it
 
 `Write` the direction doc at the `docs.direction` path, `Edit` the product doc's outcome lines as
-approved, and `Edit` `work/inbox.md` to append the seeds after its last entry. If it doesn't
-exist, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then append. Then:
+approved, and `Edit` the register to append the seeds after its last entry. If it doesn't
+exist, `Write` it at that path first from `templates["inbox.md"]` in `config`, as it is, then
+append. **The register is the file `config`'s `work.register` names:** `work/inbox.md`, or
+`work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
+second file beside it, which would hide every entry the first one holds. Then:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit

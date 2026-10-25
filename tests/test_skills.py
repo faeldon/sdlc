@@ -78,6 +78,7 @@ READS_CONFIG = {
         "docs.project",
         "docs.product",
         "git.base",
+        "work.register",
     ],
     "sdlc:spec": [
         "docs.policy",
@@ -95,6 +96,7 @@ READS_CONFIG = {
         "docs.review",
         "docs.context",
         "git.base",
+        "work.register",
     ],
     "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target", "git.base"],
     "sdlc:drop": ["archive.target", "git.base"],
@@ -109,7 +111,7 @@ READS_CONFIG = {
     ],
     "sdlc:publish": ["release.remote", "release.publish", "release.prepare", "git.base"],
     "sdlc:health": ["commands.scan", "docs.health"],
-    "sdlc:bug": ["docs.process", "git.base"],
+    "sdlc:bug": ["docs.process", "git.base", "work.register"],
     "sdlc:retro": [
         "docs.process",
         "docs.policy",
@@ -117,6 +119,7 @@ READS_CONFIG = {
         "docs.context",
         "docs.product",
         "retro.evidence",
+        "work.register",
     ],
     "sdlc:setup": [
         "commands.check",

@@ -364,3 +364,49 @@ def test_readiness_says_a_repo_has_registers_to_move(tmp_path: Path, capsys) -> 
     sdlc.cmd_readiness(root)
     item = next(i for i in json.loads(capsys.readouterr().out)["items"] if i["name"] == "inbox")
     assert item["status"] == "warn" and "migrate-inbox" in item["detail"]
+
+
+def test_config_names_the_register_a_skill_writes_to(tmp_path: Path, capsys) -> None:
+    """Under the shim the writers append to `work/ideas.md`: a second file beside it would hide
+    every entry the first holds."""
+    root = _old_layout(tmp_path)
+    sdlc.cmd_config(root)
+    assert json.loads(capsys.readouterr().out)["work"]["register"] == str(
+        root / "work" / "ideas.md"
+    )
+    assert _migrate(root, capsys)[0] == 0
+    sdlc.cmd_config(root)
+    assert json.loads(capsys.readouterr().out)["work"]["register"] == str(
+        root / "work" / "inbox.md"
+    )
+
+
+def test_migrate_refuses_a_register_it_cant_read_before_moving_it(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    (root / "work" / "ideas.md").write_bytes(b"# Ideas\n\n## [2026-10-01] [seed] Caf\xe9\n")
+    _git(root, "commit", "-qam", "not utf-8")
+    code, out = _migrate(root, capsys)
+    assert code == 1 and any(r.startswith("work/ideas.md can't be read") for r in out["refusals"])
+    assert (root / "work" / "ideas.md").is_file() and not (root / "work" / "inbox.md").exists()
+    assert _git(root, "status", "--short") == ""
+
+
+def test_migrate_and_readiness_name_a_change_open_elsewhere(tmp_path: Path, capsys) -> None:
+    """Its `idea:` can't be rewritten from here, so its seed would read `vanished`, not
+    `shipped`, against a rewritten `Groups:` line: best migrated with no change open."""
+    root = _old_layout(tmp_path)
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "ignore worktrees")
+    tree = root / ".claude" / "worktrees" / "002-other"
+    _git(root, "worktree", "add", "-q", "-b", "002-other", str(tree))
+    (tree / "work" / "002-other").mkdir(parents=True)
+    (tree / "work" / "002-other" / "intent.md").write_text(
+        OPEN_INTENT.replace("id: 001", "id: 002").replace("slug: share-drafts", "slug: other"),
+        encoding="utf-8",
+    )
+    sdlc.cmd_readiness(root)
+    item = next(i for i in json.loads(capsys.readouterr().out)["items"] if i["name"] == "inbox")
+    assert "best with no change open" in item["detail"] and "002-other" in item["detail"]
+    code, out = _migrate(root, capsys)
+    assert code == 0 and out["elsewhere"] == ["002-other"]

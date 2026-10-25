@@ -139,29 +139,6 @@ bug entry behind one approval. A report never names the host in what lands here 
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 
-## [2026-10-25-10] [building] A bugs register beside the ideas register
-
-Building in work/024-bugs-register/.
-
-A bug isn't a seed: it has a severity, a repro and something already broken, and wants triage
-before it waits its turn, where a seed waits until someone wants it. Weigh a `work/bugs.md` shaped
-like `work/nits.md` (`## <id> [<severity>] <title>`, `reported`, `repro`, `paths`, read as text by
-`sdlc.py`, written by skills behind a WAIT), against tagging bugs inside `work/ideas.md`
-(`[bug]`, one register, no new reader, but no severity to sort by and nothing for status or retro
-to count apart). Feature requests stay seeds either way. Then: what status and retro show
-(open bugs by severity, age), how `/sdlc:intent` promotes one, and whether a fix's ship retires
-it as it does a nit. Raised 2026-10-25.
-
-Track fixes through the change cycle, for the retrospective. A change that fixes a bug names it
-(`fixes: [B3]` in the intent, set when `/sdlc:intent` promotes the entry), ship retires the entry,
-and close writes an `Sdlc-Fixes:` trailer (extending the trailer contract, not redefining it), so
-history keeps the link. Triage may record `introduced_by:` the change that let the bug through:
-that splits escaped bugs from retro's rework, which can't tell a planned follow-up from a defect.
-Retro then counts bugs reported and fixed in its window by severity, time from report to fix, open
-bugs by age, and escapes per introducing change against its tier; the product doc may own a
-measure such as escaped bugs per release. This leans the choice above toward the separate
-register: tags in `work/ideas.md` give retro nothing to count or link a fix to. Raised 2026-10-25.
-
 ## [2026-10-25-11] [seed] GitHub issues as the intake for bugs and requests, in hosts too
 
 Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
@@ -180,17 +157,19 @@ After: 2026-10-25-10
 Retro pairs any two changes closed within a week that share a file. With the common files left
 out (021), the 17 changes since the last retrospective still hold 42 pairs, nearly all same-week
 changes adding to a shared skill or test file, not one fixing another. Reframe it in two parts:
-- **Declared, the signal.** A later change names what it fixes, in a `fixes:` frontmatter line
-  (one or more change ids, read as text like `depends_on:`), which intent asks for when the
-  problem traces to an earlier change. Retro counts these links, whatever the gap in days, and
-  `check` refuses an id that names no change.
+- **Declared, the signal.** A later change names the earlier changes it reworks, in a `reworks:`
+  frontmatter line (one or more change ids, read as text like `depends_on:`), which intent asks
+  for when the problem traces to an earlier change. Retro counts these links, whatever the gap in
+  days, and `check` refuses an id that names no change.
 - **Inferred, the cross-check.** Lines an earlier change added that a later one modifies or
   deletes within the window, found by blaming the earlier change's hunks. Appending to a shared
-  file no longer counts; replacing what the earlier change wrote does. A hit with no `fixes:`
+  file no longer counts; replacing what the earlier change wrote does. A hit with no `reworks:`
   link is a question for the retrospective (an undeclared fix, or a planned follow-up), never a
   count.
 The file pairs, `REWORK_DAYS` as a match rule and `rework_common` go. Close's in-change rework
-(`Sdlc-Rework`) is untouched. Pairs with the bugs register, whose fixes are declared the same way.
+(`Sdlc-Rework`) is untouched. Its own key, not `fixes:`, which names the inbox's `[bug]` entries a
+change fixes (024): a change can have both, a bug it fixes and the change that let it through,
+which that bug's `Introduced by:` line already records, so retro can cross-check the two.
 See work/021-rework-shared-files/.
 
 ## [2026-10-25-19] [seed] Push at close and at release, not only at publish
@@ -335,3 +314,15 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 023-branch-size (correctness)
+
+## [2026-10-25-22] [nit] A test that close alone records fixes greps the source
+
+`test_only_a_close_records_fixes_never_a_drop` checks `inspect.getsource` for `fix_trailers(`, so
+only a rename or a revert fails it. Close a dropped change that has `fixes:` and assert its `Drop`
+commit carries no `Sdlc-Fixes:` line.
+
+Theme: tests
+Paths: tests/test_bugs.py
+Cost: M
+Value: low
+Raised by: 024-bugs-register (correctness)

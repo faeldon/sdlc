@@ -49,7 +49,8 @@ updated: 2026-10-25
    takes ids from it after its `base`. Tests: another worktree's id skipped, a same-day deleted id
    skipped, a new date starts at 1.
 6. `check` reports an id used twice.
-7. A reference is an id or a title, by shape, in `idea:`, `fixes:`, `After:` and `Groups:`: an
+7. A reference is an id or a title, by shape, in `idea:`, `After:` and `Groups:` (`fixes:` takes
+   ids alone, so a fix's trailer always names its bug by one): an
    unquoted `YYYY-MM-DD-n` is an id, a quoted string a title, a bare `006` a change id (on
    `Groups:` lines entry ids are taken first, so `2026` is never read as one). Ids match ids, titles
    match titles; title references are read for good, since shipped intents in history carry them

@@ -413,3 +413,31 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         "escapes": [],
         "unattributed": 0,
     }
+
+
+def test_retro_counts_escapes_only_from_its_window(tmp_path: Path) -> None:
+    """A bug reported before the last retrospective was counted there, and isn't again."""
+    root = _repo(tmp_path)
+    _close(root, "001-start", "src/drafts.py")
+    _inbox(
+        root,
+        _bug("2026-09-01-1", "Old", extra="Introduced by: 001-start\n"),
+        _bug("2026-09-02-1", "Old and unattributed"),
+        _bug("2026-10-10-1", "New", extra="Introduced by: 001-start\n"),
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Retrospective 2026-10-01")
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out["escapes"] == [{"change": "001-start", "bugs": 1, "tier": 1}]
+    assert out["unattributed"] == 0 and out["reported"] == {"high": 1}
+    assert len(out["open"]) == 3, "every open bug is still listed by age"
+
+
+def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
+    _fixing(root, '"One"')
+    errors = sdlc.analyze(root)["open"][0]["errors"]
+    assert "fixes: 'One' isn't an id: name each bug by its YYYY-MM-DD-n" in errors
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert "no bug to remove" in capsys.readouterr().out
+    assert "2026-10-01-1" in (root / "work" / "inbox.md").read_text(encoding="utf-8")
