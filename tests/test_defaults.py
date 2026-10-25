@@ -216,10 +216,10 @@ def test_every_shipped_file_has_the_reader_its_folder_promises(tmp_path: Path, c
 
 def test_the_inbox_template_shows_the_heading_the_script_reads() -> None:
     note = " ".join(_note(_text("templates/inbox.md")))
-    form = re.search(r"`(## \[YYYY-MM-DD\] \[seed\] <title>)`", note)
+    form = re.search(r"`(## \[YYYY-MM-DD-n\] \[seed\] <title>)`", note)
     assert form, "the note names the seed heading form"
-    heading = form.group(1).replace("YYYY-MM-DD", "2026-10-24").replace("<title>", "A seed")
-    assert sdlc.ENTRY_RE.match(heading)
+    heading = form.group(1).replace("YYYY-MM-DD-n", "2026-10-24-1").replace("<title>", "A seed")
+    assert sdlc._heading_entry(heading)["id"] == "2026-10-24-1"
     assert not [line for line in _text("templates/inbox.md").splitlines() if line.startswith("## ")]
 
 

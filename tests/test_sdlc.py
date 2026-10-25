@@ -1882,7 +1882,7 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
     before = (d / "intent.md").read_text(encoding="utf-8")
     assert sdlc.cmd_ship(root, "001") == 1
     err = capsys.readouterr().err
-    assert "2 entries titled 'Reopen drafts'" in err and "lines 9, 18" in err
+    assert "2 entries named 'Reopen drafts'" in err and "lines 9, 18" in err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
     assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
     assert _staged(root) == []

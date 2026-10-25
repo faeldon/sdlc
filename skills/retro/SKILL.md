@@ -9,6 +9,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
 disable-model-invocation: true
 ---
 
@@ -159,16 +160,16 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it. Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each milestone says what is true when it's done and has one `Groups:`
-   line naming its changes and seeds. Then say what the next **major** release would contain (the
+   line naming its changes and seeds, each seed by its id. Then say what the next **major** release would contain (the
    process doc's `impact:` table: users have to change what they do), or that none is planned.
 
 ## Step 3 — Give each finding a disposition
 
 Every finding ends in exactly one of these, or it doesn't go in the report:
 
-- **Seed**: a `work/inbox.md` entry, `## [YYYY-MM-DD] [seed] Title`, with a short paragraph: the
+- **Seed**: a `work/inbox.md` entry, `## [<id>] [seed] Title`, with a short paragraph: the
   problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD." A finding that comes in
-  phases is one seed per phase, each later one with an `After: "<earlier seed's title>"` line, so
+  phases is one seed per phase, each later one with an `After: <earlier seed's id>` line, so
   `/sdlc:status` puts forward only the phase that's next.
 - **Intent**: a proposed title for `/sdlc:intent`, for one that needs a decision now. Don't open it:
   that skill has its own gate.
@@ -179,9 +180,15 @@ A finding that duplicates an open change (in `open`) or an existing seed is drop
 ## Step 4 — Draft and show it
 
 Draft the whole direction doc from `templates["direction.md"]` in `config`, every section filled
-and no `<` prompt line left, and every new seed exactly as it will be appended. Every id the
-current doc has open is still there, open or struck with its status; one already struck may be
-left out. With a product doc, draft its outcome lines the same way: each open one carried or
+and no `<` prompt line left, and every new seed exactly as it will be appended, with its id. Take
+the ids for all of them in one call, `<N>` being how many:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
+```
+
+Every id the current doc has open is still there, open or struck with its status; one already
+struck may be left out. With a product doc, draft its outcome lines the same way: each open one carried or
 struck with its status, new ones numbered from `product.next_ids` with a short bold name
 (`- O5. **<name>.** …`), and every other line of it
 left exactly as it is. A change to its users, problem, measures or bets is the human's: propose it

@@ -129,7 +129,7 @@ impact:            # settled by /sdlc:ship: major | minor | patch | none
 stage: plan        # plan | spike | design | build | test | ship | shipped | dropped
 created: 2026-10-17
 updated: 2026-10-17
-idea:              # optional backlink: the title of a work/inbox.md seed
+idea:              # optional backlink: the id of a work/inbox.md entry (a title, before ids)
 depends_on:        # optional: the open changes this one waits on, by id, e.g. [003]
 dropped_at:        # stamped by /sdlc:drop: the stage a dropped change reached
 ```

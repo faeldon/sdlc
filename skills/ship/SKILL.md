@@ -14,6 +14,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks *)'
@@ -291,11 +292,16 @@ them is an "edit the message" answer, and the question is asked again.
 
 First, the undone items, exactly as approved:
 
-- **Carried:** append a seed to `work/inbox.md`, as
-  `## [YYYY-MM-DD] [seed] <its title>`. If there's no `work/inbox.md`, `Write` it first from
-  `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do
-  and points at `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
-  `- [x] <text> → seed: <its title>`.
+- **Carried:** take an id for each seed carried, all in one call, `<N>` being how many:
+
+  ```bash
+  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
+  ```
+
+  Then append each seed to `work/inbox.md` as `## [<id>] [seed] <its title>`. If there's no
+  `work/inbox.md`, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then
+  append. Its body says what is left to do and points at `work/NNN-slug/notes.md` in this
+  change's commit. Then tick the item in place: `- [x] <text> → seed: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
 
 Then the nits, exactly as approved: append each new entry to `work/nits.md` after its last one,

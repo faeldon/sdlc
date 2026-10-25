@@ -249,9 +249,15 @@ an entry it can't read.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `work/inbox.md`, `work/nits.md` and direction doc. A
-missing file adds nothing. Two optional forms in `work/inbox.md` feed it: `[bug]` in place of
-`[seed]` marks something already broken, and an `After: "<title>", "<title>"` line in a seed's
-body makes it wait while any seed it names is still in the register and not being built. A seed
+missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [seed] Title`:
+the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
+and every commit that ever held one, so an id is never handed out twice. A heading with a bare
+date is an entry from before ids, read the same. An `idea:`, `After:` or `Groups:` line names an
+entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
+intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
+`work/inbox.md` feed it: `[bug]` in place of `[seed]` marks something already broken, and an
+`After: <id>, <id>` line in a seed's body makes it wait while any seed it names is still in the
+register and not being built. Each line's command is `/sdlc:intent <id>`. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
 Candidates come in this order, each once, under the first rule it meets:
 

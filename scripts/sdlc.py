@@ -38,6 +38,7 @@ So this tool answers the questions that are queries rather than decisions:
                 trackers are modules in scripts/trackers/; `archive.target = "none"` loads none)
     lookup      the values the project doc's issue fields can take (milestone, project,
                 assignees), from the tracker, a host command or a fixed list, as JSON
+    next-entry  the id the next work/inbox.md entry would take today, or --count N of them
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
     readiness   whether this repo is set up for the plugin, item by item, with the commands its own
                 task files suggest for the gate, the slower check and the scans, as JSON
@@ -138,6 +139,11 @@ ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\
 # are a bug's or a nit's own.
 BODY_KEYS = ("After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by")
 BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
+# A reference to an entry, on an `idea:`, `fixes:`, `After:` or `Groups:` line, is its id, written
+# bare, or its title, quoted. Titles are read for good: the intents in history name seeds by them.
+ENTRY_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+$")
+ENTRY_ID_TOKEN_RE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}-\d+(?![\w-])")
+REF_RE = re.compile(rf'"([^"]+)"|({ENTRY_ID_TOKEN_RE.pattern})')
 # work/nits.md: "## 003-1 [robustness] Some title", the raising change's number and a count, then
 # `- **raised:**`, `- **paths:**` and `- **cost:** … **value:** …` bullets. Ship writes and retires
 # entries, intent and spec offer them, retro counts them; the process doc's rubric says what each
@@ -706,7 +712,7 @@ def load_change(
         if not rec[field]:
             rec["errors"].append(f"missing {field}:")
 
-    rec["idea"] = str(post.get("idea") or "")
+    rec["idea"] = intent_idea(intent.read_text(encoding="utf-8"))
     # Empty until /sdlc:ship settles it.
     rec["impact"] = str(post.get("impact") or "")
     if rec["impact"] and rec["impact"] not in IMPACTS:
@@ -959,19 +965,63 @@ def inbox_entries(root: Path) -> list[dict]:
             continue
         if fenced:
             continue
-        m = ENTRY_RE.match(line)
-        if m:
-            current = {"id": f"{m.group(1)}-{m.group(2)}" if m.group(2) else None,
-                       "date": m.group(1), "status": m.group(3), "title": m.group(4).strip(),
-                       "after": [], "fields": {}}  # fmt: skip
+        heading = _heading_entry(line)
+        if heading:
+            current = {**heading, "after": [], "fields": {}}
             out.append(current)
         elif line.startswith("#"):
             current = None
         elif current is not None and (body := BODY_RE.match(line.strip())):
             current["fields"].setdefault(body.group(1), body.group(2).strip())
             if body.group(1) == "After" and not current["after"]:
-                current["after"] = re.findall(r'"([^"]+)"', body.group(2))
+                current["after"] = refs_in(body.group(2))
+    # An `After:` naming an entry by id reads as that entry's title, so what waits on what is
+    # worked out on titles either way; an id naming nothing stays as written.
+    by_id = {e["id"]: e["title"] for e in out if e["id"]}
+    for e in out:
+        e["after"] = [by_id.get(r, r) for r in e["after"]]
     return out
+
+
+def _heading_entry(line: str) -> dict | None:
+    """An entry's id (None for a bare date), date, tag as written (`status`) and title, from its
+    heading line; None for any other line."""
+    m = ENTRY_RE.match(line)
+    if not m:
+        return None
+    return {"id": f"{m.group(1)}-{m.group(2)}" if m.group(2) else None, "date": m.group(1),
+            "status": m.group(3), "title": m.group(4).strip()}  # fmt: skip
+
+
+def refs_in(text: str) -> list[str]:
+    """The entries an `After:` or `Groups:` line names, in order: each quoted title, and each id
+    written bare."""
+    return [m.group(1) or m.group(2) for m in REF_RE.finditer(text)]
+
+
+def entry_ref(text: str) -> tuple[str, str]:
+    """A reference as `("id", …)` or `("title", …)`. An `idea:` may hold an id, a title, or a whole
+    older heading, which comes back as its title."""
+    text = text.strip().strip('"')
+    return ("id", text) if ENTRY_ID_RE.match(text) else ("title", _seed_title(text))
+
+
+def ref_matches(ref: str, entry: dict) -> bool:
+    """Whether a reference names this entry: an id its id, a title its title."""
+    kind, value = entry_ref(ref)
+    if kind == "id":
+        return entry.get("id") == value
+    return _seed_title(entry["title"]) == value
+
+
+def same_ref(a: str, b: str) -> bool:
+    """Whether two references name the same thing as written: id to id, title to title."""
+    return entry_ref(a) == entry_ref(b)
+
+
+def intent_idea(text: str) -> str:
+    """The `idea:` an intent names, read as text, so an id is never a date; "" when it has none."""
+    return (frontmatter_list(text, "idea") or [""])[0]
 
 
 def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
@@ -1175,10 +1225,15 @@ def analyze(root: Path, today: date | None = None) -> dict:
                 "entries there and delete it",
             }
         )
-    # The explicit link: /sdlc:intent writes the seed's title into `idea:`, and older intents the
-    # whole heading, with the status tag it had at promotion (`[seed]`) while the register moved on
-    # to `[building]`, so match on the title alone. A dropped change is building nothing and can't
-    # vouch for a seed.
+    for entry_id, n in Counter(e["id"] for e in entries if e["id"]).items():
+        if n > 1:
+            problems.append(
+                {"dir": register, "kind": "entry id", "detail": f"{entry_id} is used {n} times"}
+            )
+    # The explicit link: /sdlc:intent writes the seed's id into `idea:`, older intents its title or
+    # the whole heading, with the status tag it had at promotion (`[seed]`) while the register moved
+    # on to `[building]`, so a title is matched alone. A dropped change is building nothing and
+    # can't vouch for a seed.
     linked = [rec["idea"] for rec in changes if rec["idea"] and rec["stage"] != "dropped"]
     for idea in ideas:
         # Substring either way, deliberately loose: a folder slug is usually a shortening of the
@@ -1186,7 +1241,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
         # an idea that *is* being worked on under a shorter name.
         title_slug = slugify(idea["title"])
         by_slug = any(s in title_slug or title_slug in s for s in slugs)
-        by_frontmatter = any(idea["title"] in ref for ref in linked)
+        by_frontmatter = any(idea["title"] in ref or ref_matches(ref, idea) for ref in linked)
         if not (by_slug or by_frontmatter):
             problems.append(
                 {
@@ -1269,6 +1324,27 @@ def next_id(home: Path) -> str:
     if last is None:
         seeds.append(_history_highest(home))
     return f"{max(seeds) + 1:03d}"
+
+
+def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
+    """The next `count` register ids for entries dated `day` (`YYYY-MM-DD-n`): one past the highest
+    `n` that day in the register of every checkout of the repo, uncommitted edits included, and in
+    every commit on any branch that ever added or removed one, so an id deleted since is never
+    handed out again. A space of its own: never a change number, never the tracker's."""
+    heading = re.compile(rf"^[+-]?##\s*\[{re.escape(day)}-(\d+)\]")
+    texts = []
+    for checkout in dict.fromkeys([main_root(home), *(p for p, _ in worktrees(home))]):
+        for name in (INBOX, OLD_INBOX):
+            try:
+                texts.append((work_dir(checkout) / name).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+    paths = [f"work/{INBOX}", f"work/{OLD_INBOX}"]
+    log = _git(home, "log", "--all", "-p", "--format=", "-G", rf"\[{day}-", "--", *paths)
+    texts.append(log or "")
+    used = [int(m.group(1)) for t in texts for line in t.splitlines() if (m := heading.match(line))]
+    top = max(used, default=0)
+    return [f"{day}-{top + k}" for k in range(1, count + 1)]
 
 
 def _add_worktree(home: Path, name: str, base: str) -> tuple[Path | None, str | None]:
@@ -1707,7 +1783,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     # here, with the diff in front of someone, not reconstructed from commit subjects at release.
     try:
         post = frontmatter.load(intent)
-        impact, idea = str(post.get("impact") or ""), str(post.get("idea") or "")
+        impact, idea = str(post.get("impact") or ""), intent_idea(intent.read_text("utf-8"))
     except Exception:  # malformed YAML: `check` reports it; ship refuses below like any other gap
         impact, idea = "", ""
     if impact not in IMPACTS:
@@ -1723,7 +1799,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     seeds = _seed_lines(ideas, idea)
     if len(seeds) > 1:
         print(
-            f"⚠  work/{ideas.name} has {len(seeds)} entries titled {_seed_title(idea)!r} (lines "
+            f"⚠  work/{ideas.name} has {len(seeds)} entries named {entry_ref(idea)[1]!r} (lines "
             f"{', '.join(str(n + 1) for n in seeds)}): delete the one this change built by hand, "
             "or retitle one, and re-run. Not stamping.",
             file=sys.stderr,
@@ -1766,9 +1842,9 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     )
     if seeds:
         _drop_seed(ideas, seeds[0])
-        print(f"  removed seed {_seed_title(idea)!r} from work/{ideas.name}")
+        print(f"  removed seed {entry_ref(idea)[1]!r} from work/{ideas.name}")
     elif idea:
-        print(f"  no seed to remove: work/{ideas.name} has no entry titled {_seed_title(idea)!r}")
+        print(f"  no seed to remove: work/{ideas.name} has no entry named {entry_ref(idea)[1]!r}")
     paths, err = _stage_change(tree, leave)
     if err:
         print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
@@ -1791,13 +1867,16 @@ def _seed_title(text: str) -> str:
 
 
 def _seed_lines(ideas: Path, idea: str) -> list[int]:
-    """The line numbers (from 0) of the register's headings whose title is the `idea:`'s; [] with
-    no `idea:` or no file."""
+    """The line numbers (from 0) of the register's headings the `idea:` names, by id or title; []
+    with no `idea:` or no file."""
     if not idea.strip() or not ideas.is_file():
         return []
-    want = _seed_title(idea)
     lines = ideas.read_text(encoding="utf-8").splitlines()
-    return [n for n, line in enumerate(lines) if ENTRY_RE.match(line) and _seed_title(line) == want]
+    return [
+        n
+        for n, line in enumerate(lines)
+        if (heading := _heading_entry(line)) and ref_matches(idea, heading)
+    ]
 
 
 def _drop_seed(ideas: Path, start: int) -> None:
@@ -3174,7 +3253,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec["tier"] = post.get("tier")
     rec["impact"] = str(post.get("impact") or "")
     rec["created"] = str(post.get("created") or "")
-    rec["idea"] = str(post.get("idea") or "")
+    rec["idea"] = intent_idea(text or "")
     for line in (post.content or "").splitlines():
         if line.startswith("# "):
             rec["title"] = TITLE_ID_RE.sub("", line[2:].strip())
@@ -3960,9 +4039,11 @@ def doc_items(text: str, kinds: str) -> dict:
             current = None
         g = GROUPS_RE.match(line.strip())
         if g and current and not any(current["groups"].values()):
-            seeds = re.findall(r'"([^"]+)"', g[1])
-            current["groups"]["seeds"] = seeds
-            current["groups"]["changes"] = GROUP_CHANGE_RE.findall(re.sub(r'"[^"]*"', "", g[1]))
+            # Seeds by quoted title or bare id, then change numbers from what's left, so an id's
+            # year is never read as a change.
+            current["groups"]["seeds"] = refs_in(g[1])
+            rest = ENTRY_ID_TOKEN_RE.sub("", re.sub(r'"[^"]*"', "", g[1]))
+            current["groups"]["changes"] = GROUP_CHANGE_RE.findall(rest)
     ids = {i["id"] for i in items}
     for item in items:
         if item["status"] == "revised" and item["successor"] not in ids:
@@ -3989,7 +4070,7 @@ def _milestone_verdicts(
     if not wanted:
         return {}
     history = closed_changes(home, None, trunk)
-    seeds_open = {i["title"] for i in inbox_entries(home)}
+    entries = inbox_entries(home)
     out: dict[str, list[dict]] = {}
     for item in wanted:
         rows = []
@@ -4003,14 +4084,13 @@ def _milestone_verdicts(
             else:
                 rows.append({"entry": ident, "kind": "change", "verdict": "unknown"})
         for seed in item["groups"]["seeds"]:
-            title = _seed_title(seed)
-            shipped = next(
-                (c for c in history if c["idea"] and _seed_title(c["idea"]) == title), None
-            )
+            # A shipped change's `idea:` and the `Groups:` line each name the seed by id or by
+            # title, compared as written: id to id, title to title.
+            shipped = next((c for c in history if c["idea"] and same_ref(c["idea"], seed)), None)
             if shipped:
                 rows.append({"entry": seed, "kind": "seed", "verdict": "shipped",
                              "change": shipped["name"], "date": shipped["close_date"]})  # fmt: skip
-            elif seed in seeds_open:
+            elif any(ref_matches(seed, e) for e in entries):
                 rows.append({"entry": seed, "kind": "seed", "verdict": "open"})
             else:
                 rows.append({"entry": seed, "kind": "seed", "verdict": "vanished"})
@@ -4145,7 +4225,8 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     ideas = inbox_entries(home)
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
-    building = {_seed_title(r["idea"]) for r in open_changes if r.get("idea")}
+    named = [r["idea"] for r in open_changes if r.get("idea")]
+    building = {e["title"] for e in ideas if any(ref_matches(n, e) for n in named)}
     states = {e["title"]: "building" for e in ideas if is_building(e) or e["title"] in building}
     open_titles = {e["title"] for e in ideas if e["title"] not in states}
     for e in ideas:
@@ -4157,7 +4238,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     def seed(rule: str, label: str, e: dict) -> dict:
         return {"rule": rule, "label": label, "title": e["title"],
                 "age_days": _age_days({"created": e["date"]}, today),
-                "command": f"/sdlc:intent {e['title']}"}  # fmt: skip
+                "command": f"/sdlc:intent {e['id'] or e['title']}"}  # fmt: skip
 
     items: list[dict] = []
     taken: set[str] = set()
@@ -4166,10 +4247,10 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
         if rule == "bug":
             found = [seed(rule, "bug", e) for e in ready if e["status"].strip().lower() == "bug"]
         elif rule == "milestone":
-            by_title = {e["title"]: e for e in ready if e["title"] not in taken}
+            untaken = [e for e in ready if e["title"] not in taken]
             for m in milestones:
                 first = next(
-                    (by_title[t] for t in map(_seed_title, m["groups"]["seeds"]) if t in by_title),
+                    (e for ref in m["groups"]["seeds"] for e in untaken if ref_matches(ref, e)),
                     None,
                 )
                 if first:
@@ -4206,10 +4287,10 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     dangling = {t for e in ideas for t in e["after"] if t not in known}
     if dangling:
         history = closed_changes(home, None, cfg["git"]["base"])
-        shipped = {_seed_title(c["idea"]) for c in history if c.get("idea")}
+        shipped = [c["idea"] for c in history if c.get("idea")]
         for e in ideas:
             for t in e["after"]:
-                if t in dangling and t not in shipped:
+                if t in dangling and not any(same_ref(s, t) for s in shipped):
                     warnings.append(f'"{e["title"]}" waits on "{t}", which is no seed or change')
     waiting = {e["title"]: e["after"] for e in ideas if states[e["title"]] == "waiting"}
     for loop in _after_loops(waiting):
@@ -4659,7 +4740,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift",
+    "drift", "next-entry",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -5633,6 +5714,11 @@ def main() -> int:
     )
     p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
 
+    p_entry = sub.add_parser(
+        "next-entry", help="the id the next work/inbox.md entry would take today; writes nothing"
+    )
+    p_entry.add_argument("--count", type=int, default=1, help="this many ids, one per line")
+
     p_nits = sub.add_parser("nits", help="the open nits in work/nits.md, as JSON; writes nothing")
     p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
     p_nits.add_argument("--change", help="only those this change's diff against main touches")
@@ -5764,6 +5850,10 @@ def main() -> int:
             print(f"{guess:03d}")
         else:
             print(next_id(home))
+        return 0
+    if args.cmd == "next-entry":
+        for entry_id in next_entry_ids(home, date.today().isoformat(), max(args.count, 1)):
+            print(entry_id)
         return 0
     if args.cmd == "undone":
         return cmd_undone(root, args.id)

@@ -522,7 +522,7 @@ def test_the_templates_example_parses_to_its_ids() -> None:
     m1 = next(i for i in out["items"] if i["id"] == "M1")
     assert m1["groups"] == {
         "changes": ["006"],
-        "seeds": ["Reopen drafts from the list"],
+        "seeds": ["2026-10-01-2"],
     }
 
 
@@ -620,6 +620,28 @@ def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> Non
         "Reopen drafts from the list": ("shipped", "011-keep-one-draft"),
         "Still waiting": ("open", None),
         "Thrown away": ("vanished", None),
+    }
+
+
+def test_a_seed_named_by_id_reads_shipped_open_or_vanished(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "work").mkdir()
+    (root / "work" / "inbox.md").write_text(
+        "# Inbox\n\n## [2026-10-01-2] [seed] Still waiting\n\nx\n", encoding="utf-8"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "seed")
+    _close(root, "011-keep-one-draft", idea="2026-10-01-1")
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "DIRECTION.md").write_text(
+        "## Milestones\n\n### M1. Drafts\n\nGroups: 2026-10-01-1, 2026-10-01-2, 2026-10-01-3\n",
+        encoding="utf-8",
+    )
+    rows = _retro(root)["direction"]["milestones"]["M1"]
+    assert {r["entry"]: (r["verdict"], r.get("change")) for r in rows} == {
+        "2026-10-01-1": ("shipped", "011-keep-one-draft"),
+        "2026-10-01-2": ("open", None),
+        "2026-10-01-3": ("vanished", None),
     }
 
 

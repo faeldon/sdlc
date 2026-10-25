@@ -42,7 +42,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 `config` names the repo's process doc (`docs.process`) and its policy doc (`docs.policy`). Read the
 process doc if it isn't already in context — specifically its tier table, since Step 2 depends on
 it. If `config` reports it doesn't exist, use the tiers in Step 2 as they stand and say so. Skim
-`work/inbox.md`, if there is one, for a seed that matches what the human is describing. Note
+`work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
+argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
 `docs.product` exists, and its `outcomes`: with a product doc, Step 1 asks what the change serves.
@@ -210,8 +211,9 @@ the approved issue fields' lines and the `serves:` line under `depends_on:`, exa
 Step 3.
 
 If the change came from a `work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
-title alone, without its `## `, date or tag (`idea: Keep drafts` for `## [2026-10-01] [seed] Keep
-drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit` the entry in the worktree's
+id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [seed] Keep drafts`), or, for an
+entry from before ids (`## [2026-10-01] [seed] Keep drafts`), to its title alone, without its
+`## `, date or tag (`idea: Keep drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit` the entry in the worktree's
 `work/inbox.md`: its heading's tag becomes `[building]`, the rest of the heading unchanged, and
 `Building in work/NNN-slug/.` becomes its first body line, so the tag lands with the change. Never
 put the pointer in the heading. Leave the seed's prose alone.

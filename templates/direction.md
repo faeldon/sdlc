@@ -16,7 +16,7 @@
 >
 > What's true when it's done.
 >
-> Groups: 006, "Reopen drafts from the list"
+> Groups: 006, 2026-10-01-2
 >
 > ### ~~M2. Drafts sync every hour~~ Revised → M3: on every save, not on a timer
 >
@@ -49,8 +49,8 @@ no direction.>
 ## Milestones
 
 <Each milestone as its own `### M<n>. Name` heading: what is true when it's done, then one
-`Groups:` line naming the changes (NNN) and seeds ("their heading") it groups. In the order they
-should land.>
+`Groups:` line naming the changes (NNN) and inbox entries (by id, or "their title" for one from
+before ids) it groups. In the order they should land.>
 
 ## Next major release
 
