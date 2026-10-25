@@ -105,3 +105,13 @@ line and points at where it's specified, with a test that fails when a term the 
 (`STAGES`, tiers, impacts, nit costs and values, review passes) has no entry. Hosts read it on
 GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
 should use its terms. Raised 2026-10-25.
+
+## [2026-10-25] [seed] A publish command that needs a confirmation, split into prepare and upload
+
+A host whose release upload asks for confirmation can't use it as `release.publish`: `cmd_publish`
+runs the command with its output captured and no terminal, after the skill's one WAIT, so a prompt
+hangs or fails. A host hit this and split its own command into a prepare step and an upload step.
+The plugin could support that natively: a `release.prepare` command run before publish's WAIT (or
+by `/sdlc:release`), whose output (what will be uploaded) the WAIT shows, and `release.publish`
+after it as today, so the WAIT is the confirmation and no host command ever prompts. Also say in
+`docs/REFERENCE.md` that `release.publish` runs non-interactively. Raised 2026-10-25.
