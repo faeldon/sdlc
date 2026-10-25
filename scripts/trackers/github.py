@@ -306,6 +306,11 @@ class Tracker:
             return None, err
         return [i for i in items if i.get("number") not in recorded], None
 
+    def open_numbers(self, limit: int = 1000) -> set[int] | None:
+        """The numbers of the repo's open issues, or None when they can't be listed."""
+        items, _ = self._issues(fields="number", limit=limit)
+        return None if items is None else {i["number"] for i in items if "number" in i}
+
     def titles(self, numbers: list[int]) -> list[dict]:
         """Each issue's number, title, state and URL, or its `error` when it can't be read."""
         out = []

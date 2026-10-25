@@ -408,11 +408,21 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         "reported": {},
         "fixed": {},
         "retired": {},
+        "triaged": {},
         "days_to_fix": {"median": None, "max": None},
         "open": [],
         "escapes": [],
         "unattributed": 0,
     }
+
+
+def test_retro_counts_the_issues_triage_closed_by_verdict(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    triaged = ["12=resolved:019-status-next", "13=wontfix", "14=wontfix"]
+    whys = ["13=Out of scope", "14=Out of scope"]
+    assert sdlc.cmd_bug_commit(root, triaged=triaged, whys=whys) == 0
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out["triaged"] == {"resolved": 1, "wontfix": 2}
 
 
 def test_retro_counts_escapes_only_from_its_window(tmp_path: Path) -> None:

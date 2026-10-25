@@ -41,7 +41,12 @@ So this tool answers the questions that are queries rather than decisions:
     next-entry  the id the next work/inbox.md entry would take today, or --count N of them
     bugs        the open [bug] entries, as JSON, with the closed change that last touched a path
                 (--introduced), a candidate for the bug's `Introduced by:`
-    bug-commit  commit work/inbox.md alone, from the main checkout, as File, Retire or Update <id>
+    bug-commit  commit work/inbox.md alone, from the main checkout, as File, Retire or Update <id>,
+                and triage's verdicts (--triaged) as `Sdlc-Triaged:` trailers
+    intake      the open issues people filed that triage has to read, as JSON
+    closes      the issues a change's `closes:` line names, with their titles, as JSON
+    mark-triaged  label, comment on and relate each open issue the repo records
+    needs-info  ask an issue's author for the detail triage needs
     migrate-inbox  move work/ideas.md and work/nits.md into work/inbox.md, every entry with an
                 id, [seed] retagged [idea], and the references to open entries by id; never
                 commits
@@ -3101,7 +3106,16 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         fixes = fix_trailers(main, branch)
         if fixes:
             report["fixes"] = fixes
-        return _close_commit(main, branch, sha, where, captured + fixes, closes)
+        err = _close_commit(main, branch, sha, where, captured + fixes, closes)
+        if err is None and not unavailable:
+            # The entries the change brought to main, a seed split off at ship among them, are
+            # committed now, so their issues are told where to follow. Never a refusal.
+            found = tracker(main, cfg)
+            if hasattr(found, "mark"):
+                marked = mark_issues(main, found)
+                if marked["done"] or marked["failed"]:
+                    report["intake"] = marked
+        return err
 
     def record() -> str | None:
         if _drop_commit(main, branch, trunk):
@@ -5114,12 +5128,17 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
             fixed.append({"id": bug_id, "change": rec["name"], "date": rec["close_date"],
                           **{k: str(v) for k, v in f.items()}})  # fmt: skip
     retired = []
+    triaged: Counter = Counter()
     span = f"{since['sha']}..{trunk}" if since else trunk
     log = _git(home, "log", "--first-parent", "--format=%x1e%cs%x00%B", span) if trunk else ""
     for record in (log or "").split("\x1e"):
         day, _, body = record.partition("\x00")
-        for bug_id, f in ((metrics.parse_trailers(body) or {}).get("retired") or {}).items():
+        trailers = metrics.parse_trailers(body) or {}
+        for bug_id, f in (trailers.get("retired") or {}).items():
             retired.append({"id": bug_id, "date": day.strip(), **{k: str(v) for k, v in f.items()}})
+        # Issues triage closed without a change: already resolved, or nothing will be done.
+        for f in (trailers.get("triaged") or {}).values():
+            triaged[str(f.get("verdict") or "unset")] += 1
 
     def in_window(reported: str | None) -> bool:
         return bool(reported) and reported != "unknown" and (start is None or reported >= start)
@@ -5158,6 +5177,7 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         "reported": by_severity(list(reported.values())),
         "fixed": by_severity(fixed),
         "retired": dict(Counter(r.get("reason") or "unset" for r in retired)),
+        "triaged": dict(triaged),
         "days_to_fix": {
             "median": days[len(days) // 2] if days else None,
             "max": days[-1] if days else None,
@@ -5262,13 +5282,64 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
 # Why a bug left the register without a fix. A fixed one leaves through the ship that fixes it.
 RETIRE_REASONS = ("duplicate", "not-a-bug", "wontfix", "cant-reproduce")
 BUG_SUBJECTS = ("File", "Retire", "Update")
+# What triage can decide about an issue that closes it there: nothing more will be done. Anything
+# else is filed as an entry or put on a change's `closes:` line, and closes when that lands.
+TRIAGE_VERDICTS = ("resolved", "wontfix", "not-a-bug", "duplicate")
+TRIAGE_REF_NEEDED = ("resolved", "duplicate")
 
 
-def cmd_bug_commit(root: Path, reasons: list[str] | None = None) -> int:
-    """Record what /sdlc:bug wrote: one commit of the register alone, on the base branch in the
-    main checkout, its subject `File <id>`, `Retire <id>` or `Update <id>` for each entry added,
-    removed or changed, and an `Sdlc-Retired:` trailer for each bug removed, with the reason
-    `--reason <id>=<word>` gave it. Every refusal is found before anything is written."""
+def _triage_verdicts(
+    triaged: list[str], whys: list[str], refusals: list[str]
+) -> tuple[list[str], list[str], list[int]]:
+    """`--triaged <N>=<verdict>[:<ref>]` and `--why <N>=<text>` as the `Sdlc-Triaged:` trailers,
+    the `Why #N:` body lines and the issue numbers, adding to `refusals` what's malformed: a
+    verdict not in TRIAGE_VERDICTS, a resolved or duplicate one with no ref, any other with no
+    why. The why is the reason the issue's closing comment gives."""
+    said: dict[int, str] = {}
+    for w in whys:
+        n, _, text = w.partition("=")
+        if not n.strip().lstrip("#").isdigit() or not text.strip():
+            refusals.append(f"--why {w}: give it as <N>=<one line>")
+            continue
+        said[int(n.strip().lstrip("#"))] = " ".join(text.split())
+    trailers, body, numbers = [], [], []
+    for t in triaged:
+        n, _, rest = t.partition("=")
+        verdict, _, ref = rest.partition(":")
+        if not n.strip().lstrip("#").isdigit():
+            refusals.append(f"--triaged {t}: the issue is a number, <N>=<verdict>[:<ref>]")
+            continue
+        number = int(n.strip().lstrip("#"))
+        if verdict not in TRIAGE_VERDICTS:
+            refusals.append(f"--triaged {t}: the verdict is one of {'|'.join(TRIAGE_VERDICTS)}")
+            continue
+        if verdict in TRIAGE_REF_NEEDED and not ref.strip():
+            refusals.append(f"--triaged {t}: a {verdict} verdict names what it rests on, :<ref>")
+            continue
+        if verdict not in TRIAGE_REF_NEEDED and number not in said:
+            refusals.append(f"--triaged {t}: give the reason as --why {number}=<one line>")
+            continue
+        numbers.append(number)
+        trailers.append(f"Sdlc-Triaged: #{number} verdict={verdict} ref={ref.strip() or '-'}")
+        if number in said:
+            body.append(f"Why #{number}: {said[number]}")
+    unused = sorted(set(said) - set(numbers))
+    refusals += [f"--why {n}: no --triaged names #{n}" for n in unused]
+    return trailers, body, numbers
+
+
+def cmd_bug_commit(
+    root: Path,
+    reasons: list[str] | None = None,
+    triaged: list[str] | None = None,
+    whys: list[str] | None = None,
+) -> int:
+    """Record what /sdlc:bug or /sdlc:triage wrote: one commit of the register alone, on the base
+    branch in the main checkout, its subject `File <id>`, `Retire <id>` or `Update <id>` for each
+    entry added, removed or changed, and an `Sdlc-Retired:` trailer for each bug removed, with the
+    reason `--reason <id>=<word>` gave it. Each `--triaged` verdict adds an `Sdlc-Triaged:`
+    trailer, and `Triage #N` to the subject; with nothing else to record, the commit is empty.
+    Every refusal is found before anything is written."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     register = register_path(work_dir(home))
@@ -5295,8 +5366,9 @@ def cmd_bug_commit(root: Path, reasons: list[str] | None = None) -> int:
     stray = [p for p in changed if p != rel]
     if stray:
         refusals.append(f"only {rel} may be uncommitted; also changed: " + ", ".join(stray))
-    elif not changed:
+    elif not changed and not triaged:
         refusals.append(f"nothing to record: {rel} is unchanged")
+    verdicts, why_lines, numbers = _triage_verdicts(triaged or [], whys or [], refusals)
     given: dict[str, str] = {}
     for r in reasons or []:
         ident, _, word = r.partition("=")
@@ -5335,14 +5407,23 @@ def cmd_bug_commit(root: Path, reasons: list[str] | None = None) -> int:
     refusals += [f"--reason {k}: no entry by that id was removed" for k in unused]
     if refusals:
         return emit(1)
-    subject = "; ".join(f"{s} {', '.join(ids)}" for s, ids in actions.items() if ids)
+    parts = [f"{s} {', '.join(ids)}" for s, ids in actions.items() if ids]
+    if numbers:
+        parts.append("Triage " + ", ".join(f"#{n}" for n in numbers))
+    subject = "; ".join(parts)
     if not subject:
         refusals.append(f"nothing to record: {rel} changed, but no entry did")
         return emit(1)
     report["commit"] = subject
     report["entries"] = [{"action": s, "id": i} for s, ids in actions.items() for i in ids]
-    message = ["-m", subject] + (["-m", "\n".join(trailers)] if trailers else [])
-    for args in (["add", "--", rel], ["commit", "-q", *message, "--", rel]):
+    report["triaged"] = numbers
+    trailers += verdicts
+    message = ["-m", subject] + (["-m", "\n".join(why_lines)] if why_lines else [])
+    message += ["-m", "\n".join(trailers)] if trailers else []
+    steps = [["add", "--", rel], ["commit", "-q", *message, "--", rel]]
+    if not changed:
+        steps = [["commit", "-q", "--allow-empty", *message]]
+    for args in steps:
         made = subprocess.run(["git", "-C", str(home), *args], capture_output=True, text=True)
         if made.returncode != 0:
             refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
@@ -5350,6 +5431,253 @@ def cmd_bug_commit(root: Path, reasons: list[str] | None = None) -> int:
     report["done"].append("commit")
     report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
     return emit(0)
+
+
+# ---------------------------------------------------------------- intake
+#
+# Issues filed on the tracker by people who don't run a session. Each one the repo records has
+# one record: an inbox entry's `Issue:` line, a change's `closes:` line, or an `Sdlc-Triaged:`
+# trailer on the base branch for a verdict that closed it. The core decides what each record says
+# on its issue and which issue is its parent; the tracker only sets it. Every comment is fixed
+# text with ids, numbers and names filled in, and a person's reason or questions as approved.
+
+TRIAGED_RE = re.compile(r"^Why #(\d+):\s*(.+)$")
+
+
+def _intake_tracker(home: Path, cfg: dict):
+    """(the tracker, None) when it reads intake, or (None, why not)."""
+    why = archive_unavailable(home, cfg)
+    if why:
+        return None, why
+    found = tracker(home, cfg)
+    if not hasattr(found, "intake"):
+        return None, f"the {cfg['archive']['target']} tracker reads no issues people file"
+    return found, None
+
+
+def _verdicts(home: Path, trunk: str | None) -> dict[int, dict]:
+    """Each issue an `Sdlc-Triaged:` trailer on the base branch names: its verdict, what it rests
+    on, and the reason its commit gives; the newest for an issue that has several."""
+    if not trunk:
+        return {}
+    log = _git(home, "log", "--format=%x1e%B", "--grep=^Sdlc-Triaged:", trunk) or ""
+    out: dict[int, dict] = {}
+    for body in reversed(log.split("\x1e")):
+        whys = {int(m.group(1)): m.group(2).strip() for ln in body.splitlines()
+                if (m := TRIAGED_RE.match(ln.strip()))}  # fmt: skip
+        for name, fields in ((metrics.parse_trailers(body) or {}).get("triaged") or {}).items():
+            n = int(str(name).lstrip("#"))
+            ref = str(fields.get("ref", "-"))
+            out[n] = {"verdict": str(fields.get("verdict")), "ref": ref, "why": whys.get(n, "")}
+    return out
+
+
+def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]:
+    """Every issue the repo records, by number, each with what it should say on the tracker: its
+    `comment`, `marker`, `parent`, and `close` reason when a verdict closed it, and `filed` (the
+    entry id, change name or verdict that records it). A verdict outranks a change, and a change
+    an entry: the newest decision about an issue is the one its filer follows. From the base
+    branch's committed register when `committed_only`, else from every checkout's too."""
+    home = main_root(home)
+    cfg = load_config(home)[0]
+    trunk = cfg["git"]["base"]
+    register = f"work/{register_path(work_dir(home)).name}"
+    texts = [_git(home, "show", f"{trunk}:{register}") or ""] if trunk else []
+    if not committed_only:
+        for checkout in dict.fromkeys([home, *(p for p, _ in worktrees(home))]):
+            try:
+                texts.append(register_path(work_dir(checkout)).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+    out: dict[int, dict] = {}
+    for text in texts:
+        for e in parse_entries(text):
+            issues = entry_issues(e) or []
+            if not e["id"] or not issues:
+                continue
+            split = next((t for t in e["text"] if t.startswith("Split from ")), None)
+            for k, n in enumerate(issues):
+                if n in out:
+                    continue
+                first = issues[0]
+                if k:
+                    comment = f"Filed with #{first} as {e['id']}; follow #{first} for progress."
+                elif split:
+                    name = split[len("Split from ") :].split(":", 1)[0].strip()
+                    comment = f"Not resolved by {name}; it stays open as {e['id']} in {register}."
+                else:
+                    comment = f"Filed as {e['id']} ([{e['status']}]) in {register}."
+                out[n] = {
+                    "filed": e["id"],
+                    "comment": comment,
+                    "marker": f"<!-- sdlc:intake:{e['id']} -->",
+                    "parent": first if k else None,
+                    "close": None,
+                }
+    for path in change_dirs(home):
+        rec = load_change(path, home)
+        if rec["stage"] == "dropped" or not rec.get("closes"):
+            continue
+        name, own = path.name, int(rec["id"])
+        for n in rec["closes"]:
+            out[n] = {
+                "filed": name,
+                "comment": f"Taken on by #{own} ({name}); follow #{own} for progress.",
+                "marker": f"<!-- sdlc:intake:{name} -->",
+                "parent": own,
+                "close": None,
+            }
+    for n, v in _verdicts(home, trunk).items():
+        ref, verdict = v["ref"], v["verdict"]
+        if verdict == "resolved":
+            comment = f"Already resolved by {ref}."
+        else:
+            comment = f"Closed as {verdict}: {v['why']}" + ("" if v["why"].endswith(".") else ".")
+        dup = re.fullmatch(r"#(\d+)", ref) if verdict == "duplicate" else None
+        out[n] = {
+            "filed": f"#{n} {verdict}",
+            "comment": comment,
+            "marker": f"<!-- sdlc:triage:#{n} -->",
+            "parent": int(dup.group(1)) if dup else None,
+            "close": "completed" if verdict == "resolved" else "not planned",
+        }
+    return out
+
+
+def cmd_intake(root: Path) -> int:
+    """What /sdlc:triage reads, as JSON: the open issues no change claims and triage hasn't
+    labelled, each with `filed` naming the record the repo already holds for it (so a rerun only
+    labels it) or null; the `dangling` ones, labelled `triaged` with no record; the severities;
+    and the open changes an issue could go to. Writes nothing."""
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    out: dict = {"unavailable": None, "issues": [], "more": False, "dangling": []}
+    out["severities"] = severities(home, cfg)
+    a = analyze(home)
+    out["open_changes"] = [
+        {"id": r["id"], "slug": r["slug"], "title": r["title"], "stage": r["stage"],
+         "closes": r.get("closes") or []}
+        for r in a["open"] if r["stage"] not in ("shipped", "dropped")
+    ]  # fmt: skip
+    found, why = _intake_tracker(home, cfg)
+    if found is None:
+        out["unavailable"] = why
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return 0
+    issues, more, err = found.intake()
+    if issues is None:
+        out["unavailable"] = err
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return 1
+    records = recorded_issues(home)
+    out["issues"] = [{**i, "filed": (records.get(i["number"]) or {}).get("filed")} for i in issues]
+    out["more"] = more
+    dangling, err = found.dangling(set(records))
+    out["dangling"] = dangling if dangling is not None else []
+    if err:
+        out["dangling_error"] = err
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_closes(root: Path, ident: str) -> int:
+    """The issues a change's `closes:` line names, each with its title and state, as JSON, for
+    /sdlc:ship to ask about one by one. Writes nothing."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    numbers = load_change(path, home).get("closes") or []
+    out: dict = {"change": path.name, "closes": [{"number": n} for n in numbers]}
+    found, why = _intake_tracker(home, cfg)
+    if numbers and found is not None:
+        out["closes"] = found.titles(numbers)
+    elif numbers:
+        out["unavailable"] = why
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def mark_issues(home: Path, found) -> dict:
+    """Bring every open issue the base branch and the open changes record in line with its record
+    on the tracker: its comment once, the `triaged` label, its parent, and closed for a verdict
+    that closes it. Never raises; what failed is listed."""
+    report: dict = {"done": [], "failed": []}
+    records = recorded_issues(home, committed_only=True)
+    if not records:
+        return report
+    try:
+        still_open = found.open_numbers()
+    except Exception as e:  # a tracker that fails here still lets close land
+        report["failed"].append(f"listing open issues: {type(e).__name__}: {e}")
+        return report
+    if still_open is None:
+        report["failed"].append("couldn't list the open issues")
+        return report
+    for n, r in sorted(records.items()):
+        if n not in still_open:
+            continue
+        err = found.mark(n, r["comment"], r["marker"], parent=r["parent"], close=r["close"])
+        (report["failed"] if err else report["done"]).append(err or f"#{n}: {r['filed']}")
+    return report
+
+
+def cmd_mark_triaged(root: Path) -> int:
+    """Label, comment on and relate each open issue the repo records, from the main checkout on
+    the base branch, as /sdlc:triage's last write: after the register's commit, so a record that
+    isn't committed is never marked, and a rerun finishes what a failed one left. JSON; exit 1
+    when one failed."""
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    report: dict = {"done": [], "failed": [], "refusals": []}
+    if root.resolve() != home.resolve():
+        report["refusals"].append(f"run it from the main checkout ({home}), not a worktree")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
+        report["refusals"].append(why)
+    elif _git(home, "branch", "--show-current") != trunk:
+        report["refusals"].append(f"the main checkout ({home}) isn't on {trunk}")
+    found, why = _intake_tracker(home, cfg)
+    if found is None:
+        report["refusals"].append(why)
+    if report["refusals"]:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1
+    report.update(mark_issues(home, found))
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 1 if report["failed"] else 0
+
+
+NEEDS_INFO_LEAD = "Needs more detail before this can be triaged:"
+
+
+def cmd_needs_info(root: Path, number: int, questions_file: str) -> int:
+    """Ask issue `number`'s author for what triage needs: the approved questions under a fixed
+    lead line, and the `needs-info` label, so `intake` leaves it out until they reply. JSON."""
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    report: dict = {"issue": number, "done": [], "refusals": []}
+    try:
+        questions = Path(questions_file).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as e:
+        questions = ""
+        report["refusals"].append(f"{questions_file} can't be read: {e}")
+    if not questions and not report["refusals"]:
+        report["refusals"].append(f"{questions_file} holds no questions")
+    found, why = _intake_tracker(home, cfg)
+    if found is None:
+        report["refusals"].append(why)
+    if report["refusals"]:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 1
+    err = found.needs_info(number, f"{NEEDS_INFO_LEAD}\n\n{questions}")
+    if err:
+        report["refusals"].append(err)
+    else:
+        report["done"].append(f"#{number}: asked")
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 1 if err else 0
 
 
 # ---------------------------------------------------------------- readiness
@@ -5424,7 +5752,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs",
+    "drift", "next-entry", "bugs", "intake", "closes",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -6434,6 +6762,28 @@ def main() -> int:
     p_bugc.add_argument(
         "--reason", action="append", default=[], help="<id>=<word>, for each entry removed"
     )
+    p_bugc.add_argument(
+        "--triaged",
+        action="append",
+        default=[],
+        help="<N>=<verdict>[:<ref>], for each issue triage closes: " + "|".join(TRIAGE_VERDICTS),
+    )
+    p_bugc.add_argument(
+        "--why", action="append", default=[], help="<N>=<one line>, the reason a verdict gives"
+    )
+
+    sub.add_parser("intake", help="the open issues triage has to read, as JSON; writes nothing")
+    p_closes = sub.add_parser(
+        "closes", help="the issues a change's closes: line names, with titles; writes nothing"
+    )
+    p_closes.add_argument("id")
+    sub.add_parser(
+        "mark-triaged",
+        help="label, comment on and relate each open issue the repo records, from main",
+    )
+    p_info = sub.add_parser("needs-info", help="ask an issue's author for more detail")
+    p_info.add_argument("number", type=int)
+    p_info.add_argument("--questions-file", required=True, help="the approved questions")
 
     sub.add_parser(
         "migrate-inbox",
@@ -6582,7 +6932,15 @@ def main() -> int:
     if args.cmd == "bugs":
         return cmd_bugs(root, args.touching, args.introduced)
     if args.cmd == "bug-commit":
-        return cmd_bug_commit(root, args.reason)
+        return cmd_bug_commit(root, args.reason, args.triaged, args.why)
+    if args.cmd == "intake":
+        return cmd_intake(root)
+    if args.cmd == "closes":
+        return cmd_closes(root, args.id)
+    if args.cmd == "mark-triaged":
+        return cmd_mark_triaged(root)
+    if args.cmd == "needs-info":
+        return cmd_needs_info(root, args.number, args.questions_file)
     if args.cmd == "migrate-inbox":
         return cmd_migrate_inbox(root)
     if args.cmd == "next-entry":

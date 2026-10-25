@@ -1722,3 +1722,219 @@ def test_a_dropped_change_sends_the_issues_it_would_close_back_to_triage(
     assert issue["comments"][-1]["body"].endswith(
         "001-thing was dropped; this issue is open for triage again."
     )
+
+
+def _register(root: Path, text: str, commit: bool = True) -> None:
+    """work/inbox.md on main holding these entries, committed unless `commit` is False."""
+    (root / "work").mkdir(exist_ok=True)
+    (root / "work" / "inbox.md").write_text(f"# Inbox\n\n{text}", encoding="utf-8")
+    if commit:
+        _git(root, "add", "work/inbox.md")
+        _git(root, "commit", "-q", "-m", "File entries")
+
+
+def _json(capsys, call) -> tuple[int, dict]:
+    """Run `call` and read the JSON it printed, and nothing printed before it."""
+    capsys.readouterr()
+    code = call()
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_intake_lists_only_what_no_one_has_recorded(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _open(root)
+    _filed(gh, 50, labels=("triaged",))
+    _filed(gh, 51, labels=("landed",))
+    _filed(gh, 52)
+    _filed(gh, 53)
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #53\n")
+    capsys.readouterr()
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert code == 0, out
+    assert [(i["number"], i["filed"]) for i in out["issues"]] == [(52, None), (53, "2026-10-26-1")]
+    assert out["issues"][0]["author"] == "ana" and out["issues"][0]["title"] == "Report 52"
+    assert [c["id"] for c in out["open_changes"]] == ["001"]
+    assert [d["number"] for d in out["dangling"]] == [50], "triaged with no record"
+
+
+def test_intake_with_no_tracker_reads_nothing(tmp_path, capsys) -> None:
+    root = _repo(tmp_path, github=False)
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert code == 0 and out["issues"] == [] and out["unavailable"] == "archive.target is none"
+
+
+def test_mark_triaged_marks_what_main_has_committed_once(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    for n in (12, 15, 20):
+        _filed(gh, n)
+    _register(
+        root,
+        "## [2026-10-26-1] [bug] Drafts vanish\n\nx\n\nSeverity: high\nIssue: #12, #15\n\n"
+        "## [2026-10-26-2] [idea] Not yet committed\n\nx\n\nIssue: #20\n",
+        commit=False,
+    )
+    _git(root, "add", "work/inbox.md")
+    _git(root, "commit", "-q", "-m", "File 2026-10-26-1")
+    text = (root / "work" / "inbox.md").read_text()
+    _git(root, "reset", "-q", "HEAD~1", "--soft")
+    (root / "work" / "inbox.md").write_text(text.split("## [2026-10-26-2]")[0])
+    _git(root, "add", "work/inbox.md")
+    _git(root, "commit", "-q", "-m", "File 2026-10-26-1")
+    (root / "work" / "inbox.md").write_text(text)  # the second entry, written but uncommitted
+    for _ in range(2):
+        code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+        assert code == 0, out
+    first, second, loose = _issue(gh, 12), _issue(gh, 15), _issue(gh, 20)
+    assert [c["body"] for c in first["comments"]] == [
+        "<!-- sdlc:intake:2026-10-26-1 -->\nFiled as 2026-10-26-1 ([bug]) in work/inbox.md."
+    ]
+    assert [c["body"] for c in second["comments"]] == [
+        "<!-- sdlc:intake:2026-10-26-1 -->\n"
+        "Filed with #12 as 2026-10-26-1; follow #12 for progress."
+    ]
+    assert second["parent"] == 12 and first["parent"] is None
+    assert {"name": "triaged"} in first["labels"] and {"name": "triaged"} in second["labels"]
+    assert loose["comments"] == [] and loose["labels"] == [], "an uncommitted entry waits"
+
+
+def test_mark_triaged_points_an_attached_issue_at_its_change(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert code == 0, out
+    issue = _issue(gh, 50)
+    assert issue["parent"] == 1 and {"name": "triaged"} in issue["labels"]
+    assert issue["comments"][0]["body"] == (
+        "<!-- sdlc:intake:001-thing -->\nTaken on by #1 (001-thing); follow #1 for progress."
+    )
+
+
+def test_mark_triaged_refuses_a_worktree(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(folder.parent.parent))
+    assert code == 1 and "not a worktree" in out["refusals"][0]
+
+
+def test_a_crash_before_marking_is_finished_by_the_next_run(tmp_path, gh, capsys) -> None:
+    """The register's commit is the record; the label comes after. A run that stopped between
+    them shows the issue as filed, and mark-triaged alone finishes it."""
+    root = _repo(tmp_path)
+    _filed(gh, 52)
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #52\n")
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert [(i["number"], i["filed"]) for i in out["issues"]] == [(52, "2026-10-26-1")]
+    _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert out["issues"] == [] and out["dangling"] == []
+
+
+def test_a_verdict_is_committed_then_closes_its_issue_once(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _register(root, "")
+    for n in (60, 61, 62):
+        _filed(gh, n)
+    code, out = _json(
+        capsys,
+        lambda: sdlc.cmd_bug_commit(
+            root,
+            triaged=["60=resolved:019-status-next", "61=wontfix", "62=duplicate:#60"],
+            whys=["61=Out of scope for the plugin", "62=Same report as #60"],
+        ),
+    )
+    assert code == 0, out
+    assert out["commit"] == "Triage #60, #61, #62" and out["triaged"] == [60, 61, 62]
+    body = _git(root, "log", "-1", "--format=%B")
+    assert "Why #61: Out of scope for the plugin" in body
+    assert "Sdlc-Triaged: #60 verdict=resolved ref=019-status-next" in body
+    assert _git(root, "diff", "--name-only", "HEAD~1", "HEAD") == "", "an empty commit"
+    for _ in range(2):
+        code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+        assert code == 0, out
+    resolved, wontfix, dup = _issue(gh, 60), _issue(gh, 61), _issue(gh, 62)
+    assert resolved["state"] == "CLOSED" and resolved["reason"] == "completed"
+    assert resolved["comments"][0]["body"].endswith("Already resolved by 019-status-next.")
+    assert wontfix["reason"] == "not planned"
+    assert wontfix["comments"][0]["body"].endswith(
+        "Closed as wontfix: Out of scope for the plugin."
+    )
+    assert dup["parent"] == 60 and dup["reason"] == "not planned"
+    closes = [c for c in gh()["calls"] if c[:2] == ["issue", "close"]]
+    assert len(closes) == 3, "each closed once across two runs"
+
+
+def test_a_verdict_names_what_it_rests_on_or_why(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _register(root, "")
+    code, out = _json(
+        capsys, lambda: sdlc.cmd_bug_commit(root, triaged=["60=resolved", "61=wontfix"])
+    )
+    assert code == 1
+    assert out["refusals"] == [
+        "--triaged 60=resolved: a resolved verdict names what it rests on, :<ref>",
+        "--triaged 61=wontfix: give the reason as --why 61=<one line>",
+    ]
+
+
+def test_needs_info_waits_for_the_author(tmp_path, gh, capsys, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    _filed(gh, 70, author="ana")
+    questions = tmp_path / "q.md"
+    questions.write_text("- Which command did you run?\n", encoding="utf-8")
+    for _ in range(2):
+        code, out = _json(capsys, lambda: sdlc.cmd_needs_info(root, 70, str(questions)))
+        assert code == 0, out
+    issue = _issue(gh, 70)
+    assert {"name": "needs-info"} in issue["labels"] and len(issue["comments"]) == 1
+    assert issue["comments"][0]["body"] == (
+        "<!-- sdlc:needs-info -->\nNeeds more detail before this can be triaged:\n\n"
+        "- Which command did you run?"
+    )
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert out["issues"] == [], "waiting on its author"
+    monkeypatch.setenv("FAKE_GH_USER", "ana")
+    tracker = sdlc.tracker(root, sdlc.load_config(root)[0])
+    tracker._gh("issue", "comment", "70", "--body-file", "-", stdin="I ran status.")
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert [(i["number"], i["replied"]) for i in out["issues"]] == [(70, True)]
+
+
+def test_closes_lists_the_issues_a_change_would_close(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    code, out = _json(capsys, lambda: sdlc.cmd_closes(root, "001"))
+    assert code == 0
+    assert [(c["number"], c["title"], c["state"]) for c in out["closes"]] == [
+        (50, "Report 50", "OPEN")
+    ]
+
+
+def test_a_seed_split_off_at_ship_is_told_where_it_stays_at_close(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _register(root, "")
+    folder = _open(root)
+    _filed(gh, 15, labels=("triaged",), parent=1)
+    tree = folder.parent.parent
+    (tree / "work" / "inbox.md").write_text(
+        "# Inbox\n\n## [2026-10-26-1] [idea] Reopen drafts too\n\n"
+        "Split from 001-thing: reopening isn't covered.\n\nIssue: #15\n",
+        encoding="utf-8",
+    )
+    _set(folder, "impact:\n", "impact: none\n")
+    assert sdlc.cmd_ship(root, "001") == 0
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ship 001-thing")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    assert "Closes #15" not in _git(root, "log", "-1", "--format=%b", "main")
+    issue = _issue(gh, 15)
+    assert issue["state"] == "OPEN"
+    assert issue["comments"][-1]["body"] == (
+        "<!-- sdlc:intake:2026-10-26-1 -->\n"
+        "Not resolved by 001-thing; it stays open as 2026-10-26-1 in work/inbox.md."
+    )
+    assert out["intake"]["done"] == ["#15: 2026-10-26-1"]

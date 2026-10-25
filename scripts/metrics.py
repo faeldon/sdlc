@@ -918,7 +918,7 @@ def parse_trailers(body: str | None) -> dict | None:
             out["blocked"][name] = fields.get("minutes", 0)
         elif key == "review" and name:
             out.setdefault("reviews", {})[name] = fields
-        elif key in ("fixes", "retired") and name:
+        elif key in ("fixes", "retired", "triaged") and name:
             out.setdefault(key, {})[name] = fields
         else:
             out[key] = fields
