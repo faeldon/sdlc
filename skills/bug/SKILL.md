@@ -70,8 +70,7 @@ When the argument is an entry's id, or the human wants one gone or moved:
   `/sdlc:ship` removes it with the fix.
 - **Retag** an entry filed as the wrong kind: a `[bug]` that is really a request becomes a
   `[idea]`, and an `[idea]` (or an older `[seed]`) that describes something broken becomes a
-  `[bug]` with its
-  `Severity:` line. Its id stays the same, so whatever names it still does.
+  `[bug]` with its `Severity:` line. Its id stays the same, so whatever names it still does.
 
 ## Step 3 — Draft and show it
 

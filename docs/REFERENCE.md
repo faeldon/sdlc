@@ -239,13 +239,13 @@ with finished changes: the change's commit keeps them in history. `work/inbox.md
 too; a closed seed is deleted from it, history keeping that as well. Every entry there is a
 seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]` (the process doc's "Seeds, and the
 changes they become" says what each is, and the change types they grow into). Any other tag reads
-as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good. It was `work/ideas.md`
-before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
+as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good.
+It was `work/ideas.md` before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
 reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
 over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
-into `[nit]` entries, retags each `[seed]` entry `[idea]`, and rewrites the titles that name an open entry to its id, in `After:`, the
-direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
+into `[nit]` entries, retags each `[seed]` entry `[idea]`, and rewrites the titles that name an
+open entry to its id, in `After:`, the direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
 of those files has uncommitted edits, or one it can't read. Run it with no change open: one in
 another worktree keeps a title `idea:`. Until a repo migrates, `sdlc.py config`'s `work.register`
 names `work/ideas.md`, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,

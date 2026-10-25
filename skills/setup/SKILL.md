@@ -139,9 +139,9 @@ edit to an existing file as a diff. A doc drafted from a default keeps the `>` n
 title: it says what the plugin reads from the doc, which whoever edits it later needs.
 
 - **The inbox**, when `readiness`'s `inbox` item is `warn`: the repo still has a `work/ideas.md`
-  or a `work/nits.md`, or entries without ids. Propose moving them over, saying what its detail
-  lists, as `work/inbox.md (migrated)` in Step 4's list. `sdlc.py migrate-inbox` does it in Step
-  5, renaming `work/ideas.md` so history follows it, and refuses while one of those files has
+  or a `work/nits.md`, entries without ids, or `[seed]` entries to retag `[idea]`. Propose moving
+  them over, saying what its detail lists, as `work/inbox.md (migrated)` in Step 4's list.
+  `sdlc.py migrate-inbox` does it in Step 5, renaming `work/ideas.md` so history follows it, and refuses while one of those files has
   uncommitted edits: those are the human's to commit first. It is best run with no change open:
   one open in another worktree keeps the title on its `idea:` line, which `readiness` names, and
   once it lands its seed reads `vanished`, not `shipped`, against a `Groups:` line rewritten to
