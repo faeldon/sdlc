@@ -6,7 +6,8 @@ it: /sdlc:intent opens the issue and the change takes its number.
 `tier:`/`stage:`/`impact:` labels, and a blocked-by link for each id in `depends_on`. Close
 renders it a last time, labels it `landed`, and reads it back before the folder goes; the Close
 commit says `Closes #N`, so GitHub closes the issue when that commit reaches the default branch.
-Where the default branch isn't `main`, close closes it itself.
+Where the default branch isn't the base branch close lands on (`change["base"]`), close closes it
+itself.
 
 Loaded by path from `sdlc.py` (`tracker()`), only when `archive.target = "github"`. It never
 imports `sdlc.py` and never reads `work/` or `.sdlc/`: what it needs crosses as a `change` dict.
@@ -23,11 +24,9 @@ from pathlib import Path
 
 ARCHIVE_LABEL = "sdlc"
 DESCRIPTION = "A change tracked by the sdlc plugin"
-# Archived on a local main, open until its Close commit reaches the default branch. Never one of
-# the labels `_reconcile()` manages, so nothing removes it.
+# Archived on the local base branch, open until its Close commit reaches the default branch. Never
+# one of the labels `_reconcile()` manages, so nothing removes it.
 LANDED = "landed"
-# The branch close lands on: GitHub reads `Closes #N` only from commits on the default branch.
-MAIN = "main"
 # One colour per group, so a list of issues reads by group at a glance.
 COLOURS = {
     ARCHIVE_LABEL: "C5DEF5", "tier": "5319E7", "stage": "FBCA04", "impact": "D93F0B",
@@ -199,21 +198,32 @@ class Tracker:
             why = made.stderr.strip() or made.stdout.strip()
             return None, None, f"gh issue create failed: {why}"
         if n in used:
-            self.drop(url, f"#{n} is already a change number here")
+            left = self.drop(url, f"#{n} is already a change number here")
+            what = f"it is still open: close it by hand ({left})" if left else "closed it"
             return (
                 None,
                 url,
                 (
-                    f"issue #{n} has a number a locally numbered open change already holds. "
-                    'Keep `ids = "local"` until those are archived'
+                    f"issue #{n} has a number a locally numbered open change already holds, so "
+                    f'{what}. Keep `ids = "local"` until those are archived'
                 ),
             )
         return n, url, None
 
-    def drop(self, url: str, why: str) -> None:
-        self._gh(
+    def drop(self, url: str, why: str) -> str | None:
+        """Close an issue `claim()` opened for a change that was never made, as not planned: None,
+        or why it is still open. Its `stage:` label goes too, in an edit of its own whose refusal
+        is skipped, so a closed issue doesn't still read `stage: plan`."""
+        closed = self._gh(
             "issue", "close", url, "--reason", "not planned", "--comment", f"Not opened: {why}."
         )
+        if closed.returncode != 0:
+            return closed.stderr.strip() or f"gh issue close exited {closed.returncode}"
+        seen = (self._view(url, "labels") or {}).get("labels") or []
+        stages = sorted(n for n in {lb.get("name") or "" for lb in seen} if n.startswith("stage: "))
+        if stages:
+            self._gh("issue", "edit", url, *(a for n in stages for a in ("--remove-label", n)))
+        return None
 
     # ------------------------------------------------------------ mirroring
 
@@ -402,15 +412,16 @@ class Tracker:
 
     def _landing(self, change: dict) -> bool:
         """Whether a push will close this change's issue, so close only labels it: a shipped
-        change, on a repo whose default branch is the `main` close lands on. Otherwise close
-        closes it, and `closed_because` says why for a shipped one."""
+        change, on a repo whose default branch is the base branch close lands on (`base`).
+        Otherwise close closes it, and `closed_because` says why for a shipped one."""
         if change.get("stage") == "dropped":
             return False
         branch, why = self._default_branch()
-        if branch == MAIN:
+        base = change.get("base")
+        if branch and branch == base:
             return True
         self.closed_because = (
-            f"the default branch is {branch}, not {MAIN}"
+            f"the default branch is {branch}, not {base}"
             if branch
             else f"couldn't read the default branch: {why}"
         )

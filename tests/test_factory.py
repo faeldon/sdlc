@@ -374,5 +374,5 @@ def test_sdlc_reads_a_factory_built_change_like_any_other(tmp_path) -> None:
     _git(root, "rm", "-r", "-q", f"work/{NAME}")
     _git(root, "commit", "-q", "-m", f"Close {NAME}")
     _git(root, "branch", "-q", "-f", "main", "HEAD")
-    [closed] = sdlc.closed_changes(root, None)
+    [closed] = sdlc.closed_changes(root, None, "main")
     assert (closed["name"], closed["impact"], closed["problems"]) == (NAME, "minor", [])

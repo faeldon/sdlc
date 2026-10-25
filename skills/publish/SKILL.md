@@ -33,6 +33,8 @@ a package upload, a `gh release create`, a deploy. It runs with no terminal and 
 after this skill's one approval, so it must never ask for anything: what it uploads is built
 beforehand by `release.prepare`, which `/sdlc:release` runs. With none set, publishing is the push alone,
 which is how a repo whose users pull from it, a plugin marketplace among them, releases.
+`config`'s `git.base` is the branch that is pushed, `main` unless the repo's is another; where this
+skill says `main`, it means that branch.
 
 `publish --check` gives the version, the tag, the remote, the command as it will run, what
 `/sdlc:release` prepared for this tag (`prepared`: the end of `release.prepare`'s output, or null),
@@ -52,7 +54,7 @@ here** and say what each needs.
 
 Ask literally:
 
-> `Publish <tag>: push main and <tag> to <remote>, then run <command>? This can't be taken back. (yes / no)`
+> `Publish <tag>: push <git.base> and <tag> to <remote>, then run <command>? This can't be taken back. (yes / no)`
 
 Leave out `, then run <command>` when `release.publish` is unset. When `prepared` is set, say
 `…, then run <command> to upload what was prepared, shown above?`.
@@ -65,7 +67,7 @@ Leave out `, then run <command>` when `release.publish` is unset. When `prepared
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py publish
 ```
 
-Its steps run in order: `push main`, `push tag`, `publish command`. Each is skipped when it is
+Its steps run in order: `push <git.base>`, `push tag`, `publish command`. Each is skipped when it is
 already done, so a rerun after a failure picks up where it stopped without pushing twice or
 publishing twice.
 

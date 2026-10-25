@@ -56,9 +56,10 @@ thing anyone does with it, so without the fallback the skill breaks on its own f
 plain `git diff` calls rather than an `if`, so the skill's allowed tools cover it exactly.
 
 `config` gives the commands Steps 1 and 2 run and the review Step 3 works through. Keep its output
-in view; nothing below names the repo's tools any other way.
+in view; nothing below names the repo's tools any other way. Its `git.base` is the branch a change
+lands on, `main` unless the repo's is another; where this skill says `main`, it means that branch.
 
-**Then bring the branch up to date with `main`**, before anything is checked or reviewed:
+**Then bring the branch up to date with `git.base`**, before anything is checked or reviewed:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base <NNN>

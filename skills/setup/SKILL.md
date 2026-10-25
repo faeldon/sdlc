@@ -121,6 +121,9 @@ Then one short round, only for what Step 1 couldn't settle:
   the file: the counter numbers changes, nothing is mirrored and close files no issue. When the person picks GitHub and `readiness`'s `gh auth` isn't `ok`,
   still set github, and say that `/sdlc:intent` refuses until `gh auth login` has run. Never leave
   it local in its place: a repo that later moves to GitHub would hand out a number twice.
+- **The base branch** (`git.base`), only when `config` gives it as null (`git.base_source` is
+  `unset`: no `main`, and `origin/HEAD` names no local branch): which branch every change starts
+  from and lands on. Every change refuses to start until it is set.
 - **Evidence** (`retro.evidence`), only when a product doc is being drafted: commands that print
   what users did with the product, as counts and summaries, for the retrospective's product pass.
   Ask; never guess them from task files. None is a fine answer, and the pass then has only the
@@ -137,7 +140,10 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
 - **`.gitignore`**: a `.claude/worktrees/` line, where each change's worktree lives. Never `work/`:
   a change's artifacts are committed with it, and `readiness` reports an ignored `work/`.
 - **`.sdlc/config.toml`**: only the keys that differ from their defaults, each with a comment
-  saying why. Include `[archive] target`, either way.
+  saying why. Include `[archive] target`, either way. Include `[git] base` when the base branch
+  isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is
+  `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it. A
+  repo on `main` gets no `[git]` section.
 - **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process` and fill in every line that
   starts with `<`. Those are where this repo differs: the failure it most needs to stop, its
   always-Tier-2 carve-outs, its gate and slower check, how a commit reaches its users. Keep the

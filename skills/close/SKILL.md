@@ -55,6 +55,9 @@ change will be mirrored: `archive.target`, and `archive.kept_because` when there
 mirror to here (`archive.target` is `none`, or GitHub can't be reached), which is a fine
 answer: the folder still leaves `main`, and history keeps it.
 
+`config`'s `git.base` is the branch close lands on, `main` unless the repo's is another; where this
+skill says `main`, it means that branch.
+
 If `config` sets `commands.close_list`, run it next, with `{suffix}` replaced by the branch name
 with `-` as `_`. It is the repo's read-only listing of what a change's worktree left outside git.
 None found is a fine answer. With no `close_list`, there is nothing to list; skip it.
@@ -71,11 +74,11 @@ branch onto `main` and ship again, or fix `archive` in `.sdlc/config.toml`.
 
 Ask literally:
 
-> `Close NNN-slug: fast-forward main to it, archive it to <where>, commit the removal of work/NNN-slug/ as "Close NNN-slug", then remove its worktree and delete its branch? (yes / no)`
+> `Close NNN-slug: fast-forward <git.base> to it, archive it to <where>, commit the removal of work/NNN-slug/ as "Close NNN-slug", then remove its worktree and delete its branch? (yes / no)`
 
 For a dropped change, ask instead:
 
-> `Close dropped NNN-slug: archive it to <where> and close it as not planned, record a "Drop NNN-slug" commit on main that changes no files, then remove its worktree and delete its branch? (yes / no)`
+> `Close dropped NNN-slug: archive it to <where> and close it as not planned, record a "Drop NNN-slug" commit on <git.base> that changes no files, then remove its worktree and delete its branch? (yes / no)`
 
 `<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave out `archive it to <where>, ` (and `and close
 it as not planned`).
@@ -107,7 +110,7 @@ it as not planned`).
 
 ## Step 4 — Report and stop
 
-Report what `done` lists, `main`'s new commits (`git log -2 --oneline main`), where the change was
+Report what `done` lists, `main`'s new commits (`git log -2 --oneline <git.base>`), where the change was
 mirrored (`archive.location`) or why it wasn't, and where the session is now. With
 `archive.closes`, say the issue stays open, labelled `landed`, until `main` reaches GitHub, by
 `/sdlc:publish` or a push of the human's own, and GitHub closes it then. With

@@ -241,6 +241,11 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # gates its tier and way of running pass, plus this.
         "stop_allowance": 1,
     },
+    # The branch every change starts from and lands on, which release tags and publish pushes.
+    # Unset, it is `main` when there is one, else the branch `origin/HEAD` names (`_resolve_trunk`).
+    "git": {
+        "base": None,
+    },
 }
 # Each tracker is a module in scripts/trackers/, so adding one adds a target. GitHub first, as the
 # default; `none` is no tracker at all.
@@ -324,11 +329,46 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
 def _resolve_docs(root: Path, cfg: dict, chosen: set[str]) -> dict:
     """With no CLAUDE.md, the policy is an AGENTS.md if there is one, unless the host set
     `docs.policy` (`chosen`). Every reader takes `cfg["docs"]`, so this is the one place it is
-    decided."""
+    decided. The base branch is resolved here too, for the same reason (`_resolve_trunk`)."""
     agents_only = not (root / "CLAUDE.md").is_file() and (root / "AGENTS.md").is_file()
     if "policy" not in chosen and agents_only:
         cfg["docs"]["policy"] = "AGENTS.md"
+    cfg["git"]["base"], cfg["git"]["base_source"] = _resolve_trunk(root, cfg["git"]["base"])
     return cfg
+
+
+def _resolve_trunk(root: Path, given: str | None) -> tuple[str | None, str]:
+    """The base branch and where it came from: `git.base` as set (`config`); else `main` when the
+    repo has one, else the local branch `origin/HEAD` names (`detected`); else (None, `unset`).
+    Never the checkout's current branch or `init.defaultBranch`, which describe one machine, and
+    never GitHub's default branch, which would be a network call from core."""
+    if given:
+        return given, "config"
+    if _git(root, "rev-parse", "--verify", "-q", f"refs/heads/{DEFAULT_TRUNK}") is not None:
+        return DEFAULT_TRUNK, "detected"
+    remote = _git(root, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or ""
+    name = remote.removeprefix("origin/")
+    named = remote.startswith("origin/") and name
+    if named and _git(root, "rev-parse", "--verify", "-q", f"refs/heads/{name}") is not None:
+        return name, "detected"
+    return None, "unset"
+
+
+# The one name the plugin assumes, and only when it exists: every other use of the base branch
+# reads `git.base` as resolved.
+DEFAULT_TRUNK = "main"
+TRUNK_KEY = f"[git] base in {HOST_DIR}/config.toml"
+
+
+def trunk_refusal(home: Path, trunk: str | None, source: str = "config") -> str | None:
+    """Why a command that moves or reads the base branch can't run here, or None. Every command
+    that writes asks this before anything else, so nothing is half made on a branch that isn't
+    there."""
+    if not trunk:
+        return f"no base branch: there is no main and origin/HEAD names none; set {TRUNK_KEY}"
+    if _git(home, "rev-parse", "--verify", "-q", f"refs/heads/{trunk}") is None:
+        return f"base branch {trunk!r} doesn't exist here (git.base, {source}); set {TRUNK_KEY}"
+    return None
 
 
 def template_path(root: Path, name: str) -> tuple[Path, str]:
@@ -439,6 +479,8 @@ def cmd_config(root: Path) -> int:
     ignored = work_ignored(root)
     if ignored:
         warnings.append(IGNORED)
+    if not cfg["git"]["base"]:
+        warnings.append(f"git.base: {trunk_refusal(home, None)}")
     cfg_file = root / HOST_DIR / "config.toml"
     out = {
         "config_file": f"{HOST_DIR}/config.toml" if cfg_file.is_file() else None,
@@ -455,6 +497,7 @@ def cmd_config(root: Path) -> int:
         "release": cfg["release"],
         "retro": cfg["retro"],
         "metrics": cfg["metrics"],
+        "git": cfg["git"],
         "templates": templates,
         "warnings": warnings,
     }
@@ -1237,7 +1280,7 @@ def cmd_new(
     tier: int,
     title: str | None,
     worktree: bool = False,
-    base: str = "main",
+    base: str | None = None,
 ) -> int:
     home = main_root(root)
     slug = slugify(given_slug)
@@ -1254,6 +1297,13 @@ def cmd_new(
     if work_ignored(home):
         print(f"⚠  {IGNORED}", file=sys.stderr)
         return 1
+    # Before any number is claimed: a GitHub issue opened for a worktree git then can't branch
+    # is a change half made.
+    cfg, _, _ = load_config(home)
+    base, source = (base, "--base") if base else (cfg["git"]["base"], cfg["git"]["base_source"])
+    if worktree and (why := trunk_refusal(home, base, source)):
+        print(f"⚠  {why}", file=sys.stderr)
+        return 1
 
     wanted = TIER_ARTIFACTS[tier]
     missing = [n for n in wanted if not template_path(home, n)[0].is_file()]
@@ -1265,7 +1315,6 @@ def cmd_new(
     # id is settled before anything in git can claim one, by the change's GitHub issue or by the
     # counter under a lock. Without a worktree, the folder goes in the checkout `new` ran in.
     here = Path(_git(root, "rev-parse", "--show-toplevel") or root)
-    cfg, _, _ = load_config(home)
     mode = ids_mode(home, cfg)
     issue = None
     if mode == "github":
@@ -1287,8 +1336,8 @@ def cmd_new(
         name = f"{number:03d}-{slug}"
         tree, why = _add_worktree(home, name, base) if worktree else (None, None)
         if why:
-            numbering.drop(issue, f"its worktree couldn't be made ({why})")
             print(f"⚠  git worktree add failed: {why}", file=sys.stderr)
+            _report_drop(issue, numbering.drop(issue, f"its worktree couldn't be made ({why})"))
             return 1
         dest = work_dir(tree or here) / name
         dest.mkdir(parents=True)
@@ -1329,6 +1378,15 @@ def cmd_new(
         f"({'Problem → Outcome → Approach' if tier == 1 else 'Problem → Outcome, then /sdlc:spec'})"
     )
     return 0
+
+
+def _report_drop(issue: str, err: str | None) -> None:
+    """Say what became of an issue `new` opened and then gave up on: printed either way, since
+    `opened` is the last word otherwise, and it reads as if the issue were still open."""
+    if err:
+        print(f"⚠  {issue} is still open: close it by hand ({err})", file=sys.stderr)
+    else:
+        print(f"  closed   {issue}  (not planned)")
 
 
 def stamp_shipped(text: str, stamp: str) -> tuple[str, list[str]]:
@@ -1481,17 +1539,18 @@ def cmd_undone(root: Path, ident: str) -> int:
 
 def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
     """The open nits in work/nits.md as JSON, with their age, for intent and spec to offer and
-    ship to retire. `--change` keeps those a change's diff against main touches, `--touching`
-    those the given paths do. Writes nothing."""
+    ship to retire. `--change` keeps those a change's diff against the base branch touches,
+    `--touching` those the given paths do. Writes nothing."""
     nits, problems = nit_entries(root)
     paths = list(touching or [])
     if change:
         path = _one_change(root, change)
         if path is None:
             return 1
-        found = changed_paths(path.parent.parent, "main")
+        trunk = load_config(main_root(root))[0]["git"]["base"]
+        found = changed_paths(path.parent.parent, trunk) if trunk else None
         if found is None:
-            print("⚠  no merge base with 'main': is this a git checkout?", file=sys.stderr)
+            print(f"⚠  no merge base with {trunk!r}: is this a git checkout?", file=sys.stderr)
             return 1
         paths += [p for _, path_, to in found[1] for p in (path_, to) if p]
     if change or touching is not None:
@@ -1884,26 +1943,29 @@ def ready_to_close(root: Path) -> list[dict]:
     return out
 
 
-def behind_main(main: Path, branch: str) -> int | None:
-    """How many of `main`'s commits `branch` lacks; None when either isn't a local branch. 0 is
-    close's precondition, `main` an ancestor of the branch, so a fast-forward is possible. Status
-    shows anything else, and ship stops on it, before the gate and the review run on a base that
-    close would refuse."""
-    out = _git(main, "rev-list", "--count", f"refs/heads/{branch}..refs/heads/main")
+def behind_trunk(main: Path, branch: str, trunk: str | None) -> int | None:
+    """How many of the base branch's commits `branch` lacks; None when either isn't a local
+    branch. 0 is close's precondition, the base an ancestor of the branch, so a fast-forward is
+    possible. Status shows anything else, and ship stops on it, before the gate and the review run
+    on a base that close would refuse."""
+    if not trunk:
+        return None
+    out = _git(main, "rev-list", "--count", f"refs/heads/{branch}..refs/heads/{trunk}")
     return int(out) if out and out.isdigit() else None
 
 
 def cmd_base(root: Path, ident: str | None) -> int:
-    """Bring a change's branch up to date with `main` in its own worktree, or refuse, as JSON.
-    /sdlc:ship runs it at Step 0, so the gate and the review see what close will fast-forward.
+    """Bring a change's branch up to date with the base branch (`git.base`) in its own worktree,
+    or refuse, as JSON. /sdlc:ship runs it at Step 0, so the gate and the review see what close
+    will fast-forward.
 
     The one write a skill makes before its WAIT, by a named exception (004's spec): it moves only
-    the change's own local branch onto `main`, only when nothing conflicts, and prints the command
-    that undoes it. A branch with no commits of its own, the usual case at ship and always after a
-    factory run, fast-forwards, and git carries the uncommitted work or refuses to overwrite it.
-    One with commits rebases, from a clean tree only, and a conflict is aborted. Never a stash:
-    the stack is shared with every worktree. Never a merge of `main` into the branch: close would
-    put it on main's first-parent line, which `closed_changes()` walks."""
+    the change's own local branch onto the base, only when nothing conflicts, and prints the
+    command that undoes it. A branch with no commits of its own, the usual case at ship and always
+    after a factory run, fast-forwards, and git carries the uncommitted work or refuses to
+    overwrite it. One with commits rebases, from a clean tree only, and a conflict is aborted.
+    Never a stash: the stack is shared with every worktree. Never a merge of the base into the
+    branch: close would put it on the base's first-parent line, which `closed_changes()` walks."""
     trees = [(t, b) for t, b in worktrees(root) if DIR_RE.match(b)]
     if ident is None:
         here = _git(root, "branch", "--show-current") or ""
@@ -1922,47 +1984,51 @@ def cmd_base(root: Path, ident: str | None) -> int:
         return emit(0)
     tree, branch = found[0]
     before = _git(tree, "rev-parse", "HEAD")
-    behind = behind_main(main, branch)
+    git_cfg = load_config(main)[0]["git"]
+    trunk = git_cfg["base"]
+    behind = behind_trunk(main, branch, trunk)
     report.update(change=branch, branch=branch, behind=behind, **{"from": before, "to": before})
 
     def refuse(reason: str) -> int:
         report.update(action="refused", reason=reason, to=_git(tree, "rev-parse", "HEAD"))
         return emit(1)
 
+    if why := trunk_refusal(main, trunk, git_cfg["base_source"]):
+        return refuse(why)
     if behind is None:
-        return refuse("no local main branch to bring it up to date with")
+        return refuse(f"no local {trunk} branch to bring it up to date with")
     if behind == 0:
         return emit(0)
-    own = _git(main, "rev-list", "--count", f"refs/heads/main..refs/heads/{branch}")
+    own = _git(main, "rev-list", "--count", f"refs/heads/{trunk}..refs/heads/{branch}")
     if own and own != "0":
         if _dirty_paths(tree):
             return refuse(
                 f"{branch} has commits of its own and uncommitted work, so it can't rebase: "
                 "commit the work, then run /sdlc:ship again"
             )
-        err = _git_err(tree, "rebase", "-q", "main")
+        err = _git_err(tree, "rebase", "-q", trunk)
         if err:
             _git_err(tree, "rebase", "--abort")
-            return refuse(f"rebasing onto main conflicts, so it was aborted: {err}")
+            return refuse(f"rebasing onto {trunk} conflicts, so it was aborted: {err}")
         report["action"] = "rebased"
     else:
         # The counter `new` wrote beside the folder is untracked until ship commits it, and a
-        # change closed meanwhile under local numbering committed main's: git would refuse to
+        # change closed meanwhile under local numbering committed the base's: git would refuse to
         # overwrite ours. Set it aside, and keep the higher number.
         counter = tree / ".sdlc" / LAST_ID
         kept = None
         if (
             counter.is_file()
             and _git(tree, "ls-files", "--error-unmatch", f".sdlc/{LAST_ID}") is None
-            and _git(main, "cat-file", "-e", f"main:.sdlc/{LAST_ID}") is not None
+            and _git(main, "cat-file", "-e", f"{trunk}:.sdlc/{LAST_ID}") is not None
         ):
             kept = counter.read_text(encoding="utf-8")
             counter.unlink()
-        err = _git_err(tree, "merge", "--ff-only", "-q", "main")
+        err = _git_err(tree, "merge", "--ff-only", "-q", trunk)
         if err:
             if kept is not None:
                 counter.write_text(kept, encoding="utf-8")
-            return refuse(f"main changed what this change's uncommitted work changes: {err}")
+            return refuse(f"{trunk} changed what this change's uncommitted work changes: {err}")
         ours = int(kept.strip()) if kept is not None and kept.strip().isdigit() else 0
         if kept is not None and (_read_number(counter) or 0) < ours:
             _write_state(tree, LAST_ID, kept)
@@ -1971,9 +2037,9 @@ def cmd_base(root: Path, ident: str | None) -> int:
     return emit(0)
 
 
-def _close_times(main: Path) -> dict[str, datetime]:
-    """When each change's `Close` commit landed on main, by the change's name."""
-    log = _git(main, "log", "--first-parent", "--format=%cI%x00%s", "main") or ""
+def _close_times(main: Path, trunk: str) -> dict[str, datetime]:
+    """When each change's `Close` commit landed on the base branch, by the change's name."""
+    log = _git(main, "log", "--first-parent", "--format=%cI%x00%s", trunk) or ""
     found = {}
     for line in log.splitlines():
         when, _, subject = line.partition("\x00")
@@ -2105,7 +2171,7 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         events = metrics.read_events(dirs, branch, branch, cfg["commands"]["check"])
         if not events:
             return from_history("no transcripts for this change")
-        closes = _close_times(main)
+        closes = _close_times(main, cfg["git"]["base"])
         dep_closes = {}
         for ident in depends_on(text):
             name = next((n for n in closes if names_change(n, ident)), ident)
@@ -2117,11 +2183,11 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         return from_history(f"capture failed: {type(e).__name__}")
 
 
-def _drop_commit(main: Path, branch: str) -> str | None:
-    """The `Drop <branch>` commit on main's first-parent line whose second parent is the branch's
-    tip: a rerun's sign that `record` is done. None when there is none."""
+def _drop_commit(main: Path, branch: str, trunk: str) -> str | None:
+    """The `Drop <branch>` commit on the base's first-parent line whose second parent is the
+    branch's tip: a rerun's sign that `record` is done. None when there is none."""
     tip = _git(main, "rev-parse", branch)
-    log = _git(main, "log", "--first-parent", "--format=%H%x00%P%x00%s", "main") or ""
+    log = _git(main, "log", "--first-parent", "--format=%H%x00%P%x00%s", trunk) or ""
     for line in log.splitlines():
         sha, parents, subject = (line.split("\x00") + ["", ""])[:3]
         if subject == f"{DROP_PREFIX}{branch}" and parents.split()[1:2] == [tip]:
@@ -2198,10 +2264,10 @@ def _close_commit(
     return None
 
 
-# Set on a close that another close handed off to: `main` once it runs main's script, `merged` once
+# Set on a close that another close handed off to: `home` once it runs main's script, `merged` once
 # it runs the code its own merge brought. Read only here, so a handoff never loops.
 HANDOFF_ENV = "SDLC_CLOSE_RAN"
-RAN = {"main": "main's code", "merged": "merged code"}
+RAN = {"home": "main's code", "merged": "merged code"}
 
 
 def _own_repo(main: Path) -> bool:
@@ -2248,7 +2314,7 @@ def _handoff(main: Path, argv: list[str], ran: str, report: dict) -> int:
         return made.returncode
     said = [ln for ln in made.stderr.splitlines() if ln.strip()]
     why = said[-1].strip() if said else f"exited {made.returncode}"
-    if ran == "main":
+    if ran == "home":
         report["refusals"].append(f"main's sdlc.py didn't run: {why}")
     else:
         number = str(report.get("change") or "").split("-")[0]
@@ -2280,7 +2346,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     if own and PLUGIN_DIR.resolve() != main.resolve() and not os.environ.get(HANDOFF_ENV):
         argv = [*([ident] if ident else []), *(["--check"] if check_only else [])]
         report = {"change": ident, "main_checkout": str(main), "refusals": [], "done": []}
-        return _handoff(main, argv, "main", report | {"skipped": []})
+        return _handoff(main, argv, "home", report | {"skipped": []})
     cfg, _, _ = load_config(main)
     trees = [(t, b) for t, b in worktrees(root) if DIR_RE.match(b)]
     if ident is None:
@@ -2333,23 +2399,27 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         )
     if _git(tree, "status", "--porcelain") not in ("", None):
         report["refusals"].append(f"{tree} has uncommitted or untracked files")
-    if _git(main, "branch", "--show-current") != "main":
-        report["refusals"].append(f"the main checkout ({main}) isn't on main")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(main, trunk, cfg["git"]["base_source"]):
+        report["refusals"].append(why)
+        return emit(1)
+    if _git(main, "branch", "--show-current") != trunk:
+        report["refusals"].append(f"the main checkout ({main}) isn't on {trunk}")
     if _git(main, "status", "--porcelain", "--untracked-files=no") not in ("", None):
         report["refusals"].append(f"the main checkout ({main}) has uncommitted changes")
     # Merged already is a rerun's state, not a refusal.
-    landed = _git(main, "merge-base", "--is-ancestor", branch, "main") is not None
+    landed = _git(main, "merge-base", "--is-ancestor", branch, trunk) is not None
     if kind == "dropped":
-        # A dropped change is recorded whatever main has done since: nothing of it lands.
-        if landed and not _drop_commit(main, branch):
+        # A dropped change is recorded whatever the base has done since: nothing of it lands.
+        if landed and not _drop_commit(main, branch, trunk):
             report["refusals"].append(
-                f"{branch} is already on main with no {DROP_PREFIX}{branch} commit: it landed, "
-                "so it isn't a drop"
+                f"{branch} is already on {trunk} with no {DROP_PREFIX}{branch} commit: it "
+                "landed, so it isn't a drop"
             )
-    elif not landed and behind_main(main, branch) != 0:
+    elif not landed and behind_trunk(main, branch, trunk) != 0:
         report["refusals"].append(
-            f"main has moved past {branch}'s base, so it can't fast-forward; rebase {branch} "
-            "onto main in its worktree and ship again"
+            f"{trunk} has moved past {branch}'s base, so it can't fast-forward; rebase {branch} "
+            f"onto {trunk} in its worktree and ship again"
         )
     if report["refusals"]:
         return emit(1)
@@ -2410,7 +2480,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         return _close_commit(main, branch, sha, where, captured, closes)
 
     def record() -> str | None:
-        if _drop_commit(main, branch):
+        if _drop_commit(main, branch, trunk):
             return None  # recorded by an earlier run that stopped before removing the worktree
         where = report["archive"]["location"]
         return _drop_record(main, branch, sha, where, kept["reached"], kept["reason"], captured)
@@ -2434,7 +2504,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         return emit(0)
 
     inside = Path.cwd().resolve().is_relative_to(tree.resolve())
-    before = _git(main, "rev-parse", "main")
+    before = _git(main, "rev-parse", trunk)
     for i, (name, step) in enumerate(steps):
         if name == "remove worktree" and inside:
             report["skipped"] = [n for n, _ in steps[i:]]
@@ -2451,7 +2521,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             report["refusals"].append(f"{name} failed: {err}")
             return emit(1)
         report["done"].append(name)
-        if name == "merge" and own and _merged_scripts(main, before):
+        if name == "merge" and own and _merged_scripts(main, before, trunk):
             # The rest runs as the code this merge brought.
             report["skipped"] = [n for n, _ in steps[i + 1 :]]
             return _handoff(main, [branch], "merged", report)
@@ -2511,8 +2581,8 @@ OWN_RAN = "the change's own code"
 def _own_script(root: Path) -> Path | None:
     """The change's own `scripts/sdlc.py` when this command should run it: in the plugin's own
     repo (`_own_repo()`, read from its files, so never a host), from a change's checkout whose
-    branch edits `scripts/` against its merge base with `main`, when that copy isn't the one
-    running. None otherwise, and on any failure: a handoff is never a refusal."""
+    branch edits `scripts/` against its merge base with the base branch, when that copy isn't the
+    one running. None otherwise, and on any failure: a handoff is never a refusal."""
     try:
         if os.environ.get(OWN_SCRIPT_ENV):
             return None
@@ -2520,7 +2590,8 @@ def _own_script(root: Path) -> Path | None:
             return None
         if not _own_repo(main_root(root)):
             return None
-        base = _git(root, "merge-base", "main", "HEAD")
+        trunk = load_config(main_root(root))[0]["git"]["base"]
+        base = _git(root, "merge-base", trunk, "HEAD") if trunk else None
         if base is None:
             return None
         edited = _git(root, "diff", "--quiet", base, "--", "scripts") is None or bool(
@@ -2571,10 +2642,10 @@ def _run_own(script: Path, argv: list[str]) -> int | None:
     return made.returncode
 
 
-def _merged_scripts(main: Path, before: str | None) -> bool:
+def _merged_scripts(main: Path, before: str | None, trunk: str) -> bool:
     """Whether a merge just brought this plugin's scripts into the main checkout it runs from, so
     the rest of the close must run as the merged code. Never twice for one close."""
-    after = _git(main, "rev-parse", "main")
+    after = _git(main, "rev-parse", trunk)
     return (
         PLUGIN_DIR.resolve() == main.resolve()
         and os.environ.get(HANDOFF_ENV) != "merged"
@@ -2791,6 +2862,7 @@ def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
     branch = _git(folder, "branch", "--show-current") or folder.name
     sha = sha or _git(folder, "rev-parse", "--short", "HEAD")
     m = DIR_RE.match(folder.name)
+    cfg = load_config(home)[0]
     change = {
         **rec,
         "name": folder.name,
@@ -2799,6 +2871,8 @@ def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
         "folder": folder,
         "sha": sha,
         "branch": branch,
+        # The branch the change lands on, which a tracker compares with the repo's default.
+        "base": cfg["git"]["base"],
         "marker": f"<!-- sdlc:{folder.name} -->",
         "body": "",
         "comments": [],
@@ -2807,9 +2881,7 @@ def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
         "vocabulary": {"tier": list(TIER_ARTIFACTS), "stage": STAGES, "impact": list(IMPACTS)},
         # The issue fields the project doc turns on, as the intent sets them; a tracker mirrors
         # these exactly and never reads or writes one that isn't here.
-        "fields": {
-            name: rec["fields"].get(name, []) for name in project_doc(home, load_config(home)[0])[0]
-        },
+        "fields": {name: rec["fields"].get(name, []) for name in project_doc(home, cfg)[0]},
     }
     parts = render_issue(home, folder, rec, branch, sha)
     if isinstance(parts, str):
@@ -3071,15 +3143,19 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     return rec
 
 
-def closed_changes(home: Path, base: str | None, read: bool = True) -> list[dict]:
-    """Every change closed on main after `base` (all of main when None), oldest first, from
-    history alone: each `Close NNN-slug` commit on main's first-parent line names one, and its
-    parent, the change's own commit, holds the intent. First parent only: close fast-forwards, so
-    main's own line is every change in order. `read=False` skips the intents, for a count. Each
-    record adds the `Close` commit's sha and date (`close_sha`, `close_date`); `sha` is the
-    change's own commit. The release loop reads it from the last tag, the retrospective from its
-    own boundary."""
-    span = f"{base}..main" if base else "main"
+def closed_changes(
+    home: Path, since: str | None, trunk: str | None, read: bool = True
+) -> list[dict]:
+    """Every change closed on the base branch `trunk` after `since` (all of it when None), oldest
+    first, from history alone: each `Close NNN-slug` commit on the base's first-parent line names
+    one, and its parent, the change's own commit, holds the intent. First parent only: close
+    fast-forwards, so the base's own line is every change in order. `read=False` skips the
+    intents, for a count. Each record adds the `Close` commit's sha and date (`close_sha`,
+    `close_date`); `sha` is the change's own commit. The release loop reads it from the last tag,
+    the retrospective from its own boundary. No base branch, no changes."""
+    if not trunk:
+        return []
+    span = f"{since}..{trunk}" if since else trunk
     fmt = "--format=%h%x00%p%x00%cs%x00%s"
     log = _git(home, "log", "--first-parent", "--reverse", fmt, span) or ""
     found = []
@@ -3102,12 +3178,15 @@ def closed_changes(home: Path, base: str | None, read: bool = True) -> list[dict
     return found
 
 
-def dropped_changes(home: Path, base: str | None) -> list[dict]:
-    """Every change dropped on main after `base` (all of main when None), oldest first: each
-    `Drop NNN-slug` commit on main's first-parent line names one, and its second parent, the
-    branch's tip, holds the intent with `dropped_at:` and the reason. Never counted by a release,
-    which reads only `Close` commits. Each record adds `drop_sha`, `drop_date` and `days_open`."""
-    span = f"{base}..main" if base else "main"
+def dropped_changes(home: Path, since: str | None, trunk: str | None) -> list[dict]:
+    """Every change dropped on the base branch `trunk` after `since` (all of it when None), oldest
+    first: each `Drop NNN-slug` commit on the base's first-parent line names one, and its second
+    parent, the branch's tip, holds the intent with `dropped_at:` and the reason. Never counted by
+    a release, which reads only `Close` commits. Each record adds `drop_sha`, `drop_date` and
+    `days_open`."""
+    if not trunk:
+        return []
+    span = f"{since}..{trunk}" if since else trunk
     fmt = "--format=%h%x00%P%x00%cs%x00%s"
     log = _git(home, "log", "--first-parent", "--reverse", fmt, span) or ""
     found = []
@@ -3174,7 +3253,10 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
                 at = last or "<the commit that released it>"
                 out["missing"] = {"tag": tag, "hint": f'git tag -a {tag} -m "{tag}" {at}'}
 
-    out["changes"] = closed_changes(home, out["since"], read)
+    trunk = cfg["git"]["base"]
+    if not trunk:
+        out["problems"].append(trunk_refusal(home, trunk))
+    out["changes"] = closed_changes(home, out["since"], trunk, read)
     # A close that stopped after its merge leaves the change's folder on main, shipped: landed,
     # so it is in this release, though not yet closed. Its sha is the commit that shipped it.
     base = work_dir(home)
@@ -3233,13 +3315,17 @@ def _git_err(root: Path, *args: str) -> str | None:
     return made.stderr.strip() or made.stdout.strip() or f"exited {made.returncode}"
 
 
-def _release_refusals(root: Path, home: Path) -> list[str]:
-    """Where a release step may run: the main checkout, on main, with nothing uncommitted."""
+def _release_refusals(root: Path, home: Path, cfg: dict) -> list[str]:
+    """Where a release step may run: the main checkout, on the base branch, with nothing
+    uncommitted."""
     refusals = []
     if root.resolve() != home.resolve():
         refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
-    if _git(home, "branch", "--show-current") != "main":
-        refusals.append(f"the main checkout ({home}) isn't on main")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
+        refusals.append(why)
+    elif _git(home, "branch", "--show-current") != trunk:
+        refusals.append(f"the main checkout ({home}) isn't on {trunk}")
     if _git(home, "status", "--porcelain", "--untracked-files=no") not in ("", None):
         refusals.append(f"the main checkout ({home}) has uncommitted changes")
     return refusals
@@ -3274,7 +3360,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         "files": [*rel["version_files"], *([rel["changelog"]] if rel["changelog"] else [])],
         "changes": u["changes"],
         "notes": "",
-        "refusals": _release_refusals(root, home),
+        "refusals": _release_refusals(root, home, cfg),
         "done": [],
         "skipped": [],
         "undo": None,
@@ -3464,19 +3550,21 @@ def _remote_sha(home: Path, remote: str, ref: str) -> str | None:
 
 
 def cmd_publish(root: Path, check_only: bool = False) -> int:
-    """Push main and the release tag, then run the host's publish command: the one step in the
-    plugin that sends anything anywhere. Never forced, so a remote that has moved is refused. A
-    rerun skips what the remote already has and a publish command that already succeeded."""
+    """Push the base branch (`git.base`) and the release tag, then run the host's publish command:
+    the one step in the plugin that sends anything anywhere. Never forced, so a remote that has
+    moved is refused. A rerun skips what the remote already has and a publish command that
+    already succeeded."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     rel = cfg["release"]
     remote = rel["remote"]
+    trunk = cfg["git"]["base"]
     report: dict = {
         "version": None,
         "tag": None,
         "remote": remote,
         "command": None,
-        "refusals": _release_refusals(root, home),
+        "refusals": _release_refusals(root, home, cfg),
         "done": [],
         "skipped": [],
     }
@@ -3503,10 +3591,10 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     tagged = _git(home, "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}")
     if tagged is None:
         refusals.append(f"no tag {tag}: run /sdlc:release first")
-    elif tagged != _git(home, "rev-parse", "main"):
+    elif trunk and tagged != _git(home, "rev-parse", trunk):
         refusals.append(
-            f"main has moved past {tag}: publish a release before closing more changes onto it, "
-            "or release again"
+            f"{trunk} has moved past {tag}: publish a release before closing more changes onto "
+            "it, or release again"
         )
     if _git(home, "remote", "get-url", remote) is None:
         refusals.append(f"no remote {remote!r}: set release.remote")
@@ -3537,9 +3625,9 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
         # Never --force: a remote that has moved refuses, and that refusal is the answer.
         return lambda: _git_err(home, "push", "-q", remote, ref)
 
-    main_ref, tag_ref = "refs/heads/main", f"refs/tags/{tag}"
+    trunk_ref, tag_ref = f"refs/heads/{trunk}", f"refs/tags/{tag}"
     steps = [
-        ("push main", lambda: pushed(main_ref), push(main_ref)),
+        (f"push {trunk}", lambda: pushed(trunk_ref), push(trunk_ref)),
         ("push tag", lambda: pushed(tag_ref), push(tag_ref)),
         ("publish command", lambda: not report["command"] or published(), run_command),
     ]
@@ -3638,10 +3726,12 @@ def _days_between(start: str, end: str) -> int | None:
         return None
 
 
-def last_retrospective(home: Path) -> dict | None:
-    """The newest `Retrospective YYYY-MM-DD` commit on main's first-parent line, the boundary of
-    the next one. retro-commit writes the subject, so it is never a guess."""
-    log = _git(home, "log", "--first-parent", "--format=%h%x00%s", "main") or ""
+def last_retrospective(home: Path, trunk: str | None) -> dict | None:
+    """The newest `Retrospective YYYY-MM-DD` commit on the base branch's first-parent line, the
+    boundary of the next one. retro-commit writes the subject, so it is never a guess."""
+    if not trunk:
+        return None
+    log = _git(home, "log", "--first-parent", "--format=%h%x00%s", trunk) or ""
     for line in log.splitlines():
         sha, _, subject = line.partition("\x00")
         m = RETRO_RE.match(subject)
@@ -3683,10 +3773,13 @@ def prose_metrics(home: Path, cfg: dict) -> dict:
 
 
 def _release_tags(home: Path, cfg: dict, since: dict | None) -> list[dict]:
-    """The release tags on main after the last retrospective, oldest first."""
+    """The release tags on the base branch after the last retrospective, oldest first."""
+    trunk = cfg["git"]["base"]
+    if not trunk:
+        return []
     pattern = cfg["release"]["tag"].replace("{version}", "*")
     fmt = "--format=%(refname:short)%00%(creatordate:short)"
-    listed = _git(home, "tag", "--merged", "main", "--list", pattern, "--sort=creatordate", fmt)
+    listed = _git(home, "tag", "--merged", trunk, "--list", pattern, "--sort=creatordate", fmt)
     tags = []
     for line in (listed or "").splitlines():
         tag, _, when = line.partition("\x00")
@@ -3810,14 +3903,16 @@ def doc_items(text: str, kinds: str) -> dict:
     }
 
 
-def _milestone_verdicts(home: Path, items: list[dict], open_names: list[str]) -> dict:
+def _milestone_verdicts(
+    home: Path, items: list[dict], open_names: list[str], trunk: str | None
+) -> dict:
     """What each open milestone's grouped seeds and changes have become, from history: a change
     closed (with when), still open, or unknown; a seed still in ideas.md, shipped by the change
     whose `idea:` names it, or vanished with no change behind it."""
     wanted = [i for i in items if i["kind"] == "milestone" and i["status"] == "open"]
     if not wanted:
         return {}
-    history = closed_changes(home, None)
+    history = closed_changes(home, None, trunk)
     seeds_open = {i["title"] for i in idea_entries(home)}
     out: dict[str, list[dict]] = {}
     for item in wanted:
@@ -4026,14 +4121,16 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     done = []
     if milestones:
         open_names = [f"{r['id']}-{r['slug']}" for r in open_changes]
-        for m_id, rows in _milestone_verdicts(home, doc["items"], open_names).items():
+        verdicts = _milestone_verdicts(home, doc["items"], open_names, cfg["git"]["base"])
+        for m_id, rows in verdicts.items():
             if rows and all(r["verdict"] in ("closed", "shipped", "vanished") for r in rows):
                 done.append(m_id)
 
     warnings = []
     dangling = {t for e in ideas for t in e["after"] if t not in known}
     if dangling:
-        shipped = {_seed_title(c["idea"]) for c in closed_changes(home, None) if c.get("idea")}
+        history = closed_changes(home, None, cfg["git"]["base"])
+        shipped = {_seed_title(c["idea"]) for c in history if c.get("idea")}
         for e in ideas:
             for t in e["after"]:
                 if t in dangling and t not in shipped:
@@ -4049,7 +4146,7 @@ def retro_due(home: Path, cfg: dict) -> dict:
     """Whether a retrospective is due, and why: `retro.after_releases` release tags since the last
     one (or since the start, with none yet), or any release in that range that raised the major
     version. Never runs one; `status` and release only say so."""
-    since = last_retrospective(home)
+    since = last_retrospective(home, cfg["git"]["base"])
     every = _release_tags(home, cfg, None)
     in_range = _release_tags(home, cfg, since) if since else every
     template = cfg["release"]["tag"]
@@ -4215,9 +4312,10 @@ def dropped_cost(dropped: list[dict]) -> dict:
 def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     """What the retrospective counts: everything since the last one, from history. Read-only."""
     today = today or date.today()
-    since = last_retrospective(home)
-    changes = closed_changes(home, since["sha"] if since else None)
-    problems: list[str] = []
+    trunk = cfg["git"]["base"]
+    since = last_retrospective(home, trunk)
+    changes = closed_changes(home, since["sha"] if since else None, trunk)
+    problems: list[str] = [] if trunk else [trunk_refusal(home, trunk)]
     touched: dict[str, set[str]] = {}
     # Ship's context pass edits these on every change by design, so sharing them isn't rework.
     every_change = {*cfg["docs"]["context"], cfg["docs"]["process"], cfg["docs"]["policy"]}
@@ -4240,10 +4338,10 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             days_open=_days_between(rec["created"], rec["close_date"]),
             release=_release_of(home, cfg, rec["sha"]),
         )
-    dropped = dropped_changes(home, since["sha"] if since else None)
+    dropped = dropped_changes(home, since["sha"] if since else None, trunk)
     for rec in dropped:
         problems += rec.pop("problems")
-        # What the dropped branch touched: its tip against where it left main.
+        # What the dropped branch touched: its tip against where it left the base.
         fork = _git(home, "merge-base", f"{rec['drop_sha']}^1", f"{rec['drop_sha']}^2")
         files = (_git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
         touched[rec["name"]] = {
@@ -4274,7 +4372,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     seeds = [i for i in idea_entries(home) if not is_building(i)]
     direction = direction_items(_direction_text(home, cfg))
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
-    direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names)
+    direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names, trunk)
     doc = product_doc(home, cfg)
     product = None if doc is None else _product(home, cfg, doc, changes, a["open"])
     return {
@@ -4340,8 +4438,11 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
 
     if root.resolve() != home.resolve():
         refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
-    if _git(home, "branch", "--show-current") != "main":
-        refusals.append(f"the main checkout ({home}) isn't on main")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
+        refusals.append(why)
+    elif _git(home, "branch", "--show-current") != trunk:
+        refusals.append(f"the main checkout ({home}) isn't on {trunk}")
     # Staged, unstaged and untracked, by name: porcelain's columns don't survive `_git`'s strip.
     tracked = _git(home, "-c", "core.quotePath=false", "diff", "--name-only", "HEAD") or ""
     untracked = (
@@ -4356,9 +4457,9 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         )
     elif not changed:
         refusals.append(f"nothing to record: {' and '.join(sorted(allowed))} are unchanged")
-    last = last_retrospective(home)
+    last = last_retrospective(home, trunk)
     if last and last["date"] == stamp:
-        refusals.append(f"{report['commit']} is already on main ({last['sha']}): one a day")
+        refusals.append(f"{report['commit']} is already on {trunk} ({last['sha']}): one a day")
     # Follow-through: every goal, milestone or outcome the committed docs left open is still
     # there, carried or struck with its status. One already struck may go: it stayed one
     # retrospective. A product doc the retrospective didn't touch is checked all the same.
@@ -5222,7 +5323,7 @@ def changed_paths(root: Path, base: str) -> tuple[str, list[tuple[str, str, str 
     return mb, rows
 
 
-def cmd_context(root: Path, base: str) -> int:
+def cmd_context(root: Path, base: str | None = None) -> int:
     """The context docs a change could have made wrong, as JSON, for /sdlc:ship's context pass.
     Writes nothing.
 
@@ -5231,8 +5332,11 @@ def cmd_context(root: Path, base: str) -> int:
     folder has both: a CLAUDE.md importing AGENTS.md can still say things of its own. `stale`:
     their lines naming a
     path the diff deletes or renames, the way context goes wrong most often and most quietly.
-    Whether anything else in them needs to change is judgment, and the skill's."""
-    found = changed_paths(root, base)
+    Whether anything else in them needs to change is judgment, and the skill's. The diff is taken
+    against `base`, the base branch (`git.base`) unless given."""
+    cfg, _, _ = load_config(root)
+    base = base or cfg["git"]["base"]
+    found = changed_paths(root, base) if base else None
     if found is None:
         print(
             f"⚠  no merge base with {base!r}: is this a git checkout with that branch?",
@@ -5240,7 +5344,6 @@ def cmd_context(root: Path, base: str) -> int:
         )
         return 1
     mb, rows = found
-    cfg, _, _ = load_config(root)
     docs: dict[str, str] = {}
     for rel in cfg["docs"]["context"]:
         if (root / rel).is_file():
@@ -5301,7 +5404,9 @@ def print_status(a: dict) -> None:
         if rec.get("open_questions"):
             undone += f"  · {rec['open_questions']} open question(s)"
         if rec.get("behind"):
-            undone += f"  · behind main by {rec['behind']}: /sdlc:ship brings it up to date"
+            undone += (
+                f"  · behind {a.get('trunk')} by {rec['behind']}: /sdlc:ship brings it up to date"
+            )
         print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
         if rec["title"]:
             print(f"                              {rec['title']}")
@@ -5322,7 +5427,7 @@ def print_status(a: dict) -> None:
         for rec in a["ready"]:
             mark = "  (dropped)" if rec.get("kind") == "dropped" else ""
             if rec.get("behind") and rec.get("kind") != "dropped":
-                mark = f"  (behind main by {rec['behind']}: rebase and ship again)"
+                mark = f"  (behind {a.get('trunk')} by {rec['behind']}: rebase and ship again)"
             print(f"    {rec['id']}  {rec['slug']:<28} → /sdlc:close {rec['id']}{mark}")
 
     # Left out where releasing isn't set up and nothing has landed: most repos, most of the time.
@@ -5402,7 +5507,7 @@ def main() -> int:
         action="store_true",
         help="create the change in its own worktree and branch, .claude/worktrees/NNN-slug",
     )
-    p_new.add_argument("--base", default="main", help="what --worktree branches from (main)")
+    p_new.add_argument("--base", help="what --worktree branches from (git.base)")
 
     p_check = sub.add_parser("check", help="audit artifacts against declared tier/stage")
     p_check.add_argument("--strict", action="store_true", help="exit 1 if any problem is found")
@@ -5492,7 +5597,7 @@ def main() -> int:
     p_context = sub.add_parser(
         "context", help="the context docs this checkout's diff could have made wrong, as JSON"
     )
-    p_context.add_argument("--base", default="main", help="what the diff is taken against (main)")
+    p_context.add_argument("--base", help="what the diff is taken against (git.base)")
 
     sub.add_parser(
         "unreleased", help="the changes landed since the last release tag, as JSON; writes nothing"
@@ -5592,11 +5697,16 @@ def main() -> int:
         return 1 if (args.strict and a["problems"]) else 0
 
     a["ready"] = ready_to_close(root)
-    # Here, not in `analyze()`: a stale base is a nudge, and `check` is a gate.
-    for rec in a["open"] + a["ready"]:
-        rec["behind"] = behind_main(home, f"{rec['id']}-{rec['slug']}")
     # Unconfigured, status shows only a count, so the intents behind it aren't read.
     cfg = load_config(home)[0]
+    a["trunk"] = cfg["git"]["base"]
+    # A problem here, not in `analyze()`: every change refuses to start without a base branch,
+    # but `check` is a gate, and a repo whose `main` has no commit yet has none to name.
+    if not a["trunk"]:
+        a["problems"].append({"dir": "git.base", "detail": trunk_refusal(home, None)})
+    # Here, not in `analyze()`: a stale base is a nudge, and `check` is a gate.
+    for rec in a["open"] + a["ready"]:
+        rec["behind"] = behind_trunk(home, f"{rec['id']}-{rec['slug']}", a["trunk"])
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
     a["retro_due"] = retro_due(home, cfg)

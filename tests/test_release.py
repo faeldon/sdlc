@@ -195,7 +195,7 @@ def test_closed_changes_carries_what_both_outer_loops_read(tmp_path: Path) -> No
     fields, the change's own commit, and the Close commit's sha and date."""
     root = _repo(tmp_path)
     _close(root, "002-reopen-drafts", "minor", "Reopen saved drafts")
-    [rec] = sdlc.closed_changes(root, "v0.4.2")
+    [rec] = sdlc.closed_changes(root, "v0.4.2", "main")
     assert {k: rec[k] for k in ("id", "slug", "name", "title", "tier", "impact", "created")} == {
         "id": "002",
         "slug": "reopen-drafts",
@@ -209,7 +209,7 @@ def test_closed_changes_carries_what_both_outer_loops_read(tmp_path: Path) -> No
     assert rec["close_sha"] == _git(root, "rev-parse", "--short", "HEAD")
     assert rec["close_date"] == _git(root, "log", "-1", "--format=%cs")
     assert rec["problems"] == [] and rec["closed"] is True
-    assert sdlc.closed_changes(root, "HEAD") == []
+    assert sdlc.closed_changes(root, "HEAD", "main") == []
 
 
 def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:
@@ -221,14 +221,14 @@ def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:
     _git(root, "commit", "-q", "-m", "ship")
     _git(root, "rm", "-r", "-q", "work")
     _git(root, "commit", "-q", "-m", "Close 002-reopen-drafts")
-    [rec] = sdlc.closed_changes(root, None)
+    [rec] = sdlc.closed_changes(root, None, "main")
     assert "no readable work/002-reopen-drafts/intent.md" in rec["problems"][0]
 
 
 def test_without_reading_it_lists_by_name_only(tmp_path: Path) -> None:
     root = _repo(tmp_path, config="")
     _close(root, "002-reopen-drafts", None)
-    [rec] = sdlc.closed_changes(root, None, read=False)
+    [rec] = sdlc.closed_changes(root, None, "main", read=False)
     assert (rec["id"], rec["impact"], rec["problems"]) == ("002", "", [])
 
 

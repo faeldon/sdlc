@@ -68,6 +68,9 @@ evidence = ["./scripts/usage-summary.sh"]   # optional: what users did, printed 
 transcripts = true                          # the default: close reads this repo's transcripts, numbers only
 idle_minutes = 30                           # the default: a longer wait is the person away, not answering
 stop_allowance = 1                          # the default: stops beyond a change's gates its person should expect
+
+[git]
+base = "master"                             # optional: the branch changes start from and land on; unset = detected
 ```
 
 The placeholders:
@@ -83,6 +86,36 @@ A version line is `"version": "1.2.0"` (JSON) or `version = "1.2.0"` (TOML). A f
 or more than one, is refused rather than guessed at.
 
 A `[docs]` path under `work/` is read like any other, from the checkout `config` runs in.
+
+### The base branch: `[git] base`
+
+Every change branches from the base branch and lands back on it. Ship brings a branch up to date
+with it, close fast-forwards it, release tags it, publish pushes it, and status, release and the
+retrospective read history along its first-parent line. Wherever these docs say `main`, they
+mean this branch.
+
+`git.base` set is the base branch. Unset, it is worked out, in this order:
+
+1. `main`, when the repo has a local `main`.
+2. The branch `origin/HEAD` names, when that branch exists locally: what a clone of a repo whose
+   default branch is `master` has.
+3. Nothing.
+
+It is never the branch the checkout happens to be on, `init.defaultBranch`, or what GitHub
+reports, since the first two describe one machine rather than the repo and the third is a network
+call. `config` prints the answer as `git.base`, with `git.base_source` saying which way it came:
+`config`, `detected` or `unset`. `/sdlc:setup` writes `base` when the branch it detects isn't
+`main`, so a later change to `origin/HEAD` can't move it, and asks for it when nothing is
+detected.
+
+With no base branch, or one that doesn't exist here, every command that writes refuses before it
+does anything: `new` before it claims a number, so no GitHub issue is opened for a change that
+can't be made, and `base`, `close`, `release`, `publish` and `retro-commit` too. `status`,
+`unreleased` and `retro` report it and list no landed changes.
+
+Changing `base` in a repo that has already closed changes points every history reader at the new
+branch's line. The changes closed on the old one aren't found there unless the old branch was
+merged into it by fast-forward.
 
 ## The docs
 

@@ -71,6 +71,10 @@ It writes after one approval and never commits: it ends by printing the `git add
 
 `docs/` stays yours: the plugin's own documents live in `.sdlc/`.
 
+Your default branch needn't be `main`. Setup finds it (a local `main`, else the branch
+`origin/HEAD` names) and writes it as `[git] base` when it isn't `main`; wherever these docs
+say `main`, they mean that branch.
+
 ## A first change
 
 1. **`/sdlc:intent`**, with what's wrong in your own words. It asks only about the gaps, proposes

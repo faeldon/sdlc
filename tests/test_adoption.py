@@ -54,14 +54,29 @@ def _git(cwd: Path, *args: str) -> str:
     return out.stdout.strip()
 
 
-def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
+def _track(root: Path, remote: Path, trunk: str) -> None:
+    """Give `root` an origin holding `trunk`, with `origin/HEAD` naming it, as a clone has."""
+    _git(root, "remote", "add", "origin", str(remote))
+    _git(root, "push", "-q", "origin", trunk)
+    _git(root, "remote", "set-head", "origin", trunk)
+
+
+# A host whose only branch is `master` gets there with no config: `origin/HEAD` names it.
+TRUNKS = pytest.mark.parametrize("trunk", ["main", "master"])
+
+
+@TRUNKS
+def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str) -> None:
     root = tmp_path / "bare"
     root.mkdir()
     (root / "README.md").write_text("a repo with nothing set up\n", encoding="utf-8")
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    _git(root, "init", "-q", "-b", "main")
+    _git(root, "init", "-q", "-b", trunk)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
+    if trunk != "main":
+        _git(tmp_path, "init", "-q", "--bare", "-b", trunk, str(tmp_path / "remote.git"))
+        _track(root, tmp_path / "remote.git", trunk)
 
     cfg = _run(root, "config")
     assert cfg.returncode == 0, cfg.stderr
@@ -70,6 +85,7 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
     assert all(v is None for v in out["commands"].values())
     assert out["docs"]["review"]["source"] == "plugin"
     assert out["work"] == {"dir": str(root / "work"), "ignored": False}
+    assert out["git"] == {"base": trunk, "base_source": "detected"}
 
     def main_checkout() -> tuple[str, list[str]]:
         return _git(root, "status", "--porcelain"), sorted(p.name for p in root.rglob("work/*"))
@@ -114,11 +130,11 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
     assert json.loads(closed.stdout)["done"] == [
         "merge", "verify", "measure", "remove folder", "remove worktree", "delete branch"
     ]  # fmt: skip
-    assert _git(root, "rev-parse", "main~1") == tip
-    assert _git(root, "log", "-1", "--format=%s", "main") == "Close 001-first-change"
+    assert _git(root, "rev-parse", f"{trunk}~1") == tip
+    assert _git(root, "log", "-1", "--format=%s", trunk) == "Close 001-first-change"
     # No session ever ran in this scratch repo, so close records what history gives, and says so.
     # (HOME stays real: uv's cache lives there, and this repo's path matches no transcript folder.)
-    body = _git(root, "log", "-1", "--format=%B", "main")
+    body = _git(root, "log", "-1", "--format=%B", trunk)
     assert "Sdlc-Coverage: none: no transcripts for this repo" in body
     assert "Sdlc-Totals: elapsed=" in body and "Sdlc-Mode: manual" in body
     assert not tree.exists()
@@ -140,21 +156,22 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
     )
     dropped = _run(tree, "drop", "002")
     assert dropped.returncode == 0, dropped.stdout + dropped.stderr
-    before = _git(root, "rev-parse", "main")
+    before = _git(root, "rev-parse", trunk)
     closed = _run(root, "close", "002")
     assert closed.returncode == 0, closed.stdout + closed.stderr
     assert json.loads(closed.stdout)["done"] == [
         "verify", "measure", "record", "remove worktree", "delete branch"
     ]  # fmt: skip
-    assert _git(root, "log", "-1", "--format=%s", "main") == "Drop 002-second-try"
-    assert _git(root, "rev-parse", "main^1") == before
-    assert _git(root, "diff", "--name-only", "main^1", "main") == ".sdlc/last-id"
+    assert _git(root, "log", "-1", "--format=%s", trunk) == "Drop 002-second-try"
+    assert _git(root, "rev-parse", f"{trunk}^1") == before
+    assert _git(root, "diff", "--name-only", f"{trunk}^1", trunk) == ".sdlc/last-id"
     assert not tree.exists() and not (root / "work" / "002-second-try").exists()
     assert _git(root, "status", "--porcelain") == ""
     assert _run(root, "next").stdout.strip() == "003", "a dropped change's number stays spent"
 
 
-def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path) -> None:
+@TRUNKS
+def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk: str) -> None:
     """The release loop after the change loop: one change closed with `impact: minor`, then a
     release that reads it from history and a publish to a remote, here a bare repo on disk."""
     root = tmp_path / "bare"
@@ -166,12 +183,12 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path) -> No
         '[release]\nversion_files = ["VERSION"]\n', encoding="utf-8"
     )
     remote = tmp_path / "remote.git"
-    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "remote", "add", "origin", str(remote))
+    _git(tmp_path, "init", "-q", "--bare", "-b", trunk, str(remote))
+    _git(root, "init", "-q", "-b", trunk)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
     _git(root, "tag", "-a", "v0.1.0", "-m", "v0.1.0")
+    _track(root, remote, trunk)
 
     assert _run(root, "new", "first-change", "--worktree").returncode == 0
     tree = root / ".claude" / "worktrees" / "001-first-change"
@@ -193,9 +210,9 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path) -> No
     assert (root / "VERSION").read_text(encoding="utf-8") == 'version = "0.2.0"\n'
     published = _run(root, "publish")
     assert published.returncode == 0, published.stdout + published.stderr
-    assert json.loads(published.stdout)["done"] == ["push main", "push tag"]
-    assert _git(remote, "rev-parse", "main") == _git(root, "rev-parse", "main")
-    assert _git(remote, "rev-parse", "v0.2.0^{commit}") == _git(root, "rev-parse", "main")
+    assert json.loads(published.stdout)["done"] == [f"push {trunk}", "push tag"]
+    assert _git(remote, "rev-parse", trunk) == _git(root, "rev-parse", trunk)
+    assert _git(remote, "rev-parse", "v0.2.0^{commit}") == _git(root, "rev-parse", trunk)
     assert _git(root, "status", "--porcelain") == ""
 
     # The retro loop over both: it counts what closed and released, then records one commit,

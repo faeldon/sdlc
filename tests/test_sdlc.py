@@ -593,13 +593,17 @@ def _git(root: Path, *args: str) -> str:
     return out.stdout.strip()
 
 
-def _repo(tmp_path: Path) -> Path:
-    """A real repo on `main` that ignores its change worktrees and commits work/."""
+def _repo(tmp_path: Path, trunk: str = "main") -> Path:
+    """A real repo on `trunk` that ignores its change worktrees and commits work/. Any other
+    trunk is named in its config, since a repo with no `main` and no remote has no base."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
     (root / "README.md").write_text("a repo\n", encoding="utf-8")
-    _git(root, "init", "-q", "-b", "main")
+    if trunk != "main":
+        (root / ".sdlc").mkdir()
+        (root / ".sdlc" / "config.toml").write_text(f'[git]\nbase = "{trunk}"\n', "utf-8")
+    _git(root, "init", "-q", "-b", trunk)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
     return root
@@ -949,15 +953,16 @@ def test_close_refuses_before_writing_anything(
     assert _git(root, "rev-parse", "main") == main_before and tree.is_dir()
 
 
-def test_behind_main_counts_what_the_branch_lacks(tmp_path: Path) -> None:
+def test_behind_trunk_counts_what_the_branch_lacks(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     assert sdlc.cmd_new(root, "thing", 1, None, worktree=True) == 0
     tree = root / ".claude" / "worktrees" / "001-thing"
-    assert sdlc.behind_main(root, "001-thing") == 0
+    assert sdlc.behind_trunk(root, "001-thing", "main") == 0
     _diverge(root, tree)
     _git(root, "commit", "-q", "--allow-empty", "-m", "main moved again")
-    assert sdlc.behind_main(root, "001-thing") == 2
-    assert sdlc.behind_main(root, "002-nothing") is None
+    assert sdlc.behind_trunk(root, "001-thing", "main") == 2
+    assert sdlc.behind_trunk(root, "002-nothing", "main") is None
+    assert sdlc.behind_trunk(root, "001-thing", None) is None
 
 
 def test_status_marks_a_stale_base_and_check_ignores_it(
@@ -1056,6 +1061,52 @@ def test_base_rebases_a_clean_branch_with_commits(tmp_path: Path, capsys) -> Non
     assert code == 0 and out["action"] == "rebased", out
     assert _git(tree, "merge-base", "--is-ancestor", "main", "HEAD") == ""
     assert (tree / "ours.txt").is_file() and (tree / "theirs.txt").is_file()
+
+
+def test_base_follows_a_trunk_that_isnt_main(tmp_path: Path, capsys) -> None:
+    """Fast-forward with no commits of its own, rebase with some: both onto `git.base`."""
+    root = _repo(tmp_path, "master")
+    tree = _opened(root)
+    _commit_on_main(root, "theirs.txt", "theirs\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "fast-forwarded" and out["behind"] == 1, out
+    assert _git(tree, "rev-parse", "HEAD") == _git(root, "rev-parse", "master")
+    (tree / "ours.txt").write_text("ours\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    _commit_on_main(root, "more.txt", "more\n")
+    code, out = _base(tree, "001", capsys)
+    assert code == 0 and out["action"] == "rebased", out
+    assert _git(tree, "merge-base", "--is-ancestor", "master", "HEAD") == ""
+
+
+def test_status_context_and_nits_read_a_trunk_that_isnt_main(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path, "master")
+    tree = _opened(root)
+    (tree / "src").mkdir()
+    (tree / "src" / "a.py").write_text("x\n", encoding="utf-8")
+    _commit_on_main(root, "theirs.txt", "theirs\n")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "status"])
+    capsys.readouterr()
+    sdlc.main()
+    assert "behind master by 1" in capsys.readouterr().out
+    code = sdlc.cmd_context(tree)
+    assert code == 0 and json.loads(capsys.readouterr().out)["base"] == "master"
+    assert sdlc.cmd_nits(tree, None, "001") == 0, capsys.readouterr().err
+
+
+def test_base_refuses_without_a_base_branch(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "config.toml").write_text('[git]\nbase = "gone"\n', encoding="utf-8")
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _base(tree, "001", capsys)
+    assert code == 1 and "base branch 'gone' doesn't exist here" in out["reason"], out
+    assert _git(tree, "rev-parse", "HEAD") == head
 
 
 def test_base_aborts_a_conflicting_rebase(tmp_path: Path, capsys) -> None:
@@ -1360,6 +1411,35 @@ def test_core_never_calls_gh_itself() -> None:
         assert needle not in core, f"{needle} belongs in scripts/trackers/github.py"
     github = (TRACKERS / "github.py").read_text(encoding="utf-8")
     assert '"gh"' in github and "github.com" in github and "Closes #" in github
+
+
+def test_no_git_call_names_main_itself() -> None:
+    """Every use of the base branch reads `git.base` as resolved (018): a `main` written into a
+    ref is a host on `master` stuck at that step. `DEFAULT_TRUNK`, which detection tries first,
+    is the one name allowed."""
+    import ast
+
+    tree = ast.parse(SDLC_PY.read_text(encoding="utf-8"))
+    docstrings, allowed = set(), set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        first = body[0] if isinstance(body, list) and body else None
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            docstrings.add(id(first.value))
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "DEFAULT_TRUNK" for t in node.targets
+        ):
+            allowed.add(id(node.value))
+    ref = re.compile(r"^main$|refs/heads/main\b|\.\.main\b|^main[:^~]")
+    found = [
+        f"line {node.lineno}: {node.value!r}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings | allowed
+        and ref.search(node.value)
+    ]
+    assert not found, "read the base branch from git.base:\n  " + "\n  ".join(found)
 
 
 def test_archive_targets_are_the_tracker_modules() -> None:

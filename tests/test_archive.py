@@ -171,13 +171,14 @@ def _git(root: Path, *args: str, input: str | None = None) -> str:
     return out.stdout.strip()
 
 
-def _repo(tmp_path: Path, github: bool = True) -> Path:
+def _repo(tmp_path: Path, github: bool = True, trunk: str = "main") -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    if github:
-        _config(root, '[archive]\ntarget = "github"\n')
-    _git(root, "init", "-q", "-b", "main")
+    named = f'[git]\nbase = "{trunk}"\n' if trunk != "main" else ""
+    if github or named:
+        _config(root, ('[archive]\ntarget = "github"\n' if github else "") + named)
+    _git(root, "init", "-q", "-b", trunk)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
     if github:
@@ -282,13 +283,51 @@ def test_a_failed_issue_means_no_change(tmp_path, gh, monkeypatch, capsys) -> No
     assert not (_state_dir(root) / "last-id").exists()
 
 
-def test_a_worktree_that_fails_closes_its_issue_as_not_planned(tmp_path, gh) -> None:
+def test_a_worktree_that_fails_closes_its_issue_as_not_planned(tmp_path, gh, capsys) -> None:
+    """And says so: `opened` as the last word reads as if the issue were still open."""
     root = _repo(tmp_path)
     (root / ".claude" / "worktrees" / "001-taken").mkdir(parents=True)
     assert sdlc.cmd_new(root, "taken", 1, None, worktree=True) == 1
     [issue] = gh()["issues"]
     assert issue["state"] == "CLOSED" and issue["reason"] == "not planned"
+    assert {lb["name"] for lb in issue["labels"]} == {"sdlc", "tier: 1"}, "no stage: plan left"
     assert not (root / "work").exists()
+    assert f"closed   {issue['url']}  (not planned)" in capsys.readouterr().out
+
+
+def test_an_issue_new_couldnt_close_is_reported_open(tmp_path, gh, monkeypatch, capsys) -> None:
+    root = _repo(tmp_path)
+    (root / ".claude" / "worktrees" / "001-taken").mkdir(parents=True)
+    monkeypatch.setenv("FAKE_GH_FAIL", "close")
+    assert sdlc.cmd_new(root, "taken", 1, None, worktree=True) == 1
+    [issue] = gh()["issues"]
+    assert issue["state"] == "OPEN"
+    out = capsys.readouterr()
+    assert f"{issue['url']} is still open: close it by hand (boom)" in out.err
+    assert "closed " not in out.out
+
+
+@pytest.mark.parametrize(
+    "config, base, why",
+    [
+        ("", None, "no base branch"),
+        ('[git]\nbase = "trunk"\n', None, "'trunk' doesn't exist here (git.base, config)"),
+        ("", "trunk", "'trunk' doesn't exist here (git.base, --base)"),
+    ],
+)
+def test_no_base_branch_means_no_issue(tmp_path, gh, capsys, config, base, why) -> None:
+    """Refused before the number is claimed, so nothing is half made: no issue, no counter."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _config(root, '[archive]\ntarget = "github"\n' + config)
+    _git(root, "init", "-q", "-b", "master")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "init")
+    _git(root, "remote", "add", "origin", "https://github.com/o/r.git")
+    assert sdlc.cmd_new(root, "thing", 1, None, worktree=True, base=base) == 1
+    assert why in capsys.readouterr().err
+    assert gh()["issues"] == []
+    assert not (_state_dir(root) / "last-id").exists()
+    assert not (root / ".claude" / "worktrees").exists()
 
 
 def test_an_issue_number_a_local_folder_holds_is_refused(tmp_path, gh, capsys) -> None:
@@ -296,7 +335,7 @@ def test_an_issue_number_a_local_folder_holds_is_refused(tmp_path, gh, capsys) -
     _config(root, '[archive]\ntarget = "github"\n')
     (root / "work" / "001-old").mkdir(parents=True)
     assert sdlc.cmd_new(root, "fresh", 1, None) == 1
-    assert "already holds" in capsys.readouterr().err
+    assert "already holds, so closed it" in capsys.readouterr().err
     assert gh()["issues"][0]["reason"] == "not planned"
     assert not (root / "work" / "001-fresh").exists()
 
@@ -448,14 +487,14 @@ def test_a_copy_that_isnt_mains_hands_the_close_to_mains_script(
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
     _landing(root, {"feature.txt": "x\n"})
     assert sdlc.cmd_close(root, "001", check) == 0
-    assert handoffs == [(["001", "--check"] if check else ["001"], "main")]
+    assert handoffs == [(["001", "--check"] if check else ["001"], "home")]
     assert _git(root, "rev-parse", "main") != _git(root, "rev-parse", "001-thing"), "nothing done"
 
 
 def test_mains_script_once_handed_the_close_runs_it(tmp_path, gh, capsys, handoffs, monkeypatch):
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
-    monkeypatch.setenv(sdlc.HANDOFF_ENV, "main")
+    monkeypatch.setenv(sdlc.HANDOFF_ENV, "home")
     name = _landing(root, {"feature.txt": "x\n"})
     code, out = _close(root, capsys, "001")
     assert code == 0 and handoffs == [] and not _on_main(root, name), out
@@ -775,7 +814,7 @@ def test_close_records_what_the_change_cost_as_trailers(tmp_path, gh, capsys, mo
     assert back["mode"] == "manual" and back["totals"]["agent"] == 6
     assert back["stages"]["ship"]["gate"] == 1 and back["totals"]["required"] == 3
     assert "/" not in "\n".join(ln for ln in body.splitlines() if ln.startswith("Sdlc-"))
-    [rec] = [c for c in sdlc.closed_changes(root, None) if c["name"] == name]
+    [rec] = [c for c in sdlc.closed_changes(root, None, "main") if c["name"] == name]
     assert rec["metrics"]["totals"]["agent"] == 6
 
 
@@ -982,6 +1021,20 @@ def test_a_default_branch_that_isnt_main_closes_the_issue_at_close(
     assert {"name": "landed"} not in issue["labels"]
     assert out["archive"]["closed_because"] == why and "closes" not in out["archive"]
     assert "Closes" not in _git(root, "log", "-1", "--format=%B", "main")
+
+
+def test_a_trunk_that_is_githubs_default_leaves_the_issue_to_the_push(
+    tmp_path, gh, capsys, monkeypatch
+) -> None:
+    """On `master` with GitHub's default `master`, the push closes it, exactly as on `main`."""
+    root = _repo(tmp_path, trunk="master")
+    _shipped(root)
+    monkeypatch.setenv("FAKE_GH_DEFAULT", "master")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    [issue] = gh()["issues"]
+    assert issue["state"] == "OPEN" and {"name": "landed"} in issue["labels"]
+    assert "\nCloses #1\n" in _git(root, "log", "-1", "--format=%b", "master")
 
 
 def test_check_says_where_and_writes_nothing(tmp_path, gh, capsys) -> None:

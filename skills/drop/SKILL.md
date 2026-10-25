@@ -40,7 +40,9 @@ change reached, the paths it will commit, and its refusals. Its refusal about a 
 change goes to `/sdlc:close`, and uncommitted work outside the change's folder is the human's to
 commit or discard first. `close --check` refuses that the change isn't shipped or dropped until
 Step 4 stamps it; read it for everything else, and for `archive.target` (where the change will be
-mirrored) or `archive.kept_because` (why it won't be, which is fine).
+mirrored) or `archive.kept_because` (why it won't be, which is fine). `config`'s `git.base` is
+the branch the `Drop` commit lands on, `main` unless the repo's is another; where this skill says
+`main`, it means that branch.
 
 ## Step 1 — The reason
 
@@ -65,7 +67,7 @@ missing section. **If there are any, stop here** and say what each needs.
 
 Ask literally:
 
-> `Drop NNN-slug at <stage>: record this reason in its intent, commit its folder on its branch, record a "Drop NNN-slug" commit on main that changes no files, archive it to <where> and close it as not planned, then remove its worktree and delete its branch? (yes / edit the reason / no)`
+> `Drop NNN-slug at <stage>: record this reason in its intent, commit its folder on its branch, record a "Drop NNN-slug" commit on <git.base> that changes no files, archive it to <where> and close it as not planned, then remove its worktree and delete its branch? (yes / edit the reason / no)`
 
 `<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave out `archive it to <where> and close it as not
 planned, `.

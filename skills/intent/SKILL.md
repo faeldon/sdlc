@@ -46,6 +46,9 @@ it. If `config` reports it doesn't exist, use the tiers in Step 2 as they stand 
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
 `docs.product` exists, and its `outcomes`: with a product doc, Step 1 asks what the change serves.
+Note `git.base` too: the branch every change starts from, `main` unless the repo's is another.
+Where this skill says `main`, it means that branch. When it is null, stop here and say why: `new`
+refuses without one, and `/sdlc:setup` sets it.
 
 **`work/` is committed**: each change's folder lives on its own branch, in its own worktree, and
 open changes in other worktrees are listed by `status`. If `config` says `work.ignored: true`, stop
@@ -164,7 +167,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next
 
 Ask literally, with that number as NNN:
 
-> `Create this as <tier> change NNN-<slug> (NNN if still free when created), in a new worktree and branch NNN-<slug> off main? (yes / change the tier / edit a section)`
+> `Create this as <tier> change NNN-<slug> (NNN if still free when created), in a new worktree and branch NNN-<slug> off <git.base>? (yes / change the tier / edit a section)`
 
 With `ids_from: github`, say what else a yes does, since it is visible to everyone with access to
 the repo: `…NNN-<slug> (NNN if still free when created), opening its GitHub issue with this title
@@ -178,7 +181,7 @@ same gate `/sdlc:spec` and `/sdlc:ship` use, for the same reason.
 
 ## Step 5 — Create it
 
-Every change gets its own worktree and branch, both named `NNN-slug` and branched from `main`, so
+Every change gets its own worktree and branch, both named `NNN-slug` and branched from `git.base`, so
 a new session can never land inside another change's branch, and its folder `work/NNN-slug/`
 inside that worktree, committed with the change. Run this from wherever the session is — the tool
 finds the main checkout itself and takes the number from the change's new GitHub issue, or under a

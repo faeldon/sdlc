@@ -37,6 +37,8 @@ a lock file regenerated from the new version, say), and the command, if any, tha
 `/sdlc:publish` will upload (`release.prepare`). `unreleased` lists each change since the tag (`changes`: id, title,
 impact, and `closed: false` for one whose close stopped after its merge), the ones still open in
 worktrees (`open`, not in this release), and the proposed `next` version with its `bump`.
+`config`'s `git.base` is the branch changes land on and the release is cut from, `main` unless
+the repo's is another; where this skill says `main`, it means that branch.
 
 Three answers mean there is nothing to approve yet. Say which and stop:
 

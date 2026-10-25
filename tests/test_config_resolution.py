@@ -287,3 +287,83 @@ def test_the_plugin_intent_keeps_the_sections_hosts_mirror():
         "Open questions",
         "Approach",
     ]
+
+
+# ── 018: the base branch ─────────────────────────────────────────────────────────────────────
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _repo_on(root: Path, branch: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", branch)
+    _git(root, "commit", "-q", "--allow-empty", "-m", "init")
+    return root
+
+
+def _with_origin(tmp_path: Path, branch: str) -> Path:
+    """A clone of a repo whose only branch is `branch`, so `origin/HEAD` names it."""
+    _repo_on(tmp_path / "upstream", branch)
+    _git(tmp_path, "clone", "-q", str(tmp_path / "upstream"), str(tmp_path / "repo"))
+    return tmp_path / "repo"
+
+
+def test_the_base_is_main_when_there_is_one(tmp_path: Path, capsys):
+    _, out = _config(_repo_on(tmp_path, "main"), capsys)
+    assert out["git"] == {"base": "main", "base_source": "detected"}
+
+
+def test_with_no_main_the_base_is_the_branch_origin_head_names(tmp_path: Path, capsys):
+    _, out = _config(_with_origin(tmp_path, "master"), capsys)
+    assert out["git"] == {"base": "master", "base_source": "detected"}
+
+
+def test_with_no_main_and_no_origin_the_base_is_unset(tmp_path: Path, capsys):
+    root = _repo_on(tmp_path, "master")
+    _, out = _config(root, capsys)
+    assert out["git"] == {"base": None, "base_source": "unset"}
+    assert "no base branch" in sdlc.trunk_refusal(root, None)
+    assert any(w.startswith("git.base: no base branch") for w in out["warnings"])
+
+
+def test_status_reports_a_missing_base_and_check_doesnt(tmp_path: Path, capsys, monkeypatch):
+    """Status says so, since every change would refuse to start; `check` is a gate, and stays
+    green for a repo that simply has no commit on `main` yet."""
+    import sys
+
+    root = _repo_on(tmp_path, "master")
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "status"])
+    capsys.readouterr()
+    sdlc.main()
+    assert "git.base: no base branch" in capsys.readouterr().out
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    assert sdlc.main() == 0
+    assert "no base branch" not in capsys.readouterr().out
+
+
+def test_the_configured_base_wins_over_one_detected(tmp_path: Path, capsys):
+    root = _repo_on(tmp_path, "main")
+    _git(root, "branch", "trunk")
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "config.toml").write_text('[git]\nbase = "trunk"\n', encoding="utf-8")
+    _, out = _config(root, capsys)
+    assert out["git"] == {"base": "trunk", "base_source": "config"}
+    assert sdlc.trunk_refusal(root, "trunk") is None
+    assert "'gone' doesn't exist here" in sdlc.trunk_refusal(root, "gone")
+
+
+def test_a_base_that_isnt_a_string_is_a_warning(tmp_path: Path, capsys):
+    root = _repo_on(tmp_path, "main")
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "config.toml").write_text("[git]\nbase = 1\n", encoding="utf-8")
+    _, out = _config(root, capsys)
+    assert "git.base must be a string" in out["warnings"]
+    assert out["git"]["base"] == "main"

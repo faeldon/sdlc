@@ -110,3 +110,11 @@ on each other through a later title are never listed and never warned about.
 With an open milestone and a dangling `After:` title, `next_up` calls `closed_changes(home, None)`
 once through `_milestone_verdicts` and once for the shipped titles, reading every closed intent
 both times. Walk it once and pass it in.
+
+## 018-1 [perf] load_config runs git on every call to resolve the base branch
+- **raised:** 2026-10-25 by 018-base-branch (cost)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+`_resolve_trunk` runs up to three `git` calls each time `load_config()` does, and some commands
+call it several times; nothing is slow yet, but one resolved value could be passed down instead.

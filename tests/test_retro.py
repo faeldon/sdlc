@@ -381,7 +381,7 @@ def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, c
         "work/ideas.md",
     ]
     assert _git(root, "status", "--porcelain") == ""
-    assert sdlc.last_retrospective(root)["date"] == "2026-10-24"
+    assert sdlc.last_retrospective(root, "main")["date"] == "2026-10-24"
 
 
 def _stray(root: Path) -> None:
@@ -756,7 +756,7 @@ def test_old_and_new_trailers_read_against_their_own_targets(tmp_path: Path) -> 
     root = _repo(tmp_path)
     _measured(root, "001-keep-one-draft", agent=10, stops=9)  # old: required=5 target=2
     _measured(root, "002-draft-titles", agent=10, stops=6, targets="target=5 allowance=0")
-    changes = sdlc.closed_changes(root, None)
+    changes = sdlc.closed_changes(root, None, "main")
     group = sdlc.metrics_summary(changes, allowance=1)["groups"]["tier 2, manual"]
     assert group["target"] == 5.5, "6 for the old commit, 5 as the new one recorded"
     assert group["median"]["over"] == 2, "9 - 6 and 6 - 5"
@@ -777,7 +777,7 @@ def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> N
     _git(root, "rm", "-r", "-q", f"work/{nid}-{slug}")
     _git(root, "commit", "-q", "-m", f"Close {nid}-{slug}", "-m",
          "Sdlc-Mode: manual\nSdlc-Totals: agent=5 stops=5 required=5 target=2")  # fmt: skip
-    [rec] = sdlc.closed_changes(root, None)
+    [rec] = sdlc.closed_changes(root, None, "main")
     assert rec["findings"] == {"important": 1, "nit": 3, "cost": 2}
     group = sdlc.metrics_summary([rec])["groups"]["tier 2, manual"]
     assert group["findings"] == {"important": 1, "nit": 3}

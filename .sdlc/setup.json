@@ -20,6 +20,7 @@
     "docs.project",
     "docs.read_before_design",
     "docs.review",
+    "git.base",
     "metrics.idle_minutes",
     "metrics.stop_allowance",
     "metrics.transcripts",

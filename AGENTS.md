@@ -61,6 +61,12 @@ writes itself, every time (`direction.md`, `ideas.md`, `notes.md`, the artifacts
 overridable in `.sdlc/templates/`. A missing review doc falls back to `defaults/REVIEW.md`; other
 missing docs are reported, never replaced.
 
+**The base branch: `git.base`.** `main` in this file means the base branch a host names in
+`[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
+passes it as `trunk`, since `base` already means a boundary or a merge base there. Never write
+`main` into a git call: `test_no_git_call_names_main_itself` fails on one, and a host on `master`
+would get stuck at that step. A command that writes asks `trunk_refusal()` first.
+
 **Tiers and stages.** Tier 0 gets no folder, Tier 1 an `intent.md`, Tier 2 `intent.md`, `spec.md`
 and `plan.md`. `STAGES`, `TIER_ARTIFACTS`, `SPEC_REQUIRED_FROM` and `PLAN_REQUIRED_FROM` define
 what `check` requires. A file with two or more lines starting with `<` is an unfilled scaffold.
