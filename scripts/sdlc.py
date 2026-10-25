@@ -39,6 +39,9 @@ So this tool answers the questions that are queries rather than decisions:
     lookup      the values the project doc's issue fields can take (milestone, project,
                 assignees), from the tracker, a host command or a fixed list, as JSON
     next-entry  the id the next work/inbox.md entry would take today, or --count N of them
+    bugs        the open [bug] entries, as JSON, with the closed change that last touched a path
+                (--introduced), a candidate for the bug's `Introduced by:`
+    bug-commit  commit work/inbox.md alone, from the main checkout, as File, Retire or Update <id>
     migrate-inbox  move work/ideas.md and work/nits.md into work/inbox.md, every entry with an
                 id and the references to open entries by id; never commits
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
@@ -958,6 +961,11 @@ def inbox_entries(root: Path) -> list[dict]:
         text = path.read_text(encoding="utf-8") if path.is_file() else ""
     except (OSError, UnicodeDecodeError):
         return []
+    return parse_entries(text)
+
+
+def parse_entries(text: str) -> list[dict]:
+    """The entries a register's text holds, as `inbox_entries()` returns them."""
     out: list[dict] = []
     current: dict | None = None
     fenced = False
@@ -1116,6 +1124,113 @@ def is_nit(entry: dict) -> bool:
     return entry["status"].strip().lower() == "nit"
 
 
+def is_bug(entry: dict) -> bool:
+    """Something already broken, `[bug]`: put forward first, by severity."""
+    return entry["status"].strip().lower() == "bug"
+
+
+# The process doc names the severity words in a `- **severity:**` bullet in its section whose
+# heading starts with `Bugs`, backticked and most severe first.
+SEVERITY_RE = re.compile(r"^- \*\*severity:\*\*\s*(.*)$")
+
+
+def severities(root: Path, cfg: dict) -> list[str]:
+    """The severity words, most severe first: the host's process doc's, else the default doc's."""
+    rel = cfg["docs"]["process"]
+    for path in ([root / rel] if rel else []) + [DEFAULTS_DIR / "SDLC.md"]:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        inside, bullet = False, None
+        for line in text.splitlines():
+            if line.startswith("#"):
+                if bullet is not None:
+                    break
+                inside = line.lstrip("#").strip().startswith("Bugs")
+            elif bullet is not None and line.startswith("  "):
+                bullet += " " + line.strip()
+            elif bullet is not None:
+                break
+            elif inside and (m := SEVERITY_RE.match(line)):
+                bullet = m.group(1)
+        words = re.findall(r"`([^`]+)`", bullet or "")
+        if words:
+            return words
+    return []
+
+
+def bug_entries(root: Path, words: list[str] | None = None) -> tuple[list[dict], list[str]]:
+    """Every open bug, the register's `[bug]` entries, and what's wrong with them: no id, or a
+    severity missing or not among the process doc's words. Its reported date is its id's."""
+    if words is None:
+        words = severities(root, load_config(root)[0])
+    bugs: list[dict] = []
+    problems: list[str] = []
+    for e in inbox_entries(root):
+        if not is_bug(e):
+            continue
+        fields = e["fields"]
+        name = e["id"] or e["title"]
+        severity = (fields.get("Severity") or "").strip()
+        paths = fields.get("Paths", "")
+        bugs.append(
+            {
+                "id": e["id"],
+                "title": e["title"],
+                "reported": e["date"],
+                "severity": severity,
+                "paths": [p.strip().strip("`") for p in paths.split(",") if p.strip()],
+                "introduced_by": (fields.get("Introduced by") or "").strip() or None,
+                "text": " ".join(e["text"]),
+            }
+        )
+        if not e["id"]:
+            problems.append(f"{name!r} has no id: its heading is `## [YYYY-MM-DD-n] [bug] title`")
+        if not severity:
+            problems.append(f"{name} has no `Severity:` line")
+        elif words and severity not in words:
+            problems.append(f"{name}: Severity must be one of {'|'.join(words)}, got {severity!r}")
+    return bugs, problems
+
+
+def severity_rank(severity: str | None, words: list[str]) -> int:
+    """Where a severity sorts: its place among the words, an unknown one last."""
+    return words.index(severity) if severity in words else len(words)
+
+
+def bugs_summary(bugs: list[dict], words: list[str], today: date) -> dict:
+    """How many bugs are open, by severity in the process doc's order, and the oldest's age."""
+    by = Counter(b["severity"] or "unset" for b in bugs)
+    order = [w for w in words if by[w]] + sorted(k for k in by if k not in words)
+    ages = [_age_days({"created": b["reported"]}, today) for b in bugs]
+    return {
+        "open": len(bugs),
+        "by_severity": {k: by[k] for k in order},
+        "oldest_days": max((a for a in ages if a is not None), default=None),
+    }
+
+
+def introducer(home: Path, trunk: str | None, path: str) -> str | None:
+    """The closed change that last touched `path` on the base branch, or None: no commit touches
+    it, or the newest one was committed outside a change. A candidate for a bug's `Introduced by:`
+    line, never written without a person's word."""
+    if not trunk:
+        return None
+    sha = _git(home, "log", "-1", "--format=%H", trunk, "--", path)
+    if not sha:
+        return None
+    log = _git(home, "log", "--first-parent", "--reverse", "--format=%H %s", f"{sha}..{trunk}")
+    for line in (log or "").splitlines():
+        close, _, subject = line.partition(" ")
+        name = subject.removeprefix(CLOSE_PREFIX)
+        if subject.startswith(CLOSE_PREFIX) and DIR_RE.match(name):
+            base = _change_base(home, name, f"{close}^")
+            inside = base and _git(home, "merge-base", "--is-ancestor", base, sha) is not None
+            return name if inside and base != sha else None
+    return None
+
+
 def analyze(root: Path, today: date | None = None) -> dict:
     today = today or date.today()
     cfg = load_config(root)[0]
@@ -1239,6 +1354,19 @@ def analyze(root: Path, today: date | None = None) -> dict:
             )
     for detail in nit_entries(root)[1]:
         problems.append({"dir": register, "kind": "nits", "detail": detail})
+    bugs, bug_problems = bug_entries(root)
+    for detail in bug_problems:
+        problems.append({"dir": register, "kind": "bugs", "detail": detail})
+    claimed = [b for b in bugs if b["introduced_by"]]
+    if claimed:
+        trunk = load_config(root)[0]["git"]["base"]
+        names = [c["name"] for c in closed_changes(main_root(root), None, trunk, read=False)]
+        names += [f"{rec['id']}-{rec['slug']}" for rec in changes]
+        for b in claimed:
+            if not any(names_change(n, b["introduced_by"]) for n in names):
+                problems.append({"dir": register, "kind": "bugs",
+                                 "detail": f"{b['id'] or b['title']}: Introduced by "
+                                 f"{b['introduced_by']!r} names no change"})  # fmt: skip
     if work_ignored(root):
         problems.append({"dir": "work/", "kind": "ignored", "detail": IGNORED})
     # A counter behind the folders is normal: main's committed one only moves when a change
@@ -1872,6 +2000,28 @@ def cmd_migrate_inbox(root: Path) -> int:
             )
     report["done"].append("references rewritten")
     return emit(0)
+
+
+def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | None) -> int:
+    """The open bugs, the register's `[bug]` entries, as JSON with their age and the process
+    doc's severity words. `--touching` keeps those the given paths touch; `--introduced` names, for
+    each path, the closed change that last touched it, a candidate for `Introduced by:`. Writes
+    nothing."""
+    cfg = load_config(root)[0]
+    words = severities(root, cfg)
+    bugs, problems = bug_entries(root, words)
+    if touching is not None:
+        bugs = [b for b in bugs if nit_touches(b, touching)]
+    today = date.today()
+    for b in bugs:
+        b["age_days"] = _age_days({"created": b["reported"]}, today)
+    out: dict = {"path": _shown(register_path(work_dir(root)), root), "severities": words,
+                 "bugs": bugs, "problems": problems}  # fmt: skip
+    if introduced is not None:
+        home, trunk = main_root(root), cfg["git"]["base"]
+        out["introduced"] = [{"path": q, "change": introducer(home, trunk, q)} for q in introduced]
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 1 if problems else 0
 
 
 def cmd_checks(root: Path, ident: str) -> int:
@@ -4372,7 +4522,7 @@ def _direction_text(home: Path, cfg: dict) -> str:
 # under the first rule it meets. A fixed order a person can argue with line by line, never a
 # score; the status skill weighs it against the open changes, release and retro.
 NEXT_RULES = (
-    ("bug", "entries tagged [bug], oldest first"),
+    ("bug", "entries tagged [bug], most severe first, then oldest"),
     ("milestone", "each open milestone's first grouped seed that is ready, in the doc's order"),
     ("series", "ready seeds whose After: seeds have all left the register, oldest first"),
     ("nits", "open nits of cost S, one line per theme, oldest theme first"),
@@ -4434,7 +4584,12 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     for rule, _ in NEXT_RULES:
         found: list[dict] = []
         if rule == "bug":
-            found = [seed(rule, "bug", e) for e in ready if e["status"].strip().lower() == "bug"]
+            words = severities(home, cfg)
+            bugs = sorted(
+                (e for e in ready if is_bug(e)),
+                key=lambda e: (severity_rank(e["fields"].get("Severity"), words), e["date"]),
+            )
+            found = [seed(rule, f"bug {e['fields'].get('Severity') or '?'}", e) for e in bugs]
         elif rule == "milestone":
             untaken = [e for e in ready if e["title"] not in taken]
             for m in milestones:
@@ -4857,6 +5012,99 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     return emit(0)
 
 
+# Why a bug left the register without a fix. A fixed one leaves through the ship that fixes it.
+RETIRE_REASONS = ("duplicate", "not-a-bug", "wontfix", "cant-reproduce")
+BUG_SUBJECTS = ("File", "Retire", "Update")
+
+
+def cmd_bug_commit(root: Path, reasons: list[str] | None = None) -> int:
+    """Record what /sdlc:bug wrote: one commit of the register alone, on the base branch in the
+    main checkout, its subject `File <id>`, `Retire <id>` or `Update <id>` for each entry added,
+    removed or changed, and an `Sdlc-Retired:` trailer for each bug removed, with the reason
+    `--reason <id>=<word>` gave it. Every refusal is found before anything is written."""
+    home = main_root(root)
+    cfg, _, _ = load_config(home)
+    register = register_path(work_dir(home))
+    rel = f"work/{register.name}"
+    report: dict = {"commit": None, "entries": [], "refusals": [], "done": []}
+    refusals = report["refusals"]
+
+    def emit(code: int) -> int:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return code
+
+    if root.resolve() != home.resolve():
+        refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
+        refusals.append(why)
+    elif _git(home, "branch", "--show-current") != trunk:
+        refusals.append(f"the main checkout ({home}) isn't on {trunk}")
+    tracked = _git(home, "-c", "core.quotePath=false", "diff", "--name-only", "HEAD") or ""
+    untracked = (
+        _git(home, "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard") or ""
+    )
+    changed = sorted({p for p in (*tracked.splitlines(), *untracked.splitlines()) if p})
+    stray = [p for p in changed if p != rel]
+    if stray:
+        refusals.append(f"only {rel} may be uncommitted; also changed: " + ", ".join(stray))
+    elif not changed:
+        refusals.append(f"nothing to record: {rel} is unchanged")
+    given: dict[str, str] = {}
+    for r in reasons or []:
+        ident, _, word = r.partition("=")
+        if word not in RETIRE_REASONS:
+            refusals.append(f"--reason {r}: the reason is one of {'|'.join(RETIRE_REASONS)}")
+        given[ident.strip()] = word
+
+    def key(e: dict) -> str:
+        return e["id"] or e["title"]
+
+    before = {key(e): e for e in parse_entries(_git(home, "show", f"HEAD:{rel}") or "")}
+    try:
+        after = {key(e): e for e in parse_entries(register.read_text(encoding="utf-8"))}
+    except (OSError, UnicodeDecodeError) as e:
+        refusals.append(f"{rel} can't be read: {e}")
+        after = dict(before)
+    actions: dict[str, list[str]] = {s: [] for s in BUG_SUBJECTS}
+    trailers: list[str] = []
+    for k in after:
+        if k not in before:
+            actions["File"].append(k)
+        elif after[k] != before[k]:
+            actions["Update"].append(k)
+    for k, e in before.items():
+        if k in after:
+            continue
+        actions["Retire"].append(k)
+        if k not in given:
+            refusals.append(f"{k} is removed with no reason: give --reason {k}=<word>")
+        elif is_bug(e):
+            severity = (e["fields"].get("Severity") or "unset").replace(" ", "-")
+            trailers.append(
+                f"Sdlc-Retired: {k} severity={severity} reported={e['date']} reason={given[k]}"
+            )
+    unused = [k for k in given if k not in actions["Retire"]]
+    refusals += [f"--reason {k}: no entry by that id was removed" for k in unused]
+    if refusals:
+        return emit(1)
+    subject = "; ".join(f"{s} {', '.join(ids)}" for s, ids in actions.items() if ids)
+    if not subject:
+        refusals.append(f"nothing to record: {rel} changed, but no entry did")
+        return emit(1)
+    report["commit"] = subject
+    report["entries"] = [{"action": s, "id": i} for s, ids in actions.items() for i in ids]
+    message = ["-m", subject] + (["-m", "\n".join(trailers)] if trailers else [])
+    for args in (["add", "--", rel], ["commit", "-q", *message, "--", rel]):
+        made = subprocess.run(["git", "-C", str(home), *args], capture_output=True, text=True)
+        if made.returncode != 0:
+            refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
+            return emit(1)
+    report["done"].append("commit")
+    report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
+    return emit(0)
+
+
 # ---------------------------------------------------------------- readiness
 #
 # What /sdlc:setup works from: each thing a repo can set up for this plugin, whether it has, and
@@ -4929,7 +5177,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry",
+    "drift", "next-entry", "bugs",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -5837,6 +6085,13 @@ def print_status(a: dict) -> None:
             landed = "" if c["closed"] else "  (landed, not closed)"
             print(f"    {c['id']}  {c['slug']:<28} {c['impact'] or '?'}{landed}")
 
+    # Left out with no bug open, as Unreleased is with nothing landed.
+    bugs = a.get("bugs")
+    if bugs and bugs["open"]:
+        counts = ", ".join(f"{k} {n}" for k, n in bugs["by_severity"].items())
+        oldest = f", oldest {bugs['oldest_days']}d" if bugs["oldest_days"] is not None else ""
+        print(f"\n■ Bugs: {bugs['open']} open ({counts}){oldest}  → /sdlc:bug")
+
     # Left out when the registers hold nothing to put forward, as Unreleased is.
     nxt = a.get("next_up")
     if nxt and (nxt["items"] or nxt["done_milestones"] or nxt["warnings"]):
@@ -5907,6 +6162,18 @@ def main() -> int:
         "undone", help="a change's unticked `- [ ]` items in notes.md, as JSON; writes nothing"
     )
     p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
+
+    p_bugs = sub.add_parser("bugs", help="the open [bug] entries in work/inbox.md, as JSON")
+    p_bugs.add_argument("--touching", nargs="*", help="only those these paths touch")
+    p_bugs.add_argument(
+        "--introduced", nargs="*", help="for each path, the closed change that last touched it"
+    )
+    p_bugc = sub.add_parser(
+        "bug-commit", help="commit work/inbox.md alone, as File, Retire or Update <id>"
+    )
+    p_bugc.add_argument(
+        "--reason", action="append", default=[], help="<id>=<word>, for each entry removed"
+    )
 
     sub.add_parser(
         "migrate-inbox",
@@ -6052,6 +6319,10 @@ def main() -> int:
         else:
             print(next_id(home))
         return 0
+    if args.cmd == "bugs":
+        return cmd_bugs(root, args.touching, args.introduced)
+    if args.cmd == "bug-commit":
+        return cmd_bug_commit(root, args.reason)
     if args.cmd == "migrate-inbox":
         return cmd_migrate_inbox(root)
     if args.cmd == "next-entry":
@@ -6112,6 +6383,8 @@ def main() -> int:
     a["retro_due"] = retro_due(home, cfg)
     # Here, not in `analyze()`: `check` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
+    words = severities(home, cfg)
+    a["bugs"] = bugs_summary(bug_entries(home, words)[0], words, date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
     print_status(a)
     return 0

@@ -64,6 +64,8 @@
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **cost:**": "sha256:76be784796eb3b5a",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **value:**": "sha256:17743923b867bd34",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **theme:**": "sha256:16a78c8fcaf1f039",
+        "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Bugs: what's already broken": "sha256:d1333cf97da62b8f",
+        "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Bugs: what's already broken > - **severity:**": "sha256:2e9435c56d609060",
         "## Running the stages > ### Closing and the archive \u2192 `/sdlc:close`": "sha256:b218343b104a03d9",
         "## Running the stages > ### Dropping a change \u2192 `/sdlc:drop`": "sha256:98d05de155596ea5",
         "## Running the stages > ### The release loop \u2192 `/sdlc:release`, then `/sdlc:publish`": "sha256:f6e6395af8a2be4a",
@@ -122,7 +124,7 @@
   "templates": {
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:6ecddfc40e569e7f",
-    "inbox.md": "sha256:1a088280532d165b",
+    "inbox.md": "sha256:1fef030572d7beac",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:4c0f2bfd4c54e4a3",
     "notes.md": "sha256:a5022187b58499c9",

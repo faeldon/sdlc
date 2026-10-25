@@ -303,6 +303,24 @@ down as they pass. A theme with 5 or more open, or any nit older than 60 days, i
 `/sdlc:retro` proposes one change to pay down. Release and publish never look at them: the release
 cycle is for shipping.
 
+#### Bugs: what's already broken
+
+A bug is something that shipped and is broken, with a way to see it: a `[bug]` entry in
+`work/inbox.md`, filed by `/sdlc:bug` with `Severity:` and `Paths:` lines, and an
+`Introduced by: NNN-slug` line once someone confirms which change let it through. A request for
+something nobody has built is a seed, and a finding in a diff under review is a nit or Important.
+Each is weighed the same way:
+
+- **severity:** `high`, it loses work, gives a wrong number or stops a stage · `med`, its output
+  is wrong and there is a way round it · `low`, a message or a rough edge.
+
+`/sdlc:status` puts open bugs first, most severe first. `/sdlc:intent <id>` opens the change that
+fixes one, its intent naming it on a `fixes:` line; `/sdlc:ship` removes the entry with the fix,
+and `/sdlc:close` records it on the `Close` commit as an `Sdlc-Fixes:` trailer, so history says
+which change fixed what. One that needs no fix is retired by `/sdlc:bug`, with its reason.
+`/sdlc:retro` counts them: reported, fixed and retired in its window, days from report to fix,
+and escapes per introducing change against its tier.
+
 ### Closing and the archive → `/sdlc:close`
 
 After ship, behind one approval, one command: bring the session back to the main checkout,

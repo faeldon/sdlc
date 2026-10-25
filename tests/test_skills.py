@@ -60,6 +60,7 @@ GATED = {
             "publish",
             "retro",
             "uninstall",
+            "bug",
         )  # fmt: skip
     ),
     "sdlc-factory:spec",
@@ -108,6 +109,7 @@ READS_CONFIG = {
     ],
     "sdlc:publish": ["release.remote", "release.publish", "release.prepare", "git.base"],
     "sdlc:health": ["commands.scan", "docs.health"],
+    "sdlc:bug": ["docs.process", "git.base"],
     "sdlc:retro": [
         "docs.process",
         "docs.policy",
@@ -140,7 +142,7 @@ READS_CONFIG = {
 def test_skills_were_found() -> None:
     """A glob that matches nothing makes every test below vacuously pass."""
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
-    assert {f"sdlc:{n}" for n in names | {"publish", "retro", "drop", "uninstall"}} | {
+    assert {f"sdlc:{n}" for n in names | {"publish", "retro", "drop", "uninstall", "bug"}} | {
         "sdlc-factory:spec", "sdlc-factory:build"
     } == set(BY_ID)  # fmt: skip
 
@@ -338,6 +340,17 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
         assert "Never take one in unasked" in " ".join(text[name].split()), name
     assert "`nits`" in text["retro"]
     assert "never this skill's" in " ".join(text["retro"].split())
+
+
+def test_bug_files_by_the_script_and_never_writes_introduced_by_unasked() -> None:
+    """A bug's id comes from `next-entry`, its commit from `bug-commit`, and its `Introduced by:`
+    only from a person's word: retro counts escapes by it."""
+    text = (ROOT / "skills" / "bug" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    assert "sdlc.py next-entry" in text and "sdlc.py bug-commit" in text
+    assert "sdlc.py bugs --introduced" in text
+    assert "only when the human confirms one" in flat
+    assert "names no host" in flat
 
 
 def test_only_close_and_drop_leave_the_worktree() -> None:

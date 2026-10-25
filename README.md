@@ -16,6 +16,7 @@ rely on gets a spec and a plan.
 | `/sdlc:ship` | when it's built: the gate, a review in passes, one commit |
 | `/sdlc:close` | after ship: land it on `main` and tidy away its worktree and branch |
 | `/sdlc:drop` | for a change that won't ship: record why, and keep what it cost |
+| `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
 | `/sdlc:release` | after a batch of changes: the version they add up to, committed and tagged |
 | `/sdlc:publish` | after release: push `main` and the tag, then run your publish command |
