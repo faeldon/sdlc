@@ -215,6 +215,22 @@ commit say the same in prose, since `.claude/settings.local.json` and managed se
 the project file. Ask at setup rather than assume: some teams want the line. Also decide whether the
 text the plugin writes into issues follows the same key. Raised 2026-10-25.
 
+## [2026-10-25-23] [seed] Setup refreshes template overrides the way it refreshes docs
+
+A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts
+from its default, but setup handles only the docs. `record` keeps one hash of each whole plugin
+template, so `drift()` can only say `changed` and point at the plugin's file; a person diffs and
+merges it by hand, and an override nobody revisits keeps an old shape while the plugin's moves on.
+Treat overrides like docs: record a hash per block (`doc_units()`, a section or a `- **lead**`
+bullet) of each plugin template, classify an override's blocks three ways against it, and put the
+blocks the plugin changed and the host never touched under `refresh`, with the whole override as
+`proposed` and every other block as the host wrote it; a block both sides changed is a
+`conflict` in `report`. `breaking` (`_template_misses()`, `TEMPLATE_READS`) stays as it is.
+Decide what a template's frontmatter counts as (it is keys, not a block), whether
+`templates/issue.md`, whose text is every issue's body, splits into blocks at all, and what a
+record from before this change reads as (`base: none`, so `differs`, never proposed). Raised
+2026-10-25.
+
 ## [2026-10-24-7] [nit] A deprecations status test whose patched half can't fail
 
 The half of the `status` test that runs with a patch applied can't fail, so it proves nothing.
