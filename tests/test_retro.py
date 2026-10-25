@@ -370,10 +370,11 @@ def test_a_repo_with_nothing_still_answers(tmp_path: Path, capsys) -> None:
     out = json.loads(capsys.readouterr().out)
     assert out["since"] is None
     assert out["changes"] == out["rework"] == out["releases"] == out["problems"] == []
-    assert out["ideas"] == {"seeds": 0, "oldest": None}
+    assert out["ideas"] == {"open": 0, "oldest": None}
 
 
-def test_open_changes_and_seeds_are_counted(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tag", ["idea", "seed"])
+def test_open_changes_and_seeds_are_counted(tmp_path: Path, tag: str) -> None:
     root = _repo(tmp_path)
     (root / "work" / "004-open-one").mkdir(parents=True)
     (root / "work" / "004-open-one" / "intent.md").write_text(
@@ -382,7 +383,7 @@ def test_open_changes_and_seeds_are_counted(tmp_path: Path) -> None:
         encoding="utf-8",
     )  # fmt: skip
     (root / "work" / "inbox.md").write_text(
-        "# Ideas\n\n## [2026-09-01] [seed] Old one\n\nx\n\n## [2026-10-01] [seed] New one\n\nx\n"
+        f"# Ideas\n\n## [2026-09-01] [{tag}] Old one\n\nx\n\n## [2026-10-01] [{tag}] New one\n\nx\n"
         "\n## [2026-10-02] [building] Taken\n\nx\n",
         encoding="utf-8",
     )
@@ -390,7 +391,7 @@ def test_open_changes_and_seeds_are_counted(tmp_path: Path) -> None:
     assert [(o["name"], o["title"], o["age_days"]) for o in out["open"]] == [
         ("004-open-one", "open one", 4)
     ]
-    assert out["ideas"] == {"seeds": 2, "oldest": "2026-09-01"}
+    assert out["ideas"] == {"open": 2, "oldest": "2026-09-01"}
 
 
 def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path) -> None:

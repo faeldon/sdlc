@@ -43,7 +43,8 @@ So this tool answers the questions that are queries rather than decisions:
                 (--introduced), a candidate for the bug's `Introduced by:`
     bug-commit  commit work/inbox.md alone, from the main checkout, as File, Retire or Update <id>
     migrate-inbox  move work/ideas.md and work/nits.md into work/inbox.md, every entry with an
-                id and the references to open entries by id; never commits
+                id, [seed] retagged [idea], and the references to open entries by id; never
+                commits
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
     readiness   whether this repo is set up for the plugin, item by item, with the commands its own
                 task files suggest for the gate, the slower check and the scans, as JSON
@@ -134,9 +135,12 @@ DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # nobody has written it yet; prose almost never opens consecutive lines with '<'.
 PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
-# work/inbox.md, the register of change requests: "## [2026-10-25-3] [seed] Some title", its id
-# (the date it came in and a count) then its tag. A bare date, `[2026-10-17]`, is an entry from
-# before ids, read the same with no id until 1.4.0, a shim (`migrate-inbox` gives it one).
+# work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title", its id
+# (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its kind:
+# `[idea]`, `[bug]` or `[nit]`, with `[building]` an idea a change is building. Any other tag reads
+# as an idea, `[seed]` (what ideas were tagged before) for good. A bare date, `[2026-10-17]`, is
+# an entry from before ids, read the same with no id until 1.4.0, a shim (`migrate-inbox` gives it
+# one).
 ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\s*(.+)$")
 # The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
 # seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
@@ -152,7 +156,7 @@ REF_RE = re.compile(rf'"([^"]+)"|({ENTRY_ID_TOKEN_RE.pattern})')
 # A nit is a `[nit]` entry: a finding ship approved unfixed, with `Theme:`, `Paths:`, `Cost:`,
 # `Value:` and `Raised by: NNN-slug (pass)` lines. Ship writes and retires them, intent and spec
 # offer them, retro counts them; the process doc's rubric says what each cost and value means. High
-# value is never a nit, and L cost is a seed, so neither appears here.
+# value is never a nit, and L cost is an idea, so neither appears here.
 NIT_RAISED_RE = re.compile(r"^(\d{3,}-[a-z0-9][a-z0-9-]*)\s*(?:\(([^)]*)\))?\s*$")
 NIT_COSTS = ("S", "M")
 NIT_VALUES = ("med", "low")
@@ -1134,7 +1138,7 @@ def nits_summary(nits: list[dict], today: date) -> dict:
 
 
 def is_building(idea: dict) -> bool:
-    """Work has started: the seed is tagged `[building]`."""
+    """Work has started: the idea is tagged `[building]`."""
     return "building" in idea["status"].lower()
 
 
@@ -1837,10 +1841,20 @@ def inbox_migration(root: Path) -> list[str]:
         todo.append(f"move work/{OLD_INBOX} to work/{INBOX}")
     if (work / OLD_NITS).is_file():
         todo.append(f"fold work/{OLD_NITS} into work/{INBOX} as [nit] entries")
-    bare = [e for e in inbox_entries(root) if not e["id"]]
+    entries = inbox_entries(root)
+    bare = [e for e in entries if not e["id"]]
     if bare:
         todo.append(f"give {len(bare)} entr{'y' if len(bare) == 1 else 'ies'} an id")
+    seeds = [e for e in entries if _is_old_seed(e)]
+    if seeds:
+        todo.append(f"retag {len(seeds)} [seed] entr{'y' if len(seeds) == 1 else 'ies'} as [idea]")
     return todo
+
+
+def _is_old_seed(entry: dict) -> bool:
+    """Tagged `[seed]`, what an idea was tagged before `[idea]`: read as an idea for good, and
+    retagged by `migrate-inbox`."""
+    return entry["status"].strip().lower() == "seed"
 
 
 def _old_nits(text: str) -> tuple[list[dict], list[str]]:
@@ -1874,7 +1888,8 @@ def _old_nits(text: str) -> tuple[list[dict], list[str]]:
 def cmd_migrate_inbox(root: Path) -> int:
     """Move this checkout's registers to `work/inbox.md` with ids: `work/ideas.md` renamed (`git
     mv`, so history follows it), an id for every entry with a bare date, each `work/nits.md` entry
-    turned into a `[nit]` entry dated by when it was raised and the file removed, and the title
+    turned into a `[nit]` entry dated by when it was raised and the file removed, each `[seed]`
+    tag retagged `[idea]`, and the title
     references that name an open entry rewritten to its id: `After:` lines, the direction doc's
     `Groups:` and this checkout's open changes' `idea:`. A reference to a seed already shipped
     stays a title. Refuses while any of those files has uncommitted edits, before writing
@@ -1882,8 +1897,8 @@ def cmd_migrate_inbox(root: Path) -> int:
     tree = Path(_git(root, "rev-parse", "--show-toplevel") or root)
     work = work_dir(root)
     cfg = load_config(root)[0]
-    report: dict = {"todo": inbox_migration(root), "ids": [], "nits": [], "references": [],
-                    "refusals": [], "done": []}  # fmt: skip
+    report: dict = {"todo": inbox_migration(root), "ids": [], "retagged": [], "nits": [],
+                    "references": [], "refusals": [], "done": []}  # fmt: skip
     refusals = report["refusals"]
 
     def emit(code: int) -> int:
@@ -1962,9 +1977,12 @@ def cmd_migrate_inbox(root: Path) -> int:
             fenced = not fenced
         heading = None if fenced else _heading_entry(line.rstrip("\n"))
         if heading and not heading["id"]:
-            entry_id = take(heading["date"])
-            lines[n] = line.replace(f"[{heading['date']}]", f"[{entry_id}]", 1)
-            report["ids"].append({"id": entry_id, "title": heading["title"]})
+            heading["id"] = take(heading["date"])
+            lines[n] = line.replace(f"[{heading['date']}]", f"[{heading['id']}]", 1)
+            report["ids"].append({"id": heading["id"], "title": heading["title"]})
+        if heading and _is_old_seed(heading):
+            lines[n] = re.sub(r"^(##\s*\[[^\]]+\]\s*)\[[^\]]+\]", r"\1[idea]", lines[n], count=1)
+            report["retagged"].append({"id": heading["id"], "title": heading["title"]})
     if old_nits:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] += "\n"
@@ -4604,7 +4622,7 @@ NEXT_RULES = (
     ("milestone", "each open milestone's first grouped seed that is ready, in the doc's order"),
     ("series", "ready seeds whose After: seeds have all left the register, oldest first"),
     ("nits", "open nits of cost S, one line per theme, oldest theme first"),
-    ("seed", "every other ready seed, oldest first"),
+    ("idea", "every other ready idea, oldest first"),
 )
 NEXT_SHOWN = 5
 
@@ -4692,7 +4710,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
                               "age_days": t["age_days"],
                               "command": f"/sdlc:intent pay down the [{theme}] nits"})  # fmt: skip
         else:
-            found = [seed(rule, "seed", e) for e in ready]
+            found = [seed(rule, "idea", e) for e in ready]
         for item in found:
             if item["rule"] == "nits" or item["title"] not in taken:
                 taken.add(item["title"])
@@ -4966,7 +4984,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                      "files": shared, "dropped": True}
                 )  # fmt: skip
     a = analyze(home, today)
-    seeds = [i for i in inbox_entries(home) if not (is_building(i) or is_nit(i) or is_bug(i))]
+    ideas = [i for i in inbox_entries(home) if not (is_building(i) or is_nit(i) or is_bug(i))]
     direction = direction_items(_direction_text(home, cfg))
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names, trunk)
@@ -4996,8 +5014,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             for r in a["open"]
         ],  # fmt: skip
         "ideas": {
-            "seeds": len(seeds),
-            "oldest": min((i["date"] for i in seeds), default=None),
+            "open": len(ideas),
+            "oldest": min((i["date"] for i in ideas), default=None),
         },
         "nits": nits_summary(nit_entries(home)[0], today),
         "bugs": bugs_retro(home, cfg, since, changes, today),

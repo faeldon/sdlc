@@ -236,12 +236,15 @@ clean tree, reported with the command that undoes it. Anything that would confli
 untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
 with finished changes: the change's commit keeps them in history. `work/inbox.md` is committed
-too; a closed seed is deleted from it, history keeping that as well. It was `work/ideas.md`
+too; a closed seed is deleted from it, history keeping that as well. Every entry there is a
+seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]` (the process doc's "Seeds, and the
+changes they become" says what each is, and the change types they grow into). Any other tag reads
+as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good. It was `work/ideas.md`
 before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
 reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
 over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
-into `[nit]` entries, and rewrites the titles that name an open entry to its id, in `After:`, the
+into `[nit]` entries, retags each `[seed]` entry `[idea]`, and rewrites the titles that name an open entry to its id, in `After:`, the
 direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
 of those files has uncommitted edits, or one it can't read. Run it with no change open: one in
 another worktree keeps a title `idea:`. Until a repo migrates, `sdlc.py config`'s `work.register`
@@ -270,13 +273,13 @@ an `Sdlc-Fixes:` trailer for it on the `Close` commit.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `work/inbox.md` and direction doc. A
-missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [seed] Title`:
+missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [idea] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
 and every commit that ever held one, so an id is never handed out twice. A heading with a bare
 date is an entry from before ids, read the same until 1.4.0: run `migrate-inbox` before. An `idea:`, `After:` or `Groups:` line names an
 entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
-`work/inbox.md` feed it: `[bug]` in place of `[seed]` marks something already broken, and an
+`work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an
 `After: <id>, <id>` line in a seed's body makes it wait while any seed it names is still in the
 register and not being built. Each line's command is `/sdlc:intent <id>`. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
@@ -286,7 +289,7 @@ Candidates come in this order, each once, under the first rule it meets:
 2. each open milestone's first `Groups:` seed that is ready, in the doc's order;
 3. a seed whose `After:` seeds have all left the register, the next in its series;
 4. nits of cost `S`, one line per theme, oldest theme first;
-5. every other ready seed, oldest first.
+5. every other ready idea, oldest first (`idea`).
 
 Five are shown, then a count. Below them, an open milestone whose grouped changes and seeds are all
 closed says so, for `/sdlc:retro` to settle, and an `After:` line that can never be met (it names

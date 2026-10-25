@@ -209,15 +209,17 @@ that means the change is too big, and that's the finding.
 
 Weigh each Nit under the rubric in the process doc (`docs.process`), its section on nits, and give
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
-it Important. One that costs a design call (L) is a seed for `work/inbox.md`, not a nit. One that
+it Important. One that costs a design call (L) is an idea for `work/inbox.md`, not a nit. One that
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
 answer below. The rest are proposed as `[nit]` entries in `work/inbox.md`.
 
 ## Step 4 — Present findings and the draft commit
 
 Show the findings, then the exact commit message you propose. Match the repo's style, read from
-`git log --oneline -10`. Absent a clear one: imperative, no Conventional Commits prefix, reads like a
-changelog entry, with the change folder named in the body:
+`git log --oneline -10`. When that style names a change's type (`fix: …`), use the words the
+process doc's "Seeds, and the changes they become" gives (`feature`, `fix`, `refactor`…, or the
+host's own list there). Absent a clear style: imperative, no Conventional Commits prefix, reads
+like a changelog entry, with the change folder named in the body:
 
 ```
 Let a saved draft be reopened from the list
@@ -309,7 +311,7 @@ second file beside it, which would hide every entry the first one holds.
 
 First, the undone items, exactly as approved:
 
-- **Carried:** append each seed to the register as `## [<id>] [seed] <its title>`, with the id
+- **Carried:** append each seed to the register as `## [<id>] [idea] <its title>`, with the id
   Step 4 took for it. If it doesn't exist, `Write` it at that path first from
   `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do and points at
   `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:

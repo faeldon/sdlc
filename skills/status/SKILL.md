@@ -47,7 +47,7 @@ go looking for any of it elsewhere.
 register or the direction doc to answer "what's next". The script collects candidates from them
 and orders them by a fixed rule: `bug` entries first, then each open milestone's next grouped seed
 (`M1 (…)`), then the next seed in a series (`next in series after "…"`), then cost-`S` nits by
-theme (`nits`), then every other seed (`seed`). Each line ends with the command that starts it,
+theme (`nits`), then every other idea (`idea`). Each line ends with the command that starts it,
 `/sdlc:intent <id>` with the entry's id.
 A seed already being built, or waiting on an earlier seed in its series, is left out. The lines
 below the list say which milestone has nothing left in its groups, and which `After:` lines can

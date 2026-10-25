@@ -250,7 +250,7 @@ def test_a_bare_repo_moves_its_old_registers_into_the_inbox(tmp_path: Path) -> N
     moved = _run(root, "migrate-inbox")
     assert moved.returncode == 0, moved.stdout + moved.stderr
     inbox = (root / "work" / "inbox.md").read_text(encoding="utf-8")
-    assert "## [2026-10-01-1] [seed] Keep drafts" in inbox and "After: 2026-10-01-1" in inbox
+    assert "## [2026-10-01-1] [idea] Keep drafts" in inbox and "After: 2026-10-01-1" in inbox
     assert "## [2026-10-03-1] [nit] A test that can't fail" in inbox
     assert not (root / "work" / "nits.md").exists()
     _git(root, "commit", "-q", "-m", "migrate")

@@ -1,6 +1,6 @@
 ---
 name: bug
-description: File a bug in work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone as "File <id>", "Retire <id>" or "Update <id>". Use from the main checkout when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (a seed, which /sdlc:retro or a person writes), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
+description: File a bug in work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone as "File <id>", "Retire <id>" or "Update <id>". Use from the main checkout when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:retro or a person writes), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
 argument-hint: "[what broke, or an entry's id to retire or retag]"
 allowed-tools:
   - Read
@@ -69,7 +69,8 @@ When the argument is an entry's id, or the human wants one gone or moved:
   or `cant-reproduce`, said with a line on why. A bug fixed by a change is never retired here:
   `/sdlc:ship` removes it with the fix.
 - **Retag** an entry filed as the wrong kind: a `[bug]` that is really a request becomes a
-  `[seed]`, and a `[seed]` that describes something broken becomes a `[bug]` with its
+  `[idea]`, and an `[idea]` (or an older `[seed]`) that describes something broken becomes a
+  `[bug]` with its
   `Severity:` line. Its id stays the same, so whatever names it still does.
 
 ## Step 3 — Draft and show it

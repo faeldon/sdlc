@@ -216,11 +216,40 @@ def test_every_shipped_file_has_the_reader_its_folder_promises(tmp_path: Path, c
 
 def test_the_inbox_template_shows_the_heading_the_script_reads() -> None:
     note = " ".join(_note(_text("templates/inbox.md")))
-    form = re.search(r"`(## \[YYYY-MM-DD-n\] \[seed\] <title>)`", note)
-    assert form, "the note names the seed heading form"
+    form = re.search(r"`(## \[YYYY-MM-DD-n\] \[idea\] <title>)`", note)
+    assert form, "the note names the idea heading form"
     heading = form.group(1).replace("YYYY-MM-DD-n", "2026-10-24-1").replace("<title>", "A seed")
     assert sdlc._heading_entry(heading)["id"] == "2026-10-24-1"
     assert not [line for line in _text("templates/inbox.md").splitlines() if line.startswith("## ")]
+
+
+def test_the_inbox_note_defines_seed_and_its_kinds() -> None:
+    """Someone reading only the note can tell a seed (any entry) from an idea (one kind)."""
+    note = " ".join(line.lstrip("> ") for line in _note(_text("templates/inbox.md")))
+    assert "Every entry is a **seed**" in note
+    for tag in ("[idea]", "[bug]", "[nit]", "[building]", "[seed]"):
+        assert f"`{tag}`" in note, tag
+    assert "`[seed]` tag, from before ideas had their own, reads as `[idea]`" in note
+
+
+@pytest.mark.parametrize("doc", ["defaults/SDLC.md", ".sdlc/SDLC.md"])
+def test_the_process_doc_names_the_seed_kinds_and_the_change_types(doc: str) -> None:
+    text = _text(doc)
+    section = text.split("### Seeds, and the changes they become\n", 1)[1].split("\n## ", 1)[0]
+    for word in ("[idea]", "[bug]", "[nit]", "feature", "fix", "refactor", "docs", "chore"):
+        assert f"`{word}`" in section, word
+
+
+def test_no_shipped_text_writes_a_seed_heading() -> None:
+    """Ideas are tagged `[idea]`; `[seed]` is named only as the old tag, never written."""
+    paths = [
+        *ROOT.glob("skills/*/SKILL.md"),
+        *ROOT.glob("plugins/factory/skills/*/SKILL.md"),
+        *ROOT.glob("templates/*.md"),
+        *ROOT.glob("defaults/*.md"),
+        ROOT / "docs" / "REFERENCE.md",
+    ]
+    assert not [str(p.relative_to(ROOT)) for p in paths if "] [seed]" in p.read_text("utf-8")]
 
 
 def test_the_factory_starts_notes_from_the_same_text_as_the_template() -> None:

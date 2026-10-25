@@ -53,7 +53,7 @@ What `retro` gives:
 - `rework`: later changes that touched an earlier one's code within days, leaving out
   `rework_common`: the files more than a third of the window's changes touched (once there are
   six), each with how many, since sharing one of them says nothing.
-- `open`, `ideas` (seed count, oldest), `tiers`, `impacts`, and `releases` since `since`.
+- `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
 - `nits`: the nits ship left open, `[nit]` entries in `work/inbox.md`, by theme, each theme's
   `count` and its oldest's date and `age_days`.
 - `bugs`: the `[bug]` entries and their history in the window. `reported`, `fixed` (from each
@@ -179,7 +179,7 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 
 Every finding ends in exactly one of these, or it doesn't go in the report:
 
-- **Seed**: a `work/inbox.md` entry, `## [<id>] [seed] Title`, with a short paragraph: the
+- **Seed**: a `work/inbox.md` entry, `## [<id>] [idea] Title`, with a short paragraph: the
   problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD." A finding that comes in
   phases is one seed per phase, each later one with an `After: <earlier seed's id>` line, so
   `/sdlc:status` puts forward only the phase that's next.

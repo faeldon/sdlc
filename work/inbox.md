@@ -2,7 +2,7 @@
 
 Seeds, not a backlog. `/sdlc:intent` promotes one into a change.
 
-## [2026-10-24-1] [seed] UX and UI reviewers for the factory, and how a repo declares a front end
+## [2026-10-24-1] [idea] UX and UI reviewers for the factory, and how a repo declares a front end
 
 The factory ships code, security and test reviewers. The factory it learned from also
 runs UX and UI reviewers against a running app. agent-skills has no such agent, only its
@@ -10,20 +10,20 @@ runs UX and UI reviewers against a running app. agent-skills has no such agent, 
 needs a declaration (a `factory.toml` key, or `commands.preview` for a dev server) before a UI
 reviewer can run. Raised 2026-10-24.
 
-## [2026-10-24-2] [seed] A factory queue, and parallel runs across worktrees
+## [2026-10-24-2] [idea] A factory queue, and parallel runs across worktrees
 
 The factory runs one change per session. A queue (`/sdlc-factory:next` over seeds or
 open intents) and several runs at once, one per worktree, would let ideas move while nobody
 watches. GitHub issues and `work/ideas.md` are already the queue; this is the runner. Raised
 2026-10-24.
 
-## [2026-10-24-3] [seed] A factory status board
+## [2026-10-24-3] [idea] A factory status board
 
 A page that shows each running change's stage, round and verdicts as they land, from the change
 folders' files, the way the factory it learned from shows a dashboard. Read-only. Raised
 2026-10-24.
 
-## [2026-10-24-4] [seed] A retro report and process views from each change's numbers
+## [2026-10-24-4] [idea] A retro report and process views from each change's numbers
 
 Close records each change's numbers; render them: a templated report the
 script fills with no model tokens, committed with each retrospective. Then add the process views
@@ -33,7 +33,7 @@ throughput by tier per week alongside cycle time and rework, roughly DORA's set.
 velocity figure, which invites optimising the number. A dashboard is optional and comes after the
 report: the process doc keeps "no dashboard" for the signals. Raised 2026-10-24.
 
-## [2026-10-24-5] [seed] Architecture indicators for the retro loop
+## [2026-10-24-5] [idea] Architecture indicators for the retro loop
 
 A standard set the plugin can compute from git for any repo, for the retrospective's
 architecture pass:
@@ -48,7 +48,7 @@ Language-specific measures (complexity, dependency cycles) come from the host th
 command, the way `commands.scan` works, since the plugin knows nothing about what a host builds.
 Raised 2026-10-24.
 
-## [2026-10-24-6] [seed] Landing changes through pull requests, for teams
+## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
 Close lands a change by fast-forwarding `main` locally, and only publish pushes. A team that
 reviews through pull requests would want ship to push the branch and open a PR (its body carrying
@@ -57,7 +57,7 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-25-1] [seed] A process map of the three loops, kept true by the gate
+## [2026-10-25-1] [idea] A process map of the three loops, kept true by the gate
 
 A map of the change loop (intent → spec → plan → build → ship → close), the release loop (release
 → publish) and the retro loop: each stage's gates, the `sdlc.py` calls, the checks (gate,
@@ -66,7 +66,7 @@ rendered by GitHub), with a test that fails when a stage, skill or WAIT is missi
 or a diagramming tool can be generated from it later. Decide whether hosts get a copy from setup.
 Raised 2026-10-25.
 
-## [2026-10-25-2] [seed] Decide at intent whether a change reaches hosts
+## [2026-10-25-2] [idea] Decide at intent whether a change reaches hosts
 
 This repo is the plugin's testbed, so whatever it builds for itself should reach hosts in some
 form, but whether, and how generically, is decided late and implicitly today (010's `after_bump`
@@ -75,7 +75,7 @@ was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent a
 designs for the host from the start and ship can check the change delivered on it. Raised
 2026-10-25.
 
-## [2026-10-25-3] [seed] A glossary of the process's terms
+## [2026-10-25-3] [idea] A glossary of the process's terms
 
 The plugin's words (change, tier, stage, gate, WAIT, stop, seed, nit, finding, impact, landed,
 retro, direction, outcome, drift…) are defined only where they're used, and someone new meets them
@@ -85,7 +85,7 @@ line and points at where it's specified, with a test that fails when a term the 
 GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
 should use its terms. Raised 2026-10-25.
 
-## [2026-10-25-4] [seed] A changelog that keeps its own layout
+## [2026-10-25-4] [idea] A changelog that keeps its own layout
 
 `release.changelog` puts each release's `## X.Y.Z — date` section right under the file's `# `
 title. A changelog that opens with prose or a table before its releases is split by it, and a Keep
@@ -94,7 +94,7 @@ releases go (`<!-- sdlc:releases -->`, inserted after), falling back to today's 
 section heading a template a host can override. Tier 2: it changes what release writes in a host.
 Raised 2026-10-25 by a host.
 
-## [2026-10-25-5] [seed] Version lines release can't read, and the first release's baseline
+## [2026-10-25-5] [idea] Version lines release can't read, and the first release's baseline
 
 `VERSION_RE` reads `version = "x"` and `"version": "x"`, not Python's `__version__ = "x"`, so a
 host has to move its version elsewhere to use `/sdlc:release`. And with no tag for the current
@@ -103,7 +103,7 @@ which can predate the repo's adoption of the plugin, so the first release takes 
 closed since. Read the dunder form, and point the hint at the adoption commit when that is later.
 Raised 2026-10-25 by a host.
 
-## [2026-10-25-6] [seed] Publish's "published" note never leaves the machine
+## [2026-10-25-6] [idea] Publish's "published" note never leaves the machine
 
 Publish marks a tag `published` in `refs/notes/sdlc` so a rerun skips the host's upload, but the
 notes ref isn't pushed: from a second clone, publish runs the upload again. Push the notes ref with
@@ -113,7 +113,7 @@ the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote.
 --dry-run`), and that releases outside `release.tag`'s pattern live outside the loop. Raised
 2026-10-25 by a host.
 
-## [2026-10-25-7] [seed] Close warns before its merge deletes files in the main checkout
+## [2026-10-25-7] [idea] Close warns before its merge deletes files in the main checkout
 
 A change that untracks files the main checkout still holds (data kept out of git from then on)
 deletes them there when close fast-forwards `main`. They are in history, but the person isn't
@@ -121,14 +121,14 @@ told. `close --check` could list the tracked paths the merge removes, so the app
 Not an automatic `after_close` command: `close_cleanup` stays the person's to run. Raised
 2026-10-25 by a host.
 
-## [2026-10-25-8] [seed] Small gaps in sync and worktree setup
+## [2026-10-25-8] [idea] Small gaps in sync and worktree setup
 
 `sync` rewrites an issue's body but never its title, so an intent retitled at spec leaves the issue
 on the old one. `commands.worktree_setup` gets `{worktree}` but not `{main}`, so a host linking
 untracked data from the main checkout works the path out from `git rev-parse --git-common-dir`.
 Tier 1 together. Raised 2026-10-25 by a host.
 
-## [2026-10-25-9] [seed] A local channel for bug reports and feature requests from other sessions
+## [2026-10-25-9] [idea] A local channel for bug reports and feature requests from other sessions
 
 Working locally across several repos, a session in a host that hits a plugin bug or wants a
 feature has no channel but the person: they copy what it wrote into the plugin's session, which
@@ -139,7 +139,7 @@ bug entry behind one approval. A report never names the host in what lands here 
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 
-## [2026-10-25-11] [seed] GitHub issues as the intake for bugs and requests, in hosts too
+## [2026-10-25-11] [idea] GitHub issues as the intake for bugs and requests, in hosts too
 
 Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
 session through `gh`) is the remote form of the local channel: triage reads open issues that no
@@ -152,7 +152,7 @@ triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` s
 
 After: 2026-10-25-10
 
-## [2026-10-25-12] [seed] Rework as a declared fix, with surviving lines as the cross-check
+## [2026-10-25-12] [idea] Rework as a declared fix, with surviving lines as the cross-check
 
 Retro pairs any two changes closed within a week that share a file. With the common files left
 out (021), the 17 changes since the last retrospective still hold 42 pairs, nearly all same-week
@@ -172,7 +172,7 @@ change fixes (024): a change can have both, a bug it fixes and the change that l
 which that bug's `Introduced by:` line already records, so retro can cross-check the two.
 See work/021-rework-shared-files/.
 
-## [2026-10-25-19] [seed] Push at close and at release, not only at publish
+## [2026-10-25-19] [idea] Push at close and at release, not only at publish
 
 Only publish pushes, so a closed change sits on the local `main` until the next publish: no
 backup, no other machine sees it, and its issue (labelled `landed`) waits for the `Closes #N` to
@@ -184,7 +184,7 @@ is what users install from (this repo's marketplace): a pushed version bump is a
 so release may push only the tag there, or nothing. Landing through pull requests is the other
 half of this, seeded on its own above. Raised 2026-10-25.
 
-## [2026-10-25-20] [seed] Keep the change folders under .sdlc/, or where a host says
+## [2026-10-25-20] [idea] Keep the change folders under .sdlc/, or where a host says
 
 `work/` sits at a host's root, beside its own code, so adopting the plugin adds a top-level folder
 a host never asked for. Move it under `.sdlc/` (`.sdlc/work/`, with `ideas.md` and `nits.md`), or
@@ -199,7 +199,7 @@ and records it, what `drift()` makes of a host on the old path, and whether the 
 retired. Worktrees follow the folder, since each holds its own `<work>/<branch>/`. Tier 2: it
 changes where every host's artifacts live. Raised 2026-10-25.
 
-## [2026-10-25-21] [seed] Agent attribution in a host's commits, off by default
+## [2026-10-25-21] [idea] Agent attribution in a host's commits, off by default
 
 The commits `sdlc.py` makes (`Close`, `Drop`, release, retro) carry only the `Sdlc-*` trailers,
 but the ones a session makes for a skill (ship's commit, the factory's build) take the harness's
@@ -215,7 +215,7 @@ commit say the same in prose, since `.claude/settings.local.json` and managed se
 the project file. Ask at setup rather than assume: some teams want the line. Also decide whether the
 text the plugin writes into issues follows the same key. Raised 2026-10-25.
 
-## [2026-10-25-23] [seed] Setup refreshes template overrides the way it refreshes docs
+## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts
 from its default, but setup handles only the docs. `record` keeps one hash of each whole plugin
@@ -230,6 +230,17 @@ Decide what a template's frontmatter counts as (it is keys, not a block), whethe
 `templates/issue.md`, whose text is every issue's body, splits into blocks at all, and what a
 record from before this change reads as (`base: none`, so `differs`, never proposed). Raised
 2026-10-25.
+
+## [2026-10-25-24] [idea] Record each change's type, and let the host decide where it shows
+
+The process doc names the types a seed grows into (`feature`, `fix`, `refactor`, `perf`, `docs`,
+`test`, `chore`), but nothing records which one a change is. Give the intent a `type:` key that
+intent proposes from the seed's kind (a `[bug]` suggests `fix`) and `check` validates against the
+process doc's list, so a host can add its own words. Where it shows is the host's choice, said in
+config: a subject prefix (`fix: …`, Conventional Commits) for a repo that uses one, an
+`Sdlc-Type:` trailer on the `Close` commit beside `Sdlc-Fixes:`, or nowhere. Retro can then count
+changes by type, and release can group its notes by it. Tier 2: a new intent key and what
+`sdlc.py` writes in a host. Raised 2026-10-25, from 025's vocabulary.
 
 ## [2026-10-24-7] [nit] A deprecations status test whose patched half can't fail
 

@@ -185,7 +185,7 @@ def test_next_up_puts_bugs_first_most_severe_then_oldest(tmp_path: Path) -> None
         ("bug", "bug high", "Older and high"),
         ("bug", "bug high", "New and high"),
         ("bug", "bug low", "Old and low"),
-        ("seed", "seed", "A seed"),
+        ("idea", "idea", "A seed"),
     ]
 
 

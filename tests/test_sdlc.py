@@ -1832,6 +1832,19 @@ def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, i
     )
 
 
+@pytest.mark.parametrize("tag", ["idea", "seed"])
+def test_ship_deletes_an_idea_or_an_older_seed_by_its_id(tmp_path: Path, tag: str) -> None:
+    ideas = (
+        f"# Inbox\n\n## [2026-10-02-1] [{tag}] Reopen drafts\n\nThe one.\n\n"
+        "## [2026-10-03-1] [idea] Share drafts\n\nThe last.\n"
+    )
+    root, _ = _seeded(tmp_path, "2026-10-02-1", ideas)
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
+        "# Inbox\n\n## [2026-10-03-1] [idea] Share drafts\n\nThe last.\n"
+    )
+
+
 def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)

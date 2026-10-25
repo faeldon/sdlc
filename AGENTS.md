@@ -157,7 +157,9 @@ branch.
 
 **The inbox: `inbox_entries()`.** `work/inbox.md` is the one register of change requests, each
 entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
-(`BODY_KEYS`). `register_path()` is the one place that knows the old name: a repo with only
+(`BODY_KEYS`). Every entry is a seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]`. Any
+other tag reads as an idea, `[seed]` (the old idea tag) for good, so say "seed" for any entry and
+"idea" for the kind. `register_path()` is the one place that knows the old name: a repo with only
 `work/ideas.md` is read from it until 1.4.0 (`.sdlc/deprecations.toml`), and
 `migrate-inbox` moves it over; it and bare-date headings go in 1.4.0 too. Ids come from `next_entry_ids()`, which counts every checkout's
 register, uncommitted edits included, and every commit that ever held one; they are their own

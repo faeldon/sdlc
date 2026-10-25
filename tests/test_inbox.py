@@ -116,7 +116,7 @@ def _repo(tmp_path: Path, inbox: str = "# Inbox\n") -> Path:
     return root
 
 
-def _entry(entry_id: str, title: str, tag: str = "seed", after: str = "") -> str:
+def _entry(entry_id: str, title: str, tag: str = "idea", after: str = "") -> str:
     line = f"\nAfter: {after}\n" if after else ""
     return f"## [{entry_id}] [{tag}] {title}\n\nWhy.\n{line}\n"
 
@@ -310,7 +310,7 @@ def test_migrate_moves_the_registers_into_one_inbox_with_ids(tmp_path: Path, cap
     assert not (work / "ideas.md").exists() and not (work / "nits.md").exists()
     assert "work/ideas.md -> work/inbox.md" in _git(root, "status", "--short"), "a git mv"
     inbox = (work / "inbox.md").read_text(encoding="utf-8")
-    assert inbox.startswith("# Ideas\n\n> The note.\n\n## [2026-10-01-1] [seed] Keep drafts\n")
+    assert inbox.startswith("# Ideas\n\n> The note.\n\n## [2026-10-01-1] [idea] Keep drafts\n")
     assert "## [2026-10-01-2] [building] Share drafts" in inbox
     assert "After: 2026-10-01-1\n" in inbox
     assert "## [2026-10-03-1] [bug] Drafts lose their title" in inbox
@@ -331,6 +331,42 @@ def test_migrate_moves_the_registers_into_one_inbox_with_ids(tmp_path: Path, cap
     assert "\nidea: 2026-10-01-2\n" in intent
     assert [r["to"] for r in out["references"]] == ["2026-10-01-1", "2026-10-01-1", "2026-10-01-2"]
     assert sdlc.inbox_migration(root) == []
+
+
+def test_migrate_retags_seed_entries_as_ideas(tmp_path: Path, capsys) -> None:
+    """Only a live `[seed]` heading becomes `[idea]`; everything else is left byte for byte, and
+    readiness nudges until it's done."""
+    root = _repo(
+        tmp_path,
+        "# Inbox\n\n> Example: `## [2026-10-01-9] [seed] Not an entry`\n\n"
+        "```\n## [2026-10-01-8] [seed] A fenced example\n```\n\n"
+        + _entry("2026-10-01-1", "Keep drafts", "seed", after="2026-10-01-2")
+        + _entry("2026-10-01-2", "Share drafts", "Seed")
+        + _entry("2026-10-01-3", "Drafts lose their title", "bug")
+        + _entry("2026-10-01-4", "Reopen drafts", "building")
+        + _entry("2026-10-01-5", "Already an idea"),
+    )
+    before = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert sdlc.inbox_migration(root) == ["retag 2 [seed] entries as [idea]"]
+    sdlc.cmd_readiness(root)
+    item = next(i for i in json.loads(capsys.readouterr().out)["items"] if i["name"] == "inbox")
+    assert item["status"] == "warn" and "retag 2 [seed] entries as [idea]" in item["detail"]
+
+    code, out = _migrate(root, capsys)
+    assert code == 0, out
+    assert out["retagged"] == [
+        {"id": "2026-10-01-1", "title": "Keep drafts"},
+        {"id": "2026-10-01-2", "title": "Share drafts"},
+    ]
+    after = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert after == before.replace("[2026-10-01-1] [seed]", "[2026-10-01-1] [idea]").replace(
+        "[2026-10-01-2] [Seed]", "[2026-10-01-2] [idea]"
+    )
+    sdlc.cmd_readiness(root)
+    item = next(i for i in json.loads(capsys.readouterr().out)["items"] if i["name"] == "inbox")
+    assert item["status"] == "ok"
+    _git(root, "commit", "-qam", "retagged")
+    assert _migrate(root, capsys)[1]["done"] == ["nothing to migrate"]
 
 
 def test_a_second_migration_has_nothing_to_do(tmp_path: Path, capsys) -> None:
