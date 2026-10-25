@@ -265,3 +265,98 @@ def test_bug_commit_refuses_a_change_s_worktree(tmp_path: Path, capsys) -> None:
     (tree / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
     code, out = _commit(tree, capsys)
     assert code == 1 and any("run it from the main checkout" in r for r in out["refusals"])
+
+
+# The fix cycle: `fixes:` in the intent, ship removing the entry, close's trailer.
+
+FIXING = """\
+---
+id: 001
+slug: keep-drafts
+tier: 1
+impact: patch
+stage: build
+created: 2026-10-01
+updated: 2026-10-01
+idea:
+depends_on:
+fixes: [{fixes}]
+---
+
+# 001 — keep drafts
+"""
+
+
+def _fixing(root: Path, fixes: str) -> Path:
+    folder = root / "work" / "001-keep-drafts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "intent.md").write_text(FIXING.format(fixes=fixes), encoding="utf-8")
+    return folder
+
+
+def test_a_change_s_fixes_must_name_open_bugs_in_its_register(tmp_path: Path) -> None:
+    root = _repo(tmp_path, _bug("2026-10-01-1", "One"), "## [2026-10-01-2] [seed] A seed\n\nx\n")
+    _fixing(root, "2026-10-01-1, 2026-10-01-2, 2026-10-01-9")
+    rec = sdlc.analyze(root)["open"][0]
+    assert rec["fixes"] == ["2026-10-01-1", "2026-10-01-2", "2026-10-01-9"]
+    errors = [e for e in rec["errors"] if e.startswith("fixes:")]
+    assert errors == [
+        "fixes: '2026-10-01-2' isn't a [bug] in work/inbox.md",
+        "fixes: '2026-10-01-9' isn't a [bug] in work/inbox.md",
+    ]
+
+
+def test_a_bug_an_open_change_fixes_leaves_next_up_and_the_count(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path, _bug("2026-10-01-1", "Being fixed"), _bug("2026-10-02-1", "Open"))
+    _fixing(root, "2026-10-01-1")
+    a = sdlc.analyze(root)
+    items = sdlc.next_up(root, sdlc.load_config(root)[0], a["open"], date(2026, 10, 25))["items"]
+    assert [i["title"] for i in items] == ["Open"]
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "status"])
+    sdlc.main()
+    assert "■ Bugs: 1 open (high 1)" in capsys.readouterr().out
+
+
+def test_ship_removes_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path, capsys) -> None:
+    entries = [
+        _bug("2026-10-01-1", "One"),
+        _bug("2026-10-01-2", "Two"),
+        _bug("2026-10-01-3", "Three"),
+    ]
+    root = _repo(tmp_path, *entries)
+    _fixing(root, "2026-10-01-1, 2026-10-01-3, 2026-10-01-9")
+    assert sdlc.cmd_ship(root, "001") == 0
+    out = capsys.readouterr().out
+    assert "removed bug 2026-10-01-1" in out and "removed bug 2026-10-01-3" in out
+    assert "no bug to remove: work/inbox.md has no entry 2026-10-01-9" in out
+    inbox = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert inbox == "# Inbox\n\n" + entries[1].rstrip("\n") + "\n", "the last one trails no gap"
+
+
+def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        _bug("2026-10-01-1", "One", extra="Introduced by: 000-start\n"),
+        _bug("2026-10-02-1", "Two", "low"),
+    )
+    _git(root, "checkout", "-q", "-b", "001-keep-drafts")
+    _fixing(root, "2026-10-01-1, 2026-10-02-1, 2026-10-03-9")
+    _inbox(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Ship 001-keep-drafts")
+    assert sdlc.fix_trailers(root, "001-keep-drafts") == [
+        "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start",
+        "Sdlc-Fixes: 2026-10-02-1 severity=low reported=2026-10-02 introduced_by=unknown",
+        "Sdlc-Fixes: 2026-10-03-9 severity=unknown reported=unknown introduced_by=unknown",
+    ]
+    assert sdlc.fix_trailers(root, "no-such-branch") == []
+
+
+def test_only_a_close_records_fixes_never_a_drop() -> None:
+    import inspect
+
+    assert "fix_trailers(" in inspect.getsource(sdlc.cmd_close)
+    assert "fix_trailers(" not in inspect.getsource(sdlc._drop_record)

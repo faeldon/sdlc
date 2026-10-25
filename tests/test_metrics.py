@@ -345,6 +345,26 @@ def test_a_commit_without_trailers_reads_as_none() -> None:
     assert metrics.parse_trailers(None) is None
 
 
+def test_fixes_and_retirements_read_by_id_beside_the_rest() -> None:
+    """Two lines of one key never overwrite each other, and the other keys read as before."""
+    body = (
+        "Close 001-x\n\nIts artifacts are in abc.\n\n"
+        "Sdlc-Mode: manual\n"
+        "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start\n"
+        "Sdlc-Fixes: 2026-10-02-1 severity=low reported=2026-10-02 introduced_by=unknown\n"
+        "Sdlc-Retired: 2026-10-03-1 severity=med reported=2026-10-03 reason=duplicate\n"
+    )
+    back = metrics.parse_trailers(body)
+    assert back["mode"] == "manual"
+    assert back["fixes"]["2026-10-01-1"] == {
+        "severity": "high",
+        "reported": "2026-10-01",
+        "introduced_by": "000-start",
+    }
+    assert back["fixes"]["2026-10-02-1"]["severity"] == "low"
+    assert back["retired"]["2026-10-03-1"]["reason"] == "duplicate"
+
+
 # ---------------------------------------------------------------- rework within a change
 
 

@@ -117,7 +117,8 @@ mirrored (`archive.location`) or why it wasn't, and where the session is now. Wi
 `archive.closed_because`, say close closed the issue now, and why. Say what `measure`
 recorded on the `Close` commit, from its `coverage`: which stages this machine's transcripts saw,
 or `none:` and why (transcripts off in `metrics.transcripts`, none for this change, or the reader
-failed), which never stops a close. When the report has `ran`, say which code ran the close:
+failed), which never stops a close. With `fixes`, name each bug the `Close` commit records as
+fixed, from its `Sdlc-Fixes:` line. When the report has `ran`, say which code ran the close:
 `main's code` (the session's own copy of the plugin wasn't the main checkout's) or `merged code`
 (the change brought the plugin's scripts, so its own code ran the steps after the merge). If `close_list`
 found something and `config` sets `commands.close_cleanup`, end with that one command for the

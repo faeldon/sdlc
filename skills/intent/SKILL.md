@@ -213,10 +213,16 @@ Step 3.
 If the change came from a `work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [seed] Keep drafts`), or, for an
 entry from before ids (`## [2026-10-01] [seed] Keep drafts`), to its title alone, without its
-`## `, date or tag (`idea: Keep drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit` the entry in the worktree's
-`work/inbox.md`: its heading's tag becomes `[building]`, the rest of the heading unchanged, and
-`Building in work/NNN-slug/.` becomes its first body line, so the tag lands with the change. Never
-put the pointer in the heading. Leave the seed's prose alone.
+`## `, date or tag (`idea: Keep drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit`
+the entry in the worktree's `work/inbox.md`: its heading's tag becomes `[building]`, the rest of
+the heading unchanged, and `Building in work/NNN-slug/.` becomes its first body line, so the tag
+lands with the change. Never put the pointer in the heading. Leave the seed's prose alone.
+
+If the change fixes a `[bug]` entry, the one its argument named or any the human says it fixes:
+add `fixes: [<id>, <id>]` under `depends_on:`, each bug's id, and draft the Problem from the
+entry's own description and repro. Leave the entry as it is, tag and all: `status` leaves out a
+bug an open change fixes, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` records it on
+the `Close` commit as an `Sdlc-Fixes:` trailer, which is how `/sdlc:retro` counts it fixed.
 
 Then mirror the written intent to the change's issue, which until now says only that it was
 opened. With no tracker, or a change that gets its issue at close, it says there is nothing to

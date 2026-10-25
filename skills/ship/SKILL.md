@@ -271,6 +271,11 @@ moot, proposed for retirement with a one-line reason, and a `Retired nits:` para
 message after the body, one `- <id>: <reason>` line each. A listed nit the diff doesn't settle
 stays, and needs no mention.
 
+**Bugs fixed.** When the intent has a `fixes:` line, name each bug it lists, by id and title from
+`work/inbox.md`: `sdlc.py ship` deletes those entries with the commit, and `/sdlc:close` records
+each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
+the line comes out, or the fix goes in.
+
 **Context update.** Show the context pass's result under the findings: each proposed edit as a
 diff of its doc, or "no update needed" and why. A doc left saying something false is an
 **Important** finding, not a nit.
@@ -334,8 +339,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # t
 commit. "Nothing to sync" is fine. A failure never undoes the commit: report what it printed, and
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
-`ship` stamps the folder shipped, deletes the entry the change's `idea:` names from
-`work/inbox.md` (saying so when there is none), and stages every path the checkout has
+`ship` stamps the folder shipped, deletes the entry the change's `idea:` names and each bug its
+`fixes:` names from `work/inbox.md` (saying so when one isn't there), and stages every path the checkout has
 uncommitted but the ones left out: the change's code, its folder, `work/inbox.md` when Step 6
 edited it, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
 counter, which reaches `main` this way). It prints each path it staged, and never commits. The

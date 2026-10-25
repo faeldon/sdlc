@@ -685,6 +685,7 @@ def load_change(
         "depends_on": [],
         "fields": {},
         "serves": None,
+        "fixes": [],
         "errors": [],
     }
     intent = path / "intent.md"
@@ -757,6 +758,16 @@ def load_change(
         product = product_doc(checkout, load_config(checkout)[0])
     rec["serves"] = frontmatter_list(text, "serves")
     rec["errors"] += serves_errors(rec["serves"], product, rec["stage"])
+    # The bugs a change fixes, by id, each an open `[bug]` in its own checkout's register until
+    # ship removes it with the fix.
+    rec["fixes"] = frontmatter_list(text, "fixes") or []
+    if rec["fixes"] and rec["stage"] not in ("shipped", "dropped"):
+        open_bugs = {e["id"] for e in inbox_entries(path.parent.parent) if is_bug(e)}
+        rec["errors"] += [
+            f"fixes: {f!r} isn't a [bug] in work/{register_path(path.parent).name}"
+            for f in rec["fixes"]
+            if f not in open_bugs
+        ]
     return rec
 
 
@@ -2184,6 +2195,14 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
         print(f"  removed seed {entry_ref(idea)[1]!r} from work/{ideas.name}")
     elif idea:
         print(f"  no seed to remove: work/{ideas.name} has no entry named {entry_ref(idea)[1]!r}")
+    # Each bug the change fixes leaves with it, found afresh after every deletion.
+    for fixed in frontmatter_list(stamped, "fixes") or []:
+        lines = _seed_lines(ideas, fixed)
+        if lines:
+            _drop_seed(ideas, lines[0])
+            print(f"  removed bug {fixed} from work/{ideas.name}")
+        else:
+            print(f"  no bug to remove: work/{ideas.name} has no entry {fixed}")
     paths, err = _stage_change(tree, leave)
     if err:
         print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
@@ -2655,6 +2674,40 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         return from_history(f"capture failed: {type(e).__name__}")
 
 
+def fix_trailers(main: Path, branch: str) -> list[str]:
+    """An `Sdlc-Fixes:` line for each bug the change's intent names on `fixes:`, with its
+    severity, reported date and introducing change as the register held them in the newest commit
+    on the branch that still had the entry; `unknown` where none did. Never raises: a fix that
+    can't be described is still recorded."""
+    try:
+        intent = _git(main, "show", f"{branch}:work/{branch}/intent.md") or ""
+        fixes = frontmatter_list(intent, "fixes") or []
+        found: dict[str, dict] = {}
+        paths = [f"work/{INBOX}", f"work/{OLD_INBOX}"]
+        shas = (_git(main, "log", "--format=%H", branch, "--", *paths) or "").split()
+        for sha in shas:
+            if all(f in found for f in fixes):
+                break
+            for rel in paths:
+                for e in parse_entries(_git(main, "show", f"{sha}:{rel}") or ""):
+                    if e["id"] in fixes and e["id"] not in found:
+                        found[e["id"]] = e
+        lines = []
+        for f in fixes:
+            e = found.get(f)
+            fields = e["fields"] if e else {}
+            severity = (fields.get("Severity") or "unknown").replace(" ", "-")
+            introduced = (fields.get("Introduced by") or "unknown").strip()
+            reported = e["date"] if e else "unknown"
+            lines.append(
+                f"Sdlc-Fixes: {f} severity={severity} reported={reported} "
+                f"introduced_by={introduced}"
+            )
+        return lines
+    except Exception:
+        return []
+
+
 def _drop_commit(main: Path, branch: str, trunk: str) -> str | None:
     """The `Drop <branch>` commit on the base's first-parent line whose second parent is the
     branch's tip: a rerun's sign that `record` is done. None when there is none."""
@@ -2949,7 +3002,10 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
     def remove_folder() -> str | None:
         where, closes = report["archive"]["location"], report["archive"].get("closes")
-        return _close_commit(main, branch, sha, where, captured, closes)
+        fixes = fix_trailers(main, branch)
+        if fixes:
+            report["fixes"] = fixes
+        return _close_commit(main, branch, sha, where, captured + fixes, closes)
 
     def record() -> str | None:
         if _drop_commit(main, branch, trunk):
@@ -4565,6 +4621,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
     named = [r["idea"] for r in open_changes if r.get("idea")]
+    named += [f for r in open_changes for f in r.get("fixes") or []]
     building = {e["title"] for e in ideas if any(ref_matches(n, e) for n in named)}
     states = {e["title"]: "building" for e in ideas if is_building(e) or e["title"] in building}
     open_titles = {e["title"] for e in ideas if e["title"] not in states}
@@ -6384,7 +6441,9 @@ def main() -> int:
     # Here, not in `analyze()`: `check` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
     words = severities(home, cfg)
-    a["bugs"] = bugs_summary(bug_entries(home, words)[0], words, date.fromisoformat(a["today"]))
+    fixing = {f for r in a["open"] for f in r.get("fixes") or []}
+    bugs = [b for b in bug_entries(home, words)[0] if b["id"] not in fixing]
+    a["bugs"] = bugs_summary(bugs, words, date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
     print_status(a)
     return 0
