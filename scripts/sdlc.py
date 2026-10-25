@@ -3089,8 +3089,9 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         where, err = mirror_to.archive(change)
         report["archive"]["location"] = where
         # What the tracker says about closing its issue: a line for the Close commit, so the
-        # push closes it, or why it closed it now. Only a tracker that has them sets them.
-        for key in ("closes", "closed_because"):
+        # push closes it, or why it closed it now, and any issue on the change's `closes:` line
+        # it couldn't close or let go. Only a tracker that has them sets them.
+        for key in ("closes", "closed_because", "closes_errors"):
             if getattr(mirror_to, key, None):
                 report["archive"][key] = getattr(mirror_to, key)
         return err
@@ -3478,6 +3479,15 @@ def render_issue(
     return marker, body, comments
 
 
+def closes_texts(name: str) -> dict[str, str]:
+    """What the tracker posts on an issue a change's `closes:` line names: as it closes it where
+    no push will (`fixed`), and as it sends it back to triage when the change is dropped."""
+    return {
+        "fixed": f"Fixed by {name}.",
+        "dropped": f"{name} was dropped; this issue is open for triage again.",
+    }
+
+
 def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
     """What a tracker is handed about a change: its record, the checkout its folder is in, and
     the issue rendered from it. `sha` defaults to that checkout's HEAD."""
@@ -3505,6 +3515,9 @@ def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
         # The issue fields the project doc turns on, as the intent sets them; a tracker mirrors
         # these exactly and never reads or writes one that isn't here.
         "fields": {name: rec["fields"].get(name, []) for name in project_doc(home, cfg)[0]},
+        # What the tracker posts on each issue the change's `closes:` line names, as it closes
+        # them or, for a dropped change, sends them back to triage. Fixed text, the core's.
+        "texts": closes_texts(folder.name),
     }
     parts = render_issue(home, folder, rec, branch, sha)
     if isinstance(parts, str):

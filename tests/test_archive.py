@@ -68,6 +68,28 @@ def every(flag):
     return [args[k + 1] for k, a in enumerate(args) if a == flag]
 
 
+def said(body):
+    # A comment as gh gives it: who wrote it and when, the clock one tick per comment.
+    st["clock"] = st.get("clock", 0) + 1
+    who = os.environ.get("FAKE_GH_USER", "me")
+    return {"body": body, "author": {"login": who}, "createdAt": f"2026-10-26T00:{st['clock']:04d}"}
+
+
+def shaped(i, keys):
+    # The fields in gh's shapes: objects and connections, not what the state keeps.
+    out = {k: i.get(k) for k in keys}
+    if "author" in out:
+        out["author"] = {"login": i.get("author") or "me"}
+    if "parent" in out:
+        out["parent"] = {"number": i["parent"]} if i.get("parent") else None
+    if "subIssues" in out:
+        kids = [{"number": x["number"]} for x in st["issues"] if x.get("parent") == i["number"]]
+        out["subIssues"] = {"nodes": kids, "totalCount": len(kids)}
+    if "comments" in out:
+        out["comments"] = i.get("comments") or []
+    return out
+
+
 if fail and args[:2] == ["issue", fail]:
     print("boom", file=sys.stderr)
     done(1)
@@ -99,8 +121,15 @@ if args[:2] == ["project", "list"]:
         done(1)
     done(out=json.dumps(st.get("projects", [])))
 if args[:2] == ["issue", "list"]:
-    keys = ("number", "title", "url", "state")
-    done(out=json.dumps([{k: i[k] for k in keys} for i in st["issues"]]))
+    keys = ["number", "title", "url", "state"]
+    if "--json" in args:
+        keys = args[args.index("--json") + 1].split(",")
+    found = [i for i in st["issues"] if "--state" not in args or i["state"] == "OPEN"]
+    for name in every("--label"):
+        found = [i for i in found if name in [lb["name"] for lb in i["labels"]]]
+    if "--limit" in args:
+        found = found[: int(args[args.index("--limit") + 1])]
+    done(out=json.dumps([shaped(i, keys) for i in found]))
 if args[:2] == ["issue", "create"]:
     n = top() + 1
     url = f"https://github.com/o/r/issues/{n}"
@@ -120,6 +149,13 @@ if args[:2] == ["issue", "edit"]:
     links = i.setdefault("blockedBy", [])
     links[:] = [x for x in links if str(x) not in every("--remove-blocked-by")]
     links += [int(x) for x in every("--add-blocked-by")]
+    if "--remove-parent" in args:
+        i["parent"] = None
+    if "--parent" in args:
+        if i.get("parent"):
+            print("issue already has a parent", file=sys.stderr)
+            done(1)
+        i["parent"] = int(args[args.index("--parent") + 1])
     if "--milestone" in args:
         i["milestone"] = args[args.index("--milestone") + 1]
     if "--remove-milestone" in args:
@@ -129,20 +165,20 @@ if args[:2] == ["issue", "edit"]:
         i[field] = have + [x for x in every(f"--add-{noun}") if x not in have]
     done()
 if args[:2] == ["issue", "comment"]:
-    find(args[2])["comments"].append({"body": sys.stdin.read()})
+    find(args[2])["comments"].append(said(sys.stdin.read()))
     done()
 if args[:2] == ["issue", "close"]:
     i = find(args[2])
     i["state"], i["reason"] = "CLOSED", args[args.index("--reason") + 1]
     if "--comment" in args:
-        i["comments"].append({"body": args[args.index("--comment") + 1]})
+        i["comments"].append(said(args[args.index("--comment") + 1]))
     done()
 if args[:2] == ["issue", "view"]:
     i = find(args[2])
     if i is None:
         done(1)
     keys = args[args.index("--json") + 1].split(",")
-    out = {k: i.get(k) for k in keys}
+    out = shaped(i, keys)
     if "blockedBy" in out:
         # As gh gives it: a GraphQL connection, not a list.
         links = i.get("blockedBy") or []
@@ -1543,3 +1579,146 @@ def test_a_field_github_refuses_is_skipped_and_the_rest_land(
     assert code == 0, out
     landed = {"name": "landed"} in gh()["issues"][0]["labels"]
     assert landed, "a refused field never stops the archive"
+
+
+# Intake: issues people filed, recorded by triage, attached to a change by its `closes:` line and
+# closed when it lands.
+
+
+def _filed(gh, n: int, labels: tuple[str, ...] = (), author: str = "ana", parent=None) -> None:
+    """Issue `n`, filed by someone who runs no session, put straight into the fake's state."""
+    state = gh()
+    state["issues"].append(
+        {
+            "number": n, "title": f"Report {n}", "url": f"https://github.com/o/r/issues/{n}",
+            "state": "OPEN", "labels": [{"name": x} for x in labels], "body": "It broke.",
+            "comments": [], "reason": None, "assignees": [], "blockedBy": [], "author": author,
+            "parent": parent,
+        }
+    )  # fmt: skip
+    Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps(state), encoding="utf-8")
+
+
+def _issue(gh, n: int) -> dict:
+    return next(i for i in gh()["issues"] if i["number"] == n)
+
+
+def _github(root: Path):
+    return sdlc.tracker(root, sdlc.load_config(root)[0])
+
+
+def test_mark_comments_once_labels_and_sets_the_parent(tmp_path, gh) -> None:
+    root = _repo(tmp_path)
+    _filed(gh, 50)
+    _filed(gh, 51)
+    for _ in range(2):
+        assert (
+            _github(root).mark(51, "Filed with #50.", "<!-- sdlc:intake:x -->", parent=50) is None
+        )
+    issue = _issue(gh, 51)
+    assert [c["body"] for c in issue["comments"]] == ["<!-- sdlc:intake:x -->\nFiled with #50."]
+    assert {"name": "triaged"} in issue["labels"] and issue["parent"] == 50
+    edits = [c for c in gh()["calls"] if c[:3] == ["issue", "edit", "51"]]
+    assert len(edits) == 2, "one label edit and one parent edit, never again on a rerun"
+
+
+def test_mark_with_close_closes_an_open_issue_once(tmp_path, gh) -> None:
+    root = _repo(tmp_path)
+    _filed(gh, 50, labels=("needs-info",))
+    for _ in range(2):
+        assert _github(root).mark(50, "Already resolved.", "<!-- m -->", close="completed") is None
+    issue = _issue(gh, 50)
+    assert issue["state"] == "CLOSED" and issue["reason"] == "completed"
+    assert {"name": "needs-info"} not in issue["labels"]
+    assert len([c for c in gh()["calls"] if c[:2] == ["issue", "close"]]) == 1
+
+
+def test_unmark_sends_an_issue_back_to_triage(tmp_path, gh) -> None:
+    root = _repo(tmp_path)
+    _filed(gh, 50, labels=("triaged",), parent=7)
+    for _ in range(2):
+        assert _github(root).unmark(50, "Dropped.", "<!-- d -->") is None
+    issue = _issue(gh, 50)
+    assert {"name": "triaged"} not in issue["labels"] and issue["parent"] is None
+    assert len(issue["comments"]) == 1
+
+
+def test_sync_makes_the_change_s_issue_the_parent_of_each_issue_it_closes(
+    tmp_path, gh, capsys
+) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50, labels=("triaged",), parent=40)
+    _filed(gh, 51)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50, 51]\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0, out
+    assert _issue(gh, 50)["parent"] == 1 and _issue(gh, 51)["parent"] == 1
+    assert "sub-issue #50" in out["done"] and "sub-issue #51" in out["done"]
+    _set(folder, "closes: [50, 51]\n", "closes: []\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0, out
+    assert _issue(gh, 50)["parent"] is None, "a triaged issue that left the line lets go"
+    assert _issue(gh, 51)["parent"] == 1, "a sub-issue triage didn't record stays"
+
+
+def _shipped_closing(root: Path, closes: str) -> str:
+    folder = _open(root)
+    _set(folder, "impact:\n", "impact: none\n")
+    _set(folder, "depends_on:\n", f"depends_on:\ncloses: [{closes}]\n")
+    assert sdlc.cmd_ship(root, "001") == 0
+    tree = folder.parent.parent
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ship 001-thing")
+    return folder.name
+
+
+def test_close_says_closes_for_each_issue_the_change_closes(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _shipped_closing(root, "50, 51")
+    _filed(gh, 50)
+    _filed(gh, 51)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    assert out["archive"]["closes"] == "Closes #1\nCloses #50\nCloses #51"
+    body = _git(root, "log", "-1", "--format=%b", "main")
+    assert "\nCloses #1\nCloses #50\nCloses #51\n" in body
+    assert _issue(gh, 50)["state"] == "OPEN", "the push closes it, not close"
+
+
+def test_where_no_push_closes_them_close_closes_each_itself(
+    tmp_path, gh, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FAKE_GH_DEFAULT", "release")
+    _shipped_closing(root, "50, 99")
+    _filed(gh, 50)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    issue = _issue(gh, 50)
+    assert issue["state"] == "CLOSED" and issue["reason"] == "completed"
+    assert issue["comments"][-1]["body"] == "Fixed by 001-thing."
+    assert out["archive"]["closes_errors"] == ["#99: gh issue view failed on #99"]
+    assert "Closes #50" not in _git(root, "log", "-1", "--format=%b", "main")
+
+
+def test_a_dropped_change_sends_the_issues_it_would_close_back_to_triage(
+    tmp_path, gh, capsys
+) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    _git(folder.parent.parent, "add", "-A")
+    _git(folder.parent.parent, "commit", "-q", "-m", "closes 50")
+    _filed(gh, 50, labels=("triaged",), parent=1)
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text() + "\n## Dropped\n\nNot needed.\n")
+    assert sdlc.cmd_drop(folder.parent.parent, None) == 0
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    issue = _issue(gh, 50)
+    assert issue["state"] == "OPEN" and issue["parent"] is None
+    assert {"name": "triaged"} not in issue["labels"]
+    assert issue["comments"][-1]["body"].endswith(
+        "001-thing was dropped; this issue is open for triage again."
+    )
