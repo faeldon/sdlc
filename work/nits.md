@@ -81,3 +81,32 @@ The WAIT variant and a Step 1 line added for `after_bump`.
 
 `nits_summary` compares `raised` strings, so an entry with a malformed date (which `check` already
 reports) can be taken as its theme's oldest, leaving `age_days` null.
+
+## 019-1 [robustness] A mistyped After: title makes a seed "next in series"
+
+- **raised:** 2026-10-25 by 019-status-next-work (correctness)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+`next_up` labels a ready seed `next in series` when none of its `After:` titles is in the
+register, so a title naming nothing gets that label as well as its `⚠` warning. Check it against
+the titles history has shipped too.
+
+## 019-2 [robustness] A loop through a seed's second After: title isn't reported
+
+- **raised:** 2026-10-25 by 019-status-next-work (correctness)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+`_after_loops` follows only each waiting seed's first waiting `After:` title, so seeds that wait
+on each other through a later title are never listed and never warned about.
+
+## 019-3 [cost] Status can walk main's history twice
+
+- **raised:** 2026-10-25 by 019-status-next-work (cost)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+With an open milestone and a dangling `After:` title, `next_up` calls `closed_changes(home, None)`
+once through `_milestone_verdicts` and once for the shipped titles, reading every closed intent
+both times. Walk it once and pass it in.

@@ -161,7 +161,9 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 Every finding ends in exactly one of these, or it doesn't go in the report:
 
 - **Seed**: a `work/ideas.md` entry, `## [YYYY-MM-DD] [seed] Title`, with a short paragraph: the
-  problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD."
+  problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD." A finding that comes in
+  phases is one seed per phase, each later one with an `After: "<earlier seed's title>"` line, so
+  `/sdlc:status` puts forward only the phase that's next.
 - **Intent**: a proposed title for `/sdlc:intent`, for one that needs a decision now. Don't open it:
   that skill has its own gate.
 - **Dropped**: with its reason, which goes under the direction doc's *Dropped findings*.

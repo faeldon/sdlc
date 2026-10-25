@@ -171,6 +171,8 @@ to count apart). Feature requests stay seeds either way. Then: what status and r
 (open bugs by severity, age), how `/sdlc:intent` promotes one, and whether a fix's ship retires
 it as it does a nit. Raised 2026-10-25.
 
+After: "A local channel for bug reports and feature requests from other sessions"
+
 ## [2026-10-25] [seed] GitHub issues as the intake for bugs and requests, in hosts too
 
 Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
@@ -181,3 +183,5 @@ issues, and its sessions triage them the same way, so the design is a host featu
 this repo as its first user. Phases: the plugin's own local intake, the register, then GitHub
 triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` skill). Raised
 2026-10-25.
+
+After: "A bugs register beside the ideas register"

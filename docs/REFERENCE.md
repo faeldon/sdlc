@@ -211,6 +211,24 @@ paths, retired by the ship whose diff fixes it, and counted by theme and age by 
 `sdlc.py nits` lists them (`--change NNN` or `--touching <path>…` to narrow), and `check` reports
 an entry it can't read.
 
+**What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
+changes are done, from the main checkout's `work/ideas.md`, `work/nits.md` and direction doc. A
+missing file adds nothing. Two optional forms in `work/ideas.md` feed it: `[bug]` in place of
+`[seed]` marks something already broken, and an `After: "<title>", "<title>"` line in a seed's
+body makes it wait while any seed it names is still in the register and not being built. A seed
+being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
+Candidates come in this order, each once, under the first rule it meets:
+
+1. `[bug]` entries, oldest first;
+2. each open milestone's first `Groups:` seed that is ready, in the doc's order;
+3. a seed whose `After:` seeds have all left the register, the next in its series;
+4. nits of cost `S`, one line per theme, oldest theme first;
+5. every other ready seed, oldest first.
+
+Five are shown, then a count. Below them, an open milestone whose grouped changes and seeds are all
+closed says so, for `/sdlc:retro` to settle, and an `After:` line that can never be met (it names
+nothing, or seeds that wait on each other) is a `⚠`, never a `check` problem.
+
 A change may keep its **acceptance checks** in `work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one
 check holding one `sh` block, which passes when it exits 0 within 300 seconds and leaves the

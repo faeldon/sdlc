@@ -99,7 +99,9 @@ The tiers:
 | 2 | anything others rely on, or near an invariant | `intent.md`, `spec.md`, `plan.md` |
 
 `/sdlc:status` tells you where every open change is and what to do next, from any worktree. Ideas
-not ready to be a change go in `work/ideas.md`, which `/sdlc:intent` can start from.
+not ready to be a change go in `work/ideas.md`, which `/sdlc:intent` can start from; tag one
+`[bug]`, or give it an `After: "<title>"` line to make it wait for another, and status's
+**Next up** puts forward the one to start once the open changes are done.
 
 ## Optional features
 

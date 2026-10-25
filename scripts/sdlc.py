@@ -130,6 +130,9 @@ PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
 # work/ideas.md: "## [2026-10-17] [seed] Some title" — the status tag is the second bracket group.
 IDEA_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*\[([^\]]+)\]\s*(.+)$")
+# A seed that waits on others: `After: "Some title", "Another"`, a line in its body, the titles
+# quoted as a milestone's `Groups:` line has them. Status holds it back while one is still open.
+AFTER_RE = re.compile(r"^After:\s*(.+)$")
 # work/nits.md: "## 003-1 [robustness] Some title", the raising change's number and a count, then
 # `- **raised:**`, `- **paths:**` and `- **cost:** … **value:** …` bullets. Ship writes and retires
 # entries, intent and spec offer them, retro counts them; the process doc's rubric says what each
@@ -877,16 +880,23 @@ def _age_days(rec: dict, today: date) -> int | None:
 
 
 def idea_entries(root: Path) -> list[dict]:
-    """Every entry heading in work/ideas.md, with its status tag as written. A closed entry is
-    deleted once its change ships; history keeps it."""
+    """Every entry heading in work/ideas.md, with its status tag as written and the titles its
+    `After:` line names. A closed entry is deleted once its change ships; history keeps it."""
     path = work_dir(root) / "ideas.md"
     if not path.is_file():
         return []
-    out = []
+    out: list[dict] = []
+    current: dict | None = None
     for line in path.read_text(encoding="utf-8").splitlines():
         m = IDEA_RE.match(line)
         if m:
-            out.append({"date": m.group(1), "status": m.group(2), "title": m.group(3).strip()})
+            current = {"date": m.group(1), "status": m.group(2), "title": m.group(3).strip(),
+                       "after": []}  # fmt: skip
+            out.append(current)
+        elif line.startswith("#"):
+            current = None
+        elif current is not None and (after := AFTER_RE.match(line.strip())):
+            current["after"] = re.findall(r'"([^"]+)"', after.group(1))
     return out
 
 
@@ -3918,6 +3928,123 @@ def _direction_text(home: Path, cfg: dict) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+# What `status` puts forward once the open changes are done, in this order, each candidate once
+# under the first rule it meets. A fixed order a person can argue with line by line, never a
+# score; the status skill weighs it against the open changes, release and retro.
+NEXT_RULES = (
+    ("bug", "entries tagged [bug], oldest first"),
+    ("milestone", "each open milestone's first grouped seed that is ready, in the doc's order"),
+    ("series", "ready seeds whose After: seeds have all left the register, oldest first"),
+    ("nits", "open nits of cost S, one line per theme, oldest theme first"),
+    ("seed", "every other ready seed, oldest first"),
+)
+NEXT_SHOWN = 5
+
+
+def _seed_state(entry: dict, open_titles: set[str], building: set[str]) -> str:
+    """`building` (tagged so, or named by an open change's `idea:`), `waiting` (a seed its
+    `After:` names is still open), or `ready`."""
+    if is_building(entry) or entry["title"] in building:
+        return "building"
+    if any(t in open_titles for t in entry["after"]):
+        return "waiting"
+    return "ready"
+
+
+def _after_loops(waiting: dict[str, list[str]]) -> list[list[str]]:
+    """Each set of waiting seeds that wait on each other, once, in the order first met."""
+    loops: list[list[str]] = []
+    seen: set[str] = set()
+    for start in waiting:
+        path: list[str] = []
+        node = start
+        while node in waiting and node not in path and node not in seen:
+            path.append(node)
+            node = next((t for t in waiting[node] if t in waiting), "")
+        if node in path:
+            loops.append(path[path.index(node) :])
+        seen.update(path)
+    return loops
+
+
+def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dict:
+    """What to work on once the open changes are done, from the main checkout's ideas, nits and
+    direction doc, ordered by NEXT_RULES. Read-only, and a missing file adds nothing. Also the
+    open milestones with nothing left in their groups, and `After:` lines that can never be met."""
+    ideas = idea_entries(home)
+    nits = nit_entries(home)[0]
+    doc = direction_items(_direction_text(home, cfg))
+    building = {_seed_title(r["idea"]) for r in open_changes if r.get("idea")}
+    states = {e["title"]: "building" for e in ideas if is_building(e) or e["title"] in building}
+    open_titles = {e["title"] for e in ideas if e["title"] not in states}
+    for e in ideas:
+        states.setdefault(e["title"], _seed_state(e, open_titles, building))
+    ready = sorted((e for e in ideas if states[e["title"]] == "ready"), key=lambda e: e["date"])
+    known = {e["title"] for e in ideas}
+    milestones = [i for i in doc["items"] if i["kind"] == "milestone" and i["status"] == "open"]
+
+    def seed(rule: str, label: str, e: dict) -> dict:
+        return {"rule": rule, "label": label, "title": e["title"],
+                "age_days": _age_days({"created": e["date"]}, today),
+                "command": f"/sdlc:intent {e['title']}"}  # fmt: skip
+
+    items: list[dict] = []
+    taken: set[str] = set()
+    for rule, _ in NEXT_RULES:
+        found: list[dict] = []
+        if rule == "bug":
+            found = [seed(rule, "bug", e) for e in ready if e["status"].strip().lower() == "bug"]
+        elif rule == "milestone":
+            by_title = {e["title"]: e for e in ready if e["title"] not in taken}
+            for m in milestones:
+                first = next(
+                    (by_title[t] for t in map(_seed_title, m["groups"]["seeds"]) if t in by_title),
+                    None,
+                )
+                if first:
+                    found.append(seed(rule, f"{m['id']} ({m['name'] or m['title']})", first))
+        elif rule == "series":
+            found = [
+                seed(rule, f'next in series after "{e["after"][-1]}"', e)
+                for e in ready
+                if e["after"] and not any(t in known for t in e["after"])
+            ]
+        elif rule == "nits":
+            themes = nits_summary([n for n in nits if n["cost"] == "S"], today)["themes"]
+            for theme, t in sorted(themes.items(), key=lambda kv: kv[1]["oldest"] or ""):
+                found.append({"rule": rule, "label": "nits",
+                              "title": f"[{theme}] {t['count']} open, cost S",
+                              "age_days": t["age_days"],
+                              "command": f"/sdlc:intent pay down the [{theme}] nits"})  # fmt: skip
+        else:
+            found = [seed(rule, "seed", e) for e in ready]
+        for item in found:
+            if item["rule"] == "nits" or item["title"] not in taken:
+                taken.add(item["title"])
+                items.append(item)
+
+    done = []
+    if milestones:
+        open_names = [f"{r['id']}-{r['slug']}" for r in open_changes]
+        for m_id, rows in _milestone_verdicts(home, doc["items"], open_names).items():
+            if rows and all(r["verdict"] in ("closed", "shipped", "vanished") for r in rows):
+                done.append(m_id)
+
+    warnings = []
+    dangling = {t for e in ideas for t in e["after"] if t not in known}
+    if dangling:
+        shipped = {_seed_title(c["idea"]) for c in closed_changes(home, None) if c.get("idea")}
+        for e in ideas:
+            for t in e["after"]:
+                if t in dangling and t not in shipped:
+                    warnings.append(f'"{e["title"]}" waits on "{t}", which is no seed or change')
+    waiting = {e["title"]: e["after"] for e in ideas if states[e["title"]] == "waiting"}
+    for loop in _after_loops(waiting):
+        names = ", ".join(f'"{t}"' for t in loop)
+        warnings.append(f"these seeds wait on each other, so none will come up: {names}")
+    return {"items": items, "done_milestones": done, "warnings": warnings}
+
+
 def retro_due(home: Path, cfg: dict) -> dict:
     """Whether a retrospective is due, and why: `retro.after_releases` release tags since the last
     one (or since the start, with none yet), or any release in that range that raised the major
@@ -5223,6 +5350,20 @@ def print_status(a: dict) -> None:
             landed = "" if c["closed"] else "  (landed, not closed)"
             print(f"    {c['id']}  {c['slug']:<28} {c['impact'] or '?'}{landed}")
 
+    # Left out when the registers hold nothing to put forward, as Unreleased is.
+    nxt = a.get("next_up")
+    if nxt and (nxt["items"] or nxt["done_milestones"] or nxt["warnings"]):
+        print(f"\n■ Next up: {len(nxt['items'])}")
+        for item in nxt["items"][:NEXT_SHOWN]:
+            age = f"{item['age_days']}d" if item["age_days"] is not None else "?"
+            print(f"    {item['label']}  {item['title']}  ({age})  → {item['command']}")
+        if len(nxt["items"]) > NEXT_SHOWN:
+            print(f"    (+{len(nxt['items']) - NEXT_SHOWN} more)")
+        for m in nxt["done_milestones"]:
+            print(f"    {m} has nothing left in its groups: /sdlc:retro decides whether it's done")
+        for w in nxt["warnings"]:
+            print(f"    ⚠  {w}")
+
     # Nudges, not gates: one line each, only when it applies, and nothing runs. Never a problem:
     # `check --strict` is a gate, and a plugin update mustn't fail every host's.
     if a.get("setup"):
@@ -5459,6 +5600,8 @@ def main() -> int:
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
     a["retro_due"] = retro_due(home, cfg)
+    # Here, not in `analyze()`: `check` never reads the registers for what comes next.
+    a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
     print_status(a)
     return 0

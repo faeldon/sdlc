@@ -43,6 +43,15 @@ That is the entire input. `sdlc.py status` already gives id, tier, stage, age in
 artifacts exist, the title, and the counts of undone items and unresolved open questions — don't
 go looking for any of it elsewhere.
 
+**`■ Next up` is what comes after the open changes**, so you never need `work/ideas.md`, the nits
+register or the direction doc to answer "what's next". The script collects candidates from them
+and orders them by a fixed rule: `bug` entries first, then each open milestone's next grouped seed
+(`M1 (…)`), then the next seed in a series (`next in series after "…"`), then cost-`S` nits by
+theme (`nits`), then every other seed (`seed`). Each line ends with the command that starts it.
+A seed already being built, or waiting on an earlier seed in its series, is left out. The lines
+below the list say which milestone has nothing left in its groups, and which `After:` lines can
+never be met (`⚠`).
+
 **The `~` markers in the artifact column are load-bearing.** `sdlc.py new --tier 2` scaffolds
 `spec.md` and `plan.md` from the plugin's templates, so a change whose spec and plan are still
 empty forms would otherwise be indistinguishable from a written one. `status` marks each unwritten
@@ -59,8 +68,9 @@ prose without the strikethrough still counts, so read the number as a ceiling.
 If `check` reports `work/ is gitignored`, the repo isn't set up for the plugin: recommend
 `/sdlc:setup`, which says what else is missing, and stop. `/sdlc:intent` would be refused.
 
-If `work/` doesn't exist or `status` reports nothing open, say so plainly and recommend
-`/sdlc:intent`. Done.
+If `work/` doesn't exist or `status` reports nothing open, say so plainly, skip Step 2, and pick
+from Step 3's precedence: release, retro, then `Next up`, and `/sdlc:intent` only when none of
+those apply.
 
 ## Step 2 — Map each open change to its next action
 
@@ -107,19 +117,25 @@ by line. Give them what the tool didn't:
 1. **One line of shape** — how many open, where they're bunched (e.g. "4 open, all at `stage: plan`
    — nothing has been built yet").
 2. **Problems**, if `check --strict` failed. Otherwise skip the heading entirely.
-3. **Recommended next: NNN-slug** — one change, with a sentence on *why it's the one* (unblocks
-   others, smallest, oldest, already half-built) and the exact command to run.
+3. **Recommended next** — one item, an open change (`NNN-slug`) or a `Next up` line, with a
+   sentence on *why it's the one* (unblocks others, smallest, oldest, already half-built, the
+   milestone it moves) and the exact command to run.
 4. **Runners-up** — at most two, one line each.
 
 Pick the recommendation on this order of precedence, stopping at the first that applies:
 
 1. Anything `check --strict` flags as broken — fix the pipeline before extending it.
 2. A change already at `stage: build` or later — finish what's started before opening more.
-3. A change others are declared to depend on: nothing that reads a thing can be built, or pointed
+3. A change in `Ready to close` — `/sdlc:close NNN` lands it.
+4. A change others are declared to depend on: nothing that reads a thing can be built, or pointed
    at it, until the thing exists.
-4. The lowest tier among the rest — a Tier 1 is roughly fifteen lines of intent and an afternoon.
+5. The lowest tier among the rest of the open changes — a Tier 1 is roughly fifteen lines of
+   intent and an afternoon.
+6. `Unreleased` lists changes — `/sdlc:release`, from the main checkout.
+7. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
+8. The first `Next up` line — its own command. Runners-up come from the lines after it.
 
-If everything is closed, say so and recommend `/sdlc:intent`. Don't invent work to fill the report.
+With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 
 ## Step 4 — Only if asked: one change in depth
 
