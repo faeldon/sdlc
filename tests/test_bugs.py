@@ -360,3 +360,56 @@ def test_only_a_close_records_fixes_never_a_drop() -> None:
 
     assert "fix_trailers(" in inspect.getsource(sdlc.cmd_close)
     assert "fix_trailers(" not in inspect.getsource(sdlc._drop_record)
+
+
+# What retro counts.
+
+
+def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-start", "src/drafts.py")
+    # The fix: a change whose Close commit records it, ten days after the report.
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-11T12:00:00")
+    folder = root / "work" / "002-fix-drafts"
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text(INTENT.format(id="002", slug="fix-drafts"), encoding="utf-8")
+    (root / "src" / "drafts.py").write_text("fixed\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Fix drafts")
+    _git(root, "rm", "-rq", "work/002-fix-drafts")
+    fixes = "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=001-start"
+    _git(root, "commit", "-q", "-m", "Close 002-fix-drafts", "-m", "x", "-m", fixes)
+    # A retirement, on its own commit.
+    _inbox(root, _bug("2026-10-02-1", "Twice", "low"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File 2026-10-02-1")
+    _inbox(root, _bug("2026-10-03-1", "Still open", "med"))
+    _git(root, "add", "-A")
+    retired = "Sdlc-Retired: 2026-10-02-1 severity=low reported=2026-10-02 reason=duplicate"
+    _git(root, "commit", "-q", "-m", "Retire 2026-10-02-1; File 2026-10-03-1", "-m", retired)
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out["reported"] == {"high": 1, "med": 1, "low": 1}
+    assert out["fixed"] == {"high": 1}
+    assert out["retired"] == {"duplicate": 1}
+    assert out["days_to_fix"] == {"median": 10, "max": 10}
+    assert [(b["id"], b["severity"], b["age_days"]) for b in out["open"]] == [
+        ("2026-10-03-1", "med", 22)
+    ]
+    assert out["escapes"] == [{"change": "001-start", "bugs": 1, "tier": 1}]
+    assert out["unattributed"] == 1, "the open bug no one has attributed"
+
+
+def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out == {
+        "reported": {},
+        "fixed": {},
+        "retired": {},
+        "days_to_fix": {"median": None, "max": None},
+        "open": [],
+        "escapes": [],
+        "unattributed": 0,
+    }

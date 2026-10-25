@@ -104,9 +104,10 @@ The tiers:
 | 2 | anything others rely on, or near an invariant | `intent.md`, `spec.md`, `plan.md` |
 
 `/sdlc:status` tells you where every open change is and what to do next, from any worktree. Requests
-not ready to be a change go in `work/inbox.md`, which `/sdlc:intent` can start from; tag one
-`[bug]`, or give it an `After: "<title>"` line to make it wait for another, and status's
-**Next up** puts forward the one to start once the open changes are done.
+not ready to be a change go in `work/inbox.md`, which `/sdlc:intent <id>` can start from; give one
+an `After: <id>` line to make it wait for another, and status's **Next up** puts forward the one to
+start once the open changes are done. Something already broken is a bug: `/sdlc:bug` files it
+with a severity, and it comes first.
 
 ## Optional features
 

@@ -4944,7 +4944,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                      "files": shared, "dropped": True}
                 )  # fmt: skip
     a = analyze(home, today)
-    seeds = [i for i in inbox_entries(home) if not is_building(i) and not is_nit(i)]
+    seeds = [i for i in inbox_entries(home) if not (is_building(i) or is_nit(i) or is_bug(i))]
     direction = direction_items(_direction_text(home, cfg))
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names, trunk)
@@ -4978,6 +4978,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             "oldest": min((i["date"] for i in seeds), default=None),
         },
         "nits": nits_summary(nit_entries(home)[0], today),
+        "bugs": bugs_retro(home, cfg, since, changes, today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
         "releases": _release_tags(home, cfg, since),
@@ -4986,6 +4987,84 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,
         "prose": prose_metrics(home, cfg),
+    }
+
+
+def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], today: date) -> dict:
+    """What retro counts about bugs in its window: each reported one once, by id and its reported
+    date (open in the register, fixed on a `Close` commit's `Sdlc-Fixes:`, retired on a `Retire`
+    commit's `Sdlc-Retired:`), the fixed by severity, the retired by reason, the days from report
+    to fix, the open ones by age, and the escapes: each introducing change with its tier, and how
+    many no one attributed. Read from the register and history alone."""
+    trunk = cfg["git"]["base"]
+    start = since["date"] if since else None
+    words = severities(home, cfg)
+    open_bugs = bug_entries(home, words)[0]
+    fixed = []
+    for rec in changes:
+        for bug_id, f in ((rec.get("metrics") or {}).get("fixes") or {}).items():
+            fixed.append({"id": bug_id, "change": rec["name"], "date": rec["close_date"],
+                          **{k: str(v) for k, v in f.items()}})  # fmt: skip
+    retired = []
+    span = f"{since['sha']}..{trunk}" if since else trunk
+    log = _git(home, "log", "--first-parent", "--format=%x1e%cs%x00%B", span) if trunk else ""
+    for record in (log or "").split("\x1e"):
+        day, _, body = record.partition("\x00")
+        for bug_id, f in ((metrics.parse_trailers(body) or {}).get("retired") or {}).items():
+            retired.append({"id": bug_id, "date": day.strip(), **{k: str(v) for k, v in f.items()}})
+
+    def in_window(reported: str | None) -> bool:
+        return bool(reported) and reported != "unknown" and (start is None or reported >= start)
+
+    reported: dict[str, str] = {}
+    for b in open_bugs:
+        if b["id"] and in_window(b["reported"]):
+            reported.setdefault(b["id"], b["severity"] or "unset")
+    for f in fixed + retired:
+        if in_window(f.get("reported")):
+            reported.setdefault(f["id"], f.get("severity") or "unset")
+    days = sorted(
+        d for f in fixed if (d := _days_between(f.get("reported", ""), f["date"])) is not None
+    )
+    history = {c["name"]: c for c in closed_changes(home, None, trunk, read=True)}
+    escapes: dict[str, dict] = {}
+    unattributed = 0
+    for source in [*fixed, *({"introduced_by": b["introduced_by"]} for b in open_bugs)]:
+        by = source.get("introduced_by")
+        if not by or by == "unknown":
+            unattributed += 1
+            continue
+        name = next((n for n in history if names_change(n, by)), by)
+        row = escapes.setdefault(name, {"bugs": 0, "tier": (history.get(name) or {}).get("tier")})
+        row["bugs"] += 1
+
+    def by_severity(rows: list[dict] | list[str]) -> dict[str, int]:
+        counts = Counter(r if isinstance(r, str) else r.get("severity") or "unset" for r in rows)
+        order = [w for w in words if counts[w]] + sorted(k for k in counts if k not in words)
+        return {k: counts[k] for k in order}
+
+    return {
+        "reported": by_severity(list(reported.values())),
+        "fixed": by_severity(fixed),
+        "retired": dict(Counter(r.get("reason") or "unset" for r in retired)),
+        "days_to_fix": {
+            "median": days[len(days) // 2] if days else None,
+            "max": days[-1] if days else None,
+        },
+        "open": sorted(
+            (
+                {
+                    "id": b["id"],
+                    "title": b["title"],
+                    "severity": b["severity"],
+                    "age_days": _age_days({"created": b["reported"]}, today),
+                }
+                for b in open_bugs
+            ),
+            key=lambda b: -(b["age_days"] or 0),
+        ),
+        "escapes": [{"change": n, **row} for n, row in sorted(escapes.items())],
+        "unattributed": unattributed,
     }
 
 

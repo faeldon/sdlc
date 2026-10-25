@@ -170,6 +170,93 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert _run(root, "next").stdout.strip() == "003", "a dropped change's number stays spent"
 
 
+def _bare(tmp_path: Path) -> Path:
+    root = tmp_path / "bare"
+    root.mkdir()
+    (root / "README.md").write_text("a repo with nothing set up\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: Path) -> None:
+    """The fix cycle through the script alone: what /sdlc:bug, /sdlc:intent, /sdlc:ship and
+    /sdlc:close run, from filing to the `Sdlc-Fixes:` line retro counts."""
+    root = _bare(tmp_path)
+    bug_id = _run(root, "next-entry").stdout.strip()
+    (root / "work").mkdir()
+    (root / "work" / "inbox.md").write_text(
+        f"# Inbox\n\n## [{bug_id}] [bug] The report loses its last row\n\nIt does.\n\n"
+        "Severity: high\nPaths: report.txt\n",
+        encoding="utf-8",
+    )
+    filed = _run(root, "bug-commit")
+    assert filed.returncode == 0, filed.stdout + filed.stderr
+    assert _git(root, "log", "-1", "--format=%s") == f"File {bug_id}"
+    assert "■ Bugs: 1 open (high 1)" in _run(root, "status").stdout
+
+    assert _run(root, "new", "fix-report", "--tier", "1", "--worktree").returncode == 0
+    tree = root / ".claude" / "worktrees" / "001-fix-report"
+    intent = tree / "work" / "001-fix-report" / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("impact:\n", "impact: patch\n", 1)
+    intent.write_text(text.replace("depends_on:\n", f"depends_on:\nfixes: [{bug_id}]\n", 1))
+    (tree / "report.txt").write_text("every row\n", encoding="utf-8")
+    check = _run(tree, "check", "--strict")
+    assert check.returncode == 0, check.stdout + check.stderr
+    assert "■ Bugs" not in _run(tree, "status").stdout, "a bug being fixed isn't counted open"
+
+    shipped = _run(tree, "ship", "001")
+    assert shipped.returncode == 0, shipped.stderr
+    assert f"removed bug {bug_id}" in shipped.stdout
+    assert "work/inbox.md" in _git(tree, "diff", "--cached", "--name-only").splitlines()
+    _git(tree, "commit", "-q", "-m", "ship 001")
+
+    closed = _run(root, "close", "001")
+    assert closed.returncode == 0, closed.stdout + closed.stderr
+    body = _git(root, "log", "-1", "--format=%B")
+    today = bug_id.rsplit("-", 1)[0]
+    assert f"Sdlc-Fixes: {bug_id} severity=high reported={today} introduced_by=unknown" in body
+    assert bug_id not in (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    bugs = json.loads(_run(root, "retro").stdout)["bugs"]
+    assert bugs["fixed"] == {"high": 1} and bugs["open"] == [] and bugs["unattributed"] == 1
+
+
+def test_a_bare_repo_moves_its_old_registers_into_the_inbox(tmp_path: Path) -> None:
+    """A repo that kept `work/ideas.md` and `work/nits.md` reads from them unmoved, and comes
+    through `migrate-inbox` with every entry an id and `check` clean."""
+    root = _bare(tmp_path)
+    (root / "work").mkdir()
+    (root / "work" / "ideas.md").write_text(
+        "# Ideas\n\n## [2026-10-01] [seed] Keep drafts\n\nWhy.\n\n"
+        '## [2026-10-02] [seed] Share drafts\n\nWhy.\n\nAfter: "Keep drafts"\n',
+        encoding="utf-8",
+    )
+    (root / "work" / "nits.md").write_text(
+        "# Nits\n\n## 003-1 [tests] A test that can't fail\n"
+        "- **raised:** 2026-10-03 by 003-test-lifetimes (correctness)\n"
+        "- **paths:** tests/x.py\n- **cost:** S  **value:** low\n",
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "the old registers")
+    assert "Keep drafts" in _run(root, "status").stdout, "work/ideas.md still reads"
+
+    moved = _run(root, "migrate-inbox")
+    assert moved.returncode == 0, moved.stdout + moved.stderr
+    inbox = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "## [2026-10-01-1] [seed] Keep drafts" in inbox and "After: 2026-10-01-1" in inbox
+    assert "## [2026-10-03-1] [nit] A test that can't fail" in inbox
+    assert not (root / "work" / "nits.md").exists()
+    _git(root, "commit", "-q", "-m", "migrate")
+    check = _run(root, "check", "--strict")
+    assert check.returncode == 0, check.stdout + check.stderr
+    assert "/sdlc:intent 2026-10-01-1" in _run(root, "status").stdout
+    again = json.loads(_run(root, "migrate-inbox").stdout)
+    assert again["done"] == ["nothing to migrate"]
+
+
 @TRUNKS
 def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk: str) -> None:
     """The release loop after the change loop: one change closed with `impact: minor`, then a

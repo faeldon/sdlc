@@ -251,6 +251,21 @@ the same paths, retired by the ship whose diff fixes it, and counted by theme an
 `sdlc.py nits` lists them (`--change NNN` or `--touching <path>…` to narrow), and `check` reports
 an entry it can't read.
 
+**Bugs** are entries there too: something shipped and broken, tagged `[bug]`, with `Severity:`,
+`Paths:` and, once someone confirms it, `Introduced by: NNN-slug` lines. The severity words are the
+process doc's, from the `- **severity:**` bullet in its section headed `Bugs…`, most severe first
+(`high` · `med` · `low` when it has none). `/sdlc:bug` files one, retires one that needs no fix
+(`duplicate`, `not-a-bug`, `wontfix` or `cant-reproduce`) or retags one filed as the wrong kind,
+behind one approval, and `sdlc.py bug-commit` commits the inbox alone, from the main checkout, as
+`File <id>`, `Retire <id>` or `Update <id>`, a retired bug's `Sdlc-Retired:` trailer saying why.
+`sdlc.py bugs` lists them (`--touching <path>…` to narrow), and `--introduced <path>…` names the
+closed change that last touched each path, a candidate for `Introduced by:` and never written
+without a person's word. `check` reports a bug with no id, a severity outside the words, or an
+`Introduced by:` that names no change, and `status` prints a `■ Bugs` line. A change that fixes one
+names it on a `fixes: [<id>]` line in its intent (`/sdlc:intent <id>` writes it); `status` leaves
+it out while the change is open, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` writes
+an `Sdlc-Fixes:` trailer for it on the `Close` commit.
+
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [seed] Title`:
@@ -265,7 +280,7 @@ register and not being built. Each line's command is `/sdlc:intent <id>`. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
 Candidates come in this order, each once, under the first rule it meets:
 
-1. `[bug]` entries, oldest first;
+1. `[bug]` entries, most severe first, then oldest;
 2. each open milestone's first `Groups:` seed that is ready, in the doc's order;
 3. a seed whose `After:` seeds have all left the register, the next in its series;
 4. nits of cost `S`, one line per theme, oldest theme first;
@@ -461,7 +476,9 @@ history, everything since the last `Retrospective YYYY-MM-DD` commit: the change
 dropped (tier, impact, size, days open, the first paragraph of each problem, what they cost),
 rework (leaving out the files more than a third of them touch, listed apart), open changes and
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
-trailers.
+trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
+reason, the days from report to fix, the open ones by age, and the escapes: each introducing
+change with its tier, and how many no one tied to a change.
 
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
@@ -499,6 +516,11 @@ edited after their stage, `revise` answers, failed gate runs, ship reruns, lines
 lines kept, and for the factory its rounds, verdicts and decisions). Exploration you mean to throw
 away goes under `stage: spike`, which owes no artifact; its cost is reported apart as
 `Sdlc-Spike`, never as rework.
+
+The bugs a change fixes are recorded too, one `Sdlc-Fixes: <id> severity=<w> reported=<date>
+introduced_by=<NNN-slug|unknown>` line each, from its intent's `fixes:` and the entry as the
+branch last held it; a bug retired without a fix gets `Sdlc-Retired: <id> severity=<w>
+reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing.
 
 `sdlc.py retro` reads all of them. Measuring never stops a close: without transcripts,
 `Sdlc-Coverage` says why, and the numbers are what history gives. `git log --format=%B` on a

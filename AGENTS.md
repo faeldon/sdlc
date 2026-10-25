@@ -154,6 +154,22 @@ and reports format problems rather than raising. The product doc (`docs.product`
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.
 
+**The inbox: `inbox_entries()`.** `work/inbox.md` is the one register of change requests, each
+entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
+(`BODY_KEYS`). `register_path()` is the one place that knows the old name: a repo with only
+`work/ideas.md` is read from it until 2.0.0 (`.sdlc/deprecations.toml`), and
+`migrate-inbox` moves it over. Ids come from `next_entry_ids()`, which counts every checkout's
+register, uncommitted edits included, and every commit that ever held one; they are their own
+space, never a change number. A reference (`idea:`, `fixes:`, `After:`, `Groups:`) is an id,
+bare, or a title, quoted, matched by `ref_matches()`/`same_ref()`; titles are read for good,
+since history's intents name seeds by them. Never match an entry by title alone.
+
+**Bugs: `bug_entries()`.** `[bug]` entries carry `Severity:`, its words read from the process doc
+by `severities()` (the default doc's when the host's has none), `Paths:` and a confirmed
+`Introduced by:`. `bug-commit` is the only code that commits the inbox, from the main checkout
+alone; ship deletes a change's `fixes:` entries, and close's `fix_trailers()` writes their
+`Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the register and those trailers.
+
 **Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
 `work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
 `Raised by: NNN-slug (pass)` lines, the last keeping the raising change's number. `sdlc.py` only
@@ -170,6 +186,7 @@ exactly), attributes them to the change by branch, keeps numbers only, and write
 are a contract: extend them, never redefine. Measuring never refuses: a failure is
 `Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,
 `Sdlc-Happy`, `Sdlc-Spike`) is apart from `retro`'s rework, and spikes are never rework.
+`Sdlc-Fixes` and `Sdlc-Retired` are written by `sdlc.py`, not measured, and parsed keyed by id.
 
 **Setup's record: `drift()`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup writes:
 the plugin version, its config keys, and a hash of each block (`doc_units()`: a section or a

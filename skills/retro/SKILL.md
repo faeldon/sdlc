@@ -54,8 +54,12 @@ What `retro` gives:
   `rework_common`: the files more than a third of the window's changes touched (once there are
   six), each with how many, since sharing one of them says nothing.
 - `open`, `ideas` (seed count, oldest), `tiers`, `impacts`, and `releases` since `since`.
-- `nits`: the nits ship left open, `[nit]` entries in `work/inbox.md`, by theme, each theme's `count` and its
-  oldest's date and `age_days`.
+- `nits`: the nits ship left open, `[nit]` entries in `work/inbox.md`, by theme, each theme's
+  `count` and its oldest's date and `age_days`.
+- `bugs`: the `[bug]` entries and their history in the window. `reported`, `fixed` (from each
+  `Close` commit's `Sdlc-Fixes:`) and `retired` (from each `Retire` commit's `Sdlc-Retired:`,
+  by reason), `days_to_fix` (median and max), `open` (oldest first), and `escapes`: each change a
+  bug was `Introduced by`, with its tier, and `unattributed`, the bugs no one tied to a change.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
@@ -137,6 +141,14 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay
    that theme down in a single change, never a seed per nit. The `[nit]` entries themselves are
    ship's to edit, never this skill's.
+
+   Then `bugs`: what got through. Weigh each escape against the introducing change's tier: a
+   Tier 1 that let a high-severity bug through says the tier rule let something risky skip its
+   spec; a Tier 2 says its review passes missed a class of failure, which is a finding for the
+   review doc, proposed as an intent title. Say how many are `unattributed`, since an escape no
+   one tied to a change counts toward neither. A bug open long, or `days_to_fix` growing, is a
+   finding whose disposition is the intent that fixes it. Bugs themselves are `/sdlc:bug`'s to
+   file and retire, never this skill's.
 4. **Product**, only when `product` isn't null. Whether the work is going where the users are,
    judged from `product.evidence` against each outcome's measure in the product doc. Score every
    open outcome in `product.items` the way the direction pass scores its items (done, dropped,
