@@ -264,6 +264,24 @@ nits cap at 5, and more than 5 means the change is too big.
 <Anything between `main` and this repo's users besides the release loop below, such as CI that
 deploys on every push. With none, the release loop is the whole path. Ship stops before it.>
 
+#### Nits: small technical debt
+
+A Nit approved unfixed isn't lost in the findings count: ship records it in `work/nits.md`, and a
+later ship retires it once a diff fixes it or makes it moot. Each is weighed the same way:
+
+- **cost:** `S`, one sitting and a few lines · `M`, a test or several files · `L`, a design call.
+  An `L` is a `work/ideas.md` seed, not a nit.
+- **value:** `med`, a user or host could hit it on an edge case · `low`, only a reader of the code
+  notices. One users would hit in normal use, or that loses work, is never a nit: it is Important.
+- **theme:** `docs`, `refactor`, `robustness`, `tests` or `style`, or one of this repo's own, so
+  like is paid down with like.
+
+An `S` with `med` value is worth fixing before the commit that found it. `/sdlc:intent` (Tier 1)
+and `/sdlc:spec` (Tier 2) offer the open ones on the paths a change touches, so changes pay debt
+down as they pass. A theme with 5 or more open, or any nit older than 60 days, is what
+`/sdlc:retro` proposes one change to pay down. Release and publish never look at them: the release
+cycle is for shipping.
+
 ### Closing and the archive → `/sdlc:close`
 
 After ship, behind one approval, one command: bring the session back to the main checkout,

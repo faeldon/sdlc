@@ -17,6 +17,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py new *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py lookup *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
 disable-model-invocation: true
 ---
 
@@ -124,6 +125,17 @@ diff, that rule wins over the size of the diff.
 When it's otherwise borderline, pick the lower tier. An under-specified Tier 1 that turns out to
 need a spec can be promoted by editing `tier:` and running `/sdlc:spec`; an over-ceremonied Tier 2
 just doesn't get written.
+
+**Open nits, for a Tier 1 change.** A Tier 2 change's spec weighs these instead. List the nits
+earlier ships left open on the paths this change will touch:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --touching <path> <path>
+```
+
+Offer the ones of cost `S`, and any whose theme is the change's own, to take in. Each one taken is
+named by id in the **Approach** section; `/sdlc:ship` retires it once the diff fixes it. Nothing
+listed is the usual answer, and then there is nothing to say. Never take one in unasked.
 
 ## Step 3 — Draft and show it
 

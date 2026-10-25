@@ -83,8 +83,10 @@ READS_CONFIG = {
         "docs.review",
         "docs.explore",
         "docs.product",
+        "docs.process",
     ],
     "sdlc:ship": [
+        "docs.process",
         "commands.check",
         "commands.build",
         "commands.build_when",
@@ -305,6 +307,28 @@ def test_ship_records_its_findings_and_close_and_retro_name_the_numbers() -> Non
     # Rework within a change is read beside its cost, and never confused with follow-up rework.
     assert "`in_change`" in step0 and "`in_change`" in process
     assert "follow-up `rework`" in step0
+
+
+def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
+    """A nit approved unfixed goes to work/nits.md behind ship's one approval; intent and spec
+    offer the open ones a change touches; retro weighs them and never edits the register."""
+    text = {
+        s: (ROOT / "skills" / s / "SKILL.md").read_text(encoding="utf-8")
+        for s in ("ship", "intent", "spec", "retro")
+    }
+    ship = text["ship"]
+    step0 = ship.split("## Step 0")[1].split("## Step 1")[0]
+    assert "sdlc.py nits --change <NNN>" in step0
+    wait = ship.split("## Step 5")[1].split("## Step 6")[0]
+    assert "the nits shown recorded in work/nits.md" in wait
+    land = ship.split("## Step 6")[1].split("## Step 7")[0]
+    assert 'templates["nits.md"]' in land and "`work/nits.md` when Step 6" in " ".join(land.split())
+    assert "Retired nits:" in ship
+    for name in ("intent", "spec"):
+        assert "sdlc.py nits --touching" in text[name], name
+        assert "Never take one in unasked" in " ".join(text[name].split()), name
+    assert "`nits`" in text["retro"]
+    assert "never this skill's" in " ".join(text["retro"].split())
 
 
 def test_only_close_and_drop_leave_the_worktree() -> None:

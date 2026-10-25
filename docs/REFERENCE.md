@@ -135,7 +135,8 @@ written from a real artifact.
 
 `ideas.md` here replaces what `work/ideas.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
-or the factory first writes one. Neither has prompts: its note carries the rules. `checks.md`
+or the factory first writes one, and `nits.md` what `work/nits.md` starts as, when `/sdlc:ship`
+first records a nit. None has prompts: its note carries the rules. `checks.md`
 is what a change's acceptance checks start as; its one example section's prompts make an untouched
 copy a scaffold, which `sdlc.py check` reports rather than runs.
 
@@ -202,7 +203,12 @@ clean tree, reported with the command that undoes it. Anything that would confli
 untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
 with finished changes: the change's commit keeps them in history. `work/ideas.md` is committed
-too; a closed seed is deleted from it, history keeping that as well.
+too; a closed seed is deleted from it, history keeping that as well. So is `work/nits.md`, the
+findings `/sdlc:ship` approved unfixed: each is an entry with its theme, paths, cost and value
+under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on the same
+paths, retired by the ship whose diff fixes it, and counted by theme and age by `/sdlc:retro`.
+`sdlc.py nits` lists them (`--change NNN` or `--touching <path>…` to narrow), and `check` reports
+an entry it can't read.
 
 A change may keep its **acceptance checks** in `work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one

@@ -50,6 +50,8 @@ What `retro` gives:
   or null for no line) and `moves` (its `**Moves O1:**` lines: what should change if it works).
 - `rework`: later changes that touched an earlier one's code within days.
 - `open`, `ideas` (seed count, oldest), `tiers`, `impacts`, and `releases` since `since`.
+- `nits`: the nits ship left open in `work/nits.md`, by theme, each theme's `count` and its
+  oldest's date and `age_days`.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
@@ -123,6 +125,11 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
      spikes are buying fewer misses later.
 
    Say how many changes the numbers rest on, and that `uncaptured` ones aren't in them.
+
+   Then the debt in `nits`: each theme's count and oldest age against the threshold the process
+   doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay
+   that theme down in a single change, never a seed per nit. `work/nits.md` itself is ship's to
+   edit, never this skill's.
 4. **Product**, only when `product` isn't null. Whether the work is going where the users are,
    judged from `product.evidence` against each outcome's measure in the product doc. Score every
    open outcome in `product.items` the way the direction pass scores its items (done, dropped,

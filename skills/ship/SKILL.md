@@ -13,6 +13,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks *)'
@@ -97,6 +98,15 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone <NNN>
 Each item is an unticked `- [ ]` line in `notes.md`. Step 4 proposes what happens to each one.
 `sdlc.py ship` refuses while one is still unticked, because a shipped folder isn't read again,
 and an item left there is lost.
+
+Then list the open nits this change's diff touches, from `work/nits.md`:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --change <NNN>
+```
+
+Each is a finding an earlier ship approved unfixed. Step 4 proposes retiring the ones this diff
+fixed or made moot. None listed, or no `work/nits.md`, is the usual answer.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
@@ -194,6 +204,12 @@ is worth saying. Do not skim the diff; read it.
 Rank findings **Important** or **Nit**, tag each with its pass, and **cap nits at 5** — more than
 that means the change is too big, and that's the finding.
 
+Weigh each Nit under the rubric in the process doc (`docs.process`), its section on nits, and give
+it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
+it Important. One that costs a design call (L) is a seed for `work/ideas.md`, not a nit. One that
+is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
+answer below. The rest are proposed for `work/nits.md`.
+
 ## Step 4 — Present findings and the draft commit
 
 Show the findings, then the exact commit message you propose. Match the repo's style, read from
@@ -238,6 +254,12 @@ it's written down somewhere that gets read. Put the dispositions in the commit m
 body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Leave out a paragraph
 that has nothing in it.
 
+**Nits.** Show the nits proposed for `work/nits.md`, each as the entry it becomes: `## <NNN>-<n>
+[<theme>] <title>`, numbered from 1 for this change, with its `raised`, `paths` and `cost`/`value`
+lines. Then each nit Step 0 listed that this diff fixed or made moot, proposed for retirement with
+a one-line reason, and a `Retired nits:` paragraph in the commit message after the body, one
+`- <id>: <reason>` line each. A listed nit the diff doesn't settle stays, and needs no mention.
+
 **Context update.** Show the context pass's result under the findings: each proposed edit as a
 diff of its doc, or "no update needed" and why. A doc left saying something false is an
 **Important** finding, not a nit.
@@ -252,15 +274,16 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 Ask literally:
 
-> `Commit this, with the context update shown, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, with the context update shown, the nits shown recorded in work/nits.md, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
-Leave out `, with the context update shown` when the context pass proposed none, and
-`, then update its issue` when `config` says `archive.target` is `none`.
+Leave out `, with the context update shown` when the context pass proposed none, `, the nits shown
+recorded in work/nits.md` when there are none to add or retire, and `, then update its issue` when
+`config` says `archive.target` is `none`.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone
-items' dispositions, the context update and the release impact too. A change to one of them is an "edit the message"
-answer, and the question is asked again.
+items' dispositions, the nits, the context update and the release impact too. A change to one of
+them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
 
@@ -273,6 +296,10 @@ First, the undone items, exactly as approved:
   `- [x] <text> → seed: <its title>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
 
+Then the nits, exactly as approved: append each new entry to `work/nits.md` after its last one,
+and delete each retired entry, heading to the line before the next `## `. If there's no
+`work/nits.md`, `Write` it first from `templates["nits.md"]` in `config`, as it is, then append.
+
 Then make the approved context edits, exactly as shown, in this checkout: they land in the same
 commit as the code they describe.
 
@@ -282,7 +309,8 @@ Then, if the change came from a `work/ideas.md` seed (its `idea:` line), delete 
 heading to the line before the next `## `, from `work/ideas.md`: it lands with the change, and
 history keeps it. If the built thing deviated from the sketch, say how in `notes.md` instead,
 starting it from `templates["notes.md"]` in `config` if the change has none. `Write` is for those
-two files only: everything else this step changes already exists, and is edited in place.
+files only, and `work/nits.md`'s first time: everything else this step changes already exists, and
+is edited in place.
 
 Then:
 
@@ -298,8 +326,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # t
 commit. "Nothing to sync" is fine. A failure never undoes the commit: report what it printed, and
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
-The staged paths are the change's code, its folder `work/NNN-slug/`, `work/ideas.md` when Step 6
-edited it, any context doc Step 6 edited, and any `.sdlc/last-id` its `new` wrote
+The staged paths are the change's code, its folder `work/NNN-slug/`, `work/ideas.md` and
+`work/nits.md` when Step 6 edited them, any context doc Step 6 edited, and any `.sdlc/last-id` its `new` wrote
 in the worktree (the counter, which reaches `main` this way). The commit message names `NNN-slug`,
 which is how the commit and its folder find each other. If `sdlc.py ship` refuses over
 an undone item, one was missed:
@@ -316,7 +344,8 @@ ignored file in the staged list means the ignore file lost a rule: say so rather
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
 name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by pass, which context docs were updated (or
 that none needed it), the release impact recorded, each undone
-item and where it went (the seed's title, or dropped and why), and anything else deliberately
+item and where it went (the seed's title, or dropped and why), the nits recorded and retired by
+id, and anything else deliberately
 deferred. Be explicit that nothing was pushed and nothing was deployed.
 
 Say what ran and what didn't. A report that implies more was verified than was is worse than

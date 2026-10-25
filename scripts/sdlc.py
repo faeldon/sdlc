@@ -130,6 +130,16 @@ PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
 # work/ideas.md: "## [2026-10-17] [seed] Some title" — the status tag is the second bracket group.
 IDEA_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*\[([^\]]+)\]\s*(.+)$")
+# work/nits.md: "## 003-1 [robustness] Some title", the raising change's number and a count, then
+# `- **raised:**`, `- **paths:**` and `- **cost:** … **value:** …` bullets. Ship writes and retires
+# entries, intent and spec offer them, retro counts them; the process doc's rubric says what each
+# cost and value means. High value is never a nit, and L cost is a seed, so neither appears here.
+NIT_RE = re.compile(r"^##\s+(\d{3,}-\d+)\s+\[([^\]]+)\]\s*(.+)$")
+NIT_RAISED_RE = re.compile(r"^- \*\*raised:\*\*\s*(\S+)\s+by\s+(\S+)\s*(?:\(([^)]*)\))?\s*$")
+NIT_PATHS_RE = re.compile(r"^- \*\*paths:\*\*\s*(.+)$")
+NIT_COST_RE = re.compile(r"^- \*\*cost:\*\*\s*(\S+)\s+\*\*value:\*\*\s*(\S+)\s*$")
+NIT_COSTS = ("S", "M")
+NIT_VALUES = ("med", "low")
 # notes.md is free-form, with one rule: anything left undone is an unticked `- [ ]` line.
 # /sdlc:ship carries each one to a work/ideas.md seed or drops it with a reason, ticking it as it
 # goes, and `ship` refuses while one is still unticked, so nothing lands on main with a question
@@ -242,8 +252,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/ideas.md`, a change's `notes.md` and its `checks.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", "ideas.md", "notes.md", "checks.md")
+# `work/ideas.md`, `work/nits.md`, a change's `notes.md` and its `checks.md`.
+DOC_TEMPLATES = ("direction.md", "issue.md", "ideas.md", "nits.md", "notes.md", "checks.md")
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -876,6 +886,101 @@ def idea_entries(root: Path) -> list[dict]:
     return out
 
 
+def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
+    """Every open nit in work/nits.md, and what about the file can't be read. A retired nit is
+    deleted by the ship that retires it; history keeps it. Read as text, never YAML, and fenced
+    lines are skipped, so the template's own example is never an entry."""
+    path = work_dir(root) / "nits.md"
+    if not path.is_file():
+        return [], []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return [], [f"can't be read: {e}"]
+    nits: list[dict] = []
+    problems: list[str] = []
+    fenced = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("## "):
+            m = NIT_RE.match(line)
+            if not m:
+                problems.append(f"{line.strip()!r} isn't `## NNN-n [theme] title`")
+                nits.append({"id": None})
+                continue
+            nits.append(
+                {
+                    "id": m.group(1),
+                    "theme": m.group(2).strip(),
+                    "title": m.group(3).strip(),
+                    "raised": None,
+                    "by": None,
+                    "pass": None,
+                    "paths": [],
+                    "cost": None,
+                    "value": None,
+                    "text": [],
+                }
+            )
+            continue
+        if not nits or nits[-1]["id"] is None:
+            continue
+        nit = nits[-1]
+        if m := NIT_RAISED_RE.match(line):
+            nit.update(raised=m.group(1), by=m.group(2), **{"pass": m.group(3)})
+        elif m := NIT_PATHS_RE.match(line):
+            nit["paths"] = [p.strip().strip("`") for p in m.group(1).split(",") if p.strip()]
+        elif m := NIT_COST_RE.match(line):
+            nit.update(cost=m.group(1), value=m.group(2))
+        elif line.strip():
+            nit["text"].append(line.strip())
+    nits = [n for n in nits if n["id"] is not None]
+    seen: Counter[str] = Counter(n["id"] for n in nits)
+    problems += [f"{i} is used twice" for i, k in seen.items() if k > 1]
+    for n in nits:
+        if n["raised"] is None:
+            problems.append(f"{n['id']} has no `- **raised:** YYYY-MM-DD by NNN-slug (pass)`")
+        else:
+            try:
+                date.fromisoformat(n["raised"])
+            except ValueError:
+                problems.append(f"{n['id']}: raised {n['raised']!r} isn't YYYY-MM-DD")
+        if not n["paths"]:
+            problems.append(f"{n['id']} has no `- **paths:**`")
+        if n["cost"] not in NIT_COSTS:
+            problems.append(
+                f"{n['id']}: cost must be one of {'|'.join(NIT_COSTS)}, got {n['cost']!r}"
+            )
+        if n["value"] not in NIT_VALUES:
+            problems.append(
+                f"{n['id']}: value must be one of {'|'.join(NIT_VALUES)}, got {n['value']!r}"
+            )
+        n["text"] = " ".join(n["text"])
+    return nits, problems
+
+
+def nit_touches(nit: dict, paths: list[str]) -> bool:
+    """A nit's path is one of `paths`, or a folder holding one."""
+    return any(p == q or q.startswith(p.rstrip("/") + "/") for p in nit["paths"] for q in paths)
+
+
+def nits_summary(nits: list[dict], today: date) -> dict:
+    """What retro weighs: how many are open, and per theme how many and how old the oldest is."""
+    themes: dict[str, dict] = {}
+    for n in nits:
+        t = themes.setdefault(n["theme"], {"count": 0, "oldest": None})
+        t["count"] += 1
+        if n["raised"] and (t["oldest"] is None or n["raised"] < t["oldest"]):
+            t["oldest"] = n["raised"]
+    for t in themes.values():
+        t["age_days"] = _age_days({"created": t["oldest"] or ""}, today)
+    return {"open": len(nits), "themes": themes}
+
+
 def is_building(idea: dict) -> bool:
     """Work has started: the seed is tagged `[building]`."""
     return "building" in idea["status"].lower()
@@ -986,6 +1091,8 @@ def analyze(root: Path, today: date | None = None) -> dict:
                     "detail": f"[{idea['status']}] {idea['title']} — no work/ folder",
                 }
             )
+    for detail in nit_entries(root)[1]:
+        problems.append({"dir": "work/nits.md", "kind": "nits", "detail": detail})
     if work_ignored(root):
         problems.append({"dir": "work/", "kind": "ignored", "detail": IGNORED})
     # A counter behind the folders is normal: main's committed one only moves when a change
@@ -1355,6 +1462,31 @@ def cmd_undone(root: Path, ident: str) -> int:
         )
     )
     return 0
+
+
+def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
+    """The open nits in work/nits.md as JSON, with their age, for intent and spec to offer and
+    ship to retire. `--change` keeps those a change's diff against main touches, `--touching`
+    those the given paths do. Writes nothing."""
+    nits, problems = nit_entries(root)
+    paths = list(touching or [])
+    if change:
+        path = _one_change(root, change)
+        if path is None:
+            return 1
+        found = changed_paths(path.parent.parent, "main")
+        if found is None:
+            print("⚠  no merge base with 'main': is this a git checkout?", file=sys.stderr)
+            return 1
+        paths += [p for _, path_, to in found[1] for p in (path_, to) if p]
+    if change or touching is not None:
+        nits = [n for n in nits if nit_touches(n, paths)]
+    today = date.today()
+    for n in nits:
+        n["age_days"] = _age_days({"created": n["raised"] or ""}, today)
+    out = {"path": _shown(work_dir(root) / "nits.md", root), "nits": nits, "problems": problems}
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 1 if problems else 0
 
 
 def cmd_checks(root: Path, ident: str) -> int:
@@ -3722,6 +3854,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             "seeds": len(seeds),
             "oldest": min((i["date"] for i in seeds), default=None),
         },
+        "nits": nits_summary(nit_entries(home)[0], today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
         "releases": _release_tags(home, cfg, since),
@@ -4824,6 +4957,10 @@ def main() -> int:
     )
     p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
 
+    p_nits = sub.add_parser("nits", help="the open nits in work/nits.md, as JSON; writes nothing")
+    p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
+    p_nits.add_argument("--change", help="only those this change's diff against main touches")
+
     p_checks = sub.add_parser(
         "checks", help="a change's acceptance checks in checks.md, as JSON; runs nothing"
     )
@@ -4950,6 +5087,8 @@ def main() -> int:
         return 0
     if args.cmd == "undone":
         return cmd_undone(root, args.id)
+    if args.cmd == "nits":
+        return cmd_nits(root, args.touching, args.change)
     if args.cmd == "checks":
         return cmd_checks(root, args.id)
     if args.cmd == "accept":

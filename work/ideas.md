@@ -84,11 +84,3 @@ changes touch. Raised by the retrospective of 2026-10-24.
 `retro` reads a change's files and lines from the one commit before its `Close`, so 002, two
 commits and about 1,700 lines on its branch, reads as 1 file and 9 lines. Count the branch's whole
 diff against the base it was shipped on. Raised by the retrospective of 2026-10-24.
-
-## [2026-10-24] [seed] Carry a ship's unfixed nits forward
-
-Ship gives each undone item a disposition, but a nit approved unfixed lives only in the
-`Sdlc-Findings` count. Five are open now: 003's status test whose patched half can't fail, and its
-registry that crashes `status` when it isn't UTF-8; 005's `left` that builds up across checks, its
-timeout output kept as bytes, and checks that inherit stdin. Carry nits like undone items, and fix
-these five. Raised by the retrospective of 2026-10-24.

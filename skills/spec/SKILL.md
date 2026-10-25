@@ -15,6 +15,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py lookup *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
 disable-model-invocation: true
 ---
 
@@ -62,6 +63,16 @@ spec worth writing. `config` says where each one is:
 - **The system itself**, when the design depends on what it actually holds rather than what it's
   assumed to hold. If `docs.explore` names a skill or command for that, use it. A spec written
   against assumptions is how the review's worst findings ship.
+- **Open nits** on the paths the design touches: findings earlier ships left unfixed.
+
+  ```bash
+  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --touching <path> <path>
+  ```
+
+  Offer the ones of cost `S`, and any whose theme is the change's own, to take in, weighed by the
+  rubric in the process doc (`docs.process`). Each one taken becomes a requirement naming its id;
+  `/sdlc:ship` retires it once the diff fixes it. Nothing listed is the usual answer. Never take
+  one in unasked.
 
 ## Step 2 — Resolve the intent's open questions
 
