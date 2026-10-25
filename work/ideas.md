@@ -84,3 +84,21 @@ changes touch. Raised by the retrospective of 2026-10-24.
 `retro` reads a change's files and lines from the one commit before its `Close`, so 002, two
 commits and about 1,700 lines on its branch, reads as 1 file and 9 lines. Count the branch's whole
 diff against the base it was shipped on. Raised by the retrospective of 2026-10-24.
+
+## [2026-10-25] [seed] A process map of the three loops, kept true by the gate
+
+A map of the change loop (intent → spec → plan → build → ship → close), the release loop (release
+→ publish) and the retro loop: each stage's gates, the `sdlc.py` calls, the checks (gate,
+acceptance checks, review passes) and what it writes. Mermaid in the repo (`docs/PROCESS.md`,
+rendered by GitHub), with a test that fails when a stage, skill or WAIT is missing from it; HTML
+or a diagramming tool can be generated from it later. Decide whether hosts get a copy from setup.
+Raised 2026-10-25.
+
+## [2026-10-25] [seed] Decide at intent whether a change reaches hosts
+
+This repo is the plugin's testbed, so whatever it builds for itself should reach hosts in some
+form, but whether, and how generically, is decided late and implicitly today (010's `after_bump`
+was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent as its own question
+(plugin only, host-facing, or both, with this repo as the first user) and record it, so the spec
+designs for the host from the start and ship can check the change delivered on it. Raised
+2026-10-25.
