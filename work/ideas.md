@@ -102,3 +102,13 @@ was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent a
 (plugin only, host-facing, or both, with this repo as the first user) and record it, so the spec
 designs for the host from the start and ship can check the change delivered on it. Raised
 2026-10-25.
+
+## [2026-10-25] [seed] A glossary of the process's terms
+
+The plugin's words (change, tier, stage, gate, WAIT, stop, seed, nit, finding, impact, landed,
+retro, direction, outcome, drift…) are defined only where they're used, and someone new meets them
+in skill prompts long before SDLC.md. A `docs/GLOSSARY.md`, linked from the README, gives each a
+line and points at where it's specified, with a test that fails when a term the code fixes
+(`STAGES`, tiers, impacts, nit costs and values, review passes) has no entry. Hosts read it on
+GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
+should use its terms. Raised 2026-10-25.
