@@ -204,3 +204,18 @@ rule names the steps allowed instead. A release push needs care where the remote
 is what users install from (this repo's marketplace): a pushed version bump is already a publish,
 so release may push only the tag there, or nothing. Landing through pull requests is the other
 half of this, seeded on its own above. Raised 2026-10-25.
+
+## [2026-10-25] [seed] Keep the change folders under .sdlc/, or where a host says
+
+`work/` sits at a host's root, beside its own code, so adopting the plugin adds a top-level folder
+a host never asked for. Move it under `.sdlc/` (`.sdlc/work/`, with `ideas.md` and `nits.md`), or
+make it a config key (`[paths] work`, defaulting to `work` so no host moves unasked). `work_dir()`
+is already the one place the path is built, but `work/` is written literally across the script's
+messages and globs, the skills, the defaults, the templates and the docs. History is the harder
+part: `closed_changes()` reads each intent from the `Close` commit's parent at its old path, the
+seed counter reads `Close` and `Drop` subjects, and retro reads `ideas.md` and `nits.md` across
+the window, so a move needs either a reader that looks in both places or a recorded switch point
+(setup's record, or a `Move work` commit). Decide whether setup moves an existing host's folder
+and records it, what `drift()` makes of a host on the old path, and whether the key is ever
+retired. Worktrees follow the folder, since each holds its own `<work>/<branch>/`. Tier 2: it
+changes where every host's artifacts live. Raised 2026-10-25.
