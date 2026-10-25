@@ -169,8 +169,7 @@ written from a real artifact.
 
 `inbox.md` here replaces what `work/inbox.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
-or the factory first writes one, and `nits.md` what `work/nits.md` starts as, when `/sdlc:ship`
-first records a nit. None has prompts: its note carries the rules. `checks.md`
+or the factory first writes one. None has prompts: its note carries the rules. `checks.md`
 is what a change's acceptance checks start as; its one example section's prompts make an untouched
 copy a scaffold, which `sdlc.py check` reports rather than runs.
 
@@ -240,15 +239,16 @@ with finished changes: the change's commit keeps them in history. `work/inbox.md
 too; a closed seed is deleted from it, history keeping that as well. It was `work/ideas.md`
 before 1.2.0, and a repo with only that file is read from it until 2.0.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
-reports a repo holding both. So is `work/nits.md`, the
-findings `/sdlc:ship` approved unfixed: each is an entry with its theme, paths, cost and value
-under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on the same
-paths, retired by the ship whose diff fixes it, and counted by theme and age by `/sdlc:retro`.
+reports a repo holding both. The findings `/sdlc:ship` approved unfixed are entries there too,
+tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
+lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
+the same paths, retired by the ship whose diff fixes it, and counted by theme and age by
+`/sdlc:retro`.
 `sdlc.py nits` lists them (`--change NNN` or `--touching <path>…` to narrow), and `check` reports
 an entry it can't read.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
-changes are done, from the main checkout's `work/inbox.md`, `work/nits.md` and direction doc. A
+changes are done, from the main checkout's `work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [seed] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
 and every commit that ever held one, so an id is never handed out twice. A heading with a bare

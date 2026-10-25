@@ -1,5 +1,5 @@
-"""work/nits.md: the nits ship approved unfixed. `nits` lists them, `check` audits them, `retro`
-counts them by theme and age, and release and publish never look."""
+"""The nits ship approved unfixed, `[nit]` entries in work/inbox.md. `nits` lists them, `check`
+audits them, `retro` counts them by theme and age, and release, publish and measuring never look."""
 
 from __future__ import annotations
 
@@ -23,26 +23,39 @@ def _load():
 sdlc = _load()
 
 GOOD = """\
-# Nits
+# Inbox
 
 > The note.
 
-## 003-1 [robustness] A registry that isn't UTF-8 crashes status
-- **raised:** 2026-10-04 by 003-test-lifetimes (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** med
+## [2026-10-04-1] [nit] A registry that isn't UTF-8 crashes status
 
 What's wrong.
 
-## 005-2 [robustness] Timed-out output kept as bytes
-- **raised:** 2026-10-10 by 005-acceptance-checks (correctness)
-- **paths:** scripts/
-- **cost:** S  **value:** low
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: med
+Raised by: 003-test-lifetimes (correctness)
 
-## 009-1 [style] An idiom
-- **raised:** 2026-10-20 by 009-drift-message (cost)
-- **paths:** tests/test_defaults.py, docs/
-- **cost:** M  **value:** low
+## [2026-10-05-1] [seed] Not a nit
+
+Why.
+
+## [2026-10-10-1] [nit] Timed-out output kept as bytes
+
+Theme: robustness
+Paths: scripts/
+Cost: S
+Value: low
+Raised by: 005-acceptance-checks (correctness)
+
+## [2026-10-20-1] [nit] An idiom
+
+Theme: style
+Paths: tests/test_defaults.py, docs/
+Cost: M
+Value: low
+Raised by: 009-drift-message (cost)
 """
 
 INTENT = """\
@@ -74,7 +87,7 @@ def _repo(tmp_path: Path, nits: str | None = None) -> Path:
     (root / "work").mkdir(parents=True)
     (root / "README.md").write_text("a repo\n", encoding="utf-8")
     if nits is not None:
-        (root / "work" / "nits.md").write_text(nits, encoding="utf-8")
+        (root / "work" / "inbox.md").write_text(nits, encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
@@ -92,7 +105,7 @@ def test_a_register_reads_as_its_entries(tmp_path: Path) -> None:
     root = _repo(tmp_path, GOOD)
     nits, problems = sdlc.nit_entries(root)
     assert problems == []
-    assert [n["id"] for n in nits] == ["003-1", "005-2", "009-1"]
+    assert [n["id"] for n in nits] == ["2026-10-04-1", "2026-10-10-1", "2026-10-20-1"]
     first = nits[0]
     assert first["theme"] == "robustness" and first["by"] == "003-test-lifetimes"
     assert first["raised"] == "2026-10-04" and first["pass"] == "correctness"
@@ -110,34 +123,33 @@ def test_no_register_is_no_nits_and_no_problem(tmp_path: Path, capsys) -> None:
 
 
 def test_the_template_alone_holds_no_entry(tmp_path: Path) -> None:
-    root = _repo(tmp_path, (ROOT / "templates" / "nits.md").read_text(encoding="utf-8"))
+    root = _repo(tmp_path, (ROOT / "templates" / "inbox.md").read_text(encoding="utf-8"))
     assert sdlc.nit_entries(root) == ([], [])
 
 
 def test_each_malformed_entry_is_a_problem_check_reports(tmp_path: Path) -> None:
     bad = GOOD + (
-        "\n## not a nit heading\n"
-        "\n## 003-1 [robustness] Twice\n"
-        "- **raised:** 2026-10-04 by 003-test-lifetimes (correctness)\n"
-        "- **paths:** a\n- **cost:** S  **value:** med\n"
-        "\n## 011-1 [docs] Missing and wrong\n"
-        "- **raised:** yesterday by 011-x\n- **cost:** L  **value:** high\n"
+        "\n## [2026-10-21] [nit] Before ids\n\nTheme: docs\nPaths: a\nCost: S\nValue: low\n"
+        "Raised by: 011-x\n"
+        "\n## [2026-13-40-1] [nit] Missing and wrong\n\nRaised by: yesterday\n"
+        "Cost: L\nValue: high\n"
     )
     root = _repo(tmp_path, bad)
     problems = sdlc.nit_entries(root)[1]
-    assert any("'## not a nit heading'" in p for p in problems)
-    assert "003-1 is used twice" in problems
-    assert any("011-1: raised 'yesterday'" in p for p in problems)
-    assert "011-1 has no `- **paths:**`" in problems
-    assert any(p.startswith("011-1: cost must be one of S|M") for p in problems)
-    assert any(p.startswith("011-1: value must be one of med|low") for p in problems)
+    assert any(p.startswith("'Before ids' has no id") for p in problems)
+    assert "2026-13-40-1: '2026-13-40' isn't a date" in problems
+    assert "2026-13-40-1 has no `Theme:` line" in problems
+    assert "2026-13-40-1 has no `Raised by: NNN-slug (pass)` line" in problems
+    assert "2026-13-40-1 has no `Paths:` line" in problems
+    assert any(p.startswith("2026-13-40-1: Cost must be one of S|M") for p in problems)
+    assert any(p.startswith("2026-13-40-1: Value must be one of med|low") for p in problems)
     found = [p for p in sdlc.analyze(root)["problems"] if p["kind"] == "nits"]
-    assert len(found) == len(problems) and all(p["dir"] == "work/nits.md" for p in found)
+    assert len(found) == len(problems) and all(p["dir"] == "work/inbox.md" for p in found)
 
 
 def test_a_register_that_isnt_utf8_is_a_problem_not_a_crash(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "work" / "nits.md").write_bytes(b"# Nits\n\n\xff\xfe\n")
+    (root / "work" / "inbox.md").write_bytes(b"# Inbox\n\n\xff\xfe\n")
     nits, problems = sdlc.nit_entries(root)
     assert nits == [] and problems and problems[0].startswith("can't be read")
 
@@ -145,10 +157,10 @@ def test_a_register_that_isnt_utf8_is_a_problem_not_a_crash(tmp_path: Path) -> N
 def test_touching_keeps_the_nits_on_those_paths(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, GOOD)
     code, out = _nits(root, capsys, "--touching", "scripts/sdlc.py")
-    # 005-2 names the folder, so a file inside it touches it too.
-    assert code == 0 and [n["id"] for n in out["nits"]] == ["003-1", "005-2"]
+    # The second names the folder, so a file inside it touches it too.
+    assert code == 0 and [n["id"] for n in out["nits"]] == ["2026-10-04-1", "2026-10-10-1"]
     code, out = _nits(root, capsys, "--touching", "docs/REFERENCE.md")
-    assert [n["id"] for n in out["nits"]] == ["009-1"]
+    assert [n["id"] for n in out["nits"]] == ["2026-10-20-1"]
     assert all(isinstance(n["age_days"], int) for n in out["nits"])
 
 
@@ -163,7 +175,7 @@ def test_change_keeps_the_nits_its_diff_touches(tmp_path: Path, capsys) -> None:
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "work")
     code, out = _nits(root, capsys, "--change", "001")
-    assert code == 0 and [n["id"] for n in out["nits"]] == ["009-1"]
+    assert code == 0 and [n["id"] for n in out["nits"]] == ["2026-10-20-1"]
 
 
 def test_retro_counts_open_nits_by_theme_and_age(tmp_path: Path) -> None:
@@ -194,11 +206,13 @@ def test_this_repos_register_reads_clean() -> None:
     assert all(n["by"] and n["raised"] for n in nits)
 
 
-def test_release_and_publish_never_read_the_register() -> None:
-    """The release cycle is for shipping: the in-change and retro loops pay nits down."""
+def test_release_publish_and_measuring_never_read_the_register() -> None:
+    """The release cycle is for shipping: the in-change and retro loops pay nits down, and a
+    change's cost is its own, whatever the inbox holds."""
     for skill in ("release", "publish"):
         text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
-        assert "nits" not in text, skill
-    for fn in (sdlc.cmd_release, sdlc.cmd_publish):
+        assert "nits" not in text and "inbox" not in text, skill
+    for fn in (sdlc.cmd_release, sdlc.cmd_publish, sdlc.measure_change):
         source = inspect.getsource(fn)
-        assert "nits" not in source and "nit_" not in source, fn.__name__
+        for word in ("nits", "nit_", "inbox", "INBOX", "register_path"):
+            assert word not in source, (fn.__name__, word)

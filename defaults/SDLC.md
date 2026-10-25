@@ -266,8 +266,9 @@ deploys on every push. With none, the release loop is the whole path. Ship stops
 
 #### Nits: small technical debt
 
-A Nit approved unfixed isn't lost in the findings count: ship records it in `work/nits.md`, and a
-later ship retires it once a diff fixes it or makes it moot. Each is weighed the same way:
+A Nit approved unfixed isn't lost in the findings count: ship records it in `work/inbox.md` as a
+`[nit]` entry, with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)` lines,
+and a later ship retires it once a diff fixes it or makes it moot. Each is weighed the same way:
 
 - **cost:** `S`, one sitting and a few lines · `M`, a test or several files · `L`, a design call.
   An `L` is a `work/inbox.md` seed, not a nit.

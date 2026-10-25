@@ -60,7 +60,7 @@
         "## Running the stages > ### Stage 4 \u2014 Test > - **Compatibility:**": "sha256:a91cbe1694fe5448",
         "## Running the stages > ### Stage 4 \u2014 Test > - **Acceptance:**": "sha256:ff24123f28b62e49",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship`": "sha256:cc0b849b505a1a56",
-        "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt": "sha256:1f4f668fcf460a5d",
+        "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt": "sha256:f7bbc49c5ba55396",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **cost:**": "sha256:76be784796eb3b5a",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **value:**": "sha256:17743923b867bd34",
         "## Running the stages > ### Stage 5 \u2014 Ship \u2192 `/sdlc:ship` > #### Nits: small technical debt > - **theme:**": "sha256:16a78c8fcaf1f039",
@@ -122,10 +122,9 @@
   "templates": {
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:6ecddfc40e569e7f",
-    "inbox.md": "sha256:418c868c8ffd7ffd",
+    "inbox.md": "sha256:1a088280532d165b",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:4c0f2bfd4c54e4a3",
-    "nits.md": "sha256:52ba163c34fd84ed",
     "notes.md": "sha256:a5022187b58499c9",
     "plan.md": "sha256:c8f2e95ebf1071df",
     "spec.md": "sha256:44e198408d01b8a0"

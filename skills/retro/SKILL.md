@@ -54,7 +54,7 @@ What `retro` gives:
   `rework_common`: the files more than a third of the window's changes touched (once there are
   six), each with how many, since sharing one of them says nothing.
 - `open`, `ideas` (seed count, oldest), `tiers`, `impacts`, and `releases` since `since`.
-- `nits`: the nits ship left open in `work/nits.md`, by theme, each theme's `count` and its
+- `nits`: the nits ship left open, `[nit]` entries in `work/inbox.md`, by theme, each theme's `count` and its
   oldest's date and `age_days`.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
@@ -135,8 +135,8 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 
    Then the debt in `nits`: each theme's count and oldest age against the threshold the process
    doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay
-   that theme down in a single change, never a seed per nit. `work/nits.md` itself is ship's to
-   edit, never this skill's.
+   that theme down in a single change, never a seed per nit. The `[nit]` entries themselves are
+   ship's to edit, never this skill's.
 4. **Product**, only when `product` isn't null. Whether the work is going where the users are,
    judged from `product.evidence` against each outcome's measure in the product doc. Score every
    open outcome in `product.items` the way the direction pass scores its items (done, dropped,

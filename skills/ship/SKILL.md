@@ -100,14 +100,14 @@ Each item is an unticked `- [ ]` line in `notes.md`. Step 4 proposes what happen
 `sdlc.py ship` refuses while one is still unticked, because a shipped folder isn't read again,
 and an item left there is lost.
 
-Then list the open nits this change's diff touches, from `work/nits.md`:
+Then list the open nits this change's diff touches, the `[nit]` entries in `work/inbox.md`:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --change <NNN>
 ```
 
 Each is a finding an earlier ship approved unfixed. Step 4 proposes retiring the ones this diff
-fixed or made moot. None listed, or no `work/nits.md`, is the usual answer.
+fixed or made moot. None listed, or no `work/inbox.md`, is the usual answer.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
@@ -211,7 +211,7 @@ Weigh each Nit under the rubric in the process doc (`docs.process`), its section
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
 it Important. One that costs a design call (L) is a seed for `work/inbox.md`, not a nit. One that
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
-answer below. The rest are proposed for `work/nits.md`.
+answer below. The rest are proposed as `[nit]` entries in `work/inbox.md`.
 
 ## Step 4 — Present findings and the draft commit
 
@@ -257,11 +257,19 @@ it's written down somewhere that gets read. Put the dispositions in the commit m
 body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Leave out a paragraph
 that has nothing in it.
 
-**Nits.** Show the nits proposed for `work/nits.md`, each as the entry it becomes: `## <NNN>-<n>
-[<theme>] <title>`, numbered from 1 for this change, with its `raised`, `paths` and `cost`/`value`
-lines. Then each nit Step 0 listed that this diff fixed or made moot, proposed for retirement with
-a one-line reason, and a `Retired nits:` paragraph in the commit message after the body, one
-`- <id>: <reason>` line each. A listed nit the diff doesn't settle stays, and needs no mention.
+**Ids.** Take an id for every entry this ship would add to `work/inbox.md`, the new nits and the
+seeds undone items are carried to, all in one call, `<N>` being how many, so no two share one:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
+```
+
+**Nits.** Show the nits proposed, each as the entry it becomes: `## [<id>] [nit] <title>`, a line
+or two on what's wrong, then its `Theme:`, `Paths:`, `Cost:`, `Value:` and
+`Raised by: <NNN-slug> (<pass>)` lines. Then each nit Step 0 listed that this diff fixed or made
+moot, proposed for retirement with a one-line reason, and a `Retired nits:` paragraph in the commit
+message after the body, one `- <id>: <reason>` line each. A listed nit the diff doesn't settle
+stays, and needs no mention.
 
 **Context update.** Show the context pass's result under the findings: each proposed edit as a
 diff of its doc, or "no update needed" and why. A doc left saying something false is an
@@ -277,10 +285,10 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 Ask literally:
 
-> `Commit this, with the context update shown, the nits shown recorded in work/nits.md, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, with the context update shown, the nits shown recorded in work/inbox.md, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
 Leave out `, with the context update shown` when the context pass proposed none, `, the nits shown
-recorded in work/nits.md` when there are none to add or retire, and `, then update its issue` when
+recorded in work/inbox.md` when there are none to add or retire, and `, then update its issue` when
 `config` says `archive.target` is `none`.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
@@ -292,21 +300,16 @@ them is an "edit the message" answer, and the question is asked again.
 
 First, the undone items, exactly as approved:
 
-- **Carried:** take an id for each seed carried, all in one call, `<N>` being how many:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
-  ```
-
-  Then append each seed to `work/inbox.md` as `## [<id>] [seed] <its title>`. If there's no
-  `work/inbox.md`, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then
-  append. Its body says what is left to do and points at `work/NNN-slug/notes.md` in this
-  change's commit. Then tick the item in place: `- [x] <text> → seed: <id>`.
+- **Carried:** append each seed to `work/inbox.md` as `## [<id>] [seed] <its title>`, with the id
+  Step 4 took for it. If there's no `work/inbox.md`, `Write` it first from `templates["inbox.md"]`
+  in `config`, as it is, then append. Its body says what is left to do and points at
+  `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
+  `- [x] <text> → seed: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
 
-Then the nits, exactly as approved: append each new entry to `work/nits.md` after its last one,
+Then the nits, exactly as approved: append each new entry to `work/inbox.md` after its last one,
 and delete each retired entry, heading to the line before the next `## `. If there's no
-`work/nits.md`, `Write` it first from `templates["nits.md"]` in `config`, as it is, then append.
+`work/inbox.md`, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then append.
 
 Then make the approved context edits, exactly as shown, in this checkout: they land in the same
 commit as the code they describe.
@@ -315,7 +318,7 @@ Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter.
 
 If the change came from a `work/inbox.md` seed and the built thing deviated from the sketch, say
 how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
-`Write` is for those files only, and `work/nits.md`'s first time: everything else this step
+`Write` is for those files only, and `work/inbox.md`'s first time: everything else this step
 changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
 
 Then, with a `--leave <path>` for each path Step 0's approval set apart:
@@ -333,8 +336,8 @@ that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last t
 
 `ship` stamps the folder shipped, deletes the entry the change's `idea:` names from
 `work/inbox.md` (saying so when there is none), and stages every path the checkout has
-uncommitted but the ones left out: the change's code, its folder, `work/inbox.md` and
-`work/nits.md` when Step 6 edited them, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
+uncommitted but the ones left out: the change's code, its folder, `work/inbox.md` when Step 6
+edited it, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
 counter, which reaches `main` this way). It prints each path it staged, and never commits. The
 commit message names `NNN-slug`, which is how the commit and its folder find each other.
 

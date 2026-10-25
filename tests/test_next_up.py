@@ -63,10 +63,9 @@ def _ideas(root: Path, *seeds: str) -> None:
 
 def _nit(nid: str, theme: str, raised: str, cost: str = "S") -> str:
     return (
-        f"## {nid} [{theme}] A small thing in {theme}\n\n"
-        f"- **raised:** {raised} by 003-reopen-drafts (correctness)\n"
-        "- **paths:** `scripts/drafts.py`\n"
-        f"- **cost:** {cost}  **value:** low\n\n"
+        f"## [{raised}-{nid.split('-')[1]}] [nit] A small thing in {theme}\n\n"
+        f"Theme: {theme}\nPaths: `scripts/drafts.py`\nCost: {cost}\nValue: low\n"
+        f"Raised by: {nid.split('-')[0]}-reopen-drafts (correctness)\n\n"
     )
 
 
@@ -132,7 +131,7 @@ def test_each_register_alone_is_enough(tmp_path: Path) -> None:
     assert [i["rule"] for i in _next(root)["items"]] == ["seed"]
 
     root = _repo(tmp_path / "nits")
-    _write(root, "work/nits.md", "# Nits\n\n" + _nit("003-1", "style", "2026-10-04"))
+    _ideas(root, _nit("003-1", "style", "2026-10-04"))
     assert [i["rule"] for i in _next(root)["items"]] == ["nits"]
 
     # A milestone whose grouped seed isn't in the register puts nothing forward.
@@ -202,8 +201,8 @@ def test_next_up_orders_by_rule(tmp_path: Path) -> None:
         _seed("2026-10-03", "Grouped seed"),
         _seed("2026-10-04", "Drafts lose their title", tag="bug"),
         _seed("2026-10-05", "Grouped bug", tag="bug"),
+        _nit("003-1", "style", "2026-10-04"),
     )
-    _write(root, "work/nits.md", "# Nits\n\n" + _nit("003-1", "style", "2026-10-04"))
     _direction(
         root,
         _milestone("M1", "Drafts reopen", '"Grouped bug", "Grouped seed"'),
@@ -251,7 +250,7 @@ def test_nits_of_cost_s_come_one_line_per_theme_oldest_first(tmp_path: Path) -> 
         + _nit("004-1", "robustness", "2026-10-05")
         + _nit("004-2", "tests", "2026-10-01", cost="M")
     )
-    _write(root, "work/nits.md", "# Nits\n\n" + nits)
+    _ideas(root, nits)
     items = _next(root)["items"]
     assert [i["title"] for i in items] == ["[robustness] 1 open, cost S", "[style] 2 open, cost S"]
     assert items[0]["command"] == "/sdlc:intent pay down the [robustness] nits"

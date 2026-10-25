@@ -315,8 +315,9 @@ def test_ship_records_its_findings_and_close_and_retro_name_the_numbers() -> Non
 
 
 def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
-    """A nit approved unfixed goes to work/nits.md behind ship's one approval; intent and spec
-    offer the open ones a change touches; retro weighs them and never edits the register."""
+    """A nit approved unfixed goes to work/inbox.md, as a `[nit]` entry with an id, behind ship's
+    one approval; intent and spec offer the open ones a change touches; retro weighs them and never
+    edits the register."""
     text = {
         s: (ROOT / "skills" / s / "SKILL.md").read_text(encoding="utf-8")
         for s in ("ship", "intent", "spec", "retro")
@@ -325,9 +326,12 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
     step0 = ship.split("## Step 0")[1].split("## Step 1")[0]
     assert "sdlc.py nits --change <NNN>" in step0
     wait = ship.split("## Step 5")[1].split("## Step 6")[0]
-    assert "the nits shown recorded in work/nits.md" in wait
+    assert "the nits shown recorded in work/inbox.md" in wait
+    present = ship.split("## Step 4")[1].split("## Step 5")[0]
+    assert "sdlc.py next-entry --count <N>" in present and "[nit]" in present
     land = ship.split("## Step 6")[1].split("## Step 7")[0]
-    assert 'templates["nits.md"]' in land and "`work/nits.md` when Step 6" in " ".join(land.split())
+    assert 'templates["inbox.md"]' in land
+    assert "`work/inbox.md` when Step 6" in " ".join(land.split())
     assert "Retired nits:" in ship
     for name in ("intent", "spec"):
         assert "sdlc.py nits --touching" in text[name], name

@@ -144,14 +144,11 @@ BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
 ENTRY_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+$")
 ENTRY_ID_TOKEN_RE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}-\d+(?![\w-])")
 REF_RE = re.compile(rf'"([^"]+)"|({ENTRY_ID_TOKEN_RE.pattern})')
-# work/nits.md: "## 003-1 [robustness] Some title", the raising change's number and a count, then
-# `- **raised:**`, `- **paths:**` and `- **cost:** … **value:** …` bullets. Ship writes and retires
-# entries, intent and spec offer them, retro counts them; the process doc's rubric says what each
-# cost and value means. High value is never a nit, and L cost is a seed, so neither appears here.
-NIT_RE = re.compile(r"^##\s+(\d{3,}-\d+)\s+\[([^\]]+)\]\s*(.+)$")
-NIT_RAISED_RE = re.compile(r"^- \*\*raised:\*\*\s*(\S+)\s+by\s+(\S+)\s*(?:\(([^)]*)\))?\s*$")
-NIT_PATHS_RE = re.compile(r"^- \*\*paths:\*\*\s*(.+)$")
-NIT_COST_RE = re.compile(r"^- \*\*cost:\*\*\s*(\S+)\s+\*\*value:\*\*\s*(\S+)\s*$")
+# A nit is a `[nit]` entry: a finding ship approved unfixed, with `Theme:`, `Paths:`, `Cost:`,
+# `Value:` and `Raised by: NNN-slug (pass)` lines. Ship writes and retires them, intent and spec
+# offer them, retro counts them; the process doc's rubric says what each cost and value means. High
+# value is never a nit, and L cost is a seed, so neither appears here.
+NIT_RAISED_RE = re.compile(r"^(\d{3,}-[a-z0-9][a-z0-9-]*)\s*(?:\(([^)]*)\))?\s*$")
 NIT_COSTS = ("S", "M")
 NIT_VALUES = ("med", "low")
 # notes.md is free-form, with one rule: anything left undone is an unticked `- [ ]` line.
@@ -279,8 +276,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/inbox.md`, `work/nits.md`, a change's `notes.md` and its `checks.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "nits.md", "notes.md", "checks.md")
+# `work/inbox.md`, a change's `notes.md` and its `checks.md`.
+DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md")
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -950,16 +947,19 @@ def _age_days(rec: dict, today: date) -> int | None:
 
 def inbox_entries(root: Path) -> list[dict]:
     """Every entry in the register (`register_path()`): its id (None for a bare date), its tag as
-    written (`status`), its title, the titles its `After:` line names, and its body lines by key. A
-    closed entry is deleted once its change ships; history keeps it. Fenced lines are skipped, so a
-    template's example is never an entry."""
+    written (`status`), its title, the titles its `After:` line names, its body lines by key, and
+    its other lines as `text`. A closed entry is deleted once its change ships; history keeps it.
+    Fenced lines are skipped, so a template's example is never an entry. A file that can't be read
+    holds none: `nit_entries()` says why."""
     path = register_path(work_dir(root))
-    if not path.is_file():
+    try:
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except (OSError, UnicodeDecodeError):
         return []
     out: list[dict] = []
     current: dict | None = None
     fenced = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         if FENCE_RE.match(line):
             fenced = not fenced
             continue
@@ -967,7 +967,7 @@ def inbox_entries(root: Path) -> list[dict]:
             continue
         heading = _heading_entry(line)
         if heading:
-            current = {**heading, "after": [], "fields": {}}
+            current = {**heading, "after": [], "fields": {}, "text": []}
             out.append(current)
         elif line.startswith("#"):
             current = None
@@ -975,6 +975,8 @@ def inbox_entries(root: Path) -> list[dict]:
             current["fields"].setdefault(body.group(1), body.group(2).strip())
             if body.group(1) == "After" and not current["after"]:
                 current["after"] = refs_in(body.group(2))
+        elif current is not None and line.strip():
+            current["text"].append(line.strip())
     # An `After:` naming an entry by id reads as that entry's title, so what waits on what is
     # worked out on titles either way; an id naming nothing stays as written.
     by_id = {e["id"]: e["title"] for e in out if e["id"]}
@@ -1025,79 +1027,57 @@ def intent_idea(text: str) -> str:
 
 
 def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
-    """Every open nit in work/nits.md, and what about the file can't be read. A retired nit is
-    deleted by the ship that retires it; history keeps it. Read as text, never YAML, and fenced
-    lines are skipped, so the template's own example is never an entry."""
-    path = work_dir(root) / "nits.md"
-    if not path.is_file():
-        return [], []
+    """Every open nit, the register's `[nit]` entries, and what about them can't be read. A retired
+    nit is deleted by the ship that retires it; history keeps it. Its raised date is its id's, and
+    who raised it is its `Raised by: NNN-slug (pass)` line."""
+    path = register_path(work_dir(root))
     try:
-        text = path.read_text(encoding="utf-8")
+        if path.is_file():
+            path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return [], [f"can't be read: {e}"]
     nits: list[dict] = []
     problems: list[str] = []
-    fenced = False
-    for line in text.splitlines():
-        if FENCE_RE.match(line):
-            fenced = not fenced
+    for e in inbox_entries(root):
+        if not is_nit(e):
             continue
-        if fenced:
-            continue
-        if line.startswith("## "):
-            m = NIT_RE.match(line)
-            if not m:
-                problems.append(f"{line.strip()!r} isn't `## NNN-n [theme] title`")
-                nits.append({"id": None})
-                continue
-            nits.append(
-                {
-                    "id": m.group(1),
-                    "theme": m.group(2).strip(),
-                    "title": m.group(3).strip(),
-                    "raised": None,
-                    "by": None,
-                    "pass": None,
-                    "paths": [],
-                    "cost": None,
-                    "value": None,
-                    "text": [],
-                }
-            )
-            continue
-        if not nits or nits[-1]["id"] is None:
-            continue
-        nit = nits[-1]
-        if m := NIT_RAISED_RE.match(line):
-            nit.update(raised=m.group(1), by=m.group(2), **{"pass": m.group(3)})
-        elif m := NIT_PATHS_RE.match(line):
-            nit["paths"] = [p.strip().strip("`") for p in m.group(1).split(",") if p.strip()]
-        elif m := NIT_COST_RE.match(line):
-            nit.update(cost=m.group(1), value=m.group(2))
-        elif line.strip():
-            nit["text"].append(line.strip())
-    nits = [n for n in nits if n["id"] is not None]
-    seen: Counter[str] = Counter(n["id"] for n in nits)
-    problems += [f"{i} is used twice" for i, k in seen.items() if k > 1]
-    for n in nits:
-        if n["raised"] is None:
-            problems.append(f"{n['id']} has no `- **raised:** YYYY-MM-DD by NNN-slug (pass)`")
-        else:
-            try:
-                date.fromisoformat(n["raised"])
-            except ValueError:
-                problems.append(f"{n['id']}: raised {n['raised']!r} isn't YYYY-MM-DD")
-        if not n["paths"]:
-            problems.append(f"{n['id']} has no `- **paths:**`")
-        if n["cost"] not in NIT_COSTS:
+        fields = e["fields"]
+        name = e["id"] or e["title"]
+        raised = NIT_RAISED_RE.match(fields.get("Raised by", ""))
+        paths = fields.get("Paths", "")
+        nit = {
+            "id": e["id"],
+            "theme": (fields.get("Theme") or "").strip(),
+            "title": e["title"],
+            "raised": e["date"],
+            "by": raised.group(1) if raised else None,
+            "pass": raised.group(2) if raised else None,
+            "paths": [p.strip().strip("`") for p in paths.split(",") if p.strip()],
+            "cost": fields.get("Cost"),
+            "value": fields.get("Value"),
+            "text": " ".join(e["text"]),
+        }
+        if not e["id"]:
+            problems.append(f"{name!r} has no id: its heading is `## [YYYY-MM-DD-n] [nit] title`")
+        try:
+            date.fromisoformat(e["date"])
+        except ValueError:
+            problems.append(f"{name}: {e['date']!r} isn't a date")
+        if not nit["theme"]:
+            problems.append(f"{name} has no `Theme:` line")
+        if not raised:
+            problems.append(f"{name} has no `Raised by: NNN-slug (pass)` line")
+        if not nit["paths"]:
+            problems.append(f"{name} has no `Paths:` line")
+        if nit["cost"] not in NIT_COSTS:
             problems.append(
-                f"{n['id']}: cost must be one of {'|'.join(NIT_COSTS)}, got {n['cost']!r}"
+                f"{name}: Cost must be one of {'|'.join(NIT_COSTS)}, got {nit['cost']!r}"
             )
-        if n["value"] not in NIT_VALUES:
+        if nit["value"] not in NIT_VALUES:
             problems.append(
-                f"{n['id']}: value must be one of {'|'.join(NIT_VALUES)}, got {n['value']!r}"
+                f"{name}: Value must be one of {'|'.join(NIT_VALUES)}, got {nit['value']!r}"
             )
-        n["text"] = " ".join(n["text"])
+        nits.append(nit)
     return nits, problems
 
 
@@ -1127,6 +1107,11 @@ def nits_summary(nits: list[dict], today: date) -> dict:
 def is_building(idea: dict) -> bool:
     """Work has started: the seed is tagged `[building]`."""
     return "building" in idea["status"].lower()
+
+
+def is_nit(entry: dict) -> bool:
+    """A finding ship approved unfixed, `[nit]`: put forward by theme, never as a seed."""
+    return entry["status"].strip().lower() == "nit"
 
 
 def analyze(root: Path, today: date | None = None) -> dict:
@@ -1251,7 +1236,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
                 }
             )
     for detail in nit_entries(root)[1]:
-        problems.append({"dir": "work/nits.md", "kind": "nits", "detail": detail})
+        problems.append({"dir": register, "kind": "nits", "detail": detail})
     if work_ignored(root):
         problems.append({"dir": "work/", "kind": "ignored", "detail": IGNORED})
     # A counter behind the folders is normal: main's committed one only moves when a change
@@ -1660,9 +1645,9 @@ def cmd_undone(root: Path, ident: str) -> int:
 
 
 def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
-    """The open nits in work/nits.md as JSON, with their age, for intent and spec to offer and
-    ship to retire. `--change` keeps those a change's diff against the base branch touches,
-    `--touching` those the given paths do. Writes nothing."""
+    """The open nits, the register's `[nit]` entries, as JSON, with their age, for intent and
+    spec to offer and ship to retire. `--change` keeps those a change's diff against the base
+    branch touches, `--touching` those the given paths do. Writes nothing."""
     nits, problems = nit_entries(root)
     paths = list(touching or [])
     if change:
@@ -1680,7 +1665,7 @@ def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
     today = date.today()
     for n in nits:
         n["age_days"] = _age_days({"created": n["raised"] or ""}, today)
-    out = {"path": _shown(work_dir(root) / "nits.md", root), "nits": nits, "problems": problems}
+    out = {"path": _shown(register_path(work_dir(root)), root), "nits": nits, "problems": problems}
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 1 if problems else 0
 
@@ -4222,7 +4207,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     """What to work on once the open changes are done, from the main checkout's ideas, nits and
     direction doc, ordered by NEXT_RULES. Read-only, and a missing file adds nothing. Also the
     open milestones with nothing left in their groups, and `After:` lines that can never be met."""
-    ideas = inbox_entries(home)
+    ideas = [e for e in inbox_entries(home) if not is_nit(e)]
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
     named = [r["idea"] for r in open_changes if r.get("idea")]
@@ -4543,7 +4528,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                      "files": shared, "dropped": True}
                 )  # fmt: skip
     a = analyze(home, today)
-    seeds = [i for i in inbox_entries(home) if not is_building(i)]
+    seeds = [i for i in inbox_entries(home) if not is_building(i) and not is_nit(i)]
     direction = direction_items(_direction_text(home, cfg))
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names, trunk)
@@ -5719,7 +5704,9 @@ def main() -> int:
     )
     p_entry.add_argument("--count", type=int, default=1, help="this many ids, one per line")
 
-    p_nits = sub.add_parser("nits", help="the open nits in work/nits.md, as JSON; writes nothing")
+    p_nits = sub.add_parser(
+        "nits", help="the open [nit] entries in work/inbox.md, as JSON; writes nothing"
+    )
     p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
     p_nits.add_argument("--change", help="only those this change's diff against main touches")
 

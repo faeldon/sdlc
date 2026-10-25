@@ -154,12 +154,14 @@ and reports format problems rather than raising. The product doc (`docs.product`
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.
 
-**Nits: `nit_entries()`.** `work/nits.md` holds the findings ship approved unfixed, one
-`## NNN-n [theme] title` entry each, its id taken from the raising change so parallel branches
-never collide. `sdlc.py` only reads it (`nits`, `check`, retro's `nits`), as text; the skills
-write it: ship adds and retires entries behind its one WAIT, intent and spec offer the ones a
-change touches, retro proposes one paydown seed per theme. The rubric is the process doc's, not
-code's. Release and publish never read it (`test_release_and_publish_never_read_the_register`).
+**Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
+`work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
+`Raised by: NNN-slug (pass)` lines, the last keeping the raising change's number. `sdlc.py` only
+reads them (`nits`, `check`, retro's `nits`), as text, and never puts one forward as a seed; the
+skills write them: ship adds and retires entries behind its one WAIT, intent and spec offer the
+ones a change touches, retro proposes one paydown seed per theme. The rubric is the process doc's,
+not code's. Release, publish and measuring never read the register
+(`test_release_publish_and_measuring_never_read_the_register`).
 
 **Metrics: `scripts/metrics.py`.** Pure functions, loaded by path, no import of `sdlc.py`. Close's
 `measure` step reads this repo's Claude Code transcripts (`_project_dirs()`, its own folders
