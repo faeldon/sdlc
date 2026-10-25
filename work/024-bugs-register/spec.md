@@ -24,7 +24,7 @@ updated: 2026-10-25
    `templates/nits.md` in `DOC_TEMPLATES` and passes the shape test.
 2. `work/ideas.md` is a shim: with no `work/inbox.md`, every reader reads it in its place, and the
    same for a host override at `.sdlc/templates/ideas.md`. An entry in `.sdlc/deprecations.toml`,
-   `remove_in = "2.0.0"`, with its test. With both files present, `check` reports it and
+   `remove_in = "1.4.0"`, with its test. With both files present, `check` reports it and
    `work/inbox.md` is read. `work/nits.md` gets no shim: it was never released.
 3. `sdlc.py migrate-inbox` (writes, never commits, not in `READ_ONLY`) `git mv`s `work/ideas.md` to
    `work/inbox.md` (history follows), gives each bare-date entry an id (R5), turns each
@@ -32,6 +32,8 @@ updated: 2026-10-25
    rewrites the references naming an open entry to ids (`After:`, the direction doc's `Groups:`,
    this checkout's open changes' `idea:`). It refuses while any of those files is dirty; a rerun
    changes nothing. `/sdlc:setup` offers it behind setup's WAIT; this change runs it on this repo.
+   Reading bare-date headings and `migrate-inbox` are a shim of their own, `remove_in = "1.4.0"`:
+   the few hosts on the plugin migrate before then.
    Tests: seeds, one `After:`, one `Groups:` and two nits become the expected inbox; a rerun is a
    no-op; a shipped title is left.
 4. `retro-commit` takes `work/inbox.md` (or `work/ideas.md` while the shim reads it). `release`,
@@ -150,13 +152,15 @@ bug: its `Retire` trailer. A paid-down nit: its ship commit's `Retired nits:` pa
 
 - **What `sdlc.py` reads or writes in a host** (why this is Tier 2): the register's name and shape,
   how references resolve, a new frontmatter key, a section read from the process doc, and
-  `bug-commit`'s commits. Kept working: `work/ideas.md` and its template override (shim until
-  2.0.0), bare-date headings and title references (permanently). Moves for a host: Next up commands
+  `bug-commit`'s commits. Kept working: `work/ideas.md`, its template override and bare-date
+  headings (shims until 1.4.0, since the hosts on the plugin are few and migrate before then), and
+  title references (permanently, since history holds them). Moves for a host: Next up commands
   become ids, new entries get ids, and nits move into the inbox (`nits.md` was never released).
   Impact `minor`; the 1.2.0 release is held until this lands, so `nits.md` and the bare `[bug]` tag
   never ship.
-- **Shims**: `work/ideas.md` has a `deprecations.toml` entry; `cmd_release` will refuse 2.0.0
-  while it remains.
+- **Shims**: `ideas-register`, `bare-date-entries` and `retired-target-stops` (007's drift note,
+  its `since` corrected to 1.2.0) have `deprecations.toml` entries, all `remove_in = "1.4.0"`, and
+  `cmd_release` refuses 1.4.0 while any remains. What reads history stays for good.
 - **The trailer contract**: extended with `Sdlc-Fixes` and `Sdlc-Retired`; nothing redefined.
 - **Frontmatter read as text**: `idea:` and `fixes:` ids go through `frontmatter_list()`.
 - **Numbering**: entry ids are their own space, never drawn from change numbers or the tracker.
@@ -175,8 +179,8 @@ bug: its `Retire` trailer. A paid-down nit: its ship commit's `Retired nits:` pa
 - **Keeping `NNN-n` for nits**: two id shapes in one file, and a nit filed by intake has no change
   to number it by.
 - **Separate counters per kind**: a retagged entry could collide.
-- **Forcing migration, or rewriting history's titles**: the shim and permanent title reading keep
-  every host working untouched.
+- **Forcing migration now, or rewriting history's titles**: the shims keep every host working
+  untouched until it migrates, and title reading stays for history.
 - **A fixed severity scale in code**: the process doc owns the words.
 - **Retro guessing escapes from paths**: only a confirmed `Introduced by:` counts.
 

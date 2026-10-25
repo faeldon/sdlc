@@ -35,7 +35,7 @@ follow-up from an escaped defect.
 
 - One `work/inbox.md` holds every change request, tagged `[seed]`, `[building]`, `[bug]` or
   `[nit]`, each with a `YYYY-MM-DD-n` id from one counter and its kind's facts as body lines.
-  `work/ideas.md` still reads (a shim until 2.0.0); `work/nits.md` folds in; `sdlc.py
+  `work/ideas.md` still reads (a shim until 1.4.0); `work/nits.md` folds in; `sdlc.py
   migrate-inbox` moves a repo over.
 - `idea:`, `fixes:`, `After:` and `Groups:` link by id (titles still read), so triage can reword
   or reclassify a report without breaking a link.

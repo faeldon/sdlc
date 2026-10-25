@@ -136,7 +136,7 @@ PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
 # work/inbox.md, the register of change requests: "## [2026-10-25-3] [seed] Some title", its id
 # (the date it came in and a count) then its tag. A bare date, `[2026-10-17]`, is an entry from
-# before ids, read the same with no id.
+# before ids, read the same with no id until 1.4.0, a shim (`migrate-inbox` gives it one).
 ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\s*(.+)$")
 # The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
 # seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
@@ -170,7 +170,7 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = PLUGIN_DIR / "templates"
 DEFAULTS_DIR = PLUGIN_DIR / "defaults"
-# The register's name, and the one it had before: a shim until 2.0.0 (.sdlc/deprecations.toml).
+# The register's name, and the one it had before: a shim until 1.4.0 (.sdlc/deprecations.toml).
 # A repo with only the old file is read from it, and so is a host template under the old name.
 INBOX = "inbox.md"
 OLD_INBOX = "ideas.md"
@@ -5515,7 +5515,7 @@ HOST_DOCS = {
 RETIRED_KEYS: dict[str, dict[str, str | None]] = {
     "metrics.target_stops": {
         "now": "metrics.stop_allowance",
-        "since": "2.0.0",
+        "since": "1.2.0",
         "do": "Delete it. A change's target is now its gates plus `stop_allowance` (1 by default); "
         "set that instead if you want a different allowance.",
     },
@@ -5841,7 +5841,7 @@ def drift(root: Path) -> dict:
                     "what": "template",
                     "where": where,
                     "class": "renamed",
-                    "detail": f"read as {INBOX} until 2.0.0: rename it to {INBOX}",
+                    "detail": f"read as {INBOX} until 1.4.0: rename it to {INBOX}",
                 }
             )
             continue

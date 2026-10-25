@@ -1,7 +1,8 @@
 # The plugin's shims: code kept working for something older, and the version that removes each.
 # `release.deprecations` names this file; `/sdlc:release` refuses to cut a version that would still
 # carry one, and `/sdlc:status` lists those due. A path kept for good is not a shim and has no
-# entry here (the no-manifest drift, RETIRED_KEYS). Empty while there is no shim.
+# entry here: the no-manifest drift, and whatever reads what history holds, which never migrates.
+# A RETIRED_KEYS entry is a shim, its drift note removed with the rest.
 #
 # [[shim]]
 # name = "old-flag"                       # unique
@@ -11,6 +12,18 @@
 
 [[shim]]
 name = "ideas-register"
-remove_in = "2.0.0"
-where = "scripts/sdlc.py register_path, template_path"
+remove_in = "1.4.0"
+where = "scripts/sdlc.py register_path, template_path, drift (the old template's name)"
 test = "tests/test_inbox.py::test_ideas_md_still_reads"
+
+[[shim]]
+name = "bare-date-entries"
+remove_in = "1.4.0"
+where = "scripts/sdlc.py ENTRY_RE's optional count, inbox_migration, cmd_migrate_inbox"
+test = "tests/test_inbox.py::test_migrate_moves_the_registers_into_one_inbox_with_ids"
+
+[[shim]]
+name = "retired-target-stops"
+remove_in = "1.4.0"
+where = "scripts/sdlc.py RETIRED_KEYS"
+test = "tests/test_setup_lifecycle.py::test_a_host_still_setting_target_stops_is_told"

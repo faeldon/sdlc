@@ -205,7 +205,7 @@ recorded hash, and sorts what it finds:
 
 Whitespace alone is never drift. `breaking` is kept apart from all of that: what the plugin would
 now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py` names its
-replacement: `metrics.target_stops` became `metrics.stop_allowance` in 2.0.0), a template override lacking a heading, frontmatter key or placeholder the script
+replacement: `metrics.target_stops` became `metrics.stop_allowance` in 1.2.0, and the note goes in 1.4.0), a template override lacking a heading, frontmatter key or placeholder the script
 reads (`TEMPLATE_READS`), or a project or product doc it can't parse. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
@@ -237,7 +237,7 @@ untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
 with finished changes: the change's commit keeps them in history. `work/inbox.md` is committed
 too; a closed seed is deleted from it, history keeping that as well. It was `work/ideas.md`
-before 1.2.0, and a repo with only that file is read from it until 2.0.0, as a host template
+before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
 reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
 over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
@@ -271,7 +271,7 @@ changes are done, from the main checkout's `work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [seed] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
 and every commit that ever held one, so an id is never handed out twice. A heading with a bare
-date is an entry from before ids, read the same. An `idea:`, `After:` or `Groups:` line names an
+date is an entry from before ids, read the same until 1.4.0: run `migrate-inbox` before. An `idea:`, `After:` or `Groups:` line names an
 entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
 `work/inbox.md` feed it: `[bug]` in place of `[seed]` marks something already broken, and an
@@ -466,7 +466,8 @@ refuses to cut any version at or past a shim's `remove_in`, a `--version` includ
 and its test are gone and the entry with them. `/sdlc:status` shows the overdue and due ones under
 *Unreleased*; it never counts them as problems, so `check --strict` stays a gate for the change in
 hand. A bad entry is reported, and blocks a release, rather than raised. Without the file nothing
-changes. A path kept for good is not a shim and has no entry.
+changes. A path kept for good (the no-manifest drift, and whatever reads what history holds,
+which never migrates) is not a shim and has no entry.
 
 ## Retrospectives
 
