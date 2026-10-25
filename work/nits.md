@@ -15,57 +15,12 @@
 
 The half of the `status` test that runs with a patch applied can't fail, so it proves nothing.
 
-## 003-2 [robustness] A deprecations registry that isn't UTF-8 crashes status
-- **raised:** 2026-10-24 by 003-test-lifetimes (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** med
-
-`deprecations()` catches `TOMLDecodeError` but not `UnicodeDecodeError` from `read_text`, so it
-raises instead of reporting a problem.
-
-## 005-1 [robustness] Accept's `left` builds up across checks
-- **raised:** 2026-10-24 by 005-acceptance-checks (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** med
-
-`cmd_accept` takes `before` once, so one check that leaves the tree changed fails every check
-after it too.
-
-## 005-2 [robustness] Accept keeps a timed-out check's output as bytes
-- **raised:** 2026-10-24 by 005-acceptance-checks (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** med
-
-`TimeoutExpired.stdout` is bytes even with `text=True`, so the output reads `b'…'`.
-
-## 005-3 [robustness] Acceptance checks inherit stdin
-- **raised:** 2026-10-24 by 005-acceptance-checks (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** low
-
-A check that reads stdin waits until the timeout instead of failing at once.
-
 ## 009-1 [style] The `RECORD_CLEARS` tuple-unpacking idiom
 - **raised:** 2026-10-24 by 009-drift-message (cost)
 - **paths:** tests/test_defaults.py
 - **cost:** S  **value:** low
 
 The set is built from two unpacked tuples where one set literal reads plainer.
-
-## 010-1 [robustness] Release's after-bump step misses files the command stages
-- **raised:** 2026-10-24 by 010-release-lock (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** S  **value:** med
-
-`git diff --name-only` sees unstaged changes only; `git diff --name-only -z HEAD` would see both.
-
-## 010-2 [robustness] A failed after-bump leaves a changelog release created
-- **raised:** 2026-10-24 by 010-release-lock (correctness)
-- **paths:** scripts/sdlc.py
-- **cost:** M  **value:** med
-
-`restore()` puts back tracked files only, so a changelog file the release created stays, and a
-rerun adds its section twice.
 
 ## 010-3 [style] Two release-skill lines run past 100 characters
 - **raised:** 2026-10-24 by 010-release-lock (cost)
@@ -118,3 +73,11 @@ both times. Walk it once and pass it in.
 
 `_resolve_trunk` runs up to three `git` calls each time `load_config()` does, and some commands
 call it several times; nothing is slow yet, but one resolved value could be passed down instead.
+
+## 022-1 [robustness] A failed commit or prepare doesn't list a new file after-bump staged
+- **raised:** 2026-10-25 by 022-robustness-nits (correctness)
+- **paths:** scripts/sdlc.py
+- **cost:** S  **value:** low
+
+`restore()` after a later failure unstages it into an untracked file, but `untracked` was taken
+at after-bump, so the report never names it.

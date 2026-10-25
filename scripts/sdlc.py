@@ -1588,9 +1588,15 @@ def cmd_accept(root: Path, ident: str) -> int:
         return 1
     found = acceptance(path)
     checkout = path.parent.parent
-    before = _status_lines(checkout)
     results = []
+
+    def text(out: str | bytes | None) -> str:
+        # A timeout's partial output is bytes even with text=True.
+        return out.decode("utf-8", "replace") if isinstance(out, bytes) else out or ""
+
     for check in found["checks"]:
+        # Per check, so one that leaves the tree changed fails alone.
+        before = _status_lines(checkout)
         start = datetime.now(UTC)
         try:
             run = subprocess.run(
@@ -1599,11 +1605,12 @@ def cmd_accept(root: Path, ident: str) -> int:
                 capture_output=True,
                 text=True,
                 timeout=CHECK_TIMEOUT,
+                stdin=subprocess.DEVNULL,
             )
             code, output = run.returncode, run.stdout + run.stderr
         except subprocess.TimeoutExpired as e:
             code = None
-            output = f"{e.stdout or ''}{e.stderr or ''}\ntimed out after {CHECK_TIMEOUT}s"
+            output = f"{text(e.stdout)}{text(e.stderr)}\ntimed out after {CHECK_TIMEOUT}s"
         seconds = round((datetime.now(UTC) - start).total_seconds(), 1)
         left = sorted(_status_lines(checkout) - before)
         results.append(
@@ -3045,7 +3052,7 @@ def deprecations(home: Path, cfg: dict) -> dict:
     out["exists"] = True
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         out["problems"].append(f"{rel} won't parse: {e}")
         return out
     entries = data.get("shim", [])
@@ -3337,6 +3344,18 @@ def _untracked(home: Path) -> set[str]:
     return {p for p in out.split("\0") if p}
 
 
+def _put_back(home: Path, paths: list[str]) -> None:
+    """Put these paths back as HEAD has them: unstaged, and their HEAD text checked out. A path
+    HEAD lacks is left untracked, never deleted, and kept out of the checkout, whose whole
+    pathspec git refuses over one path it can't match."""
+    if not paths:
+        return
+    _git(home, "reset", "-q", "HEAD", "--", *paths)
+    out = _git(home, "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *paths) or ""
+    if known := [p for p in out.split("\0") if p]:
+        _git(home, "checkout", "-q", "--", *known)
+
+
 def cmd_unreleased(root: Path) -> int:
     """The changes since the last release, as JSON. Writes nothing."""
     home = main_root(root)
@@ -3422,6 +3441,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         return emit(1)
 
     tag, notes = report["tag"], report["notes"]
+    created: list[str] = []  # files the release wrote that weren't there, which restore removes
 
     def bump() -> str | None:
         for rel_path in rel["version_files"]:
@@ -3431,14 +3451,17 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
 
     def changelog() -> str | None:
         path = home / rel["changelog"]
+        if not path.is_file():
+            created.append(rel["changelog"])
         text = path.read_bytes().decode("utf-8") if path.is_file() else "# Changelog\n"
         path.write_bytes(with_changelog(text, new, notes, date.today().isoformat()).encode())
         return None
 
     def restore() -> None:
         # Put the files back, so a rerun finds main clean and the same release to make.
-        _git(home, "reset", "-q", "HEAD", "--", *report["files"])
-        _git(home, "checkout", "-q", "--", *report["files"])
+        _put_back(home, report["files"])
+        for rel_path in created:
+            (home / rel_path).unlink(missing_ok=True)
 
     def after_bump() -> str | None:
         # Main had no uncommitted tracked changes (`_release_refusals`), so every tracked file
@@ -3458,15 +3481,17 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
             err = f"release.after_bump timed out after {AFTER_BUMP_TIMEOUT}s"
         except OSError as e:
             err = f"release.after_bump didn't run: {e}"
-        changed = (_git(home, "diff", "--name-only", "-z") or "").split("\0")
+        # Against HEAD, so a file the command staged is seen as well as one it only changed.
+        changed = (_git(home, "diff", "--name-only", "-z", "HEAD") or "").split("\0")
         report["files"] += [p for p in changed if p and p not in report["files"]]
-        report["untracked"] = sorted(_untracked(home) - before)
         if err:
             restore()
+        # After restore, which leaves a new file the command staged untracked.
+        report["untracked"] = sorted(_untracked(home) - before)
         return err
 
     def tracked_changes() -> set[str]:
-        return {p for p in (_git(home, "diff", "--name-only", "-z") or "").split("\0") if p}
+        return {p for p in (_git(home, "diff", "--name-only", "-z", "HEAD") or "").split("\0") if p}
 
     def prepare() -> str | None:
         # A build, never part of the release commit: every tracked file it changes is put back
@@ -3492,7 +3517,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         others = tracked_changes() - before - set(report["files"])
         touched = sorted(others | {p for p, b in held.items() if _read_bytes(home / p) != b})
         if others:
-            _git(home, "checkout", "-q", "--", *sorted(others))
+            _put_back(home, sorted(others))
         if touched:
             err = err or (
                 f"release.prepare changed tracked files: {', '.join(touched)}; build into an "

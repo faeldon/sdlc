@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -242,3 +243,36 @@ def test_accept_refuses_a_bad_file(repo: Path, capsys) -> None:
     _write(repo, _checks("## No command\n\nJust prose.\n"))
     code, out = _cmd(capsys, sdlc.cmd_accept, repo)
     assert code == 1 and out["passed"] is False and out["problems"]
+
+
+def test_accept_judges_each_check_on_its_own_changes(repo: Path, capsys) -> None:
+    _write(repo, _checks(_check("Leaves a file", "touch stray.txt"), _check("Holds", "true")))
+    code, out = _cmd(capsys, sdlc.cmd_accept, repo)
+    assert code == 1
+    by = {c["name"]: c for c in out["checks"]}
+    assert not by["Leaves a file"]["passed"] and by["Leaves a file"]["left"] == ["?? stray.txt"]
+    assert by["Holds"]["passed"] and by["Holds"]["left"] == []
+
+
+def test_a_timed_out_checks_output_is_text(repo: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(sdlc, "CHECK_TIMEOUT", 1)
+    _write(repo, _checks(_check("Hangs", "echo partial; exec sleep 5")))
+    code, out = _cmd(capsys, sdlc.cmd_accept, repo)
+    output = out["checks"][0]["output"]
+    assert code == 1 and "partial" in output and "b'" not in output
+
+
+def test_a_check_reading_stdin_gets_nothing_and_never_waits(repo: Path, capsys, monkeypatch):
+    monkeypatch.setattr(sdlc, "CHECK_TIMEOUT", 2)
+    _write(repo, _checks(_check("Reads stdin", "cat > /dev/null")))
+    # A stdin that never closes: a check that inherits it would wait out the timeout.
+    r, w = os.pipe()
+    saved = os.dup(0)
+    os.dup2(r, 0)
+    try:
+        code, out = _cmd(capsys, sdlc.cmd_accept, repo)
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, r, w):
+            os.close(fd)
+    assert code == 0 and out["checks"][0]["exit"] == 0

@@ -710,3 +710,50 @@ def test_a_prepare_that_edits_a_file_the_release_changed_is_refused(tmp_path, ca
     ]
     assert _git(root, "rev-parse", "HEAD") == head and _git(root, "tag", "-l", "v0.4.3") == ""
     assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+# ---------------------------------------------------------------- putting it back
+
+
+def test_a_failed_after_bump_unstages_what_it_staged(tmp_path: Path, capsys) -> None:
+    root = _locked(tmp_path, "echo x >> uv.lock; git add uv.lock; exit 1")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1 and "uv.lock" in out["files"]
+    assert _git(root, "rev-parse", "HEAD") == head
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_a_failed_after_bump_leaves_a_new_file_it_staged_untracked(tmp_path: Path, capsys):
+    root = _locked(tmp_path, "touch new.txt; git add new.txt; exit 1")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+    assert (root / "new.txt").exists() and "new.txt" in out["untracked"]
+    assert '"0.4.2"' in (root / "pkg.json").read_text(encoding="utf-8")
+
+
+def test_a_prepare_that_stages_a_file_is_refused_and_unstaged(tmp_path: Path, capsys) -> None:
+    root = _prepared(tmp_path, "echo x >> README.md; git add README.md")
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    _git(root, "add", "README.md")
+    _git(root, "commit", "-q", "-m", "a readme")
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1 and "README.md" in out["refusals"][0]
+    assert _git(root, "rev-parse", "HEAD") == head
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_a_failed_release_removes_the_changelog_it_created(tmp_path: Path, capsys) -> None:
+    config = CONFIG + 'changelog = "CHANGELOG.md"\nafter_bump = "exit 1"\n'
+    root = _repo(tmp_path, config=config)
+    _close(root, "002-reopen-drafts", "patch")
+    code, _ = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1 and not (root / "CHANGELOG.md").exists()
+    fixed = CONFIG + 'changelog = "CHANGELOG.md"\n'
+    (root / ".sdlc" / "config.toml").write_text(fixed, encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "after_bump fixed")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8").count("## 0.4.3") == 1

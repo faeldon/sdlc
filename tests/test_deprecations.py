@@ -336,3 +336,11 @@ def test_this_repos_check_fails_on_an_overdue_shim_or_a_missing_test(tmp_path: P
         "old-flag is overdue: remove_in 1.0.0",
         "old-flag: no test tests/test_x.py::test_gone",
     ]
+
+
+def test_a_registry_that_isnt_utf8_is_a_problem_not_a_crash(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "deprecations.toml").write_bytes(b"\xff\xfe[[shim]]\n")
+    reg = _read(root)
+    assert any("won't parse" in p for p in reg["problems"]), reg["problems"]
+    assert reg["shims"] == []
