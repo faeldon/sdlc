@@ -102,8 +102,8 @@ The tiers:
 | 1 | a small, contained change | `intent.md`, with a short Approach |
 | 2 | anything others rely on, or near an invariant | `intent.md`, `spec.md`, `plan.md` |
 
-`/sdlc:status` tells you where every open change is and what to do next, from any worktree. Ideas
-not ready to be a change go in `work/ideas.md`, which `/sdlc:intent` can start from; tag one
+`/sdlc:status` tells you where every open change is and what to do next, from any worktree. Requests
+not ready to be a change go in `work/inbox.md`, which `/sdlc:intent` can start from; tag one
 `[bug]`, or give it an `After: "<title>"` line to make it wait for another, and status's
 **Next up** puts forward the one to start once the open changes are done.
 
@@ -129,7 +129,7 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   command.
 - **Retrospectives.** After a couple of releases, `/sdlc:status` says **Retro due**.
   `/sdlc:retro` looks across what shipped (cost, architecture, process, product, direction), rewrites
-  the direction doc (`.sdlc/DIRECTION.md`) and turns findings into seeds in `work/ideas.md`. It
+  the direction doc (`.sdlc/DIRECTION.md`) and turns findings into seeds in `work/inbox.md`. It
   never edits code.
 - **What each change cost.** `/sdlc:close` records each change's time, tokens, stops and rework
   on its `Close` commit, read from this repo's Claude Code transcripts on your machine, numbers

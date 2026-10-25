@@ -8,3 +8,9 @@
 # remove_in = "2.0.0"                     # quoted X.Y.Z: the release that no longer carries it
 # where = "scripts/sdlc.py load_config"   # where the shim is
 # test = "tests/test_sdlc.py::test_old_flag_still_reads"   # optional: the test that goes with it
+
+[[shim]]
+name = "ideas-register"
+remove_in = "2.0.0"
+where = "scripts/sdlc.py register_path, template_path"
+test = "tests/test_inbox.py::test_ideas_md_still_reads"

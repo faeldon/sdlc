@@ -1,6 +1,6 @@
 ---
 name: intent
-description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a work/ideas.md seed into committed work.
+description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a work/inbox.md seed into committed work.
 argument-hint: "[what the change is about, or the path to a brief file]"
 allowed-tools:
   - Read
@@ -42,7 +42,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 `config` names the repo's process doc (`docs.process`) and its policy doc (`docs.policy`). Read the
 process doc if it isn't already in context — specifically its tier table, since Step 2 depends on
 it. If `config` reports it doesn't exist, use the tiers in Step 2 as they stand and say so. Skim
-`work/ideas.md`, if there is one, for a seed that matches what the human is describing. Note
+`work/inbox.md`, if there is one, for a seed that matches what the human is describing. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
 `docs.product` exists, and its `outcomes`: with a product doc, Step 1 asks what the change serves.
@@ -209,10 +209,10 @@ replace the template body with the approved draft. Keep the frontmatter the tool
 the approved issue fields' lines and the `serves:` line under `depends_on:`, exactly as shown in
 Step 3.
 
-If the change came from a `work/ideas.md` seed: set `idea:` in the frontmatter to that entry's
+If the change came from a `work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 title alone, without its `## `, date or tag (`idea: Keep drafts` for `## [2026-10-01] [seed] Keep
 drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit` the entry in the worktree's
-`work/ideas.md`: its heading's tag becomes `[building]`, the rest of the heading unchanged, and
+`work/inbox.md`: its heading's tag becomes `[building]`, the rest of the heading unchanged, and
 `Building in work/NNN-slug/.` becomes its first body line, so the tag lands with the change. Never
 put the pointer in the heading. Leave the seed's prose alone.
 

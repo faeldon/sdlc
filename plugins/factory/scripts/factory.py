@@ -75,7 +75,7 @@ NOTES_HEAD = """\
 
 > What happened while this change was built that its intent, spec and plan don't say. Free-form,
 > with one rule: anything left undone is an unticked `- [ ]` line. `/sdlc:ship` gives each one a
-> disposition, carried to a `work/ideas.md` seed or dropped with a reason, and `sdlc.py ship`
+> disposition, carried to a `work/inbox.md` seed or dropped with a reason, and `sdlc.py ship`
 > refuses while one is still unticked.
 """
 CONFIG_FILE = Path(".sdlc") / "factory.toml"

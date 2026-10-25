@@ -381,7 +381,7 @@ def test_open_changes_and_seeds_are_counted(tmp_path: Path) -> None:
                       title="open one").replace("stage: shipped", "stage: build"),
         encoding="utf-8",
     )  # fmt: skip
-    (root / "work" / "ideas.md").write_text(
+    (root / "work" / "inbox.md").write_text(
         "# Ideas\n\n## [2026-09-01] [seed] Old one\n\nx\n\n## [2026-10-01] [seed] New one\n\nx\n"
         "\n## [2026-10-02] [building] Taken\n\nx\n",
         encoding="utf-8",
@@ -435,7 +435,7 @@ def _direction(root: Path) -> None:
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nGoals.\n", encoding="utf-8")
     (root / "work").mkdir(exist_ok=True)
-    (root / "work" / "ideas.md").write_text("# Ideas\n\n## [2026-10-24] [seed] X\n\nx\n")
+    (root / "work" / "inbox.md").write_text("# Ideas\n\n## [2026-10-24] [seed] X\n\nx\n")
 
 
 def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, capsys) -> None:
@@ -447,7 +447,7 @@ def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, c
     assert _git(root, "log", "-1", "--format=%s") == "Retrospective 2026-10-24"
     assert _git(root, "show", "--name-only", "--format=", "HEAD").splitlines() == [
         ".sdlc/DIRECTION.md",
-        "work/ideas.md",
+        "work/inbox.md",
     ]
     assert _git(root, "status", "--porcelain") == ""
     assert sdlc.last_retrospective(root, "main")["date"] == "2026-10-24"
@@ -593,7 +593,7 @@ def test_a_doc_without_ids_or_no_doc_is_a_first_retrospective(tmp_path: Path) ->
 def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "work").mkdir()
-    (root / "work" / "ideas.md").write_text(
+    (root / "work" / "inbox.md").write_text(
         "# Ideas\n\n## [2026-10-01] [seed] Still waiting\n\nx\n", encoding="utf-8"
     )
     _git(root, "add", "-A")
@@ -1034,7 +1034,7 @@ def test_retro_commit_takes_the_product_doc_too(tmp_path: Path, capsys) -> None:
     code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
     assert code == 0, capsys.readouterr().out
     assert sorted(_git(root, "show", "--name-only", "--format=", "HEAD").splitlines()) == [
-        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", "work/ideas.md",
+        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", "work/inbox.md",
     ]  # fmt: skip
 
 

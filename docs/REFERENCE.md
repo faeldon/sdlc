@@ -167,7 +167,7 @@ own can add the sections its domain needs and prompts in its own words; keep the
 start with `<`: two or more left in a file is how `sdlc.py status` tells a scaffold nobody has
 written from a real artifact.
 
-`ideas.md` here replaces what `work/ideas.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
+`inbox.md` here replaces what `work/inbox.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
 or the factory first writes one, and `nits.md` what `work/nits.md` starts as, when `/sdlc:ship`
 first records a nit. None has prompts: its note carries the rules. `checks.md`
@@ -236,8 +236,11 @@ fast-forward that carries the uncommitted work, or a rebase of the branch's own 
 clean tree, reported with the command that undoes it. Anything that would conflict is refused,
 untouched, for the person to resolve. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
-with finished changes: the change's commit keeps them in history. `work/ideas.md` is committed
-too; a closed seed is deleted from it, history keeping that as well. So is `work/nits.md`, the
+with finished changes: the change's commit keeps them in history. `work/inbox.md` is committed
+too; a closed seed is deleted from it, history keeping that as well. It was `work/ideas.md`
+before 1.2.0, and a repo with only that file is read from it until 2.0.0, as a host template
+`.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
+reports a repo holding both. So is `work/nits.md`, the
 findings `/sdlc:ship` approved unfixed: each is an entry with its theme, paths, cost and value
 under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on the same
 paths, retired by the ship whose diff fixes it, and counted by theme and age by `/sdlc:retro`.
@@ -245,8 +248,8 @@ paths, retired by the ship whose diff fixes it, and counted by theme and age by 
 an entry it can't read.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
-changes are done, from the main checkout's `work/ideas.md`, `work/nits.md` and direction doc. A
-missing file adds nothing. Two optional forms in `work/ideas.md` feed it: `[bug]` in place of
+changes are done, from the main checkout's `work/inbox.md`, `work/nits.md` and direction doc. A
+missing file adds nothing. Two optional forms in `work/inbox.md` feed it: `[bug]` in place of
 `[seed]` marks something already broken, and an `After: "<title>", "<title>"` line in a seed's
 body makes it wait while any seed it names is still in the register and not being built. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.

@@ -214,13 +214,13 @@ def test_every_shipped_file_has_the_reader_its_folder_promises(tmp_path: Path, c
     assert defaults == {p.name for p in ROOT.glob("defaults/*.md")}
 
 
-def test_the_ideas_template_shows_the_heading_the_script_reads() -> None:
-    note = " ".join(_note(_text("templates/ideas.md")))
+def test_the_inbox_template_shows_the_heading_the_script_reads() -> None:
+    note = " ".join(_note(_text("templates/inbox.md")))
     form = re.search(r"`(## \[YYYY-MM-DD\] \[seed\] <title>)`", note)
     assert form, "the note names the seed heading form"
     heading = form.group(1).replace("YYYY-MM-DD", "2026-10-24").replace("<title>", "A seed")
-    assert sdlc.IDEA_RE.match(heading)
-    assert not [line for line in _text("templates/ideas.md").splitlines() if line.startswith("## ")]
+    assert sdlc.ENTRY_RE.match(heading)
+    assert not [line for line in _text("templates/inbox.md").splitlines() if line.startswith("## ")]
 
 
 def test_the_factory_starts_notes_from_the_same_text_as_the_template() -> None:

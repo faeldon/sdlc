@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Run a retrospective, the outermost loop — look across every change and release since the last one, from counts the script gathers, and make five passes (cost, architecture, process, product, direction). The product pass, when the repo has a product doc, scores its outcomes against the evidence the host's commands print. Each finding becomes a work/ideas.md seed, an intent title, or is dropped with a reason. After one approval, rewrite the direction doc (goals, milestones, the next major release) and the product doc's outcome lines, and commit them with the seeds as "Retrospective YYYY-MM-DD". Use from the main checkout when /sdlc:status says a retrospective is due (after 2 releases, or a major one), or when the direction is unclear. Not for scans or drift (/sdlc:health), not for cutting a release (/sdlc:release), and never for editing code, skills or the process doc.
+description: Run a retrospective, the outermost loop — look across every change and release since the last one, from counts the script gathers, and make five passes (cost, architecture, process, product, direction). The product pass, when the repo has a product doc, scores its outcomes against the evidence the host's commands print. Each finding becomes a work/inbox.md seed, an intent title, or is dropped with a reason. After one approval, rewrite the direction doc (goals, milestones, the next major release) and the product doc's outcome lines, and commit them with the seeds as "Retrospective YYYY-MM-DD". Use from the main checkout when /sdlc:status says a retrospective is due (after 2 releases, or a major one), or when the direction is unclear. Not for scans or drift (/sdlc:health), not for cutting a release (/sdlc:release), and never for editing code, skills or the process doc.
 argument-hint: "[an area to focus on]"
 allowed-tools:
   - Read
@@ -22,7 +22,7 @@ architecture still the right shape, are the loops working, is the work moving wh
 and where should the next stretch of work go.
 
 **It never edits code, skills or the process doc.** What it finds goes back in as seeds in
-`work/ideas.md` and intent titles for `/sdlc:intent`, and comes out the other end as changes.
+`work/inbox.md` and intent titles for `/sdlc:intent`, and comes out the other end as changes.
 Besides seeds it writes the direction doc, which says where the repo is headed, and, when there is
 one, the outcome lines of the product doc (`docs.product`), never its prose.
 
@@ -100,7 +100,7 @@ What `retro` gives:
 - **The product doc** (`docs.product`), if it exists: who the users are, the problem, the outcomes
   and how each is measured, and the bets. This is what "the right work" means here.
 - **The context docs** (`docs.context`): what a session is told about the repo.
-- **`work/ideas.md`**: the seeds, so a finding that is already a seed is dropped as a duplicate.
+- **`work/inbox.md`**: the seeds, so a finding that is already a seed is dropped as a duplicate.
 - **Three skills at most**: the three largest by `est_tokens` in `prose.skills` (or by `tokens` sum
   when measured), plus any the argument names. They sit next to this one, in the plugin's
   `skills/` folder.
@@ -156,7 +156,7 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    - **revised**: struck `~~…~~ Revised → <new id>: <reason>`, with the new item written beside it;
    - **carried**: left open, saying what's left. Partial progress is carried, never "partly done".
 
-   A `vanished` seed is worth saying out loud: it left `ideas.md` with no change behind it. Then,
+   A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it. Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each milestone says what is true when it's done and has one `Groups:`
    line naming its changes and seeds. Then say what the next **major** release would contain (the
@@ -166,7 +166,7 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 
 Every finding ends in exactly one of these, or it doesn't go in the report:
 
-- **Seed**: a `work/ideas.md` entry, `## [YYYY-MM-DD] [seed] Title`, with a short paragraph: the
+- **Seed**: a `work/inbox.md` entry, `## [YYYY-MM-DD] [seed] Title`, with a short paragraph: the
   problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD." A finding that comes in
   phases is one seed per phase, each later one with an `After: "<earlier seed's title>"` line, so
   `/sdlc:status` puts forward only the phase that's next.
@@ -192,7 +192,7 @@ changes first: they are the decisions this approval makes.
 
 Ask literally:
 
-> `Write <docs.direction> with these <K> status changes (done, dropped, revised), append these <N> seeds to work/ideas.md, then commit both as "Retrospective <today>"? (yes / revise / no)`
+> `Write <docs.direction> with these <K> status changes (done, dropped, revised), append these <N> seeds to work/inbox.md, then commit both as "Retrospective <today>"? (yes / revise / no)`
 
 When the product doc's outcome lines change too, name it: `Write <docs.direction> and the
 outcomes in <docs.product> with these <K> status changes…, then commit all three as…`.
@@ -203,8 +203,8 @@ it again and ask again.
 ## Step 6 — Write and record it
 
 `Write` the direction doc at the `docs.direction` path, `Edit` the product doc's outcome lines as
-approved, and `Edit` `work/ideas.md` to append the seeds after its last entry. If it doesn't
-exist, `Write` it first from `templates["ideas.md"]` in `config`, as it is, then append. Then:
+approved, and `Edit` `work/inbox.md` to append the seeds after its last entry. If it doesn't
+exist, `Write` it first from `templates["inbox.md"]` in `config`, as it is, then append. Then:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
@@ -227,7 +227,7 @@ so no product pass: run /sdlc:setup product to add one.` Then stop.
 
 - Editing code, skills, the process doc or the policy doc: that's a change, through `/sdlc:intent`.
 - Editing the product doc's users, problem, measures or bets: only its outcome lines.
-- Quoting evidence output into the direction doc, the product doc or `work/ideas.md`: findings
+- Quoting evidence output into the direction doc, the product doc or `work/inbox.md`: findings
   are written in this skill's own words, and a line of evidence goes in only when the human
   approves that line at the WAIT. Evidence can hold what a host's users did.
 - Opening intents, cutting releases, pushing anything.

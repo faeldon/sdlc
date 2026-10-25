@@ -22,7 +22,7 @@ thousands of tokens — re-reading the process doc for the stage model, the revi
 shipping involves, and several `intent.md` files to see what each change is waiting on. Everything
 needed to answer the common case is in Step 1's output plus the tables below.
 
-**Do not read the process doc, the review, `work/ideas.md`, or any `intent.md`/`spec.md`/`plan.md`**
+**Do not read the process doc, the review, `work/inbox.md`, or any `intent.md`/`spec.md`/`plan.md`**
 — not "for context", not "to be thorough". Step 1 is the whole input. The one exception is Step 4.
 
 **Read-only.** Never write an artifact, never edit frontmatter, never advance a `stage:`, never
@@ -43,7 +43,7 @@ That is the entire input. `sdlc.py status` already gives id, tier, stage, age in
 artifacts exist, the title, and the counts of undone items and unresolved open questions — don't
 go looking for any of it elsewhere.
 
-**`■ Next up` is what comes after the open changes**, so you never need `work/ideas.md`, the nits
+**`■ Next up` is what comes after the open changes**, so you never need `work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
 and orders them by a fixed rule: `bug` entries first, then each open milestone's next grouped seed
 (`M1 (…)`), then the next seed in a series (`next in series after "…"`), then cost-`S` nits by

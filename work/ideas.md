@@ -139,7 +139,9 @@ bug entry behind one approval. A report never names the host in what lands here 
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 
-## [2026-10-25] [seed] A bugs register beside the ideas register
+## [2026-10-25] [building] A bugs register beside the ideas register
+
+Building in work/024-bugs-register/.
 
 A bug isn't a seed: it has a severity, a repro and something already broken, and wants triage
 before it waits its turn, where a seed waits until someone wants it. Weigh a `work/bugs.md` shaped
@@ -159,8 +161,6 @@ Retro then counts bugs reported and fixed in its window by severity, time from r
 bugs by age, and escapes per introducing change against its tier; the product doc may own a
 measure such as escaped bugs per release. This leans the choice above toward the separate
 register: tags in `work/ideas.md` give retro nothing to count or link a fix to. Raised 2026-10-25.
-
-After: "A local channel for bug reports and feature requests from other sessions"
 
 ## [2026-10-25] [seed] GitHub issues as the intake for bugs and requests, in hosts too
 

@@ -367,11 +367,11 @@ def test_drop_writes_the_reason_then_lands_through_the_script() -> None:
 
 
 @pytest.mark.parametrize("name", sorted(BY_ID))
-def test_no_skill_writes_the_ideas_heading_itself(name: str) -> None:
-    """`work/ideas.md` starts from `templates["ideas.md"]`, which a host can override; a heading
+def test_no_skill_writes_the_inbox_heading_itself(name: str) -> None:
+    """`work/inbox.md` starts from `templates["inbox.md"]`, which a host can override; a heading
     written inline would skip it."""
     text = BY_ID[name].read_text(encoding="utf-8")
-    assert "`# Ideas`" not in text, f'{name}: start ideas.md from templates["ideas.md"]'
+    assert "`# Inbox`" not in text, f'{name}: start inbox.md from templates["inbox.md"]'
 
 
 @pytest.mark.parametrize("name", ["sdlc:intent", "sdlc:spec", "sdlc:retro", "sdlc:setup"])

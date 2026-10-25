@@ -223,7 +223,7 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk
     assert [r["tag"] for r in looked["releases"]] == ["v0.1.0", "v0.2.0"]
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n", encoding="utf-8")
     (root / "work").mkdir()
-    (root / "work" / "ideas.md").write_text("# Ideas\n", encoding="utf-8")
+    (root / "work" / "inbox.md").write_text("# Ideas\n", encoding="utf-8")
     recorded = _run(root, "retro-commit")
     assert recorded.returncode == 0, recorded.stdout + recorded.stderr
     assert _git(root, "log", "-1", "--format=%s").startswith("Retrospective ")

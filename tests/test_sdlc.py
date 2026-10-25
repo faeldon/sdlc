@@ -384,7 +384,7 @@ def test_check_is_quiet_with_no_counter_or_one_behind_or_ahead_of_the_folders(
 
 def test_orphan_building_idea_is_flagged(tmp_path: Path) -> None:
     (tmp_path / "work").mkdir()
-    (tmp_path / "work" / "ideas.md").write_text(
+    (tmp_path / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Column level lineage export\n\nSome prose.\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -395,7 +395,7 @@ def test_building_idea_with_a_folder_is_quiet(tmp_path: Path) -> None:
     """The slug match is deliberately loose both ways: a folder slug is a shortening of the idea's
     title, never a copy, so an exact comparison would nag about every idea being worked on."""
     _change(tmp_path, "001-column-lineage", _fm(slug="column-lineage"))
-    (tmp_path / "work" / "ideas.md").write_text(
+    (tmp_path / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Column lineage\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -405,13 +405,13 @@ def test_building_idea_with_a_folder_is_quiet(tmp_path: Path) -> None:
 def test_building_idea_linked_only_by_frontmatter_is_quiet(tmp_path: Path) -> None:
     """`idea:` is the explicit link /sdlc:intent writes, so it counts even when the slug has
     drifted from the title. The frontmatter keeps the heading as it read at
-    promotion, `[seed]`, while work/ideas.md now says `[building]`, so the match is on the title."""
+    promotion, `[seed]`, while work/inbox.md now says `[building]`, so the match is on the title."""
     _change(
         tmp_path,
         "001-search-front-end",
         _fm(slug="search-front-end", idea='"[2026-10-01] [seed] Search as its own page"'),
     )
-    (tmp_path / "work" / "ideas.md").write_text(
+    (tmp_path / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -429,7 +429,7 @@ def test_building_idea_linked_only_to_a_dropped_change_is_flagged(tmp_path: Path
             idea='"[2026-10-01] [seed] Search as its own page"',
         ),
     )
-    (tmp_path / "work" / "ideas.md").write_text(
+    (tmp_path / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -453,8 +453,8 @@ def test_new_starts_no_notes(tmp_path: Path, tier: int) -> None:
     assert sorted(p.name for p in folder.iterdir()) == sorted(sdlc.TIER_ARTIFACTS[tier])
 
 
-def test_a_hosts_ideas_and_notes_templates_win(tmp_path: Path) -> None:
-    for name in ("ideas.md", "notes.md"):
+def test_a_hosts_inbox_and_notes_templates_win(tmp_path: Path) -> None:
+    for name in ("inbox.md", "notes.md"):
         assert sdlc.template_path(tmp_path, name) == (sdlc.TEMPLATE_DIR / name, "plugin")
         (tmp_path / ".sdlc" / "templates").mkdir(parents=True, exist_ok=True)
         (tmp_path / ".sdlc" / "templates" / name).write_text("# Mine\n", encoding="utf-8")
@@ -1226,7 +1226,7 @@ def test_check_after_the_last_close_still_audits_ideas(tmp_path: Path, capsys, m
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
     assert sdlc.main() == 0
     (root / "work").mkdir(exist_ok=True)
-    (root / "work" / "ideas.md").write_text("## [2026-10-01] [building] Orphan\n", encoding="utf-8")
+    (root / "work" / "inbox.md").write_text("## [2026-10-01] [building] Orphan\n", encoding="utf-8")
     assert sdlc.main() == 1
     assert [p["kind"] for p in sdlc.analyze(root)["problems"]] == ["orphan idea"]
 
@@ -1805,7 +1805,7 @@ def _seeded(tmp_path: Path, idea: str, ideas: str = IDEAS) -> tuple[Path, Path]:
     """A change in a real repo, ready to ship, whose `idea:` is `idea`, beside `ideas`."""
     root = _repo(tmp_path)
     d = _change(root, "001-reopen-drafts", _fm(stage="build", impact="patch", idea=idea))
-    (root / "work" / "ideas.md").write_text(ideas, encoding="utf-8")
+    (root / "work" / "inbox.md").write_text(ideas, encoding="utf-8")
     return root, d
 
 
@@ -1825,7 +1825,7 @@ def _staged(root: Path) -> list[str]:
 def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, idea) -> None:
     root, _ = _seeded(tmp_path, idea)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == (
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
@@ -1836,14 +1836,14 @@ def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert "Reopen drafts" not in (root / "work" / "ideas.md").read_text(encoding="utf-8")
+    assert "Reopen drafts" not in (root / "work" / "inbox.md").read_text(encoding="utf-8")
 
 
 def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer(tmp_path) -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
     root, _ = _seeded(tmp_path, '"[2026-10-02] [seed] Reopen drafts"', ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == (
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
@@ -1856,7 +1856,7 @@ def test_a_title_holding_an_arrow_is_kept_whole(tmp_path: Path) -> None:
     )
     root, _ = _seeded(tmp_path, "Map intent → spec", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / "work" / "ideas.md").read_text(encoding="utf-8")
+    text = (root / "work" / "inbox.md").read_text(encoding="utf-8")
     assert "Map intent → spec" not in text and "## [2026-10-01] [seed] Map intent\n" in text
 
 
@@ -1866,13 +1866,13 @@ def test_a_body_line_shaped_like_a_heading_is_never_a_seed(tmp_path: Path) -> No
     )
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == ideas
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
 
 
 def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path) -> None:
     root, _ = _seeded(tmp_path, "Share drafts")
     assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / "work" / "ideas.md").read_text(encoding="utf-8")
+    text = (root / "work" / "inbox.md").read_text(encoding="utf-8")
     assert text.endswith("Two lines.\n") and "Share drafts" not in text
 
 
@@ -1884,7 +1884,7 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
     err = capsys.readouterr().err
     assert "2 entries titled 'Reopen drafts'" in err and "lines 9, 18" in err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == ideas
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
     assert _staged(root) == []
 
 
@@ -1892,7 +1892,7 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
 def test_ship_with_no_seed_to_remove_says_so_and_ships_twice(tmp_path: Path, capsys, ideas):
     root, d = _seeded(tmp_path, "Reopen drafts", ideas or "")
     if ideas is None:
-        (root / "work" / "ideas.md").unlink()
+        (root / "work" / "inbox.md").unlink()
     assert sdlc.cmd_ship(root, "001") == 0
     assert "no seed to remove" in capsys.readouterr().out
     assert sdlc.cmd_ship(root, "001") == 0, "a rerun after a refused commit"
@@ -1903,7 +1903,7 @@ def test_ship_with_no_idea_mentions_no_seed(tmp_path: Path, capsys) -> None:
     root, _ = _seeded(tmp_path, "")
     assert sdlc.cmd_ship(root, "001") == 0
     out = capsys.readouterr().out
-    assert "seed" not in out and (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
+    assert "seed" not in out and (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
 
 
 def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, capsys) -> None:
@@ -1917,7 +1917,7 @@ def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, ca
     assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 0
     assert _staged(root) == [
         ".sdlc/last-id", "drafts.py", "with space.txt",
-        "work/001-reopen-drafts/intent.md", "work/ideas.md",
+        "work/001-reopen-drafts/intent.md", "work/inbox.md",
     ]  # fmt: skip
     assert "  staged with space.txt" in capsys.readouterr().out
     assert _git(root, "rev-parse", "HEAD") == head, "ship never commits"
@@ -1937,7 +1937,7 @@ def test_ship_stages_beside_a_deletion_already_staged(tmp_path: Path, capsys) ->
     assert sdlc.cmd_ship(root, "001") == 0
     assert _staged(root) == [
         "drafts.py", "gone.txt", "half.txt",
-        "work/001-reopen-drafts/intent.md", "work/ideas.md",
+        "work/001-reopen-drafts/intent.md", "work/inbox.md",
     ]  # fmt: skip
     assert _git(root, "diff", "--name-only") == "", "the later edit is staged too"
     assert "  staged gone.txt" in capsys.readouterr().out
@@ -1953,7 +1953,7 @@ def test_a_left_path_that_matches_nothing_refuses_before_any_write(
     assert sdlc.cmd_ship(root, "001", [left]) == 1
     assert f"--leave {left}: not a path the checkout has uncommitted" in capsys.readouterr().err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
     assert _staged(root) == []
 
 
@@ -1965,4 +1965,4 @@ def test_a_left_path_already_staged_refuses_before_any_write(tmp_path: Path, cap
     assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 1
     assert "already staged" in capsys.readouterr().err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS

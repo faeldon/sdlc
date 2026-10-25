@@ -57,7 +57,7 @@ host-specific comes from `.sdlc/config.toml`, read only by `sdlc.py config`, whi
 `load_config()` resolves once (every doc path included), so no reader has its own. Skills ask
 `config` rather than guessing. `defaults/` holds the docs `/sdlc:setup` copies into a host once,
 after which the host owns them (`HEALTH.md` is one); `templates/` the shape of each file the plugin
-writes itself, every time (`direction.md`, `ideas.md`, `notes.md`, the artifacts, the issue),
+writes itself, every time (`direction.md`, `inbox.md`, `notes.md`, the artifacts, the issue),
 overridable in `.sdlc/templates/`. A missing review doc falls back to `defaults/REVIEW.md`; other
 missing docs are reported, never replaced.
 
@@ -146,7 +146,7 @@ path kept for good (the no-manifest drift, `RETIRED_KEYS`) is not a shim and has
 
 **Retrospectives: `retro()`.** The outermost loop, read-only, bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,
-`work/ideas.md` and the product doc, nothing else, refusing a doc that drops an open id). It
+`work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id). It
 counts closed and dropped changes, rework (later changes sharing code), the skills' size, and,
 with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
 they run), so `retro` is not in `READ_ONLY`. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)

@@ -208,7 +208,7 @@ that means the change is too big, and that's the finding.
 
 Weigh each Nit under the rubric in the process doc (`docs.process`), its section on nits, and give
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
-it Important. One that costs a design call (L) is a seed for `work/ideas.md`, not a nit. One that
+it Important. One that costs a design call (L) is a seed for `work/inbox.md`, not a nit. One that
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
 answer below. The rest are proposed for `work/nits.md`.
 
@@ -247,7 +247,7 @@ don't is said so, with why. The decision informs the person's approval and never
 
 **Undone items.** For each item Step 0 listed, propose one of two dispositions:
 
-- **carry it forward:** a new `work/ideas.md` seed, with a short title of its own;
+- **carry it forward:** a new `work/inbox.md` seed, with a short title of its own;
 - **drop it:** with a one-line reason (done after all, superseded, not worth doing).
 
 There is no third option, such as keeping it as an open question in `intent.md`: a shipped intent
@@ -291,9 +291,9 @@ them is an "edit the message" answer, and the question is asked again.
 
 First, the undone items, exactly as approved:
 
-- **Carried:** append a seed to `work/ideas.md`, as
-  `## [YYYY-MM-DD] [seed] <its title>`. If there's no `work/ideas.md`, `Write` it first from
-  `templates["ideas.md"]` in `config`, as it is, then append. Its body says what is left to do
+- **Carried:** append a seed to `work/inbox.md`, as
+  `## [YYYY-MM-DD] [seed] <its title>`. If there's no `work/inbox.md`, `Write` it first from
+  `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do
   and points at `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
   `- [x] <text> → seed: <its title>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
@@ -307,7 +307,7 @@ commit as the code they describe.
 
 Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter. `sdlc.py ship` refuses without one.
 
-If the change came from a `work/ideas.md` seed and the built thing deviated from the sketch, say
+If the change came from a `work/inbox.md` seed and the built thing deviated from the sketch, say
 how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
 `Write` is for those files only, and `work/nits.md`'s first time: everything else this step
 changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
@@ -326,8 +326,8 @@ commit. "Nothing to sync" is fine. A failure never undoes the commit: report wha
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
 `ship` stamps the folder shipped, deletes the entry the change's `idea:` names from
-`work/ideas.md` (saying so when there is none), and stages every path the checkout has
-uncommitted but the ones left out: the change's code, its folder, `work/ideas.md` and
+`work/inbox.md` (saying so when there is none), and stages every path the checkout has
+uncommitted but the ones left out: the change's code, its folder, `work/inbox.md` and
 `work/nits.md` when Step 6 edited them, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
 counter, which reaches `main` this way). It prints each path it staged, and never commits. The
 commit message names `NNN-slug`, which is how the commit and its folder find each other.

@@ -58,7 +58,7 @@ def _seed(day: str, title: str, tag: str = "seed", after: str = "") -> str:
 
 
 def _ideas(root: Path, *seeds: str) -> None:
-    _write(root, "work/ideas.md", "# Ideas\n\nSeeds, not a backlog.\n\n" + "".join(seeds))
+    _write(root, "work/inbox.md", "# Ideas\n\nSeeds, not a backlog.\n\n" + "".join(seeds))
 
 
 def _nit(nid: str, theme: str, raised: str, cost: str = "S") -> str:
@@ -112,7 +112,7 @@ def test_idea_entries_reads_after_lines(tmp_path: Path) -> None:
         _seed("2026-10-02", "Share drafts", after='"Reopen drafts"'),
         _seed("2026-10-03", "Sync drafts", after='"Reopen drafts", "Share drafts"'),
     )
-    got = {e["title"]: e["after"] for e in sdlc.idea_entries(root)}
+    got = {e["title"]: e["after"] for e in sdlc.inbox_entries(root)}
     assert got == {
         "Reopen drafts": [],
         "Share drafts": ["Reopen drafts"],

@@ -36,13 +36,13 @@ which holds the invariants a design stays inside, the review passes (`.sdlc/REVI
 | **5 Ship** | A reviewed commit | the commit |
 | **6 Maintain** | `/sdlc:health` runs the scans and tiers what they find | a new `intent.md` |
 
-`work/ideas.md` sits *before* Stage 1: a pool of seeds that explicitly disclaims being a backlog.
+`work/inbox.md` sits *before* Stage 1: where change requests arrive, explicitly not a backlog.
 Promoting a seed into committed work is what `/sdlc:intent` does. When `/sdlc:ship` closes a seed,
 `sdlc.py ship` deletes the entry its `idea:` names and stages it with the rest of the change, so
-`ideas.md` holds only what is open; history keeps the rest.
+`inbox.md` holds only what is open; history keeps the rest.
 
 ```
-work/ideas.md ──/sdlc:intent──▶ intent.md ──/sdlc:spec──▶ spec.md ──plan mode──▶ plan.md
+work/inbox.md ──/sdlc:intent──▶ intent.md ──/sdlc:spec──▶ spec.md ──plan mode──▶ plan.md
    ▲                                                                                │
    │                                                                           implement
    └──────────────  /sdlc:health  ◀────── maintain ──  /sdlc:ship ────────────┘
@@ -74,7 +74,7 @@ takes in what the loop inside it produced:
 |---|---|---|---|---|
 | **Change** | once per change, several in parallel | an idea, a finding, a seed | a reviewed commit on `main` (ship), its folder archived (close) | one WAIT each at intent, spec, ship, close |
 | **Release** | once per batch of closed changes | the `impact:` of each change closed since the last tag | a version, a tag and its notes (release); then the push and the host's publish (publish) | one WAIT at release, one at publish: reversible and irreversible kept apart |
-| **Retro** | when `status` says Retro due (2 releases, or a major one), or when the direction is unclear | the history since the last retrospective, its releases, the process and policy docs, the product doc (if any) with its evidence and what each change served, the skills, and what each change cost | the direction doc (goals, milestones, the next major release), the product doc's outcome lines, and seeds in `work/ideas.md` | one WAIT |
+| **Retro** | when `status` says Retro due (2 releases, or a major one), or when the direction is unclear | the history since the last retrospective, its releases, the process and policy docs, the product doc (if any) with its evidence and what each change served, the skills, and what each change cost | the direction doc (goals, milestones, the next major release), the product doc's outcome lines, and seeds in `work/inbox.md` | one WAIT |
 
 **No loop reaches past the one inside it.** A release only takes changes that have closed. A
 retrospective never edits code or skills; what it finds goes back in as a seed and comes out the
@@ -137,7 +137,7 @@ impact:            # settled by /sdlc:ship: major | minor | patch | none
 stage: plan        # plan | spike | design | build | test | ship | shipped | dropped
 created: 2026-10-17
 updated: 2026-10-17
-idea:              # optional backlink: the title of a work/ideas.md seed
+idea:              # optional backlink: the title of a work/inbox.md seed
 depends_on:        # optional: the open changes this one waits on, by id, e.g. [003]
 dropped_at:        # stamped by /sdlc:drop: the stage a dropped change reached
 ```
@@ -165,7 +165,7 @@ written, a migration run, something published, and the command that reverses eac
 **`notes.md`: what happened.** Optional and free-form, with one rule: **anything left undone is an
 unticked `- [ ]` line**, not an empty table cell or a "still to check" heading, which the tools
 can't see. `/sdlc:status` counts them, and `/sdlc:ship` gives each a disposition: carried to a new
-`work/ideas.md` seed, or dropped with a reason. `sdlc.py ship` refuses while one is unticked.
+`work/inbox.md` seed, or dropped with a reason. `sdlc.py ship` refuses while one is unticked.
 
 ## Where a change is worked: one worktree per change
 
@@ -196,7 +196,7 @@ start a second session with `claude --plugin-dir .claude/worktrees/NNN-slug`.
 
 Interviews you, assigns a tier, drafts `intent.md`, gates, then opens the change (its GitHub issue
 first, when that's how changes are numbered) and **stops**. If the change came from a
-`work/ideas.md` seed, it sets the `idea:` backlink and marks the seed `[building]`.
+`work/inbox.md` seed, it sets the `idea:` backlink and marks the seed `[building]`.
 
 **Is this mechanism or one host's policy?** The plugin knows nothing about what a host builds. A
 change that only makes sense for one repo belongs in that repo's `.sdlc/config.toml`, templates or
@@ -290,7 +290,7 @@ A Nit approved unfixed isn't lost in the findings count: ship records it in `wor
 later ship retires it once a diff fixes it or makes it moot. Each is weighed the same way:
 
 - **cost:** `S`, one sitting and a few lines · `M`, a test or several files · `L`, a design call.
-  An `L` is a `work/ideas.md` seed, not a nit.
+  An `L` is a `work/inbox.md` seed, not a nit.
 - **value:** `med`, a user or host could hit it on an edge case · `low`, only a reader of the code
   notices. One users would hit in normal use, or that loses work, is never a nit: it is Important.
 - **theme:** `docs`, `refactor`, `robustness`, `tests` or `style`, or one of this repo's own, so

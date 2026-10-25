@@ -137,7 +137,7 @@ def test_a_sub_agent_counts_toward_the_change_by_its_parent_call(tmp_path: Path)
     "path, kind",
     [(f"work/{BRANCH}/spec.md", "spec"), (f"/abs/work/{BRANCH}/notes.md", "notes"),
      (f"work/{BRANCH}/build/round-1.md", "artifact"), ("tests/test_x.py", "test"),
-     ("src/x.test.ts", "test"), ("README.md", "doc"), ("work/ideas.md", "doc"),
+     ("src/x.test.ts", "test"), ("README.md", "doc"), ("work/inbox.md", "doc"),
      ("scripts/x.py", "code")],
 )  # fmt: skip
 def test_the_classifier_takes_paths_relative_or_absolute(path: str, kind: str) -> None:

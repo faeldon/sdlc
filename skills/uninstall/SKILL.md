@@ -17,7 +17,7 @@ shared settings, a `.sdlc/` nobody reads, or worse, removes them while a change 
 a worktree and its number still claimed. This skill removes only what setup wrote, and only once
 nothing is live, so the repo's history keeps every file it removes.
 
-**What stays**: `work/` (the repo's record of its changes, and `work/ideas.md`), `AGENTS.md` and
+**What stays**: `work/` (the repo's record of its changes, and `work/inbox.md`), `AGENTS.md` and
 `CLAUDE.md` (other agents read them; the lines naming the plugin are listed for the human to
 edit), the tracker's issues, every tag, and every `Close` and `Drop` commit. A later setup counts
 on from that history, so no number is handed out twice.

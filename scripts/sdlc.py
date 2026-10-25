@@ -25,7 +25,7 @@ So this tool answers the questions that are queries rather than decisions:
                 its folder there from the host's .sdlc/templates/, or this plugin's templates/
                 where the host has none
     check       artifacts missing for the declared tier/stage; frontmatter that won't parse;
-                work/ideas.md entries tagged [building] with no change behind them
+                work/inbox.md entries tagged [building] with no change behind them
     ship        stamp stage: shipped + today's date, in place
                 (refused while notes.md has an unticked `- [ ]` item)
     drop        stamp stage: dropped and how far it got, in place, and commit the change's folder
@@ -52,7 +52,7 @@ So this tool answers the questions that are queries rather than decisions:
     retro       what the retrospective counts rather than judges: the changes closed since the
                 last `Retrospective` commit, open changes, seeds, tiers, impacts, releases, rework
                 and the size of each skill, as JSON
-    retro-commit  record a retrospective: commit the direction doc and work/ideas.md, and nothing
+    retro-commit  record a retrospective: commit the direction doc and work/inbox.md, and nothing
                 else, as `Retrospective YYYY-MM-DD`
 
 It deliberately does **not** write artifact prose. An `intent.md` is an argument about why a change
@@ -128,11 +128,16 @@ DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # nobody has written it yet; prose almost never opens consecutive lines with '<'.
 PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
-# work/ideas.md: "## [2026-10-17] [seed] Some title" — the status tag is the second bracket group.
-IDEA_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*\[([^\]]+)\]\s*(.+)$")
-# A seed that waits on others: `After: "Some title", "Another"`, a line in its body, the titles
-# quoted as a milestone's `Groups:` line has them. Status holds it back while one is still open.
-AFTER_RE = re.compile(r"^After:\s*(.+)$")
+# work/inbox.md, the register of change requests: "## [2026-10-25-3] [seed] Some title", its id
+# (the date it came in and a count) then its tag. A bare date, `[2026-10-17]`, is an entry from
+# before ids, read the same with no id.
+ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\s*(.+)$")
+# The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
+# seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
+# milestone's `Groups:` line has them, and status holds it back while one is still open; the rest
+# are a bug's or a nit's own.
+BODY_KEYS = ("After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by")
+BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
 # work/nits.md: "## 003-1 [robustness] Some title", the raising change's number and a count, then
 # `- **raised:**`, `- **paths:**` and `- **cost:** … **value:** …` bullets. Ship writes and retires
 # entries, intent and spec offer them, retro counts them; the process doc's rubric says what each
@@ -144,7 +149,7 @@ NIT_COST_RE = re.compile(r"^- \*\*cost:\*\*\s*(\S+)\s+\*\*value:\*\*\s*(\S+)\s*$
 NIT_COSTS = ("S", "M")
 NIT_VALUES = ("med", "low")
 # notes.md is free-form, with one rule: anything left undone is an unticked `- [ ]` line.
-# /sdlc:ship carries each one to a work/ideas.md seed or drops it with a reason, ticking it as it
+# /sdlc:ship carries each one to a work/inbox.md seed or drops it with a reason, ticking it as it
 # goes, and `ship` refuses while one is still unticked, so nothing lands on main with a question
 # nobody answered.
 OPEN_ITEM_RE = re.compile(r"^\s*[-*] \[ \] (.+?)\s*$")
@@ -157,6 +162,10 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = PLUGIN_DIR / "templates"
 DEFAULTS_DIR = PLUGIN_DIR / "defaults"
+# The register's name, and the one it had before: a shim until 2.0.0 (.sdlc/deprecations.toml).
+# A repo with only the old file is read from it, and so is a host template under the old name.
+INBOX = "inbox.md"
+OLD_INBOX = "ideas.md"
 
 # Everything host-specific lives in `.sdlc/config.toml`. The skills are prose and can't import
 # anything, so `config` is the one door: they run it and read the JSON, rather than each one
@@ -264,8 +273,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/ideas.md`, `work/nits.md`, a change's `notes.md` and its `checks.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", "ideas.md", "nits.md", "notes.md", "checks.md")
+# `work/inbox.md`, `work/nits.md`, a change's `notes.md` and its `checks.md`.
+DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "nits.md", "notes.md", "checks.md")
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -372,9 +381,20 @@ def trunk_refusal(home: Path, trunk: str | None, source: str = "config") -> str 
 
 
 def template_path(root: Path, name: str) -> tuple[Path, str]:
-    """The template `new` scaffolds `name` from: the host's, else the plugin's."""
+    """The template `new` scaffolds `name` from: the host's, else the plugin's. A host's inbox
+    template may still be under the register's old name."""
     host = root / HOST_DIR / "templates" / name
+    old = root / HOST_DIR / "templates" / OLD_INBOX
+    if name == INBOX and not host.is_file() and old.is_file():
+        host = old
     return (host, "host") if host.is_file() else (TEMPLATE_DIR / name, "plugin")
+
+
+def register_path(work: Path) -> Path:
+    """The register in this `work/` folder: `inbox.md`, or `ideas.md` while a repo has only that.
+    The one place that knows the old name, so every reader and writer agrees on the file."""
+    inbox = work / INBOX
+    return work / OLD_INBOX if not inbox.is_file() and (work / OLD_INBOX).is_file() else inbox
 
 
 def doc_path(root: Path, key: str, rel: str) -> dict:
@@ -922,24 +942,35 @@ def _age_days(rec: dict, today: date) -> int | None:
         return None
 
 
-def idea_entries(root: Path) -> list[dict]:
-    """Every entry heading in work/ideas.md, with its status tag as written and the titles its
-    `After:` line names. A closed entry is deleted once its change ships; history keeps it."""
-    path = work_dir(root) / "ideas.md"
+def inbox_entries(root: Path) -> list[dict]:
+    """Every entry in the register (`register_path()`): its id (None for a bare date), its tag as
+    written (`status`), its title, the titles its `After:` line names, and its body lines by key. A
+    closed entry is deleted once its change ships; history keeps it. Fenced lines are skipped, so a
+    template's example is never an entry."""
+    path = register_path(work_dir(root))
     if not path.is_file():
         return []
     out: list[dict] = []
     current: dict | None = None
+    fenced = False
     for line in path.read_text(encoding="utf-8").splitlines():
-        m = IDEA_RE.match(line)
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = ENTRY_RE.match(line)
         if m:
-            current = {"date": m.group(1), "status": m.group(2), "title": m.group(3).strip(),
-                       "after": []}  # fmt: skip
+            current = {"id": f"{m.group(1)}-{m.group(2)}" if m.group(2) else None,
+                       "date": m.group(1), "status": m.group(3), "title": m.group(4).strip(),
+                       "after": [], "fields": {}}  # fmt: skip
             out.append(current)
         elif line.startswith("#"):
             current = None
-        elif current is not None and (after := AFTER_RE.match(line.strip())):
-            current["after"] = re.findall(r'"([^"]+)"', after.group(1))
+        elif current is not None and (body := BODY_RE.match(line.strip())):
+            current["fields"].setdefault(body.group(1), body.group(2).strip())
+            if body.group(1) == "After" and not current["after"]:
+                current["after"] = re.findall(r'"([^"]+)"', body.group(2))
     return out
 
 
@@ -1131,12 +1162,22 @@ def analyze(root: Path, today: date | None = None) -> dict:
                 }
             )
 
-    entries = idea_entries(root)
+    entries = inbox_entries(root)
     ideas = [i for i in entries if is_building(i)]
     slugs = {rec["slug"] for rec in changes}
+    register = f"work/{register_path(work_dir(root)).name}"
+    if (work_dir(root) / INBOX).is_file() and (work_dir(root) / OLD_INBOX).is_file():
+        problems.append(
+            {
+                "dir": f"work/{OLD_INBOX}",
+                "kind": "register",
+                "detail": f"work/{INBOX} is the register, so this file is never read: move its "
+                "entries there and delete it",
+            }
+        )
     # The explicit link: /sdlc:intent writes the seed's title into `idea:`, and older intents the
-    # whole heading, with the status tag it had at promotion (`[seed]`) while ideas.md moved on to
-    # `[building]`, so match on the title alone. A dropped change is building nothing and can't
+    # whole heading, with the status tag it had at promotion (`[seed]`) while the register moved on
+    # to `[building]`, so match on the title alone. A dropped change is building nothing and can't
     # vouch for a seed.
     linked = [rec["idea"] for rec in changes if rec["idea"] and rec["stage"] != "dropped"]
     for idea in ideas:
@@ -1149,7 +1190,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
         if not (by_slug or by_frontmatter):
             problems.append(
                 {
-                    "dir": "work/ideas.md",
+                    "dir": register,
                     "kind": "orphan idea",
                     "detail": f"[{idea['status']}] {idea['title']} — no work/ folder",
                 }
@@ -1636,7 +1677,7 @@ def cmd_accept(root: Path, ident: str) -> int:
 
 
 def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) -> int:
-    """Stamp a change shipped, delete the seed its `idea:` names from `work/ideas.md`, and stage
+    """Stamp a change shipped, delete the seed its `idea:` names from the register, and stage
     everything its checkout has uncommitted but `leave`, for /sdlc:ship to commit. Runs after
     ship's WAIT; every refusal comes before the first write, and a rerun is harmless. Never
     commits."""
@@ -1657,7 +1698,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
             f"⚠  {path.name}/notes.md has {len(undone)} undone item(s):\n"
             + "".join(f"     notes.md:{i['line']}  {i['text']}\n" for i in undone)
             + "   Give each a disposition: tick it with `→ seed: <title>` after adding that seed "
-            "to work/ideas.md, or `→ dropped: <reason>`. Then re-run. Not stamping.",
+            "to work/inbox.md, or `→ dropped: <reason>`. Then re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1
@@ -1678,11 +1719,11 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
         )
         return 1
 
-    ideas = path.parent / "ideas.md"
+    ideas = register_path(path.parent)
     seeds = _seed_lines(ideas, idea)
     if len(seeds) > 1:
         print(
-            f"⚠  work/ideas.md has {len(seeds)} entries titled {_seed_title(idea)!r} (lines "
+            f"⚠  work/{ideas.name} has {len(seeds)} entries titled {_seed_title(idea)!r} (lines "
             f"{', '.join(str(n + 1) for n in seeds)}): delete the one this change built by hand, "
             "or retitle one, and re-run. Not stamping.",
             file=sys.stderr,
@@ -1725,9 +1766,9 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     )
     if seeds:
         _drop_seed(ideas, seeds[0])
-        print(f"  removed seed {_seed_title(idea)!r} from work/ideas.md")
+        print(f"  removed seed {_seed_title(idea)!r} from work/{ideas.name}")
     elif idea:
-        print(f"  no seed to remove: work/ideas.md has no entry titled {_seed_title(idea)!r}")
+        print(f"  no seed to remove: work/{ideas.name} has no entry titled {_seed_title(idea)!r}")
     paths, err = _stage_change(tree, leave)
     if err:
         print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
@@ -1744,19 +1785,19 @@ def _seed_title(text: str) -> str:
     with or without its `## `: without the `[date] [tag]` prefix, or the ` → work/<folder>` pointer
     an older intent put in the heading. An arrow in the title itself stays."""
     text = text.strip()
-    m = IDEA_RE.match(text) or IDEA_RE.match(f"## {text}")
-    title = m.group(3) if m else text
+    m = ENTRY_RE.match(text) or ENTRY_RE.match(f"## {text}")
+    title = m.group(4) if m else text
     return title.split(" → work/")[0].strip()
 
 
 def _seed_lines(ideas: Path, idea: str) -> list[int]:
-    """The line numbers (from 0) of `work/ideas.md`'s headings whose title is the `idea:`'s; [] with
+    """The line numbers (from 0) of the register's headings whose title is the `idea:`'s; [] with
     no `idea:` or no file."""
     if not idea.strip() or not ideas.is_file():
         return []
     want = _seed_title(idea)
     lines = ideas.read_text(encoding="utf-8").splitlines()
-    return [n for n, line in enumerate(lines) if IDEA_RE.match(line) and _seed_title(line) == want]
+    return [n for n, line in enumerate(lines) if ENTRY_RE.match(line) and _seed_title(line) == want]
 
 
 def _drop_seed(ideas: Path, start: int) -> None:
@@ -3942,13 +3983,13 @@ def _milestone_verdicts(
     home: Path, items: list[dict], open_names: list[str], trunk: str | None
 ) -> dict:
     """What each open milestone's grouped seeds and changes have become, from history: a change
-    closed (with when), still open, or unknown; a seed still in ideas.md, shipped by the change
+    closed (with when), still open, or unknown; a seed still in the register, shipped by the change
     whose `idea:` names it, or vanished with no change behind it."""
     wanted = [i for i in items if i["kind"] == "milestone" and i["status"] == "open"]
     if not wanted:
         return {}
     history = closed_changes(home, None, trunk)
-    seeds_open = {i["title"] for i in idea_entries(home)}
+    seeds_open = {i["title"] for i in inbox_entries(home)}
     out: dict[str, list[dict]] = {}
     for item in wanted:
         rows = []
@@ -4101,7 +4142,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     """What to work on once the open changes are done, from the main checkout's ideas, nits and
     direction doc, ordered by NEXT_RULES. Read-only, and a missing file adds nothing. Also the
     open milestones with nothing left in their groups, and `After:` lines that can never be met."""
-    ideas = idea_entries(home)
+    ideas = inbox_entries(home)
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
     building = {_seed_title(r["idea"]) for r in open_changes if r.get("idea")}
@@ -4421,7 +4462,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                      "files": shared, "dropped": True}
                 )  # fmt: skip
     a = analyze(home, today)
-    seeds = [i for i in idea_entries(home) if not is_building(i)]
+    seeds = [i for i in inbox_entries(home) if not is_building(i)]
     direction = direction_items(_direction_text(home, cfg))
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     direction["milestones"] = _milestone_verdicts(home, direction["items"], open_names, trunk)
@@ -4477,12 +4518,12 @@ def cmd_retro(root: Path) -> int:
 
 def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     """Record a retrospective: one commit, `Retrospective YYYY-MM-DD`, holding the direction doc,
-    work/ideas.md and the product doc's outcomes, and nothing else, so main is never left dirty.
+    the register and the product doc's outcomes, and nothing else, so main is never left dirty.
     Every refusal is found before anything is written."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     stamp = (today or date.today()).isoformat()
-    allowed = {cfg["docs"]["direction"], "work/ideas.md"}
+    allowed = {cfg["docs"]["direction"], f"work/{register_path(work_dir(home)).name}"}
     if cfg["docs"]["product"]:
         allowed.add(cfg["docs"]["product"])
     report: dict = {"commit": f"{RETRO_PREFIX}{stamp}", "paths": [], "refusals": [], "done": []}
@@ -5135,6 +5176,16 @@ def drift(root: Path) -> dict:
     for p in sorted(templates.glob("*.md")) if templates.is_dir() else []:
         where = f"{HOST_DIR}/templates/{p.name}"
         plugin_t = TEMPLATE_DIR / p.name
+        if p.name == OLD_INBOX:
+            out["report"].append(
+                {
+                    "what": "template",
+                    "where": where,
+                    "class": "renamed",
+                    "detail": f"read as {INBOX} until 2.0.0: rename it to {INBOX}",
+                }
+            )
+            continue
         if not plugin_t.is_file():
             out["report"].append(
                 {
@@ -5671,7 +5722,7 @@ def main() -> int:
         "retro", help="what the retrospective counts since the last one, as JSON; writes nothing"
     )
     sub.add_parser(
-        "retro-commit", help="commit the direction doc and work/ideas.md as `Retrospective <date>`"
+        "retro-commit", help="commit the direction doc and work/inbox.md as `Retrospective <date>`"
     )
 
     args = ap.parse_args()
