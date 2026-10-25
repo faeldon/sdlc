@@ -99,8 +99,10 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path) -> None:
 
     shipped = _run(tree, "ship", "001")
     assert shipped.returncode == 0, shipped.stderr
-    # One commit carries the code, the change's folder and the counter `new` wrote beside it.
-    _git(tree, "add", "feature.txt", "work", ".sdlc")
+    # One commit carries the code, the change's folder and the counter `new` wrote beside it,
+    # every one of them staged by `ship` itself.
+    staged = set(_git(tree, "diff", "--cached", "--name-only").splitlines())
+    assert {"feature.txt", "work/001-first-change/intent.md", ".sdlc/last-id"} <= staged, staged
     _git(tree, "commit", "-q", "-m", "ship 001")
     tip = _git(tree, "rev-parse", "HEAD")
     assert "001" in _run(root, "status").stdout, "the main checkout sees the worktree's change"

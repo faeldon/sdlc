@@ -1549,7 +1549,11 @@ def cmd_accept(root: Path, ident: str) -> int:
     return 0 if passed else 1
 
 
-def cmd_ship(root: Path, ident: str) -> int:
+def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) -> int:
+    """Stamp a change shipped, delete the seed its `idea:` names from `work/ideas.md`, and stage
+    everything its checkout has uncommitted but `leave`, for /sdlc:ship to commit. Runs after
+    ship's WAIT; every refusal comes before the first write, and a rerun is harmless. Never
+    commits."""
     path = _one_change(root, ident)
     if path is None:
         return 1
@@ -1575,14 +1579,46 @@ def cmd_ship(root: Path, ident: str) -> int:
     # The release that carries this change proposes its bump from this line. Asked for
     # here, with the diff in front of someone, not reconstructed from commit subjects at release.
     try:
-        impact = str(frontmatter.load(intent).get("impact") or "")
+        post = frontmatter.load(intent)
+        impact, idea = str(post.get("impact") or ""), str(post.get("idea") or "")
     except Exception:  # malformed YAML: `check` reports it; ship refuses below like any other gap
-        impact = ""
+        impact, idea = "", ""
     if impact not in IMPACTS:
         print(
             f"⚠  {path.name}/intent.md: impact must be one of {'|'.join(IMPACTS)}, got "
             f"{impact!r}. Say what this change does to someone holding the previous release "
             "(the process doc, Releases) and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+
+    ideas = path.parent / "ideas.md"
+    seeds = _seed_lines(ideas, idea)
+    if len(seeds) > 1:
+        print(
+            f"⚠  work/ideas.md has {len(seeds)} entries titled {_seed_title(idea)!r} (lines "
+            f"{', '.join(str(n + 1) for n in seeds)}): delete the one this change built by hand, "
+            "or retitle one, and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    tree = Path(_git(path, "rev-parse", "--show-toplevel") or path.parent.parent)
+    staged = (_git(tree, "diff", "--cached", "--name-only", "-z") or "").split("\0")
+    dirty = _dirty_paths(tree)
+    unmatched = [p for p in leave if p not in dirty]
+    if unmatched:
+        print(
+            f"⚠  --leave {', '.join(unmatched)}: not a path the checkout has uncommitted, so "
+            "whatever it meant would be staged. Name it as `git status --porcelain` does, from "
+            "the checkout's root, and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    held = [p for p in leave if p in staged]
+    if held:
+        print(
+            f"⚠  {', '.join(held)}: left out with --leave but already staged, so it would be "
+            "committed anyway: unstage it first (`git restore --staged <path>`). Not stamping.",
             file=sys.stderr,
         )
         return 1
@@ -1601,7 +1637,60 @@ def cmd_ship(root: Path, ident: str) -> int:
         f"■ shipped {path.name}  (stage: shipped, {stamp}): commit {_shown(path, root)}/ with "
         "the change"
     )
+    if seeds:
+        _drop_seed(ideas, seeds[0])
+        print(f"  removed seed {_seed_title(idea)!r} from work/ideas.md")
+    elif idea:
+        print(f"  no seed to remove: work/ideas.md has no entry titled {_seed_title(idea)!r}")
+    paths, err = _stage_change(tree, leave)
+    if err:
+        print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
+        return 1
+    for p in paths:
+        print(f"  staged {p}")
+    if not paths:
+        print("  staged nothing: the checkout has nothing uncommitted")
     return 0
+
+
+def _seed_title(text: str) -> str:
+    """A seed's title from its heading, or from an `idea:` line holding the title or the whole
+    heading: without the `## [date] [tag]` prefix, or the ` → <folder>` pointer a tag may carry."""
+    text = text.strip()
+    m = IDEA_RE.match(text)
+    title = m.group(3) if m else text
+    return title.split(" → ")[0].strip()
+
+
+def _seed_lines(ideas: Path, idea: str) -> list[int]:
+    """The line numbers (from 0) of `work/ideas.md`'s headings whose title is the `idea:`'s; [] with
+    no `idea:` or no file."""
+    if not idea.strip() or not ideas.is_file():
+        return []
+    want = _seed_title(idea)
+    lines = ideas.read_text(encoding="utf-8").splitlines()
+    return [n for n, line in enumerate(lines) if IDEA_RE.match(line) and _seed_title(line) == want]
+
+
+def _drop_seed(ideas: Path, start: int) -> None:
+    """Delete the entry whose heading is line `start`, through the line before the next `## ` (or
+    the end), as lines, so every other entry stays byte for byte."""
+    lines = ideas.read_text(encoding="utf-8").splitlines(keepends=True)
+    end = next((n for n in range(start + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+    before, after = lines[:start], lines[end:]
+    if not after:  # the last entry: no blank line left trailing the one before it
+        while before and not before[-1].strip():
+            before.pop()
+    ideas.write_text("".join(before + after), encoding="utf-8")
+
+
+def _stage_change(tree: Path, leave: list[str] | tuple[str, ...]) -> tuple[list[str], str | None]:
+    """Stage every path the checkout has uncommitted, untracked ones included, but `leave`, and
+    never by `-A`: the paths are named after `--`. Nothing outside git."""
+    paths = [p for p in _dirty_paths(tree) if p not in leave]
+    if not paths:
+        return [], None
+    return paths, _git_err(tree, "add", "--", *paths)
 
 
 # A dropped change says why under this heading of its intent, and its frontmatter's `dropped_at:`
@@ -4998,6 +5087,10 @@ def main() -> int:
 
     p_ship = sub.add_parser("ship", help="stamp the change shipped, in place")
     p_ship.add_argument("id", help="the 3-digit id, e.g. 001")
+    p_ship.add_argument(
+        "--leave", action="append", default=[], metavar="PATH",
+        help="a path not to stage, to commit apart; repeatable",
+    )  # fmt: skip
 
     sub.add_parser("next", help="the id `new` would allocate now; writes nothing")
 
@@ -5121,7 +5214,7 @@ def main() -> int:
     if args.cmd == "new":
         return cmd_new(root, args.slug, args.tier, args.title, args.worktree, args.base)
     if args.cmd == "ship":
-        return cmd_ship(root, args.id)
+        return cmd_ship(root, args.id, args.leave)
     if args.cmd == "next":
         cfg = load_config(home)[0]
         if ids_mode(home, cfg) == "github":

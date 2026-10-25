@@ -23,7 +23,6 @@ allowed-tools:
   - 'Bash(git status *)'
   - 'Bash(git diff *)'
   - 'Bash(git log *)'
-  - 'Bash(git add *)'
   - 'Bash(git commit *)'
   - 'Bash(grep *)'
 disable-model-invocation: true
@@ -110,7 +109,9 @@ fixed or made moot. None listed, or no `work/nits.md`, is the usual answer.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
-large unrelated diff hiding a real change is how review gets skipped.
+large unrelated diff hiding a real change is how review gets skipped. Each path the human chooses
+to commit separately is one Step 6 passes to `sdlc.py ship` as `--leave <path>`, since `ship`
+stages everything else the checkout has uncommitted.
 
 ## Step 1 — Run the checks
 
@@ -305,18 +306,15 @@ commit as the code they describe.
 
 Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter. `sdlc.py ship` refuses without one.
 
-Then, if the change came from a `work/ideas.md` seed (its `idea:` line), delete the whole entry,
-heading to the line before the next `## `, from `work/ideas.md`: it lands with the change, and
-history keeps it. If the built thing deviated from the sketch, say how in `notes.md` instead,
-starting it from `templates["notes.md"]` in `config` if the change has none. `Write` is for those
-files only, and `work/nits.md`'s first time: everything else this step changes already exists, and
-is edited in place.
+If the change came from a `work/ideas.md` seed and the built thing deviated from the sketch, say
+how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
+`Write` is for those files only, and `work/nits.md`'s first time: everything else this step
+changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
 
-Then:
+Then, with a `--leave <path>` for each path Step 0's approval set apart:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship <NNN>   # stamps shipped, in place
-git add <the paths this change touched>                                      # never `git add -A`
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship <NNN>   # stamps, drops the seed, stages
 git status --short                                                           # confirm nothing unrelated got staged
 git commit -m "<approved message>"
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # the issue, as committed
@@ -326,18 +324,22 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # t
 commit. "Nothing to sync" is fine. A failure never undoes the commit: report what it printed, and
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
-The staged paths are the change's code, its folder `work/NNN-slug/`, `work/ideas.md` and
-`work/nits.md` when Step 6 edited them, any context doc Step 6 edited, and any `.sdlc/last-id` its `new` wrote
-in the worktree (the counter, which reaches `main` this way). The commit message names `NNN-slug`,
-which is how the commit and its folder find each other. If `sdlc.py ship` refuses over
-an undone item, one was missed:
-give it the disposition the human approved. If there isn't one, stop and ask; never tick it to get
-past the refusal. The same goes for the impact: set the one approved, never one picked to get past it.
+`ship` stamps the folder shipped, deletes the entry the change's `idea:` names from
+`work/ideas.md` (saying so when there is none), and stages every path the checkout has
+uncommitted but the ones left out: the change's code, its folder, `work/ideas.md` and
+`work/nits.md` when Step 6 edited them, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
+counter, which reaches `main` this way). It prints each path it staged, and never commits. The
+commit message names `NNN-slug`, which is how the commit and its folder find each other.
 
-**Stage the change's own paths explicitly.** `git add -A` would sweep in whatever else Step 0 found
-in the tree, which is the bundling Step 0 exists to prevent. Read `git status --short` before
-committing and confirm everything Step 0 flagged as unrelated is still unstaged. A generated or
-ignored file in the staged list means the ignore file lost a rule: say so rather than commit it.
+If `ship` refuses over an undone item, one was missed: give it the disposition the human approved.
+If there isn't one, stop and ask; never tick it to get past the refusal. The same goes for the
+impact: set the one approved, never one picked to get past it. Two seeds sharing the `idea:`'s
+title, or a left-out path that is already staged, is a refusal before anything is written: say
+which and stop.
+
+**Read what was staged before committing.** Confirm everything Step 0 flagged as unrelated is still
+unstaged. A generated or ignored file in the staged list means the ignore file lost a rule: say
+so rather than commit it.
 
 ## Step 7 — Report and stop
 

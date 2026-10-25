@@ -38,8 +38,8 @@ which holds the invariants a design stays inside, the review passes (`.sdlc/REVI
 
 `work/ideas.md` sits *before* Stage 1: a pool of seeds that explicitly disclaims being a backlog.
 Promoting a seed into committed work is what `/sdlc:intent` does. When `/sdlc:ship` closes a seed,
-it deletes the entry in the change's commit, so `ideas.md` holds only what is open; history keeps
-the rest.
+`sdlc.py ship` deletes the entry its `idea:` names and stages it with the rest of the change, so
+`ideas.md` holds only what is open; history keeps the rest.
 
 ```
 work/ideas.md ──/sdlc:intent──▶ intent.md ──/sdlc:spec──▶ spec.md ──plan mode──▶ plan.md

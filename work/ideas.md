@@ -65,13 +65,6 @@ issues filed against setup, `new` or close per release (O1), issues reporting lo
 number given twice (O2), and the stops close records per change by tier (O3). Raised by the
 retrospective of 2026-10-24.
 
-## [2026-10-24] [seed] Ship does its own landing edits
-
-`/sdlc:ship` Step 6 asks the model to delete the seed entry the change's `idea:` line names and to
-build the `git add` list of every path the change touched. Both are mechanical, and in 001, 003
-and 005 each took a hand-written script or a 9–22-path command. `sdlc.py ship <NNN>` could delete
-the entry and print the paths to stage. Raised by the retrospective of 2026-10-24.
-
 ## [2026-10-24] [seed] Rework ignores shared docs and the setup record
 
 The first retrospective's rework list held 12 pairs, all same-day, all from `defaults/SDLC.md` or

@@ -1709,3 +1709,129 @@ def test_serves_is_read_as_text(tmp_path: Path) -> None:
     _product(tmp_path)
     folder = _change(tmp_path, "001-x", _fm(serves="[O01, none]"))
     assert sdlc.load_change(folder, tmp_path)["serves"] == ["O01", "none"]
+
+
+# ---------------------------------------------------------------- ship's landing edits
+
+IDEAS = (
+    "# Ideas\n\n> Seeds, not a backlog.\n\n"
+    "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
+    "## [2026-10-02] [building] Reopen drafts\n\nThe one being built.\nTwo lines.\n\n"
+    "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+)
+
+
+def _seeded(tmp_path: Path, idea: str, ideas: str = IDEAS) -> tuple[Path, Path]:
+    """A change in a real repo, ready to ship, whose `idea:` is `idea`, beside `ideas`."""
+    root = _repo(tmp_path)
+    d = _change(root, "001-reopen-drafts", _fm(stage="build", impact="patch", idea=idea))
+    (root / "work" / "ideas.md").write_text(ideas, encoding="utf-8")
+    return root, d
+
+
+def _staged(root: Path) -> list[str]:
+    return sorted(_git(root, "diff", "--cached", "--name-only").splitlines())
+
+
+@pytest.mark.parametrize(
+    "idea",
+    [
+        "Reopen drafts",
+        '"## [2026-10-02] [seed] Reopen drafts"',
+        "Reopen drafts → work/001-reopen-drafts/",
+    ],
+)
+def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, idea) -> None:
+    root, _ = _seeded(tmp_path, idea)
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == (
+        "# Ideas\n\n> Seeds, not a backlog.\n\n"
+        "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
+        "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+    )
+
+
+def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
+    ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
+    root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert "Reopen drafts" not in (root / "work" / "ideas.md").read_text(encoding="utf-8")
+
+
+def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path) -> None:
+    root, _ = _seeded(tmp_path, "Share drafts")
+    assert sdlc.cmd_ship(root, "001") == 0
+    text = (root / "work" / "ideas.md").read_text(encoding="utf-8")
+    assert text.endswith("Two lines.\n") and "Share drafts" not in text
+
+
+def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path, capsys) -> None:
+    ideas = IDEAS + "\n## [2026-10-04] [seed] Reopen drafts\n\nA twin.\n"
+    root, d = _seeded(tmp_path, "Reopen drafts", ideas)
+    before = (d / "intent.md").read_text(encoding="utf-8")
+    assert sdlc.cmd_ship(root, "001") == 1
+    err = capsys.readouterr().err
+    assert "2 entries titled 'Reopen drafts'" in err and "lines 9, 18" in err
+    assert (d / "intent.md").read_text(encoding="utf-8") == before
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == ideas
+    assert _staged(root) == []
+
+
+@pytest.mark.parametrize("ideas", [None, IDEAS.replace("Reopen", "Rename")])
+def test_ship_with_no_seed_to_remove_says_so_and_ships_twice(tmp_path: Path, capsys, ideas):
+    root, d = _seeded(tmp_path, "Reopen drafts", ideas or "")
+    if ideas is None:
+        (root / "work" / "ideas.md").unlink()
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert "no seed to remove" in capsys.readouterr().out
+    assert sdlc.cmd_ship(root, "001") == 0, "a rerun after a refused commit"
+    assert "stage: shipped" in (d / "intent.md").read_text(encoding="utf-8")
+
+
+def test_ship_with_no_idea_mentions_no_seed(tmp_path: Path, capsys) -> None:
+    root, _ = _seeded(tmp_path, "")
+    assert sdlc.cmd_ship(root, "001") == 0
+    out = capsys.readouterr().out
+    assert "seed" not in out and (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
+
+
+def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, capsys) -> None:
+    root, _ = _seeded(tmp_path, "Reopen drafts")
+    (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "with space.txt").write_text("x\n", encoding="utf-8")
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "last-id").write_text("1\n", encoding="utf-8")
+    (root / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    head = _git(root, "rev-parse", "HEAD")
+    assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 0
+    assert _staged(root) == [
+        ".sdlc/last-id", "drafts.py", "with space.txt",
+        "work/001-reopen-drafts/intent.md", "work/ideas.md",
+    ]  # fmt: skip
+    assert "  staged with space.txt" in capsys.readouterr().out
+    assert _git(root, "rev-parse", "HEAD") == head, "ship never commits"
+
+
+@pytest.mark.parametrize("left", ["./unrelated.txt", "unrelatd.txt"])
+def test_a_left_path_that_matches_nothing_refuses_before_any_write(
+    tmp_path: Path, capsys, left
+) -> None:
+    root, d = _seeded(tmp_path, "Reopen drafts")
+    (root / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    before = (d / "intent.md").read_text(encoding="utf-8")
+    assert sdlc.cmd_ship(root, "001", [left]) == 1
+    assert f"--leave {left}: not a path the checkout has uncommitted" in capsys.readouterr().err
+    assert (d / "intent.md").read_text(encoding="utf-8") == before
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
+    assert _staged(root) == []
+
+
+def test_a_left_path_already_staged_refuses_before_any_write(tmp_path: Path, capsys) -> None:
+    root, d = _seeded(tmp_path, "Reopen drafts")
+    (root / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    _git(root, "add", "unrelated.txt")
+    before = (d / "intent.md").read_text(encoding="utf-8")
+    assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 1
+    assert "already staged" in capsys.readouterr().err
+    assert (d / "intent.md").read_text(encoding="utf-8") == before
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == IDEAS
