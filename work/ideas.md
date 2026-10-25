@@ -57,14 +57,6 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 
-## [2026-10-24] [seed] Evidence for this repo's retrospective
-
-`retro.evidence` is empty, so the retrospective can score none of O1–O4 and every outcome is
-carried. Add read-only commands for this repo that print what the product doc's measures name:
-issues filed against setup, `new` or close per release (O1), issues reporting lost work or a
-number given twice (O2), and the stops close records per change by tier (O3). Raised by the
-retrospective of 2026-10-24.
-
 ## [2026-10-24] [seed] Rework ignores shared docs and the setup record
 
 The first retrospective's rework list held 12 pairs, all same-day, all from `defaults/SDLC.md` or

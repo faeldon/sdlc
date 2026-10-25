@@ -87,6 +87,11 @@ anything that changes what `sdlc.py` reads or writes in a host repo, and a skill
 
 The repo is numbered by GitHub issues, so an intent opens an issue on `faeldon/sdlc`.
 
+A reported bug is an issue too, and triage labels it, since a reporter can't: `bug`, plus
+`area: setup`, `area: new` or `area: close` when it's in one of those, and `lost-work` when a
+change's work was lost or one number given twice. `.sdlc/evidence.py` counts them per release
+window for `/sdlc:retro`, which scores O1 and O2 in `.sdlc/PRODUCT.md` from them.
+
 ## Design philosophy
 
 **Mechanism vs. judgment.** `scripts/sdlc.py` does the mechanical half (numbering, worktrees,

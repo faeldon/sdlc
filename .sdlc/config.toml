@@ -29,3 +29,9 @@ version_files = [
 # uv.lock records pyproject.toml's version, so it's regenerated in the release commit; otherwise
 # every `uv run` after a release rewrites it.
 after_bump = "uv lock"
+
+[retro]
+# Reported bugs per release window for the product pass: issues labelled `bug`, not `sdlc`, split
+# by `area: setup`, `area: new` and `area: close` (O1) and `lost-work` (O2). Stops (O3) are
+# already in retro's own metrics.
+evidence = ["uv run --quiet --script .sdlc/evidence.py"]
