@@ -180,3 +180,15 @@ After: "A bugs register beside the ideas register"
 With the common files left out (021), the window of 14 changes still holds 24 rework pairs,
 mostly same-week changes sharing a skill or a test file, not follow-up fixes. Pair on the hunks
 a later change rewrites, or count only changes that fix a bug. See work/021-rework-shared-files/.
+
+## [2026-10-25] [seed] Push at close and at release, not only at publish
+
+Only publish pushes, so a closed change sits on the local `main` until the next publish: no
+backup, no other machine sees it, and its issue (labelled `landed`) waits for the `Closes #N` to
+reach the remote. An opt-in key (a `[git] push` naming `close`, `release` or both) would let close
+push `main` after its `Close` commit and release push `main` and the tag, to `release.remote`,
+never forced. It is an exception to "only publish pushes" made on purpose: the test pinning that
+rule names the steps allowed instead. A release push needs care where the remote's default branch
+is what users install from (this repo's marketplace): a pushed version bump is already a publish,
+so release may push only the tag there, or nothing. Landing through pull requests is the other
+half of this, seeded on its own above. Raised 2026-10-25.
