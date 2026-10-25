@@ -58,7 +58,8 @@ What `retro` gives:
   `count` and its oldest's date and `age_days`.
 - `bugs`: the `[bug]` entries and their history in the window. `reported`, `fixed` (from each
   `Close` commit's `Sdlc-Fixes:`) and `retired` (from each `Retire` commit's `Sdlc-Retired:`,
-  by reason), `days_to_fix` (median and max), `open` (oldest first), and `escapes`: each change a
+  by reason), `triaged` (the issues triage closed without a change, from each `Sdlc-Triaged:`, by
+  verdict), `days_to_fix` (median and max), `open` (oldest first), and `escapes`: each change a
   bug was `Introduced by`, with its tier, and `unattributed`, the bugs no one tied to a change.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.

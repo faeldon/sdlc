@@ -149,6 +149,9 @@ Show the issue fields chosen in Step 1 above it, as the frontmatter lines they b
 `milestone: "Q4 2026"`, `project: [Roadmap]`, `assignees: [ana, bo]`, and the `serves:` line
 with each outcome's `name` in a comment after it: `serves: [O1]  # O1 (Unaided setup)`. The
 comment is for the reader of the draft; the line written in Step 5 is `serves: [O1]` alone.
+When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
+number on it, bare: `Issue: #12, #15` becomes `closes: [12, 15]`. Those are the issues people
+filed for it, which the change closes when it lands.
 
 Write in the repo's register: concrete, naming real files, real components and real incidents, and
 explaining *why* and not only *what*. Prefer "the export job reads every order twice when a refund
@@ -224,6 +227,11 @@ add `fixes: [<id>, <id>]` under `depends_on:`, each bug's id, and draft the Prob
 entry's own description and repro. Leave the entry as it is, tag and all: `status` leaves out a
 bug an open change fixes, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` records it on
 the `Close` commit as an `Sdlc-Fixes:` trailer, which is how `/sdlc:retro` counts it fixed.
+
+If that seed or bug has an `Issue:` line, add the `closes:` line Step 3 showed under
+`depends_on:`, every number on it, so the issues it was filed from close with the change. `/sdlc:ship`
+asks about each one before it does, and the `sync` below makes each a sub-issue of the change's
+issue, so its filer follows the change.
 
 Then mirror the written intent to the change's issue, which until now says only that it was
 opened. With no tracker, or a change that gets its issue at close, it says there is nothing to

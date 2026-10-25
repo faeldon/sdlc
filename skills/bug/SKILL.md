@@ -67,7 +67,9 @@ When the argument is an entry's id, or the human wants one gone or moved:
 
 - **Retire** a bug that needs no fix: the reason is one of `duplicate`, `not-a-bug`, `wontfix`
   or `cant-reproduce`, said with a line on why. A bug fixed by a change is never retired here:
-  `/sdlc:ship` removes it with the fix.
+  `/sdlc:ship` removes it with the fix. An entry with an `Issue:` line was filed from those
+  issues, which stay open and labelled: say so in Step 6, and that each is closed by hand on the
+  tracker, with the same reason.
 - **Retag** an entry filed as the wrong kind: a `[bug]` that is really a request becomes a
   `[idea]`, and an `[idea]` (or an older `[seed]`) that describes something broken becomes a
   `[bug]` with its `Severity:` line. Its id stays the same, so whatever names it still does.

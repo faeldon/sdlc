@@ -18,7 +18,8 @@ A change can stop at any stage: the problem went away, another change covers it,
 than it was worth. Removing its worktree and branch by hand loses everything it was, and the
 retrospective never learns what work didn't ship. This skill keeps the record: the reason in the
 change's own intent, its commits reachable from `main`, its issue closed as not planned, and a
-`Drop NNN-slug` commit `retro` counts.
+`Drop NNN-slug` commit `retro` counts. Each issue on its `closes:` line goes back to triage: it
+stays open, loses its `triaged` label and its parent, and is told why.
 
 **Nothing of the change lands.** The `Drop` commit is a merge that keeps `main`'s files exactly
 (`git merge -s ours`), so the branch's commits stay in history and `git branch -d` can delete the

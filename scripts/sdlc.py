@@ -5553,12 +5553,17 @@ def cmd_intake(root: Path) -> int:
     cfg = load_config(home)[0]
     out: dict = {"unavailable": None, "issues": [], "more": False, "dangling": []}
     out["severities"] = severities(home, cfg)
-    a = analyze(home)
-    out["open_changes"] = [
-        {"id": r["id"], "slug": r["slug"], "title": r["title"], "stage": r["stage"],
-         "closes": r.get("closes") or []}
-        for r in a["open"] if r["stage"] not in ("shipped", "dropped")
-    ]  # fmt: skip
+    # Where an issue can go: each change still being built, with its intent's path, in its own
+    # worktree, for triage to add the issue to its `closes:` line. One at ship or later is past it.
+    out["open_changes"] = []
+    for path in change_dirs(home):
+        r = load_change(path, home)
+        if r["stage"] in (None, "ship", "shipped", "dropped"):
+            continue
+        out["open_changes"].append(
+            {"id": r["id"], "slug": r["slug"], "title": r["title"], "stage": r["stage"],
+             "closes": r.get("closes") or [], "intent": str(path / "intent.md")}
+        )  # fmt: skip
     found, why = _intake_tracker(home, cfg)
     if found is None:
         out["unavailable"] = why

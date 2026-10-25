@@ -14,6 +14,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py closes *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
@@ -108,6 +109,15 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --change <N
 
 Each is a finding an earlier ship approved unfixed. Step 4 proposes retiring the ones this diff
 fixed or made moot. None listed, or no `work/inbox.md`, is the usual answer.
+
+Then the issues the change would close, those its intent's `closes:` line names:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py closes <NNN>
+```
+
+Each is an issue someone filed that triage, or the seed this change came from, put on the change.
+Step 4 asks about each one. An empty list is the usual answer.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
@@ -259,8 +269,9 @@ it's written down somewhere that gets read. Put the dispositions in the commit m
 body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Leave out a paragraph
 that has nothing in it.
 
-**Ids.** Take an id for every entry this ship would add to `work/inbox.md`, the new nits and the
-seeds undone items are carried to, all in one call, `<N>` being how many, so no two share one:
+**Ids.** Take an id for every entry this ship would add to `work/inbox.md`, the new nits, the
+seeds undone items are carried to and the seeds issues are split off as, all in one call, `<N>`
+being how many, so no two share one:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
@@ -278,6 +289,14 @@ stays, and needs no mention.
 each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
 the line comes out, or the fix goes in.
 
+**Issues it closes.** For each issue `closes <NNN>` listed, show its number and title, with a line on
+whether the diff resolves what it asks, and ask, issue by issue, whether this change resolved it.
+Only a confirmed one stays on `closes:`, and `/sdlc:close` closes it when the change lands. One the
+human says this change didn't resolve is never closed and never dropped: propose a new seed for it,
+an `[idea]` or a `[bug]` as the human decides (a bug with its `Severity:`), with an id from the same
+`next-entry` call, its `Issue: #N` line, and a first body line `Split from <NNN-slug>:` saying what
+is left. Show the `closes:` line as it becomes.
+
 **Context update.** Show the context pass's result under the findings: each proposed edit as a
 diff of its doc, or "no update needed" and why. A doc left saying something false is an
 **Important** finding, not a nit.
@@ -292,11 +311,12 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 Ask literally:
 
-> `Commit this, with the context update shown, the nits shown recorded in work/inbox.md, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, with the context update shown, the nits shown recorded in work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
 Leave out `, with the context update shown` when the context pass proposed none, `, the nits shown
-recorded in work/inbox.md` when there are none to add or retire, and `, then update its issue` when
-`config` says `archive.target` is `none`.
+recorded in work/inbox.md` when there are none to add or retire, the closing clause when `closes:`
+names nothing (and its `splitting` half when every issue was resolved), and `, then update its
+issue` when `config` says `archive.target` is `none`.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone
@@ -317,6 +337,11 @@ First, the undone items, exactly as approved:
   `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
   `- [x] <text> → seed: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
+
+Then the issues it closes, exactly as approved: take each one this change didn't resolve off the
+intent's `closes:` line, and append its seed to the register with its `Issue: #N` line and its
+`Split from <NNN-slug>:` line. The seed lands with the change; the `sync` below lets the issue go
+from the change's issue, and `/sdlc:close` tells it which seed it stays open as.
 
 Then the nits, exactly as approved: append each new entry to the register after its last one,
 and delete each retired entry, heading to the line before the next `## `. If it doesn't exist,
