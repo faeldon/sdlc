@@ -5,6 +5,7 @@ an entry."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -221,3 +222,145 @@ def test_a_milestone_puts_forward_its_seed_named_by_id(tmp_path: Path) -> None:
     )
     items = _next(root)["items"]
     assert [(i["rule"], i["title"]) for i in items][0] == ("milestone", "Other")
+
+
+# Moving a repo over: `migrate-inbox`.
+
+OLD_IDEAS = """\
+# Ideas
+
+> The note.
+
+## [2026-10-01] [seed] Keep drafts
+
+Why.
+
+## [2026-10-01] [building] Share drafts
+
+Building in work/001-share-drafts/.
+
+After: "Keep drafts"
+
+## [2026-10-03] [bug] Drafts lose their title
+
+What happens.
+"""
+
+OLD_NITS = """\
+# Nits
+
+> The note.
+
+## 003-1 [tests] A test that can't fail
+- **raised:** 2026-10-01 by 003-test-lifetimes (correctness)
+- **paths:** tests/test_x.py
+- **cost:** S  **value:** low
+
+The half that runs patched proves nothing.
+
+## 009-1 [style] An idiom
+- **raised:** 2026-10-04 by 009-drift-message (cost)
+- **paths:** tests/test_defaults.py, docs/
+- **cost:** M  **value:** low
+"""
+
+OPEN_INTENT = """\
+---
+id: 001
+slug: share-drafts
+tier: 1
+impact:
+stage: build
+created: 2026-10-02
+updated: 2026-10-02
+idea: Share drafts
+depends_on:
+---
+
+# 001 — Share drafts
+"""
+
+DIRECTION = '## Milestones\n\n### M1. Drafts\n\nGroups: 001, "Keep drafts", "Long gone"\n'
+
+
+def _old_layout(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    (root / "work" / "001-share-drafts").mkdir(parents=True)
+    (root / ".sdlc").mkdir()
+    (root / "work" / "ideas.md").write_text(OLD_IDEAS, encoding="utf-8")
+    (root / "work" / "nits.md").write_text(OLD_NITS, encoding="utf-8")
+    (root / "work" / "001-share-drafts" / "intent.md").write_text(OPEN_INTENT, encoding="utf-8")
+    (root / ".sdlc" / "DIRECTION.md").write_text(DIRECTION, encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+def _migrate(root: Path, capsys) -> tuple[int, dict]:
+    code = sdlc.cmd_migrate_inbox(root)
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_migrate_moves_the_registers_into_one_inbox_with_ids(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    code, out = _migrate(root, capsys)
+    assert code == 0, out
+    work = root / "work"
+    assert not (work / "ideas.md").exists() and not (work / "nits.md").exists()
+    assert "work/ideas.md -> work/inbox.md" in _git(root, "status", "--short"), "a git mv"
+    inbox = (work / "inbox.md").read_text(encoding="utf-8")
+    assert inbox.startswith("# Ideas\n\n> The note.\n\n## [2026-10-01-1] [seed] Keep drafts\n")
+    assert "## [2026-10-01-2] [building] Share drafts" in inbox
+    assert "After: 2026-10-01-1\n" in inbox
+    assert "## [2026-10-03-1] [bug] Drafts lose their title" in inbox
+    assert inbox.endswith(
+        "## [2026-10-01-3] [nit] A test that can't fail\n\n"
+        "The half that runs patched proves nothing.\n\n"
+        "Theme: tests\nPaths: tests/test_x.py\nCost: S\nValue: low\n"
+        "Raised by: 003-test-lifetimes (correctness)\n\n"
+        "## [2026-10-04-1] [nit] An idiom\n\n"
+        "Theme: style\nPaths: tests/test_defaults.py, docs/\nCost: M\nValue: low\n"
+        "Raised by: 009-drift-message (cost)\n"
+    )
+    nits, problems = sdlc.nit_entries(root)
+    assert problems == [] and [n["by"] for n in nits] == ["003-test-lifetimes", "009-drift-message"]
+    groups = (root / ".sdlc" / "DIRECTION.md").read_text(encoding="utf-8")
+    assert 'Groups: 001, 2026-10-01-1, "Long gone"' in groups, "a shipped title stays a title"
+    intent = (work / "001-share-drafts" / "intent.md").read_text(encoding="utf-8")
+    assert "\nidea: 2026-10-01-2\n" in intent
+    assert [r["to"] for r in out["references"]] == ["2026-10-01-1", "2026-10-01-1", "2026-10-01-2"]
+    assert sdlc.inbox_migration(root) == []
+
+
+def test_a_second_migration_has_nothing_to_do(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    assert _migrate(root, capsys)[0] == 0
+    before = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    code, out = _migrate(root, capsys)
+    assert code == 0 and out["done"] == ["nothing to migrate"]
+    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == before
+
+
+def test_migrate_refuses_uncommitted_edits_before_writing(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    (root / ".sdlc" / "DIRECTION.md").write_text(DIRECTION + "\nmore\n", encoding="utf-8")
+    code, out = _migrate(root, capsys)
+    assert code == 1 and out["refusals"] == ["commit or put back these first: .sdlc/DIRECTION.md"]
+    assert (root / "work" / "ideas.md").read_text(encoding="utf-8") == OLD_IDEAS
+
+
+def test_migrate_refuses_both_registers(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    (root / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "both")
+    code, out = _migrate(root, capsys)
+    assert code == 1 and any("both work/ideas.md and work/inbox.md" in r for r in out["refusals"])
+
+
+def test_readiness_says_a_repo_has_registers_to_move(tmp_path: Path, capsys) -> None:
+    root = _old_layout(tmp_path)
+    sdlc.cmd_readiness(root)
+    item = next(i for i in json.loads(capsys.readouterr().out)["items"] if i["name"] == "inbox")
+    assert item["status"] == "warn" and "migrate-inbox" in item["detail"]

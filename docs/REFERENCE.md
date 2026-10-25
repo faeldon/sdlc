@@ -239,7 +239,11 @@ with finished changes: the change's commit keeps them in history. `work/inbox.md
 too; a closed seed is deleted from it, history keeping that as well. It was `work/ideas.md`
 before 1.2.0, and a repo with only that file is read from it until 2.0.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
-reports a repo holding both. The findings `/sdlc:ship` approved unfixed are entries there too,
+reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
+over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
+into `[nit]` entries, and rewrites the titles that name an open entry to its id, in `After:`, the
+direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
+of those files has uncommitted edits. The findings `/sdlc:ship` approved unfixed are entries there too,
 tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
 lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
 the same paths, retired by the ship whose diff fixes it, and counted by theme and age by

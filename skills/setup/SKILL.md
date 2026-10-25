@@ -16,6 +16,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py migrate-inbox *)'
 disable-model-invocation: true
 ---
 
@@ -137,6 +138,11 @@ Each item `readiness` reported as `missing` or `warn` gets a draft. Show new fil
 edit to an existing file as a diff. A doc drafted from a default keeps the `>` note under its
 title: it says what the plugin reads from the doc, which whoever edits it later needs.
 
+- **The inbox**, when `readiness`'s `inbox` item is `warn`: the repo still has a `work/ideas.md`
+  or a `work/nits.md`, or entries without ids. Propose moving them over, saying what its detail
+  lists, as `work/inbox.md (migrated)` in Step 4's list. `sdlc.py migrate-inbox` does it in Step
+  5, renaming `work/ideas.md` so history follows it, and refuses while one of those files has
+  uncommitted edits: those are the human's to commit first.
 - **`.gitignore`**: a `.claude/worktrees/` line, where each change's worktree lives. Never `work/`:
   a change's artifacts are committed with it, and `readiness` reports an ignored `work/`.
 - **`.sdlc/config.toml`**: only the keys that differ from their defaults, each with a comment
@@ -220,7 +226,14 @@ Ask literally, listing every path:
 ## Step 5 — Write and prove it
 
 Write each file, `Edit` each existing one exactly as approved: a `refresh` doc is written as its
-approved `proposed` text. A template override being reset is deleted by the script, which takes
+approved `proposed` text. An approved inbox move is the script's, never an edit by hand:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py migrate-inbox
+```
+
+It prints what it moved, the ids it gave and the references it rewrote; a refusal is said as it
+stands, and the rest of the approved list is written all the same. A template override being reset is deleted by the script, which takes
 only a file name in `.sdlc/templates/` and refuses one with uncommitted edits:
 
 ```bash

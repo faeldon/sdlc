@@ -6,7 +6,7 @@ impact:
 stage: build
 created: 2026-10-25
 updated: 2026-10-25
-idea: A bugs register beside the ideas register
+idea: 2026-10-25-10
 depends_on:
 serves: [O4, O2]
 ---
