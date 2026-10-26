@@ -2,7 +2,7 @@
 
 > Rewritten by `/sdlc:retro` each time it runs; history keeps every earlier version. It says where
 > the repo is headed, not what is being built: the changes are in `work/`, the seeds in
-> `work/ideas.md`.
+> `work/inbox.md`.
 >
 > Every goal and milestone has an id that carries from one retrospective to the next, and ends
 > done, dropped or revised, never silently gone: `sdlc.py retro-commit` refuses a doc that drops
@@ -16,7 +16,7 @@
 >
 > What's true when it's done.
 >
-> Groups: 006, "Reopen drafts from the list"
+> Groups: 006, 2026-10-01-2
 >
 > ### ~~M2. Drafts sync every hour~~ Revised → M3: on every save, not on a timer
 >
@@ -29,60 +29,83 @@
 
 ## Since the last retrospective
 
-First retrospective: no goals or milestones were open.
+- G1 done: 020 gave the retrospective its evidence, and this one scores every outcome against it.
+- G2 carried: the target and the gates now agree (007), but the median change still stops above
+  it, Tier 1 at 7 against 5 and Tier 2 at 9.5 against 6.
+- G3 carried: size, nits and the drift gate are honest now; rework still counts shared files, not
+  fixes, and a ship that fixes its own finding reads as a miss.
+- M1 done: 020 (v1.2.0) added `retro.evidence`, and its rows decide O2 and O3 below.
+- M2 revised → M4: 007 and 014 shipped and the two numbers agree, but Tier 1 still runs 2 stops
+  over, and permission prompts (median 2.5 a change) are most of the excess.
+- M3 done: 021, 023, 012 and 008 all shipped in v1.2.0.
 
 ## Where we are
 
-Six changes closed and shipped in v1.1.0, published today: the test triage rule, a shim registry,
-acceptance checks rerun at ship, setup refresh and uninstall, a ship-time base step, and the policy
-doc named by its role. Five of the six serve no product outcome, and the retrospective has no
-evidence to score any: the loop measures itself well and the product not at all. Every change stops
-its person three to seven times the two-stop target.
+Twenty changes closed since 2026-10-24: eighteen in v1.2.0 and two in v1.3.0 (025, 026), tagged
+today and not yet published. They built the inbox (seeds, bugs, nits) and the GitHub intake, and
+made the loop's own numbers honest. Every change was measured. Twelve of the twenty were Tier 2,
+only one of those went through every stage first time, and the median change stops its person
+2 to 3.5 times above the target. The evidence shows no issue filed against the plugin in any
+release. That is no channel, not no problems: hosts' reports have reached this repo by hand,
+and 026's issue forms reach users only once v1.3.0 is published.
 
 ## Goals
 
-- G1. Each retrospective scores the product's outcomes from evidence, not from process counts
-  alone (O4)
+- ~~G1. Each retrospective scores the product's outcomes from evidence, not from process counts alone (O4)~~ Done: 020, and this retrospective scores O1–O4 against its rows
 - G2. A change stops its person as often as O3 says it should, with the target and the gates
   agreeing on what that is (O3)
 - G3. The loop's own numbers can be trusted: rework, size and ship's findings say what happened
+- G4. What a host reports reaches the register without the person carrying it, and the
+  retrospective counts it (O1, O2)
 
 ## Milestones
 
-### M1. The retrospective has evidence
+### ~~M1. The retrospective has evidence~~ Done: 020, in v1.2.0
 
-`retro.evidence` names commands that print the measures O1–O3 name (issues by label per release,
-the stops close records), and the next retrospective scores at least one outcome from them.
+### ~~M2. The stop target and the gates agree~~ Revised → M4: they agree since 007; what's left is the prompts
 
-Groups: "Evidence for this repo's retrospective"
+### ~~M3. The loop's numbers are honest~~ Done: 008, 012, 021 and 023, in v1.2.0
 
-### M2. The stop target and the gates agree
+### M4. Permission stops are named, and the avoidable ones gone
 
-O3's target and `metrics.stop_allowance` match the WAITs a change actually passes, and the median
-Tier 1 change meets it.
+Close records what each permission stop asked for, every prompt a skill's rules should have covered
+is covered, and the median Tier 1 change stops within its target.
 
-Groups: 007, "Ship does its own landing edits"
+Groups: 2026-10-26-4, 2026-10-26-5
 
-### M3. The loop's numbers are honest
+### M5. Rework and first time say what happened
 
-Rework counts follow-up fixes, not shared docs; a change's size is its whole branch; a ship's
-unfixed nits are carried like undone items; this repo's gate fails when its setup record drifts.
+Retro's rework counts the earlier changes a later one says it fixes, not shared files, and ship's
+first-time rate tells a review that caught something apart from a loop that circled.
 
-Groups: "Rework ignores shared docs and the setup record", "A change's size counts every commit on its branch", "Carry a ship's unfixed nits forward", "This repo's gate fails when its setup record drifts"
+Groups: 2026-10-25-12, 2026-10-26-6
+
+### M6. Hosts report through issues
+
+v1.3.0 is published, so hosts have the issue forms and `/sdlc:triage`. A session in a host on this
+machine can hand a report to the plugin's session. The next retrospective's evidence counts reports
+that arrived that way.
+
+Groups: 026, 2026-10-25-9
 
 ## Next major release
 
-None planned: nothing above changes what a host has to do.
+None planned. The next release, 1.4.0, removes the shims in `.sdlc/deprecations.toml` (the
+`work/ideas.md` fallback and bare-date headings) and ships as a minor on purpose, after the few
+hosts have migrated. 027 would be major only if it moved an existing host's `work/` without a
+key to keep it.
 
 ## Dropped findings
 
-- `scripts/sdlc.py` at 4,928 lines, touched by three of six changes: a duplicate of the seed
-  "Architecture indicators for the retro loop", which measures churn before anything is split.
-- Ship's low first-time rate: 004's ship-time base already answers the stale-base cause; the
-  others were one-off.
-- Tier mix of four Tier 2 to two Tier 1: each Tier 2 was forced by an always-Tier-2 rule, and six
-  changes is too few to redraw the tiers. Recheck next time.
-- A session runs the skill text it started with after a change edits that skill: `AGENTS.md`
-  already says edits take effect in the next session.
-- Findings caught at ship versus found later stays unmeasured: too few changes yet, and carrying
-  nits forward (M3) covers today's gap.
+- Rework: 55 pairs, nearly all appends to a shared skill or test file. A duplicate of the seed
+  2026-10-25-12, grouped under M5.
+- `scripts/sdlc.py` grew from 4,928 to 7,047 lines and 16 of 20 changes touched it: proposed as an
+  intent to split it, not a seed. The seed 2026-10-24-5 still measures it for any host.
+- Findings caught at ship against those found later stay unmeasured: the bug register's
+  `Introduced by:` line now carries them, and no bug has been filed yet.
+- The person's response time (median 14 minutes for a Tier 2 change) almost matches the agent's
+  (15.5): reading a spec or a review is the work the gates exist for, not a queue.
+- Tokens pile up in build (median 8.9M cache reads for Tier 2): that is where the code is written,
+  and there is nothing yet to compare it with.
+- Seven of twenty changes serve no outcome, down from five of six: no longer growing.
+- No bugs reported, fixed or escaped in the window: nothing to weigh against a tier.

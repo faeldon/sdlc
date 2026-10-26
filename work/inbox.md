@@ -374,3 +374,54 @@ Paths: tests/test_adoption.py
 Cost: S
 Value: low
 Raised by: 026-github-intake (correctness)
+
+## [2026-10-26-4] [idea] Close records what each permission stop asked for
+
+Close counts a change's permission prompts among its stops (median 3 for a Tier 2 change and 2.5
+for a Tier 1 in the last window), but not which tool or command each was for, so nobody can tell
+the ones a skill's `allowed-tools` should have covered from the ones that ask on purpose (`accept`).
+Record each prompt's tool and the command's first word, numbers and names only, on the `Close`
+commit, and let retro group them across the window. Raised by the retrospective of 2026-10-26.
+
+## [2026-10-26-5] [idea] Cover the permission prompts a skill's rules should have
+
+Once close names them, take the prompts that recur across changes and aren't asking on purpose,
+and give each the rule its skill was missing, or move its logic into `sdlc.py` where a rule can
+cover it. This is what brings the median Tier 1 change within its stop target (7 against 5 in the
+last window). Raised by the retrospective of 2026-10-26.
+
+After: 2026-10-26-4
+
+## [2026-10-26-6] [idea] A ship that fixes its own review finding is not a miss
+
+`happy()` marks ship `no` whenever the person answers anything but yes inside it, so "fix a finding
+first", which is the review doing its job, counts the same as a loop that circled. Ship went
+through first time in 5 of 12 Tier 2 changes and 4 of 8 Tier 1 in the last window, and those
+numbers can't say which. Count a ship that stopped for a finding its own review raised apart from
+one rerun for any other reason, and let `first_time` count only the second kind. Raised by the
+retrospective of 2026-10-26.
+
+## [2026-10-26-7] [idea] Pay down the robustness nits
+
+The `robustness` theme holds five open nits, the threshold the process doc sets for one paydown
+change: 2026-10-25-13 and 2026-10-25-14 (status's `After:` handling), 2026-10-25-17 (a file
+after-bump staged, missing from a failed release's report), 2026-10-25-18 (a change sized from an
+intent committed early) and 2026-10-26-1 (an issue that hears nothing until the next marking).
+Fix them in one change, each retired by its ship. Raised by the retrospective of 2026-10-26.
+
+## [2026-10-26-8] [idea] Leave each change's measured numbers out of retro's and release's output
+
+`sdlc.py retro` and `unreleased` print every change's full `metrics` blob, half of retro's output
+in the last window (about 39 KB of 78 KB compact, twenty changes), and `release --check` prints
+it again. Retro's skill reads only the medians in `metrics`, and release reads none. Leave the
+per-change blob out by default, behind a flag for anyone who wants it, so each retrospective and
+release reads a fraction of the tokens. Raised by the retrospective of 2026-10-26.
+
+## [2026-10-26-9] [idea] One preflight call for ship's lookups
+
+Ship is the largest skill (about 6,000 tokens, 21 commands) and 7 of the last 20 changes edited
+it. Its Step 0 runs `status`, `config`, `base`, `undone`, `nits --change`, `closes` and
+`checks` one by one on the same change, and Step 5 builds its WAIT question by leaving out
+clauses that a rule decides. A `ship --check <NNN>` returning all of them, and the question's
+text, takes those steps out of prose, and each new list ship gains then goes in the script, not
+the skill. Raised by the retrospective of 2026-10-26.
