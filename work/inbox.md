@@ -468,3 +468,15 @@ Paths: tests/test_inbox.py
 Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
+
+## [2026-10-27-1] [idea] Close records where a change started, as Sdlc-Base
+
+`_change_base()` starts a change at the parent of the first commit holding its intent, so a
+change whose build commits leave its folder out is measured from the ship commit alone: 028's
+`reaches` missed the five skills it changed, its `Sdlc-Rework` said `final=2` (amended to 100),
+and retro and `bugs --introduced` would size it from that one commit. Close's merge step knows
+where the base branch was before the fast-forward, which ship's `base` makes the change's true
+start: write it as an `Sdlc-Base:` trailer on the `Close` commit, use it for `measure` and
+`reaches`, and have `_change_base()` read it, falling back to the intent rule for closes from
+before it. The merge-base alone fails once the branch is gone; committing the folder early is a
+rule nothing enforces.
