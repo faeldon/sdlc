@@ -16,6 +16,7 @@ rely on gets a spec and a plan.
 | `/sdlc:ship` | when it's built: the gate, a review in passes, one commit |
 | `/sdlc:close` | after ship: land it on `main` and tidy away its worktree and branch |
 | `/sdlc:drop` | for a change that won't ship: record why, and keep what it cost |
+| `/sdlc:idea` | when you think of something for later: file it in the inbox, or edit or retire one |
 | `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one |
 | `/sdlc:triage` | when people have filed GitHub issues: check each, then file, attach or close it |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
@@ -105,7 +106,8 @@ The tiers:
 | 2 | anything others rely on, or near an invariant | `intent.md`, `spec.md`, `plan.md` |
 
 `/sdlc:status` tells you where every open change is and what to do next, from any worktree. Requests
-not ready to be a change go in `.sdlc/work/inbox.md`, which `/sdlc:intent <id>` can start from; give one
+not ready to be a change go in `.sdlc/work/inbox.md`, where `/sdlc:idea` files them from any
+checkout and `/sdlc:intent <id>` can start from one; give one
 an `After: <id>` line to make it wait for another, and status's **Next up** puts forward the one to
 start once the open changes are done. Something already broken is a bug: `/sdlc:bug` files it
 with a severity, and it comes first.

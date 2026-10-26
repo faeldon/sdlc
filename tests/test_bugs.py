@@ -1,14 +1,19 @@
 """Bugs: `[bug]` entries in work/inbox.md, weighed by the process doc's severity words. `bugs` lists
 them and names the change that last touched a path, `check` audits them, `status` puts them first,
-and `bug-commit` records what /sdlc:bug wrote, from the main checkout only."""
+and `inbox-commit` records what /sdlc:bug or /sdlc:idea wrote, on main, from the main checkout or
+for the entries a change's worktree names."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import subprocess
+import sys
+import threading
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -225,11 +230,11 @@ def test_status_counts_the_open_bugs(tmp_path: Path, capsys, monkeypatch) -> Non
 
 
 def _commit(root: Path, capsys, *reasons: str) -> tuple[int, dict]:
-    code = sdlc.cmd_bug_commit(root, list(reasons))
+    code = sdlc.cmd_inbox_commit(root, reasons=list(reasons))
     return code, json.loads(capsys.readouterr().out)
 
 
-def test_bug_commit_files_a_new_bug(tmp_path: Path, capsys) -> None:
+def test_inbox_commit_files_a_new_bug(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     _inbox(root, _bug("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
     code, out = _commit(root, capsys)
@@ -238,14 +243,14 @@ def test_bug_commit_files_a_new_bug(tmp_path: Path, capsys) -> None:
     assert _git(root, "status", "--short") == ""
 
 
-def test_bug_commit_updates_a_retagged_entry(tmp_path: Path, capsys) -> None:
+def test_inbox_commit_updates_a_retagged_entry(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     _inbox(root, "## [2026-10-01-1] [seed] One\n\nIt's a request after all.\n\n")
     assert _commit(root, capsys)[0] == 0
     assert _git(root, "log", "-1", "--format=%s") == "Update 2026-10-01-1"
 
 
-def test_bug_commit_retires_with_a_reason_and_a_trailer(tmp_path: Path, capsys) -> None:
+def test_inbox_commit_retires_with_a_reason_and_a_trailer(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two", "low"))
     _inbox(root, _bug("2026-10-01-1", "One"))
     code, out = _commit(root, capsys)
@@ -259,7 +264,7 @@ def test_bug_commit_retires_with_a_reason_and_a_trailer(tmp_path: Path, capsys) 
     assert "Sdlc-Retired: 2026-10-02-1 severity=low reported=2026-10-02 reason=duplicate" in body
 
 
-def test_bug_commit_refuses_before_writing(tmp_path: Path, capsys) -> None:
+def test_inbox_commit_refuses_before_writing(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     code, out = _commit(root, capsys)
     assert code == 1 and out["refusals"] == ["nothing to record: .sdlc/work/inbox.md is unchanged"]
@@ -269,21 +274,160 @@ def test_bug_commit_refuses_before_writing(tmp_path: Path, capsys) -> None:
     assert code == 1
     assert out["refusals"] == [
         "only .sdlc/work/inbox.md may be uncommitted; also changed: README.md",
-        "--reason 2026-10-01-9=bogus: the reason is one of "
-        "duplicate|not-a-bug|wontfix|cant-reproduce",
         "--reason 2026-10-01-1: no entry by that id was removed",
         "--reason 2026-10-01-9: no entry by that id was removed",
     ]
     assert _git(root, "log", "--format=%s") == "init"
 
 
-def test_bug_commit_refuses_a_change_s_worktree(tmp_path: Path, capsys) -> None:
-    root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
-    tree = root / ".claude" / "worktrees" / "001-x"
-    _git(root, "worktree", "add", "-q", "-b", "001-x", str(tree))
-    (tree / ".sdlc" / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
-    code, out = _commit(tree, capsys)
-    assert code == 1 and any("run it from the main checkout" in r for r in out["refusals"])
+def _idea(entry_id: str, title: str, tag: str = "idea") -> str:
+    return f"## [{entry_id}] [{tag}] {title}\n\nWhat it's for.\n\n"
+
+
+def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> None:
+    """An idea retires as duplicate, superseded or declined, a bug by its own four, and a nit or
+    an entry being built never here."""
+    root = _repo(
+        tmp_path,
+        _bug("2026-10-01-1", "One"),
+        _idea("2026-10-02-1", "Two"),
+        _idea("2026-10-03-1", "Three", "nit"),
+        _idea("2026-10-04-1", "Four", "building"),
+    )
+    _inbox(root, _bug("2026-10-01-1", "One"))
+    code, out = _commit(
+        root, capsys, "2026-10-02-1=wontfix", "2026-10-03-1=declined", "2026-10-04-1=declined"
+    )
+    assert code == 1 and out["refusals"] == [
+        "--reason 2026-10-02-1=wontfix: an idea's reason is one of duplicate|superseded|declined",
+        "2026-10-03-1 is a nit: ship retires nits, with the change that fixes one",
+        "2026-10-04-1 is being built: its change removes it at ship, or /sdlc:drop says why not",
+    ]
+    _inbox(
+        root,
+        _bug("2026-10-01-1", "One"),
+        _idea("2026-10-03-1", "Three", "nit"),
+        _idea("2026-10-04-1", "Four", "building"),
+    )
+    code, out = _commit(root, capsys, "2026-10-02-1=superseded")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B")
+    assert body.startswith("Retire 2026-10-02-1")
+    assert "Reason 2026-10-02-1: superseded" in body and "Sdlc-Retired:" not in body
+    _inbox(root, _idea("2026-10-03-1", "Three", "nit"), _idea("2026-10-04-1", "Four", "building"))
+    code, out = _commit(root, capsys, "2026-10-01-1=superseded")
+    assert code == 1 and out["refusals"] == [
+        "--reason 2026-10-01-1=superseded: a bug's reason is one of "
+        "duplicate|not-a-bug|wontfix|cant-reproduce"
+    ]
+
+
+def test_bug_commit_is_gone(capsys, monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "bug-commit"])
+    with pytest.raises(SystemExit) as raised:
+        sdlc.main()
+    assert raised.value.code != 0
+
+
+def _tree(root: Path, name: str = "001-x") -> Path:
+    tree = root / ".claude" / "worktrees" / name
+    _git(root, "worktree", "add", "-q", "-b", name, str(tree))
+    return tree
+
+
+def _tree_inbox(tree: Path, *entries: str) -> None:
+    (tree / ".sdlc" / "work" / "inbox.md").write_text(
+        "# Inbox\n\n" + "".join(entries), encoding="utf-8"
+    )
+
+
+def _file(tree: Path, capsys, *ids: str, reasons: tuple[str, ...] = ()) -> tuple[int, dict]:
+    code = sdlc.cmd_inbox_commit(tree, list(ids), list(reasons))
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_a_worktree_files_the_entries_it_names_on_main(tmp_path: Path, capsys) -> None:
+    """A new idea from a change's worktree lands on main alone; the worktree's own edits stay, and
+    the filed entry leaves its diff until it comes up to date."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
+    tree = _tree(root)
+    _tree_inbox(
+        tree,
+        _idea("2026-10-01-1", "One", "building"),
+        _bug("2026-10-02-1", "Two"),
+        _idea("2026-10-05-1", "Five"),
+    )
+    code, out = _file(tree, capsys, "2026-10-05-1")
+    assert code == 0, out
+    assert _git(root, "log", "-1", "--format=%s") == "File 2026-10-05-1"
+    assert _git(root, "show", "--name-only", "--format=", "HEAD") == ".sdlc/work/inbox.md"
+    assert _git(root, "status", "--short") == ""
+    on_main = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    filed = _idea("2026-10-05-1", "Five").rstrip("\n") + "\n"
+    assert on_main.endswith(_bug("2026-10-02-1", "Two") + filed)
+    in_tree = (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "[building] One" in in_tree and "Five" not in in_tree
+    _tree_inbox(tree, _idea("2026-10-01-1", "One", "building"))
+    code, out = _file(tree, capsys, "2026-10-02-1", reasons=("2026-10-02-1=not-a-bug",))
+    assert code == 0, out
+    assert _git(root, "log", "-1", "--format=%s") == "Retire 2026-10-02-1"
+    assert "2026-10-02-1" not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "[bug] Two" in (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+
+
+def test_a_worktree_updates_an_entry_in_place_on_main(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _idea("2026-10-02-1", "Two"))
+    tree = _tree(root)
+    _tree_inbox(tree, _idea("2026-10-01-1", "One, sharper"), _idea("2026-10-02-1", "Two"))
+    code, out = _file(tree, capsys, "2026-10-01-1")
+    assert code == 0, out
+    assert _git(root, "log", "-1", "--format=%s") == "Update 2026-10-01-1"
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+        "# Inbox\n\n" + _idea("2026-10-01-1", "One, sharper") + _idea("2026-10-02-1", "Two")
+    )
+    assert _git(tree, "status", "--short") == ""
+
+
+def test_a_worktree_refuses_what_it_cant_file(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"))
+    tree = _tree(root)
+    _tree_inbox(tree, _idea("2026-10-01-1", "One"), _idea("2026-10-05-1", "Five"))
+    code, out = _file(tree, capsys)
+    assert code == 1 and out["refusals"] == [
+        "from a change's worktree, name the entries to file: inbox-commit <id>…"
+    ]
+    code, out = _file(tree, capsys, "2026-10-01-1")
+    assert code == 1 and out["refusals"] == [
+        "2026-10-01-1: this worktree's .sdlc/work/inbox.md doesn't change it"
+    ]
+    (root / "README.md").write_text("someone's draft\n", encoding="utf-8")
+    code, out = _file(tree, capsys, "2026-10-05-1")
+    assert code == 1 and out["refusals"] == [
+        f"the main checkout ({root.resolve()}) has uncommitted changes: README.md"
+    ]
+    (root / "README.md").unlink()
+    _git(root, "checkout", "-q", "-b", "elsewhere")
+    code, out = _file(tree, capsys, "2026-10-05-1")
+    assert code == 1 and out["refusals"] == [f"the main checkout ({root.resolve()}) isn't on main"]
+    assert _git(root, "log", "--format=%s", "main") == "init"
+    assert "Five" in (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+
+
+def test_inbox_commit_waits_for_the_lock_claim_takes(tmp_path: Path, capsys) -> None:
+    """Two sessions filing at once: the second waits until the first lets go."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"))
+    tree = _tree(root)
+    _tree_inbox(tree, _idea("2026-10-01-1", "One"), _idea("2026-10-05-1", "Five"))
+    done = threading.Event()
+    with sdlc._main_lock(root):
+        worker = threading.Thread(
+            target=lambda: (sdlc.cmd_inbox_commit(tree, ["2026-10-05-1"]), done.set())
+        )
+        worker.start()
+        assert not done.wait(0.5)
+    worker.join(10)
+    assert done.is_set()
+    assert _git(root, "log", "-1", "--format=%s") == "File 2026-10-05-1"
 
 
 # The fix cycle: `fixes:` in the intent, ship removing the entry, close's trailer.
@@ -439,7 +583,7 @@ def test_retro_counts_the_issues_triage_closed_by_verdict(tmp_path: Path, capsys
     root = _repo(tmp_path)
     triaged = ["12=resolved:019-status-next", "13=wontfix", "14=wontfix"]
     whys = ["13=Out of scope", "14=Out of scope"]
-    assert sdlc.cmd_bug_commit(root, triaged=triaged, whys=whys) == 0
+    assert sdlc.cmd_inbox_commit(root, triaged=triaged, whys=whys) == 0
     out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out["triaged"] == {"resolved": 1, "wontfix": 2}
 

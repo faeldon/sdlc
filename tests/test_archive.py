@@ -1849,7 +1849,7 @@ def test_a_crash_before_the_register_s_commit_says_it_needs_committing(
     assert issue["filed"] == "2026-10-26-1" and issue["uncommitted"] is True
     _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
     assert _issue(gh, 52)["labels"] == [], "an uncommitted entry is never marked"
-    code, out = _json(capsys, lambda: sdlc.cmd_bug_commit(root))
+    code, out = _json(capsys, lambda: sdlc.cmd_inbox_commit(root))
     assert code == 0, out
     _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
     _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
@@ -1863,7 +1863,7 @@ def test_a_verdict_is_committed_then_closes_its_issue_once(tmp_path, gh, capsys)
         _filed(gh, n)
     code, out = _json(
         capsys,
-        lambda: sdlc.cmd_bug_commit(
+        lambda: sdlc.cmd_inbox_commit(
             root,
             triaged=["60=resolved:019-status-next", "61=wontfix", "62=duplicate:#60"],
             whys=["61=Out of scope for the plugin", "62=Same report as #60"],
@@ -1894,7 +1894,7 @@ def test_a_verdict_names_what_it_rests_on_or_why(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _register(root, "")
     code, out = _json(
-        capsys, lambda: sdlc.cmd_bug_commit(root, triaged=["60=resolved", "61=wontfix"])
+        capsys, lambda: sdlc.cmd_inbox_commit(root, triaged=["60=resolved", "61=wontfix"])
     )
     assert code == 1
     assert out["refusals"] == [

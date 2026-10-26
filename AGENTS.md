@@ -177,9 +177,15 @@ since history's intents name seeds by them. Never match an entry by title alone.
 
 **Bugs: `bug_entries()`.** `[bug]` entries carry `Severity:`, its words read from the process doc
 by `severities()` (the default doc's when the host's has none), `Paths:` and a confirmed
-`Introduced by:`. `bug-commit` is the only code that commits the inbox, from the main checkout
-alone; ship deletes a change's `fixes:` entries, and close's `fix_trailers()` writes their
-`Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the register and those trailers.
+`Introduced by:`. `inbox-commit` (`cmd_inbox_commit()`) is the only code that commits the inbox
+on its own, always on the base branch in the main checkout, for `/sdlc:idea`, `/sdlc:bug` and
+`/sdlc:triage`. From a change's worktree it files only the entries it names, splicing them
+into the main checkout's register (which must be clean) and back out of the worktree's under
+`_main_lock()`, the lock `claim()` takes, so an entry never rides on a change's branch, where a
+drop would lose it. A removed entry needs a reason of its kind (`RETIRE_REASONS`), and a nit or
+a `[building]` entry is never removed there. Ship deletes a change's `fixes:` entries, and close's
+`fix_trailers()` writes their `Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the
+register and those trailers, and `Sdlc-Retired:` is written for bugs alone.
 
 **Intake: `recorded_issues()`.** Issues people file on GitHub reach the repo through
 `/sdlc:triage`, and each one the repo records has exactly one record: an entry's `Issue: #12, #15`
@@ -187,7 +193,7 @@ line (`entry_issues()`, the first the parent), a change's `closes:` line, or an 
 trailer on the base branch for a verdict that closed it. `recorded_issues()` is the one reader of
 all three, and decides each issue's comment, marker and parent; the tracker's `mark()`,
 `unmark()` and `needs_info()` only set them, so a tracker still never reads `.sdlc/work/`. The record is
-always committed before the issue is told (`bug-commit --triaged`, then `mark-triaged`), so a rerun
+always committed before the issue is told (`inbox-commit --triaged`, then `mark-triaged`), so a rerun
 finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
 asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
 `Split from NNN-slug:` line, never left dangling. Close's `remove folder` step reruns the marking
@@ -257,7 +263,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, and the factory's `spec` and `build`) have exactly one heading
+  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec` and `build`) have exactly one heading
   containing `WAIT`. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill

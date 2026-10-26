@@ -252,7 +252,7 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
         "Severity: high\nPaths: report.txt\n",
         encoding="utf-8",
     )
-    filed = _run(root, "bug-commit")
+    filed = _run(root, "inbox-commit")
     assert filed.returncode == 0, filed.stdout + filed.stderr
     assert _git(root, "log", "-1", "--format=%s") == f"File {bug_id}"
     assert "■ Bugs: 1 open (high 1)" in _run(root, "status").stdout

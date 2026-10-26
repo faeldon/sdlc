@@ -1,6 +1,6 @@
 ---
 name: bug
-description: File a bug in .sdlc/work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone as "File <id>", "Retire <id>" or "Update <id>". Use from the main checkout when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:retro or a person writes), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
+description: File a bug in .sdlc/work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone on the base branch as "File <id>", "Retire <id>" or "Update <id>". Use from any checkout, a change's worktree included, when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:idea files), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
 argument-hint: "[what broke, or an entry's id to retire or retag]"
 allowed-tools:
   - Read
@@ -9,7 +9,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bugs *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bug-commit *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py inbox-commit *)'
 disable-model-invocation: true
 ---
 
@@ -30,8 +30,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bugs
 ```
 
-Run this from the **main checkout**, on `git.base` from `config`: the commit in Step 5 refuses
-anywhere else. If `config`'s `work.dir` is inside `.claude/worktrees/`, stop and say so. `bugs`
+Run it from any checkout: a bug turns up at any stage of a change. The commit in Step 5 always lands
+on `git.base` from `config`, in the main checkout. When `config`'s `work.dir` is inside
+`.claude/worktrees/`, the session is in a change's worktree: note it, since Step 5 then names the
+entry it files. `bugs`
 lists the open bugs and `severities`, the process doc's words for how bad one is (`docs.process`,
 its section on bugs), most severe first. If the bug is already listed, say which and stop: one bug,
 one entry.
@@ -119,12 +121,16 @@ place. If it doesn't exist, `Write` it at that path first from `templates["inbox
 `config`, as it is, then append. Then:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bug-commit --reason <id>=<reason>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py inbox-commit <id> --reason <id>=<reason>
 ```
 
-`--reason` only for a retirement. The script commits the inbox alone, and refuses before writing
-anything if anything else in the main checkout is uncommitted, or an entry is gone without a
-reason: say what it printed and stop. It never pushes.
+The `<id>` only from a change's worktree, and `--reason` only for a retirement. From the main
+checkout the script commits the inbox alone, and refuses before writing anything if anything else
+there is uncommitted, or an entry is gone without a reason. From a worktree it files the entry it
+names into the main checkout's register and commits it there, refusing if the main checkout has
+anything uncommitted or isn't on `git.base`, then puts the entry back as it was in the worktree,
+which gets it from `git.base` when it next comes up to date. On a refusal, say what it printed and
+stop. It never pushes.
 
 ## Step 6 — Report and stop
 
@@ -134,5 +140,5 @@ human wants it fixed now, or nothing, and `/sdlc:status` puts it forward by seve
 ## Out of scope
 
 - Fixing the bug, or opening the change that does: that's `/sdlc:intent <id>`.
-- Seeds and nits: retro and ship write those.
+- Ideas: `/sdlc:idea` files them. Nits: ship writes those.
 - Pushing. Only `/sdlc:publish` pushes.

@@ -62,6 +62,7 @@ GATED = {
             "uninstall",
             "bug",
             "triage",
+            "idea",
         )  # fmt: skip
     ),
     "sdlc-factory:spec",
@@ -113,6 +114,7 @@ READS_CONFIG = {
     "sdlc:publish": ["release.remote", "release.publish", "release.prepare", "git.base"],
     "sdlc:health": ["commands.scan", "docs.health"],
     "sdlc:bug": ["docs.process", "git.base", "work.register"],
+    "sdlc:idea": ["git.base", "work.register"],
     "sdlc:triage": [
         "archive.target",
         "docs.process",
@@ -153,7 +155,7 @@ READS_CONFIG = {
 def test_skills_were_found() -> None:
     """A glob that matches nothing makes every test below vacuously pass."""
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
-    more = {"publish", "retro", "drop", "uninstall", "bug", "triage"}
+    more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea"}
     assert {f"sdlc:{n}" for n in names | more} | {
         "sdlc-factory:spec", "sdlc-factory:build"
     } == set(BY_ID)  # fmt: skip
@@ -357,14 +359,28 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
 
 
 def test_bug_files_by_the_script_and_never_writes_introduced_by_unasked() -> None:
-    """A bug's id comes from `next-entry`, its commit from `bug-commit`, and its `Introduced by:`
+    """A bug's id comes from `next-entry`, its commit from `inbox-commit`, and its `Introduced by:`
     only from a person's word: retro counts escapes by it."""
     text = (ROOT / "skills" / "bug" / "SKILL.md").read_text(encoding="utf-8")
     flat = " ".join(text.split())
-    assert "sdlc.py next-entry" in text and "sdlc.py bug-commit" in text
+    assert "sdlc.py next-entry" in text and "sdlc.py inbox-commit" in text
     assert "sdlc.py bugs --introduced" in text
     assert "only when the human confirms one" in flat
     assert "names no host" in flat
+
+
+def test_idea_files_by_the_script_from_any_checkout() -> None:
+    """An idea's id comes from `next-entry` and its commit from `inbox-commit`, which takes the
+    entry's id from a change's worktree; it retires only with an idea's reasons, and names no
+    host."""
+    text = (ROOT / "skills" / "idea" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    assert "sdlc.py next-entry" in text and "sdlc.py inbox-commit <id>" in text
+    assert "`duplicate`, `superseded` or `declined`" in flat
+    assert "names no host" in flat
+    for skill in ("bug", "idea"):
+        body = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+        assert "Run it from any checkout" in body, skill
 
 
 def test_only_close_and_drop_leave_the_worktree() -> None:
@@ -700,11 +716,11 @@ def test_triage_s_one_wait_shows_every_verdict_and_writes_nothing_before() -> No
     decide = "Propose; never decide. The kind, the severity and every verdict are the human's"
     assert decide in steps["2"]
     before = " ".join(steps[n] for n in ("0", "1", "2", "3", "4"))
-    for write in ("bug-commit", "mark-triaged", "needs-info", "sync"):
+    for write in ("inbox-commit", "mark-triaged", "needs-info", "sync"):
         run = f"/scripts/sdlc.py {write}"
         assert run not in before, f"{write} runs only after the WAIT"
         assert run in steps["5"]
-    first = steps["5"].index("/scripts/sdlc.py bug-commit")
+    first = steps["5"].index("/scripts/sdlc.py inbox-commit")
     then = steps["5"].index("/scripts/sdlc.py mark-triaged")
     assert first < then, "the record is committed before any issue is told"
 

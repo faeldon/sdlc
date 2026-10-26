@@ -12,7 +12,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py intake *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bugs *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bug-commit *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py inbox-commit *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py needs-info *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py mark-triaged *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
@@ -49,7 +49,7 @@ there is nothing to read.
   One whose `filed` names a record (an entry's id, a change, a verdict) was recorded by a run that
   stopped before it marked it: it needs only Step 5's `mark-triaged`, never a second record. One
   also flagged `uncommitted` stopped before its commit: its entry is in the register but not
-  committed, so Step 5's `bug-commit` comes first, and `mark-triaged` after it. One flagged
+  committed, so Step 5's `inbox-commit` comes first, and `mark-triaged` after it. One flagged
   `replied` was waiting on its author, who has answered.
 - **`dangling`**: open issues labelled `triaged` that nothing in the repo records anymore. Offer each
   to be triaged again, as if new.
@@ -169,7 +169,7 @@ second file beside it.
    each but `resolved`:
 
    ```bash
-   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py bug-commit --triaged <N>=<verdict>[:<ref>] --why <N>=<reason>
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py inbox-commit --triaged <N>=<verdict>[:<ref>] --why <N>=<reason>
    ```
 
    With only verdicts and no entries, the commit is empty, `Triage #N`. It refuses before writing

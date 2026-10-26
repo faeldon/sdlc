@@ -268,8 +268,14 @@ an entry it can't read.
 process doc's, from the `- **severity:**` bullet in its section headed `Bugs…`, most severe first
 (`high` · `med` · `low` when it has none). `/sdlc:bug` files one, retires one that needs no fix
 (`duplicate`, `not-a-bug`, `wontfix` or `cant-reproduce`) or retags one filed as the wrong kind,
-behind one approval, and `sdlc.py bug-commit` commits the inbox alone, from the main checkout, as
-`File <id>`, `Retire <id>` or `Update <id>`, a retired bug's `Sdlc-Retired:` trailer saying why.
+behind one approval, and `sdlc.py inbox-commit` commits the inbox alone, on the base branch in
+the main checkout, as `File <id>`, `Retire <id>` or `Update <id>`, a retired bug's
+`Sdlc-Retired:` trailer saying why. `/sdlc:idea` files, edits or retires an idea the same way,
+its reasons `duplicate`, `superseded` or `declined`, written as a `Reason <id>:` line. Both run
+from any checkout: from a change's worktree, `inbox-commit <id>` files the entry it names into
+the main checkout's register, which must be clean and on the base branch, so it never waits on
+the change's branch, and the worktree gets it when it next comes up to date. A nit, or an
+entry tagged `[building]`, is never retired this way.
 `sdlc.py bugs` lists them (`--touching <path>…` to narrow), and `--introduced <path>…` names the
 closed change that last touched each path, a candidate for `Introduced by:` and never written
 without a person's word. `check` reports a bug with no id, a severity outside the words, or an
@@ -296,7 +302,7 @@ after one approval records each issue once, in one of three ways:
   listed under `archive.closes_errors`, never a refusal. A dropped change's issues lose their
   `triaged` label and parent and go back to triage.
 - **A verdict that closes it now**, when nothing more will be done: `resolved` (naming the change
-  or commit that did it), `wontfix`, `not-a-bug` or `duplicate`. `bug-commit
+  or commit that did it), `wontfix`, `not-a-bug` or `duplicate`. `inbox-commit
   --triaged <N>=<verdict>[:<ref>] --why <N>=<reason>` records each as an `Sdlc-Triaged: #N
   verdict=… ref=…` trailer, on an empty `Triage #N` commit when nothing else changed, and retro
   counts them under `bugs.triaged`.

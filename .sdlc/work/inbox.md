@@ -447,8 +447,9 @@ Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
 
-## [2026-10-27-2] [idea] An /sdlc:idea skill, and inbox-commit for every kind of entry
+## [2026-10-27-2] [building] An /sdlc:idea skill, and inbox-commit for every kind of entry
 
+Building in .sdlc/work/031-idea-skill/.
 `bug-commit` already commits any change to the register: it diffs it against `HEAD` and writes
 `File <id>`, `Update <id>` or `Retire <id>` for each entry, whatever its kind, and triage uses it to
 file ideas split off from issues. But its name says bugs, its retire reasons (`duplicate`,

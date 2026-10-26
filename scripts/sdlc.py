@@ -41,8 +41,9 @@ So this tool answers the questions that are queries rather than decisions:
     next-entry  the id the next work/inbox.md entry would take today, or --count N of them
     bugs        the open [bug] entries, as JSON, with the closed change that last touched a path
                 (--introduced), a candidate for the bug's `Introduced by:`
-    bug-commit  commit work/inbox.md alone, from the main checkout, as File, Retire or Update <id>,
-                and triage's verdicts (--triaged) as `Sdlc-Triaged:` trailers
+    inbox-commit  commit work/inbox.md alone, on the base branch in the main checkout, as File,
+                Retire or Update <id>, and triage's verdicts (--triaged) as `Sdlc-Triaged:`
+                trailers; from a change's worktree, only the entries it names
     intake      the open issues people filed that triage has to read, as JSON
     closes      the issues a change's `closes:` line names, with their titles, as JSON
     mark-triaged  label, comment on and relate each open issue the repo records
@@ -101,6 +102,8 @@ import sys
 import tomllib
 import unicodedata
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from datetime import time as dtime
 from pathlib import Path
@@ -1260,6 +1263,11 @@ def is_bug(entry: dict) -> bool:
     return entry["status"].strip().lower() == "bug"
 
 
+def entry_kind(entry: dict) -> str:
+    """`bug`, `nit` or `idea`: every other tag, `[seed]` and `[building]` included, is an idea."""
+    return "bug" if is_bug(entry) else "nit" if is_nit(entry) else "idea"
+
+
 # The process doc names the severity words in a `- **severity:**` bullet in its section whose
 # heading starts with `Bugs`, backticked and most severe first.
 SEVERITY_RE = re.compile(r"^- \*\*severity:\*\*\s*(.*)$")
@@ -1634,11 +1642,7 @@ def claim(
     two sessions that read the same id for different slugs would both get it. What is made under
     the lock (the worktree's branch, or the folder) is what the next claim counts, so the counter
     can be written after the lock is released."""
-    lock = state_path(home, LAST_ID).parent
-    lock.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock, os.O_RDONLY)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    with _main_lock(home):
         name = f"{next_id(home)}-{slug}"
         tree = None
         if base is not None:
@@ -1651,6 +1655,18 @@ def claim(
         except FileExistsError:
             return None, None, f"{dest} already exists"
         return dest, tree, None
+
+
+@contextmanager
+def _main_lock(home: Path) -> Iterator[None]:
+    """An exclusive lock on the main checkout's `.sdlc/`, which every worktree shares, held for
+    the `with` block: what `claim()` takes a number under, and `inbox-commit` the register."""
+    lock = state_path(home, LAST_ID).parent
+    lock.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
     finally:
         os.close(fd)  # and with it the lock
 
@@ -2197,6 +2213,55 @@ def _drop_seed(ideas: Path, start: int) -> None:
         while before and not before[-1].strip():
             before.pop()
     ideas.write_text("".join(before + after), encoding="utf-8")
+
+
+def _entry_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
+    """Each entry's lines in a register, by id: from its heading through the line before the next
+    `## ` outside a fence, or the end, the span `_drop_seed()` deletes."""
+    spans: dict[str, tuple[int, int]] = {}
+    current: tuple[str, int] | None = None
+    fenced = False
+    for n, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        if fenced or not line.startswith("## "):
+            continue
+        if current:
+            spans[current[0]] = (current[1], n)
+        heading = _heading_entry(line.rstrip("\n"))
+        current = (heading["id"], n) if heading else None
+    if current:
+        spans[current[0]] = (current[1], len(lines))
+    return spans
+
+
+def _splice_entries(target: str, source: str, ids: list[str]) -> str:
+    """`target` with each of `ids` as `source` has it: replaced in place, appended at the end when
+    only `source` has it, removed when only `target` does. Every other line stays byte for
+    byte."""
+    lines = target.splitlines(keepends=True)
+    src = source.splitlines(keepends=True)
+    src_spans = _entry_spans(src)
+    for i in ids:
+        chunk: list[str] | None = None
+        if i in src_spans:
+            s, e = src_spans[i]
+            chunk = ("".join(src[s:e]).rstrip("\n") + "\n").splitlines(keepends=True)
+        spans = _entry_spans(lines)
+        if i in spans:
+            s, e = spans[i]
+            before, after = lines[:s], lines[e:]
+            if chunk is not None:
+                lines = before + chunk + (["\n"] if after else []) + after
+                continue
+            if not after:  # the last entry: no blank line left trailing the one before it
+                while before and not before[-1].strip():
+                    before.pop()
+            lines = before + after
+        elif chunk is not None:
+            text = "".join(lines).rstrip("\n")
+            lines = (text + "\n\n").splitlines(keepends=True) + chunk if text else chunk
+    return "".join(lines)
 
 
 def _stage_change(tree: Path, leave: list[str] | tuple[str, ...]) -> tuple[list[str], str | None]:
@@ -5166,9 +5231,14 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     return emit(0)
 
 
-# Why a bug left the register without a fix. A fixed one leaves through the ship that fixes it.
-RETIRE_REASONS = ("duplicate", "not-a-bug", "wontfix", "cant-reproduce")
-BUG_SUBJECTS = ("File", "Retire", "Update")
+# Why an entry left the register without a change, by its kind. A fixed bug or a built idea
+# leaves through the ship that did it, and a nit only through ship.
+RETIRE_REASONS = {
+    "idea": ("duplicate", "superseded", "declined"),
+    "bug": ("duplicate", "not-a-bug", "wontfix", "cant-reproduce"),
+    "nit": (),
+}
+INBOX_SUBJECTS = ("File", "Retire", "Update")
 # What triage can decide about an issue that closes it there: nothing more will be done. Anything
 # else is filed as an entry or put on a change's `closes:` line, and closes when that lands.
 TRIAGE_VERDICTS = ("resolved", "wontfix", "not-a-bug", "duplicate")
@@ -5215,31 +5285,64 @@ def _triage_verdicts(
     return trailers, body, numbers
 
 
-def cmd_bug_commit(
+def cmd_inbox_commit(
     root: Path,
+    ids: list[str] | None = None,
     reasons: list[str] | None = None,
     triaged: list[str] | None = None,
     whys: list[str] | None = None,
 ) -> int:
-    """Record what /sdlc:bug or /sdlc:triage wrote: one commit of the register alone, on the base
-    branch in the main checkout, its subject `File <id>`, `Retire <id>` or `Update <id>` for each
-    entry added, removed or changed, and an `Sdlc-Retired:` trailer for each bug removed, with the
-    reason `--reason <id>=<word>` gave it. Each `--triaged` verdict adds an `Sdlc-Triaged:`
-    trailer, and `Triage #N` to the subject; with nothing else to record, the commit is empty.
-    Every refusal is found before anything is written."""
+    """Record what /sdlc:idea, /sdlc:bug or /sdlc:triage wrote: one commit of the register alone,
+    on the base branch in the main checkout, its subject `File <id>`, `Retire <id>` or `Update
+    <id>` for each entry added, removed or changed. A removed entry needs `--reason <id>=<word>`,
+    one of its kind's RETIRE_REASONS: a bug's goes on an `Sdlc-Retired:` trailer, any other's on a
+    `Reason <id>:` body line; a nit, or an entry being built, is never removed here. Each
+    `--triaged` verdict adds an `Sdlc-Triaged:` trailer, and `Triage #N` to the subject; with
+    nothing else to record, the commit is empty.
+
+    From a change's worktree it files only the entries `ids` names, as the worktree's register
+    has them against its own HEAD, into the main checkout's register, which must be clean and on
+    the base branch; once committed there, those entries go back to HEAD in the worktree, which
+    gets them from the base branch when it next comes up to date. The whole run holds the lock
+    `claim()` takes, so two sessions filing at once keep both entries. Every refusal is found
+    before anything is written."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     register = register_path(work_dir(home))
     rel = f"{work_rel(home)}/{register.name}"
     report: dict = {"commit": None, "entries": [], "refusals": [], "done": []}
     refusals = report["refusals"]
+    ids = list(dict.fromkeys(i.strip() for i in ids or [] if i.strip()))
+    in_tree = root.resolve() != home.resolve()
 
     def emit(code: int) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return code
 
-    if root.resolve() != home.resolve():
-        refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
+    if in_tree and not ids:
+        refusals.append("from a change's worktree, name the entries to file: inbox-commit <id>…")
+    if in_tree and triaged:
+        refusals.append(f"triage's verdicts are recorded from the main checkout ({home})")
+    with _main_lock(home):
+        return emit(_inbox_commit(root, home, cfg, register, rel, ids, in_tree, report, reasons,
+                                  triaged, whys))  # fmt: skip
+
+
+def _inbox_commit(
+    root: Path,
+    home: Path,
+    cfg: dict,
+    register: Path,
+    rel: str,
+    ids: list[str],
+    in_tree: bool,
+    report: dict,
+    reasons: list[str] | None,
+    triaged: list[str] | None,
+    whys: list[str] | None,
+) -> int:
+    """`cmd_inbox_commit()`'s work, under its lock: the exit code, with `report` filled in."""
+    refusals = report["refusals"]
     trunk = cfg["git"]["base"]
     if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
         refusals.append(why)
@@ -5251,26 +5354,54 @@ def cmd_bug_commit(
     )
     changed = sorted({p for p in (*tracked.splitlines(), *untracked.splitlines()) if p})
     stray = [p for p in changed if p != rel]
-    if stray:
+    if in_tree and changed:
+        refusals.append(
+            f"the main checkout ({home}) has uncommitted changes: " + ", ".join(changed)
+        )
+    elif stray:
         refusals.append(f"only {rel} may be uncommitted; also changed: " + ", ".join(stray))
-    elif not changed and not triaged:
+    elif not changed and not triaged and not in_tree:
         refusals.append(f"nothing to record: {rel} is unchanged")
     verdicts, why_lines, numbers = _triage_verdicts(triaged or [], whys or [], refusals)
     given: dict[str, str] = {}
     for r in reasons or []:
         ident, _, word = r.partition("=")
-        if word not in RETIRE_REASONS:
-            refusals.append(f"--reason {r}: the reason is one of {'|'.join(RETIRE_REASONS)}")
-        given[ident.strip()] = word
+        given[ident.strip()] = word.strip()
 
-    before = {e["id"]: e for e in parse_entries(_git(home, "show", f"HEAD:{rel}") or "")}
+    head_text = _git(home, "show", f"HEAD:{rel}") or ""
     try:
-        after = {e["id"]: e for e in parse_entries(register.read_text(encoding="utf-8"))}
+        main_text = register.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         refusals.append(f"{rel} can't be read: {e}")
-        after = dict(before)
-    actions: dict[str, list[str]] = {s: [] for s in BUG_SUBJECTS}
+        main_text = head_text
+    new_text = main_text
+    tree_register = register_path(work_dir(root))
+    tree_text = tree_head = ""
+    if in_tree:
+        tree_rel = f"{work_rel(root)}/{tree_register.name}"
+        tree_head = _git(root, "show", f"HEAD:{tree_rel}") or ""
+        try:
+            tree_text = tree_register.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            refusals.append(f"{tree_rel} can't be read: {e}")
+            tree_text = tree_head
+        was = {e["id"]: e for e in parse_entries(tree_head)}
+        now = {e["id"]: e for e in parse_entries(tree_text)}
+        on_main = {e["id"] for e in parse_entries(main_text)}
+        for i in ids:
+            if was.get(i) == now.get(i):
+                refusals.append(f"{i}: this worktree's {tree_rel} doesn't change it")
+            elif i not in was and i in on_main:
+                refusals.append(f"{i} is already in the main checkout's {rel}")
+            elif i in was and i not in on_main:
+                refusals.append(f"{i} isn't in the main checkout's {rel}")
+        new_text = _splice_entries(main_text, tree_text, ids)
+
+    before = {e["id"]: e for e in parse_entries(head_text)}
+    after = {e["id"]: e for e in parse_entries(new_text)}
+    actions: dict[str, list[str]] = {s: [] for s in INBOX_SUBJECTS}
     trailers: list[str] = []
+    reason_lines: list[str] = []
     for k in after:
         if k not in before:
             actions["File"].append(k)
@@ -5280,41 +5411,66 @@ def cmd_bug_commit(
         if k in after:
             continue
         actions["Retire"].append(k)
-        if k not in given:
+        kind = entry_kind(e)
+        allowed = RETIRE_REASONS[kind]
+        if kind == "nit":
+            refusals.append(f"{k} is a nit: ship retires nits, with the change that fixes one")
+        elif is_building(e):
+            refusals.append(
+                f"{k} is being built: its change removes it at ship, or /sdlc:drop says why not"
+            )
+        elif k not in given:
             refusals.append(f"{k} is removed with no reason: give --reason {k}=<word>")
-        elif is_bug(e):
+        elif given[k] not in allowed:
+            refusals.append(
+                f"--reason {k}={given[k]}: a{'n' if kind == 'idea' else ''} {kind}'s reason is "
+                f"one of {'|'.join(allowed)}"
+            )
+        elif kind == "bug":
             severity = (e["fields"].get("Severity") or "unset").replace(" ", "-")
             trailers.append(
                 f"Sdlc-Retired: {k} severity={severity} reported={e['date']} reason={given[k]}"
             )
+        else:
+            reason_lines.append(f"Reason {k}: {given[k]}")
     unused = [k for k in given if k not in actions["Retire"]]
     refusals += [f"--reason {k}: no entry by that id was removed" for k in unused]
     if refusals:
-        return emit(1)
-    parts = [f"{s} {', '.join(ids)}" for s, ids in actions.items() if ids]
+        return 1
+    parts = [f"{s} {', '.join(i)}" for s, i in actions.items() if i]
     if numbers:
         parts.append("Triage " + ", ".join(f"#{n}" for n in numbers))
     subject = "; ".join(parts)
     if not subject:
         refusals.append(f"nothing to record: {rel} changed, but no entry did")
-        return emit(1)
+        return 1
     report["commit"] = subject
-    report["entries"] = [{"action": s, "id": i} for s, ids in actions.items() for i in ids]
+    report["entries"] = [{"action": s, "id": i} for s, found in actions.items() for i in found]
     report["triaged"] = numbers
     trailers += verdicts
-    message = ["-m", subject] + (["-m", "\n".join(why_lines)] if why_lines else [])
+    body = why_lines + reason_lines
+    message = ["-m", subject] + (["-m", "\n".join(body)] if body else [])
     message += ["-m", "\n".join(trailers)] if trailers else []
     steps = [["add", "--", rel], ["commit", "-q", *message, "--", rel]]
-    if not changed:
+    if not changed and not in_tree:
         steps = [["commit", "-q", "--allow-empty", *message]]
+    if in_tree:
+        register.parent.mkdir(parents=True, exist_ok=True)
+        register.write_text(new_text, encoding="utf-8")
     for args in steps:
         made = subprocess.run(["git", "-C", str(home), *args], capture_output=True, text=True)
         if made.returncode != 0:
             refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
-            return emit(1)
+            if in_tree:
+                _git(home, "reset", "-q", "--", rel)
+                register.write_text(main_text, encoding="utf-8")
+            return 1
     report["done"].append("commit")
     report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
-    return emit(0)
+    if in_tree:
+        tree_register.write_text(_splice_entries(tree_text, tree_head, ids), encoding="utf-8")
+        report["done"].append("worktree")
+    return 0
 
 
 # ---------------------------------------------------------------- intake
@@ -6834,19 +6990,22 @@ def main() -> int:
     p_bugs.add_argument(
         "--introduced", nargs="*", help="for each path, the closed change that last touched it"
     )
-    p_bugc = sub.add_parser(
-        "bug-commit", help="commit the inbox alone, as File, Retire or Update <id>"
+    p_inboxc = sub.add_parser(
+        "inbox-commit", help="commit the inbox alone, as File, Retire or Update <id>"
     )
-    p_bugc.add_argument(
+    p_inboxc.add_argument(
+        "ids", nargs="*", help="from a change's worktree, the entries to file on the base branch"
+    )
+    p_inboxc.add_argument(
         "--reason", action="append", default=[], help="<id>=<word>, for each entry removed"
     )
-    p_bugc.add_argument(
+    p_inboxc.add_argument(
         "--triaged",
         action="append",
         default=[],
         help="<N>=<verdict>[:<ref>], for each issue triage closes: " + "|".join(TRIAGE_VERDICTS),
     )
-    p_bugc.add_argument(
+    p_inboxc.add_argument(
         "--why", action="append", default=[], help="<N>=<one line>, the reason a verdict gives"
     )
 
@@ -7026,8 +7185,8 @@ def main() -> int:
         return 0
     if args.cmd == "bugs":
         return cmd_bugs(root, args.touching, args.introduced)
-    if args.cmd == "bug-commit":
-        return cmd_bug_commit(root, args.reason, args.triaged, args.why)
+    if args.cmd == "inbox-commit":
+        return cmd_inbox_commit(root, args.ids, args.reason, args.triaged, args.why)
     if args.cmd == "intake":
         return cmd_intake(root)
     if args.cmd == "closes":
