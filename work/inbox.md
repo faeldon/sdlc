@@ -425,3 +425,17 @@ it. Its Step 0 runs `status`, `config`, `base`, `undone`, `nits --change`, `clos
 clauses that a rule decides. A `ship --check <NNN>` returning all of them, and the question's
 text, takes those steps out of prose, and each new list ship gains then goes in the script, not
 the skill. Raised by the retrospective of 2026-10-26.
+
+## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
+
+Setup offers the two issue forms whenever `archive.target` is GitHub, and counts one as the host's
+only when a file already sits at its own path (`.github/ISSUE_TEMPLATE/sdlc-bug.yml`,
+`sdlc-request.yml`). A host that designed its own bug and feature templates gets the plugin's
+added beside them: two bug forms in the chooser, and the host's own never asked for the fields
+`/sdlc:triage` reads. Read the host's `.github/ISSUE_TEMPLATE/` (forms and Markdown templates, and
+`config.yml`) first, and ask per template: add the plugin's beside it, replace it, or extend it
+with the fields triage needs (severity, the paths, a repro) and leave the rest as the host wrote
+it. Then decide what triage does with an issue from a template that lacks them (ask for the
+missing facts, as `needs-info` does), and what `drift` and `uninstall` make of a host template
+setup extended rather than created. Raised 2026-10-26, after running setup on a host with its own
+templates.
