@@ -2,10 +2,11 @@
 id: 027
 slug: work-path
 tier: 2
-impact:
-stage: build
+impact: minor
+stage: shipped
 created: 2026-10-26
 updated: 2026-10-26
+shipped: 2026-10-26
 idea: 2026-10-25-20
 depends_on:
 serves: [O1]

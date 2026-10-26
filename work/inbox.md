@@ -179,23 +179,6 @@ there, or nothing, and the nudge says so rather than suggesting a push that rele
 through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
 revised 2026-10-26: never automatic, and a nudge when landed work piles up.
 
-## [2026-10-25-20] [building] Keep the change folders under .sdlc/, or where a host says
-
-Building in work/027-work-path/.
-
-`work/` sits at a host's root, beside its own code, so adopting the plugin adds a top-level folder
-a host never asked for. Move it under `.sdlc/` (`.sdlc/work/`, with `ideas.md` and `nits.md`), or
-make it a config key (`[paths] work`, defaulting to `work` so no host moves unasked). `work_dir()`
-is already the one place the path is built, but `work/` is written literally across the script's
-messages and globs, the skills, the defaults, the templates and the docs. History is the harder
-part: `closed_changes()` reads each intent from the `Close` commit's parent at its old path, the
-seed counter reads `Close` and `Drop` subjects, and retro reads `ideas.md` and `nits.md` across
-the window, so a move needs either a reader that looks in both places or a recorded switch point
-(setup's record, or a `Move work` commit). Decide whether setup moves an existing host's folder
-and records it, what `drift()` makes of a host on the old path, and whether the key is ever
-retired. Worktrees follow the folder, since each holds its own `<work>/<branch>/`. Tier 2: it
-changes where every host's artifacts live. Raised 2026-10-25.
-
 ## [2026-10-25-21] [idea] Agent attribution in a host's commits, off by default
 
 The commits `sdlc.py` makes (`Close`, `Drop`, release, retro) carry only the `Sdlc-*` trailers,
@@ -303,17 +286,6 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 019-status-next-work (cost)
-
-## [2026-10-25-16] [nit] load_config runs git on every call to resolve the base branch
-
-`_resolve_trunk` runs up to three `git` calls each time `load_config()` does, and some commands
-call it several times; nothing is slow yet, but one resolved value could be passed down instead.
-
-Theme: perf
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 018-base-branch (cost)
 
 ## [2026-10-25-17] [nit] A failed commit or prepare doesn't list a new file after-bump staged
 
@@ -466,3 +438,22 @@ counts as a mention (a regex over paths and skill names, or the docs `context` a
 and how an old host with no record is told what can't be attributed to setup. Edits stay the
 host's to commit, like the rest of uninstall. Raised 2026-10-26, after uninstalling from a host
 set up by an early version.
+
+## [2026-10-26-12] [nit] move-work leaves work/ behind when it holds ignored files
+
+`git mv` moves what git tracks; an ignored file keeps work/ on disk, and the repo then reads as
+half-moved. Move or remove what's left, or refuse with the list.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 027-work-path (correctness)
+
+## [2026-10-26-13] [idea] Support moving the change folder, once a host needs it
+
+027 fixed the folder at .sdlc/work/ and supports one move only, from the old work/. Moving it
+again, or choosing a path, was left out on purpose: no host needs it. It would need a `Move work`
+commit with an `Sdlc-Work: from= to=` trailer, a resolver giving the folder at any commit, and a
+rule every reader of history follows. History from .sdlc/work/ on sits at one path, so nothing
+from before has to be carried back. See work/027-work-path/spec.md (Alternatives rejected).

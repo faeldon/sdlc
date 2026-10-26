@@ -662,8 +662,9 @@ def work_rel(root: Path) -> str:
     """The change folder of `root`'s repo, relative to a checkout's root: `WORK`, or `OLD_WORK` in
     a repo that hasn't moved. Read from the main checkout, so every worktree agrees with it. An
     old repo whose changes have all closed may hold no `work/` on disk (close removes each folder),
-    so with neither folder there, history decides: `OLD_WORK` if any commit ever touched it. Only
-    that answer is cached, since it can't go from yes to no; `move-work` changes the rest."""
+    so with neither folder there, history decides: `OLD_WORK` if any commit ever touched it. That
+    answer is cached per process, since nothing a command does adds `work/` to history; the folders
+    on disk, which `move-work` changes, are read every time."""
     home = main_root(root)
     if (home / WORK).is_dir():
         return WORK
@@ -672,10 +673,8 @@ def work_rel(root: Path) -> str:
     key = home.resolve()
     if key not in _OLD_HISTORY:
         found = _git(home, "log", "-1", "--all", "--format=%h", "--", f"{OLD_WORK}/")
-        if not found:
-            return WORK
-        _OLD_HISTORY[key] = True
-    return OLD_WORK
+        _OLD_HISTORY[key] = bool(found)
+    return OLD_WORK if _OLD_HISTORY[key] else WORK
 
 
 _OLD_HISTORY: dict[Path, bool] = {}

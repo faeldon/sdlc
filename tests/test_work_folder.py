@@ -79,6 +79,23 @@ def test_an_old_repo_whose_changes_all_closed_is_still_on_the_old_folder(tmp_pat
     assert sdlc.work_rel(root) == "work"
 
 
+def test_a_repo_with_neither_folder_asks_history_once(tmp_path: Path, monkeypatch) -> None:
+    """A new repo has no `.sdlc/work/` on main until a register lands there, and `status` resolves
+    the folder dozens of times: history is read once, either answer."""
+    root = _repo(tmp_path)
+    calls = []
+    real = sdlc._git
+
+    def counting(where, *args):
+        if args[:1] == ("log",) and "--" in args:
+            calls.append(args)
+        return real(where, *args)
+
+    monkeypatch.setattr(sdlc, "_git", counting)
+    assert {sdlc.work_rel(root) for _ in range(10)} == {".sdlc/work"}
+    assert len(calls) == 1
+
+
 def test_a_worktree_resolves_as_its_main_checkout_does(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _write(root, "work/inbox.md", "# Inbox\n")
