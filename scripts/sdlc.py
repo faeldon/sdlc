@@ -2886,6 +2886,13 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         )
     if report["refusals"]:
         return emit(1)
+    start = BASE_REF + branch
+    tip = _git(main, "rev-parse", "--verify", "-q", trunk)
+    held = _git(main, "rev-parse", "--verify", "-q", start)
+    if kind == "shipped" and not check_only and not landed and tip and not held:
+        # Written once, before anything moves `trunk`: a rerun keeps the first run's start, and a
+        # failure only leaves the trailer out.
+        _git(main, "update-ref", start, tip)
     if own and kind == "shipped" and (reaches := _reaches(main, branch)):
         report["reaches"] = reaches
 
@@ -2945,7 +2952,9 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         fixes = fix_trailers(main, branch)
         if fixes:
             report["fixes"] = fixes
-        err = _close_commit(main, branch, sha, where, captured + fixes, closes)
+        at = _git(main, "rev-parse", "--verify", "-q", start)
+        based = [f"{BASE_KEY}: {at}"] if at else []
+        err = _close_commit(main, branch, sha, where, captured + based + fixes, closes)
         if err is None and not unavailable:
             # The entries the change brought to main, a seed split off at ship among them, are
             # committed now, so their issues are told where to follow. Never a refusal.
@@ -2965,6 +2974,15 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     def git_step(*args: str):
         return lambda: _git_err(main, *args)
 
+    def delete_branch() -> str | None:
+        err = _git_err(main, "branch", "-d", branch)
+        # Its start is on the `Close` commit now; a ref left behind is said, never refused.
+        if err is None and _git(main, "rev-parse", "--verify", "-q", start):
+            gone = _git_err(main, "update-ref", "-d", start)
+            if gone:
+                report["base_ref"] = f"{start} kept: {gone}"
+        return err
+
     if kind == "dropped":
         landing = [("verify", verify), ("measure", measure), ("archive", mirror)]
         landing.append(("record", record))
@@ -2974,7 +2992,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     steps = [
         *landing,
         ("remove worktree", git_step("worktree", "remove", str(tree))),
-        ("delete branch", git_step("branch", "-d", branch)),
+        ("delete branch", delete_branch),
     ]
     if check_only:
         report["skipped"] = [f"{name} (--check)" for name, _ in steps]
@@ -3468,6 +3486,11 @@ BUMPS = ("patch", "minor", "major")
 CLOSE_PREFIX = "Close "
 # A dropped change's record on main: a merge that keeps main's tree (`_drop_record`).
 DROP_PREFIX = "Drop "
+# Where a change starts, as close keeps it: the base branch's tip before the merge, in a ref of
+# its own between close's runs (so a rerun after the fast-forward still knows it), then as a
+# trailer on the `Close` commit, the ref going with the branch.
+BASE_REF = "refs/sdlc/base/"
+BASE_KEY = "Sdlc-Base"
 # An intent's H1 is `# NNN — Title`; the notes carry the id once, in their own column.
 TITLE_ID_RE = re.compile(r"^\d{3,}\s*[—–-]\s*")
 # An intent's Outcome line saying what should change for users if it works: `**Moves O1:** …`.

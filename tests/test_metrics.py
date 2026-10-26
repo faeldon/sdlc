@@ -340,6 +340,11 @@ def test_history_alone_says_why_and_still_reads_back() -> None:
     assert back["mode"] == "factory"
 
 
+def test_where_a_change_started_reads_back_as_its_sha() -> None:
+    body = "Close 001-x\n\nIts artifacts are in abc.\n\nSdlc-Mode: manual\nSdlc-Base: 158aa72\n"
+    assert metrics.parse_trailers(body)["base"] == "158aa72"
+
+
 def test_a_commit_without_trailers_reads_as_none() -> None:
     assert metrics.parse_trailers("Close 001-x\n\nIts artifacts are in abc.") is None
     assert metrics.parse_trailers(None) is None

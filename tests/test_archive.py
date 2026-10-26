@@ -1963,3 +1963,57 @@ def test_a_seed_split_off_at_ship_is_told_where_it_stays_at_close(tmp_path, gh, 
         "Not resolved by 001-thing; it stays open as 2026-10-26-1 in .sdlc/work/inbox.md."
     )
     assert out["intake"]["done"] == ["#15: 2026-10-26-1"]
+
+
+# ---------------------------------------------------------------- where a change started
+
+
+def _base_refs(root: Path) -> list[str]:
+    return _git(root, "for-each-ref", "--format=%(refname)", "refs/sdlc/base/").splitlines()
+
+
+def test_close_records_where_the_change_started(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    start = _git(root, "rev-parse", "main")
+    name = _shipped(root)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert f"Sdlc-Base: {start}" in body
+    assert _base_refs(root) == [], "the ref goes with the branch"
+    assert not _on_main(root, name)
+
+
+def test_a_rerun_after_a_failed_archive_keeps_the_first_runs_start(
+    tmp_path, gh, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    start = _git(root, "rev-parse", "main")
+    name = _shipped(root)
+    monkeypatch.setenv("FAKE_GH_FAIL_FLAG", "--add-label")
+    code, _ = _close(root, capsys, "001")
+    assert code == 1
+    assert _git(root, "rev-parse", f"refs/sdlc/base/{name}") == start, "kept before the merge"
+    assert _git(root, "rev-parse", "main") != start, "main has moved onto the change"
+    monkeypatch.delenv("FAKE_GH_FAIL_FLAG")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert body.count("Sdlc-Base:") == 1 and f"Sdlc-Base: {start}" in body
+    assert _base_refs(root) == []
+
+
+def test_a_dropped_change_records_no_start(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _dropped(root)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    assert "Sdlc-Base:" not in _git(root, "log", "-1", "--format=%B", "main")
+    assert _base_refs(root) == []
+
+
+def test_a_check_writes_no_ref(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _shipped(root)
+    code, _ = _close(root, capsys, "001", check=True)
+    assert code == 0 and _base_refs(root) == []

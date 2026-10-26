@@ -469,7 +469,9 @@ Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
 
-## [2026-10-27-1] [idea] Close records where a change started, as Sdlc-Base
+## [2026-10-27-1] [building] Close records where a change started, as Sdlc-Base
+
+Building in work/029-close-records-base/.
 
 `_change_base()` starts a change at the parent of the first commit holding its intent, so a
 change whose build commits leave its folder out is measured from the ship commit alone: 028's

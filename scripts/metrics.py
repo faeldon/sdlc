@@ -900,7 +900,7 @@ def parse_trailers(body: str | None) -> dict | None:
             continue
         found = True
         key, rest = m.group(1).lower(), m.group(2).strip()
-        if key in ("mode", "coverage"):
+        if key in ("mode", "coverage", "base"):
             out[key] = rest
             continue
         words = rest.split()
