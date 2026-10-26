@@ -15,8 +15,10 @@ updated: 2026-10-27
 
 1. **R1. Close knows the start before it merges.** On a shipped change's first run, before
    `merge`, close writes `refs/sdlc/base/<branch>` at `git.base`'s tip (which its preconditions
-   already require to be an ancestor of the branch). A rerun keeps the ref it finds and never moves
-   it. Test: a close that fails at `archive`, rerun, still writes the first run's start.
+   already require to be an ancestor of the branch). Until the merge it follows that tip, so a ref
+   left by a run that failed before merging is brought up to date; once merged, a rerun keeps it.
+   Tests: a close that fails at `archive`, rerun, still writes the first run's start; a ref left
+   at an older commit before the merge is moved to the tip.
 2. **R2. The `Close` commit carries `Sdlc-Base: <full sha>`**, written by `remove folder` beside
    `Sdlc-Fixes`, from the ref; written even when `measure` failed; absent only when there is no
    ref. A dropped change's `Drop` commit gets none. Test: the `Close` commit's body has

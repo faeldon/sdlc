@@ -298,19 +298,6 @@ Cost: S
 Value: low
 Raised by: 022-robustness-nits (correctness)
 
-## [2026-10-25-18] [nit] A change sized from an intent committed to main early counts others' commits
-
-`_change_base` takes the parent of the commit that first added the intent. If that commit landed
-on main before other changes closed (an intent committed outside its branch), the range from it
-to the change's commit spans their commits too, in `retro`'s size and in close's `_change_diff`.
-A `Close` or `Drop` commit inside the range would show it.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 023-branch-size (correctness)
-
 ## [2026-10-25-22] [nit] A test that close alone records fixes greps the source
 
 `test_only_a_close_records_fixes_never_a_drop` checks `inspect.getsource` for `fix_trailers(`, so
@@ -469,20 +456,6 @@ Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
 
-## [2026-10-27-1] [building] Close records where a change started, as Sdlc-Base
-
-Building in work/029-close-records-base/.
-
-`_change_base()` starts a change at the parent of the first commit holding its intent, so a
-change whose build commits leave its folder out is measured from the ship commit alone: 028's
-`reaches` missed the five skills it changed, its `Sdlc-Rework` said `final=2` (amended to 100),
-and retro and `bugs --introduced` would size it from that one commit. Close's merge step knows
-where the base branch was before the fast-forward, which ship's `base` makes the change's true
-start: write it as an `Sdlc-Base:` trailer on the `Close` commit, use it for `measure` and
-`reaches`, and have `_change_base()` read it, falling back to the intent rule for closes from
-before it. The merge-base alone fails once the branch is gone; committing the folder early is a
-rule nothing enforces.
-
 ## [2026-10-27-2] [idea] An /sdlc:idea skill, and inbox-commit for every kind of entry
 
 `bug-commit` already commits any change to the register: it diffs it against `HEAD` and writes
@@ -502,3 +475,14 @@ reads (`Seed <id>: …`). Three parts:
   skill.
 Tier 2: it renames a command a skill's `allowed-tools` names, and adds a skill that writes.
 Raised 2026-10-27.
+
+## [2026-10-27-4] [nit] close --check previews reaches without the change's start
+
+`--check` writes no ref, so `_change_base` falls back to the intent rule and the preview can
+list fewer skills than the close reports. Pass the base branch's tip as the start under --check.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 029-close-records-base (correctness)

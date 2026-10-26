@@ -2003,6 +2003,22 @@ def test_a_rerun_after_a_failed_archive_keeps_the_first_runs_start(
     assert _base_refs(root) == []
 
 
+def test_a_ref_left_before_a_failed_merge_is_brought_up_to_main(tmp_path, gh, capsys) -> None:
+    """A run that wrote the ref and failed before merging leaves an older start; until the merge,
+    main's tip is the start, so the next run moves the ref there."""
+    root = _repo(tmp_path)
+    old = _git(root, "rev-parse", "main")
+    (root / "later.txt").write_text("x\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "main moves on before the change opens")
+    start = _git(root, "rev-parse", "main")
+    name = _shipped(root)
+    _git(root, "update-ref", f"refs/sdlc/base/{name}", old)
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    assert f"Sdlc-Base: {start}" in _git(root, "log", "-1", "--format=%B", "main")
+
+
 def test_a_dropped_change_records_no_start(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _dropped(root)

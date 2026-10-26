@@ -2897,10 +2897,10 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         return emit(1)
     start = BASE_REF + branch
     tip = _git(main, "rev-parse", "--verify", "-q", trunk)
-    held = _git(main, "rev-parse", "--verify", "-q", start)
-    if kind == "shipped" and not check_only and not landed and tip and not held:
-        # Written once, before anything moves `trunk`: a rerun keeps the first run's start, and a
-        # failure only leaves the trailer out.
+    if kind == "shipped" and not check_only and not landed and tip:
+        # Until the merge, `trunk`'s tip is where the change starts, so a ref an earlier run left
+        # before a failed merge is brought up to it; once merged, a rerun keeps it. A failure
+        # only leaves the trailer out.
         _git(main, "update-ref", start, tip)
     if own and kind == "shipped" and (reaches := _reaches(main, branch)):
         report["reaches"] = reaches

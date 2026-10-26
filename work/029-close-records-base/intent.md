@@ -2,10 +2,11 @@
 id: 029
 slug: close-records-base
 tier: 2
-impact:
-stage: build
+impact: patch
+stage: shipped
 created: 2026-10-27
 updated: 2026-10-27
+shipped: 2026-10-27
 idea: 2026-10-27-1
 depends_on:
 serves: [O4]
