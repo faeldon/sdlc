@@ -480,3 +480,23 @@ start: write it as an `Sdlc-Base:` trailer on the `Close` commit, use it for `me
 `reaches`, and have `_change_base()` read it, falling back to the intent rule for closes from
 before it. The merge-base alone fails once the branch is gone; committing the folder early is a
 rule nothing enforces.
+
+## [2026-10-27-2] [idea] An /sdlc:idea skill, and inbox-commit for every kind of entry
+
+`bug-commit` already commits any change to the register: it diffs it against `HEAD` and writes
+`File <id>`, `Update <id>` or `Retire <id>` for each entry, whatever its kind, and triage uses it to
+file ideas split off from issues. But its name says bugs, its retire reasons (`duplicate`,
+`not-a-bug`, `wontfix`, `cant-reproduce`) only fit bugs, and no skill files an idea someone
+dictates mid-session: `/sdlc:bug` files bugs, triage files issues, ship files nits and carried
+items, retro its own seeds. So ideas get committed by hand, under subjects nothing in history
+reads (`Seed <id>: …`). Three parts:
+- **Rename** `bug-commit` to `inbox-commit`, with no shim: no host has run it yet. The bug and
+  triage skills' `allowed-tools` rules, the docs and the tests follow the new name.
+- **Retire reasons by kind:** an idea's are `superseded` and `declined` (beside `duplicate`), a
+  bug's stay as they are, and a nit is ship's to retire, so it needs none here.
+- **`/sdlc:idea`**: takes the idea in the person's words, drafts the entry in neutral terms with
+  an id from `next-entry` (an `After:` line when it follows another seed), and after its one WAIT
+  appends it and runs `inbox-commit`. Editing or retiring an existing idea goes through the same
+  skill.
+Tier 2: it renames a command a skill's `allowed-tools` names, and adds a skill that writes.
+Raised 2026-10-27.
