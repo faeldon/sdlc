@@ -159,17 +159,25 @@ change fixes (024): a change can have both, a bug it fixes and the change that l
 which that bug's `Introduced by:` line already records, so retro can cross-check the two.
 See work/021-rework-shared-files/.
 
-## [2026-10-25-19] [idea] Push at close and at release, not only at publish
+## [2026-10-25-19] [idea] Say when to push, and nudge when landed work piles up unpushed
 
 Only publish pushes, so a closed change sits on the local `main` until the next publish: no
 backup, no other machine sees it, and its issue (labelled `landed`) waits for the `Closes #N` to
-reach the remote. An opt-in key (a `[git] push` naming `close`, `release` or both) would let close
-push `main` after its `Close` commit and release push `main` and the tag, to `release.remote`,
-never forced. It is an exception to "only publish pushes" made on purpose: the test pinning that
-rule names the steps allowed instead. A release push needs care where the remote's default branch
-is what users install from (this repo's marketplace): a pushed version bump is already a publish,
-so release may push only the tag there, or nothing. Landing through pull requests is the other
-half of this, seeded on its own above. Raised 2026-10-25.
+reach the remote. Pushing stays a step the person approves, never automatic. Two parts:
+- **When, as config.** A `[git] push` key naming the points a skill offers a push: `close` (after
+  its `Close` commit), `release` (`main` and the tag), or none, the default. At each point named,
+  the skill asks, behind its WAIT or as its own question after the commit, and pushes to
+  `release.remote`, never forced. It is an exception to "only publish pushes" made on purpose: the
+  test pinning that rule names the steps allowed instead.
+- **A nudge, whatever the key.** `status` and close's report count what `main` holds that the
+  remote doesn't: closed changes, and on GitHub the issues labelled `landed` still open because
+  their `Closes #N` hasn't reached it. Past a threshold (a count of changes or an age, in config),
+  they suggest a push and name what it would close. A nudge is never a problem and never a gate.
+A release push needs care where the remote's default branch is what users install from (this
+repo's marketplace): a pushed version bump is already a publish, so release may push only the tag
+there, or nothing, and the nudge says so rather than suggesting a push that releases. Landing
+through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
+revised 2026-10-26: never automatic, and a nudge when landed work piles up.
 
 ## [2026-10-25-20] [idea] Keep the change folders under .sdlc/, or where a host says
 
