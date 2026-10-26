@@ -173,6 +173,18 @@ by `severities()` (the default doc's when the host's has none), `Paths:` and a c
 alone; ship deletes a change's `fixes:` entries, and close's `fix_trailers()` writes their
 `Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the register and those trailers.
 
+**Intake: `recorded_issues()`.** Issues people file on GitHub reach the repo through
+`/sdlc:triage`, and each one the repo records has exactly one record: an entry's `Issue: #12, #15`
+line (`entry_issues()`, the first the parent), a change's `closes:` line, or an `Sdlc-Triaged:`
+trailer on the base branch for a verdict that closed it. `recorded_issues()` is the one reader of
+all three, and decides each issue's comment, marker and parent; the tracker's `mark()`,
+`unmark()` and `needs_info()` only set them, so a tracker still never reads `work/`. The record is
+always committed before the issue is told (`bug-commit --triaged`, then `mark-triaged`), so a rerun
+finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
+asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
+`Split from NNN-slug:` line, never left dangling. Close's `remove folder` step reruns the marking
+(`mark_issues()`) once the change's entries are on the base branch, and never refuses on it.
+
 **Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
 `work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
 `Raised by: NNN-slug (pass)` lines, the last keeping the raising change's number. `sdlc.py` only
@@ -227,7 +239,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, and the factory's `spec` and `build`) have exactly one heading
+  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, and the factory's `spec` and `build`) have exactly one heading
   containing `WAIT`. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill

@@ -19,7 +19,8 @@ nothing is live, so the repo's history keeps every file it removes.
 
 **What stays**: `work/` (the repo's record of its changes, and `work/inbox.md`), `AGENTS.md` and
 `CLAUDE.md` (other agents read them; the lines naming the plugin are listed for the human to
-edit), the tracker's issues, every tag, and every `Close` and `Drop` commit. A later setup counts
+edit), the issue forms in `.github/ISSUE_TEMPLATE/` (people file with them), the tracker's
+issues and their labels, every tag, and every `Close` and `Drop` commit. A later setup counts
 on from that history, so no number is handed out twice.
 
 ## Step 0 — The plan (mechanical, no confirmation needed)

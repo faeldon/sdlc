@@ -271,6 +271,38 @@ names it on a `fixes: [<id>]` line in its intent (`/sdlc:intent <id>` writes it)
 it out while the change is open, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` writes
 an `Sdlc-Fixes:` trailer for it on the `Close` commit.
 
+**Issues people file.** With `archive.target = "github"`, anyone can file an issue, and
+`/sdlc:triage` reads the open ones that carry neither `sdlc` (a change's own) nor `triaged` nor
+`landed`, through `sdlc.py intake`. It checks each against the code and the closed changes, and
+after one approval records each issue once, in one of three ways:
+
+- **An entry** carrying an `Issue: #12, #15` line: the issues it was filed from, the first the
+  parent of the rest, so a duplicate follows the original. `check` reports a value that isn't
+  `#N` and an issue on two entries.
+- **A change's `closes: [12]` line**, in its intent, for an issue an open change already covers,
+  whatever its kind. `/sdlc:intent` copies an entry's `Issue:` numbers onto the new change's
+  `closes:`. `check` reports a value that isn't a bare number, the change's own number, and one
+  issue on two open changes' lines. `sync` makes the change's issue the parent of each, and `/sdlc:ship` asks about
+  each one before it lands: one the change didn't resolve comes off the line and becomes a new
+  seed carrying its `Issue:` and a `Split from NNN-slug:` line. `/sdlc:close` closes the rest:
+  a `Closes #N` line on the `Close` commit, or closed at once where no push would, and a failure
+  listed under `archive.closes_errors`, never a refusal. A dropped change's issues lose their
+  `triaged` label and parent and go back to triage.
+- **A verdict that closes it now**, when nothing more will be done: `resolved` (naming the change
+  or commit that did it), `wontfix`, `not-a-bug` or `duplicate`. `bug-commit
+  --triaged <N>=<verdict>[:<ref>] --why <N>=<reason>` records each as an `Sdlc-Triaged: #N
+  verdict=… ref=…` trailer, on an empty `Triage #N` commit when nothing else changed, and retro
+  counts them under `bugs.triaged`.
+
+An issue too thin to judge gets its author asked, by `sdlc.py needs-info`, and the `needs-info`
+label; `intake` leaves it out until the author comments. Then `sdlc.py mark-triaged`, from the
+main checkout, tells each open issue the repo records where it stands: one comment each, the
+`triaged` label, and its parent (the entry's first issue, or the change's issue), closing those a
+verdict closed. It reads only what is committed on the base branch and the open changes, so a run
+that stops halfway is finished by the next. `intake` lists as `dangling` an issue labelled
+`triaged` that nothing records anymore, and `/sdlc:close` reruns the marking once the change's
+entries are on the base branch.
+
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [idea] Title`:
@@ -350,7 +382,12 @@ nothing needs `gh`. Only Tier 1 and 2 changes reach one: Tier 0 has no folder an
   says `Closes #N`, so GitHub closes it when that commit reaches the default branch, by
   `/sdlc:publish`, a push of your own, or a merged pull request. Where the default branch isn't
   `main`, close closes the issue itself and says why. An artifact too long for the body becomes a
-  comment. A dropped change's issue is closed as not planned.
+  comment. A dropped change's issue is closed as not planned. Each issue on the intent's
+  `closes:` line is a sub-issue of the change's, so the person who filed it follows the change;
+  one triage recorded that leaves the line is let go, and one a person added stays. The labels
+  `triaged` and `needs-info` are triage's, never removed by sync. Setup offers a repo on GitHub
+  two issue forms, `.github/ISSUE_TEMPLATE/sdlc-bug.yml` (with a severity dropdown from the
+  process doc's words) and `sdlc-request.yml`, which are the repo's once written.
 - **`command`**: the repo's own command (`archive.command`) archives the folder at close. It has no
   live view.
 - **`none`**: nothing is mirrored, and the folder still goes: history has it.
@@ -483,8 +520,9 @@ dropped (tier, impact, size, days open, the first paragraph of each problem, wha
 rework (leaving out the files more than a third of them touch, listed apart), open changes and
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
 trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
-reason, the days from report to fix, the open ones by age, and the escapes: each introducing
-change with its tier, and how many no one tied to a change.
+reason, the issues triage closed without a change by verdict (`triaged`), the days from report
+to fix, the open ones by age, and the escapes: each introducing change with its tier, and how
+many no one tied to a change.
 
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
@@ -526,7 +564,9 @@ away goes under `stage: spike`, which owes no artifact; its cost is reported apa
 The bugs a change fixes are recorded too, one `Sdlc-Fixes: <id> severity=<w> reported=<date>
 introduced_by=<NNN-slug|unknown>` line each, from its intent's `fixes:` and the entry as the
 branch last held it; a bug retired without a fix gets `Sdlc-Retired: <id> severity=<w>
-reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing.
+reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing. An issue
+triage closed gets `Sdlc-Triaged: #<N> verdict=<word> ref=<what it rests on>` on its `Triage` or
+`File` commit, its reason as a `Why #<N>:` line in the body.
 
 `sdlc.py retro` reads all of them. Measuring never stops a close: without transcripts,
 `Sdlc-Coverage` says why, and the numbers are what history gives. `git log --format=%B` on a

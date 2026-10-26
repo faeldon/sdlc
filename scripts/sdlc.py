@@ -5946,6 +5946,14 @@ def cmd_readiness(root: Path) -> int:
         },
         # What setup copies from, when the repo has none of its own.
         "defaults": {key: str(DEFAULTS_DIR / name) for key, name in HOST_DOCS.items()},
+        # The issue forms setup offers a repo tracked on GitHub, where each goes, and whether it is
+        # there already: one that is, is the host's, never written over.
+        "issue_forms": {
+            rel: {"from": str(DEFAULTS_DIR / name), "present": (home / rel).is_file()}
+            for rel, name in ISSUE_FORMS.items()
+        }
+        if cfg["archive"]["target"] == "github"
+        else {},
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0
@@ -5964,6 +5972,13 @@ HOST_DOCS = {
     "project": "PROJECT.md",
     "product": "PRODUCT.md",
     "health": "HEALTH.md",
+}
+# The issue forms setup offers a repo tracked on GitHub, by where each goes, from `defaults/`, so
+# a person filing a bug gives what a `[bug]` entry needs. The host's once written: never drifted,
+# never removed by uninstall.
+ISSUE_FORMS = {
+    ".github/ISSUE_TEMPLATE/sdlc-bug.yml": "issue-forms/sdlc-bug.yml",
+    ".github/ISSUE_TEMPLATE/sdlc-request.yml": "issue-forms/sdlc-request.yml",
 }
 # A config key a release renamed or removed: `section.old` → {"now": the key that replaced it, or
 # None, "since": the version, "do": what a host does about it}. A host still setting one has a
@@ -6467,6 +6482,9 @@ def uninstall_plan(root: Path) -> dict:
                 }
             )
     plan["left"].append({"path": "work/", "why": "the repo's record of its changes"})
+    for rel in ISSUE_FORMS:
+        if (home / rel).is_file():
+            plan["left"].append({"path": rel, "why": "an issue form: the repo's once written"})
     if cfg["archive"]["target"] != "none":
         plan["left"].append(
             {

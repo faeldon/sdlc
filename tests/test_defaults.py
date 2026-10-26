@@ -374,3 +374,25 @@ def test_drift_lines_name_each_fix() -> None:
         True,
     )
     assert _drift_lines({"refresh": [], "breaking": [retired], "report": [unknown]})[1] is False
+
+
+@pytest.mark.parametrize("rel", sorted(sdlc.ISSUE_FORMS))
+def test_each_issue_form_is_one_github_reads(rel: str) -> None:
+    """GitHub ignores an issue form missing its keys, and a person filing gets a blank box."""
+    import yaml
+
+    source = sdlc.DEFAULTS_DIR / sdlc.ISSUE_FORMS[rel]
+    form = yaml.safe_load(source.read_text(encoding="utf-8"))
+    assert {"name", "description", "body"} <= set(form), rel
+    assert form["labels"] == [], "a label a form sets would make triage skip its own issue"
+    for field in form["body"]:
+        assert field["type"] in ("textarea", "input", "dropdown") and field["attributes"]["label"]
+    assert rel.startswith(".github/ISSUE_TEMPLATE/") and rel.endswith(".yml")
+
+
+def test_the_bug_form_takes_its_severities_from_the_process_doc() -> None:
+    import yaml
+
+    text = (sdlc.DEFAULTS_DIR / "issue-forms" / "sdlc-bug.yml").read_text(encoding="utf-8")
+    [severity] = [f for f in yaml.safe_load(text)["body"] if f["id"] == "severity"]
+    assert severity["attributes"]["options"] == ["<severities>"], "setup fills it in"

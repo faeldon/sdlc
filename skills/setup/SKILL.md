@@ -207,6 +207,13 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   `permissions.allow`, keeping everything already there. They cover only the script's read-only
   subcommands; everything that writes keeps asking. Say that the file is shared: it is committed
   and applies to everyone who works in the repo.
+- **Issue forms**, only when `archive.target` is `github`: each of `readiness`'s `issue_forms`
+  not yet `present`, copied from its `from` file to its path under `.github/ISSUE_TEMPLATE/`, with
+  the bug form's `<severities>` line replaced by one `- <word>` option per word of the process
+  doc's severities, most severe first. They give a person filing an issue the fields
+  `/sdlc:triage` reads into an entry. One already `present` is the repo's: never redraft it. Once
+  written, both are the repo's too: no later setup proposes changes to them, and
+  `/sdlc:uninstall` leaves them.
 - **What the plugin update changed** (`drift`), on a repo already set up. Show `breaking` first,
   each with what it breaks and its `fix`: a retired key is edited to the key that replaced it, an
   override lacking a heading or key gets it back (or a `reset`). Then each `refresh` doc as one

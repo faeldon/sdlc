@@ -17,6 +17,7 @@ rely on gets a spec and a plan.
 | `/sdlc:close` | after ship: land it on `main` and tidy away its worktree and branch |
 | `/sdlc:drop` | for a change that won't ship: record why, and keep what it cost |
 | `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one |
+| `/sdlc:triage` | when people have filed GitHub issues: check each, then file, attach or close it |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
 | `/sdlc:release` | after a batch of changes: the version they add up to, committed and tagged |
 | `/sdlc:publish` | after release: push `main` and the tag, then run your publish command |
@@ -119,6 +120,11 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   change through its stages and holds its artifacts once it closes. Without GitHub, a counter in
   `.sdlc/` numbers changes, safe on one machine; your own archive command, or none, can stand in
   for the issue.
+- **Issues people file.** On GitHub, setup offers bug and request issue forms, and
+  `/sdlc:triage` reads what comes in: it checks each issue against the code, then files it in
+  `work/inbox.md`, puts it on the open change that covers it, or closes it as already resolved or
+  not to be done, behind one approval. Each filer gets a comment and a parent issue to follow, and
+  the change that takes an issue on closes it when it lands, once `/sdlc:ship` has asked.
 - **A project doc** (`.sdlc/PROJECT.md`). Gives each change's issue a milestone, a project or
   assignees, chosen from lists the doc names. `/sdlc:setup` drafts it for a team on GitHub, and
   `/sdlc:setup project` adds it later.

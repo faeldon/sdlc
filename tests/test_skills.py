@@ -417,6 +417,13 @@ def test_setup_drafts_from_readiness_and_never_commits() -> None:
     assert "never rewrite it" in text, "an existing CLAUDE.md gets a diff, not a new file"
 
 
+def test_setup_offers_the_issue_forms_only_on_github_and_never_over_a_host_s() -> None:
+    step3 = _steps("setup")["3"]
+    assert "**Issue forms**, only when `archive.target` is `github`" in step3
+    assert "`issue_forms`" in step3 and "`<severities>`" in step3
+    assert "One already `present` is the repo's: never redraft it" in step3
+
+
 def test_setup_asks_what_kind_of_repo_first() -> None:
     skill = ROOT / "skills" / "setup" / "SKILL.md"
     step2 = skill.read_text(encoding="utf-8").split("## Step 2")[1].split("## Step 3")[0]
