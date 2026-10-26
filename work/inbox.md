@@ -439,3 +439,20 @@ it. Then decide what triage does with an issue from a template that lacks them (
 missing facts, as `needs-info` does), and what `drift` and `uninstall` make of a host template
 setup extended rather than created. Raised 2026-10-26, after running setup on a host with its own
 templates.
+
+## [2026-10-26-11] [idea] Uninstall offers to clean the plugin's mentions out of a host
+
+Uninstall removes only what setup's record says setup wrote, and lists the mentions it finds
+elsewhere without editing them: `work/`, `AGENTS.md`, `CLAUDE.md` and the rest are out of its
+scope. On a host set up by a much older version, before setup kept a record, that leaves most of
+the plugin behind: the policy doc still describes the plugin's stages and skills, and Markdown
+files and code across the repo still name `/sdlc:*`, `.sdlc/`, `work/` and the process. Offer a
+cleanup as part of the same approval, mention by mention: drafted edits to the policy doc and
+the context docs that take out what only the plugin needed (its sections, its invariants, the
+commands it runs) and keep what the host still relies on, and the other mentions in docs and code
+listed with a proposed edit or left as they are, the host's call each time. Decide what happens
+to `work/` and the inbox (removed, kept as the project's history, or left for the host), what
+counts as a mention (a regex over paths and skill names, or the docs `context` already lists),
+and how an old host with no record is told what can't be attributed to setup. Edits stay the
+host's to commit, like the rest of uninstall. Raised 2026-10-26, after uninstalling from a host
+set up by an early version.
