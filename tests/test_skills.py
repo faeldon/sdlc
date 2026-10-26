@@ -424,6 +424,17 @@ def test_setup_offers_the_issue_forms_only_on_github_and_never_over_a_host_s() -
     assert "One already `present` is the repo's: never redraft it" in step3
 
 
+def test_setup_moves_the_change_folder_first_and_only_behind_its_wait() -> None:
+    steps = _steps("setup")
+    assert "**The change folder**, when `readiness`'s `work moved` item is `warn`" in steps["3"]
+    assert "release, retro and `bugs --introduced` read only `.sdlc/work/`" in steps["3"]
+    assert "sdlc.py move-work" not in " ".join(steps[n] for n in ("0", "1", "2", "3", "4"))
+    step5 = steps["5"]
+    assert step5.index("sdlc.py move-work") < step5.index("sdlc.py migrate-inbox"), (
+        "the move needs a clean tree, so it runs before anything else is written"
+    )
+
+
 def test_setup_asks_what_kind_of_repo_first() -> None:
     skill = ROOT / "skills" / "setup" / "SKILL.md"
     step2 = skill.read_text(encoding="utf-8").split("## Step 2")[1].split("## Step 3")[0]

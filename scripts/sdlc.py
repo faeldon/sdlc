@@ -50,6 +50,7 @@ So this tool answers the questions that are queries rather than decisions:
     migrate-inbox  move work/ideas.md and work/nits.md into work/inbox.md, every entry with an
                 id, [seed] retagged [idea], and the references to open entries by id; never
                 commits
+    move-work   move the old `work/` change folder to `.sdlc/work/`, once, in a commit of its own
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
     readiness   whether this repo is set up for the plugin, item by item, with the commands its own
                 task files suggest for the gate, the slower check and the scans, as JSON
@@ -682,6 +683,21 @@ _OLD_HISTORY: dict[Path, bool] = {}
 
 def work_dir(root: Path) -> Path:
     return root / work_rel(root)
+
+
+def old_folder(root: Path) -> str | None:
+    """The nudge for a repo still on the old change folder, or one half-moved; None once moved.
+    Said by `status` and `readiness`, never a `check` problem, which is a gate. A shim, with
+    `work_rel()`'s fallback, until 1.5.0."""
+    home = main_root(root)
+    if (home / OLD_WORK).is_dir() and (home / WORK).is_dir():
+        return (
+            f"both {OLD_WORK}/ and {WORK}/ exist: half-moved. {WORK}/ is read; move what is left "
+            f"in {OLD_WORK}/ into it by hand and commit"
+        )
+    if work_rel(home) == OLD_WORK:
+        return f"{OLD_WORK}/ is the old change folder: run /sdlc:setup to move it to {WORK}/"
+    return None
 
 
 def checkout_of(folder: Path) -> Path:
@@ -5773,6 +5789,78 @@ def cmd_needs_info(root: Path, number: int, questions_file: str) -> int:
     return 1 if err else 0
 
 
+# ---------------------------------------------------------------- the change folder's move
+#
+# Once, per repo: the old `work/` moved to `.sdlc/work/` in a commit of its own, `/sdlc:setup`'s to
+# offer behind its one WAIT. History isn't rewritten, and readers look only where the folder is now,
+# so what closed before the move is out of their reach: nothing may be open or unreleased. A shim,
+# with `work_rel()`'s fallback and `old_folder()`, until 1.5.0.
+
+MOVE_SUBJECT = f"Move {OLD_WORK} to {WORK}"
+
+
+def cmd_move_work(root: Path) -> int:
+    """Move the old change folder to `.sdlc/work/`: one `git mv` and one commit, from the main
+    checkout on the base branch with a clean tree. Refused while any change is open (its folder
+    is on its branch, under the old name) or, in a repo that releases, while one is unreleased
+    (release reads its intent from history, at the folder's current name). JSON; never pushes."""
+    home = main_root(root)
+    cfg, _, _ = load_config(home)
+    report: dict = {"commit": None, "refusals": [], "done": []}
+    refusals = report["refusals"]
+
+    def emit(code: int) -> int:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return code
+
+    if root.resolve() != home.resolve():
+        refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
+    trunk = cfg["git"]["base"]
+    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
+        refusals.append(why)
+    elif _git(home, "branch", "--show-current") != trunk:
+        refusals.append(f"the main checkout ({home}) isn't on {trunk}")
+    if (home / WORK).exists():
+        refusals.append(f"{WORK}/ already exists: there is nothing to move into")
+    elif not (home / OLD_WORK).is_dir():
+        refusals.append(f"there is no {OLD_WORK}/ to move")
+    dirty = [p for _, p in _status_entries(home)]
+    if dirty:
+        refusals.append("commit or put back these first: " + ", ".join(sorted(dirty)))
+    changes = [p.name for p in change_dirs(home)]
+    changes += [b for t, b in worktrees(home) if DIR_RE.match(b) and b not in changes]
+    if changes:
+        refusals.append(
+            f"close or drop every change first, since each holds its folder under {OLD_WORK}/: "
+            + ", ".join(sorted(changes))
+        )
+    ignored = subprocess.run(
+        ["git", "-C", str(home), "check-ignore", "-q", f"{WORK}/"], capture_output=True
+    )
+    if ignored.returncode == 0:
+        refusals.append(f"{WORK}/ is gitignored: remove the line that ignores it first")
+    if cfg["release"]["version_files"] and trunk and not refusals:
+        names = [c["name"] for c in unreleased(home, cfg, read=False)["changes"]]
+        if names:
+            refusals.append(
+                "release first: these closed changes aren't released, and after the move release "
+                "can't read them: " + ", ".join(names)
+            )
+    if refusals:
+        return emit(1)
+    (home / WORK).parent.mkdir(parents=True, exist_ok=True)
+    for args in (["mv", "--", OLD_WORK, WORK], ["commit", "-q", "-m", MOVE_SUBJECT]):
+        if err := _git_err(home, *args):
+            refusals.append(f"git {args[0]} failed: {err}")
+            if args[0] == "commit":
+                _git(home, "mv", "--", WORK, OLD_WORK)
+            return emit(1)
+    report["commit"] = MOVE_SUBJECT
+    report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
+    report["done"] += [f"moved {OLD_WORK}/ to {WORK}/", "commit"]
+    return emit(0)
+
+
 # ---------------------------------------------------------------- readiness
 #
 # What /sdlc:setup works from: each thing a repo can set up for this plugin, whether it has, and
@@ -5922,6 +6010,8 @@ def cmd_readiness(root: Path) -> int:
         item("inbox", "warn", "; ".join(todo) + ": `sdlc.py migrate-inbox` does it")
     else:
         item("inbox", "ok", f"{work_rel(root)}/{INBOX} is the register, every entry with an id")
+    moving = old_folder(root)
+    item("work moved", "warn" if moving else "ok", moving or f"the change folder is {WORK}/")
     cfg_file = root / HOST_DIR / "config.toml"
     if not cfg_file.is_file():
         item("config", "missing", f"no {HOST_DIR}/config.toml: every setting is its default")
@@ -6814,6 +6904,8 @@ def print_status(a: dict) -> None:
     # `check --strict` is a gate, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
+    if a.get("work_move"):
+        print(f"\n■ Change folder: {a['work_move']}")
     due = a.get("retro_due")
     if due and due["due"]:
         print(f"\n■ Retro due: {'; '.join(due['why'])}  /sdlc:retro")
@@ -6904,6 +6996,10 @@ def main() -> int:
     sub.add_parser(
         "migrate-inbox",
         help="move ideas.md and nits.md into inbox.md, with ids; never commits",
+    )
+    sub.add_parser(
+        "move-work",
+        help="move the old change folder to .sdlc/work/ in a commit of its own, from main",
     )
 
     p_entry = sub.add_parser(
@@ -7059,6 +7155,8 @@ def main() -> int:
         return cmd_needs_info(root, args.number, args.questions_file)
     if args.cmd == "migrate-inbox":
         return cmd_migrate_inbox(root)
+    if args.cmd == "move-work":
+        return cmd_move_work(root)
     if args.cmd == "next-entry":
         for entry_id in next_entry_ids(home, date.today().isoformat(), max(args.count, 1)):
             print(entry_id)
@@ -7122,6 +7220,7 @@ def main() -> int:
     bugs = [b for b in bug_entries(home, words)[0] if b["id"] not in fixing]
     a["bugs"] = bugs_summary(bugs, words, date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
+    a["work_move"] = old_folder(root)
     print_status(a)
     return 0
 

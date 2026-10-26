@@ -33,3 +33,9 @@ name = "seed-tag-retag"
 remove_in = "1.4.0"
 where = "scripts/sdlc.py _is_old_seed in inbox_migration and cmd_migrate_inbox (the [seed] retag; reading [seed] as an idea stays for good)"
 test = "tests/test_inbox.py::test_migrate_retags_seed_entries_as_ideas"
+
+[[shim]]
+name = "work-folder-move"
+remove_in = "1.5.0"
+where = "scripts/sdlc.py OLD_WORK and the fallback in work_rel, old_folder, cmd_move_work, the readiness item; plugins/factory/scripts/factory.py work_rel; skills/setup/SKILL.md the move (reading history at both names in next_entry_ids and CHANGE_FOLDERS stays for good)"
+test = "tests/test_work_folder.py::test_move_work_moves_the_old_folder_in_one_commit"

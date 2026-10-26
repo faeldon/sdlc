@@ -17,6 +17,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py migrate-inbox *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work *)'
 disable-model-invocation: true
 ---
 
@@ -207,6 +208,12 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   `permissions.allow`, keeping everything already there. They cover only the script's read-only
   subcommands; everything that writes keeps asking. Say that the file is shared: it is committed
   and applies to everyone who works in the repo.
+- **The change folder**, when `readiness`'s `work moved` item is `warn`: moving the old `work/`
+  to `.sdlc/work/`, so the plugin adds no top-level folder. Say what it costs: history isn't
+  rewritten, and from then on release, retro and `bugs --introduced` read only `.sdlc/work/`, so
+  what closed before the move is out of their reach. The script refuses while any change is open,
+  and, in a repo with `release.version_files`, while any closed change is unreleased: say which,
+  and that `/sdlc:release` comes first. Half-moved (both folders) is the human's to finish by hand.
 - **Issue forms**, only when `archive.target` is `github`: each of `readiness`'s `issue_forms`
   not yet `present`, copied from its `from` file to its path under `.github/ISSUE_TEMPLATE/`, with
   the bug form's `<severities>` line replaced by one `- <word>` option per word of the process
@@ -234,6 +241,15 @@ Ask literally, listing every path:
 "leave one out" means drop it from the list and ask again. Approval is for this list only.
 
 ## Step 5 — Write and prove it
+
+An approved move of the change folder comes first, before anything else is written, since it
+needs a clean tree. It is the script's, one `git mv` and its own commit, `Move work to .sdlc/work`:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work
+```
+
+A refusal is said as it stands, and the rest of the approved list is written all the same.
 
 Write each file, `Edit` each existing one exactly as approved: a `refresh` doc is written as its
 approved `proposed` text. An approved inbox move is the script's, never an edit by hand:
