@@ -65,6 +65,49 @@ def _track(root: Path, remote: Path, trunk: str) -> None:
 TRUNKS = pytest.mark.parametrize("trunk", ["main", "master"])
 
 
+def _land(root: Path, number: str, slug: str, rel: str) -> None:
+    """A change run from `new` to `close` through the script, its folder asserted under `rel`."""
+    made = _run(root, "new", slug, "--tier", "1", "--worktree")
+    assert made.returncode == 0, made.stderr
+    tree = root / ".claude" / "worktrees" / f"{number}-{slug}"
+    intent = tree / rel / f"{number}-{slug}" / "intent.md"
+    assert intent.is_file(), made.stdout
+    intent.write_text(intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1))
+    (tree / f"{slug}.txt").write_text("the change itself\n", encoding="utf-8")
+    assert _run(tree, "ship", number).returncode == 0
+    _git(tree, "commit", "-q", "-m", f"ship {number}")
+    closed = _run(root, "close", number)
+    assert closed.returncode == 0, closed.stdout + closed.stderr
+
+
+def test_a_repo_on_the_old_folder_works_there_then_moves_once(tmp_path: Path) -> None:
+    """A repo set up before 1.4.0 keeps `work/` and is nudged; `move-work` moves it once, and the
+    next change lands under `.sdlc/work/`, numbered on from the last."""
+    root = tmp_path / "old"
+    (root / "work").mkdir(parents=True)
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    (root / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+
+    assert json.loads(_run(root, "config").stdout)["work"]["rel"] == "work"
+    assert "■ Change folder: work/ is the old change folder" in _run(root, "status").stdout
+    assert _run(root, "check", "--strict").returncode == 0, "a nudge, never a problem"
+    _land(root, "001", "before-the-move", "work")
+
+    moved = _run(root, "move-work")
+    assert moved.returncode == 0, moved.stdout + moved.stderr
+    assert _git(root, "log", "-1", "--format=%s") == "Move work to .sdlc/work"
+    assert not (root / "work").exists() and (root / ".sdlc" / "work" / "inbox.md").is_file()
+    assert "Change folder" not in _run(root, "status").stdout
+
+    _land(root, "002", "after-the-move", ".sdlc/work")
+    subjects = _git(root, "log", "--format=%s").splitlines()
+    assert subjects[0] == "Close 002-after-the-move" and "Close 001-before-the-move" in subjects
+    assert _run(root, "next").stdout.strip() == "003"
+
+
 @TRUNKS
 def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str) -> None:
     root = tmp_path / "bare"
