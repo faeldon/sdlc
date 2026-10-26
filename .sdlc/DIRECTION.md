@@ -78,7 +78,7 @@ Groups: 2026-10-26-4, 2026-10-26-5
 Retro's rework counts the earlier changes a later one says it fixes, not shared files, and ship's
 first-time rate tells a review that caught something apart from a loop that circled.
 
-Groups: 2026-10-25-12, 2026-10-26-6
+Groups: 2026-10-25-12, 2026-10-26-6, 2026-10-27-1
 
 ### M6. Hosts report through issues
 

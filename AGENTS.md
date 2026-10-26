@@ -210,6 +210,10 @@ are a contract: extend them, never redefine. Measuring never refuses: a failure 
 `Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,
 `Sdlc-Happy`, `Sdlc-Spike`) is apart from `retro`'s rework, and spikes are never rework.
 `Sdlc-Fixes` and `Sdlc-Retired` are written by `sdlc.py`, not measured, and parsed keyed by id.
+`Sdlc-Base`, where a change started, is too: `_change_base()` reads it from the `Close` commit,
+then from `refs/sdlc/base/<branch>`, which close writes before its merge and deletes with the
+branch, and only then falls back to the parent of the first commit holding the intent, which
+misses a commit the change made before its folder.
 
 **Setup's record: `drift()`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup writes:
 the plugin version, its config keys, and a hash of each block (`doc_units()`: a section or a

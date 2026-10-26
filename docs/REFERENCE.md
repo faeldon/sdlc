@@ -575,6 +575,13 @@ reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes no
 triage closed gets `Sdlc-Triaged: #<N> verdict=<word> ref=<what it rests on>` on its `Triage` or
 `File` commit, its reason as a `Why #<N>:` line in the body.
 
+Where a change started is recorded as `Sdlc-Base: <sha>`: the base branch's tip just before close
+merged it, which close keeps in `refs/sdlc/base/<branch>` between its runs and removes with the
+branch. Retro's sizes, the rework `final` counts and `bugs --introduced` measure a change from
+it, so a commit the change made before its folder is counted. A `Close` commit from before the
+trailer existed is measured from the parent of the commit that first holds the change's intent. A
+dropped change has none.
+
 `sdlc.py retro` reads all of them. Measuring never stops a close: without transcripts,
 `Sdlc-Coverage` says why, and the numbers are what history gives. `git log --format=%B` on a
 `Close` commit shows them.
