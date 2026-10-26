@@ -12,14 +12,10 @@ allowed-tools:
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py closes *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py context *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
   - 'Bash(git status *)'
@@ -91,33 +87,24 @@ its reviews in `.sdlc/work/NNN-slug/reviews/round-<N>/<role>.md`, each opening `
 reviews and the ledger: they are evidence for Step 3, never a substitute for it. A change with
 none of them is reviewed exactly as below.
 
-Then list what the change's notes left undone:
+Then everything else this skill looks up about the change, in one call that writes nothing:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py undone <NNN>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN>
 ```
 
-Each item is an unticked `- [ ]` line in `notes.md`. Step 4 proposes what happens to each one.
-`sdlc.py ship` refuses while one is still unticked, because a shipped folder isn't read again,
-and an item left there is lost.
+Keep its output in view; the steps below read its parts by name, and run none of them again:
 
-Then list the open nits this change's diff touches, the `[nit]` entries in `.sdlc/work/inbox.md`:
+- **`undone`**: the unticked `- [ ]` lines in `notes.md`. Step 4 proposes what happens to each.
+  `sdlc.py ship` refuses while one is still unticked: a shipped folder isn't read again.
+- **`nits`**: the open `[nit]` entries this diff touches, findings an earlier ship approved
+  unfixed. Step 4 proposes retiring the ones it fixed or made moot.
+- **`closes`**: the issues the intent's `closes:` line names, which Step 4 asks about one by one.
+- **`checks`**: the change's acceptance checks, which Step 1 shows and runs.
+- **`context`**: the docs the context pass weighs in Step 3.
 
-```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --change <NNN>
-```
-
-Each is a finding an earlier ship approved unfixed. Step 4 proposes retiring the ones this diff
-fixed or made moot. None listed, or no `.sdlc/work/inbox.md`, is the usual answer.
-
-Then the issues the change would close, those its intent's `closes:` line names:
-
-```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py closes <NNN>
-```
-
-Each is an issue someone filed that triage, or the seed this change came from, put on the change.
-Step 4 asks about each one. An empty list is the usual answer.
+Empty is the usual answer for the first three. A non-empty `problems` names the part that has one;
+a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
@@ -144,11 +131,8 @@ green gate is evidence about what it checks and silence about everything else.
 
 **Then the change's own acceptance checks,** the `## ` sections of its `checks.md`: proof that
 only a revert could break, kept out of the suite and rerun here because review fixes and a rebase
-may have touched what they check. List them first; this runs nothing:
-
-```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py checks <NNN>
-```
+may have touched what they check. They are `preflight`'s `checks` part from Step 0, which ran
+nothing.
 
 With none listed, say "no acceptance checks" and go on. Otherwise show each check's name and its
 command, as listed, and only then run `sdlc.py accept <NNN>`, the same way. It has no rule here on
@@ -156,7 +140,7 @@ purpose: an agent may have written those commands, so the person sees them above
 prompt it raises. It runs each from the checkout root and must exit 0. A check fails when its
 command exits non-zero, times out, or leaves the working tree changed (`left`). **A failure stops
 here, as a failing gate does:** report each failing check's name, `output` and `left`. A problem in
-`checks.md` itself, which `checks` reports, stops here too.
+`checks.md` itself, which the `checks` part reports, stops here too.
 
 ## Step 2 — If the diff calls for it, run the build check
 
@@ -193,13 +177,8 @@ is worth saying. Do not skim the diff; read it.
 2. **Contract** — every invariant the policy doc (`docs.policy`) declares that the diff comes near.
 3. **Cost & simplification** — as the review defines it.
 4. **Context** — whether the docs that give a session its context still tell the truth after this
-   diff. This pass is the skill's, not the review's, so it runs whatever review the repo has:
-
-   ```bash
-   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py context
-   ```
-
-   It lists the docs to weigh (`docs.context` from `config`, plus any `CLAUDE.md` above a changed
+   diff. This pass is the skill's, not the review's, so it runs whatever review the repo has.
+   `preflight`'s **`context`** part from Step 0 lists the docs to weigh (`docs.context` from `config`, plus any `CLAUDE.md` above a changed
    path, each with why) and `stale`: their lines naming a path this diff deletes or renames. Read
    each listed doc, then ask of it:
 
@@ -289,7 +268,7 @@ stays, and needs no mention.
 each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
 the line comes out, or the fix goes in.
 
-**Issues it closes.** For each issue `closes <NNN>` listed, show its number and title, with a line on
+**Issues it closes.** For each issue `preflight`'s `closes` part listed, show its number and title, with a line on
 whether the diff resolves what it asks, and ask, issue by issue, whether this change resolved it.
 Only a confirmed one stays on `closes:`, and `/sdlc:close` closes it when the change lands. One the
 human says this change didn't resolve is never closed and never dropped: propose a new seed for it,
@@ -309,14 +288,20 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 ## Step 5 — WAIT for explicit approval
 
-Ask literally:
+The script words the question from what Step 4 decided. Pass `--context` when the context pass
+proposed an edit, `--nits` when nits are added or retired, and each issue on `closes:` once, as
+`--closing N` when this change resolved it or `--split N` when it is split off as a seed:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --closing <N> --split <K>
+```
+
+Ask exactly what it prints. With every clause in, it reads:
 
 > `Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
-Leave out `, with the context update shown` when the context pass proposed none, `, the nits shown
-recorded in .sdlc/work/inbox.md` when there are none to add or retire, the closing clause when `closes:`
-names nothing (and its `splitting` half when every issue was resolved), and `, then update its
-issue` when `config` says `archive.target` is `none`.
+A refusal names an issue left out, given twice, or not on `closes:`: settle it in Step 4, then run
+it again. Never word the question by hand.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone

@@ -344,6 +344,14 @@ have written them, so a person sees them and answers the prompt. A failing check
 failing gate. The file reaches history and the change's issue with the folder; a check that can't
 run (looking at a rendered page) is written in `notes.md` instead.
 
+`/sdlc:ship` reads all of this in one call, `sdlc.py preflight NNN`: the change's undone notes,
+the nits its diff touches, the issues on its `closes:` line, its acceptance checks and the context
+docs its diff could have made wrong, each part as `undone`, `nits --change`, `closes`, `checks`
+and `context` give it. It writes nothing, and setup's read-only rules allow it, `nits` too.
+`preflight NNN --question` words ship's approval question from what its review decided
+(`--context`, `--nits`, and each issue on `closes:` once as `--closing N` or `--split N`), and
+refuses an issue left out.
+
 `.claude/worktrees/` belongs in `.gitignore`, and `.sdlc/work/` must not be in it: `sdlc.py new` refuses
 an ignored `.sdlc/work/`, and `sdlc.py check` flags it. The main checkout stays on `main`: close
 fast-forwards it there, and refuses while it is on another branch or has uncommitted changes.

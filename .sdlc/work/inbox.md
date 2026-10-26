@@ -386,7 +386,9 @@ it again. Retro's skill reads only the medians in `metrics`, and release reads n
 per-change blob out by default, behind a flag for anyone who wants it, so each retrospective and
 release reads a fraction of the tokens. Raised by the retrospective of 2026-10-26.
 
-## [2026-10-26-9] [idea] One preflight call for ship's lookups
+## [2026-10-26-9] [building] One preflight call for ship's lookups
+
+Building in .sdlc/work/030-ship-preflight/.
 
 Ship is the largest skill (about 6,000 tokens, 21 commands) and 7 of the last 20 changes edited
 it. Its Step 0 runs `status`, `config`, `base`, `undone`, `nits --change`, `closes` and

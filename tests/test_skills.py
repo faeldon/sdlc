@@ -241,8 +241,10 @@ def test_ship_checks_the_context_docs_inside_its_one_gate() -> None:
     one WAIT and landed in the same commit. Close can't do it: it has no Edit, and refuses a dirty
     worktree."""
     text = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+    step0 = text.split("## Step 0")[1].split("## Step 1")[0]
+    assert "sdlc.py preflight <NNN>" in step0 and "**`context`**" in step0
     step3 = text.split("## Step 3")[1].split("## Step 4")[0]
-    assert "sdlc.py context" in step3 and "**Context**" in step3
+    assert "`preflight`'s **`context`** part" in step3 and "**Context**" in step3
     wait = text.split("## Step 5")[1].split("## Step 6")[0]
     assert "context update" in wait
     close = frontmatter.load(ROOT / "skills" / "close" / "SKILL.md")
@@ -338,7 +340,7 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
     }
     ship = text["ship"]
     step0 = ship.split("## Step 0")[1].split("## Step 1")[0]
-    assert "sdlc.py nits --change <NNN>" in step0
+    assert "sdlc.py preflight <NNN>" in step0 and "**`nits`**" in step0
     wait = ship.split("## Step 5")[1].split("## Step 6")[0]
     assert "the nits shown recorded in .sdlc/work/inbox.md" in wait
     present = ship.split("## Step 4")[1].split("## Step 5")[0]
@@ -609,7 +611,7 @@ def test_ship_lists_then_runs_the_changes_checks_under_a_prompt() -> None:
     `accept`, which ship names without a rule, so the person answers a prompt with them in view."""
     text = BY_ID["sdlc:ship"].read_text(encoding="utf-8")
     step1 = text.split("## Step 1")[1].split("## Step 2")[0]
-    order = ("commands.check", "sdlc.py checks <NNN>", "sdlc.py accept <NNN>")
+    order = ("commands.check", "`preflight`'s `checks` part", "sdlc.py accept <NNN>")
     gate, listed, run = (step1.find(s) for s in order)
     assert -1 < gate < listed < run, "the gate, then the listing, then the run"
     assert "**A failure stops" in step1 and "no acceptance checks" in step1
@@ -709,13 +711,23 @@ def test_triage_s_one_wait_shows_every_verdict_and_writes_nothing_before() -> No
 
 def test_ship_asks_about_each_issue_it_would_close_and_splits_off_the_rest() -> None:
     steps = _steps("ship")
-    assert "sdlc.py closes <NNN>" in steps["0"]
+    assert "sdlc.py preflight <NNN>" in steps["0"] and "**`closes`**" in steps["0"]
     assert "ask, issue by issue, whether this change resolved it" in steps["4"]
     assert "never closed and never dropped" in steps["4"]
     assert "`Split from <NNN-slug>:`" in steps["4"] and "`Issue: #N`" in steps["4"]
     assert "closing #N and #M when it lands and splitting #K off as a seed" in steps["5"]
     took = "take each one this change didn't resolve off the intent's `closes:` line"
     assert took in steps["6"]
+
+
+def test_ship_asks_the_question_the_script_words() -> None:
+    """Step 5 asks what `preflight --question` prints, from flags Step 4 decided; the clause rules
+    are the script's, pinned in test_preflight.py, and never worded by hand."""
+    steps = _steps("ship")
+    assert "sdlc.py preflight <NNN> --question" in steps["5"]
+    assert "Ask exactly what it prints" in steps["5"]
+    assert "Never word the question by hand" in steps["5"]
+    assert "Leave out" not in steps["5"]
 
 
 def test_intent_carries_an_entry_s_issues_onto_closes() -> None:

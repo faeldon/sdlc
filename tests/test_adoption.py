@@ -163,6 +163,14 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     check = _run(tree, "check", "--strict")
     assert check.returncode == 0, check.stdout + check.stderr
 
+    # Ship's one lookup, and its question, in a repo with no tracker and no inbox.
+    pre = _run(tree, "preflight", "001")
+    assert pre.returncode == 0, pre.stdout + pre.stderr
+    found = json.loads(pre.stdout)
+    assert {"undone", "nits", "closes", "checks", "context"} <= found.keys()
+    asked = _run(tree, "preflight", "001", "--question")
+    assert asked.returncode == 0 and asked.stdout.startswith("Commit this"), asked.stderr
+
     shipped = _run(tree, "ship", "001")
     assert shipped.returncode == 0, shipped.stderr
     # One commit carries the code, the change's folder and the counter `new` wrote beside it,

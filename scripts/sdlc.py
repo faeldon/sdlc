@@ -1898,50 +1898,60 @@ def cmd_lookup(root: Path, names: list[str]) -> int:
     return 1 if unknown or (problems and not fields) else 0
 
 
+def _undone_report(root: Path, path: Path) -> dict:
+    """A change's undone notes.md items, for `undone` and `preflight`."""
+    return {
+        "change": path.name,
+        "notes": _shown(path / "notes.md", root),
+        "items": [{"line": i["line"], "text": i["text"]} for i in open_items(path)],
+    }
+
+
 def cmd_undone(root: Path, ident: str) -> int:
     """A change's undone notes.md items as JSON, for /sdlc:ship's Step 0. Writes nothing."""
     path = _one_change(root, ident)
     if path is None:
         return 1
-    items = open_items(path)
-    print(
-        json.dumps(
-            {
-                "change": path.name,
-                "notes": _shown(path / "notes.md", root),
-                "items": [{"line": i["line"], "text": i["text"]} for i in items],
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
+    print(json.dumps(_undone_report(root, path), indent=2, ensure_ascii=False))
     return 0
+
+
+def _nits_report(root: Path, path: Path | None, touching: list[str] | None) -> dict | None:
+    """The open nits with their age, for `nits` and `preflight`: those change `path`'s diff
+    against the base branch touches, or the `touching` paths do, or all. None when the change's
+    checkout has no merge base with the base branch."""
+    nits, problems = nit_entries(root)
+    paths = list(touching or [])
+    if path is not None:
+        trunk = load_config(main_root(root))[0]["git"]["base"]
+        found = changed_paths(checkout_of(path), trunk) if trunk else None
+        if found is None:
+            return None
+        paths += [p for _, path_, to in found[1] for p in (path_, to) if p]
+    if path is not None or touching is not None:
+        nits = [n for n in nits if nit_touches(n, paths)]
+    today = date.today()
+    for n in nits:
+        n["age_days"] = _age_days({"created": n["raised"] or ""}, today)
+    return {"path": _shown(register_path(work_dir(root)), root), "nits": nits, "problems": problems}
 
 
 def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
     """The open nits, the register's `[nit]` entries, as JSON, with their age, for intent and
     spec to offer and ship to retire. `--change` keeps those a change's diff against the base
     branch touches, `--touching` those the given paths do. Writes nothing."""
-    nits, problems = nit_entries(root)
-    paths = list(touching or [])
+    path = None
     if change:
         path = _one_change(root, change)
         if path is None:
             return 1
+    out = _nits_report(root, path, touching)
+    if out is None:
         trunk = load_config(main_root(root))[0]["git"]["base"]
-        found = changed_paths(checkout_of(path), trunk) if trunk else None
-        if found is None:
-            print(f"⚠  no merge base with {trunk!r}: is this a git checkout?", file=sys.stderr)
-            return 1
-        paths += [p for _, path_, to in found[1] for p in (path_, to) if p]
-    if change or touching is not None:
-        nits = [n for n in nits if nit_touches(n, paths)]
-    today = date.today()
-    for n in nits:
-        n["age_days"] = _age_days({"created": n["raised"] or ""}, today)
-    out = {"path": _shown(register_path(work_dir(root)), root), "nits": nits, "problems": problems}
+        print(f"⚠  no merge base with {trunk!r}: is this a git checkout?", file=sys.stderr)
+        return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
-    return 1 if problems else 0
+    return 1 if out["problems"] else 0
 
 
 def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | None) -> int:
@@ -1972,9 +1982,14 @@ def cmd_checks(root: Path, ident: str) -> int:
     path = _one_change(root, ident)
     if path is None:
         return 1
-    found = acceptance(path)
-    print(json.dumps({"change": path.name, **found}, indent=2, ensure_ascii=False))
+    found = _checks_report(path)
+    print(json.dumps(found, indent=2, ensure_ascii=False))
     return 1 if found["problems"] else 0
+
+
+def _checks_report(path: Path) -> dict:
+    """A change's acceptance checks, for `checks` and `preflight`."""
+    return {"change": path.name, **acceptance(path)}
 
 
 def _status_lines(checkout: Path) -> set[str]:
@@ -5464,12 +5479,118 @@ def cmd_intake(root: Path) -> int:
     return 0
 
 
+def cmd_preflight(root: Path, ident: str) -> int:
+    """Everything /sdlc:ship's Step 0 looks up about a change, as one JSON object: its undone
+    items, the nits its diff touches, the issues it would close, its acceptance checks and the
+    context docs its diff could have made wrong, each part as its own command gives it. Writes
+    nothing, so it is allowed without a prompt. Exits 1 when a part reports problems, after
+    printing every part."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    home = main_root(root)
+    rec = load_change(path, home)
+    checkout = checkout_of(path)
+    trunk = load_config(home)[0]["git"]["base"]
+    parts = {
+        "undone": _undone_report(root, path),
+        "nits": _nits_report(root, path, None),
+        "closes": _closes_report(root, path),
+        "checks": _checks_report(path),
+        "context": _context_report(checkout, trunk),
+    }
+    problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
+    for name in ("nits", "checks"):
+        problems += [f"{name}: {p}" for p in (parts[name] or {}).get("problems") or []]
+    out = {"change": path.name, "tier": rec["tier"], "stage": rec["stage"],
+           "folder": _shown(path, root), **parts, "problems": problems}  # fmt: skip
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 1 if problems else 0
+
+
+def _issues(numbers: list[int]) -> str:
+    """`#1`, `#1 and #2`, `#1, #2 and #3`."""
+    named = [f"#{n}" for n in numbers]
+    return named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+
+
+def ship_question(
+    folder: str,
+    closes: list[int],
+    target: str | None,
+    context: bool,
+    nits: bool,
+    closing: list[int],
+    split: list[int],
+    register: str,
+) -> tuple[str | None, str | None]:
+    """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
+    (None, why) when the issues named don't partition its `closes:` line: ship asks about every
+    one, so the question never leaves one out. Each clause is in only when its fact is: the
+    context update shown, the nits recorded in `register`, the issues closed and split off, and
+    the issue update unless `archive.target` is `none`."""
+    named = set(closes)
+    stray = sorted(n for n in {*closing, *split} if n not in named)
+    if stray:
+        return None, f"{_issues(stray)} not on the change's closes: line"
+    both = sorted(set(closing) & set(split))
+    if both:
+        return None, f"{_issues(both)} given to both --closing and --split"
+    left = sorted(named - set(closing) - set(split))
+    if left:
+        return None, f"{_issues(left)} on closes: but given to neither --closing nor --split"
+    clauses = []
+    if context:
+        clauses.append("with the context update shown")
+    if nits:
+        clauses.append(f"the nits shown recorded in {register}")
+    issues = []
+    if closing:
+        issues.append(f"closing {_issues(sorted(closing))} when it lands")
+    if split:
+        seeds = "a seed" if len(split) == 1 else "seeds"
+        issues.append(f"splitting {_issues(sorted(split))} off as {seeds}")
+    if issues:
+        clauses.append(" and ".join(issues))
+    stamped = f"{folder}/ stamped shipped"
+    body = f", {', '.join(clauses)}, and {stamped}" if clauses else f", with {stamped}"
+    then = "" if target == "none" else ", then update its issue"
+    return f"Commit this{body}{then}? (yes / fix a finding first / edit the message)", None
+
+
+def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
+                      closing: list[int], split: list[int]) -> int:  # fmt: skip
+    """Print ship's WAIT question for a change, from what its Step 4 decided. Writes nothing."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    home = main_root(root)
+    cfg = load_config(home)[0]
+    rel = work_rel(root)
+    question, why = ship_question(
+        f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
+        cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md",
+    )  # fmt: skip
+    if question is None:
+        print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
+        return 1
+    print(question)
+    return 0
+
+
 def cmd_closes(root: Path, ident: str) -> int:
     """The issues a change's `closes:` line names, each with its title and state, as JSON, for
     /sdlc:ship to ask about one by one. Writes nothing."""
     path = _one_change(root, ident)
     if path is None:
         return 1
+    print(json.dumps(_closes_report(root, path), indent=2, ensure_ascii=False))
+    return 0
+
+
+def _closes_report(root: Path, path: Path) -> dict:
+    """The issues change `path`'s `closes:` line names, with titles where the tracker answers,
+    for `closes` and `preflight`."""
     home = main_root(root)
     cfg = load_config(home)[0]
     numbers = load_change(path, home).get("closes") or []
@@ -5479,8 +5600,7 @@ def cmd_closes(root: Path, ident: str) -> int:
         out["closes"] = found.titles(numbers)
     elif numbers:
         out["unavailable"] = why
-    print(json.dumps(out, indent=2, ensure_ascii=False))
-    return 0
+    return out
 
 
 def mark_issues(home: Path, found) -> dict:
@@ -5708,7 +5828,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs", "intake", "closes",
+    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -6499,15 +6619,25 @@ def cmd_context(root: Path, base: str | None = None) -> int:
     path the diff deletes or renames, the way context goes wrong most often and most quietly.
     Whether anything else in them needs to change is judgment, and the skill's. The diff is taken
     against `base`, the base branch (`git.base`) unless given."""
-    cfg, _, _ = load_config(root)
-    base = base or cfg["git"]["base"]
-    found = changed_paths(root, base) if base else None
-    if found is None:
+    base = base or load_config(root)[0]["git"]["base"]
+    out = _context_report(root, base)
+    if out is None:
         print(
             f"⚠  no merge base with {base!r}: is this a git checkout with that branch?",
             file=sys.stderr,
         )
         return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _context_report(root: Path, base: str | None) -> dict | None:
+    """`context`'s report for checkout `root` against `base`, for `context` and `preflight`.
+    None when there is no merge base."""
+    cfg, _, _ = load_config(root)
+    found = changed_paths(root, base) if base else None
+    if found is None:
+        return None
     mb, rows = found
     docs: dict[str, str] = {}
     for rel in cfg["docs"]["context"]:
@@ -6544,8 +6674,7 @@ def cmd_context(root: Path, base: str | None = None) -> int:
         "docs": [{"path": p, "why": why} for p, why in docs.items()],
         "stale": stale,
     }
-    print(json.dumps(out, indent=2, ensure_ascii=False))
-    return 0
+    return out
 
 
 def print_status(a: dict) -> None:
@@ -6726,6 +6855,23 @@ def main() -> int:
         "closes", help="the issues a change's closes: line names, with titles; writes nothing"
     )
     p_closes.add_argument("id")
+    p_pre = sub.add_parser(
+        "preflight", help="everything ship looks up about a change, as JSON; writes nothing"
+    )
+    p_pre.add_argument("id", help="the 3-digit id, e.g. 025")
+    p_pre.add_argument(
+        "--question", action="store_true", help="print ship's WAIT question instead, from:"
+    )
+    p_pre.add_argument("--context", action="store_true", help="a context update was proposed")
+    p_pre.add_argument("--nits", action="store_true", help="nits are added or retired")
+    p_pre.add_argument(
+        "--closing", action="append", type=int, default=[], metavar="N",
+        help="an issue on closes: this change resolved; repeatable",
+    )  # fmt: skip
+    p_pre.add_argument(
+        "--split", action="append", type=int, default=[], metavar="N",
+        help="an issue on closes: split off as a seed; repeatable",
+    )  # fmt: skip
     sub.add_parser(
         "mark-triaged",
         help="label, comment on and relate each open issue the repo records, from main",
@@ -6886,6 +7032,10 @@ def main() -> int:
         return cmd_intake(root)
     if args.cmd == "closes":
         return cmd_closes(root, args.id)
+    if args.cmd == "preflight" and args.question:
+        return cmd_ship_question(root, args.id, args.context, args.nits, args.closing, args.split)
+    if args.cmd == "preflight":
+        return cmd_preflight(root, args.id)
     if args.cmd == "mark-triaged":
         return cmd_mark_triaged(root)
     if args.cmd == "needs-info":
