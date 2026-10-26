@@ -167,9 +167,9 @@ branch.
 entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
 (`BODY_KEYS`). Every entry is a seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]`. Any
 other tag reads as an idea, `[seed]` (the old idea tag) for good, so say "seed" for any entry and
-"idea" for the kind. `register_path()` is the one place that knows the old name: a repo with only
-`.sdlc/work/ideas.md` is read from it until 1.4.0 (`.sdlc/deprecations.toml`), and
-`migrate-inbox` moves it over; it and bare-date headings go in 1.4.0 too. Ids come from `next_entry_ids()`, which counts every checkout's
+"idea" for the kind. A heading without its id is not an entry, and the old `ideas.md` is never
+read as the register: only readers of history name it (`next_entry_ids()`, `fix_trailers()`), and
+`_seed_title()` still strips a bare-date heading from an old intent's `idea:`. Ids come from `next_entry_ids()`, which counts every checkout's
 register, uncommitted edits included, and every commit that ever held one; they are their own
 space, never a change number. A reference (`idea:`, `fixes:`, `After:`, `Groups:`) is an id,
 bare, or a title, quoted, matched by `ref_matches()`/`same_ref()`; titles are read for good,

@@ -325,9 +325,9 @@ them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
 
-**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`, or
-`.sdlc/work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
-second file beside it, which would hide every entry the first one holds.
+**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`. Write
+entries there, never into a second file beside it, which would hide every entry the first one
+holds.
 
 First, the undone items, exactly as approved:
 

@@ -214,9 +214,8 @@ the approved issue fields' lines and the `serves:` line under `depends_on:`, exa
 Step 3.
 
 If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
-id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`), or, for an
-entry from before ids (a heading with a bare date, `[2026-10-01]`), to its title alone, without its
-`## `, date or tag (`idea: Keep drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit`
+id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`):
+`sdlc.py ship` deletes the entry by it. Then `Edit`
 the entry in the worktree's register, the file `config`'s `work.register` names: its heading's
 tag becomes `[building]`, the rest of
 the heading unchanged, and `Building in .sdlc/work/NNN-slug/.` becomes its first body line, so the tag

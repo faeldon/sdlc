@@ -430,7 +430,7 @@ def test_setup_moves_the_change_folder_first_and_only_behind_its_wait() -> None:
     assert "release, retro and `bugs --introduced` read only `.sdlc/work/`" in steps["3"]
     assert "sdlc.py move-work" not in " ".join(steps[n] for n in ("0", "1", "2", "3", "4"))
     step5 = steps["5"]
-    assert step5.index("sdlc.py move-work") < step5.index("sdlc.py migrate-inbox"), (
+    assert step5.index("sdlc.py move-work") < step5.index("Write each file"), (
         "the move needs a clean tree, so it runs before anything else is written"
     )
 
@@ -722,3 +722,15 @@ def test_intent_carries_an_entry_s_issues_onto_closes() -> None:
     steps = _steps("intent")
     assert "`Issue: #12, #15` becomes `closes: [12, 15]`" in steps["3"]
     assert "add the `closes:` line Step 3 showed" in steps["5"]
+
+
+def test_no_shipped_text_names_migrate_inbox() -> None:
+    """The 1.4.0 shims are gone, and with them the command that moved a repo off them."""
+    texts = [*SKILLS, *(ROOT / "defaults").rglob("*.md"), *(ROOT / "templates").glob("*.md")]
+    texts += [
+        *(FACTORY / "agents").glob("*.md"),
+        ROOT / "README.md",
+        ROOT / "docs" / "REFERENCE.md",
+    ]
+    named = [p.name for p in texts if "migrate-inbox" in p.read_text(encoding="utf-8")]
+    assert named == []

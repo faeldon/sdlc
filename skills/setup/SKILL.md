@@ -16,7 +16,6 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py migrate-inbox *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work *)'
 disable-model-invocation: true
 ---
@@ -139,14 +138,6 @@ Each item `readiness` reported as `missing` or `warn` gets a draft. Show new fil
 edit to an existing file as a diff. A doc drafted from a default keeps the `>` note under its
 title: it says what the plugin reads from the doc, which whoever edits it later needs.
 
-- **The inbox**, when `readiness`'s `inbox` item is `warn`: the repo still has a `.sdlc/work/ideas.md`
-  or a `.sdlc/work/nits.md`, entries without ids, or `[seed]` entries to retag `[idea]`. Propose moving
-  them over, saying what its detail lists, as `.sdlc/work/inbox.md (migrated)` in Step 4's list.
-  `sdlc.py migrate-inbox` does it in Step 5, renaming `.sdlc/work/ideas.md` so history follows it, and refuses while one of those files has
-  uncommitted edits: those are the human's to commit first. It is best run with no change open:
-  one open in another worktree keeps the title on its `idea:` line, which `readiness` names, and
-  once it lands its seed reads `vanished`, not `shipped`, against a `Groups:` line rewritten to
-  ids. Say so when the detail names one, and offer to wait until it closes.
 - **`.gitignore`**: a `.claude/worktrees/` line, where each change's worktree lives. Never `.sdlc/work/`:
   a change's artifacts are committed with it, and `readiness` reports an ignored `.sdlc/work/`.
 - **`.sdlc/config.toml`**: only the keys that differ from their defaults, each with a comment
@@ -252,14 +243,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work
 A refusal is said as it stands, and the rest of the approved list is written all the same.
 
 Write each file, `Edit` each existing one exactly as approved: a `refresh` doc is written as its
-approved `proposed` text. An approved inbox move is the script's, never an edit by hand:
-
-```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py migrate-inbox
-```
-
-It prints what it moved, the ids it gave and the references it rewrote; a refusal is said as it
-stands, and the rest of the approved list is written all the same. A template override being reset is deleted by the script, which takes
+approved `proposed` text. A template override being reset is deleted by the script, which takes
 only a file name in `.sdlc/templates/` and refuses one with uncommitted edits:
 
 ```bash

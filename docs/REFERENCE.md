@@ -205,7 +205,8 @@ recorded hash, and sorts what it finds:
 
 Whitespace alone is never drift. `breaking` is kept apart from all of that: what the plugin would
 now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py` names its
-replacement: `metrics.target_stops` became `metrics.stop_allowance` in 1.2.0, and the note goes in 1.4.0), a template override lacking a heading, frontmatter key or placeholder the script
+replacement, until the release that drops the note; after it, the key is reported as one the
+plugin doesn't read), a template override lacking a heading, frontmatter key or placeholder the script
 reads (`TEMPLATE_READS`), or a project or product doc it can't parse. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
@@ -252,15 +253,9 @@ too; a closed seed is deleted from it, history keeping that as well. Every entry
 seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]` (the process doc's "Seeds, and the
 changes they become" says what each is, and the change types they grow into). Any other tag reads
 as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good.
-It was `.sdlc/work/ideas.md` before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
-`.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
-reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
-over: it renames `.sdlc/work/ideas.md` with `git mv`, gives every entry an id, folds a `.sdlc/work/nits.md`
-into `[nit]` entries, retags each `[seed]` entry `[idea]`, and rewrites the titles that name an
-open entry to its id, in `After:`, the direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
-of those files has uncommitted edits, or one it can't read. Run it with no change open: one in
-another worktree keeps a title `idea:`. Until a repo migrates, `sdlc.py config`'s `work.register`
-names `.sdlc/work/ideas.md`, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
+It was `.sdlc/work/ideas.md` before 1.2.0; since 1.4.0 that file, and a host template
+`.sdlc/templates/ideas.md`, are not read at all. `sdlc.py config`'s `work.register` names the
+inbox, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
 tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
 lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
 the same paths, retired by the ship whose diff fixes it, and counted by theme and age by
@@ -319,8 +314,8 @@ entries are on the base branch.
 changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [idea] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
-and every commit that ever held one, so an id is never handed out twice. A heading with a bare
-date is an entry from before ids, read the same until 1.4.0: run `migrate-inbox` before. An `idea:`, `After:` or `Groups:` line names an
+and every commit that ever held one, so an id is never handed out twice. A heading without its
+count, a bare date, is not an entry. An `idea:`, `After:` or `Groups:` line names an
 entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
 `.sdlc/work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an

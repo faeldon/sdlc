@@ -109,9 +109,9 @@ for a retag: `Retag <id> as [<tag>] and commit it as "Update <id>"?`
 
 ## Step 5 — Write and record it
 
-**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`, or
-`.sdlc/work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
-second file beside it, which would hide every entry the first one holds.
+**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`. Write
+entries there, never into a second file beside it, which would hide every entry the first one
+holds.
 
 `Edit` the register as approved: append a new entry after the last one, delete a retired one from
 its heading to the line before the next `## `, or change a retagged one's heading and lines in
