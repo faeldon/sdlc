@@ -322,6 +322,38 @@ def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> Non
     ]
 
 
+def test_inbox_commit_never_retires_what_an_open_change_builds_or_fixes(
+    tmp_path: Path, capsys
+) -> None:
+    """The `[building]` tag rides on the change's branch, so main's register still reads `[idea]`:
+    an open change's `idea:` and `fixes:` lines are what say an entry is taken. Ids given from the
+    main checkout are refused, since it records the whole register."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
+    folder = root / ".sdlc" / "work" / "001-keep-drafts"
+    folder.mkdir()
+    (folder / "intent.md").write_text(
+        FIXING.format(fixes="2026-10-02-1").replace("idea:\n", "idea: 2026-10-01-1\n"),
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "open 001")
+    _inbox(root)
+    code, out = _commit(root, capsys, "2026-10-01-1=declined", "2026-10-02-1=wontfix")
+    assert code == 1 and out["refusals"] == [
+        "2026-10-01-1 is being built by 001-keep-drafts: its change removes it at ship, "
+        "or /sdlc:drop says why not",
+        "2026-10-02-1 is being built by 001-keep-drafts: its change removes it at ship, "
+        "or /sdlc:drop says why not",
+    ]
+    code = sdlc.cmd_inbox_commit(root, ["2026-10-01-1"], ["2026-10-01-1=declined"])
+    out = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert out["refusals"][0] == (
+        "from the main checkout it records the whole register: name no entries"
+    )
+    assert _git(root, "log", "-1", "--format=%s") == "open 001"
+
+
 def test_bug_commit_is_gone(capsys, monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "bug-commit"])
     with pytest.raises(SystemExit) as raised:

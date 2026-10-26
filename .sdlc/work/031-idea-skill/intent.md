@@ -2,10 +2,11 @@
 id: 031
 slug: idea-skill
 tier: 2
-impact:
-stage: build
+impact: minor
+stage: shipped
 created: 2026-10-27
 updated: 2026-10-27
+shipped: 2026-10-27
 idea: 2026-10-27-2
 depends_on:
 serves: [O3]

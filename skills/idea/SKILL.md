@@ -54,8 +54,9 @@ When the argument is an entry's id, or the human wants one changed or gone:
 - **Edit** an idea's title or prose in place. Its id stays the same, so whatever names it still
   does.
 - **Retire** an idea nobody will build: the reason is one of `duplicate`, `superseded` or
-  `declined`, said with a line on why. An idea tagged `[building]` is never retired here: its change
-  removes it at ship, or `/sdlc:drop` says why not. A `[bug]` is `/sdlc:bug`'s to retire, and a
+  `declined`, said with a line on why. An idea an open change builds (its `idea:` line, or the
+  `[building]` tag) is never retired here: its change removes it at ship, or `/sdlc:drop` says why
+  not. A `[bug]` is `/sdlc:bug`'s to retire, and a
   `[nit]` is ship's.
 
 ## Step 3 — Draft and show it

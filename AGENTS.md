@@ -182,8 +182,9 @@ on its own, always on the base branch in the main checkout, for `/sdlc:idea`, `/
 `/sdlc:triage`. From a change's worktree it files only the entries it names, splicing them
 into the main checkout's register (which must be clean) and back out of the worktree's under
 `_main_lock()`, the lock `claim()` takes, so an entry never rides on a change's branch, where a
-drop would lose it. A removed entry needs a reason of its kind (`RETIRE_REASONS`), and a nit or
-a `[building]` entry is never removed there. Ship deletes a change's `fixes:` entries, and close's
+drop would lose it. A removed entry needs a reason of its kind (`RETIRE_REASONS`), and a nit, or
+an entry an open change's `idea:` or `fixes:` names (`_open_claims()`: the `[building]` tag rides
+on the change's branch), is never removed there. Ship deletes a change's `fixes:` entries, and close's
 `fix_trailers()` writes their `Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the
 register and those trailers, and `Sdlc-Retired:` is written for bugs alone.
 

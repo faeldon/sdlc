@@ -5321,11 +5321,26 @@ def cmd_inbox_commit(
 
     if in_tree and not ids:
         refusals.append("from a change's worktree, name the entries to file: inbox-commit <id>…")
+    if ids and not in_tree:
+        refusals.append("from the main checkout it records the whole register: name no entries")
     if in_tree and triaged:
         refusals.append(f"triage's verdicts are recorded from the main checkout ({home})")
     with _main_lock(home):
         return emit(_inbox_commit(root, home, cfg, register, rel, ids, in_tree, report, reasons,
                                   triaged, whys))  # fmt: skip
+
+
+def _open_claims(home: Path) -> list[tuple[str, str]]:
+    """(reference, change) for each entry an open change builds or fixes, from its `idea:` and
+    `fixes:` lines: the `[building]` tag lives on the change's branch until ship, so the base
+    branch's register still shows such an entry as it was filed."""
+    claims = []
+    for p in change_dirs(home):
+        rec = load_change(p, home)
+        if rec["stage"] in ("shipped", "dropped"):
+            continue
+        claims += [(r, p.name) for r in [rec["idea"], *rec["fixes"]] if r]
+    return claims
 
 
 def _inbox_commit(
@@ -5407,17 +5422,22 @@ def _inbox_commit(
             actions["File"].append(k)
         elif after[k] != before[k]:
             actions["Update"].append(k)
+    claims: list[tuple[str, str]] | None = None
     for k, e in before.items():
         if k in after:
             continue
         actions["Retire"].append(k)
         kind = entry_kind(e)
         allowed = RETIRE_REASONS[kind]
+        if claims is None:
+            claims = _open_claims(home)
+        by = next((name for ref, name in claims if ref_matches(ref, e)), None)
         if kind == "nit":
             refusals.append(f"{k} is a nit: ship retires nits, with the change that fixes one")
-        elif is_building(e):
+        elif by or is_building(e):
             refusals.append(
-                f"{k} is being built: its change removes it at ship, or /sdlc:drop says why not"
+                f"{k} is being built{f' by {by}' if by else ''}: its change removes it at ship, "
+                "or /sdlc:drop says why not"
             )
         elif k not in given:
             refusals.append(f"{k} is removed with no reason: give --reason {k}=<word>")
