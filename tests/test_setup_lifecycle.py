@@ -481,6 +481,22 @@ def test_uninstall_leaves_what_git_doesnt_hold(repo: Path, plugin: Path) -> None
     assert not (repo / ".sdlc" / "config.toml").exists()
 
 
+def test_uninstall_never_removes_the_change_folder_under_sdlc(repo: Path, plugin: Path) -> None:
+    """The change folder sits under `.sdlc/`, beside what setup wrote, but it is the repo's record:
+    uninstall removes every file git holds there but it."""
+    _setup(repo)
+    (repo / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    (repo / ".sdlc" / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "inbox")
+    plan = sdlc.uninstall_plan(repo)
+    assert not [p for p in plan["remove"] if p.startswith(".sdlc/work/")]
+    assert {"path": ".sdlc/work/", "why": "the repo's record of its changes"} in plan["left"]
+    assert sdlc.cmd_uninstall(repo) == 0
+    assert (repo / ".sdlc" / "work" / "inbox.md").read_text() == "# Inbox\n"
+    assert not (repo / ".sdlc" / "config.toml").exists()
+
+
 def _change(root: Path, ident: str, slug: str, stage: str, worktree: bool) -> None:
     name = f"{ident}-{slug}"
     where = root

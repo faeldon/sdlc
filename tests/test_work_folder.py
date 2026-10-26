@@ -142,6 +142,23 @@ def test_the_factory_finds_the_folder_sdlc_finds(tmp_path: Path, layout: str) ->
     assert factory.work_rel(root) == sdlc.work_rel(root)
 
 
+# R7. Register ids never repeat across the move.
+
+
+def test_an_id_deleted_before_the_move_is_never_handed_out_after_it(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "work/inbox.md", "# Inbox\n\n## [2026-10-26-4] [idea] Keep drafts\n\nx\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File 2026-10-26-4")
+    _write(root, "work/inbox.md", "# Inbox\n")
+    _git(root, "commit", "-q", "-am", "Retire 2026-10-26-4")
+    (root / ".sdlc").mkdir()
+    _git(root, "mv", "work", ".sdlc/work")
+    _git(root, "commit", "-q", "-m", "Move work to .sdlc/work")
+    assert sdlc.work_rel(root) == ".sdlc/work"
+    assert sdlc.next_entry_ids(root, "2026-10-26") == ["2026-10-26-5"]
+
+
 # R10. The base branch is resolved once.
 
 

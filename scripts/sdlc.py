@@ -6527,17 +6527,22 @@ def uninstall_plan(root: Path) -> dict:
             refused.append(f"worktree {branch} still stands at {tree}")
     settings = home / SETTINGS
     touched = (f"{HOST_DIR}/", str(SETTINGS), ".gitignore")
+    # The change folder sits under `.sdlc/`, but it is the repo's record, never setup's to remove.
+    own = f"{work_rel(home)}/"
     refused += [
         f"{p} has uncommitted changes: commit or discard them first"
         for p in _dirty_paths(home)
-        if p.startswith(touched[0]) or p in touched[1:]
+        if (p.startswith(touched[0]) and not p.startswith(own)) or p in touched[1:]
     ]
-    plan: dict = {"refused": refused, "remove": _tracked(home, HOST_DIR), "edit": [], "left": []}
+    remove = [p for p in _tracked(home, HOST_DIR) if not p.startswith(own)]
+    plan: dict = {"refused": refused, "remove": remove, "edit": [], "left": []}
     left = (
         sorted(
             str(p.relative_to(home))
             for p in (home / HOST_DIR).rglob("*")
-            if p.is_file() and str(p.relative_to(home)) not in plan["remove"]
+            if p.is_file()
+            and str(p.relative_to(home)) not in plan["remove"]
+            and not str(p.relative_to(home)).startswith(own)
         )
         if (home / HOST_DIR).is_dir()
         else []
