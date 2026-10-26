@@ -46,7 +46,7 @@ The docstrings in `scripts/` carry the detail; this is the map, and the rules th
 obvious from any one function.
 
 **Mechanism vs. judgment.** `scripts/sdlc.py` (one file, argparse subcommands) does the
-mechanical half: ids, worktrees, scaffolding `work/NNN-slug/`, auditing artifacts against
+mechanical half: ids, worktrees, scaffolding `.sdlc/work/NNN-slug/`, auditing artifacts against
 tier and stage, landing and archiving, listing the context docs a diff touches, reporting
 whether a repo is set up. It never writes artifact prose. The skills in `skills/*/SKILL.md` do
 the judgment and call it. Logic a permission rule must cover goes in the script, not in a
@@ -73,12 +73,20 @@ what `check` requires. A file with two or more lines starting with `<` is an unf
 Frontmatter values (`id`, `depends_on:`, issue fields) are read as text (`frontmatter_list()`),
 never through YAML, which reads `012` as octal 10 and `1.10` as 1.1.
 
-**`work/` is committed, one folder per branch.** A change's folder lives on its branch, in its
+**`.sdlc/work/` is committed, one folder per branch.** A change's folder lives on its branch, in its
 worktree at `.claude/worktrees/NNN-slug`, from `new` until close removes it from `main` in a
 `Close NNN-slug` commit: history is the copy. Only `/sdlc:close` and `/sdlc:drop` leave the
-worktree. `change_dirs()` finds folders (the checkout's `work/`, the main checkout's, and each
-change worktree's own `work/<branch>/`, never the copies a worktree inherits); `main_root()` is
-for state, the lock and the worktree list. An ignored `work/` is refused by `new`.
+worktree. `change_dirs()` finds folders (the checkout's `.sdlc/work/`, the main checkout's, and each
+change worktree's own `.sdlc/work/<branch>/`, never the copies a worktree inherits); `main_root()` is
+for state, the lock and the worktree list. An ignored `.sdlc/work/` is refused by `new`.
+
+**The change folder's path: `work_rel()`.** Every path to it, on disk and in git, is built from
+`work_rel()`, never a literal (`test_no_literal_work_path_in_the_script`): `WORK`, `.sdlc/work`,
+or until 1.5.0 the old `work` in a repo that hasn't moved (on disk, or in history once every
+folder has closed). A change's checkout is `checkout_of(folder)`, read from the path. Readers of
+history look only where the folder is now, so `move-work` (setup's to run, once) refuses while
+anything is open or unreleased; only `next_entry_ids()` reads the register at both names, kept for
+good. This repo stays on `work/` until 027 is released, then moves through `/sdlc:setup`.
 
 **Numbering: `ids_mode()`.** It follows the tracker: `github` when `archive.target` is a tracker
 that numbers changes (its `claim()` opens the issue and the folder takes its number), else
@@ -93,7 +101,7 @@ never by prefix or `[:3]`.
 **Trackers: `tracker()`.** Each is `scripts/trackers/<name>.py`, loaded by path (never imported:
 `uv run --script` and the tests put different directories on `sys.path`) only when
 `archive.target` names it. Core renders the issue (`render_issue()`, `_tracker_change()`) and
-hands the tracker a dict; a tracker never reads `work/` or `.sdlc/`, and core never calls `gh`.
+hands the tracker a dict; a tracker never reads `.sdlc/` (the change folder included), and core never calls `gh`.
 `sync` mirrors an open change and never creates an issue; the intent, spec and ship skills run
 it after their WAIT. The project doc (`docs.project`, off while absent) turns on `milestone`,
 `project` and `assignees`, each mirrored exactly, each in its own `gh issue edit` so a refusal is
@@ -147,7 +155,7 @@ migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
 
 **Retrospectives: `retro()`.** The outermost loop, read-only, bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,
-`work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id). It
+`.sdlc/work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id). It
 counts closed and dropped changes, rework (later changes sharing code), the skills' size, and,
 with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
 they run), so `retro` is not in `READ_ONLY`. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
@@ -155,12 +163,12 @@ and reports format problems rather than raising. The product doc (`docs.product`
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.
 
-**The inbox: `inbox_entries()`.** `work/inbox.md` is the one register of change requests, each
+**The inbox: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests, each
 entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
 (`BODY_KEYS`). Every entry is a seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]`. Any
 other tag reads as an idea, `[seed]` (the old idea tag) for good, so say "seed" for any entry and
 "idea" for the kind. `register_path()` is the one place that knows the old name: a repo with only
-`work/ideas.md` is read from it until 1.4.0 (`.sdlc/deprecations.toml`), and
+`.sdlc/work/ideas.md` is read from it until 1.4.0 (`.sdlc/deprecations.toml`), and
 `migrate-inbox` moves it over; it and bare-date headings go in 1.4.0 too. Ids come from `next_entry_ids()`, which counts every checkout's
 register, uncommitted edits included, and every commit that ever held one; they are their own
 space, never a change number. A reference (`idea:`, `fixes:`, `After:`, `Groups:`) is an id,
@@ -178,7 +186,7 @@ alone; ship deletes a change's `fixes:` entries, and close's `fix_trailers()` wr
 line (`entry_issues()`, the first the parent), a change's `closes:` line, or an `Sdlc-Triaged:`
 trailer on the base branch for a verdict that closed it. `recorded_issues()` is the one reader of
 all three, and decides each issue's comment, marker and parent; the tracker's `mark()`,
-`unmark()` and `needs_info()` only set them, so a tracker still never reads `work/`. The record is
+`unmark()` and `needs_info()` only set them, so a tracker still never reads `.sdlc/work/`. The record is
 always committed before the issue is told (`bug-commit --triaged`, then `mark-triaged`), so a rerun
 finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
 asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
@@ -186,7 +194,7 @@ asks about one issue at a time; an issue the change didn't resolve becomes a see
 (`mark_issues()`) once the change's entries are on the base branch, and never refuses on it.
 
 **Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
-`work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
+`.sdlc/work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
 `Raised by: NNN-slug (pass)` lines, the last keeping the raising change's number. `sdlc.py` only
 reads them (`nits`, `check`, retro's `nits`), as text, and never puts one forward as a seed; the
 skills write them: ship adds and retires entries behind its one WAIT, intent and spec offer the

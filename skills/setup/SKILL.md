@@ -139,16 +139,16 @@ Each item `readiness` reported as `missing` or `warn` gets a draft. Show new fil
 edit to an existing file as a diff. A doc drafted from a default keeps the `>` note under its
 title: it says what the plugin reads from the doc, which whoever edits it later needs.
 
-- **The inbox**, when `readiness`'s `inbox` item is `warn`: the repo still has a `work/ideas.md`
-  or a `work/nits.md`, entries without ids, or `[seed]` entries to retag `[idea]`. Propose moving
-  them over, saying what its detail lists, as `work/inbox.md (migrated)` in Step 4's list.
-  `sdlc.py migrate-inbox` does it in Step 5, renaming `work/ideas.md` so history follows it, and refuses while one of those files has
+- **The inbox**, when `readiness`'s `inbox` item is `warn`: the repo still has a `.sdlc/work/ideas.md`
+  or a `.sdlc/work/nits.md`, entries without ids, or `[seed]` entries to retag `[idea]`. Propose moving
+  them over, saying what its detail lists, as `.sdlc/work/inbox.md (migrated)` in Step 4's list.
+  `sdlc.py migrate-inbox` does it in Step 5, renaming `.sdlc/work/ideas.md` so history follows it, and refuses while one of those files has
   uncommitted edits: those are the human's to commit first. It is best run with no change open:
   one open in another worktree keeps the title on its `idea:` line, which `readiness` names, and
   once it lands its seed reads `vanished`, not `shipped`, against a `Groups:` line rewritten to
   ids. Say so when the detail names one, and offer to wait until it closes.
-- **`.gitignore`**: a `.claude/worktrees/` line, where each change's worktree lives. Never `work/`:
-  a change's artifacts are committed with it, and `readiness` reports an ignored `work/`.
+- **`.gitignore`**: a `.claude/worktrees/` line, where each change's worktree lives. Never `.sdlc/work/`:
+  a change's artifacts are committed with it, and `readiness` reports an ignored `.sdlc/work/`.
 - **`.sdlc/config.toml`**: only the keys that differ from their defaults, each with a comment
   saying why. Include `[archive] target`, either way. Include `[git] base` when the base branch
   isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is

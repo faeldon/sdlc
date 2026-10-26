@@ -265,6 +265,32 @@ def test_a_half_moved_repo_names_both_folders(tmp_path: Path) -> None:
     assert said.startswith("both work/ and .sdlc/work/ exist: half-moved")
 
 
+# R8. Texts name where the folder is.
+
+TEXTS = sorted(
+    {
+        *ROOT.glob("skills/*/SKILL.md"),
+        *ROOT.glob("plugins/factory/skills/*/SKILL.md"),
+        *ROOT.glob("plugins/factory/agents/*.md"),
+        *ROOT.glob("defaults/*.md"),
+        *ROOT.glob("templates/*.md"),
+        ROOT / "README.md",
+    }
+)
+# A line about the move names the old folder on purpose.
+MOVE = re.compile(r"old `?work/|`work/` to `\.sdlc/work/`|move-work|Move work|before 1\.4\.0")
+
+
+@pytest.mark.parametrize("path", TEXTS, ids=lambda p: str(p.relative_to(ROOT)))
+def test_no_text_names_the_old_folder(path: Path) -> None:
+    bare = [
+        f"{n}: {line.strip()}"
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"(?<![\w./-])work/", line) and not MOVE.search(line)
+    ]
+    assert bare == [], "\n".join(bare)
+
+
 # R10. The base branch is resolved once.
 
 

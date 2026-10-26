@@ -53,14 +53,14 @@ person is theirs to answer now, or to leave open in the intent.
 
 Ask literally:
 
-> `Write this as work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement / rethink the design)`
+> `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement / rethink the design)`
 
 **Do not write until the person says yes.** Approval is per-invocation, never standing. A revision
 is a new draft: send it back to the agent with the person's words, show it, and ask again.
 
 ## Step 3 — Write it
 
-`Edit` the scaffolded `work/NNN-slug/spec.md` with the approved draft, exactly as shown. Strike
+`Edit` the scaffolded `.sdlc/work/NNN-slug/spec.md` with the approved draft, exactly as shown. Strike
 the open questions the spec resolved in `intent.md` (`- ~~Question?~~ Resolved: ...`), as
 `/sdlc:spec` does. Then:
 

@@ -1,6 +1,6 @@
 ---
 name: bug
-description: File a bug in work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone as "File <id>", "Retire <id>" or "Update <id>". Use from the main checkout when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:retro or a person writes), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
+description: File a bug in .sdlc/work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone as "File <id>", "Retire <id>" or "Update <id>". Use from the main checkout when something already shipped is broken, or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:retro or a person writes), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
 argument-hint: "[what broke, or an entry's id to retire or retag]"
 allowed-tools:
   - Read
@@ -15,7 +15,7 @@ disable-model-invocation: true
 
 # Bug — file what's already broken
 
-A bug is something that shipped and is broken, with a way to see it. It goes in `work/inbox.md`
+A bug is something that shipped and is broken, with a way to see it. It goes in `.sdlc/work/inbox.md`
 beside the seeds, tagged `[bug]` and given a severity, so `/sdlc:status` puts it first and
 `/sdlc:retro` can count it. This skill files one, retires one that turned out not to need a fix,
 or retags an entry that was filed as the wrong kind. It never fixes anything: the fix is a change,
@@ -100,17 +100,17 @@ For a retirement, the entry and its reason; for a retag, the heading and lines a
 
 Ask literally, with the entry's id and what happens to it:
 
-> `Append this bug to work/inbox.md as <id> and commit it as "File <id>"? (yes / edit it / no)`
+> `Append this bug to .sdlc/work/inbox.md as <id> and commit it as "File <id>"? (yes / edit it / no)`
 
-For a retirement: `Remove <id> from work/inbox.md as <reason> and commit it as "Retire <id>"?`;
+For a retirement: `Remove <id> from .sdlc/work/inbox.md as <reason> and commit it as "Retire <id>"?`;
 for a retag: `Retag <id> as [<tag>] and commit it as "Update <id>"?`
 
 **Write nothing until the human says yes.** Approval is for this entry only.
 
 ## Step 5 — Write and record it
 
-**The register is the file `config`'s `work.register` names:** `work/inbox.md`, or
-`work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
+**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`, or
+`.sdlc/work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
 second file beside it, which would hide every entry the first one holds.
 
 `Edit` the register as approved: append a new entry after the last one, delete a retired one from

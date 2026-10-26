@@ -9,7 +9,7 @@ the repo is set up.
 - [The docs](#the-docs)
 - [Templates: `.sdlc/templates/`](#templates-sdlctemplates)
 - [After an update: refresh, reset, uninstall](#after-an-update-refresh-reset-uninstall)
-- [`work/` and worktrees](#work-and-worktrees)
+- [`.sdlc/work/` and worktrees](#sdlcwork-and-worktrees)
 - [Numbering](#numbering)
 - [Trackers](#trackers)
 - [The project doc](#the-project-doc)
@@ -85,7 +85,7 @@ The placeholders:
 A version line is `"version": "1.2.0"` (JSON) or `version = "1.2.0"` (TOML). A file with none,
 or more than one, is refused rather than guessed at.
 
-A `[docs]` path under `work/` is read like any other, from the checkout `config` runs in.
+A `[docs]` path under `.sdlc/work/` is read like any other, from the checkout `config` runs in.
 
 ### The base branch: `[git] base`
 
@@ -167,7 +167,7 @@ own can add the sections its domain needs and prompts in its own words; keep the
 start with `<`: two or more left in a file is how `sdlc.py status` tells a scaffold nobody has
 written from a real artifact.
 
-`inbox.md` here replaces what `work/inbox.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
+`inbox.md` here replaces what `.sdlc/work/inbox.md` starts as, when `/sdlc:retro` or `/sdlc:ship` first
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
 or the factory first writes one. None has prompts: its note carries the rules. `checks.md`
 is what a change's acceptance checks start as; its one example section's prompts make an untouched
@@ -219,13 +219,25 @@ uncommitted edits).
 allow rules in `.claude/settings.json` (every other key and rule kept), and the
 `.claude/worktrees/` line when the record says setup added it. It refuses while a change is open,
 stands in a worktree, or is shipped and not closed, and while anything it would remove has
-uncommitted edits, so history keeps everything it removes. It leaves `work/`, `AGENTS.md` and
+uncommitted edits, so history keeps everything it removes. It leaves `.sdlc/work/`, `AGENTS.md` and
 `CLAUDE.md` (listing their lines that name the plugin), the tracker's issues, tags and history,
 and commits nothing. A later setup numbers on from that history.
 
-## `work/` and worktrees
+## `.sdlc/work/` and worktrees
 
-`work/` is committed. A change's folder, `work/NNN-slug/`, lives on its own branch, in its own
+**The change folder** is `.sdlc/work/`, beside the rest of what the plugin keeps, so adopting it
+adds no top-level folder. Its path is fixed. A repo set up before 1.4.0 has the old `work/` at
+its root, and keeps working there, history included, with a `■ Change folder` nudge in `status`
+and a `work moved` item in `readiness` (never a `check` problem). `/sdlc:setup` offers the move
+once: `sdlc.py move-work`, from the main checkout on the base branch, one `git mv` in a commit of
+its own, `Move work to .sdlc/work`. It refuses while any change is open, since each holds its
+folder under the old name, and, in a repo with `release.version_files`, while a closed change is
+unreleased: history isn't rewritten, and after the move release, retro and `bugs --introduced`
+read only `.sdlc/work/`, so what closed before is out of their reach. Release first. Register ids
+keep counting across it. The old folder, its nudge and `move-work` go in 1.5.0
+(`.sdlc/deprecations.toml`); moving the folder again isn't supported.
+
+`.sdlc/work/` is committed. A change's folder, `.sdlc/work/NNN-slug/`, lives on its own branch, in its own
 worktree (`.claude/worktrees/NNN-slug`), so the session working on it writes its artifacts where
 it works, and `/sdlc:ship` commits them with the code: the review reads the spec next to what was
 built. `sdlc.py status` lists the open changes in every worktree, from any of them, and marks
@@ -234,21 +246,21 @@ one whose branch lacks commits `main` has (`behind main by N`). Since close only
 fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
 clean tree, reported with the command that undoes it. Anything that would conflict is refused,
 untouched, for the person to resolve. Once a change
-lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `work/` never fills up
-with finished changes: the change's commit keeps them in history. `work/inbox.md` is committed
+lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `.sdlc/work/` never fills up
+with finished changes: the change's commit keeps them in history. `.sdlc/work/inbox.md` is committed
 too; a closed seed is deleted from it, history keeping that as well. Every entry there is a
 seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]` (the process doc's "Seeds, and the
 changes they become" says what each is, and the change types they grow into). Any other tag reads
 as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good.
-It was `work/ideas.md` before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
+It was `.sdlc/work/ideas.md` before 1.2.0, and a repo with only that file is read from it until 1.4.0, as a host template
 `.sdlc/templates/ideas.md` is read as `inbox.md` (`sdlc.py drift` says to rename it); `check`
 reports a repo holding both. `sdlc.py migrate-inbox`, which `/sdlc:setup` offers, moves a repo
-over: it renames `work/ideas.md` with `git mv`, gives every entry an id, folds a `work/nits.md`
+over: it renames `.sdlc/work/ideas.md` with `git mv`, gives every entry an id, folds a `.sdlc/work/nits.md`
 into `[nit]` entries, retags each `[seed]` entry `[idea]`, and rewrites the titles that name an
 open entry to its id, in `After:`, the direction doc's `Groups:` and the open changes' `idea:`. It never commits, and refuses while one
 of those files has uncommitted edits, or one it can't read. Run it with no change open: one in
 another worktree keeps a title `idea:`. Until a repo migrates, `sdlc.py config`'s `work.register`
-names `work/ideas.md`, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
+names `.sdlc/work/ideas.md`, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
 tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
 lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
 the same paths, retired by the ship whose diff fixes it, and counted by theme and age by
@@ -304,14 +316,14 @@ that stops halfway is finished by the next. `intake` lists as `dangling` an issu
 entries are on the base branch.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
-changes are done, from the main checkout's `work/inbox.md` and direction doc. A
+changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [idea] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
 and every commit that ever held one, so an id is never handed out twice. A heading with a bare
 date is an entry from before ids, read the same until 1.4.0: run `migrate-inbox` before. An `idea:`, `After:` or `Groups:` line names an
 entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
-`work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an
+`.sdlc/work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an
 `After: <id>, <id>` line in a seed's body makes it wait while any seed it names is still in the
 register and not being built. Each line's command is `/sdlc:intent <id>`. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
@@ -327,7 +339,7 @@ Five are shown, then a count. Below them, an open milestone whose grouped change
 closed says so, for `/sdlc:retro` to settle, and an `After:` line that can never be met (it names
 nothing, or seeds that wait on each other) is a `⚠`, never a `check` problem.
 
-A change may keep its **acceptance checks** in `work/NNN-slug/checks.md`: proof that only a
+A change may keep its **acceptance checks** in `.sdlc/work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one
 check holding one `sh` block, which passes when it exits 0 within 300 seconds and leaves the
 working tree as it found it. `sdlc.py checks NNN` lists them and runs nothing; `sdlc.py accept NNN`
@@ -337,8 +349,8 @@ have written them, so a person sees them and answers the prompt. A failing check
 failing gate. The file reaches history and the change's issue with the folder; a check that can't
 run (looking at a rendered page) is written in `notes.md` instead.
 
-`.claude/worktrees/` belongs in `.gitignore`, and `work/` must not be in it: `sdlc.py new` refuses
-an ignored `work/`, and `sdlc.py check` flags it. The main checkout stays on `main`: close
+`.claude/worktrees/` belongs in `.gitignore`, and `.sdlc/work/` must not be in it: `sdlc.py new` refuses
+an ignored `.sdlc/work/`, and `sdlc.py check` flags it. The main checkout stays on `main`: close
 fast-forwards it there, and refuses while it is on another branch or has uncommitted changes.
 
 ## Numbering
@@ -354,7 +366,7 @@ after it.
 - **From a counter**, otherwise: `.sdlc/last-id` holds the last number handed out, and is
   committed. `new` writes it in the change's own worktree, so it reaches `main` with the change's
   commit. Until then `main`'s counter trails what is open, so a number is one past the highest of
-  the counter, the folders in `work/` and the open change worktrees, claimed under a lock. A change
+  the counter, the folders in `.sdlc/work/` and the open change worktrees, claimed under a lock. A change
   removed by hand before it reaches `main` frees its number; one dropped with `/sdlc:drop` keeps
   it, since its `Drop` commit brings the counter to `main`. A fresh clone carries on from the
   committed counter. Two changes open at once both edit it; the second to close rebases and keeps

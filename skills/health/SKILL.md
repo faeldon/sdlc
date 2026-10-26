@@ -25,7 +25,7 @@ observation, and observations evaporate into conversation. Every finding here en
 dispositions, or it does not belong in the report.
 
 **This skill is also a budget.** One call, one consolidated picture. Do not open source files,
-`work/` artifacts or the process doc to "add context" — Step 0's output, the findings table it
+`.sdlc/work/` artifacts or the process doc to "add context" — Step 0's output, the findings table it
 names and the defaults below are the whole input. Step 3 is the one exception.
 
 **Read-only.** Never edit code, never write an artifact, never advance a `stage:`, never fix what a

@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn an open Tier 2 intent into work/NNN-slug/spec.md — numbered testable requirements, the design, which of the repo's invariants it touches, alternatives rejected, and how it will be verified, in the sections of the repo's spec template (Stage 2 of the repo's process doc). Use after /sdlc:intent has created a Tier 2 change and before building it in plan mode. Skip it entirely for Tier 0 and Tier 1 changes, whose intent.md Approach section already covers the design.
+description: Turn an open Tier 2 intent into .sdlc/work/NNN-slug/spec.md — numbered testable requirements, the design, which of the repo's invariants it touches, alternatives rejected, and how it will be verified, in the sections of the repo's spec template (Stage 2 of the repo's process doc). Use after /sdlc:intent has created a Tier 2 change and before building it in plan mode. Skip it entirely for Tier 0 and Tier 1 changes, whose intent.md Approach section already covers the design.
 argument-hint: "[change id, e.g. 003]"
 allowed-tools:
   - Read
@@ -37,11 +37,11 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 ```
 
-**`work/` in this skill is `work.dir` from `config`**: the session's own checkout's. The change's
+**`.sdlc/work/` in this skill is `work.dir` from `config`**: the session's own checkout's. The change's
 folder is committed on its branch, so run this from the change's worktree, where `/sdlc:intent`
 left the session.
 
-Read `work/NNN-slug/intent.md` in full. Then confirm it's actually Tier 2 — if `tier: 1`, stop and
+Read `.sdlc/work/NNN-slug/intent.md` in full. Then confirm it's actually Tier 2 — if `tier: 1`, stop and
 say so: a Tier 1 change's design belongs in its intent's **Approach** section, and adding a spec to
 it is exactly the overhead the tier rule exists to prevent. Offer to promote it to Tier 2 if the
 human thinks it has grown.
@@ -114,7 +114,7 @@ its `name` beside it, `O1 (Unaided setup)`.
 
 Ask literally:
 
-> `Write this as work/NNN-<slug>/spec.md, advance the change to stage: design and update its issue? (yes / revise a requirement / rethink the design)`
+> `Write this as .sdlc/work/NNN-<slug>/spec.md, advance the change to stage: design and update its issue? (yes / revise a requirement / rethink the design)`
 
 Leave out ` and update its issue` when `config` says `archive.target` is `none`.
 
@@ -123,7 +123,7 @@ covers the issue update too: it is visible to everyone with access to the repo.
 
 ## Step 5 — Write it
 
-`Edit` the scaffolded `work/NNN-slug/spec.md` with the approved content, then `Edit` `intent.md`'s
+`Edit` the scaffolded `.sdlc/work/NNN-slug/spec.md` with the approved content, then `Edit` `intent.md`'s
 frontmatter: `stage: design`, `updated:` to today. If the design found that this change waits on
 another open one, add its id to the frontmatter's `depends_on:` line too, and set any issue field
 Step 3 showed. Then:
@@ -145,7 +145,7 @@ undoes the spec: report what it printed, and that `sdlc.py sync <NNN>` can be re
 ## Step 6 — Report and stop
 
 Say the spec is written and that the next step is **plan mode** — start a session in plan mode, let
-Claude read the code against this spec, and save the approved plan as `work/NNN-slug/plan.md`.
+Claude read the code against this spec, and save the approved plan as `.sdlc/work/NNN-slug/plan.md`.
 
 Do **not** start building in this turn. Do not write code, and do not draft `plan.md` by hand — the
 whole value of a plan is that it was produced after reading the code, which is what plan mode does.

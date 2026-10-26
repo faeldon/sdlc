@@ -21,7 +21,7 @@ but the last behind one approval; the last stays the human's.
 
 **The change's own commit is the copy that counts.** Once it is on `main`, its intent, spec, plan
 and notes are in history for good, so the folder can leave the tree: close removes it in a commit
-of its own, `Close NNN-slug`, and nothing piles up in `work/`. The tracker (`archive.target` from
+of its own, `Close NNN-slug`, and nothing piles up in `.sdlc/work/`. The tracker (`archive.target` from
 `config`: its GitHub issue by default) is where people read it; when one is configured it must
 take the copy and read it back before the folder goes, and when there is none, history alone is
 fine. The archive renders the issue a last time from the landed folder, with `stage: shipped`:
@@ -74,7 +74,7 @@ branch onto `main` and ship again, or fix `archive` in `.sdlc/config.toml`.
 
 Ask literally:
 
-> `Close NNN-slug: fast-forward <git.base> to it, archive it to <where>, commit the removal of work/NNN-slug/ as "Close NNN-slug", then remove its worktree and delete its branch? (yes / no)`
+> `Close NNN-slug: fast-forward <git.base> to it, archive it to <where>, commit the removal of .sdlc/work/NNN-slug/ as "Close NNN-slug", then remove its worktree and delete its branch? (yes / no)`
 
 For a dropped change, ask instead:
 

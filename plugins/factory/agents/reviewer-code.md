@@ -11,7 +11,7 @@ Adapted from addyosmani/agent-skills (MIT): agents/code-reviewer.md, skills/code
 See NOTICE.
 
 You review one change, read-only. You write no file and change nothing: you return your review,
-and the skill writes it to `work/NNN-slug/reviews/round-N/code.md`. The builder reads it in the
+and the skill writes it to `.sdlc/work/NNN-slug/reviews/round-N/code.md`. The builder reads it in the
 next round; a person reads it at `/sdlc:ship`. You never commit, push, merge, switch branch or
 edit a file.
 

@@ -82,7 +82,7 @@ say `main`, they mean that branch.
 1. **`/sdlc:intent`**, with what's wrong in your own words. It asks only about the gaps, proposes
    a tier, and shows the draft `intent.md`. On your yes it opens the change, numbered `NNN`, in a
    worktree and branch of its own (`.claude/worktrees/NNN-slug`), with its folder
-   `work/NNN-slug/`, and moves the session there. Several changes can be open at once, each in its
+   `.sdlc/work/NNN-slug/`, and moves the session there. Several changes can be open at once, each in its
    own worktree.
 2. **`/sdlc:spec`**, for a Tier 2 change only: numbered, checkable requirements, the design and
    what it rejected, inside your repo's invariants.
@@ -105,7 +105,7 @@ The tiers:
 | 2 | anything others rely on, or near an invariant | `intent.md`, `spec.md`, `plan.md` |
 
 `/sdlc:status` tells you where every open change is and what to do next, from any worktree. Requests
-not ready to be a change go in `work/inbox.md`, which `/sdlc:intent <id>` can start from; give one
+not ready to be a change go in `.sdlc/work/inbox.md`, which `/sdlc:intent <id>` can start from; give one
 an `After: <id>` line to make it wait for another, and status's **Next up** puts forward the one to
 start once the open changes are done. Something already broken is a bug: `/sdlc:bug` files it
 with a severity, and it comes first.
@@ -122,7 +122,7 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   for the issue.
 - **Issues people file.** On GitHub, setup offers bug and request issue forms, and
   `/sdlc:triage` reads what comes in: it checks each issue against the code, then files it in
-  `work/inbox.md`, puts it on the open change that covers it, or closes it as already resolved or
+  `.sdlc/work/inbox.md`, puts it on the open change that covers it, or closes it as already resolved or
   not to be done, behind one approval. Each filer gets a comment and a parent issue to follow, and
   the change that takes an issue on closes it when it lands, once `/sdlc:ship` has asked.
 - **A project doc** (`.sdlc/PROJECT.md`). Gives each change's issue a milestone, a project or
@@ -137,7 +137,7 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   command.
 - **Retrospectives.** After a couple of releases, `/sdlc:status` says **Retro due**.
   `/sdlc:retro` looks across what shipped (cost, architecture, process, product, direction), rewrites
-  the direction doc (`.sdlc/DIRECTION.md`) and turns findings into seeds in `work/inbox.md`. It
+  the direction doc (`.sdlc/DIRECTION.md`) and turns findings into seeds in `.sdlc/work/inbox.md`. It
   never edits code.
 - **What each change cost.** `/sdlc:close` records each change's time, tokens, stops and rework
   on its `Close` commit, read from this repo's Claude Code transcripts on your machine, numbers
@@ -162,6 +162,10 @@ Then run `/sdlc:setup` in each repo that uses it. The docs it copied are yours, 
 never changes them; setup shows what the new defaults changed, drafts the blocks you never edited,
 and lists apart anything the plugin would now misread. `/sdlc:setup reset <doc>` puts one back to
 the default. See [After an update](docs/REFERENCE.md#after-an-update-refresh-reset-uninstall).
+
+A repo set up before 1.4.0 keeps its changes in `work/` at its root. Setup offers to move it to
+`.sdlc/work/` once, in a commit of its own, when no change is open and, if you release, after
+`/sdlc:release`: from then on, history from before the move isn't read again.
 
 ## More
 

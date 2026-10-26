@@ -17,7 +17,7 @@ branch or touch another worktree. The skill checks `HEAD` after every round: a c
 
 ## What you're given
 
-The change folder `work/NNN-slug/`: `intent.md` always, `spec.md` for a Tier 2 change (its
+The change folder `.sdlc/work/NNN-slug/`: `intent.md` always, `spec.md` for a Tier 2 change (its
 numbered requirements are what you build, and what the reviewers check you against). For a Tier 1
 change the intent's **Approach** section is the spec. Read the repo's instructions (`CLAUDE.md`,
 `.claude/CLAUDE.md` or `AGENTS.md`, and whatever file they import) for its commands, conventions
@@ -25,7 +25,7 @@ and invariants, and run its gate the way it says.
 
 ## First: the plan (Tier 2)
 
-Before any code, write `work/NNN-slug/plan.md`, replacing the scaffold's prompts. Read the code
+Before any code, write `.sdlc/work/NNN-slug/plan.md`, replacing the scaffold's prompts. Read the code
 first; the plan's value is that it was written after reading it.
 
 - **Files to change**, and the existing functions to reuse rather than re-derive.
@@ -53,7 +53,7 @@ Test behaviour, not implementation; prefer real code over mocks except at real b
 
 A requirement only a deliberate revert could break (a file moved, a key renamed, a line added) is
 proved by an acceptance check, not a test in the suite. Write it as a `## ` section of
-`work/NNN-slug/checks.md`, one `sh` block that exits 0 while the outcome holds and leaves the tree
+`.sdlc/work/NNN-slug/checks.md`, one `sh` block that exits 0 while the outcome holds and leaves the tree
 unchanged; `/sdlc:ship` reruns it. Start the file from this text, replacing its prompts:
 
 ````markdown
@@ -95,12 +95,12 @@ each, in your report:
   default, build on it, and keep going. It is recorded as assumed until the person confirms it.
 
 Each line says the question, the options, and your recommendation with its reason. A decision
-already answered in `work/NNN-slug/decisions.md` (a ticked line, `→ decided: ...`) is settled:
+already answered in `.sdlc/work/NNN-slug/decisions.md` (a ticked line, `→ decided: ...`) is settled:
 build on the answer, never re-raise it.
 
 ## Rework rounds
 
-When the skill resumes you, it names `work/NNN-slug/reviews/round-N/`. Every file there whose first
+When the skill resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/`. Every file there whose first
 line is `VERDICT: CHANGES` lists what must change as `- CHANGE:` lines. Address each one, or, if a
 change is wrong, say why in `notes.md` rather than ignoring it. Rerun the tests and the gate.
 
@@ -109,4 +109,4 @@ change is wrong, say why in `notes.md` rather than ignoring it. Rerun the tests 
 A short report: the slices built, the tests added and what they prove, the gate's result (its test
 count), what changed in `plan.md`, and anything left in `notes.md`. In a rework round, one line per
 `- CHANGE:` saying what you did about it. Then every `- DECISION:` line you raised this time. The
-skill writes the report to `work/NNN-slug/build/round-N.md`, where the decisions are collected.
+skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.

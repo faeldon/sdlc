@@ -1,6 +1,6 @@
 ---
 name: intent
-description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a work/inbox.md seed into committed work.
+description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work.
 argument-hint: "[what the change is about, or the path to a brief file]"
 allowed-tools:
   - Read
@@ -23,7 +23,7 @@ disable-model-invocation: true
 
 # Intent — open a change to this repo
 
-Stage 1 of the repo's change process. Produces one artifact, `work/NNN-slug/intent.md`, which
+Stage 1 of the repo's change process. Produces one artifact, `.sdlc/work/NNN-slug/intent.md`, which
 records **why** a change is worth making in the human's own words — problem, outcome, what it
 touches, what constrains it, what's still unknown.
 
@@ -42,7 +42,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 `config` names the repo's process doc (`docs.process`) and its policy doc (`docs.policy`). Read the
 process doc if it isn't already in context — specifically its tier table, since Step 2 depends on
 it. If `config` reports it doesn't exist, use the tiers in Step 2 as they stand and say so. Skim
-`work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
+`.sdlc/work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
 argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
@@ -51,9 +51,9 @@ Note `git.base` too: the branch every change starts from, `main` unless the repo
 Where this skill says `main`, it means that branch. When it is null, stop here and say why: `new`
 refuses without one, and `/sdlc:setup` sets it.
 
-**`work/` is committed**: each change's folder lives on its own branch, in its own worktree, and
+**`.sdlc/work/` is committed**: each change's folder lives on its own branch, in its own worktree, and
 open changes in other worktrees are listed by `status`. If `config` says `work.ignored: true`, stop
-here and say why: `new` refuses while `work/` is in `.gitignore`, and better now than after the
+here and say why: `new` refuses while `.sdlc/work/` is in `.gitignore`, and better now than after the
 human has approved a draft.
 
 If an open change already covers this, say so and ask whether to extend that intent instead of
@@ -186,7 +186,7 @@ same gate `/sdlc:spec` and `/sdlc:ship` use, for the same reason.
 ## Step 5 — Create it
 
 Every change gets its own worktree and branch, both named `NNN-slug` and branched from `git.base`, so
-a new session can never land inside another change's branch, and its folder `work/NNN-slug/`
+a new session can never land inside another change's branch, and its folder `.sdlc/work/NNN-slug/`
 inside that worktree, committed with the change. Run this from wherever the session is — the tool
 finds the main checkout itself and takes the number from the change's new GitHub issue, or under a
 lock from the counter, which it then writes as `.sdlc/last-id` in the new worktree:
@@ -213,13 +213,13 @@ replace the template body with the approved draft. Keep the frontmatter the tool
 the approved issue fields' lines and the `serves:` line under `depends_on:`, exactly as shown in
 Step 3.
 
-If the change came from a `work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
+If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`), or, for an
 entry from before ids (a heading with a bare date, `[2026-10-01]`), to its title alone, without its
 `## `, date or tag (`idea: Keep drafts`): `sdlc.py ship` deletes the entry by it. Then `Edit`
 the entry in the worktree's register, the file `config`'s `work.register` names: its heading's
 tag becomes `[building]`, the rest of
-the heading unchanged, and `Building in work/NNN-slug/.` becomes its first body line, so the tag
+the heading unchanged, and `Building in .sdlc/work/NNN-slug/.` becomes its first body line, so the tag
 lands with the change. Never put the pointer in the heading. Leave the seed's prose alone.
 
 If the change fixes a `[bug]` entry, the one its argument named or any the human says it fixes:
@@ -265,7 +265,7 @@ job ends here.
 
 - Writing `spec.md` or `plan.md` — that's `/sdlc:spec` and plan mode.
 - Running anything against the system the repo builds, or touching its code. This skill creates one
-  folder in `work/`, one worktree and its branch, and nothing else.
+  folder in `.sdlc/work/`, one worktree and its branch, and nothing else.
 - Committing. `/sdlc:ship` does that, at Stage 5, with the change's folder in the same commit.
 - Deciding the change is a good idea. The human is the product owner; this skill records their
   judgment, it doesn't second-guess it beyond the one push-back in Step 1.

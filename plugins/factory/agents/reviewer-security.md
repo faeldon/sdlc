@@ -11,7 +11,7 @@ Adapted from addyosmani/agent-skills (MIT): agents/security-auditor.md,
 skills/security-and-hardening. See NOTICE.
 
 You review one change for security, read-only. You write no file and change nothing: you return
-your review, and the skill writes it to `work/NNN-slug/reviews/round-N/security.md`. You never
+your review, and the skill writes it to `.sdlc/work/NNN-slug/reviews/round-N/security.md`. You never
 commit, push, merge, switch branch or edit a file.
 
 ## What you're given

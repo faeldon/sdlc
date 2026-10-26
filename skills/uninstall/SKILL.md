@@ -1,6 +1,6 @@
 ---
 name: uninstall
-description: Take the sdlc plugin's setup back out of a repo — lists everything /sdlc:setup wrote (the committed files in .sdlc/, the plugin's allow rules in .claude/settings.json, the .claude/worktrees/ line in .gitignore when setup recorded adding it) and the lines in AGENTS.md or CLAUDE.md that name the plugin, then removes setup's files after one approval and commits nothing. Refuses while any change is open, standing in a worktree, or shipped and not closed, and while anything it would remove has uncommitted edits, so everything it removes is in history. Use when a repo stops using the plugin. Not for resetting one doc or template to the plugin's default (that's /sdlc:setup reset), not for dropping one change (/sdlc:drop), and never for touching work/, the tracker's issues, tags or history.
+description: Take the sdlc plugin's setup back out of a repo — lists everything /sdlc:setup wrote (the committed files in .sdlc/, the plugin's allow rules in .claude/settings.json, the .claude/worktrees/ line in .gitignore when setup recorded adding it) and the lines in AGENTS.md or CLAUDE.md that name the plugin, then removes setup's files after one approval and commits nothing. Refuses while any change is open, standing in a worktree, or shipped and not closed, and while anything it would remove has uncommitted edits, so everything it removes is in history. Use when a repo stops using the plugin. Not for resetting one doc or template to the plugin's default (that's /sdlc:setup reset), not for dropping one change (/sdlc:drop), and never for touching .sdlc/work/, the tracker's issues, tags or history.
 allowed-tools:
   - Read
   - 'Bash(cd *)'
@@ -17,7 +17,7 @@ shared settings, a `.sdlc/` nobody reads, or worse, removes them while a change 
 a worktree and its number still claimed. This skill removes only what setup wrote, and only once
 nothing is live, so the repo's history keeps every file it removes.
 
-**What stays**: `work/` (the repo's record of its changes, and `work/inbox.md`), `AGENTS.md` and
+**What stays**: `.sdlc/work/` (the repo's record of its changes, and `.sdlc/work/inbox.md`), `AGENTS.md` and
 `CLAUDE.md` (other agents read them; the lines naming the plugin are listed for the human to
 edit), the issue forms in `.github/ISSUE_TEMPLATE/` (people file with them), the tracker's
 issues and their labels, every tag, and every `Close` and `Drop` commit. A later setup counts
@@ -45,7 +45,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py uninstall --chec
   kept, and the `.claude/worktrees/` line in `.gitignore` when the record says setup added it.
 - **`left`**: what stays, and why.
 - **`mentions`**: each line in the policy doc (`docs.policy`) or a context doc (`docs.context`)
-  that names `/sdlc:`, `.sdlc/` or `work/`, by path and line number.
+  that names `/sdlc:`, `.sdlc/` or `.sdlc/work/`, by path and line number.
 
 ## Step 1 — Show it
 
@@ -85,6 +85,6 @@ claude plugin uninstall sdlc@sdlc
 ## Out of scope
 
 - Committing, pushing, or touching the tracker. The human commits; issues stay as they are.
-- `work/`, `AGENTS.md`, `CLAUDE.md`, tags and history. Mentions are listed, never edited.
+- `.sdlc/work/`, `AGENTS.md`, `CLAUDE.md`, tags and history. Mentions are listed, never edited.
 - Closing or dropping open changes. Those are `/sdlc:close` and `/sdlc:drop`, run first.
 - Uninstalling the plugin from Claude Code. The human runs `claude plugin uninstall`.

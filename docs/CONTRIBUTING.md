@@ -156,7 +156,7 @@ valid. `sdlc.py` loads it by path and calls `make(home, cfg)`, which returns an 
 `error` when it couldn't be rendered, `vocabulary` (every
 tier, stage and impact) and `fields` (the project doc's fields that are on, with the intent's
 values: mirror these exactly, and never touch one that isn't there). A tracker never imports
-`sdlc.py` and never reads `work/` or `.sdlc/`; it has the standard library and the script's
+`sdlc.py` and never reads `.sdlc/`, the change folder included; it has the standard library and the script's
 PEP 723 dependencies, nothing more. Core never calls `gh`: every call lives in the tracker. Drive
 it in the tests through a fake of its command-line tool on `PATH`, as `tests/test_archive.py` does
 for `gh`.

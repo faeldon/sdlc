@@ -34,7 +34,7 @@ commits, pushes or merges, and the run stops if `HEAD` moves.
 **This session is the chief of staff.** Agents can't talk to the person; this session can. When an
 agent reaches a call that is the person's (a trade-off the spec leaves open, a policy, scope), it
 raises a `- DECISION:` line instead of guessing, and `factory.py decisions` gathers every one into
-the change's ledger, `work/NNN-slug/decisions.md`. A **blocking** one pauses the run: this session
+the change's ledger, `.sdlc/work/NNN-slug/decisions.md`. A **blocking** one pauses the run: this session
 asks the person, writes the answer into the ledger, and resumes the builder with it. A **default**
 one lets the run go on with the agent's stated default, recorded as assumed; the approver
 escalates while any is unconfirmed, and `/sdlc:ship` shows them all.
@@ -90,7 +90,7 @@ agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` 
 1. **Build.** Spawn `sdlc-factory:builder` with `<paths> Build it: plan.md first (Tier 2), then
    the code, test first.` Keep the agent id it returns; every rework resumes this same builder,
    with its context, through `SendMessage`. Wait for its report, and `Write` it, exactly as
-   returned, to `work/NNN-slug/build/round-1.md`.
+   returned, to `.sdlc/work/NNN-slug/build/round-1.md`.
 
    **Where every builder report goes** decides what gets reviewed, so it has one rule: to
    `build/round-<R+1>.md`, where `<R>` is the highest review round so far (0 before the first).
@@ -123,10 +123,10 @@ agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` 
 
    - **`review`**: spawn every reviewer in `missing` (`sdlc-factory:reviewer-<role>`) **in one
      message**, so they run in parallel, each with `<paths> Review round <round>.` `Write` each
-     reply, exactly as returned, to `work/NNN-slug/reviews/round-<round>/<role>.md`. Never resume
+     reply, exactly as returned, to `.sdlc/work/NNN-slug/reviews/round-<round>/<role>.md`. Never resume
      the builder until every reviewer of the round has replied and been written.
    - **`rework`**: `SendMessage` to the builder: `Round <round> reviews are in
-     work/NNN-slug/reviews/round-<round>/. Address every VERDICT: CHANGES, then report.` `Write`
+     .sdlc/work/NNN-slug/reviews/round-<round>/. Address every VERDICT: CHANGES, then report.` `Write`
      its report to `build/round-<round+1>.md`; the script then says `review` for that round.
    - **`approve`**: first carry what's unresolved into the notes, so `/sdlc:ship` must give each a
      disposition:
@@ -136,7 +136,7 @@ agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` 
      ```
 
      Then spawn `sdlc-factory:approver` with `<paths> Decide.` and `Write` its reply, exactly as
-     returned, to `work/NNN-slug/decision.md`.
+     returned, to `.sdlc/work/NNN-slug/decision.md`.
    - **`done`**: the decision is in and readable. Go to step 3.
    - **`stop`**: report its `problems` and stop. The change stays at `stage: build`. A reviewer
      reply that doesn't open with a verdict, a decision that doesn't open with one, or `HEAD`

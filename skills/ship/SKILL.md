@@ -76,17 +76,17 @@ commits that came in) and the `undo` line, and carry on. **`refused`: stop here,
 with its `reason`; the person resolves it and runs `/sdlc:ship` again. Never resolve a conflict,
 stash, or retry it by hand from this skill.
 
-**`work/` in this skill is `work.dir` from `config`**: this checkout's. The change's folder,
-`work/NNN-slug/`, is part of the diff and of the commit: the review reads the artifacts alongside
+**`.sdlc/work/` in this skill is `work.dir` from `config`**: this checkout's. The change's folder,
+`.sdlc/work/NNN-slug/`, is part of the diff and of the commit: the review reads the artifacts alongside
 the code they describe, and `/sdlc:close` takes the folder off `main` once the change lands.
 
-Read `work/NNN-slug/intent.md` and, if Tier 2, `spec.md` — you're about to check the diff against
+Read `.sdlc/work/NNN-slug/intent.md` and, if Tier 2, `spec.md` — you're about to check the diff against
 them.
 
 **Agents' verdicts, when there are any.** A change built by agents (the optional `sdlc-factory`
-plugin) has `work/NNN-slug/decision.md`, opening `DECISION: READY` or `DECISION: ESCALATE`, and
-its reviews in `work/NNN-slug/reviews/round-<N>/<role>.md`, each opening `VERDICT: PASS` or
-`VERDICT: CHANGES`, and the person's calls the agents raised in `work/NNN-slug/decisions.md`
+plugin) has `.sdlc/work/NNN-slug/decision.md`, opening `DECISION: READY` or `DECISION: ESCALATE`, and
+its reviews in `.sdlc/work/NNN-slug/reviews/round-<N>/<role>.md`, each opening `VERDICT: PASS` or
+`VERDICT: CHANGES`, and the person's calls the agents raised in `.sdlc/work/NNN-slug/decisions.md`
 (`- [x]` decided, `- [ ]` assumed). When they exist, read the decision, the highest round's
 reviews and the ledger: they are evidence for Step 3, never a substitute for it. A change with
 none of them is reviewed exactly as below.
@@ -101,14 +101,14 @@ Each item is an unticked `- [ ]` line in `notes.md`. Step 4 proposes what happen
 `sdlc.py ship` refuses while one is still unticked, because a shipped folder isn't read again,
 and an item left there is lost.
 
-Then list the open nits this change's diff touches, the `[nit]` entries in `work/inbox.md`:
+Then list the open nits this change's diff touches, the `[nit]` entries in `.sdlc/work/inbox.md`:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --change <NNN>
 ```
 
 Each is a finding an earlier ship approved unfixed. Step 4 proposes retiring the ones this diff
-fixed or made moot. None listed, or no `work/inbox.md`, is the usual answer.
+fixed or made moot. None listed, or no `.sdlc/work/inbox.md`, is the usual answer.
 
 Then the issues the change would close, those its intent's `closes:` line names:
 
@@ -219,9 +219,9 @@ that means the change is too big, and that's the finding.
 
 Weigh each Nit under the rubric in the process doc (`docs.process`), its section on nits, and give
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
-it Important. One that costs a design call (L) is an idea for `work/inbox.md`, not a nit. One that
+it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.md`, not a nit. One that
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
-answer below. The rest are proposed as `[nit]` entries in `work/inbox.md`.
+answer below. The rest are proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
 ## Step 4 — Present findings and the draft commit
 
@@ -235,7 +235,7 @@ like a changelog entry, with the change folder named in the body:
 Let a saved draft be reopened from the list
 
 Add the reopen action to the drafts list, and the test that a second
-save keeps one draft. See work/003-reopen-drafts/.
+save keeps one draft. See .sdlc/work/003-reopen-drafts/.
 ```
 
 When `config` says `archive.ids_from: github`, the change's number is its GitHub issue: end the
@@ -260,7 +260,7 @@ don't is said so, with why. The decision informs the person's approval and never
 
 **Undone items.** For each item Step 0 listed, propose one of two dispositions:
 
-- **carry it forward:** a new `work/inbox.md` seed, with a short title of its own;
+- **carry it forward:** a new `.sdlc/work/inbox.md` seed, with a short title of its own;
 - **drop it:** with a one-line reason (done after all, superseded, not worth doing).
 
 There is no third option, such as keeping it as an open question in `intent.md`: a shipped intent
@@ -269,7 +269,7 @@ it's written down somewhere that gets read. Put the dispositions in the commit m
 body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Leave out a paragraph
 that has nothing in it.
 
-**Ids.** Take an id for every entry this ship would add to `work/inbox.md`, the new nits, the
+**Ids.** Take an id for every entry this ship would add to `.sdlc/work/inbox.md`, the new nits, the
 seeds undone items are carried to and the seeds issues are split off as, all in one call, `<N>`
 being how many, so no two share one:
 
@@ -285,7 +285,7 @@ message after the body, one `- <id>: <reason>` line each. A listed nit the diff 
 stays, and needs no mention.
 
 **Bugs fixed.** When the intent has a `fixes:` line, name each bug it lists, by id and title from
-`work/inbox.md`: `sdlc.py ship` deletes those entries with the commit, and `/sdlc:close` records
+`.sdlc/work/inbox.md`: `sdlc.py ship` deletes those entries with the commit, and `/sdlc:close` records
 each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
 the line comes out, or the fix goes in.
 
@@ -311,10 +311,10 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 Ask literally:
 
-> `Commit this, with the context update shown, the nits shown recorded in work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
 Leave out `, with the context update shown` when the context pass proposed none, `, the nits shown
-recorded in work/inbox.md` when there are none to add or retire, the closing clause when `closes:`
+recorded in .sdlc/work/inbox.md` when there are none to add or retire, the closing clause when `closes:`
 names nothing (and its `splitting` half when every issue was resolved), and `, then update its
 issue` when `config` says `archive.target` is `none`.
 
@@ -325,8 +325,8 @@ them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
 
-**The register is the file `config`'s `work.register` names:** `work/inbox.md`, or
-`work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
+**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`, or
+`.sdlc/work/ideas.md` in a repo `/sdlc:setup` hasn't moved over yet. Write entries there, never into a
 second file beside it, which would hide every entry the first one holds.
 
 First, the undone items, exactly as approved:
@@ -334,7 +334,7 @@ First, the undone items, exactly as approved:
 - **Carried:** append each seed to the register as `## [<id>] [idea] <its title>`, with the id
   Step 4 took for it. If it doesn't exist, `Write` it at that path first from
   `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do and points at
-  `work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
+  `.sdlc/work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
   `- [x] <text> → seed: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
 
@@ -352,9 +352,9 @@ commit as the code they describe.
 
 Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter. `sdlc.py ship` refuses without one.
 
-If the change came from a `work/inbox.md` seed and the built thing deviated from the sketch, say
+If the change came from a `.sdlc/work/inbox.md` seed and the built thing deviated from the sketch, say
 how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
-`Write` is for those files only, and `work/inbox.md`'s first time: everything else this step
+`Write` is for those files only, and `.sdlc/work/inbox.md`'s first time: everything else this step
 changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
 
 Then, with a `--leave <path>` for each path Step 0's approval set apart:
@@ -371,8 +371,8 @@ commit. "Nothing to sync" is fine. A failure never undoes the commit: report wha
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
 `ship` stamps the folder shipped, deletes the entry the change's `idea:` names and each bug its
-`fixes:` names from `work/inbox.md` (saying so when one isn't there), and stages every path the checkout has
-uncommitted but the ones left out: the change's code, its folder, `work/inbox.md` when Step 6
+`fixes:` names from `.sdlc/work/inbox.md` (saying so when one isn't there), and stages every path the checkout has
+uncommitted but the ones left out: the change's code, its folder, `.sdlc/work/inbox.md` when Step 6
 edited it, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
 counter, which reaches `main` this way). It prints each path it staged, and never commits. The
 commit message names `NNN-slug`, which is how the commit and its folder find each other.

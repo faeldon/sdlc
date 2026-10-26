@@ -149,7 +149,7 @@ new `closes:` line, and each needs-info issue's questions, exactly as they will 
 
 Ask literally, naming what each kind of line does:
 
-> `File these entries in work/inbox.md and commit them, with each verdict that closes an issue, as "<subject>"; add the covered issues to their changes' closes: lines; ask the needs-info issues' authors; then label, comment on and relate every issue above on GitHub? (yes / change a line / no)`
+> `File these entries in .sdlc/work/inbox.md and commit them, with each verdict that closes an issue, as "<subject>"; add the covered issues to their changes' closes: lines; ask the needs-info issues' authors; then label, comment on and relate every issue above on GitHub? (yes / change a line / no)`
 
 Leave out the clauses with nothing in them. A changed line changes what is written, and nothing is
 checked again unless the human asks.

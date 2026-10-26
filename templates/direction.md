@@ -1,8 +1,8 @@
 # Direction
 
 > Rewritten by `/sdlc:retro` each time it runs; history keeps every earlier version. It says where
-> the repo is headed, not what is being built: the changes are in `work/`, the seeds in
-> `work/inbox.md`.
+> the repo is headed, not what is being built: the changes are in `.sdlc/work/`, the seeds in
+> `.sdlc/work/inbox.md`.
 >
 > Every goal and milestone has an id that carries from one retrospective to the next, and ends
 > done, dropped or revised, never silently gone: `sdlc.py retro-commit` refuses a doc that drops

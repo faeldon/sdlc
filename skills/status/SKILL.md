@@ -1,6 +1,6 @@
 ---
 name: status
-description: Report the current state of this repo's change pipeline (work/ — what's open, at what stage, what's stalled) and recommend the single next action with the command to run. Use when the human asks what's in the SDLC backlog, where a change stands, what to work on next, or what's blocking something. Read-only — it never writes, and hands off to /sdlc:intent, /sdlc:spec, plan mode or /sdlc:ship. Not for the repo's drift scans; that is /sdlc:health.
+description: Report the current state of this repo's change pipeline (.sdlc/work/ — what's open, at what stage, what's stalled) and recommend the single next action with the command to run. Use when the human asks what's in the SDLC backlog, where a change stands, what to work on next, or what's blocking something. Read-only — it never writes, and hands off to /sdlc:intent, /sdlc:spec, plan mode or /sdlc:ship. Not for the repo's drift scans; that is /sdlc:health.
 argument-hint: "[change id, e.g. 003 — omit for the whole pipeline]"
 allowed-tools:
   - Read
@@ -14,7 +14,7 @@ disable-model-invocation: true
 
 # Status — where the pipeline stands, and what's next
 
-Stage-agnostic read of `work/`, per the repo's change process. Answers two questions and stops: **what is
+Stage-agnostic read of `.sdlc/work/`, per the repo's change process. Answers two questions and stops: **what is
 open**, and **what should happen next**.
 
 **This skill is a budget, not just a report.** It exists because answering this from scratch costs
@@ -22,7 +22,7 @@ thousands of tokens — re-reading the process doc for the stage model, the revi
 shipping involves, and several `intent.md` files to see what each change is waiting on. Everything
 needed to answer the common case is in Step 1's output plus the tables below.
 
-**Do not read the process doc, the review, `work/inbox.md`, or any `intent.md`/`spec.md`/`plan.md`**
+**Do not read the process doc, the review, `.sdlc/work/inbox.md`, or any `intent.md`/`spec.md`/`plan.md`**
 — not "for context", not "to be thorough". Step 1 is the whole input. The one exception is Step 4.
 
 **Read-only.** Never write an artifact, never edit frontmatter, never advance a `stage:`, never
@@ -43,7 +43,7 @@ That is the entire input. `sdlc.py status` already gives id, tier, stage, age in
 artifacts exist, the title, and the counts of undone items and unresolved open questions — don't
 go looking for any of it elsewhere.
 
-**`■ Next up` is what comes after the open changes**, so you never need `work/inbox.md`, the nits
+**`■ Next up` is what comes after the open changes**, so you never need `.sdlc/work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
 and orders them by a fixed rule: `bug` entries first, then each open milestone's next grouped seed
 (`M1 (…)`), then the next seed in a series (`next in series after "…"`), then cost-`S` nits by
@@ -66,10 +66,10 @@ The open-questions count keys on this repo's convention for closing one: strike 
 how it went (`- ~~Question?~~ Resolved: ...`), as the intent template prompts. A question closed in
 prose without the strikethrough still counts, so read the number as a ceiling.
 
-If `check` reports `work/ is gitignored`, the repo isn't set up for the plugin: recommend
+If `check` reports `.sdlc/work/ is gitignored`, the repo isn't set up for the plugin: recommend
 `/sdlc:setup`, which says what else is missing, and stop. `/sdlc:intent` would be refused.
 
-If `work/` doesn't exist or `status` reports nothing open, say so plainly, skip Step 2, and pick
+If `.sdlc/work/` doesn't exist or `status` reports nothing open, say so plainly, skip Step 2, and pick
 from Step 3's precedence: release, retro, then `Next up`, and `/sdlc:intent` only when none of
 those apply.
 

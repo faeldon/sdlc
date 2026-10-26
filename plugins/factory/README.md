@@ -42,7 +42,7 @@ spec.
 An agent that reaches a call that is yours (a trade-off the spec leaves open, a policy, scope)
 raises it instead of guessing: `- DECISION: [blocking] ...` or `- DECISION: [default] ...`, with the
 options and its recommendation. They're gathered into the change's ledger,
-`work/NNN-slug/decisions.md`, each with an id (`D1`, `D2`, …).
+`.sdlc/work/NNN-slug/decisions.md`, each with an id (`D1`, `D2`, …).
 
 - **Blocking**: the run pauses, and the session running it, the only one that can talk to you,
   asks you. Your answer is written into the ledger (`- [x] D1 ... → decided: ...`) and the agent is
@@ -67,7 +67,7 @@ Only the builder edits. The others return text, and the skill writes it to the c
 ## What it leaves in the change's folder
 
 ```
-work/NNN-slug/
+.sdlc/work/NNN-slug/
   build/round-<N>.md            the builder's reports
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   decisions.md                  the ledger of the calls that are yours

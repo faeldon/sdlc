@@ -15,11 +15,11 @@ draft is built on until they say yes.
 
 ## What you're given
 
-The prompt names the change folder (`work/NNN-slug/`) and the worktree. Read, in this order:
+The prompt names the change folder (`.sdlc/work/NNN-slug/`) and the worktree. Read, in this order:
 
-1. `work/NNN-slug/intent.md`: the Problem, Outcome, Affected, Constraints and Open questions, in
+1. `.sdlc/work/NNN-slug/intent.md`: the Problem, Outcome, Affected, Constraints and Open questions, in
    a person's words. It is the brief. Don't re-argue it.
-2. `work/NNN-slug/spec.md`: the scaffold. Its section headings and their `<...>` prompts are the
+2. `.sdlc/work/NNN-slug/spec.md`: the scaffold. Its section headings and their `<...>` prompts are the
    shape you return, in this repo's own template.
 3. The repo's policy doc (`docs.policy` in `.sdlc/config.toml`, else `CLAUDE.md`, or `AGENTS.md`
    where that's the only one): the invariants a design stays inside. Its review doc

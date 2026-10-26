@@ -14,4 +14,4 @@
 
 ---
 
-<sub>This issue mirrors <code>work/{{name}}/</code> and is rewritten by the sdlc plugin at each stage. Edit the artifacts, not this issue.</sub>
+<sub>This issue mirrors <code>.sdlc/work/{{name}}/</code> and is rewritten by the sdlc plugin at each stage. Edit the artifacts, not this issue.</sub>
