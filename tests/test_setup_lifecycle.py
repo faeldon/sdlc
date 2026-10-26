@@ -286,14 +286,16 @@ def test_new_keys_listed(repo: Path, plugin: Path) -> None:
     assert new["where"] == "metrics.stop_allowance" and new["default"] == 1
 
 
-def test_a_host_still_setting_target_stops_is_told(repo: Path, plugin: Path) -> None:
-    """The flat target was retired for each change's own gates plus an allowance: a host's old
-    setting is read by nothing now, so setup's drift says so, with what replaced it."""
+def test_a_host_still_setting_target_stops_is_told_it_is_unread(repo: Path, plugin: Path) -> None:
+    """The flat target's retirement note was a shim, gone in 1.4.0: a host still setting it is
+    told it is a key the plugin doesn't read, no longer that it broke anything."""
     config = repo / ".sdlc" / "config.toml"
     config.write_text(config.read_text(encoding="utf-8") + "\n[metrics]\ntarget_stops = 2\n")
     assert "unknown key metrics.target_stops" in sdlc.load_config(repo)[1]
-    (found,) = [b for b in sdlc.drift(repo)["breaking"] if b["where"] == "metrics.target_stops"]
-    assert found["now"] == "metrics.stop_allowance" and "Delete it" in found["fix"]
+    out = sdlc.drift(repo)
+    assert not [b for b in out["breaking"] if b["where"] == "metrics.target_stops"]
+    (found,) = [r for r in out["report"] if r["where"] == "metrics.target_stops"]
+    assert found["class"] == "unknown"
 
 
 def test_retired_keys_point_at_live_keys() -> None:

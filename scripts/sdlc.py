@@ -5885,16 +5885,10 @@ ISSUE_FORMS = {
 }
 # A config key a release renamed or removed: `section.old` → {"now": the key that replaced it, or
 # None, "since": the version, "do": what a host does about it}. A host still setting one has a
-# setting the plugin no longer reads, which is breaking. Add to it, never prune it: a host can be
-# several releases behind.
-RETIRED_KEYS: dict[str, dict[str, str | None]] = {
-    "metrics.target_stops": {
-        "now": "metrics.stop_allowance",
-        "since": "1.2.0",
-        "do": "Delete it. A change's target is now its gates plus `stop_allowance` (1 by default); "
-        "set that instead if you want a different allowance.",
-    },
-}
+# setting the plugin no longer reads, which is breaking. Each entry is a shim, registered in
+# `.sdlc/deprecations.toml` and removed in the release that names; after that, drift reports the
+# key as one it doesn't read.
+RETIRED_KEYS: dict[str, dict[str, str | None]] = {}
 # What the script reads from each template, so a host's override that lacks one would be misread.
 # Frontmatter keys, `## ` headings and literal placeholders; a template with nothing read has no
 # entry.
