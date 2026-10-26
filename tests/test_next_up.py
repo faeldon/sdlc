@@ -56,7 +56,7 @@ def _write(root: Path, rel: str, text: str) -> None:
 
 def _seed(day: str, title: str, tag: str = "idea", after: str = "") -> str:
     line = f"\nAfter: {after}\n" if after else ""
-    return f"## [{day}] [{tag}] {title}\n\nWhy it's worth doing.\n{line}\n"
+    return f"## [{day}-1] [{tag}] {title}\n\nWhy it's worth doing.\n{line}\n"
 
 
 def _ideas(root: Path, *seeds: str) -> None:
@@ -272,7 +272,7 @@ def test_status_prints_five_then_counts_the_rest(tmp_path: Path, capsys, monkeyp
     section = out.split("■ Next up: 7\n", 1)[1].split("\n\n", 1)[0].splitlines()
     assert len(section) == 6 and section[-1] == "    (+2 more)"
     assert section[0].startswith("    idea  Seed number 1  (")
-    assert section[0].endswith("→ /sdlc:intent Seed number 1")
+    assert section[0].endswith("→ /sdlc:intent 2026-10-01-1")
     # Before the nudges and the problems, after everything that was there already.
     assert out.index("■ Next up") < out.index("■ Problems")
 

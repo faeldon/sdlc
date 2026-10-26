@@ -275,40 +275,6 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     assert bugs["fixed"] == {"high": 1} and bugs["open"] == [] and bugs["unattributed"] == 1
 
 
-def test_a_bare_repo_moves_its_old_registers_into_the_inbox(tmp_path: Path) -> None:
-    """A repo that kept `work/ideas.md` and `work/nits.md` reads from them unmoved, and comes
-    through `migrate-inbox` with every entry an id and `check` clean."""
-    root = _bare(tmp_path)
-    (root / ".sdlc" / "work").mkdir(parents=True)
-    (root / ".sdlc" / "work" / "ideas.md").write_text(
-        "# Ideas\n\n## [2026-10-01] [seed] Keep drafts\n\nWhy.\n\n"
-        '## [2026-10-02] [seed] Share drafts\n\nWhy.\n\nAfter: "Keep drafts"\n',
-        encoding="utf-8",
-    )
-    (root / ".sdlc" / "work" / "nits.md").write_text(
-        "# Nits\n\n## 003-1 [tests] A test that can't fail\n"
-        "- **raised:** 2026-10-03 by 003-test-lifetimes (correctness)\n"
-        "- **paths:** tests/x.py\n- **cost:** S  **value:** low\n",
-        encoding="utf-8",
-    )
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "the old registers")
-    assert "Keep drafts" in _run(root, "status").stdout, ".sdlc/work/ideas.md still reads"
-
-    moved = _run(root, "migrate-inbox")
-    assert moved.returncode == 0, moved.stdout + moved.stderr
-    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    assert "## [2026-10-01-1] [idea] Keep drafts" in inbox and "After: 2026-10-01-1" in inbox
-    assert "## [2026-10-03-1] [nit] A test that can't fail" in inbox
-    assert not (root / ".sdlc" / "work" / "nits.md").exists()
-    _git(root, "commit", "-q", "-m", "migrate")
-    check = _run(root, "check", "--strict")
-    assert check.returncode == 0, check.stdout + check.stderr
-    assert "/sdlc:intent 2026-10-01-1" in _run(root, "status").stdout
-    again = json.loads(_run(root, "migrate-inbox").stdout)
-    assert again["done"] == ["nothing to migrate"]
-
-
 @TRUNKS
 def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk: str) -> None:
     """The release loop after the change loop: one change closed with `impact: minor`, then a

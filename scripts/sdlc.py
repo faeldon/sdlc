@@ -47,9 +47,6 @@ So this tool answers the questions that are queries rather than decisions:
     closes      the issues a change's `closes:` line names, with their titles, as JSON
     mark-triaged  label, comment on and relate each open issue the repo records
     needs-info  ask an issue's author for the detail triage needs
-    migrate-inbox  move work/ideas.md and work/nits.md into work/inbox.md, every entry with an
-                id, [seed] retagged [idea], and the references to open entries by id; never
-                commits
     move-work   move the old `work/` change folder to `.sdlc/work/`, once, in a commit of its own
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
     readiness   whether this repo is set up for the plugin, item by item, with the commands its own
@@ -144,10 +141,11 @@ UNFILLED_THRESHOLD = 2
 # work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title", its id
 # (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its kind:
 # `[idea]`, `[bug]` or `[nit]`, with `[building]` an idea a change is building. Any other tag reads
-# as an idea, `[seed]` (what ideas were tagged before) for good. A bare date, `[2026-10-17]`, is
-# an entry from before ids, read the same with no id until 1.4.0, a shim (`migrate-inbox` gives it
-# one).
-ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})(?:-(\d+))?\]\s*\[([^\]]+)\]\s*(.+)$")
+# as an idea, `[seed]` (what ideas were tagged before) for good.
+ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})-(\d+)\]\s*\[([^\]]+)\]\s*(.+)$")
+# A heading from before ids, `[2026-10-17]` with no count, read for good where history is: an
+# older intent's `idea:` may hold a whole heading (`_seed_title`). Never an entry.
+OLD_HEADING_RE = re.compile(r"^##\s*\[\d{4}-\d{2}-\d{2}(?:-\d+)?\]\s*\[[^\]]+\]\s*(.+)$")
 # The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
 # seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
 # milestone's `Groups:` line has them, and status holds it back while one is still open; `Issue:`
@@ -183,8 +181,7 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = PLUGIN_DIR / "templates"
 DEFAULTS_DIR = PLUGIN_DIR / "defaults"
-# The register's name, and the one it had before: a shim until 1.4.0 (.sdlc/deprecations.toml).
-# A repo with only the old file is read from it, and so is a host template under the old name.
+# The register's name, and the one it had before 1.2.0, which only readers of history still name.
 INBOX = "inbox.md"
 OLD_INBOX = "ideas.md"
 
@@ -412,20 +409,14 @@ def trunk_refusal(home: Path, trunk: str | None, source: str = "config") -> str 
 
 
 def template_path(root: Path, name: str) -> tuple[Path, str]:
-    """The template `new` scaffolds `name` from: the host's, else the plugin's. A host's inbox
-    template may still be under the register's old name."""
+    """The template `new` scaffolds `name` from: the host's, else the plugin's."""
     host = root / HOST_DIR / "templates" / name
-    old = root / HOST_DIR / "templates" / OLD_INBOX
-    if name == INBOX and not host.is_file() and old.is_file():
-        host = old
     return (host, "host") if host.is_file() else (TEMPLATE_DIR / name, "plugin")
 
 
 def register_path(work: Path) -> Path:
-    """The register in this `work/` folder: `inbox.md`, or `ideas.md` while a repo has only that.
-    The one place that knows the old name, so every reader and writer agrees on the file."""
-    inbox = work / INBOX
-    return work / OLD_INBOX if not inbox.is_file() and (work / OLD_INBOX).is_file() else inbox
+    """The register in this change folder, the one file every reader and writer names."""
+    return work / INBOX
 
 
 def doc_path(root: Path, key: str, rel: str) -> dict:
@@ -1075,7 +1066,7 @@ def _age_days(rec: dict, today: date) -> int | None:
 
 
 def inbox_entries(root: Path) -> list[dict]:
-    """Every entry in the register (`register_path()`): its id (None for a bare date), its tag as
+    """Every entry in the register (`register_path()`): its id, its tag as
     written (`status`), its title, the titles its `After:` line names, its body lines by key, and
     its other lines as `text`. A closed entry is deleted once its change ships; history keeps it.
     Fenced lines are skipped, so a template's example is never an entry. A file that can't be read
@@ -1113,20 +1104,20 @@ def parse_entries(text: str) -> list[dict]:
             current["text"].append(line.strip())
     # An `After:` naming an entry by id reads as that entry's title, so what waits on what is
     # worked out on titles either way; an id naming nothing stays as written.
-    by_id = {e["id"]: e["title"] for e in out if e["id"]}
+    by_id = {e["id"]: e["title"] for e in out}
     for e in out:
         e["after"] = [by_id.get(r, r) for r in e["after"]]
     return out
 
 
 def _heading_entry(line: str) -> dict | None:
-    """An entry's id (None for a bare date), date, tag as written (`status`) and title, from its
-    heading line; None for any other line."""
+    """An entry's id, date, tag as written (`status`) and title, from its heading line; None for
+    any other line."""
     m = ENTRY_RE.match(line)
     if not m:
         return None
-    return {"id": f"{m.group(1)}-{m.group(2)}" if m.group(2) else None, "date": m.group(1),
-            "status": m.group(3), "title": m.group(4).strip()}  # fmt: skip
+    return {"id": f"{m.group(1)}-{m.group(2)}", "date": m.group(1), "status": m.group(3),
+            "title": m.group(4).strip()}  # fmt: skip
 
 
 def refs_in(text: str) -> list[str]:
@@ -1194,7 +1185,7 @@ def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
         if not is_nit(e):
             continue
         fields = e["fields"]
-        name = e["id"] or e["title"]
+        name = e["id"]
         raised = NIT_RAISED_RE.match(fields.get("Raised by", ""))
         paths = fields.get("Paths", "")
         nit = {
@@ -1209,8 +1200,6 @@ def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
             "value": fields.get("Value"),
             "text": " ".join(e["text"]),
         }
-        if not e["id"]:
-            problems.append(f"{name!r} has no id: its heading is `## [YYYY-MM-DD-n] [nit] title`")
         try:
             date.fromisoformat(e["date"])
         except ValueError:
@@ -1313,7 +1302,7 @@ def bug_entries(root: Path, words: list[str] | None = None) -> tuple[list[dict],
         if not is_bug(e):
             continue
         fields = e["fields"]
-        name = e["id"] or e["title"]
+        name = e["id"]
         severity = (fields.get("Severity") or "").strip()
         paths = fields.get("Paths", "")
         bugs.append(
@@ -1327,8 +1316,6 @@ def bug_entries(root: Path, words: list[str] | None = None) -> tuple[list[dict],
                 "text": " ".join(e["text"]),
             }
         )
-        if not e["id"]:
-            problems.append(f"{name!r} has no id: its heading is `## [YYYY-MM-DD-n] [bug] title`")
         if not severity:
             problems.append(f"{name} has no `Severity:` line")
         elif words and severity not in words:
@@ -1461,16 +1448,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
     slugs = {rec["slug"] for rec in changes}
     rel = work_rel(root)
     register = f"{rel}/{register_path(work_dir(root)).name}"
-    if (work_dir(root) / INBOX).is_file() and (work_dir(root) / OLD_INBOX).is_file():
-        problems.append(
-            {
-                "dir": f"{rel}/{OLD_INBOX}",
-                "kind": "register",
-                "detail": f"{rel}/{INBOX} is the register, so this file is never read: move its "
-                "entries there and delete it",
-            }
-        )
-    for entry_id, n in Counter(e["id"] for e in entries if e["id"]).items():
+    for entry_id, n in Counter(e["id"] for e in entries).items():
         if n > 1:
             problems.append(
                 {"dir": register, "kind": "entry id", "detail": f"{entry_id} is used {n} times"}
@@ -1498,7 +1476,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
     # One issue, one record: an entry's `Issue:` line, or an open change's `closes:`.
     filed: dict[int, list[str]] = {}
     for e in entries:
-        name = e["id"] or e["title"]
+        name = e["id"]
         issues = entry_issues(e)
         if issues is None:
             got = e["fields"]["Issue"]
@@ -1616,11 +1594,10 @@ def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
     heading = re.compile(rf"^[+-]?##\s*\[{re.escape(day)}-(\d+)\]")
     texts = []
     for checkout in dict.fromkeys([main_root(home), *(p for p, _ in worktrees(home))]):
-        for name in (INBOX, OLD_INBOX):
-            try:
-                texts.append((work_dir(checkout) / name).read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                continue
+        try:
+            texts.append((work_dir(checkout) / INBOX).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
     paths = [f"{w}/{name}" for w in (WORK, OLD_WORK) for name in (INBOX, OLD_INBOX)]
     log = _git(home, "log", "--all", "-p", "--format=", "-G", rf"\[{day}-", "--", *paths)
     texts.append(log or "")
@@ -1967,236 +1944,6 @@ def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
     return 1 if problems else 0
 
 
-# The shape `work/nits.md` had before nits were inbox entries, read only to move them.
-OLD_NIT_RE = re.compile(r"^##\s+(\d{3,}-\d+)\s+\[([^\]]+)\]\s*(.+)$")
-OLD_NIT_RAISED_RE = re.compile(
-    r"^- \*\*raised:\*\*\s*(\d{4}-\d{2}-\d{2})\s+by\s+(\S+)\s*(?:\(([^)]*)\))?\s*$"
-)
-OLD_NIT_PATHS_RE = re.compile(r"^- \*\*paths:\*\*\s*(.+)$")
-OLD_NIT_COST_RE = re.compile(r"^- \*\*cost:\*\*\s*(\S+)\s+\*\*value:\*\*\s*(\S+)\s*$")
-OLD_NITS = "nits.md"
-
-
-def inbox_migration(root: Path) -> list[str]:
-    """What `migrate-inbox` would do in this checkout, one line each; [] when there is nothing."""
-    work, rel = work_dir(root), work_rel(root)
-    todo = []
-    if (work / OLD_INBOX).is_file():
-        todo.append(f"move {rel}/{OLD_INBOX} to {rel}/{INBOX}")
-    if (work / OLD_NITS).is_file():
-        todo.append(f"fold {rel}/{OLD_NITS} into {rel}/{INBOX} as [nit] entries")
-    entries = inbox_entries(root)
-    bare = [e for e in entries if not e["id"]]
-    if bare:
-        todo.append(f"give {len(bare)} entr{'y' if len(bare) == 1 else 'ies'} an id")
-    seeds = [e for e in entries if _is_old_seed(e)]
-    if seeds:
-        todo.append(f"retag {len(seeds)} [seed] entr{'y' if len(seeds) == 1 else 'ies'} as [idea]")
-    return todo
-
-
-def _is_old_seed(entry: dict) -> bool:
-    """Tagged `[seed]`, what an idea was tagged before `[idea]`: read as an idea for good, and
-    retagged by `migrate-inbox`."""
-    return entry["status"].strip().lower() == "seed"
-
-
-def _old_nits(text: str) -> tuple[list[dict], list[str]]:
-    """The entries of a `work/nits.md` in its old shape, and why one can't be moved."""
-    nits: list[dict] = []
-    problems: list[str] = []
-    fenced = False
-    for line in text.splitlines():
-        if FENCE_RE.match(line):
-            fenced = not fenced
-            continue
-        if fenced:
-            continue
-        if m := OLD_NIT_RE.match(line):
-            nits.append({"old": m.group(1), "theme": m.group(2).strip(),
-                         "title": m.group(3).strip(), "raised": None, "by": None, "pass": None,
-                         "paths": "", "cost": "", "value": "", "text": []})  # fmt: skip
-        elif nits and (m := OLD_NIT_RAISED_RE.match(line)):
-            nits[-1].update(raised=m.group(1), by=m.group(2), **{"pass": m.group(3)})
-        elif nits and (m := OLD_NIT_PATHS_RE.match(line)):
-            nits[-1]["paths"] = m.group(1).strip()
-        elif nits and (m := OLD_NIT_COST_RE.match(line)):
-            nits[-1].update(cost=m.group(1), value=m.group(2))
-        elif nits and line.strip() and not line.startswith("#"):
-            nits[-1]["text"].append(line.rstrip())
-    problems += [f"{n['old']} has no `- **raised:** YYYY-MM-DD by NNN-slug`" for n in nits
-                 if not n["raised"]]  # fmt: skip
-    return nits, problems
-
-
-def cmd_migrate_inbox(root: Path) -> int:
-    """Move this checkout's registers to `work/inbox.md` with ids: `work/ideas.md` renamed (`git
-    mv`, so history follows it), an id for every entry with a bare date, each `work/nits.md` entry
-    turned into a `[nit]` entry dated by when it was raised and the file removed, each `[seed]`
-    tag retagged `[idea]`, and the title
-    references that name an open entry rewritten to its id: `After:` lines, the direction doc's
-    `Groups:` and this checkout's open changes' `idea:`. A reference to a seed already shipped
-    stays a title. Refuses while any of those files has uncommitted edits, before writing
-    anything; a rerun has nothing to do. Never commits."""
-    tree = Path(_git(root, "rev-parse", "--show-toplevel") or root)
-    work, rel = work_dir(root), work_rel(root)
-    cfg = load_config(root)[0]
-    report: dict = {"todo": inbox_migration(root), "ids": [], "retagged": [], "nits": [],
-                    "references": [], "refusals": [], "done": []}  # fmt: skip
-    refusals = report["refusals"]
-
-    def emit(code: int) -> int:
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        return code
-
-    if not report["todo"]:
-        report["done"].append("nothing to migrate")
-        return emit(0)
-    intents = [
-        d / "intent.md"
-        for d in sorted(work.iterdir()) if work.is_dir()
-        if d.is_dir() and DIR_RE.match(d.name) and (d / "intent.md").is_file()
-        and _stage(d) not in ("shipped", "dropped")
-    ]  # fmt: skip
-    direction = root / cfg["docs"]["direction"] if cfg["docs"]["direction"] else None
-    touched = [work / OLD_INBOX, work / INBOX, work / OLD_NITS, *intents]
-    if direction:
-        touched.append(direction)
-    rels = {_shown(p.resolve(), tree.resolve()) for p in touched}
-    dirty = sorted(p for _, p in _status_entries(tree) if p in rels)
-    if dirty:
-        refusals.append(f"commit or put back these first: {', '.join(dirty)}")
-    if (work / OLD_INBOX).is_file() and (work / INBOX).is_file():
-        refusals.append(f"both {rel}/{OLD_INBOX} and {rel}/{INBOX} exist: merge them by hand")
-    # Every file it rewrites read first, so one that can't be is refused before anything moves.
-    for path in touched:
-        try:
-            if path.is_file():
-                path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            refusals.append(f"{_shown(path, root)} can't be read: {e}")
-    old_nits: list[dict] = []
-    if (work / OLD_NITS).is_file():
-        try:
-            old_nits, problems = _old_nits((work / OLD_NITS).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError) as e:
-            problems = [f"{rel}/{OLD_NITS} can't be read: {e}"]
-        refusals += [f"{rel}/{OLD_NITS}: {p}" for p in problems]
-    if refusals:
-        return emit(1)
-    # An open change in another worktree keeps its title `idea:`: its seed reads `vanished`, not
-    # `shipped`, in a milestone's verdicts once it lands against a `Groups:` line rewritten here.
-    report["elsewhere"] = [
-        d.name
-        for d in change_dirs(root)
-        if d.parent.resolve() != work.resolve() and _stage(d) not in ("shipped", "dropped")
-    ]
-
-    def tracked(path: Path) -> bool:
-        return bool(_git(tree, "ls-files", "--", _shown(path.resolve(), tree.resolve())))
-
-    if (work / OLD_INBOX).is_file():
-        if tracked(work / OLD_INBOX):
-            err = _git_err(tree, "mv", "--", f"{rel}/{OLD_INBOX}", f"{rel}/{INBOX}")
-            if err:
-                refusals.append(f"git mv failed: {err}")
-                return emit(1)
-        else:
-            (work / OLD_INBOX).rename(work / INBOX)
-        report["done"].append(f"moved {rel}/{OLD_INBOX} to {rel}/{INBOX}")
-    inbox = work / INBOX
-    lines = inbox.read_text(encoding="utf-8").splitlines(keepends=True) if inbox.is_file() else []
-    # Ids by day, each one past the highest that day anywhere, then one more per entry given here.
-    taken: dict[str, int] = {}
-
-    def take(day: str) -> str:
-        if day not in taken:
-            taken[day] = int(next_entry_ids(root, day)[0].rsplit("-", 1)[1]) - 1
-        taken[day] += 1
-        return f"{day}-{taken[day]}"
-
-    fenced = False
-    for n, line in enumerate(lines):
-        if FENCE_RE.match(line):
-            fenced = not fenced
-        heading = None if fenced else _heading_entry(line.rstrip("\n"))
-        if heading and not heading["id"]:
-            heading["id"] = take(heading["date"])
-            lines[n] = line.replace(f"[{heading['date']}]", f"[{heading['id']}]", 1)
-            report["ids"].append({"id": heading["id"], "title": heading["title"]})
-        if heading and _is_old_seed(heading):
-            lines[n] = re.sub(r"^(##\s*\[[^\]]+\]\s*)\[[^\]]+\]", r"\1[idea]", lines[n], count=1)
-            report["retagged"].append({"id": heading["id"], "title": heading["title"]})
-    if old_nits:
-        if lines and not lines[-1].endswith("\n"):
-            lines[-1] += "\n"
-        if not lines:
-            lines = [TEMPLATE_DIR.joinpath(INBOX).read_text(encoding="utf-8")]
-        for nit in old_nits:
-            entry_id = take(nit["raised"])
-            by = f"{nit['by']} ({nit['pass']})" if nit["pass"] else nit["by"]
-            body = "\n".join(nit["text"]).strip()
-            lines.append(
-                f"\n## [{entry_id}] [nit] {nit['title']}\n\n"
-                + (f"{body}\n\n" if body else "")
-                + f"Theme: {nit['theme']}\nPaths: {nit['paths']}\nCost: {nit['cost']}\n"
-                f"Value: {nit['value']}\nRaised by: {by}\n"
-            )
-            report["nits"].append({"from": nit["old"], "id": entry_id})
-    if lines:
-        inbox.write_text("".join(lines), encoding="utf-8")
-    if (work / OLD_NITS).is_file():
-        if tracked(work / OLD_NITS):
-            err = _git_err(tree, "rm", "-q", "--", f"{rel}/{OLD_NITS}")
-            if err:
-                refusals.append(f"git rm failed: {err}")
-                return emit(1)
-        else:
-            (work / OLD_NITS).unlink()
-        report["done"].append(f"folded {rel}/{OLD_NITS} into {rel}/{INBOX}")
-
-    # References: a quoted title naming an open entry becomes its id.
-    by_title = {_seed_title(e["title"]): e["id"] for e in inbox_entries(root) if e["id"]}
-
-    def rewrite(path: Path, prefix: str) -> None:
-        if not path.is_file():
-            return
-        text = path.read_text(encoding="utf-8")
-
-        def swap(m: re.Match) -> str:
-            entry_id = by_title.get(_seed_title(m.group(1)))
-            if not entry_id:
-                return m.group(0)
-            report["references"].append(
-                {"file": _shown(path, root), "from": m.group(1), "to": entry_id}
-            )
-            return entry_id
-
-        out = [
-            re.sub(r'"([^"]+)"', swap, line) if line.strip().startswith(prefix) else line
-            for line in text.splitlines(keepends=True)
-        ]
-        if "".join(out) != text:
-            path.write_text("".join(out), encoding="utf-8")
-
-    rewrite(inbox, "After:")
-    if direction:
-        rewrite(direction, "Groups:")
-    for intent in intents:
-        text = intent.read_text(encoding="utf-8")
-        idea = intent_idea(text)
-        kind, title = entry_ref(idea) if idea else ("id", "")
-        entry_id = by_title.get(title) if kind == "title" else None
-        if entry_id:
-            new = re.sub(r"(?m)^idea:.*$", f"idea: {entry_id}", text, count=1)
-            intent.write_text(new, encoding="utf-8")
-            report["references"].append(
-                {"file": _shown(intent, root), "from": idea, "to": entry_id}
-            )
-    report["done"].append("references rewritten")
-    return emit(0)
-
-
 def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | None) -> int:
     """The open bugs, the register's `[bug]` entries, as JSON with their age and the process
     doc's severity words. `--touching` keeps those the given paths touch; `--introduced` names, for
@@ -2407,8 +2154,8 @@ def _seed_title(text: str) -> str:
     with or without its `## `: without the `[date] [tag]` prefix, or the ` → work/<folder>` pointer
     an older intent put in the heading. An arrow in the title itself stays."""
     text = text.strip()
-    m = ENTRY_RE.match(text) or ENTRY_RE.match(f"## {text}")
-    title = m.group(4) if m else text
+    m = OLD_HEADING_RE.match(text) or OLD_HEADING_RE.match(f"## {text}")
+    title = m.group(1) if m else text
     return title.split(" → work/")[0].strip()
 
 
@@ -5469,12 +5216,9 @@ def cmd_bug_commit(
             refusals.append(f"--reason {r}: the reason is one of {'|'.join(RETIRE_REASONS)}")
         given[ident.strip()] = word
 
-    def key(e: dict) -> str:
-        return e["id"] or e["title"]
-
-    before = {key(e): e for e in parse_entries(_git(home, "show", f"HEAD:{rel}") or "")}
+    before = {e["id"]: e for e in parse_entries(_git(home, "show", f"HEAD:{rel}") or "")}
     try:
-        after = {key(e): e for e in parse_entries(register.read_text(encoding="utf-8"))}
+        after = {e["id"]: e for e in parse_entries(register.read_text(encoding="utf-8"))}
     except (OSError, UnicodeDecodeError) as e:
         refusals.append(f"{rel} can't be read: {e}")
         after = dict(before)
@@ -5586,7 +5330,7 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
     for text in texts:
         for e in parse_entries(text):
             issues = entry_issues(e) or []
-            if not e["id"] or not issues:
+            if not issues:
                 continue
             split = next((t for t in e["text"] if t.startswith("Split from ")), None)
             for k, n in enumerate(issues):
@@ -5991,24 +5735,6 @@ def cmd_readiness(root: Path) -> int:
         item("work", "ok", f"{work_rel(home)}/ is committed", required=True)
     else:
         item("work", "missing", ignored_message(home), required=True)
-    todo = inbox_migration(root)
-    elsewhere = [
-        d.name
-        for d in change_dirs(root)
-        if d.parent.resolve() != work_dir(root).resolve()
-        and _stage(d) not in ("shipped", "dropped")
-    ]
-    if todo and elsewhere:
-        item(
-            "inbox",
-            "warn",
-            "; ".join(todo) + ": `sdlc.py migrate-inbox` does it, best with no change open; "
-            f"{', '.join(elsewhere)} would keep a title `idea:`",
-        )
-    elif todo:
-        item("inbox", "warn", "; ".join(todo) + ": `sdlc.py migrate-inbox` does it")
-    else:
-        item("inbox", "ok", f"{work_rel(root)}/{INBOX} is the register, every entry with an id")
     moving = old_folder(root)
     item("work moved", "warn" if moving else "ok", moving or f"the change folder is {WORK}/")
     cfg_file = root / HOST_DIR / "config.toml"
@@ -6484,16 +6210,6 @@ def drift(root: Path) -> dict:
     for p in sorted(templates.glob("*.md")) if templates.is_dir() else []:
         where = f"{HOST_DIR}/templates/{p.name}"
         plugin_t = TEMPLATE_DIR / p.name
-        if p.name == OLD_INBOX:
-            out["report"].append(
-                {
-                    "what": "template",
-                    "where": where,
-                    "class": "renamed",
-                    "detail": f"read as {INBOX} until 1.4.0: rename it to {INBOX}",
-                }
-            )
-            continue
         if not plugin_t.is_file():
             out["report"].append(
                 {
@@ -6993,10 +6709,6 @@ def main() -> int:
     p_info.add_argument("--questions-file", required=True, help="the approved questions")
 
     sub.add_parser(
-        "migrate-inbox",
-        help="move ideas.md and nits.md into inbox.md, with ids; never commits",
-    )
-    sub.add_parser(
         "move-work",
         help="move the old change folder to .sdlc/work/ in a commit of its own, from main",
     )
@@ -7152,8 +6864,6 @@ def main() -> int:
         return cmd_mark_triaged(root)
     if args.cmd == "needs-info":
         return cmd_needs_info(root, args.number, args.questions_file)
-    if args.cmd == "migrate-inbox":
-        return cmd_migrate_inbox(root)
     if args.cmd == "move-work":
         return cmd_move_work(root)
     if args.cmd == "next-entry":

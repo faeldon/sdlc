@@ -383,8 +383,9 @@ def test_open_changes_and_seeds_are_counted(tmp_path: Path, tag: str) -> None:
         encoding="utf-8",
     )  # fmt: skip
     (root / ".sdlc" / "work" / "inbox.md").write_text(
-        f"# Ideas\n\n## [2026-09-01] [{tag}] Old one\n\nx\n\n## [2026-10-01] [{tag}] New one\n\nx\n"
-        "\n## [2026-10-02] [building] Taken\n\nx\n",
+        f"# Ideas\n\n## [2026-09-01-1] [{tag}] Old one\n\nx\n\n"
+        f"## [2026-10-01-1] [{tag}] New one\n\nx\n"
+        "\n## [2026-10-02-1] [building] Taken\n\nx\n",
         encoding="utf-8",
     )
     out = _retro(root)
@@ -436,7 +437,9 @@ def _direction(root: Path) -> None:
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nGoals.\n", encoding="utf-8")
     (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
-    (root / ".sdlc" / "work" / "inbox.md").write_text("# Ideas\n\n## [2026-10-24] [seed] X\n\nx\n")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "# Ideas\n\n## [2026-10-24-1] [seed] X\n\nx\n"
+    )
 
 
 def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, capsys) -> None:
@@ -595,7 +598,7 @@ def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> Non
     root = _repo(tmp_path)
     (root / ".sdlc" / "work").mkdir(parents=True)
     (root / ".sdlc" / "work" / "inbox.md").write_text(
-        "# Ideas\n\n## [2026-10-01] [seed] Still waiting\n\nx\n", encoding="utf-8"
+        "# Ideas\n\n## [2026-10-01-1] [seed] Still waiting\n\nx\n", encoding="utf-8"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "seed")

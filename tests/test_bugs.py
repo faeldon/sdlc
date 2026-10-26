@@ -127,13 +127,11 @@ def test_bugs_read_with_their_lines(tmp_path: Path) -> None:
 def test_check_reports_each_malformed_bug(tmp_path: Path) -> None:
     root = _repo(
         tmp_path,
-        "## [2026-10-02] [bug] Before ids\n\nx\n\nSeverity: high\n\n",
         _bug("2026-10-02-1", "No severity", severity=None),
         _bug("2026-10-02-2", "Odd severity", severity="urgent"),
         _bug("2026-10-02-3", "Blamed on nothing", extra="Introduced by: 099-gone\n"),
     )
     found = [p["detail"] for p in sdlc.analyze(root)["problems"] if p["kind"] == "bugs"]
-    assert any(d.startswith("'Before ids' has no id") for d in found)
     assert "2026-10-02-1 has no `Severity:` line" in found
     assert "2026-10-02-2: Severity must be one of high|med|low, got 'urgent'" in found
     assert "2026-10-02-3: Introduced by '099-gone' names no change" in found

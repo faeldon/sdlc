@@ -385,7 +385,8 @@ def test_check_is_quiet_with_no_counter_or_one_behind_or_ahead_of_the_folders(
 def test_orphan_building_idea_is_flagged(tmp_path: Path) -> None:
     (tmp_path / ".sdlc" / "work").mkdir(parents=True)
     (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
-        "## [2026-10-01] [building] Column level lineage export\n\nSome prose.\n", encoding="utf-8"
+        "## [2026-10-01-1] [building] Column level lineage export\n\nSome prose.\n",
+        encoding="utf-8",
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     assert any(p["kind"] == "orphan idea" for p in a["problems"])
@@ -396,7 +397,7 @@ def test_building_idea_with_a_folder_is_quiet(tmp_path: Path) -> None:
     title, never a copy, so an exact comparison would nag about every idea being worked on."""
     _change(tmp_path, "001-column-lineage", _fm(slug="column-lineage"))
     (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
-        "## [2026-10-01] [building] Column lineage\n", encoding="utf-8"
+        "## [2026-10-01-1] [building] Column lineage\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     assert not any(p["kind"] == "orphan idea" for p in a["problems"])
@@ -412,7 +413,7 @@ def test_building_idea_linked_only_by_frontmatter_is_quiet(tmp_path: Path) -> No
         _fm(slug="search-front-end", idea='"[2026-10-01] [seed] Search as its own page"'),
     )
     (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
-        "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
+        "## [2026-10-01-1] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     assert not any(p["kind"] == "orphan idea" for p in a["problems"])
@@ -430,7 +431,7 @@ def test_building_idea_linked_only_to_a_dropped_change_is_flagged(tmp_path: Path
         ),
     )
     (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
-        "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
+        "## [2026-10-01-1] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     assert any(p["kind"] == "orphan idea" for p in a["problems"])
@@ -1230,7 +1231,7 @@ def test_check_after_the_last_close_still_audits_ideas(tmp_path: Path, capsys, m
     assert sdlc.main() == 0
     (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
     (root / ".sdlc" / "work" / "inbox.md").write_text(
-        "## [2026-10-01] [building] Orphan\n", encoding="utf-8"
+        "## [2026-10-01-1] [building] Orphan\n", encoding="utf-8"
     )
     assert sdlc.main() == 1
     assert [p["kind"] for p in sdlc.analyze(root)["problems"]] == ["orphan idea"]
@@ -1800,9 +1801,9 @@ def test_serves_is_read_as_text(tmp_path: Path) -> None:
 
 IDEAS = (
     "# Ideas\n\n> Seeds, not a backlog.\n\n"
-    "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
-    "## [2026-10-02] [building] Reopen drafts\n\nThe one being built.\nTwo lines.\n\n"
-    "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+    "## [2026-10-01-1] [seed] Keep drafts\n\nThe first.\n\n"
+    "## [2026-10-02-1] [building] Reopen drafts\n\nThe one being built.\nTwo lines.\n\n"
+    "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n"
 )
 
 
@@ -1832,8 +1833,8 @@ def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, i
     assert sdlc.cmd_ship(root, "001") == 0
     assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
-        "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
-        "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+        "## [2026-10-01-1] [seed] Keep drafts\n\nThe first.\n\n"
+        "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n"
     )
 
 
@@ -1863,8 +1864,8 @@ def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer(tmp_p
     assert sdlc.cmd_ship(root, "001") == 0
     assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
-        "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
-        "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
+        "## [2026-10-01-1] [seed] Keep drafts\n\nThe first.\n\n"
+        "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n"
     )
 
 
@@ -1875,7 +1876,7 @@ def test_a_title_holding_an_arrow_is_kept_whole(tmp_path: Path) -> None:
     root, _ = _seeded(tmp_path, "Map intent → spec", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
     text = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    assert "Map intent → spec" not in text and "## [2026-10-01] [seed] Map intent\n" in text
+    assert "Map intent → spec" not in text and "## [2026-10-01-1] [seed] Map intent\n" in text
 
 
 def test_a_body_line_shaped_like_a_heading_is_never_a_seed(tmp_path: Path) -> None:
@@ -1895,7 +1896,7 @@ def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path
 
 
 def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path, capsys) -> None:
-    ideas = IDEAS + "\n## [2026-10-04] [seed] Reopen drafts\n\nA twin.\n"
+    ideas = IDEAS + "\n## [2026-10-04-1] [seed] Reopen drafts\n\nA twin.\n"
     root, d = _seeded(tmp_path, "Reopen drafts", ideas)
     before = (d / "intent.md").read_text(encoding="utf-8")
     assert sdlc.cmd_ship(root, "001") == 1

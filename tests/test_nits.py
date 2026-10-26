@@ -129,14 +129,11 @@ def test_the_template_alone_holds_no_entry(tmp_path: Path) -> None:
 
 def test_each_malformed_entry_is_a_problem_check_reports(tmp_path: Path) -> None:
     bad = GOOD + (
-        "\n## [2026-10-21] [nit] Before ids\n\nTheme: docs\nPaths: a\nCost: S\nValue: low\n"
-        "Raised by: 011-x\n"
         "\n## [2026-13-40-1] [nit] Missing and wrong\n\nRaised by: yesterday\n"
         "Cost: L\nValue: high\n"
     )
     root = _repo(tmp_path, bad)
     problems = sdlc.nit_entries(root)[1]
-    assert any(p.startswith("'Before ids' has no id") for p in problems)
     assert "2026-13-40-1: '2026-13-40' isn't a date" in problems
     assert "2026-13-40-1 has no `Theme:` line" in problems
     assert "2026-13-40-1 has no `Raised by: NNN-slug (pass)` line" in problems

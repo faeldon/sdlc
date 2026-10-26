@@ -11,30 +11,6 @@
 # test = "tests/test_sdlc.py::test_old_flag_still_reads"   # optional: the test that goes with it
 
 [[shim]]
-name = "ideas-register"
-remove_in = "1.4.0"
-where = "scripts/sdlc.py register_path, template_path, drift (the old template's name)"
-test = "tests/test_inbox.py::test_ideas_md_still_reads"
-
-[[shim]]
-name = "bare-date-entries"
-remove_in = "1.4.0"
-where = "scripts/sdlc.py ENTRY_RE's optional count, inbox_migration, cmd_migrate_inbox"
-test = "tests/test_inbox.py::test_migrate_moves_the_registers_into_one_inbox_with_ids"
-
-[[shim]]
-name = "retired-target-stops"
-remove_in = "1.4.0"
-where = "scripts/sdlc.py RETIRED_KEYS"
-test = "tests/test_setup_lifecycle.py::test_a_host_still_setting_target_stops_is_told"
-
-[[shim]]
-name = "seed-tag-retag"
-remove_in = "1.4.0"
-where = "scripts/sdlc.py _is_old_seed in inbox_migration and cmd_migrate_inbox (the [seed] retag; reading [seed] as an idea stays for good)"
-test = "tests/test_inbox.py::test_migrate_retags_seed_entries_as_ideas"
-
-[[shim]]
 name = "work-folder-move"
 remove_in = "1.5.0"
 where = "scripts/sdlc.py OLD_WORK and the fallback in work_rel, old_folder, cmd_move_work, the readiness item; plugins/factory/scripts/factory.py work_rel; skills/setup/SKILL.md the move (reading history at both names in next_entry_ids and CHANGE_FOLDERS stays for good)"
