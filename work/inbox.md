@@ -179,7 +179,9 @@ there, or nothing, and the nudge says so rather than suggesting a push that rele
 through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
 revised 2026-10-26: never automatic, and a nudge when landed work piles up.
 
-## [2026-10-25-20] [idea] Keep the change folders under .sdlc/, or where a host says
+## [2026-10-25-20] [building] Keep the change folders under .sdlc/, or where a host says
+
+Building in work/027-work-path/.
 
 `work/` sits at a host's root, beside its own code, so adopting the plugin adds a top-level folder
 a host never asked for. Move it under `.sdlc/` (`.sdlc/work/`, with `ideas.md` and `nits.md`), or
