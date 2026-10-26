@@ -386,17 +386,6 @@ it again. Retro's skill reads only the medians in `metrics`, and release reads n
 per-change blob out by default, behind a flag for anyone who wants it, so each retrospective and
 release reads a fraction of the tokens. Raised by the retrospective of 2026-10-26.
 
-## [2026-10-26-9] [building] One preflight call for ship's lookups
-
-Building in .sdlc/work/030-ship-preflight/.
-
-Ship is the largest skill (about 6,000 tokens, 21 commands) and 7 of the last 20 changes edited
-it. Its Step 0 runs `status`, `config`, `base`, `undone`, `nits --change`, `closes` and
-`checks` one by one on the same change, and Step 5 builds its WAIT question by leaving out
-clauses that a rule decides. A `ship --check <NNN>` returning all of them, and the question's
-text, takes those steps out of prose, and each new list ship gains then goes in the script, not
-the skill. Raised by the retrospective of 2026-10-26.
-
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
 Setup offers the two issue forms whenever `archive.target` is GitHub, and counts one as the host's
@@ -488,6 +477,27 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 029-close-records-base (correctness)
+
+## [2026-10-27-6] [nit] preflight ignores --context, --nits, --closing and --split without --question
+
+`preflight 030 --closing 5` prints the lookup JSON and drops the flags silently; refuse them
+unless `--question` is given.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 030-ship-preflight (correctness)
+
+## [2026-10-27-7] [nit] ship_question renders a repeated issue number twice
+
+`--closing 4 --closing 4` reads "closing #4 and #4"; dedupe the numbers before rendering.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 030-ship-preflight (correctness)
 
 ## [2026-10-27-5] [idea] Keep the plugin's process guide in the plugin, and only a host's answers in .sdlc/
 

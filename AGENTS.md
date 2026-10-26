@@ -231,6 +231,12 @@ recorded) and refuses while any change is live. The nudge in `status` is never a
 `CLAUDE.md` or `AGENTS.md` above a changed path, with the lines naming a deleted or renamed path.
 Ship shows any edit with its findings and commits it with the change; close has no `Edit`.
 
+**Ship's lookups: `cmd_preflight()`.** Ship reads a change through one read-only `preflight`
+call, each part (`undone`, `nits`, `closes`, `checks`, `context`) built by the same
+`_<part>_report()` its own command prints, and asks the WAIT question `preflight --question`
+words (`ship_question()`), never one worded by hand. A new list ship needs is a new part there,
+not a new command in the skill.
+
 **Acceptance checks: `acceptance()`.** A change's `checks.md`, one `## ` section and one `sh` block
 per check. `checks` lists them (read-only, allowed); `accept` runs them from the change's checkout
 and fails one that exits non-zero, times out or leaves the tree changed. `accept` is never in

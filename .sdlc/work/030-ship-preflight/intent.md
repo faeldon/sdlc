@@ -2,10 +2,11 @@
 id: 030
 slug: ship-preflight
 tier: 2
-impact:
-stage: test
+impact: minor
+stage: shipped
 created: 2026-10-27
 updated: 2026-10-27
+shipped: 2026-10-27
 idea: 2026-10-26-9
 depends_on:
 serves: [O3]
