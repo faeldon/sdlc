@@ -1354,7 +1354,7 @@ def introducer(home: Path, trunk: str | None, path: str) -> str | None:
         close, _, subject = line.partition(" ")
         name = subject.removeprefix(CLOSE_PREFIX)
         if subject.startswith(CLOSE_PREFIX) and DIR_RE.match(name):
-            base = _change_base(home, name, f"{close}^")
+            base = _change_base(home, name, f"{close}^", close)
             inside = base and _git(home, "merge-base", "--is-ancestor", base, sha) is not None
             return name if inside and base != sha else None
     return None
@@ -2518,11 +2518,20 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     }
 
 
-def _change_base(main: Path, branch: str, rev: str | None = None) -> str | None:
-    """Where a change starts: the parent of the commit that first holds its intent (ship's, since
-    nothing commits before ship), so the answer is the same before close fast-forwards `main` and
-    after, and on a rerun. `rev` is the change's own commit once its branch is gone, as retro
-    reads it. None when no commit holds it."""
+def _change_base(
+    main: Path, branch: str, rev: str | None = None, close: str | None = None
+) -> str | None:
+    """Where a change starts: where the base branch was when close merged it, as the `Close`
+    commit `close` names says on its `Sdlc-Base:` line, or as close keeps it in `BASE_REF` between
+    its runs. Before close wrote that, the parent of the commit that first holds its intent, which
+    misses any commit the change made before its folder; `rev` is the change's own commit once
+    its branch is gone, as retro reads it. None when nothing says."""
+    said: dict = {}
+    if close:
+        said = metrics.parse_trailers(_git(main, "show", "-s", "--format=%B", close)) or {}
+    for ref in (said.get("base"), BASE_REF + branch):
+        if ref and (sha := _git(main, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")):
+            return sha
     added = _git(
         main, "log", "--diff-filter=A", "--format=%H", "--reverse", rev or branch, "--",
         f"{work_rel(main)}/{branch}/intent.md",
@@ -4866,7 +4875,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         problems += rec.pop("problems")
         # A change ships as one commit or several, and its size is all of them: its branch from
         # where it started. Without that start, the last commit still says what it touched.
-        base = _change_base(home, rec["name"], rec["sha"])
+        base = _change_base(home, rec["name"], rec["sha"], rec["close_sha"])
         if base:
             numstat = _git(home, "diff", "--numstat", "--no-renames", base, rec["sha"]) or ""
         else:

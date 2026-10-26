@@ -86,9 +86,22 @@ def _close(
     intent: str | None = None,
     idea: str = "",
     later: tuple[str, ...] = (),
+    before: tuple[str, ...] = (),
+    based: bool = False,
 ) -> None:
     """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
-    is a second commit on the change, touching those files, before it closes."""
+    is a second commit on the change, touching those files, before it closes; `before` a first
+    one, without its folder. `based` writes where the change started on the `Close`, as close
+    does."""
+    start = _git(root, "rev-parse", "HEAD")
+    when = f"{closed}T12:00:00"
+    for rel in before:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{path.read_text() if path.exists() else ''}{name}\n", "utf-8")
+    if before:
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", f"start {name}", when=when)
     nid, slug = name.split("-", 1)
     folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
@@ -102,7 +115,6 @@ def _close(
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{path.read_text() if path.exists() else ''}{name}\n", encoding="utf-8")
-    when = f"{closed}T12:00:00"
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}", when=when)
     if later:
@@ -113,7 +125,8 @@ def _close(
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", f"follow up {name}", when=when)
     _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
-    _git(root, "commit", "-q", "-m", f"Close {name}", when=when)
+    said = ["-m", f"Sdlc-Base: {start}"] if based else []
+    _git(root, "commit", "-q", "-m", f"Close {name}", *said, when=when)
 
 
 def _retro(root: Path) -> dict:
@@ -185,6 +198,47 @@ def test_a_change_is_sized_by_every_commit_on_its_branch(tmp_path: Path) -> None
     (change,) = _retro(root)["changes"]
     # The intent and a.py, b.py from the first commit, c.py from the second: not c.py alone.
     assert change["files"] == 4 and change["lines"] > 3
+
+
+def test_a_change_is_sized_from_where_its_close_says_it_started(tmp_path: Path) -> None:
+    """A first commit without the change's folder counts once the `Close` names the start."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/b.py",), before=("src/a.py",), based=True)
+    (change,) = _retro(root)["changes"]
+    assert change["files"] == 3, "a.py from the first commit, b.py and the intent from ship's"
+
+
+def test_without_its_start_a_change_is_sized_from_its_intent(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/b.py",), before=("src/a.py",))
+    (change,) = _retro(root)["changes"]
+    assert change["files"] == 2, "a close from before Sdlc-Base reads as it did"
+
+
+def test_an_intent_committed_early_never_counts_another_changes_commits(tmp_path: Path) -> None:
+    """Nit 2026-10-25-18: the intent landed on main, another change closed, then this one."""
+    root = _repo(tmp_path)
+    folder = root / ".sdlc" / "work" / "002-share-drafts"
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text(
+        INTENT.format(id="002", slug="share-drafts", tier=1, impact="patch",
+                      created="2026-10-01", title="share drafts"),
+        encoding="utf-8",
+    )  # fmt: skip
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "an intent committed outside its branch")
+    _close(root, "001-reopen-drafts", files=("src/other.py",))
+    start = _git(root, "rev-parse", "HEAD")
+    (root / "src" / "share.py").write_text("share\n", encoding="utf-8")
+    (folder / "intent.md").write_text(
+        (folder / "intent.md").read_text(encoding="utf-8") + "\nMore.\n", encoding="utf-8"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "ship 002-share-drafts")
+    _git(root, "rm", "-r", "-q", ".sdlc/work/002-share-drafts")
+    _git(root, "commit", "-q", "-m", "Close 002-share-drafts", "-m", f"Sdlc-Base: {start}")
+    share = next(c for c in _retro(root)["changes"] if c["name"] == "002-share-drafts")
+    assert share["files"] == 2, "its intent and share.py, never 001's other.py"
 
 
 def test_rework_sees_a_file_only_an_earlier_commit_touched(tmp_path: Path) -> None:

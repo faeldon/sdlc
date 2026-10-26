@@ -2017,3 +2017,30 @@ def test_a_check_writes_no_ref(tmp_path, gh, capsys) -> None:
     _shipped(root)
     code, _ = _close(root, capsys, "001", check=True)
     assert code == 0 and _base_refs(root) == []
+
+
+def test_a_first_commit_without_the_folder_reaches_and_counts(
+    tmp_path, gh, capsys, handoffs, monkeypatch
+) -> None:
+    """The change's first commit touches a skill and a test but not its folder: `reaches` and
+    the `final` size still see it, measured from where `main` was."""
+    root = _own(_repo(tmp_path))
+    monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
+    folder = _open(root)
+    tree = sdlc.checkout_of(folder)
+    (tree / "skills" / "x").mkdir(parents=True)
+    (tree / "skills" / "x" / "SKILL.md").write_text("x\n", encoding="utf-8")
+    (tree / "tests").mkdir()
+    (tree / "tests" / "test_x.py").write_text("a = 1\nb = 2\nc = 3\n", encoding="utf-8")
+    _git(tree, "add", "skills", "tests")
+    _git(tree, "commit", "-q", "-m", "a first step, without the folder")
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
+    assert sdlc.cmd_ship(root, folder.name.split("-")[0]) == 0
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", f"ship {folder.name}")
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and handoffs == [], out
+    assert out["reaches"] == {"skills": ["sdlc:x"]}
+    rework = next(t for t in out["measure"]["trailers"] if t.startswith("Sdlc-Rework:"))
+    assert "final=3" in rework, rework

@@ -168,6 +168,23 @@ def test_bugs_lists_by_path_and_names_the_change_that_last_touched_one(
     ]
 
 
+def test_a_line_from_a_changes_first_folderless_commit_is_blamed_on_it(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    start = _git(root, "rev-parse", "HEAD")
+    (root / "src").mkdir()
+    (root / "src" / "early.py").write_text("x\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a first commit, without the change's folder")
+    folder = root / ".sdlc" / "work" / "001-keep-drafts"
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text(INTENT.format(id="001", slug="keep-drafts"), "utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Ship 001-keep-drafts")
+    _git(root, "rm", "-rq", ".sdlc/work/001-keep-drafts")
+    _git(root, "commit", "-q", "-m", "Close 001-keep-drafts", "-m", f"Sdlc-Base: {start}")
+    assert sdlc.introducer(root, "main", "src/early.py") == "001-keep-drafts"
+
+
 # What comes next.
 
 
