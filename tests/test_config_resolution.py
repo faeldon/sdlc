@@ -65,7 +65,7 @@ def test_the_process_docs_default_to_sdlc(tmp_path: Path, capsys):
         ("product", "PRODUCT"),
     ):
         assert out["docs"][key]["path"] == f".sdlc/{name}.md", key
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "REVIEW.md").write_text("# review\n", encoding="utf-8")
     _, out = _config(tmp_path, capsys)
     assert out["docs"]["review"] == {"path": ".sdlc/REVIEW.md", "exists": True, "source": "host"}
@@ -83,7 +83,7 @@ def test_the_policy_is_agents_md_only_without_a_claude_md(tmp_path: Path, capsys
     assert cfg["docs"]["policy"] == "CLAUDE.md", "a host with a CLAUDE.md resolves as before"
 
     (tmp_path / "CLAUDE.md").unlink()
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text(
         '[docs]\npolicy = "CLAUDE.md"\n', encoding="utf-8"
     )
@@ -179,13 +179,13 @@ def test_metrics_reads_transcripts_by_default_and_a_host_can_turn_it_off(tmp_pat
 
 
 def test_a_review_in_work_is_read_in_the_checkout_it_runs_in(tmp_path: Path, capsys):
-    """work/ is committed, so a review kept there (the default until it moved to docs/) is in
+    """.sdlc/work/ is committed, so a review kept there (the default until it moved to docs/) is in
     every checkout, and a worktree reads its own copy, at a path relative to it."""
     root = tmp_path / "repo"
-    (root / "work").mkdir(parents=True)
-    (root / "work" / "REVIEW.md").write_text("# review\n", encoding="utf-8")
-    (root / ".sdlc").mkdir()
-    (root / ".sdlc" / "config.toml").write_text('[docs]\nreview = "work/REVIEW.md"\n')
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "REVIEW.md").write_text("# review\n", encoding="utf-8")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "config.toml").write_text('[docs]\nreview = ".sdlc/work/REVIEW.md"\n')
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(root)]
     subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
@@ -195,16 +195,21 @@ def test_a_review_in_work_is_read_in_the_checkout_it_runs_in(tmp_path: Path, cap
 
     code, out = _config(tree, capsys)
     assert code == 0
-    assert out["docs"]["review"] == {"path": "work/REVIEW.md", "exists": True, "source": "host"}
+    assert out["docs"]["review"] == {
+        "path": ".sdlc/work/REVIEW.md",
+        "exists": True,
+        "source": "host",
+    }
     assert out["work"] == {
-        "dir": str(tree / "work"),
+        "dir": str(tree / ".sdlc" / "work"),
+        "rel": ".sdlc/work",
         "ignored": False,
-        "register": str(tree / "work" / "inbox.md"),
+        "register": str(tree / ".sdlc" / "work" / "inbox.md"),
     }
 
 
 def test_an_unknown_key_or_wrong_type_is_a_warning(tmp_path: Path, capsys):
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text(
         '[commands]\nbuld = "make build"\nscan = 3\n[extras]\nx = 1\n'
         '[docs]\nread_before_design = "docs/one.md"\n',
@@ -232,7 +237,7 @@ def test_the_release_section_resolves_with_its_defaults(tmp_path: Path, capsys):
         "publish": None,
         "deprecations": ".sdlc/deprecations.toml",
     }
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text(
         '[release]\nversion_files = ["pkg.json"]\npublish = "make upload V={version}"\n',
         encoding="utf-8",
@@ -249,7 +254,7 @@ def test_the_release_section_resolves_with_its_defaults(tmp_path: Path, capsys):
 
 
 def test_a_config_that_wont_parse_exits_1(tmp_path: Path, capsys):
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text("[commands\n", encoding="utf-8")
     code, out = _config(tmp_path, capsys)
     assert code == 1
@@ -265,7 +270,7 @@ def test_new_scaffolds_from_the_host_template(tmp_path: Path, capsys, monkeypatc
     )
     monkeypatch.setattr(sdlc, "_used", lambda root: [])
     assert sdlc.cmd_new(tmp_path, "thing", 1, None) == 0
-    written = (tmp_path / "work" / "001-thing" / "intent.md").read_text(encoding="utf-8")
+    written = (tmp_path / ".sdlc" / "work" / "001-thing" / "intent.md").read_text(encoding="utf-8")
     assert "HOST PROMPT" in written and "# 001 — thing" in written
     assert "(host template)" in capsys.readouterr().out
 
@@ -274,7 +279,7 @@ def test_new_falls_back_to_the_plugin_template(tmp_path: Path, capsys, monkeypat
     monkeypatch.setattr(sdlc, "_used", lambda root: [])
     assert sdlc.cmd_new(tmp_path, "thing", 2, None) == 0
     for name in ("intent.md", "spec.md", "plan.md"):
-        assert (tmp_path / "work" / "001-thing" / name).is_file()
+        assert (tmp_path / ".sdlc" / "work" / "001-thing" / name).is_file()
     assert "(plugin template)" in capsys.readouterr().out
 
 
@@ -356,7 +361,7 @@ def test_status_reports_a_missing_base_and_check_doesnt(tmp_path: Path, capsys, 
 def test_the_configured_base_wins_over_one_detected(tmp_path: Path, capsys):
     root = _repo_on(tmp_path, "main")
     _git(root, "branch", "trunk")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[git]\nbase = "trunk"\n', encoding="utf-8")
     _, out = _config(root, capsys)
     assert out["git"] == {"base": "trunk", "base_source": "config"}
@@ -366,7 +371,7 @@ def test_the_configured_base_wins_over_one_detected(tmp_path: Path, capsys):
 
 def test_a_base_that_isnt_a_string_is_a_warning(tmp_path: Path, capsys):
     root = _repo_on(tmp_path, "main")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text("[git]\nbase = 1\n", encoding="utf-8")
     _, out = _config(root, capsys)
     assert "git.base must be a string" in out["warnings"]

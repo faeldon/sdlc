@@ -370,17 +370,27 @@ def _resolve_trunk(root: Path, given: str | None) -> tuple[str | None, str]:
     """The base branch and where it came from: `git.base` as set (`config`); else `main` when the
     repo has one, else the local branch `origin/HEAD` names (`detected`); else (None, `unset`).
     Never the checkout's current branch or `init.defaultBranch`, which describe one machine, and
-    never GitHub's default branch, which would be a network call from core."""
+    never GitHub's default branch, which would be a network call from core. A detected branch is
+    cached per checkout, since `load_config` runs many times in one command; `unset` never is, as
+    the branch can still be made."""
     if given:
         return given, "config"
+    key = root.resolve()
+    if key in _TRUNKS:
+        return _TRUNKS[key], "detected"
     if _git(root, "rev-parse", "--verify", "-q", f"refs/heads/{DEFAULT_TRUNK}") is not None:
+        _TRUNKS[key] = DEFAULT_TRUNK
         return DEFAULT_TRUNK, "detected"
     remote = _git(root, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or ""
     name = remote.removeprefix("origin/")
     named = remote.startswith("origin/") and name
     if named and _git(root, "rev-parse", "--verify", "-q", f"refs/heads/{name}") is not None:
+        _TRUNKS[key] = name
         return name, "detected"
     return None, "unset"
+
+
+_TRUNKS: dict[Path, str] = {}
 
 
 # The one name the plugin assumes, and only when it exists: every other use of the base branch
@@ -518,7 +528,7 @@ def cmd_config(root: Path) -> int:
     home = main_root(root)
     ignored = work_ignored(root)
     if ignored:
-        warnings.append(IGNORED)
+        warnings.append(ignored_message(root))
     if not cfg["git"]["base"]:
         warnings.append(f"git.base: {trunk_refusal(home, None)}")
     cfg_file = root / HOST_DIR / "config.toml"
@@ -529,6 +539,7 @@ def cmd_config(root: Path) -> int:
         # a skill never starts a second register beside the one being read.
         "work": {
             "dir": str(work_dir(root)),
+            "rel": work_rel(root),
             "ignored": ignored,
             "register": str(register_path(work_dir(root))),
         },
@@ -582,27 +593,40 @@ def _git(root: Path, *args: str) -> str | None:
     return out.stdout.strip()
 
 
+_MAIN_ROOTS: dict[Path, Path] = {}
+
+
 def main_root(root: Path) -> Path:
     """The main checkout, whichever worktree `root` is. Its git dir is the common one, so the
     parent of `--git-common-dir` is the same answer from the main checkout and from every
-    worktree. Falls back to `root` outside git."""
+    worktree. Falls back to `root` outside git, uncached, since `git init` can still make it one.
+    Cached per checkout: a checkout's main checkout never changes while a command runs."""
+    key = root.resolve()
+    if key in _MAIN_ROOTS:
+        return _MAIN_ROOTS[key]
     out = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    return Path(out).parent if out else root
+    if not out:
+        return root
+    _MAIN_ROOTS[key] = Path(out).parent
+    return _MAIN_ROOTS[key]
 
 
-IGNORED = (
-    "work/ is gitignored: remove the `work/` line from .gitignore. A change's artifacts are "
-    "committed on its branch, and `git add` skips an ignored folder"
-)
+def ignored_message(home: Path) -> str:
+    rel = work_rel(home)
+    return (
+        f"{rel}/ is gitignored: remove the line that ignores it from .gitignore. A change's "
+        "artifacts are committed on its branch, and `git add` skips an ignored folder"
+    )
 
 
 def work_ignored(home: Path) -> bool | None:
-    """Whether git ignores `work/` here; None outside git. `work/` with the slash, because
-    `check-ignore` only matches a `work/` pattern against a path it is told is a directory, and
+    """Whether git ignores the change folder here; None outside git. With the slash, because
+    `check-ignore` only matches a directory pattern against a path it is told is a directory, and
     the folder needn't exist yet."""
     try:
         code = subprocess.run(
-            ["git", "-C", str(home), "check-ignore", "-q", "work/"], capture_output=True
+            ["git", "-C", str(home), "check-ignore", "-q", f"{work_rel(home)}/"],
+            capture_output=True,
         ).returncode
     except FileNotFoundError:
         return None
@@ -622,8 +646,51 @@ def slugify(text: str) -> str:
     return re.sub(r"-{2,}", "-", text)
 
 
+# The change folder, relative to a checkout's root. `.sdlc/work`, beside the rest of what the
+# plugin keeps, so adopting it adds no top-level folder.
+WORK = ".sdlc/work"
+# Where it was before 1.4.0. A repo still holding it keeps working there, history included, with a
+# nudge to move (`old_folder()`), until `/sdlc:setup` runs `move-work`. A shim: in 1.5.0 the
+# change folder is `WORK` alone (`.sdlc/deprecations.toml`, `work-folder-move`).
+OLD_WORK = "work"
+# A path in a change's diff that is a change's own folder, under either name: history keeps both.
+CHANGE_FOLDERS = (f"{WORK}/", f"{OLD_WORK}/")
+
+
+def work_rel(root: Path) -> str:
+    """The change folder of `root`'s repo, relative to a checkout's root: `WORK`, or `OLD_WORK` in
+    a repo that hasn't moved. Read from the main checkout, so every worktree agrees with it. An
+    old repo whose changes have all closed may hold no `work/` on disk (close removes each folder),
+    so with neither folder there, history decides: `OLD_WORK` if any commit ever touched it. Only
+    that answer is cached, since it can't go from yes to no; `move-work` changes the rest."""
+    home = main_root(root)
+    if (home / WORK).is_dir():
+        return WORK
+    if (home / OLD_WORK).is_dir():
+        return OLD_WORK
+    key = home.resolve()
+    if key not in _OLD_HISTORY:
+        found = _git(home, "log", "-1", "--all", "--format=%h", "--", f"{OLD_WORK}/")
+        if not found:
+            return WORK
+        _OLD_HISTORY[key] = True
+    return OLD_WORK
+
+
+_OLD_HISTORY: dict[Path, bool] = {}
+
+
 def work_dir(root: Path) -> Path:
-    return root / "work"
+    return root / work_rel(root)
+
+
+def checkout_of(folder: Path) -> Path:
+    """The checkout a change folder `<checkout>/<WORK or OLD_WORK>/NNN-slug` sits in, read from its
+    path alone, so it holds outside git too."""
+    parent = folder.parent
+    if parent.name == Path(WORK).name and parent.parent.name == Path(WORK).parent.name:
+        return parent.parent.parent
+    return parent.parent
 
 
 def _number(name: str) -> int:
@@ -773,7 +840,7 @@ def load_change(
             if value not in field["values"]:
                 rec["errors"].append(f"{name}: {value!r} isn't one the project doc lists")
     if product is _READ:
-        checkout = path.parent.parent
+        checkout = checkout_of(path)
         product = product_doc(checkout, load_config(checkout)[0])
     rec["serves"] = frontmatter_list(text, "serves")
     rec["errors"] += serves_errors(rec["serves"], product, rec["stage"])
@@ -781,13 +848,14 @@ def load_change(
     # ship removes it with the fix.
     rec["fixes"] = frontmatter_list(text, "fixes") or []
     if rec["fixes"] and rec["stage"] not in ("shipped", "dropped"):
-        open_bugs = {e["id"] for e in inbox_entries(path.parent.parent) if is_bug(e)}
+        open_bugs = {e["id"] for e in inbox_entries(checkout_of(path)) if is_bug(e)}
         for f in rec["fixes"]:
             if not ENTRY_ID_RE.match(f):
                 rec["errors"].append(f"fixes: {f!r} isn't an id: name each bug by its YYYY-MM-DD-n")
             elif f not in open_bugs:
                 rec["errors"].append(
-                    f"fixes: {f!r} isn't a [bug] in work/{register_path(path.parent).name}"
+                    f"fixes: {f!r} isn't a [bug] in "
+                    f"{work_rel(root)}/{register_path(path.parent).name}"
                 )
     # The tracker issues the change closes when it lands, whatever their kind, by number: those
     # triage attached to it, and those its seed or bug carried on an `Issue:` line.
@@ -1299,7 +1367,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
     products: dict[Path, dict | None] = {}
     changes = []
     for p in change_dirs(root):
-        checkout = p.parent.parent
+        checkout = checkout_of(p)
         if checkout not in products:
             products[checkout] = product_doc(checkout, load_config(checkout)[0])
         changes.append(load_change(p, root, project, products[checkout]))
@@ -1376,13 +1444,14 @@ def analyze(root: Path, today: date | None = None) -> dict:
     entries = inbox_entries(root)
     ideas = [i for i in entries if is_building(i)]
     slugs = {rec["slug"] for rec in changes}
-    register = f"work/{register_path(work_dir(root)).name}"
+    rel = work_rel(root)
+    register = f"{rel}/{register_path(work_dir(root)).name}"
     if (work_dir(root) / INBOX).is_file() and (work_dir(root) / OLD_INBOX).is_file():
         problems.append(
             {
-                "dir": f"work/{OLD_INBOX}",
+                "dir": f"{rel}/{OLD_INBOX}",
                 "kind": "register",
-                "detail": f"work/{INBOX} is the register, so this file is never read: move its "
+                "detail": f"{rel}/{INBOX} is the register, so this file is never read: move its "
                 "entries there and delete it",
             }
         )
@@ -1408,7 +1477,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
                 {
                     "dir": register,
                     "kind": "orphan idea",
-                    "detail": f"[{idea['status']}] {idea['title']} — no work/ folder",
+                    "detail": f"[{idea['status']}] {idea['title']} — no change folder",
                 }
             )
     # One issue, one record: an entry's `Issue:` line, or an open change's `closes:`.
@@ -1434,7 +1503,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
     for n, names in sorted(closing.items()):
         if len(names) > 1:
             detail = f"#{n} is on the closes: line of {', '.join(names)}"
-            problems.append({"dir": "work/", "kind": "closes", "detail": detail})
+            problems.append({"dir": f"{rel}/", "kind": "closes", "detail": detail})
     for detail in nit_entries(root)[1]:
         problems.append({"dir": register, "kind": "nits", "detail": detail})
     bugs, bug_problems = bug_entries(root)
@@ -1451,7 +1520,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
                                  "detail": f"{b['id'] or b['title']}: Introduced by "
                                  f"{b['introduced_by']!r} names no change"})  # fmt: skip
     if work_ignored(root):
-        problems.append({"dir": "work/", "kind": "ignored", "detail": IGNORED})
+        problems.append({"dir": f"{rel}/", "kind": "ignored", "detail": ignored_message(root)})
     # A counter behind the folders is normal: main's committed one only moves when a change
     # merges, and allocation counts the open folders and worktrees itself. Only an unreadable one
     # is a problem. A missing file is fine; numbered by GitHub, there is none.
@@ -1537,7 +1606,7 @@ def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
                 texts.append((work_dir(checkout) / name).read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError):
                 continue
-    paths = [f"work/{INBOX}", f"work/{OLD_INBOX}"]
+    paths = [f"{w}/{name}" for w in (WORK, OLD_WORK) for name in (INBOX, OLD_INBOX)]
     log = _git(home, "log", "--all", "-p", "--format=", "-G", rf"\[{day}-", "--", *paths)
     texts.append(log or "")
     used = [int(m.group(1)) for t in texts for line in t.splitlines() if (m := heading.match(line))]
@@ -1615,7 +1684,7 @@ def cmd_new(
     # Refused rather than warned: `git add` skips an ignored folder, so the change's artifacts
     # would never reach its commit.
     if work_ignored(home):
-        print(f"⚠  {IGNORED}", file=sys.stderr)
+        print(f"⚠  {ignored_message(home)}", file=sys.stderr)
         return 1
     # Before any number is claimed: a GitHub issue opened for a worktree git then can't branch
     # is a change half made.
@@ -1868,7 +1937,7 @@ def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
         if path is None:
             return 1
         trunk = load_config(main_root(root))[0]["git"]["base"]
-        found = changed_paths(path.parent.parent, trunk) if trunk else None
+        found = changed_paths(checkout_of(path), trunk) if trunk else None
         if found is None:
             print(f"⚠  no merge base with {trunk!r}: is this a git checkout?", file=sys.stderr)
             return 1
@@ -1895,12 +1964,12 @@ OLD_NITS = "nits.md"
 
 def inbox_migration(root: Path) -> list[str]:
     """What `migrate-inbox` would do in this checkout, one line each; [] when there is nothing."""
-    work = work_dir(root)
+    work, rel = work_dir(root), work_rel(root)
     todo = []
     if (work / OLD_INBOX).is_file():
-        todo.append(f"move work/{OLD_INBOX} to work/{INBOX}")
+        todo.append(f"move {rel}/{OLD_INBOX} to {rel}/{INBOX}")
     if (work / OLD_NITS).is_file():
-        todo.append(f"fold work/{OLD_NITS} into work/{INBOX} as [nit] entries")
+        todo.append(f"fold {rel}/{OLD_NITS} into {rel}/{INBOX} as [nit] entries")
     entries = inbox_entries(root)
     bare = [e for e in entries if not e["id"]]
     if bare:
@@ -1955,7 +2024,7 @@ def cmd_migrate_inbox(root: Path) -> int:
     stays a title. Refuses while any of those files has uncommitted edits, before writing
     anything; a rerun has nothing to do. Never commits."""
     tree = Path(_git(root, "rev-parse", "--show-toplevel") or root)
-    work = work_dir(root)
+    work, rel = work_dir(root), work_rel(root)
     cfg = load_config(root)[0]
     report: dict = {"todo": inbox_migration(root), "ids": [], "retagged": [], "nits": [],
                     "references": [], "refusals": [], "done": []}  # fmt: skip
@@ -1983,7 +2052,7 @@ def cmd_migrate_inbox(root: Path) -> int:
     if dirty:
         refusals.append(f"commit or put back these first: {', '.join(dirty)}")
     if (work / OLD_INBOX).is_file() and (work / INBOX).is_file():
-        refusals.append(f"both work/{OLD_INBOX} and work/{INBOX} exist: merge them by hand")
+        refusals.append(f"both {rel}/{OLD_INBOX} and {rel}/{INBOX} exist: merge them by hand")
     # Every file it rewrites read first, so one that can't be is refused before anything moves.
     for path in touched:
         try:
@@ -1996,8 +2065,8 @@ def cmd_migrate_inbox(root: Path) -> int:
         try:
             old_nits, problems = _old_nits((work / OLD_NITS).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError) as e:
-            problems = [f"work/{OLD_NITS} can't be read: {e}"]
-        refusals += [f"work/{OLD_NITS}: {p}" for p in problems]
+            problems = [f"{rel}/{OLD_NITS} can't be read: {e}"]
+        refusals += [f"{rel}/{OLD_NITS}: {p}" for p in problems]
     if refusals:
         return emit(1)
     # An open change in another worktree keeps its title `idea:`: its seed reads `vanished`, not
@@ -2013,13 +2082,13 @@ def cmd_migrate_inbox(root: Path) -> int:
 
     if (work / OLD_INBOX).is_file():
         if tracked(work / OLD_INBOX):
-            err = _git_err(tree, "mv", "--", f"work/{OLD_INBOX}", f"work/{INBOX}")
+            err = _git_err(tree, "mv", "--", f"{rel}/{OLD_INBOX}", f"{rel}/{INBOX}")
             if err:
                 refusals.append(f"git mv failed: {err}")
                 return emit(1)
         else:
             (work / OLD_INBOX).rename(work / INBOX)
-        report["done"].append(f"moved work/{OLD_INBOX} to work/{INBOX}")
+        report["done"].append(f"moved {rel}/{OLD_INBOX} to {rel}/{INBOX}")
     inbox = work / INBOX
     lines = inbox.read_text(encoding="utf-8").splitlines(keepends=True) if inbox.is_file() else []
     # Ids by day, each one past the highest that day anywhere, then one more per entry given here.
@@ -2063,13 +2132,13 @@ def cmd_migrate_inbox(root: Path) -> int:
         inbox.write_text("".join(lines), encoding="utf-8")
     if (work / OLD_NITS).is_file():
         if tracked(work / OLD_NITS):
-            err = _git_err(tree, "rm", "-q", "--", f"work/{OLD_NITS}")
+            err = _git_err(tree, "rm", "-q", "--", f"{rel}/{OLD_NITS}")
             if err:
                 refusals.append(f"git rm failed: {err}")
                 return emit(1)
         else:
             (work / OLD_NITS).unlink()
-        report["done"].append(f"folded work/{OLD_NITS} into work/{INBOX}")
+        report["done"].append(f"folded {rel}/{OLD_NITS} into {rel}/{INBOX}")
 
     # References: a quoted title naming an open entry becomes its id.
     by_title = {_seed_title(e["title"]): e["id"] for e in inbox_entries(root) if e["id"]}
@@ -2159,7 +2228,7 @@ def cmd_accept(root: Path, ident: str) -> int:
     if path is None:
         return 1
     found = acceptance(path)
-    checkout = path.parent.parent
+    checkout = checkout_of(path)
     results = []
 
     def text(out: str | bytes | None) -> str:
@@ -2224,7 +2293,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
             f"⚠  {path.name}/notes.md has {len(undone)} undone item(s):\n"
             + "".join(f"     notes.md:{i['line']}  {i['text']}\n" for i in undone)
             + "   Give each a disposition: tick it with `→ seed: <title>` after adding that seed "
-            "to work/inbox.md, or `→ dropped: <reason>`. Then re-run. Not stamping.",
+            "to the inbox, or `→ dropped: <reason>`. Then re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1
@@ -2249,13 +2318,14 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     seeds = _seed_lines(ideas, idea)
     if len(seeds) > 1:
         print(
-            f"⚠  work/{ideas.name} has {len(seeds)} entries named {entry_ref(idea)[1]!r} (lines "
+            f"⚠  {work_rel(root)}/{ideas.name} has {len(seeds)} entries named "
+            f"{entry_ref(idea)[1]!r} (lines "
             f"{', '.join(str(n + 1) for n in seeds)}): delete the one this change built by hand, "
             "or retitle one, and re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1
-    tree = Path(_git(path, "rev-parse", "--show-toplevel") or path.parent.parent)
+    tree = Path(_git(path, "rev-parse", "--show-toplevel") or checkout_of(path))
     staged = (_git(tree, "diff", "--cached", "--name-only", "-z") or "").split("\0")
     dirty = _dirty_paths(tree)
     unmatched = [p for p in leave if p not in dirty]
@@ -2292,17 +2362,20 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     )
     if seeds:
         _drop_seed(ideas, seeds[0])
-        print(f"  removed seed {entry_ref(idea)[1]!r} from work/{ideas.name}")
+        print(f"  removed seed {entry_ref(idea)[1]!r} from {work_rel(root)}/{ideas.name}")
     elif idea:
-        print(f"  no seed to remove: work/{ideas.name} has no entry named {entry_ref(idea)[1]!r}")
+        print(
+            f"  no seed to remove: {work_rel(root)}/{ideas.name} has no entry named "
+            f"{entry_ref(idea)[1]!r}"
+        )
     # Each bug the change fixes leaves with it, found afresh after every deletion.
     for fixed in frontmatter_list(stamped, "fixes") or []:
         lines = _seed_lines(ideas, fixed) if ENTRY_ID_RE.match(fixed) else []
         if lines:
             _drop_seed(ideas, lines[0])
-            print(f"  removed bug {fixed} from work/{ideas.name}")
+            print(f"  removed bug {fixed} from {work_rel(root)}/{ideas.name}")
         else:
-            print(f"  no bug to remove: work/{ideas.name} has no entry {fixed}")
+            print(f"  no bug to remove: {work_rel(root)}/{ideas.name} has no entry {fixed}")
     paths, err = _stage_change(tree, leave)
     if err:
         print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
@@ -2434,7 +2507,7 @@ def cmd_drop(root: Path, ident: str | None, check_only: bool = False) -> int:
         report["refusals"].append(f"{ident!r} names no single change folder")
         return emit(1)
     tree = Path(_git(path, "rev-parse", "--show-toplevel") or path)
-    name, rel = path.name, f"work/{path.name}"
+    name, rel = path.name, f"{work_rel(root)}/{path.name}"
     report.update(change=name, worktree=str(tree))
     text = (path / "intent.md").read_text(encoding="utf-8")
     stage = (frontmatter_list(text, "stage") or [""])[0]
@@ -2651,7 +2724,7 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     """What the factory left in the change's commit, as counts: review rounds, each reviewer's
     `CHANGES` verdicts and change requests, the approver's decision, and the ledger's blocking
     and default decisions. None for a change built by hand (no `decision.md`)."""
-    folder = f"work/{branch}"
+    folder = f"{work_rel(main)}/{branch}"
     decision = _git(main, "show", f"{branch}:{folder}/decision.md")
     if decision is None:
         return None
@@ -2690,7 +2763,7 @@ def _change_base(main: Path, branch: str, rev: str | None = None) -> str | None:
     reads it. None when no commit holds it."""
     added = _git(
         main, "log", "--diff-filter=A", "--format=%H", "--reverse", rev or branch, "--",
-        f"work/{branch}/intent.md",
+        f"{work_rel(main)}/{branch}/intent.md",
     )  # fmt: skip
     if not added:
         return None
@@ -2722,8 +2795,9 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
     gives (elapsed since `created`, the way of running), saying why. Never raises: measuring
     must never stop a change landing."""
     settings = cfg["metrics"]
-    text = _git(main, "show", f"{branch}:work/{branch}/intent.md") or ""
-    decided = _git(main, "cat-file", "-e", f"{branch}:work/{branch}/decision.md")
+    folder = f"{work_rel(main)}/{branch}"
+    text = _git(main, "show", f"{branch}:{folder}/intent.md") or ""
+    decided = _git(main, "cat-file", "-e", f"{branch}:{folder}/decision.md")
     way = "factory" if decided is not None else "manual"
     try:
         post = frontmatter.loads(text)
@@ -2780,10 +2854,11 @@ def fix_trailers(main: Path, branch: str) -> list[str]:
     on the branch that still had the entry; `unknown` where none did. Never raises: a fix that
     can't be described is still recorded."""
     try:
-        intent = _git(main, "show", f"{branch}:work/{branch}/intent.md") or ""
+        rel = work_rel(main)
+        intent = _git(main, "show", f"{branch}:{rel}/{branch}/intent.md") or ""
         fixes = frontmatter_list(intent, "fixes") or []
         found: dict[str, dict] = {}
-        paths = [f"work/{INBOX}", f"work/{OLD_INBOX}"]
+        paths = [f"{rel}/{INBOX}", f"{rel}/{OLD_INBOX}"]
         shas = (_git(main, "log", "--format=%H", branch, "--", *paths) or "").split()
         for sha in shas:
             if all(f in found for f in fixes):
@@ -2869,11 +2944,12 @@ def _close_commit(
     `main` no longer tracks was removed by an earlier run, which is done, so a rerun writes no
     second set of trailers. `trailers` end the message, where git reads them as trailers;
     `closes`, the tracker's line for closing its issue on the push, ends the paragraph before."""
-    if not _git(main, "ls-files", f"work/{branch}"):
+    folder = f"{work_rel(main)}/{branch}"
+    if not _git(main, "ls-files", folder):
         return None
     said = f"Its artifacts are in {sha}" + (f", and archived to {where}." if where else ".")
     for args in (
-        ["rm", "-r", "-q", f"work/{branch}"],
+        ["rm", "-r", "-q", folder],
         [
             "commit", "-q", "-m", f"Close {branch}",
             "-m", said + (f"\n{closes}" if closes else ""),
@@ -2883,8 +2959,8 @@ def _close_commit(
         made = subprocess.run(["git", "-C", str(main), *args], capture_output=True, text=True)
         if made.returncode != 0:
             # Put the folder back, or the rerun that finishes this would find main dirty.
-            _git(main, "reset", "-q", "HEAD", "--", f"work/{branch}")
-            _git(main, "checkout", "-q", "--", f"work/{branch}")
+            _git(main, "reset", "-q", "HEAD", "--", folder)
+            _git(main, "checkout", "-q", "--", folder)
             return f"git {args[0]} failed: {made.stderr.strip() or made.stdout.strip()}"
     return None
 
@@ -3059,13 +3135,14 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
     def verify() -> str | None:
         # The copy that counts: the change's own commit, in main's history once it lands.
-        text = _git(main, "show", f"{branch}:work/{branch}/intent.md")
+        intent = f"{work_rel(main)}/{branch}/intent.md"
+        text = _git(main, "show", f"{branch}:{intent}")
         try:
             ok = text is not None and frontmatter.loads(text).get("stage") == kind
         except Exception:
             ok = False
         if not ok:
-            return f"{branch}'s commit doesn't hold work/{branch}/intent.md, {kind}"
+            return f"{branch}'s commit doesn't hold {intent}, {kind}"
         if kind == "dropped":
             if not dropped_reason(text):
                 return f"{branch}'s commit has no `## {DROPPED}` section in its intent.md"
@@ -3765,7 +3842,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     except Exception:
         post = None
     if post is None:
-        rec["problems"].append(f"{name}: its commit {sha} has no readable work/{name}/intent.md")
+        rec["problems"].append(f"{name}: its commit {sha} has no readable intent.md")
         return rec
     rec["tier"] = post.get("tier")
     rec["impact"] = str(post.get("impact") or "")
@@ -3813,7 +3890,8 @@ def closed_changes(
         close_sha, parent, close_date, subject = (line.split("\x00") + ["", "", ""])[:4]
         name = subject[len(CLOSE_PREFIX) :].strip() if subject.startswith(CLOSE_PREFIX) else ""
         if DIR_RE.match(name) and parent:
-            text = _git(home, "show", f"{close_sha}^:work/{name}/intent.md") if read else None
+            at = f"{close_sha}^:{work_rel(home)}/{name}/intent.md"
+            text = _git(home, "show", at) if read else None
             rec = _change_record(name, text, parent, closed=True, read=read)
             # What close measured, on its own commit, and what ship's review found, on the
             # change's: both trailers.
@@ -3845,7 +3923,7 @@ def dropped_changes(home: Path, since: str | None, trunk: str | None) -> list[di
         name = subject[len(DROP_PREFIX) :].strip() if subject.startswith(DROP_PREFIX) else ""
         tip = parents.split()[1:2]
         if DIR_RE.match(name) and tip:
-            text = _git(home, "show", f"{drop_sha}^2:work/{name}/intent.md")
+            text = _git(home, "show", f"{drop_sha}^2:{work_rel(home)}/{name}/intent.md")
             rec = _change_record(name, text, tip[0][:7], closed=False)
             rec.update(drop_sha=drop_sha, drop_date=drop_date)
             rec["days_open"] = _days_between(rec["created"], drop_date)
@@ -3912,7 +3990,7 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
     base = work_dir(home)
     landed = sorted(base.iterdir(), key=lambda p: _number(p.name)) if base.is_dir() else []
     for folder in landed:
-        intent = f"work/{folder.name}/intent.md"
+        intent = f"{work_rel(home)}/{folder.name}/intent.md"
         if DIR_RE.match(folder.name) and _shipped(folder) and _git(home, "ls-files", intent):
             sha = _git(home, "log", "-1", "--format=%h", "--", intent) or "?"
             text = (folder / "intent.md").read_text(encoding="utf-8")
@@ -5010,7 +5088,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             numstat = _git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
             name = rec["name"]
             problems.append(
-                f"{name}: no commit holds work/{name}/intent.md, so its size is unknown"
+                f"{name}: no commit holds {work_rel(home)}/{name}/intent.md, so its size is unknown"
             )
         files, lines = [], 0
         for row in numstat.splitlines():
@@ -5020,7 +5098,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                 lines += sum(int(n) for n in parts[:2] if n.isdigit())
         # A change's own folder is its alone; the code and docs around it are what reworks.
         touched[rec["name"]] = {
-            f for f in files if not f.startswith("work/") and f not in every_change
+            f for f in files if not f.startswith(CHANGE_FOLDERS) and f not in every_change
         }
         rec.update(
             files=len(files) if base else None,
@@ -5035,7 +5113,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         fork = _git(home, "merge-base", f"{rec['drop_sha']}^1", f"{rec['drop_sha']}^2")
         files = (_git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
         touched[rec["name"]] = {
-            f for f in files if not f.startswith("work/") and f not in every_change
+            f for f in files if not f.startswith(CHANGE_FOLDERS) and f not in every_change
         }
         rec["files"] = len(files)
     counts = Counter(f for files in touched.values() for f in files)
@@ -5215,7 +5293,7 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     home = main_root(root)
     cfg, _, _ = load_config(home)
     stamp = (today or date.today()).isoformat()
-    allowed = {cfg["docs"]["direction"], f"work/{register_path(work_dir(home)).name}"}
+    allowed = {cfg["docs"]["direction"], f"{work_rel(home)}/{register_path(work_dir(home)).name}"}
     if cfg["docs"]["product"]:
         allowed.add(cfg["docs"]["product"])
     report: dict = {"commit": f"{RETRO_PREFIX}{stamp}", "paths": [], "refusals": [], "done": []}
@@ -5343,7 +5421,7 @@ def cmd_bug_commit(
     home = main_root(root)
     cfg, _, _ = load_config(home)
     register = register_path(work_dir(home))
-    rel = f"work/{register.name}"
+    rel = f"{work_rel(home)}/{register.name}"
     report: dict = {"commit": None, "entries": [], "refusals": [], "done": []}
     refusals = report["refusals"]
 
@@ -5481,7 +5559,7 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
     home = main_root(home)
     cfg = load_config(home)[0]
     trunk = cfg["git"]["base"]
-    register = f"work/{register_path(work_dir(home)).name}"
+    register = f"{work_rel(home)}/{register_path(work_dir(home)).name}"
     texts = [_git(home, "show", f"{trunk}:{register}") or ""] if trunk else []
     if not committed_only:
         for checkout in dict.fromkeys([home, *(p for p, _ in worktrees(home))]):
@@ -5823,9 +5901,9 @@ def cmd_readiness(root: Path) -> int:
     if ignored is None:
         item("work", "n/a", "not a git repo")
     elif not ignored:
-        item("work", "ok", "work/ is committed", required=True)
+        item("work", "ok", f"{work_rel(home)}/ is committed", required=True)
     else:
-        item("work", "missing", IGNORED, required=True)
+        item("work", "missing", ignored_message(home), required=True)
     todo = inbox_migration(root)
     elsewhere = [
         d.name
@@ -5843,7 +5921,7 @@ def cmd_readiness(root: Path) -> int:
     elif todo:
         item("inbox", "warn", "; ".join(todo) + ": `sdlc.py migrate-inbox` does it")
     else:
-        item("inbox", "ok", f"work/{INBOX} is the register, every entry with an id")
+        item("inbox", "ok", f"{work_rel(root)}/{INBOX} is the register, every entry with an id")
     cfg_file = root / HOST_DIR / "config.toml"
     if not cfg_file.is_file():
         item("config", "missing", f"no {HOST_DIR}/config.toml: every setting is its default")
@@ -6491,7 +6569,7 @@ def uninstall_plan(root: Path) -> dict:
                     f"{WORKTREES_LINE}: remove the line yourself if it did",
                 }
             )
-    plan["left"].append({"path": "work/", "why": "the repo's record of its changes"})
+    plan["left"].append({"path": f"{work_rel(home)}/", "why": "the repo's record of its changes"})
     for rel in ISSUE_FORMS:
         if (home / rel).is_file():
             plan["left"].append({"path": rel, "why": "an issue form: the repo's once written"})
@@ -6744,7 +6822,7 @@ def print_status(a: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Track the change artifacts under work/ (see the repo's process doc)."
+        description="Track the change artifacts under .sdlc/work/ (see the repo's process doc)."
     )
     sub = ap.add_subparsers(dest="cmd")
 
@@ -6784,13 +6862,13 @@ def main() -> int:
     )
     p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
 
-    p_bugs = sub.add_parser("bugs", help="the open [bug] entries in work/inbox.md, as JSON")
+    p_bugs = sub.add_parser("bugs", help="the open [bug] entries in the inbox, as JSON")
     p_bugs.add_argument("--touching", nargs="*", help="only those these paths touch")
     p_bugs.add_argument(
         "--introduced", nargs="*", help="for each path, the closed change that last touched it"
     )
     p_bugc = sub.add_parser(
-        "bug-commit", help="commit work/inbox.md alone, as File, Retire or Update <id>"
+        "bug-commit", help="commit the inbox alone, as File, Retire or Update <id>"
     )
     p_bugc.add_argument(
         "--reason", action="append", default=[], help="<id>=<word>, for each entry removed"
@@ -6820,16 +6898,16 @@ def main() -> int:
 
     sub.add_parser(
         "migrate-inbox",
-        help="move work/ideas.md and work/nits.md into work/inbox.md, with ids; never commits",
+        help="move ideas.md and nits.md into inbox.md, with ids; never commits",
     )
 
     p_entry = sub.add_parser(
-        "next-entry", help="the id the next work/inbox.md entry would take today; writes nothing"
+        "next-entry", help="the id the next inbox entry would take today; writes nothing"
     )
     p_entry.add_argument("--count", type=int, default=1, help="this many ids, one per line")
 
     p_nits = sub.add_parser(
-        "nits", help="the open [nit] entries in work/inbox.md, as JSON; writes nothing"
+        "nits", help="the open [nit] entries in the inbox, as JSON; writes nothing"
     )
     p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
     p_nits.add_argument("--change", help="only those this change's diff against main touches")
@@ -6919,7 +6997,7 @@ def main() -> int:
         "retro", help="what the retrospective counts since the last one, as JSON; writes nothing"
     )
     sub.add_parser(
-        "retro-commit", help="commit the direction doc and work/inbox.md as `Retrospective <date>`"
+        "retro-commit", help="commit the direction doc and the inbox as `Retrospective <date>`"
     )
 
     args = ap.parse_args()

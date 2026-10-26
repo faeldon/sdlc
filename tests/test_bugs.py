@@ -53,9 +53,11 @@ def _bug(entry_id: str, title: str, severity: str | None = "high", extra: str = 
 
 def _repo(tmp_path: Path, *entries: str) -> Path:
     root = tmp_path / "repo"
-    (root / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work").mkdir(parents=True)
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    (root / "work" / "inbox.md").write_text("# Inbox\n\n" + "".join(entries), encoding="utf-8")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "# Inbox\n\n" + "".join(entries), encoding="utf-8"
+    )
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
@@ -63,20 +65,22 @@ def _repo(tmp_path: Path, *entries: str) -> Path:
 
 
 def _inbox(root: Path, *entries: str) -> None:
-    (root / "work" / "inbox.md").write_text("# Inbox\n\n" + "".join(entries), encoding="utf-8")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "# Inbox\n\n" + "".join(entries), encoding="utf-8"
+    )
 
 
 def _close(root: Path, name: str, path: str) -> None:
     """A change that edits `path`, landed on main and closed, as close leaves history."""
     number, slug = name.split("-", 1)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text(INTENT.format(id=number, slug=slug), encoding="utf-8")
     (root / path).parent.mkdir(parents=True, exist_ok=True)
     (root / path).write_text(f"{name}\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"Ship {name}")
-    _git(root, "rm", "-rq", f"work/{name}")
+    _git(root, "rm", "-rq", f".sdlc/work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}")
 
 
@@ -243,13 +247,13 @@ def test_bug_commit_retires_with_a_reason_and_a_trailer(tmp_path: Path, capsys) 
 def test_bug_commit_refuses_before_writing(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     code, out = _commit(root, capsys)
-    assert code == 1 and out["refusals"] == ["nothing to record: work/inbox.md is unchanged"]
+    assert code == 1 and out["refusals"] == ["nothing to record: .sdlc/work/inbox.md is unchanged"]
     _inbox(root, _bug("2026-10-01-1", "One", severity="low"))
     (root / "README.md").write_text("stray\n", encoding="utf-8")
     code, out = _commit(root, capsys, "2026-10-01-1=wontfix", "2026-10-01-9=bogus")
     assert code == 1
     assert out["refusals"] == [
-        "only work/inbox.md may be uncommitted; also changed: README.md",
+        "only .sdlc/work/inbox.md may be uncommitted; also changed: README.md",
         "--reason 2026-10-01-9=bogus: the reason is one of "
         "duplicate|not-a-bug|wontfix|cant-reproduce",
         "--reason 2026-10-01-1: no entry by that id was removed",
@@ -262,7 +266,7 @@ def test_bug_commit_refuses_a_change_s_worktree(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     tree = root / ".claude" / "worktrees" / "001-x"
     _git(root, "worktree", "add", "-q", "-b", "001-x", str(tree))
-    (tree / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
+    (tree / ".sdlc" / "work" / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
     code, out = _commit(tree, capsys)
     assert code == 1 and any("run it from the main checkout" in r for r in out["refusals"])
 
@@ -288,7 +292,7 @@ fixes: [{fixes}]
 
 
 def _fixing(root: Path, fixes: str) -> Path:
-    folder = root / "work" / "001-keep-drafts"
+    folder = root / ".sdlc" / "work" / "001-keep-drafts"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "intent.md").write_text(FIXING.format(fixes=fixes), encoding="utf-8")
     return folder
@@ -301,8 +305,8 @@ def test_a_change_s_fixes_must_name_open_bugs_in_its_register(tmp_path: Path) ->
     assert rec["fixes"] == ["2026-10-01-1", "2026-10-01-2", "2026-10-01-9"]
     errors = [e for e in rec["errors"] if e.startswith("fixes:")]
     assert errors == [
-        "fixes: '2026-10-01-2' isn't a [bug] in work/inbox.md",
-        "fixes: '2026-10-01-9' isn't a [bug] in work/inbox.md",
+        "fixes: '2026-10-01-2' isn't a [bug] in .sdlc/work/inbox.md",
+        "fixes: '2026-10-01-9' isn't a [bug] in .sdlc/work/inbox.md",
     ]
 
 
@@ -331,8 +335,8 @@ def test_ship_removes_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path,
     assert sdlc.cmd_ship(root, "001") == 0
     out = capsys.readouterr().out
     assert "removed bug 2026-10-01-1" in out and "removed bug 2026-10-01-3" in out
-    assert "no bug to remove: work/inbox.md has no entry 2026-10-01-9" in out
-    inbox = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "no bug to remove: .sdlc/work/inbox.md has no entry 2026-10-01-9" in out
+    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
     assert inbox == "# Inbox\n\n" + entries[1].rstrip("\n") + "\n", "the last one trails no gap"
 
 
@@ -372,13 +376,13 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
     _close(root, "001-start", "src/drafts.py")
     # The fix: a change whose Close commit records it, ten days after the report.
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-11T12:00:00")
-    folder = root / "work" / "002-fix-drafts"
+    folder = root / ".sdlc" / "work" / "002-fix-drafts"
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text(INTENT.format(id="002", slug="fix-drafts"), encoding="utf-8")
     (root / "src" / "drafts.py").write_text("fixed\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Fix drafts")
-    _git(root, "rm", "-rq", "work/002-fix-drafts")
+    _git(root, "rm", "-rq", ".sdlc/work/002-fix-drafts")
     fixes = "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=001-start"
     _git(root, "commit", "-q", "-m", "Close 002-fix-drafts", "-m", "x", "-m", fixes)
     # A retirement, on its own commit.
@@ -450,4 +454,4 @@ def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
     assert "fixes: 'One' isn't an id: name each bug by its YYYY-MM-DD-n" in errors
     assert sdlc.cmd_ship(root, "001") == 0
     assert "no bug to remove" in capsys.readouterr().out
-    assert "2026-10-01-1" in (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "2026-10-01-1" in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")

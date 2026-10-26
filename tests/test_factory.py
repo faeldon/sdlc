@@ -64,7 +64,7 @@ def _change(tmp_path: Path, tier: int = 2, stage: str = "design", branch: str = 
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
     _git(root, "checkout", "-q", "-b", branch)
-    folder = root / "work" / NAME
+    folder = root / ".sdlc" / "work" / NAME
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text(INTENT.format(tier=tier, stage=stage), encoding="utf-8")
     for artifact in ("spec.md", "plan.md"):
@@ -78,21 +78,21 @@ def _run(capsys, fn, *args) -> tuple[int, dict]:
 
 
 def _review(root: Path, n: int, role: str, verdict: str, *changes: str) -> None:
-    folder = root / "work" / NAME / "reviews" / f"round-{n}"
+    folder = root / ".sdlc" / "work" / NAME / "reviews" / f"round-{n}"
     folder.mkdir(parents=True, exist_ok=True)
     body = "".join(f"- CHANGE: {c}\n" for c in changes)
     (folder / f"{role}.md").write_text(f"{verdict}\n{body}\n## Notes\n\nFine.\n", encoding="utf-8")
 
 
 def _build_report(root: Path, n: int, *lines: str) -> None:
-    folder = root / "work" / NAME / "build"
+    folder = root / ".sdlc" / "work" / NAME / "build"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"round-{n}.md").write_text("Built slice 1.\n" + "".join(lines), encoding="utf-8")
 
 
 def _round(root: Path, n: int, **verdicts: str) -> None:
     """Review round `n`, as the loop makes one: after the builder's report for that round."""
-    if not (root / "work" / NAME / "build" / f"round-{n}.md").exists():
+    if not (root / ".sdlc" / "work" / NAME / "build" / f"round-{n}.md").exists():
         _build_report(root, n)
     for role in ("code", "security", "test"):
         verdict = verdicts.get(role, "PASS")
@@ -107,7 +107,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
     cfg, warnings = factory.load_config(tmp_path)
     assert cfg == {"reviewers": ["code", "security", "test"], "rounds": 3, "models": {}}
     assert warnings == []
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "factory.toml").write_text(
         'reviewers = ["code", "secruity"]\nrounds = 9\nloops = 1\n'
         '[models]\nbuilder = "sonnet"\ndesigner = "opus"\n',
@@ -171,7 +171,7 @@ def test_start_refuses_outside_the_changes_own_worktree(tmp_path, capsys) -> Non
 
 def test_stage_edits_only_the_two_lines(tmp_path, capsys) -> None:
     root = _change(tmp_path)
-    intent = root / "work" / NAME / "intent.md"
+    intent = root / ".sdlc" / "work" / NAME / "intent.md"
     before = intent.read_text(encoding="utf-8")
     code, out = _run(capsys, factory.cmd_stage, root, "008", "build")
     assert code == 0 and out["stage"] == "build"
@@ -238,7 +238,7 @@ def test_all_pass_goes_to_the_approver_then_done(tmp_path, capsys) -> None:
     _round(root, 1)
     out = _verdicts(root, capsys)
     assert (out["next"], out["exhausted"]) == ("approve", False)
-    (root / "work" / NAME / "decision.md").write_text("DECISION: READY\n\nAll pass.\n")
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text("DECISION: READY\n\nAll pass.\n")
     out = _verdicts(root, capsys)
     assert (out["next"], out["decision"]) == ("done", "READY")
 
@@ -249,8 +249,10 @@ def test_a_reply_without_a_verdict_stops_the_run(tmp_path, capsys) -> None:
     _review(root, 1, "code", "Looks fine to me!")
     out = _verdicts(root, capsys)
     assert out["next"] == "stop" and "round-1/code.md" in out["problems"][0]
-    (root / "work" / NAME / "reviews" / "round-1" / "code.md").write_text("VERDICT: PASS\n")
-    (root / "work" / NAME / "decision.md").write_text("Ship it\n")
+    (root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "code.md").write_text(
+        "VERDICT: PASS\n"
+    )
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text("Ship it\n")
     out = _verdicts(root, capsys)
     assert out["next"] == "stop" and "decision.md" in out["problems"][0]
 
@@ -260,11 +262,11 @@ def test_work_on_an_answer_after_a_passing_round_is_reviewed(tmp_path, capsys) -
     on it, and that work is a new round to review, never straight to the approver."""
     root = _change(tmp_path)
     _round(root, 1)
-    review = root / "work" / NAME / "reviews" / "round-1" / "code.md"
+    review = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "code.md"
     review.write_text(review.read_text() + "- DECISION: [blocking] Soft delete or hard?\n")
     _run(capsys, factory.cmd_decisions, root, "008")
     assert _verdicts(root, capsys)["next"] == "decide"
-    ledger = root / "work" / NAME / "decisions.md"
+    ledger = root / ".sdlc" / "work" / NAME / "decisions.md"
     ledger.write_text(
         ledger.read_text().replace("- [ ] D1", "- [x] D1").replace("hard?", "hard? → decided: soft")
     )
@@ -296,10 +298,10 @@ def test_carry_writes_the_unresolved_changes_to_notes_once(tmp_path, capsys) -> 
     _round(root, 1, code="CHANGES", security="CHANGES")
     code, out = _run(capsys, factory.cmd_carry, root, "008")
     assert code == 0 and out["added"] == ["code: code fix 1", "security: security fix 1"]
-    notes = (root / "work" / NAME / "notes.md").read_text(encoding="utf-8")
+    notes = (root / ".sdlc" / "work" / NAME / "notes.md").read_text(encoding="utf-8")
     assert "- [ ] code: code fix 1\n" in notes and "- [ ] security: security fix 1\n" in notes
     assert _run(capsys, factory.cmd_carry, root, "008")[1]["added"] == [], "never twice"
-    items = sdlc.open_items(root / "work" / NAME)
+    items = sdlc.open_items(root / ".sdlc" / "work" / NAME)
     assert [i["text"] for i in items] == ["code: code fix 1", "security: security fix 1"]
 
 
@@ -310,12 +312,12 @@ def test_decisions_reach_the_ledger_once_with_stable_ids(tmp_path, capsys) -> No
     root = _change(tmp_path)
     _build_report(root, 1, "- DECISION: [blocking] Keep drafts 30 days or forever? Recommend 30.\n")
     _review(root, 1, "security", "VERDICT: PASS", "")
-    review = root / "work" / NAME / "reviews" / "round-1" / "security.md"
+    review = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "security.md"
     review.write_text(review.read_text() + "- DECISION: [default] Log the draft id? Assuming no.\n")
     code, out = _run(capsys, factory.cmd_decisions, root, "008")
     assert code == 0 and out["added"] == ["D1", "D2"]
     assert (out["pending"], out["assumed"]) == (["D1"], ["D2"])
-    ledger = (root / "work" / NAME / "decisions.md").read_text(encoding="utf-8")
+    ledger = (root / ".sdlc" / "work" / NAME / "decisions.md").read_text(encoding="utf-8")
     assert "- [ ] D1 (builder round 1, blocking): Keep drafts 30 days" in ledger
     assert "- [ ] D2 (security round 1, default): Log the draft id?" in ledger
     assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == [], "never twice"
@@ -327,7 +329,7 @@ def test_a_blocking_decision_pauses_the_run_until_the_person_answers(tmp_path, c
     _run(capsys, factory.cmd_decisions, root, "008")
     out = _verdicts(root, capsys)
     assert (out["next"], out["pending"]) == ("decide", ["D1"])
-    ledger = root / "work" / NAME / "decisions.md"
+    ledger = root / ".sdlc" / "work" / NAME / "decisions.md"
     ledger.write_text(
         ledger.read_text().replace(
             "- [ ] D1 (builder round 1, blocking): Keep drafts 30 days or forever?",
@@ -337,7 +339,7 @@ def test_a_blocking_decision_pauses_the_run_until_the_person_answers(tmp_path, c
     )
     out = _verdicts(root, capsys)
     assert out["next"] == "review" and out["pending"] == []
-    [d1] = factory.read_ledger(root / "work" / NAME)
+    [d1] = factory.read_ledger(root / ".sdlc" / "work" / NAME)
     assert (d1["decided"], d1["answer"], d1["text"]) == (
         True, "30 days", "Keep drafts 30 days or forever?"
     )  # fmt: skip
@@ -360,18 +362,18 @@ def test_sdlc_reads_a_factory_built_change_like_any_other(tmp_path) -> None:
     _round(root, 1)
     _build_report(root, 1, "- DECISION: [default] Paginate at 50? Assuming 50.\n")
     assert factory.cmd_decisions(root, "008") == 0, "a ledger in the folder too"
-    (root / "work" / NAME / "decision.md").write_text("DECISION: READY\n\nAll pass.\n")
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text("DECISION: READY\n\nAll pass.\n")
     a = sdlc.analyze(root)
     assert a["problems"] == []
     [rec] = a["changes"]
     assert (rec["id"], rec["tier"], rec["stage"], rec["impact"]) == ("008", 2, "test", "minor")
     assert rec["unfilled"] == [] and rec["undone"] == []
     # Shipped and closed the way close leaves it, the outer loops read it unchanged.
-    intent = root / "work" / NAME / "intent.md"
+    intent = root / ".sdlc" / "work" / NAME / "intent.md"
     intent.write_text(intent.read_text().replace("stage: test", "stage: shipped"))
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "ship 008")
-    _git(root, "rm", "-r", "-q", f"work/{NAME}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{NAME}")
     _git(root, "commit", "-q", "-m", f"Close {NAME}")
     _git(root, "branch", "-q", "-f", "main", "HEAD")
     [closed] = sdlc.closed_changes(root, None, "main")

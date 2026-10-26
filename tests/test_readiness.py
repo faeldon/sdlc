@@ -61,7 +61,7 @@ def test_an_ignored_work_is_not_ready(tmp_path: Path, capsys) -> None:
     out = _readiness(root, capsys)
     assert out["ready"] is True and _items(out)["work"] == "ok"
     assert _items(out)["docs.process"] == "missing" and _items(out)["context"] == "missing"
-    (root / ".gitignore").write_text("work/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".sdlc/work/\n", encoding="utf-8")
     out = _readiness(root, capsys)
     assert out["ready"] is False and _items(out)["work"] == "missing"
 
@@ -102,7 +102,7 @@ def test_candidates_come_from_the_repos_own_task_files(tmp_path: Path, capsys) -
 
 def test_a_process_doc_still_holding_the_template_is_a_warning(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     shutil.copy(sdlc.DEFAULTS_DIR / "SDLC.md", root / ".sdlc" / "SDLC.md")
     assert _items(_readiness(root, capsys))["docs.process"] == "warn"
 
@@ -206,7 +206,7 @@ def test_the_health_doc_is_off_without_a_scan_and_drafted_once_there_is_one(
 ) -> None:
     root = _repo(tmp_path)
     assert _items(_readiness(root, capsys))["docs.health"] == "n/a"
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\nscan = "make scan"\n', "utf-8")
     assert _items(_readiness(root, capsys))["docs.health"] == "missing"
     out = _readiness(root, capsys)

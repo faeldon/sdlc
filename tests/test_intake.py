@@ -50,9 +50,11 @@ def _entry(entry_id: str, title: str, tag: str = "idea", extra: str = "") -> str
 
 def _repo(tmp_path: Path, *entries: str) -> Path:
     root = tmp_path / "repo"
-    (root / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work").mkdir(parents=True)
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    (root / "work" / "inbox.md").write_text("# Inbox\n\n" + "".join(entries), encoding="utf-8")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "# Inbox\n\n" + "".join(entries), encoding="utf-8"
+    )
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
@@ -61,7 +63,7 @@ def _repo(tmp_path: Path, *entries: str) -> Path:
 
 def _change(root: Path, name: str, closes: str) -> Path:
     number, slug = name.split("-", 1)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True, exist_ok=True)
     text = INTENT.format(id=number, slug=slug, closes=closes)
     (folder / "intent.md").write_text(text, encoding="utf-8")

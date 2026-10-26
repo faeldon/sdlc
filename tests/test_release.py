@@ -61,7 +61,7 @@ def _repo(tmp_path: Path, version: str = "0.4.2", config: str = CONFIG, tag: boo
     root.mkdir()
     (root / "pkg.json").write_text(PKG.replace("{v}", version), encoding="utf-8")
     (root / "pyproject.toml").write_text(PYPROJECT.replace("{v}", version), encoding="utf-8")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text(config, encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
@@ -74,7 +74,7 @@ def _repo(tmp_path: Path, version: str = "0.4.2", config: str = CONFIG, tag: boo
 def _ship(root: Path, name: str, impact: str | None = "patch", title: str = "") -> None:
     """The change's own commit: its folder, shipped, and the code it carries."""
     nid, slug = name.split("-", 1)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
     line = f"impact: {impact}\n" if impact is not None else ""
     text = INTENT.format(id=nid, slug=slug, impact=line, title=title or slug.replace("-", " "))
@@ -87,7 +87,7 @@ def _ship(root: Path, name: str, impact: str | None = "patch", title: str = "") 
 def _close(root: Path, name: str, impact: str | None = "patch", title: str = "") -> None:
     """What close leaves: the change's commit, then `Close NNN-slug` removing its folder."""
     _ship(root, name, impact, title)
-    _git(root, "rm", "-r", "-q", f"work/{name}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}", "-m", "Its artifacts are in x.")
 
 
@@ -175,7 +175,7 @@ def test_a_landed_folder_counts_and_an_open_change_does_not(tmp_path: Path) -> N
     root = _repo(tmp_path)
     _ship(root, "002-reopen-drafts", "minor")  # merged, but close stopped before its Close commit
     _git(root, "worktree", "add", "-q", "-b", "003-export-totals", str(tmp_path / "wt"))
-    wt = tmp_path / "wt" / "work" / "003-export-totals"
+    wt = tmp_path / "wt" / ".sdlc" / "work" / "003-export-totals"
     wt.mkdir(parents=True)
     (wt / "intent.md").write_text(
         INTENT.format(id="003", slug="export-totals", impact="", title="t").replace(
@@ -214,15 +214,15 @@ def test_closed_changes_carries_what_both_outer_loops_read(tmp_path: Path) -> No
 
 def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    folder = root / "work" / "002-reopen-drafts"
+    folder = root / ".sdlc" / "work" / "002-reopen-drafts"
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text("---\nid: [unclosed\n---\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "ship")
-    _git(root, "rm", "-r", "-q", "work")
+    _git(root, "rm", "-r", "-q", ".sdlc/work")
     _git(root, "commit", "-q", "-m", "Close 002-reopen-drafts")
     [rec] = sdlc.closed_changes(root, None, "main")
-    assert "no readable work/002-reopen-drafts/intent.md" in rec["problems"][0]
+    assert "has no readable intent.md" in rec["problems"][0]
 
 
 def test_without_reading_it_lists_by_name_only(tmp_path: Path) -> None:

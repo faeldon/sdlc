@@ -174,10 +174,21 @@ def find_change(root: Path, ident: str) -> tuple[Path | None, str | None]:
             f"run it from change {ident}'s own worktree: this checkout is on {branch or '?'!r}, "
             "not that change's NNN-slug branch"
         )
-    folder = root / "work" / branch
+    rel = work_rel(root)
+    folder = root / rel / branch
     if not (folder / "intent.md").is_file():
-        return None, f"work/{branch}/intent.md doesn't exist on this branch"
+        return None, f"{rel}/{branch}/intent.md doesn't exist on this branch"
     return folder, None
+
+
+def work_rel(root: Path) -> str:
+    """The change folder, relative to the checkout: `.sdlc/work`, or the old `work` in a repo that
+    has it and hasn't moved. `sdlc.py`'s `work_rel()` rule, kept here because this script never
+    imports that one; a change's worktree holds what its main checkout did when it branched. Until
+    1.5.0, as there."""
+    if (root / "work").is_dir() and not (root / ".sdlc" / "work").is_dir():
+        return "work"
+    return ".sdlc/work"
 
 
 def max_runs(cfg: dict) -> int:

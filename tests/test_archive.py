@@ -234,19 +234,19 @@ def _state_dir(root: Path) -> Path:
 def _open(root: Path, slug: str = "thing") -> Path:
     """A change opened in its own worktree; its folder there."""
     assert sdlc.cmd_new(root, slug, 1, f"The {slug}", worktree=True) == 0
-    return next((root / ".claude" / "worktrees").glob(f"*-{slug}/work/*-{slug}"))
+    return next((root / ".claude" / "worktrees").glob(f"*-{slug}/.sdlc/work/*-{slug}"))
 
 
 def _shipped(root: Path, slug: str = "thing", extra: dict[str, str] | None = None) -> str:
     """A change opened, written, shipped and committed in its worktree, as close finds it; its
-    name. Its folder on main, once landed, is `root / "work" / name`."""
+    name. Its folder on main, once landed, is `root / ".sdlc" / "work" / name`."""
     folder = _open(root, slug)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
     for name, text in (extra or {}).items():
         (folder / name).write_text(text, encoding="utf-8")
     assert sdlc.cmd_ship(root, folder.name.split("-")[0]) == 0
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     _git(tree, "add", "-A")
     _git(tree, "commit", "-q", "-m", f"ship {folder.name}")
     return folder.name
@@ -277,7 +277,7 @@ def _close(root: Path, capsys, ident: str, check: bool = False) -> tuple[int, di
 
 def _on_main(root: Path, name: str) -> bool:
     """Whether main still holds the change's folder: close removes it only after the mirror."""
-    return (root / "work" / name).is_dir()
+    return (root / ".sdlc" / "work" / name).is_dir()
 
 
 # ---------------------------------------------------------------- numbered by GitHub
@@ -289,7 +289,7 @@ def test_new_numbers_the_change_after_the_issue_it_opens(tmp_path, gh, monkeypat
     root = _repo(tmp_path)
     folder = _open(root)
     assert folder.name == "142-thing"
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     [issue] = gh()["issues"]
     assert issue["number"] == 142 and issue["state"] == "OPEN"
     assert issue["title"] == "The thing"
@@ -315,7 +315,7 @@ def test_a_failed_issue_means_no_change(tmp_path, gh, monkeypatch, capsys) -> No
     monkeypatch.setenv("FAKE_GH_FAIL", "create")
     assert sdlc.cmd_new(root, "thing", 1, None) == 1
     assert "issue create failed" in capsys.readouterr().err
-    assert not (root / "work").exists() or not any((root / "work").iterdir())
+    assert not (root / ".sdlc" / "work").exists() or not any((root / ".sdlc" / "work").iterdir())
     assert not (_state_dir(root) / "last-id").exists()
 
 
@@ -327,7 +327,7 @@ def test_a_worktree_that_fails_closes_its_issue_as_not_planned(tmp_path, gh, cap
     [issue] = gh()["issues"]
     assert issue["state"] == "CLOSED" and issue["reason"] == "not planned"
     assert {lb["name"] for lb in issue["labels"]} == {"sdlc", "tier: 1"}, "no stage: plan left"
-    assert not (root / "work").exists()
+    assert not (root / ".sdlc" / "work").exists()
     assert f"closed   {issue['url']}  (not planned)" in capsys.readouterr().out
 
 
@@ -369,11 +369,11 @@ def test_no_base_branch_means_no_issue(tmp_path, gh, capsys, config, base, why) 
 def test_an_issue_number_a_local_folder_holds_is_refused(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _config(root, '[archive]\ntarget = "github"\n')
-    (root / "work" / "001-old").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "001-old").mkdir(parents=True)
     assert sdlc.cmd_new(root, "fresh", 1, None) == 1
     assert "already holds, so closed it" in capsys.readouterr().err
     assert gh()["issues"][0]["reason"] == "not planned"
-    assert not (root / "work" / "001-fresh").exists()
+    assert not (root / ".sdlc" / "work" / "001-fresh").exists()
 
 
 # Too long for one body: the intent and spec fit, plan and notes overflow into a comment each.
@@ -476,7 +476,7 @@ def _own(root: Path, script: str = "print('main')\n", manifest: str = '{"name": 
 def _landing(root: Path, files: dict[str, str]) -> str:
     """A change shipped with `files` (paths from the worktree's root) in its commit; its name."""
     folder = _open(root)
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
     for path, text in files.items():
@@ -601,7 +601,7 @@ def own_tree(tmp_path, monkeypatch):
     root = _own(_repo(tmp_path, github=False))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "elsewhere")
     monkeypatch.delenv(sdlc.OWN_SCRIPT_ENV, raising=False)
-    return root, _open(root).parent.parent
+    return root, sdlc.checkout_of(_open(root))
 
 
 @pytest.mark.parametrize("how", ["committed", "uncommitted", "untracked"])
@@ -650,7 +650,7 @@ def test_a_host_never_runs_a_changes_own_script(tmp_path, monkeypatch, manifest)
         _own(root, manifest=manifest)
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "elsewhere")
     monkeypatch.delenv(sdlc.OWN_SCRIPT_ENV, raising=False)
-    tree = _open(root).parent.parent
+    tree = sdlc.checkout_of(_open(root))
     (tree / "scripts").mkdir(exist_ok=True)
     (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
     assert sdlc._own_script(tree) is None
@@ -772,7 +772,7 @@ def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -
             ["scripts/sdlc.py", "skills/ship/SKILL.md", "defaults/REVIEW.md", "README.md"],
             {"scripts": True, "skills": ["sdlc:ship"], "hosts": ["defaults/REVIEW.md"]},
         ),
-        (["README.md", "docs/CONTRIBUTING.md", "work/001-thing/intent.md", "tests/t.py"], {}),
+        (["README.md", "docs/CONTRIBUTING.md", ".sdlc/work/001-thing/intent.md", "tests/t.py"], {}),
     ],
 )
 def test_landing_reach_sorts_paths_into_what_each_needs(paths, reaches) -> None:
@@ -887,7 +887,7 @@ def _factory_shipped(root: Path) -> str:
     """A change the factory built, shipped with 7 lines of code and 3 of tests beside its
     folder; its name."""
     folder = _open(root)
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
     for name, text in FACTORY_FILES.items():
@@ -1104,7 +1104,7 @@ def _dropped(
     intent.write_text(text + "\n## Dropped\n\nThe drafts it reopens are gone.\n\nMore.\n")
     for name, text in (extra or {}).items():
         (folder / name).write_text(text, encoding="utf-8")
-    assert sdlc.cmd_drop(folder.parent.parent, None) == 0
+    assert sdlc.cmd_drop(sdlc.checkout_of(folder), None) == 0
     return folder.name
 
 
@@ -1150,7 +1150,7 @@ def test_a_dropped_change_is_recorded_on_main_and_its_issue_closed_not_planned(
     assert not tree.exists() and _git(root, "branch", "--list", name) == ""
     _git(root, "merge-base", "--is-ancestor", tip, "main")  # still reachable: raises if not
     assert not _on_main(root, name)
-    intent = _git(root, "show", f"main^2:work/{name}/intent.md")
+    intent = _git(root, "show", f"main^2:.sdlc/work/{name}/intent.md")
     assert "stage: dropped" in intent and "dropped_at: build" in intent
 
 
@@ -1166,7 +1166,7 @@ def test_a_change_dropped_at_intent_is_committed_and_recorded_too(tmp_path, gh, 
 def test_dropping_a_change_set_to_dropped_by_hand_finds_how_far_it_got(tmp_path, gh) -> None:
     root = _repo(tmp_path)
     folder = _open(root)
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("stage: plan\n", "stage: test\n", 1))
     _git(tree, "add", "-A")
@@ -1181,7 +1181,7 @@ def test_dropping_a_change_set_to_dropped_by_hand_finds_how_far_it_got(tmp_path,
 def test_drop_refuses_without_a_reason_or_with_other_work_uncommitted(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     folder = _open(root)
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     (tree / "half-done.py").write_text("x = 1\n", encoding="utf-8")
     capsys.readouterr()
     assert sdlc.cmd_drop(tree, None) == 1
@@ -1269,7 +1269,7 @@ def test_target_none_still_removes_the_folder(tmp_path, gh, capsys) -> None:
     assert code == 0 and out["archive"]["kept_because"] == "archive.target is none", out
     assert "archive" not in out["done"] and gh()["calls"] == []
     assert not _on_main(root, name)
-    assert "stage: shipped" in _git(root, "show", f"main~1:work/{name}/intent.md")
+    assert "stage: shipped" in _git(root, "show", f"main~1:.sdlc/work/{name}/intent.md")
 
 
 def test_a_host_command_archives_and_says_where(tmp_path, gh, capsys) -> None:
@@ -1326,9 +1326,9 @@ def test_config_says_whether_close_can_archive_and_who_numbers(tmp_path, gh, cap
 
 def test_last_id_lives_in_sdlc_and_survives_deleting_work(tmp_path, gh) -> None:
     root = _repo(tmp_path, github=False)
-    tree = _open(root, "first").parent.parent
+    tree = sdlc.checkout_of(_open(root, "first"))
     assert (_state_dir(tree) / "last-id").read_text(encoding="utf-8") == "001\n"
-    shutil.rmtree(tree / "work")
+    shutil.rmtree(tree / ".sdlc" / "work")
     assert sdlc.next_id(root) == "002"
 
 
@@ -1339,7 +1339,9 @@ def test_two_open_changes_each_take_an_issue(tmp_path, gh, monkeypatch) -> None:
     assert sdlc.cmd_new(root, "first", 1, None, worktree=True) == 0
     assert sdlc.cmd_new(root, "second", 1, None, worktree=True) == 0
     assert [i["number"] for i in gh()["issues"]] == [42, 43]
-    assert (root / ".claude" / "worktrees" / "043-second" / "work" / "043-second").is_dir()
+    assert (
+        root / ".claude" / "worktrees" / "043-second" / ".sdlc" / "work" / "043-second"
+    ).is_dir()
 
 
 def test_a_missing_counter_carries_on_from_the_closes_in_history(tmp_path) -> None:
@@ -1572,7 +1574,7 @@ def test_a_field_github_refuses_is_skipped_and_the_rest_land(
 
     _set(folder, "impact:\n", "impact: none\n")
     assert sdlc.cmd_ship(root, "001") == 0
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     _git(tree, "add", "-A")
     _git(tree, "commit", "-q", "-m", "ship 001-thing")
     code, out = _close(root, capsys, "001")
@@ -1667,7 +1669,7 @@ def _shipped_closing(root: Path, closes: str) -> str:
     _set(folder, "impact:\n", "impact: none\n")
     _set(folder, "depends_on:\n", f"depends_on:\ncloses: [{closes}]\n")
     assert sdlc.cmd_ship(root, "001") == 0
-    tree = folder.parent.parent
+    tree = sdlc.checkout_of(folder)
     _git(tree, "add", "-A")
     _git(tree, "commit", "-q", "-m", "ship 001-thing")
     return folder.name
@@ -1708,12 +1710,12 @@ def test_a_dropped_change_sends_the_issues_it_would_close_back_to_triage(
     root = _repo(tmp_path)
     folder = _open(root)
     _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
-    _git(folder.parent.parent, "add", "-A")
-    _git(folder.parent.parent, "commit", "-q", "-m", "closes 50")
+    _git(sdlc.checkout_of(folder), "add", "-A")
+    _git(sdlc.checkout_of(folder), "commit", "-q", "-m", "closes 50")
     _filed(gh, 50, labels=("triaged",), parent=1)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text() + "\n## Dropped\n\nNot needed.\n")
-    assert sdlc.cmd_drop(folder.parent.parent, None) == 0
+    assert sdlc.cmd_drop(sdlc.checkout_of(folder), None) == 0
     code, out = _close(root, capsys, "001")
     assert code == 0, out
     issue = _issue(gh, 50)
@@ -1725,11 +1727,11 @@ def test_a_dropped_change_sends_the_issues_it_would_close_back_to_triage(
 
 
 def _register(root: Path, text: str, commit: bool = True) -> None:
-    """work/inbox.md on main holding these entries, committed unless `commit` is False."""
-    (root / "work").mkdir(exist_ok=True)
-    (root / "work" / "inbox.md").write_text(f"# Inbox\n\n{text}", encoding="utf-8")
+    """.sdlc/work/inbox.md on main holding these entries, committed unless `commit` is False."""
+    (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(f"# Inbox\n\n{text}", encoding="utf-8")
     if commit:
-        _git(root, "add", "work/inbox.md")
+        _git(root, "add", ".sdlc/work/inbox.md")
         _git(root, "commit", "-q", "-m", "File entries")
 
 
@@ -1773,20 +1775,22 @@ def test_mark_triaged_marks_what_main_has_committed_once(tmp_path, gh, capsys) -
         "## [2026-10-26-2] [idea] Not yet committed\n\nx\n\nIssue: #20\n",
         commit=False,
     )
-    _git(root, "add", "work/inbox.md")
+    _git(root, "add", ".sdlc/work/inbox.md")
     _git(root, "commit", "-q", "-m", "File 2026-10-26-1")
-    text = (root / "work" / "inbox.md").read_text()
+    text = (root / ".sdlc" / "work" / "inbox.md").read_text()
     _git(root, "reset", "-q", "HEAD~1", "--soft")
-    (root / "work" / "inbox.md").write_text(text.split("## [2026-10-26-2]")[0])
-    _git(root, "add", "work/inbox.md")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(text.split("## [2026-10-26-2]")[0])
+    _git(root, "add", ".sdlc/work/inbox.md")
     _git(root, "commit", "-q", "-m", "File 2026-10-26-1")
-    (root / "work" / "inbox.md").write_text(text)  # the second entry, written but uncommitted
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        text
+    )  # the second entry, written but uncommitted
     for _ in range(2):
         code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
         assert code == 0, out
     first, second, loose = _issue(gh, 12), _issue(gh, 15), _issue(gh, 20)
     assert [c["body"] for c in first["comments"]] == [
-        "<!-- sdlc:intake:2026-10-26-1 -->\nFiled as 2026-10-26-1 ([bug]) in work/inbox.md."
+        "<!-- sdlc:intake:2026-10-26-1 -->\nFiled as 2026-10-26-1 ([bug]) in .sdlc/work/inbox.md."
     ]
     assert [c["body"] for c in second["comments"]] == [
         "<!-- sdlc:intake:2026-10-26-1 -->\n"
@@ -1814,7 +1818,7 @@ def test_mark_triaged_points_an_attached_issue_at_its_change(tmp_path, gh, capsy
 def test_mark_triaged_refuses_a_worktree(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     folder = _open(root)
-    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(folder.parent.parent))
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(sdlc.checkout_of(folder)))
     assert code == 1 and "not a worktree" in out["refusals"][0]
 
 
@@ -1939,8 +1943,8 @@ def test_a_seed_split_off_at_ship_is_told_where_it_stays_at_close(tmp_path, gh, 
     _register(root, "")
     folder = _open(root)
     _filed(gh, 15, labels=("triaged",), parent=1)
-    tree = folder.parent.parent
-    (tree / "work" / "inbox.md").write_text(
+    tree = sdlc.checkout_of(folder)
+    (tree / ".sdlc" / "work" / "inbox.md").write_text(
         "# Inbox\n\n## [2026-10-26-1] [idea] Reopen drafts too\n\n"
         "Split from 001-thing: reopening isn't covered.\n\nIssue: #15\n",
         encoding="utf-8",
@@ -1956,6 +1960,6 @@ def test_a_seed_split_off_at_ship_is_told_where_it_stays_at_close(tmp_path, gh, 
     assert issue["state"] == "OPEN"
     assert issue["comments"][-1]["body"] == (
         "<!-- sdlc:intake:2026-10-26-1 -->\n"
-        "Not resolved by 001-thing; it stays open as 2026-10-26-1 in work/inbox.md."
+        "Not resolved by 001-thing; it stays open as 2026-10-26-1 in .sdlc/work/inbox.md."
     )
     assert out["intake"]["done"] == ["#15: 2026-10-26-1"]

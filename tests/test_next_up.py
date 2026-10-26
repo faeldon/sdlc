@@ -60,7 +60,7 @@ def _seed(day: str, title: str, tag: str = "idea", after: str = "") -> str:
 
 
 def _ideas(root: Path, *seeds: str) -> None:
-    _write(root, "work/inbox.md", "# Ideas\n\nSeeds, not a backlog.\n\n" + "".join(seeds))
+    _write(root, ".sdlc/work/inbox.md", "# Ideas\n\nSeeds, not a backlog.\n\n" + "".join(seeds))
 
 
 def _nit(nid: str, theme: str, raised: str, cost: str = "S") -> str:
@@ -95,13 +95,13 @@ def _close(root: Path, name: str, idea: str) -> None:
     nid, slug = name.split("-", 1)
     _write(
         root,
-        f"work/{name}/intent.md",
+        f".sdlc/work/{name}/intent.md",
         f"---\nid: {nid}\nslug: {slug}\ntier: 1\nimpact: patch\nstage: shipped\n"
         f'created: 2026-10-01\nupdated: 2026-10-01\nidea: "{idea}"\n---\n\n# {nid} — {slug}\n',
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}")
-    _git(root, "rm", "-r", "-q", f"work/{name}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}")
 
 
@@ -155,7 +155,9 @@ def test_next_up_skips_a_seed_an_open_change_builds(tmp_path: Path) -> None:
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "seeds")
     assert sdlc.cmd_new(root, "share-drafts", 1, None, worktree=True) == 0
-    intent = root / ".claude" / "worktrees" / "001-share-drafts" / "work" / "001-share-drafts"
+    intent = (
+        root / ".claude" / "worktrees" / "001-share-drafts" / ".sdlc" / "work" / "001-share-drafts"
+    )
     text = (intent / "intent.md").read_text(encoding="utf-8")
     (intent / "intent.md").write_text(
         text.replace("idea:\n", 'idea: "Share drafts"\n', 1), encoding="utf-8"

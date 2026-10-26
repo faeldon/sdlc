@@ -185,7 +185,7 @@ def test_is_unfilled_tolerates_one_stray_bracket(tmp_path: Path) -> None:
 
 
 def _change(root: Path, name: str, frontmatter_body: str, extra: dict[str, str] | None = None):
-    d = root / "work" / name
+    d = root / ".sdlc" / "work" / name
     d.mkdir(parents=True)
     (d / "intent.md").write_text(frontmatter_body, encoding="utf-8")
     for fname, text in (extra or {}).items():
@@ -293,9 +293,9 @@ def test_a_dropped_change_owes_its_reason_and_a_real_stage(tmp_path: Path) -> No
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     details = sorted((p["dir"], p["detail"].split(" ")[0]) for p in a["problems"])
     assert details == [
-        ("work/001-x", "dropped_at"),
-        ("work/001-x", "stage:"),
-        ("work/002-y", "stage:"),
+        (".sdlc/work/001-x", "dropped_at"),
+        (".sdlc/work/001-x", "stage:"),
+        (".sdlc/work/002-y", "stage:"),
     ]
 
 
@@ -326,7 +326,7 @@ def test_next_id_allocates_sequentially(tmp_path: Path) -> None:
 
 
 def test_next_id_starts_at_001_on_an_empty_pipeline(tmp_path: Path) -> None:
-    (tmp_path / "work").mkdir()
+    (tmp_path / ".sdlc" / "work").mkdir(parents=True)
     assert sdlc.next_id(tmp_path) == "001"
 
 
@@ -349,7 +349,7 @@ def test_new_seeds_a_missing_counter_from_the_folders_then_writes_it(tmp_path: P
     """Outside git there is no worktree, so `new` writes the counter in the checkout itself."""
     _change(tmp_path, "007-y", _fm(id="007", slug="y"))
     assert sdlc.cmd_new(tmp_path, "z", 1, None) == 0
-    assert (tmp_path / "work" / "008-z").is_dir()
+    assert (tmp_path / ".sdlc" / "work" / "008-z").is_dir()
     assert (tmp_path / ".sdlc" / "last-id").read_text(encoding="utf-8") == "008\n"
     assert not (tmp_path / ".sdlc" / "last-id.tmp").exists()
 
@@ -358,9 +358,9 @@ def test_a_number_is_never_reused_after_its_folder_is_deleted(tmp_path: Path) ->
     """Scanning the folders would hand 002 out again; the counter remembers it was spent."""
     assert sdlc.cmd_new(tmp_path, "a", 1, None) == 0
     assert sdlc.cmd_new(tmp_path, "b", 1, None) == 0
-    shutil.rmtree(tmp_path / "work" / "002-b")
+    shutil.rmtree(tmp_path / ".sdlc" / "work" / "002-b")
     assert sdlc.cmd_new(tmp_path, "c", 1, None) == 0
-    assert (tmp_path / "work" / "003-c").is_dir()
+    assert (tmp_path / ".sdlc" / "work" / "003-c").is_dir()
 
 
 def test_check_flags_an_unreadable_counter(tmp_path: Path) -> None:
@@ -383,8 +383,8 @@ def test_check_is_quiet_with_no_counter_or_one_behind_or_ahead_of_the_folders(
 
 
 def test_orphan_building_idea_is_flagged(tmp_path: Path) -> None:
-    (tmp_path / "work").mkdir()
-    (tmp_path / "work" / "inbox.md").write_text(
+    (tmp_path / ".sdlc" / "work").mkdir(parents=True)
+    (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Column level lineage export\n\nSome prose.\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -395,7 +395,7 @@ def test_building_idea_with_a_folder_is_quiet(tmp_path: Path) -> None:
     """The slug match is deliberately loose both ways: a folder slug is a shortening of the idea's
     title, never a copy, so an exact comparison would nag about every idea being worked on."""
     _change(tmp_path, "001-column-lineage", _fm(slug="column-lineage"))
-    (tmp_path / "work" / "inbox.md").write_text(
+    (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Column lineage\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -411,7 +411,7 @@ def test_building_idea_linked_only_by_frontmatter_is_quiet(tmp_path: Path) -> No
         "001-search-front-end",
         _fm(slug="search-front-end", idea='"[2026-10-01] [seed] Search as its own page"'),
     )
-    (tmp_path / "work" / "inbox.md").write_text(
+    (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -429,7 +429,7 @@ def test_building_idea_linked_only_to_a_dropped_change_is_flagged(tmp_path: Path
             idea='"[2026-10-01] [seed] Search as its own page"',
         ),
     )
-    (tmp_path / "work" / "inbox.md").write_text(
+    (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(
         "## [2026-10-01] [building] Search as its own page\n", encoding="utf-8"
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -449,7 +449,7 @@ def test_new_starts_no_notes(tmp_path: Path, tier: int) -> None:
     """Notes are optional: a skill starts the file when there's something to note, so an untouched
     one never lands as an empty comment on the change's issue."""
     assert sdlc.cmd_new(tmp_path, "quiet", tier, None) == 0
-    folder = next((tmp_path / "work").glob("*-quiet"))
+    folder = next((tmp_path / ".sdlc" / "work").glob("*-quiet"))
     assert sorted(p.name for p in folder.iterdir()) == sorted(sdlc.TIER_ARTIFACTS[tier])
 
 
@@ -468,7 +468,7 @@ def test_ship_stamps_in_place(tmp_path: Path) -> None:
     d = _change(tmp_path, "001-x", _fm(stage="build", impact="patch"))
     assert sdlc.cmd_ship(tmp_path, "001") == 0
     assert "stage: shipped" in (d / "intent.md").read_text(encoding="utf-8")
-    assert sorted(p.name for p in (tmp_path / "work").iterdir()) == ["001-x"]
+    assert sorted(p.name for p in (tmp_path / ".sdlc" / "work").iterdir()) == ["001-x"]
 
 
 # ---------------------------------------------------------------- release impact
@@ -555,7 +555,7 @@ def test_undone_prints_the_items_as_json(tmp_path: Path, capsys) -> None:
     assert sdlc.cmd_undone(tmp_path, "001") == 0
     out = json.loads(capsys.readouterr().out)
     assert out["change"] == "001-x"
-    assert out["notes"] == "work/001-x/notes.md"
+    assert out["notes"] == ".sdlc/work/001-x/notes.md"
     assert [i["line"] for i in out["items"]] == [5, 6, 15]
 
 
@@ -601,7 +601,7 @@ def _repo(tmp_path: Path, trunk: str = "main") -> Path:
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
     (root / "README.md").write_text("a repo\n", encoding="utf-8")
     if trunk != "main":
-        (root / ".sdlc").mkdir()
+        (root / ".sdlc").mkdir(exist_ok=True)
         (root / ".sdlc" / "config.toml").write_text(f'[git]\nbase = "{trunk}"\n', "utf-8")
     _git(root, "init", "-q", "-b", trunk)
     _git(root, "add", "-A")
@@ -657,7 +657,7 @@ def test_new_without_a_worktree_writes_the_counter_where_it_runs(tmp_path: Path)
     tree = _sibling(root, "side")
     assert sdlc.cmd_new(tree, "here", 1, None) == 0
     assert (tree / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
-    assert (tree / "work" / "001-here" / "intent.md").is_file()
+    assert (tree / ".sdlc" / "work" / "001-here" / "intent.md").is_file()
     assert _git(root, "status", "--porcelain") == ""
 
 
@@ -666,7 +666,7 @@ def test_new_refuses_a_slug_already_in_the_main_checkout(tmp_path: Path) -> None
     tree = _sibling(root, "side")
     _change(root, "003-same-thing", _fm(id="003"))
     assert sdlc.cmd_new(tree, "same-thing", 1, None) == 1
-    assert not (tree / "work" / "004-same-thing").exists()
+    assert not (tree / ".sdlc" / "work" / "004-same-thing").exists()
 
 
 def test_new_refuses_a_slug_open_in_another_worktree(tmp_path: Path) -> None:
@@ -678,9 +678,9 @@ def test_new_refuses_a_slug_open_in_another_worktree(tmp_path: Path) -> None:
 
 def test_new_refuses_while_work_is_ignored(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
-    (root / ".gitignore").write_text("work/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".sdlc/work/\n", encoding="utf-8")
     assert sdlc.cmd_new(root, "thing", 1, None, worktree=True) == 1
-    assert "remove the `work/` line from .gitignore" in capsys.readouterr().err
+    assert "is gitignored: remove the line that ignores it" in capsys.readouterr().err
     assert "001-thing" not in _git(root, "branch", "--list")
 
 
@@ -688,7 +688,7 @@ def test_check_flags_an_ignored_work(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _change(root, "001-x", _fm())
     assert sdlc.analyze(root)["problems"] == []
-    (root / ".gitignore").write_text("work/\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".sdlc/work/\n", encoding="utf-8")
     assert [p["kind"] for p in sdlc.analyze(root)["problems"]] == ["ignored"]
 
 
@@ -707,8 +707,8 @@ def test_new_worktree_makes_the_folder_in_the_worktree_and_leaves_main_untouched
     tree = root / ".claude" / "worktrees" / "001-fresh-thing"
     assert _git(tree, "branch", "--show-current") == "001-fresh-thing"
     assert _git(tree, "rev-parse", "HEAD") == main_sha
-    assert (tree / "work" / "001-fresh-thing" / "intent.md").is_file()
-    assert not (root / "work").exists()
+    assert (tree / ".sdlc" / "work" / "001-fresh-thing" / "intent.md").is_file()
+    assert not (root / ".sdlc" / "work").exists()
     assert _git(root, "status", "--porcelain") == ""
 
 
@@ -717,8 +717,8 @@ def test_new_worktree_from_inside_a_worktree_lands_under_the_main_checkout(tmp_p
     tree = _sibling(root, "side")
     assert sdlc.cmd_new(tree, "nested", 1, None, worktree=True) == 0
     made = root / ".claude" / "worktrees" / "001-nested"
-    assert (made / "work" / "001-nested" / "intent.md").is_file()
-    assert not (tree / "work").exists() and not (root / "work").exists()
+    assert (made / ".sdlc" / "work" / "001-nested" / "intent.md").is_file()
+    assert not (tree / ".sdlc" / "work").exists() and not (root / ".sdlc" / "work").exists()
 
 
 def test_status_sees_changes_in_every_worktree_from_any_checkout(tmp_path: Path) -> None:
@@ -745,7 +745,7 @@ def test_new_worktree_makes_no_folder_and_writes_no_counter_when_the_worktree_fa
     root = _repo(tmp_path)
     assert sdlc.cmd_new(root, "thing", 1, None, worktree=True, base="no-such-branch") == 1
     assert "001-thing" not in _git(root, "branch", "--list")
-    assert not (root / "work" / "001-thing").exists()
+    assert not (root / ".sdlc" / "work" / "001-thing").exists()
     assert not (root / ".sdlc" / "last-id").exists()
     assert sdlc.next_id(root) == "001"
 
@@ -758,7 +758,7 @@ def test_new_worktree_writes_the_counter_in_the_worktree_not_under_git(tmp_path:
     assert _git(root, "status", "--porcelain") == ""
     assert (tree / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
     untracked = {ln[3:] for ln in _git(tree, "status", "--porcelain").splitlines()}
-    assert {".sdlc/", "work/"} <= untracked
+    assert {".sdlc/"} <= untracked
     assert not (root / ".sdlc" / "last-id").exists()
 
 
@@ -769,7 +769,7 @@ def test_an_open_change_holds_its_number_with_main_counter_behind(tmp_path: Path
     assert sdlc.cmd_new(root, "first", 1, None, worktree=True) == 0
     assert sdlc.cmd_new(root, "second", 1, None, worktree=True) == 0
     assert not (root / ".sdlc" / "last-id").exists()
-    shutil.rmtree(root / ".claude" / "worktrees" / "002-second" / "work" / "002-second")
+    shutil.rmtree(root / ".claude" / "worktrees" / "002-second" / ".sdlc" / "work" / "002-second")
     assert sdlc.next_id(root) == "003"
 
 
@@ -831,12 +831,12 @@ def test_concurrent_worktree_claims_get_distinct_numbers(tmp_path: Path, monkeyp
 def test_next_prints_the_id_and_writes_nothing(tmp_path: Path, monkeypatch, capsys) -> None:
     root = _repo(tmp_path)
     _change(root, "004-there", _fm(id="004"))
-    before = sorted(p.name for p in (root / "work").iterdir())
+    before = sorted(p.name for p in (root / ".sdlc" / "work").iterdir())
     monkeypatch.chdir(root)
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "next"])
     assert sdlc.main() == 0
     assert capsys.readouterr().out.strip() == "005"
-    assert sorted(p.name for p in (root / "work").iterdir()) == before
+    assert sorted(p.name for p in (root / ".sdlc" / "work").iterdir()) == before
 
 
 def test_two_changes_opened_one_after_another_get_consecutive_ids(tmp_path: Path) -> None:
@@ -856,13 +856,13 @@ def _shipped_change(root: Path, slug: str = "thing") -> tuple[Path, str]:
     assert sdlc.cmd_new(root, slug, 1, None, worktree=True) == 0
     branch = next(b for _, b in sdlc.worktrees(root) if b.endswith(f"-{slug}"))
     tree = root / ".claude" / "worktrees" / branch
-    intent = tree / "work" / branch / "intent.md"
+    intent = tree / ".sdlc" / "work" / branch / "intent.md"
     # /sdlc:ship sets the impact the human approved before it runs `ship`.
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
     assert sdlc.cmd_ship(root, branch[:3]) == 0
     (tree / f"{slug}.txt").write_text("the change\n", encoding="utf-8")
     # The change's own paths: its code, its folder and the counter `new` wrote beside it.
-    _git(tree, "add", f"{slug}.txt", "work", ".sdlc")
+    _git(tree, "add", f"{slug}.txt", ".sdlc")
     _git(tree, "commit", "-q", "-m", f"ship {branch}")
     return tree, branch
 
@@ -895,8 +895,11 @@ def test_close_lands_removes_the_folder_in_a_commit_and_tidies(
     assert out["archive"]["kept_because"] == "archive.target is none"
     assert _git(root, "rev-parse", "main~1") == tip
     assert _git(root, "log", "-1", "--format=%s%n%b", "main").splitlines()[0] == f"Close {branch}"
-    assert not (root / "work" / branch).exists() and _git(root, "status", "--porcelain") == ""
-    assert "stage: shipped" in _git(root, "show", f"{tip}:work/{branch}/intent.md")
+    assert (
+        not (root / ".sdlc" / "work" / branch).exists()
+        and _git(root, "status", "--porcelain") == ""
+    )
+    assert "stage: shipped" in _git(root, "show", f"{tip}:.sdlc/work/{branch}/intent.md")
     assert not tree.exists()
     assert branch not in _git(root, "branch", "--list")
 
@@ -1165,7 +1168,7 @@ def test_base_carries_a_factory_run_intact(tmp_path: Path, capsys) -> None:
     """The factory leaves everything uncommitted for ship: all of it survives the update."""
     root = _repo(tmp_path)
     tree = _opened(root)
-    folder = tree / "work" / "001-thing"
+    folder = tree / ".sdlc" / "work" / "001-thing"
     files = {
         folder / "decision.md": "DECISION: READY\n",
         folder / "decisions.md": "- [x] D1 (scope, default): kept small\n",
@@ -1225,8 +1228,10 @@ def test_check_after_the_last_close_still_audits_ideas(tmp_path: Path, capsys, m
     assert _close(root, "001", capsys)[0] == 0
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
     assert sdlc.main() == 0
-    (root / "work").mkdir(exist_ok=True)
-    (root / "work" / "inbox.md").write_text("## [2026-10-01] [building] Orphan\n", encoding="utf-8")
+    (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "## [2026-10-01] [building] Orphan\n", encoding="utf-8"
+    )
     assert sdlc.main() == 1
     assert [p["kind"] for p in sdlc.analyze(root)["problems"]] == ["orphan idea"]
 
@@ -1453,7 +1458,7 @@ def test_target_none_runs_a_change_without_loading_a_tracker(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     root = _repo(tmp_path)
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[archive]\ntarget = "none"\n', encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "no tracker")
@@ -1620,7 +1625,7 @@ def _lookup(root: Path, capsys, *names: str) -> tuple[int, dict]:
 
 def test_lookup_echoes_a_list_and_runs_a_command(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[archive]\ntarget = "none"\n', encoding="utf-8")
     _project(
         root,
@@ -1734,7 +1739,7 @@ def test_evidence_without_a_product_doc_is_warned(tmp_path: Path, capsys) -> Non
 
 
 def test_evidence_must_be_a_list_of_commands(tmp_path: Path) -> None:
-    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text('[retro]\nevidence = "echo"\n', "utf-8")
     _, warnings, _ = sdlc.load_config(tmp_path)
     assert "retro.evidence must be a list of commands" in warnings
@@ -1805,7 +1810,7 @@ def _seeded(tmp_path: Path, idea: str, ideas: str = IDEAS) -> tuple[Path, Path]:
     """A change in a real repo, ready to ship, whose `idea:` is `idea`, beside `ideas`."""
     root = _repo(tmp_path)
     d = _change(root, "001-reopen-drafts", _fm(stage="build", impact="patch", idea=idea))
-    (root / "work" / "inbox.md").write_text(ideas, encoding="utf-8")
+    (root / ".sdlc" / "work" / "inbox.md").write_text(ideas, encoding="utf-8")
     return root, d
 
 
@@ -1825,7 +1830,7 @@ def _staged(root: Path) -> list[str]:
 def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, idea) -> None:
     root, _ = _seeded(tmp_path, idea)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
@@ -1840,7 +1845,7 @@ def test_ship_deletes_an_idea_or_an_older_seed_by_its_id(tmp_path: Path, tag: st
     )
     root, _ = _seeded(tmp_path, "2026-10-02-1", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Inbox\n\n## [2026-10-03-1] [idea] Share drafts\n\nThe last.\n"
     )
 
@@ -1849,14 +1854,14 @@ def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert "Reopen drafts" not in (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "Reopen drafts" not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
 
 
 def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer(tmp_path) -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
     root, _ = _seeded(tmp_path, '"[2026-10-02] [seed] Reopen drafts"', ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03] [seed] Share drafts\n\nThe last.\n"
@@ -1869,7 +1874,7 @@ def test_a_title_holding_an_arrow_is_kept_whole(tmp_path: Path) -> None:
     )
     root, _ = _seeded(tmp_path, "Map intent → spec", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    text = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
     assert "Map intent → spec" not in text and "## [2026-10-01] [seed] Map intent\n" in text
 
 
@@ -1879,13 +1884,13 @@ def test_a_body_line_shaped_like_a_heading_is_never_a_seed(tmp_path: Path) -> No
     )
     root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
     assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
 
 
 def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path) -> None:
     root, _ = _seeded(tmp_path, "Share drafts")
     assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    text = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
     assert text.endswith("Two lines.\n") and "Share drafts" not in text
 
 
@@ -1897,7 +1902,7 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
     err = capsys.readouterr().err
     assert "2 entries named 'Reopen drafts'" in err and "lines 9, 18" in err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
     assert _staged(root) == []
 
 
@@ -1905,7 +1910,7 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
 def test_ship_with_no_seed_to_remove_says_so_and_ships_twice(tmp_path: Path, capsys, ideas):
     root, d = _seeded(tmp_path, "Reopen drafts", ideas or "")
     if ideas is None:
-        (root / "work" / "inbox.md").unlink()
+        (root / ".sdlc" / "work" / "inbox.md").unlink()
     assert sdlc.cmd_ship(root, "001") == 0
     assert "no seed to remove" in capsys.readouterr().out
     assert sdlc.cmd_ship(root, "001") == 0, "a rerun after a refused commit"
@@ -1916,21 +1921,24 @@ def test_ship_with_no_idea_mentions_no_seed(tmp_path: Path, capsys) -> None:
     root, _ = _seeded(tmp_path, "")
     assert sdlc.cmd_ship(root, "001") == 0
     out = capsys.readouterr().out
-    assert "seed" not in out and (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+    assert (
+        "seed" not in out
+        and (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+    )
 
 
 def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, capsys) -> None:
     root, _ = _seeded(tmp_path, "Reopen drafts")
     (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
     (root / "with space.txt").write_text("x\n", encoding="utf-8")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "last-id").write_text("1\n", encoding="utf-8")
     (root / "unrelated.txt").write_text("x\n", encoding="utf-8")
     head = _git(root, "rev-parse", "HEAD")
     assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 0
     assert _staged(root) == [
-        ".sdlc/last-id", "drafts.py", "with space.txt",
-        "work/001-reopen-drafts/intent.md", "work/inbox.md",
+        ".sdlc/last-id", ".sdlc/work/001-reopen-drafts/intent.md", ".sdlc/work/inbox.md",
+        "drafts.py", "with space.txt",
     ]  # fmt: skip
     assert "  staged with space.txt" in capsys.readouterr().out
     assert _git(root, "rev-parse", "HEAD") == head, "ship never commits"
@@ -1949,8 +1957,8 @@ def test_ship_stages_beside_a_deletion_already_staged(tmp_path: Path, capsys) ->
     (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
     assert sdlc.cmd_ship(root, "001") == 0
     assert _staged(root) == [
+        ".sdlc/work/001-reopen-drafts/intent.md", ".sdlc/work/inbox.md",
         "drafts.py", "gone.txt", "half.txt",
-        "work/001-reopen-drafts/intent.md", "work/inbox.md",
     ]  # fmt: skip
     assert _git(root, "diff", "--name-only") == "", "the later edit is staged too"
     assert "  staged gone.txt" in capsys.readouterr().out
@@ -1966,7 +1974,7 @@ def test_a_left_path_that_matches_nothing_refuses_before_any_write(
     assert sdlc.cmd_ship(root, "001", [left]) == 1
     assert f"--leave {left}: not a path the checkout has uncommitted" in capsys.readouterr().err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
     assert _staged(root) == []
 
 
@@ -1978,4 +1986,4 @@ def test_a_left_path_already_staged_refuses_before_any_write(tmp_path: Path, cap
     assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 1
     assert "already staged" in capsys.readouterr().err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
-    assert (root / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS

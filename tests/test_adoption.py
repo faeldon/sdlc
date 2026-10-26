@@ -85,25 +85,28 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert all(v is None for v in out["commands"].values())
     assert out["docs"]["review"]["source"] == "plugin"
     assert out["work"] == {
-        "dir": str(root / "work"),
+        "dir": str(root / ".sdlc" / "work"),
+        "rel": ".sdlc/work",
         "ignored": False,
-        "register": str(root / "work" / "inbox.md"),
+        "register": str(root / ".sdlc" / "work" / "inbox.md"),
     }
     assert out["git"] == {"base": trunk, "base_source": "detected"}
 
     def main_checkout() -> tuple[str, list[str]]:
-        return _git(root, "status", "--porcelain"), sorted(p.name for p in root.rglob("work/*"))
+        return _git(root, "status", "--porcelain"), sorted(
+            p.name for p in root.rglob(".sdlc/work/*")
+        )
 
     before = main_checkout()
     made = _run(root, "new", "first-change", "--tier", "1", "--worktree")
     assert made.returncode == 0, made.stderr
     assert "(plugin template)" in made.stdout
     tree = root / ".claude" / "worktrees" / "001-first-change"
-    intent = tree / "work" / "001-first-change" / "intent.md"
+    intent = tree / ".sdlc" / "work" / "001-first-change" / "intent.md"
     assert intent.is_file()
 
     # From the worktree, `config` points the skills at the worktree's own work/.
-    assert json.loads(_run(tree, "config").stdout)["work"]["dir"] == str(tree / "work")
+    assert json.loads(_run(tree, "config").stdout)["work"]["dir"] == str(tree / ".sdlc" / "work")
 
     # What /sdlc:intent and /sdlc:ship would have written: the prose, and the approved impact.
     intent.write_text(
@@ -122,12 +125,14 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     # One commit carries the code, the change's folder and the counter `new` wrote beside it,
     # every one of them staged by `ship` itself.
     staged = set(_git(tree, "diff", "--cached", "--name-only").splitlines())
-    assert {"feature.txt", "work/001-first-change/intent.md", ".sdlc/last-id"} <= staged, staged
+    assert {"feature.txt", ".sdlc/work/001-first-change/intent.md", ".sdlc/last-id"} <= staged, (
+        staged
+    )
     _git(tree, "commit", "-q", "-m", "ship 001")
     tip = _git(tree, "rev-parse", "HEAD")
     assert "001" in _run(root, "status").stdout, "the main checkout sees the worktree's change"
     assert main_checkout()[0] == before[0], "new and ship never wrote the main checkout"
-    assert not (root / "work").exists()
+    assert not (root / ".sdlc" / "work").exists()
 
     closed = _run(root, "close", "001")
     assert closed.returncode == 0, closed.stdout + closed.stderr
@@ -143,8 +148,8 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert "Sdlc-Totals: elapsed=" in body and "Sdlc-Mode: manual" in body
     assert not tree.exists()
     assert "001-first-change" not in _git(root, "branch", "--list")
-    assert not (root / "work" / "001-first-change").exists()
-    assert "stage: shipped" in _git(root, "show", f"{tip}:work/001-first-change/intent.md")
+    assert not (root / ".sdlc" / "work" / "001-first-change").exists()
+    assert "stage: shipped" in _git(root, "show", f"{tip}:.sdlc/work/001-first-change/intent.md")
     assert (root / ".sdlc" / "last-id").read_text(encoding="utf-8") == "001\n"
     assert _git(root, "status", "--porcelain") == ""
     nxt = _run(root, "next")
@@ -153,7 +158,7 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     # A second change, dropped: what /sdlc:drop runs, then close records it without landing it.
     assert _run(root, "new", "second-try", "--tier", "1", "--worktree").returncode == 0
     tree = root / ".claude" / "worktrees" / "002-second-try"
-    intent = tree / "work" / "002-second-try" / "intent.md"
+    intent = tree / ".sdlc" / "work" / "002-second-try" / "intent.md"
     intent.write_text(
         intent.read_text(encoding="utf-8") + "\n## Dropped\n\nThe first change covered it.\n",
         encoding="utf-8",
@@ -169,7 +174,7 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert _git(root, "log", "-1", "--format=%s", trunk) == "Drop 002-second-try"
     assert _git(root, "rev-parse", f"{trunk}^1") == before
     assert _git(root, "diff", "--name-only", f"{trunk}^1", trunk) == ".sdlc/last-id"
-    assert not tree.exists() and not (root / "work" / "002-second-try").exists()
+    assert not tree.exists() and not (root / ".sdlc" / "work" / "002-second-try").exists()
     assert _git(root, "status", "--porcelain") == ""
     assert _run(root, "next").stdout.strip() == "003", "a dropped change's number stays spent"
 
@@ -190,8 +195,8 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     /sdlc:close run, from filing to the `Sdlc-Fixes:` line retro counts."""
     root = _bare(tmp_path)
     bug_id = _run(root, "next-entry").stdout.strip()
-    (root / "work").mkdir()
-    (root / "work" / "inbox.md").write_text(
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
         f"# Inbox\n\n## [{bug_id}] [bug] The report loses its last row\n\nIt does.\n\n"
         "Severity: high\nPaths: report.txt\n",
         encoding="utf-8",
@@ -203,7 +208,7 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
 
     assert _run(root, "new", "fix-report", "--tier", "1", "--worktree").returncode == 0
     tree = root / ".claude" / "worktrees" / "001-fix-report"
-    intent = tree / "work" / "001-fix-report" / "intent.md"
+    intent = tree / ".sdlc" / "work" / "001-fix-report" / "intent.md"
     text = intent.read_text(encoding="utf-8").replace("impact:\n", "impact: patch\n", 1)
     intent.write_text(text.replace("depends_on:\n", f"depends_on:\nfixes: [{bug_id}]\n", 1))
     (tree / "report.txt").write_text("every row\n", encoding="utf-8")
@@ -214,7 +219,7 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     shipped = _run(tree, "ship", "001")
     assert shipped.returncode == 0, shipped.stderr
     assert f"removed bug {bug_id}" in shipped.stdout
-    assert "work/inbox.md" in _git(tree, "diff", "--cached", "--name-only").splitlines()
+    assert ".sdlc/work/inbox.md" in _git(tree, "diff", "--cached", "--name-only").splitlines()
     _git(tree, "commit", "-q", "-m", "ship 001")
 
     closed = _run(root, "close", "001")
@@ -222,7 +227,7 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     body = _git(root, "log", "-1", "--format=%B")
     today = bug_id.rsplit("-", 1)[0]
     assert f"Sdlc-Fixes: {bug_id} severity=high reported={today} introduced_by=unknown" in body
-    assert bug_id not in (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert bug_id not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
     bugs = json.loads(_run(root, "retro").stdout)["bugs"]
     assert bugs["fixed"] == {"high": 1} and bugs["open"] == [] and bugs["unattributed"] == 1
 
@@ -231,13 +236,13 @@ def test_a_bare_repo_moves_its_old_registers_into_the_inbox(tmp_path: Path) -> N
     """A repo that kept `work/ideas.md` and `work/nits.md` reads from them unmoved, and comes
     through `migrate-inbox` with every entry an id and `check` clean."""
     root = _bare(tmp_path)
-    (root / "work").mkdir()
-    (root / "work" / "ideas.md").write_text(
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "ideas.md").write_text(
         "# Ideas\n\n## [2026-10-01] [seed] Keep drafts\n\nWhy.\n\n"
         '## [2026-10-02] [seed] Share drafts\n\nWhy.\n\nAfter: "Keep drafts"\n',
         encoding="utf-8",
     )
-    (root / "work" / "nits.md").write_text(
+    (root / ".sdlc" / "work" / "nits.md").write_text(
         "# Nits\n\n## 003-1 [tests] A test that can't fail\n"
         "- **raised:** 2026-10-03 by 003-test-lifetimes (correctness)\n"
         "- **paths:** tests/x.py\n- **cost:** S  **value:** low\n",
@@ -245,14 +250,14 @@ def test_a_bare_repo_moves_its_old_registers_into_the_inbox(tmp_path: Path) -> N
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "the old registers")
-    assert "Keep drafts" in _run(root, "status").stdout, "work/ideas.md still reads"
+    assert "Keep drafts" in _run(root, "status").stdout, ".sdlc/work/ideas.md still reads"
 
     moved = _run(root, "migrate-inbox")
     assert moved.returncode == 0, moved.stdout + moved.stderr
-    inbox = (root / "work" / "inbox.md").read_text(encoding="utf-8")
+    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
     assert "## [2026-10-01-1] [idea] Keep drafts" in inbox and "After: 2026-10-01-1" in inbox
     assert "## [2026-10-03-1] [nit] A test that can't fail" in inbox
-    assert not (root / "work" / "nits.md").exists()
+    assert not (root / ".sdlc" / "work" / "nits.md").exists()
     _git(root, "commit", "-q", "-m", "migrate")
     check = _run(root, "check", "--strict")
     assert check.returncode == 0, check.stdout + check.stderr
@@ -269,7 +274,7 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk
     root.mkdir()
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
     (root / "VERSION").write_text('version = "0.1.0"\n', encoding="utf-8")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text(
         '[release]\nversion_files = ["VERSION"]\n', encoding="utf-8"
     )
@@ -283,13 +288,13 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk
 
     assert _run(root, "new", "first-change", "--worktree").returncode == 0
     tree = root / ".claude" / "worktrees" / "001-first-change"
-    intent = tree / "work" / "001-first-change" / "intent.md"
+    intent = tree / ".sdlc" / "work" / "001-first-change" / "intent.md"
     intent.write_text(
         intent.read_text(encoding="utf-8").replace("impact:\n", "impact: minor\n", 1),
         encoding="utf-8",
     )
     assert _run(tree, "ship", "001").returncode == 0
-    _git(tree, "add", "work", ".sdlc")
+    _git(tree, "add", ".sdlc")
     _git(tree, "commit", "-q", "-m", "ship 001")
     assert _run(root, "close", "001").returncode == 0
 
@@ -313,8 +318,8 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk
     assert [c["id"] for c in looked["changes"]] == ["001"]
     assert [r["tag"] for r in looked["releases"]] == ["v0.1.0", "v0.2.0"]
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n", encoding="utf-8")
-    (root / "work").mkdir()
-    (root / "work" / "inbox.md").write_text("# Ideas\n", encoding="utf-8")
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text("# Ideas\n", encoding="utf-8")
     recorded = _run(root, "retro-commit")
     assert recorded.returncode == 0, recorded.stdout + recorded.stderr
     assert _git(root, "log", "-1", "--format=%s").startswith("Retrospective ")
@@ -355,13 +360,13 @@ def test_with_no_tracker_a_change_runs_where_gh_doesnt_exist(tmp_path: Path) -> 
     made = _run(root, "new", "plain", "--worktree", path=path)
     assert made.returncode == 0, made.stderr
     tree = root / ".claude" / "worktrees" / "001-plain"
-    intent = tree / "work" / "001-plain" / "intent.md"
+    intent = tree / ".sdlc" / "work" / "001-plain" / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
     synced = _run(tree, "sync", path=path)
     assert synced.returncode == 0, synced.stderr
     assert json.loads(synced.stdout)["nothing to sync"] == "archive.target is none"
     assert _run(tree, "ship", "001", path=path).returncode == 0
-    _git(tree, "add", "work", ".sdlc")
+    _git(tree, "add", ".sdlc")
     _git(tree, "commit", "-q", "-m", "ship 001")
     closed = _run(root, "close", "001", path=path)
     assert closed.returncode == 0, closed.stdout + closed.stderr
@@ -407,7 +412,7 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
     code its merge brought: a change to close runs on its own close."""
     root = _plugin_copy(tmp_path / "plugin")
     (root / ".gitignore").write_text(".claude/worktrees/\n__pycache__/\n", encoding="utf-8")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[archive]\ntarget = "none"\n', encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
@@ -418,7 +423,7 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
         made = _by(script, root, "new", slug, "--worktree")
         assert made.returncode == 0, made.stderr
         tree = next((root / ".claude" / "worktrees").glob(f"*-{slug}"))
-        intent = tree / "work" / tree.name / "intent.md"
+        intent = tree / ".sdlc" / "work" / tree.name / "intent.md"
         intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
         edit(tree)
         number = tree.name.split("-")[0]
@@ -473,7 +478,7 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
             env=env,
         )
 
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
     shutil.copy(plugin / "defaults" / "REVIEW.md", root / ".sdlc" / "REVIEW.md")
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")

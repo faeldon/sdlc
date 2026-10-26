@@ -61,7 +61,7 @@ def _repo(tmp_path: Path, version: str = "1.0.0", config: str = CONFIG) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     (root / "pkg.json").write_text(PKG.replace("{v}", version), encoding="utf-8")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text(config, encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
@@ -72,13 +72,13 @@ def _repo(tmp_path: Path, version: str = "1.0.0", config: str = CONFIG) -> Path:
 
 def _close(root: Path, name: str = "001-reopen-drafts", impact: str = "patch") -> None:
     nid, slug = name.split("-", 1)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
     text = INTENT.format(id=nid, slug=slug, impact=impact)
     (folder / "intent.md").write_text(text, encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"Ship {name}")
-    _git(root, "rm", "-r", "-q", f"work/{name}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}")
 
 

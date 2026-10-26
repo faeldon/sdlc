@@ -70,7 +70,7 @@ def _git(root: Path, *args: str) -> str:
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
-    folder = root / "work" / NAME
+    folder = root / ".sdlc" / "work" / NAME
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text(INTENT, encoding="utf-8")
     (root / "README.md").write_text("a repo\n", encoding="utf-8")
@@ -81,13 +81,13 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _write(repo: Path, text: str) -> None:
-    (repo / "work" / NAME / "checks.md").write_text(text, encoding="utf-8")
+    (repo / ".sdlc" / "work" / NAME / "checks.md").write_text(text, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "checks")
 
 
 def _read(repo: Path) -> dict:
-    return sdlc.acceptance(repo / "work" / NAME)
+    return sdlc.acceptance(repo / ".sdlc" / "work" / NAME)
 
 
 def _cmd(capsys, fn, repo: Path) -> tuple[int, dict]:
@@ -157,7 +157,7 @@ def test_checks_problem(repo: Path, text: str, why: str) -> None:
 
 
 def test_an_unreadable_file_is_a_problem(repo: Path) -> None:
-    (repo / "work" / NAME / "checks.md").write_bytes(b"## Bad\n\n\xff\xfe\n")
+    (repo / ".sdlc" / "work" / NAME / "checks.md").write_bytes(b"## Bad\n\n\xff\xfe\n")
     assert any("can't be read" in p for p in _read(repo)["problems"])
 
 
@@ -228,7 +228,7 @@ def test_accept_leaves_work_already_uncommitted_alone(repo: Path, capsys) -> Non
 
 def test_accept_runs_from_the_checkout_root(repo: Path, capsys, monkeypatch) -> None:
     _write(repo, _checks(_check("Where", "pwd")))
-    monkeypatch.chdir(repo / "work")
+    monkeypatch.chdir(repo / ".sdlc" / "work")
     code, out = _cmd(capsys, sdlc.cmd_accept, repo)
     assert code == 0
     assert Path(out["checks"][0]["output"].strip()).resolve() == repo.resolve()

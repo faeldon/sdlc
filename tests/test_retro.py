@@ -90,7 +90,7 @@ def _close(
     """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
     is a second commit on the change, touching those files, before it closes."""
     nid, slug = name.split("-", 1)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
     text = intent or INTENT.format(
         id=nid, slug=slug, tier=tier, impact=impact, created=created, title=slug.replace("-", " ")
@@ -112,7 +112,7 @@ def _close(
             path.write_text(f"{path.read_text() if path.exists() else ''}{name}\n", "utf-8")
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", f"follow up {name}", when=when)
-    _git(root, "rm", "-r", "-q", f"work/{name}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
     _git(root, "commit", "-q", "-m", f"Close {name}", when=when)
 
 
@@ -203,10 +203,10 @@ def test_a_change_with_no_start_has_no_size(tmp_path: Path, monkeypatch) -> None
     out = _retro(root)
     assert all(c["files"] is None and c["lines"] is None for c in out["changes"])
     assert [p for p in out["problems"] if "size is unknown" in p] == [
-        "001-reopen-drafts: no commit holds work/001-reopen-drafts/intent.md, so its size is "
-        "unknown",
-        "002-keep-one-draft: no commit holds work/002-keep-one-draft/intent.md, so its size is "
-        "unknown",
+        "001-reopen-drafts: no commit holds .sdlc/work/001-reopen-drafts/intent.md, so its size "
+        "is unknown",
+        "002-keep-one-draft: no commit holds .sdlc/work/002-keep-one-draft/intent.md, so its "
+        "size is unknown",
     ]
     assert len(out["rework"]) == 1, "the last commit still says what each change touched"
 
@@ -243,7 +243,7 @@ def _drop(
     main's tree and ends with what close measured, and the branch gone."""
     nid, slug = name.split("-", 1)
     _git(root, "checkout", "-q", "-b", name)
-    folder = root / "work" / name
+    folder = root / ".sdlc" / "work" / name
     folder.mkdir(parents=True)
     text = INTENT.format(
         id=nid, slug=slug, tier=2, impact="", created=created, title=slug.replace("-", " ")
@@ -376,13 +376,13 @@ def test_a_repo_with_nothing_still_answers(tmp_path: Path, capsys) -> None:
 @pytest.mark.parametrize("tag", ["idea", "seed"])
 def test_open_changes_and_seeds_are_counted(tmp_path: Path, tag: str) -> None:
     root = _repo(tmp_path)
-    (root / "work" / "004-open-one").mkdir(parents=True)
-    (root / "work" / "004-open-one" / "intent.md").write_text(
+    (root / ".sdlc" / "work" / "004-open-one").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "004-open-one" / "intent.md").write_text(
         INTENT.format(id="004", slug="open-one", tier=1, impact="", created="2026-10-20",
                       title="open one").replace("stage: shipped", "stage: build"),
         encoding="utf-8",
     )  # fmt: skip
-    (root / "work" / "inbox.md").write_text(
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
         f"# Ideas\n\n## [2026-09-01] [{tag}] Old one\n\nx\n\n## [2026-10-01] [{tag}] New one\n\nx\n"
         "\n## [2026-10-02] [building] Taken\n\nx\n",
         encoding="utf-8",
@@ -435,8 +435,8 @@ SENTINEL = "a phrase only the person typed"
 def _direction(root: Path) -> None:
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nGoals.\n", encoding="utf-8")
-    (root / "work").mkdir(exist_ok=True)
-    (root / "work" / "inbox.md").write_text("# Ideas\n\n## [2026-10-24] [seed] X\n\nx\n")
+    (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text("# Ideas\n\n## [2026-10-24] [seed] X\n\nx\n")
 
 
 def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, capsys) -> None:
@@ -448,7 +448,7 @@ def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, c
     assert _git(root, "log", "-1", "--format=%s") == "Retrospective 2026-10-24"
     assert _git(root, "show", "--name-only", "--format=", "HEAD").splitlines() == [
         ".sdlc/DIRECTION.md",
-        "work/inbox.md",
+        ".sdlc/work/inbox.md",
     ]
     assert _git(root, "status", "--porcelain") == ""
     assert sdlc.last_retrospective(root, "main")["date"] == "2026-10-24"
@@ -593,20 +593,20 @@ def test_a_doc_without_ids_or_no_doc_is_a_first_retrospective(tmp_path: Path) ->
 
 def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "work").mkdir()
-    (root / "work" / "inbox.md").write_text(
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
         "# Ideas\n\n## [2026-10-01] [seed] Still waiting\n\nx\n", encoding="utf-8"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "seed")
     _close(root, "011-keep-one-draft", idea="Reopen drafts from the list")
-    (root / "work" / "012-open-one").mkdir(parents=True)
-    (root / "work" / "012-open-one" / "intent.md").write_text(
+    (root / ".sdlc" / "work" / "012-open-one").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "012-open-one" / "intent.md").write_text(
         INTENT.format(id="012", slug="open-one", tier=1, impact="", created="2026-10-20",
                       title="open one").replace("stage: shipped", "stage: build"),
         encoding="utf-8",
     )  # fmt: skip
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text(
         '## Milestones\n\n### M1. Drafts\n\nGroups: 011, 012, 099, "Reopen drafts from the list",'
         ' "Still waiting", "Thrown away"\n',
@@ -626,14 +626,14 @@ def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> Non
 
 def test_a_seed_named_by_id_reads_shipped_open_or_vanished(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "work").mkdir()
-    (root / "work" / "inbox.md").write_text(
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
         "# Inbox\n\n## [2026-10-01-2] [seed] Still waiting\n\nx\n", encoding="utf-8"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "seed")
     _close(root, "011-keep-one-draft", idea="2026-10-01-1")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text(
         "## Milestones\n\n### M1. Drafts\n\nGroups: 2026-10-01-1, 2026-10-01-2, 2026-10-01-3\n",
         encoding="utf-8",
@@ -649,7 +649,7 @@ def test_a_seed_named_by_id_reads_shipped_open_or_vanished(tmp_path: Path) -> No
 def test_a_seed_shipped_by_an_idea_holding_its_heading_reads_shipped(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _close(root, "011-keep-one-draft", idea="[2026-10-01] [seed] Reopen drafts from the list")
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text(
         '## Milestones\n\n### M1. Drafts\n\nGroups: "Reopen drafts from the list"\n',
         encoding="utf-8",
@@ -691,7 +691,7 @@ def test_retro_commit_refuses_a_doc_that_drops_an_open_id(tmp_path, capsys, new,
 
 def test_the_first_direction_doc_has_nothing_to_carry(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text("## Goals\n\n- G1. Ship\n", encoding="utf-8")
     assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 0, capsys.readouterr().out
 
@@ -858,7 +858,7 @@ def test_old_and_new_trailers_read_against_their_own_targets(tmp_path: Path) -> 
 def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     nid, slug = "004", "found-things"
-    folder = root / "work" / f"{nid}-{slug}"
+    folder = root / ".sdlc" / "work" / f"{nid}-{slug}"
     folder.mkdir(parents=True)
     (folder / "intent.md").write_text(
         INTENT.format(id=nid, slug=slug, tier=2, impact="patch", created="2026-10-01",
@@ -866,7 +866,7 @@ def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> N
     )  # fmt: skip
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Ship it", "-m", "Sdlc-Findings: important=1 nit=3 cost=2")
-    _git(root, "rm", "-r", "-q", f"work/{nid}-{slug}")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{nid}-{slug}")
     _git(root, "commit", "-q", "-m", f"Close {nid}-{slug}", "-m",
          "Sdlc-Mode: manual\nSdlc-Totals: agent=5 stops=5 required=5 target=2")  # fmt: skip
     [rec] = sdlc.closed_changes(root, None, "main")
@@ -975,7 +975,7 @@ def test_an_outcome_nothing_serves_is_unserved(tmp_path: Path) -> None:
 def test_an_open_change_serving_a_struck_outcome_is_stale(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _product(root)
-    folder = root / "work" / "004-open"
+    folder = root / ".sdlc" / "work" / "004-open"
     folder.mkdir(parents=True)
     text = _serving("004-open", "[O2, O3]").replace("stage: shipped", "stage: build")
     (folder / "intent.md").write_text(text, encoding="utf-8")
@@ -1057,7 +1057,7 @@ def test_retro_commit_takes_the_product_doc_too(tmp_path: Path, capsys) -> None:
     code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
     assert code == 0, capsys.readouterr().out
     assert sorted(_git(root, "show", "--name-only", "--format=", "HEAD").splitlines()) == [
-        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", "work/inbox.md",
+        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", ".sdlc/work/inbox.md",
     ]  # fmt: skip
 
 

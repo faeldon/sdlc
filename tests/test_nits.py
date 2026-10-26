@@ -84,10 +84,10 @@ def _git(root: Path, *args: str) -> str:
 
 def _repo(tmp_path: Path, nits: str | None = None) -> Path:
     root = tmp_path / "repo"
-    (root / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work").mkdir(parents=True)
     (root / "README.md").write_text("a repo\n", encoding="utf-8")
     if nits is not None:
-        (root / "work" / "inbox.md").write_text(nits, encoding="utf-8")
+        (root / ".sdlc" / "work" / "inbox.md").write_text(nits, encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
@@ -144,12 +144,12 @@ def test_each_malformed_entry_is_a_problem_check_reports(tmp_path: Path) -> None
     assert any(p.startswith("2026-13-40-1: Cost must be one of S|M") for p in problems)
     assert any(p.startswith("2026-13-40-1: Value must be one of med|low") for p in problems)
     found = [p for p in sdlc.analyze(root)["problems"] if p["kind"] == "nits"]
-    assert len(found) == len(problems) and all(p["dir"] == "work/inbox.md" for p in found)
+    assert len(found) == len(problems) and all(p["dir"] == ".sdlc/work/inbox.md" for p in found)
 
 
 def test_a_register_that_isnt_utf8_is_a_problem_not_a_crash(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "work" / "inbox.md").write_bytes(b"# Inbox\n\n\xff\xfe\n")
+    (root / ".sdlc" / "work" / "inbox.md").write_bytes(b"# Inbox\n\n\xff\xfe\n")
     nits, problems = sdlc.nit_entries(root)
     assert nits == [] and problems and problems[0].startswith("can't be read")
 
@@ -167,7 +167,7 @@ def test_touching_keeps_the_nits_on_those_paths(tmp_path: Path, capsys) -> None:
 def test_change_keeps_the_nits_its_diff_touches(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, GOOD)
     _git(root, "checkout", "-q", "-b", "001-reopen-drafts")
-    folder = root / "work" / "001-reopen-drafts"
+    folder = root / ".sdlc" / "work" / "001-reopen-drafts"
     folder.mkdir()
     (folder / "intent.md").write_text(INTENT, encoding="utf-8")
     (root / "tests").mkdir()

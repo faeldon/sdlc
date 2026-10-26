@@ -411,7 +411,7 @@ def bare(tmp_path: Path) -> Path:
 
 
 def _set_up(root: Path) -> None:
-    (root / ".sdlc").mkdir()
+    (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
     (root / ".sdlc" / "REVIEW.md").write_text(REVIEW, encoding="utf-8")
     (root / ".gitignore").write_text("node_modules/\n.claude/worktrees/\n", encoding="utf-8")
@@ -487,8 +487,8 @@ def _change(root: Path, ident: str, slug: str, stage: str, worktree: bool) -> No
     if worktree:
         where = root / ".claude" / "worktrees" / name
         _git(root, "worktree", "add", "-q", "-b", name, str(where))
-    (where / "work" / name).mkdir(parents=True)
-    (where / "work" / name / "intent.md").write_text(
+    (where / ".sdlc" / "work" / name).mkdir(parents=True)
+    (where / ".sdlc" / "work" / name / "intent.md").write_text(
         INTENT.format(id=ident, slug=slug, stage=stage), encoding="utf-8"
     )
     _git(where, "add", "-A")

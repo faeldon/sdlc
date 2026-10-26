@@ -197,6 +197,7 @@ def artifact(path: str, branch: str) -> str:
     `code`. Public: whatever reads a change's diff classifies its files the same way. The path is
     dropped after."""
     path = path if path.startswith("/") else f"/{path}"
+    # The change folder under `.sdlc/work/` or the old `work/`: both end in this.
     marker = f"/work/{branch}/"
     if marker in path:
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
