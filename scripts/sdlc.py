@@ -5886,8 +5886,8 @@ ISSUE_FORMS = {
 # A config key a release renamed or removed: `section.old` → {"now": the key that replaced it, or
 # None, "since": the version, "do": what a host does about it}. A host still setting one has a
 # setting the plugin no longer reads, which is breaking. Each entry is a shim, registered in
-# `.sdlc/deprecations.toml` and removed in the release that names; after that, drift reports the
-# key as one it doesn't read.
+# `.sdlc/deprecations.toml` and removed in the release its entry names; after that, drift reports
+# the key as one it doesn't read.
 RETIRED_KEYS: dict[str, dict[str, str | None]] = {}
 # What the script reads from each template, so a host's override that lacks one would be misread.
 # Frontmatter keys, `## ` headings and literal placeholders; a template with nothing read has no

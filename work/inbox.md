@@ -457,3 +457,14 @@ again, or choosing a path, was left out on purpose: no host needs it. It would n
 commit with an `Sdlc-Work: from= to=` trailer, a resolver giving the folder at any commit, and a
 rule every reader of history follows. History from .sdlc/work/ on sits at one path, so nothing
 from before has to be carried back. See work/027-work-path/spec.md (Alternatives rejected).
+
+## [2026-10-26-14] [nit] No test pins that readiness lost its inbox item
+
+A readiness `inbox` item coming back would pass the suite; assert it is absent from
+`cmd_readiness`'s items.
+
+Theme: tests
+Paths: tests/test_inbox.py
+Cost: S
+Value: low
+Raised by: 028-remove-1-4-shims (correctness)
