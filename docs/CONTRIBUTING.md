@@ -87,7 +87,8 @@ anything that changes what `sdlc.py` reads or writes in a host repo, and a skill
 
 The repo is numbered by GitHub issues, so an intent opens an issue on `faeldon/sdlc`.
 
-A reported bug is an issue too, and triage labels it, since a reporter can't: `bug`, plus
+A reported bug is an issue too. `/sdlc:triage` records it and labels it `triaged`; label it by
+hand too, since a reporter can't and triage doesn't: `bug`, plus
 `area: setup`, `area: new` or `area: close` when it's in one of those, and `lost-work` when a
 change's work was lost or one number given twice. `.sdlc/evidence.py` counts them per release
 window for `/sdlc:retro`, which scores O1 and O2 in `.sdlc/PRODUCT.md` from them.

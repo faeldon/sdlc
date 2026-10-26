@@ -139,21 +139,6 @@ bug entry behind one approval. A report never names the host in what lands here 
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 
-## [2026-10-25-11] [building] GitHub issues as the intake for bugs and requests, in hosts too
-
-Building in work/026-github-intake/.
-
-Where `archive.target` is GitHub, a bug or request filed as an issue (by a person, or by a host
-session through `gh`) is the remote form of the local channel: triage reads open issues that no
-change claims (no `sdlc` archive label), and files each as a seed or a bug entry, or links it to
-the change that takes it on. This serves hosts as much as the plugin: a host's own users file
-issues, and its sessions triage them the same way, so the design is a host feature first, with
-this repo as its first user. Phases: the plugin's own local intake, the register, then GitHub
-triage, then the same in hosts (an issue template from setup, a `/sdlc:triage` skill). Raised
-2026-10-25.
-
-After: 2026-10-25-10
-
 ## [2026-10-25-12] [idea] Rework as a declared fix, with surviving lines as the cross-check
 
 Retro pairs any two changes closed within a week that share a file. With the common files left
@@ -355,3 +340,37 @@ Paths: tests/test_bugs.py
 Cost: M
 Value: low
 Raised by: 024-bugs-register (correctness)
+
+## [2026-10-26-1] [nit] An issue intent carries onto closes: hears nothing until the next marking
+
+`/sdlc:intent` copies an entry's `Issue:` numbers onto `closes:`, and its `sync` makes each a
+sub-issue, but the "Taken on by" comment waits for the next `mark-triaged` or the change's close.
+
+Theme: robustness
+Paths: skills/intent/SKILL.md, scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 026-github-intake (correctness)
+
+## [2026-10-26-2] [nit] mark_issues views every open recorded issue on each run
+
+`mark_issues()` runs one `gh issue view` per open issue the repo records, on every triage and every
+close, idempotent but growing with the open issues. Skip the ones already labelled `triaged` with
+their marker, from one `issue list`.
+
+Theme: cost
+Paths: scripts/sdlc.py, scripts/trackers/github.py
+Cost: S
+Value: low
+Raised by: 026-github-intake (cost)
+
+## [2026-10-26-3] [nit] No adoption test runs a change with closes: through uv run --script
+
+Spec Verification named one; the `closes:` → `Closes #N` path is covered in `test_archive.py`
+through the imported script only.
+
+Theme: tests
+Paths: tests/test_adoption.py
+Cost: S
+Value: low
+Raised by: 026-github-intake (correctness)

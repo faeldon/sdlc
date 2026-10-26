@@ -48,7 +48,9 @@ there is nothing to read.
 - **`issues`**: the open issues no change claims (no `sdlc` label) that triage hasn't labelled.
   One whose `filed` names a record (an entry's id, a change, a verdict) was recorded by a run that
   stopped before it marked it: it needs only Step 5's `mark-triaged`, never a second record. One
-  flagged `replied` was waiting on its author, who has answered.
+  also flagged `uncommitted` stopped before its commit: its entry is in the register but not
+  committed, so Step 5's `bug-commit` comes first, and `mark-triaged` after it. One flagged
+  `replied` was waiting on its author, who has answered.
 - **`dangling`**: open issues labelled `triaged` that nothing in the repo records anymore. Offer each
   to be triaged again, as if new.
 - **`severities`**: the process doc's words (`docs.process`, its section on bugs), most severe first.

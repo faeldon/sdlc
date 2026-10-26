@@ -2,10 +2,11 @@
 id: 026
 slug: github-intake
 tier: 2
-impact:
-stage: build
+impact: minor
+stage: shipped
 created: 2026-10-26
 updated: 2026-10-26
+shipped: 2026-10-26
 idea: 2026-10-25-11
 depends_on:
 serves: [O2]

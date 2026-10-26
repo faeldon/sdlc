@@ -5575,7 +5575,17 @@ def cmd_intake(root: Path) -> int:
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 1
     records = recorded_issues(home)
-    out["issues"] = [{**i, "filed": (records.get(i["number"]) or {}).get("filed")} for i in issues]
+    # A record only on disk, an entry written and not yet committed, isn't one mark-triaged will
+    # act on: the register's commit comes first, so the skill commits it before it marks.
+    committed = recorded_issues(home, committed_only=True)
+    out["issues"] = [
+        {
+            **i,
+            "filed": (records.get(i["number"]) or {}).get("filed"),
+            "uncommitted": i["number"] in records and i["number"] not in committed,
+        }
+        for i in issues
+    ]
     out["more"] = more
     dangling, err = found.dangling(set(records))
     out["dangling"] = dangling if dangling is not None else []

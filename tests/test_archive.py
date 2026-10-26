@@ -1831,6 +1831,27 @@ def test_a_crash_before_marking_is_finished_by_the_next_run(tmp_path, gh, capsys
     assert out["issues"] == [] and out["dangling"] == []
 
 
+def test_a_crash_before_the_register_s_commit_says_it_needs_committing(
+    tmp_path, gh, capsys
+) -> None:
+    """An entry written but not committed is a record mark-triaged won't act on, so intake says
+    so, and the commit then lets the marking finish it."""
+    root = _repo(tmp_path)
+    _register(root, "")
+    _filed(gh, 52)
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #52\n", commit=False)
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    [issue] = out["issues"]
+    assert issue["filed"] == "2026-10-26-1" and issue["uncommitted"] is True
+    _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert _issue(gh, 52)["labels"] == [], "an uncommitted entry is never marked"
+    code, out = _json(capsys, lambda: sdlc.cmd_bug_commit(root))
+    assert code == 0, out
+    _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert out["issues"] == [] and {"name": "triaged"} in _issue(gh, 52)["labels"]
+
+
 def test_a_verdict_is_committed_then_closes_its_issue_once(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _register(root, "")
