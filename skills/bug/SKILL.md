@@ -35,7 +35,7 @@ on `git.base` from `config`, in the main checkout. When `config`'s `work.dir` is
 `.claude/worktrees/`, the session is in a change's worktree: note it, since Step 5 then names the
 entry it files. `bugs`
 lists the open bugs and `severities`, the process doc's words for how bad one is (`docs.process`,
-its section on bugs), most severe first. If the bug is already listed, say which and stop: one bug,
+its section on bugs, else the plugin's guide, `docs.process.guide`), most severe first. If the bug is already listed, say which and stop: one bug,
 one entry.
 
 ## Step 1 — Ask what broke

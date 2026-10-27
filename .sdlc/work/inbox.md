@@ -479,7 +479,9 @@ Cost: S
 Value: low
 Raised by: 030-ship-preflight (correctness)
 
-## [2026-10-27-5] [idea] Keep the plugin's process guide in the plugin, and only a host's answers in .sdlc/
+## [2026-10-27-5] [building] Keep the plugin's process guide in the plugin, and only a host's answers in .sdlc/
+
+Building in .sdlc/work/032-process-guide-in-plugin/.
 
 Setup copies the whole of `defaults/SDLC.md` (499 lines) into a host, though only its seven `<`
 prompts and a few settings are the host's: the failure to stop, worktree needs, Stage 1 push-backs,

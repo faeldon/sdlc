@@ -21,8 +21,9 @@ The change folder and round in the prompt. Read `intent.md`, `spec.md` (its numb
 and `plan.md`, then the diff: `git diff` and `git status` in the worktree (the work is uncommitted
 by design). Read the repo's policy doc for its invariants (`docs.policy` in `.sdlc/config.toml`,
 else `CLAUDE.md`, or `AGENTS.md` where that's the only one) and its review doc, if present, for
-the passes and failure classes this repo reviews against: those come first (`docs.review`, else
-`.sdlc/REVIEW.md`).
+the failure classes this repo adds to the passes below: those come first (`docs.review`, else
+`.sdlc/REVIEW.md`). A review doc that is a whole copy of the plugin's review guide holds its passes
+too; one that holds only the repo's answers holds just what it adds, the passes being these.
 
 Read the tests before the code; they show what the builder meant.
 

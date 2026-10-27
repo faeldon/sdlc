@@ -773,6 +773,8 @@ def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -
             {"scripts": True, "skills": ["sdlc:ship"], "hosts": ["defaults/REVIEW.md"]},
         ),
         (["README.md", "docs/CONTRIBUTING.md", ".sdlc/work/001-thing/intent.md", "tests/t.py"], {}),
+        # The guides are read in place at each stage: live, never a host's to set up again.
+        (["guide/process.md", "guide/review.md"], {"scripts": True}),
     ],
 )
 def test_landing_reach_sorts_paths_into_what_each_needs(paths, reaches) -> None:

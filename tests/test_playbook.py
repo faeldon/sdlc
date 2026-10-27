@@ -1,6 +1,6 @@
-"""The default process doc still captures the core of Anthropic's AI-native SDLC playbook.
+"""The process guide still captures the core of Anthropic's AI-native SDLC playbook.
 
-defaults/SDLC.md is what /sdlc:setup gives a repo, and it says it is adapted from the playbook.
+guide/process.md is the process every repo using the plugin reads, adapted from the playbook.
 This holds it to that: every core prescription below must still be in it, in substance. The doc
 may add to the playbook freely; what it may not do is drop a prescription without this file
 saying so, as a deliberate scope-out with its reason.
@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-DOC = ROOT / "defaults" / "SDLC.md"
+DOC = ROOT / "guide" / "process.md"
 PLAYBOOK_URL = "https://claude.com/blog/the-ai-native-sdlc-playbook"
 
 # The playbook's plays, in its order. Deploy is split between Ship (review, approval) and the
@@ -213,7 +213,7 @@ def _doc() -> str:
 def test_the_doc_captures_the_prescription(play: str, prescription: str, phrases: list[str]):
     doc = _doc()
     missing = [p for p in phrases if not re.search(p, doc, re.IGNORECASE)]
-    assert not missing, f"[{play}] {prescription}: defaults/SDLC.md lacks {missing}"
+    assert not missing, f"[{play}] {prescription}: guide/process.md lacks {missing}"
 
 
 def test_every_play_is_accounted_for() -> None:
@@ -240,7 +240,7 @@ def test_the_doc_describes_three_loops() -> None:
     playbook itself says, and with the map of where it is thin, so that stays said."""
     doc = _doc()
     loops = doc.split("## Three loops")[1].split("\n## ")[0] if "## Three loops" in doc else ""
-    assert loops, "defaults/SDLC.md has no Three loops section"
+    assert loops, "guide/process.md has no Three loops section"
     for skill in ("/sdlc:release", "/sdlc:publish", "/sdlc:retro"):
         assert skill in loops
     for phrase in (

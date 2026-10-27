@@ -53,7 +53,8 @@ there is nothing to read.
   `replied` was waiting on its author, who has answered.
 - **`dangling`**: open issues labelled `triaged` that nothing in the repo records anymore. Offer each
   to be triaged again, as if new.
-- **`severities`**: the process doc's words (`docs.process`, its section on bugs), most severe first.
+- **`severities`**: the process doc's words (`docs.process`, its section on bugs, else the
+  plugin's guide, `docs.process.guide`), most severe first.
 - **`open_changes`**: the changes still being built, each with its intent's path and its
   `closes:` line. A change at `stage: ship` or later isn't listed: its intent is settled.
 

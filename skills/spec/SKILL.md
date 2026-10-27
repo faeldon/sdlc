@@ -58,8 +58,9 @@ spec worth writing. `config` says where each one is:
   either wrong or a convention change, and the second is its own decision.
 - **The code the change touches.** Read it, and its tests. What it already promises tells you what
   its callers are entitled to assume.
-- **The review** (`docs.review`) — the failure classes Stage 5 will look for. If the design comes
-  near one, design for it now rather than answering for it at Stage 5.
+- **The review** (`docs.review`, after the plugin's guide, `docs.review.guide`, when `config`
+  gives one) — the failure classes Stage 5 will look for. If the design comes near one, design
+  for it now rather than answering for it at Stage 5.
 - **The system itself**, when the design depends on what it actually holds rather than what it's
   assumed to hold. If `docs.explore` names a skill or command for that, use it. A spec written
   against assumptions is how the review's worst findings ship.
@@ -70,7 +71,7 @@ spec worth writing. `config` says where each one is:
   ```
 
   Offer the ones of cost `S`, and any whose theme is the change's own, to take in, weighed by the
-  rubric in the process doc (`docs.process`). Each one taken becomes a requirement naming its id;
+  rubric in the process (`docs.process.guide`, then `docs.process`). Each one taken becomes a requirement naming its id;
   `/sdlc:ship` retires it once the diff fixes it. Nothing listed is the usual answer. Never take
   one in unasked.
 

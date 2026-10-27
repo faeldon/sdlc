@@ -43,6 +43,7 @@ or host does then depends on what the change touched:
 |---|---|---|
 | `scripts/` (and the factory's) | at once: every skill runs the script from the clone | nothing |
 | `skills/`, the factory's `agents/` | when the session starts | `/reload-plugins` in each open session, or restart it |
+| `guide/` | at once: read in place at each stage | nothing |
 | `defaults/`, `templates/`, a config key | never: the host owns its copies | `/sdlc:setup` in each host repo |
 
 Reload between stages, never during one. A session halfway through `/sdlc:ship` keeps its old
@@ -79,9 +80,10 @@ environment; the script declares its own dependencies inline, and the two lists 
 ## How a change is made here
 
 The plugin runs on its own repo. Open a change with `/sdlc:intent`, and it goes through the
-stages like any host's: [`.sdlc/SDLC.md`](../.sdlc/SDLC.md) is this repo's process (tiers, what
-is always Tier 2, the three loops) and [`.sdlc/REVIEW.md`](../.sdlc/REVIEW.md) the review passes
-`/sdlc:ship` works through. Two things are always Tier 2 here, whatever the size of the diff:
+stages like any host's: [`guide/process.md`](../guide/process.md) is the process (tiers, the
+three loops) and [`.sdlc/SDLC.md`](../.sdlc/SDLC.md) this repo's answers to it (what is always
+Tier 2 here, its gate); [`guide/review.md`](../guide/review.md) and
+[`.sdlc/REVIEW.md`](../.sdlc/REVIEW.md) are the review passes `/sdlc:ship` works through. Two things are always Tier 2 here, whatever the size of the diff:
 anything that changes what `sdlc.py` reads or writes in a host repo, and a skill's WAIT step or
 `allowed-tools`. A bug fix starts with a failing test.
 
@@ -130,6 +132,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 | `scripts/trackers/` | one module per tracker, loaded by path only when `archive.target` names it |
 | `scripts/metrics.py` | what a change cost, measured at close |
 | `templates/` | the shape of a file the plugin writes itself, each time it creates or rewrites one (the change artifacts, direction doc, issue, `inbox.md`, `notes.md`); a host overrides one in `.sdlc/templates/`; one shape, see `AGENTS.md` |
+| `guide/` | the process and review guides, read in place from the plugin and never copied; a host's `.sdlc/SDLC.md` and `REVIEW.md` hold only its answers to them; one shape, see `AGENTS.md` |
 | `defaults/` | a doc `/sdlc:setup` copies into a host once, after which the host owns it: the plugin reads it, and a rerun of setup only proposes what a newer default changed (`drift`, against `.sdlc/setup.json`) (the process, review, project, product and health docs); one shape, see `AGENTS.md` |
 | `plugins/factory/` | `sdlc-factory`, a second plugin with its own skills, agents and `factory.py`; its [README](../plugins/factory/README.md) describes it |
 | `.claude-plugin/` | `plugin.json` and `marketplace.json`: this repo is its own marketplace |

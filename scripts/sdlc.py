@@ -184,6 +184,10 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = PLUGIN_DIR / "templates"
 DEFAULTS_DIR = PLUGIN_DIR / "defaults"
+# The plugin's process and review guides, read in place and never copied: a host's doc holds only
+# its answers, each block standing in for the guide's of the same key or read after its parent's.
+GUIDE_DIR = PLUGIN_DIR / "guide"
+GUIDES = {"process": "process.md", "review": "review.md"}
 # The register's name, and the one it had before 1.2.0, which only readers of history still name.
 INBOX = "inbox.md"
 OLD_INBOX = "ideas.md"
@@ -422,15 +426,39 @@ def register_path(work: Path) -> Path:
     return work / INBOX
 
 
+def doc_layout(root: Path, key: str) -> str:
+    """`answers` when setup's record says the host's process or review doc holds only its answers
+    to the guide, else `full`: a whole copy from before the guide was read in place, read alone."""
+    manifest = read_manifest(root)[0] or {}
+    recorded = manifest.get("docs", {}).get(key)
+    return (
+        "answers" if isinstance(recorded, dict) and recorded.get("layout") == "answers" else "full"
+    )
+
+
 def doc_path(root: Path, key: str, rel: str) -> dict:
-    """Where a host doc is, and whether it exists. Only the review has a plugin fallback: a ship
-    with no review passes to work through isn't a ship, while a missing policy doc is a fact the
-    skill should say out loud rather than paper over with a generic one."""
+    """Where a host doc is, and whether it exists. The process and review docs also name the
+    plugin's guide to read before them (`guide`, None for a full copy) and their `layout`. Only
+    the review stands in for a missing doc, with the guide alone: a ship with no review passes to
+    work through isn't a ship, while a missing policy doc is a fact the skill should say out loud
+    rather than paper over with a generic one."""
+    guide = str(GUIDE_DIR / GUIDES[key]) if key in GUIDES else None
     if (root / rel).is_file():
-        return {"path": rel, "exists": True, "source": "host"}
+        found = {"path": rel, "exists": True, "source": "host"}
+        if guide:
+            layout = doc_layout(root, key)
+            found.update(layout=layout, guide=guide if layout == "answers" else None)
+        return found
     if key == "review":
-        return {"path": str(DEFAULTS_DIR / "REVIEW.md"), "exists": True, "source": "plugin"}
-    return {"path": rel, "exists": False, "source": "host"}
+        return {
+            "path": guide,
+            "exists": True,
+            "source": "plugin",
+            "layout": "answers",
+            "guide": None,
+        }
+    found = {"path": rel, "exists": False, "source": "host"}
+    return found | ({"layout": "answers", "guide": guide} if guide else {})
 
 
 def project_doc(root: Path, cfg: dict) -> tuple[dict[str, dict], list[str]]:
@@ -1274,9 +1302,10 @@ SEVERITY_RE = re.compile(r"^- \*\*severity:\*\*\s*(.*)$")
 
 
 def severities(root: Path, cfg: dict) -> list[str]:
-    """The severity words, most severe first: the host's process doc's, else the default doc's."""
+    """The severity words, most severe first: the host's process doc's, its answers or its full
+    copy alike, else the guide's."""
     rel = cfg["docs"]["process"]
-    for path in ([root / rel] if rel else []) + [DEFAULTS_DIR / "SDLC.md"]:
+    for path in ([root / rel] if rel else []) + [GUIDE_DIR / GUIDES["process"]]:
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -3114,14 +3143,14 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
 def landing_reach(paths: list[str]) -> dict:
     """What a landed change to this plugin asks of the sessions and hosts running it from a clone:
-    `scripts` are live in every session at once, `skills` and the factory's `agents` (by
-    namespaced name) are read when a session starts, so need `/reload-plugins`, and `hosts`
-    (setup's defaults and templates) need `/sdlc:setup` in each host. Only the kinds the paths
-    touch."""
+    `scripts` are live in every session at once, and so are the guides, read in place at each
+    stage; `skills` and the factory's `agents` (by namespaced name) are read when a session
+    starts, so need `/reload-plugins`, and `hosts` (setup's defaults and templates) need
+    `/sdlc:setup` in each host. Only the kinds the paths touch."""
     scripts, skills, agents, hosts = False, set(), set(), []
     for path in paths:
         parts = path.split("/")
-        if parts[0] == "scripts" or parts[:3] == ["plugins", "factory", "scripts"]:
+        if parts[0] in ("scripts", "guide") or parts[:3] == ["plugins", "factory", "scripts"]:
             scripts = True
         elif parts[0] == "skills" and len(parts) > 2:
             skills.add(f"sdlc:{parts[1]}")
@@ -6004,7 +6033,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits",
+    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "answers",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -6081,9 +6110,17 @@ def cmd_readiness(root: Path) -> int:
         if not found or not found["exists"]:
             item(f"docs.{key}", "missing", f"{rel} doesn't exist")
         elif found["source"] == "plugin":
-            item(f"docs.{key}", "missing", f"{rel} doesn't exist; the plugin's default stands in")
+            item(f"docs.{key}", "missing", f"{rel} doesn't exist; the plugin's guide stands in")
         elif is_unfilled(Path(found["path"]) if Path(found["path"]).is_absolute() else root / rel):
             item(f"docs.{key}", "warn", f"{rel} is still the template: fill in its `<` prompts")
+        elif found.get("layout") == "full":
+            # A shim (deprecations.toml): a nudge, never required, until every host has migrated.
+            item(
+                f"docs.{key}",
+                "warn",
+                f"migrate: {rel} is a whole copy of the plugin's guide; /sdlc:setup cuts it to "
+                "this repo's answers",
+            )
         else:
             item(f"docs.{key}", "ok", rel)
     fields, problems = project_doc(root, cfg)
@@ -6277,10 +6314,25 @@ def read_manifest(root: Path) -> tuple[dict | None, str | None]:
     return data, None
 
 
-def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
+def _copy_source(key: str) -> tuple[Path, str]:
+    """The plugin text a host's full copy of a doc tracks, and its name: the guide for the process
+    and review docs (what their copies were taken from), else the default setup copied."""
+    if key in GUIDES:
+        return GUIDE_DIR / GUIDES[key], GUIDES[key]
+    return DEFAULTS_DIR / HOST_DOCS[key], HOST_DOCS[key]
+
+
+def cmd_record(
+    root: Path, created: list[str], gitignore_line: bool, answers: list[str] | tuple = ()
+) -> int:
     """Write `.sdlc/setup.json`: this plugin's version, its config keys, and a hash of each block
     of each default behind a host doc, as of now. Writes nothing else. Setup runs it after every
-    write, so the next drift compares against what the host was last offered."""
+    write, so the next drift compares against what the host was last offered.
+
+    A process or review doc named in `answers`, or recorded as answers before, holds only the
+    host's answers to the guide: it gets `layout: answers` and a hash of the whole guide, so drift
+    can say when the guide changed, and no block hashes, since nothing of the guide's is in it.
+    Setup names them after it writes answers files; the layout is never read from the text."""
     if not (root / HOST_DIR / "config.toml").is_file():
         print(f"⚠  no {HOST_DIR}/config.toml: run /sdlc:setup first", file=sys.stderr)
         return 1
@@ -6288,13 +6340,24 @@ def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
     if bad:
         print(f"⚠  --created takes paths inside the repo: {', '.join(bad)}", file=sys.stderr)
         return 1
+    unknown = [k for k in answers if k not in GUIDES]
+    if unknown:
+        print(
+            f"⚠  --answers takes {' or '.join(GUIDES)}, not {', '.join(unknown)}", file=sys.stderr
+        )
+        return 1
     cfg = load_config(root)[0]
     before = read_manifest(root)[0] or {}
     docs = {}
-    for key, name in HOST_DOCS.items():
+    for key in HOST_DOCS:
         rel = cfg["docs"][key]
-        if rel and (root / rel).is_file():
-            text = (DEFAULTS_DIR / name).read_text(encoding="utf-8")
+        if not rel or not (root / rel).is_file():
+            continue
+        source, name = _copy_source(key)
+        text = source.read_text(encoding="utf-8")
+        if key in answers or (key in GUIDES and doc_layout(root, key) == "answers"):
+            docs[key] = {"path": rel, "layout": "answers", "guide": unit_hash(text)}
+        else:
             units = {k: unit_hash(v) for k, v in doc_units(text)}
             docs[key] = {"path": rel, "default": name, "units": units}
     manifest = {
@@ -6400,6 +6463,91 @@ def _template_misses(name: str, text: str) -> list[str]:
     ]
 
 
+def _under_guide(key: str, guide_keys: set[str]) -> bool:
+    """Whether a host block's key is a guide block's, or sits under one: the only places an answer
+    can stand in for, or follow, what the guide says."""
+    while True:
+        if key in guide_keys:
+            return True
+        if " > " not in key:
+            return False
+        key = key.rsplit(" > ", 1)[0]
+
+
+def _answers_drift(
+    rel: str, guide: Path, host_text: str, recorded: dict | None, version: str | None
+) -> list[dict]:
+    """What a person should read about an answers file: the guide changed since setup's record
+    (a note, never a refresh, since nothing of the guide's is in the host's file), and each host
+    block whose heading the guide has nowhere, which no reader can place."""
+    text = guide.read_text(encoding="utf-8")
+    found = []
+    if recorded and recorded.get("guide") not in (None, unit_hash(text)):
+        detail = f"the plugin's {guide.name} changed since {version}: read it"
+        found.append({"what": "doc", "where": rel, "class": "guide-changed",
+                      "guide": str(guide), "detail": detail})  # fmt: skip
+    keys = {k for k, _ in doc_units(text)}
+    found += [
+        {
+            "what": "doc",
+            "where": rel,
+            "class": "unknown",
+            "unit": k,
+            "detail": f"no heading in the plugin's {guide.name} to place it under",
+        }  # fmt: skip
+        for k, _ in doc_units(host_text)
+        if k != "#" and not _under_guide(k, keys)
+    ]
+    return found
+
+
+def answers_for(root: Path, key: str) -> dict:
+    """What a full copy of the process or review doc becomes as an answers file: each block whose
+    hash is the default's as setup's record offered it, or the guide's now, is the plugin's and
+    cut; every other block is the host's and kept, under the headings it sat beneath, and the
+    answers template's title and note replace the copy's. Read-only: setup shows it as a diff
+    behind its WAIT and writes it. A shim, until every host has migrated (deprecations.toml)."""
+    cfg = load_config(root)[0]
+    rel = cfg["docs"][key]
+    if not rel or not (root / rel).is_file():
+        return {"doc": key, "path": rel, "refusal": f"no {rel or 'doc'} to cut"}
+    if doc_layout(root, key) == "answers":
+        return {"doc": key, "path": rel, "refusal": f"{rel} is already answers to the guide"}
+    recorded = ((read_manifest(root)[0] or {}).get("docs", {}).get(key) or {}).get("units") or {}
+    guide = {k: unit_hash(t) for k, t in doc_units((GUIDE_DIR / GUIDES[key]).read_text("utf-8"))}
+    template = dict(doc_units((DEFAULTS_DIR / HOST_DOCS[key]).read_text(encoding="utf-8")))
+    blocks, kept, cut, placed = [("#", template["#"])], [], [], set()
+    for k, text in doc_units((root / rel).read_text(encoding="utf-8")):
+        if k == "#" or unit_hash(text) in (recorded.get(k), guide.get(k)):
+            cut.append(k)
+            continue
+        # A kept block keeps its place: each heading above it that was cut comes back alone.
+        parts = k.split(" > ")
+        for i in range(1, len(parts)):
+            above = " > ".join(parts[:i])
+            if above not in placed:
+                blocks.append((above, parts[i - 1]))
+                placed.add(above)
+        blocks.append((k, text))
+        placed.add(k)
+        kept.append(k)
+    # A blank line between blocks, but none between two bullets, so a list stays tight.
+    out = blocks[0][1].rstrip("\n")
+    for (before, _), (k, text) in zip(blocks, blocks[1:], strict=False):
+        out += ("\n" if before.endswith("**") and k.endswith("**") else "\n\n") + text.rstrip("\n")
+    return {"doc": key, "path": rel, "text": out + "\n", "kept": kept, "cut": cut}
+
+
+def cmd_answers(root: Path, key: str) -> int:
+    """Print what `answers_for` would make of a full copy, as JSON. Writes nothing."""
+    out = answers_for(root, key)
+    if "refusal" in out:
+        print(f"⚠  {out['refusal']}: nothing to migrate", file=sys.stderr)
+        return 1
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
 def drift(root: Path) -> dict:
     """What a newer plugin changed under a host's setup, read-only. `breaking` is what the plugin
     would now misread (a retired config key, an override lacking what the script reads, a doc the
@@ -6437,13 +6585,18 @@ def drift(root: Path) -> dict:
             }
         )
 
-    for key, name in HOST_DOCS.items():
+    for key in HOST_DOCS:
         rel = cfg["docs"][key]
         if not rel or not (root / rel).is_file():
             continue
         host_text = (root / rel).read_text(encoding="utf-8")
-        default = doc_units((DEFAULTS_DIR / name).read_text(encoding="utf-8"))
+        source, name = _copy_source(key)
         recorded = (manifest or {}).get("docs", {}).get(key)
+        if key in GUIDES and doc_layout(root, key) == "answers":
+            out["docs"][key] = {"path": rel, "layout": "answers", "guide": str(source)}
+            out["report"] += _answers_drift(rel, source, host_text, recorded, version)
+            continue
+        default = doc_units(source.read_text(encoding="utf-8"))
         if recorded and recorded.get("path") != rel:
             out["report"].append(
                 {
@@ -7124,6 +7277,11 @@ def main() -> int:
     sub.add_parser(
         "drift", help="what changed under this repo's setup since it ran, as JSON; writes nothing"
     )
+    p_answers = sub.add_parser(
+        "answers",
+        help="a full copy of the process or review doc cut to its answers; writes nothing",
+    )
+    p_answers.add_argument("doc", choices=sorted(GUIDES))
     p_record = sub.add_parser(
         "record", help="write .sdlc/setup.json: the defaults setup offered, for the next drift"
     )
@@ -7131,6 +7289,10 @@ def main() -> int:
     p_record.add_argument(
         "--gitignore-line", action="store_true", help=f"setup added {WORKTREES_LINE} to .gitignore"
     )
+    p_record.add_argument(
+        "--answers", nargs="*", default=[], metavar="DOC",
+        help="process, review: docs setup wrote as answers to the guide",
+    )  # fmt: skip
     p_reset = sub.add_parser("reset", help="delete one .sdlc/templates/ override")
     p_reset.add_argument("name", help="the template's file name, e.g. intent.md")
     p_reset.add_argument("--check", action="store_true", help="preconditions only, write nothing")
@@ -7181,8 +7343,10 @@ def main() -> int:
         return cmd_readiness(root)
     if args.cmd == "drift":
         return cmd_drift(root)
+    if args.cmd == "answers":
+        return cmd_answers(root, args.doc)
     if args.cmd == "record":
-        return cmd_record(root, args.created, args.gitignore_line)
+        return cmd_record(root, args.created, args.gitignore_line, args.answers)
     if args.cmd == "reset":
         return cmd_reset(root, args.name, args.check)
     if args.cmd == "uninstall":

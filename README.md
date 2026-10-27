@@ -58,9 +58,11 @@ changes tracked on GitHub or locally. Then it asks only what it can't work out (
 anything slow worth checking separately, what a design here must never break), and drafts:
 
 - `.sdlc/config.toml`: the commands the skills run, such as your test-and-lint gate;
-- `.sdlc/SDLC.md`, your process: tiers, stages and gates, from the plugin's default, filled in for
-  this repo;
-- `.sdlc/REVIEW.md`, the review passes `/sdlc:ship` works through;
+- `.sdlc/SDLC.md`, your answers to the plugin's process guide: the failure your process stops,
+  what is always Tier 2 here, your gate, how a commit reaches your users. The guide itself (tiers,
+  stages and gates) is read from the plugin, so an update reaches you without a setup diff;
+- `.sdlc/REVIEW.md`, what you add to the review passes `/sdlc:ship` works through: the ways your
+  code has failed;
 - `AGENTS.md`, with a one-line `CLAUDE.md` importing it, when the repo has neither. When it has
   either, setup proposes additions to that file instead;
 - a `.claude/worktrees/` line in `.gitignore`, and read-only permission rules in

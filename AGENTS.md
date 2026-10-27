@@ -55,11 +55,17 @@ skill's bash.
 **Mechanism vs. policy.** The plugin knows nothing about what a host builds. Everything
 host-specific comes from `.sdlc/config.toml`, read only by `sdlc.py config`, which
 `load_config()` resolves once (every doc path included), so no reader has its own. Skills ask
-`config` rather than guessing. `defaults/` holds the docs `/sdlc:setup` copies into a host once,
-after which the host owns them (`HEALTH.md` is one); `templates/` the shape of each file the plugin
-writes itself, every time (`direction.md`, `inbox.md`, `notes.md`, the artifacts, the issue),
-overridable in `.sdlc/templates/`. A missing review doc falls back to `defaults/REVIEW.md`; other
-missing docs are reported, never replaced.
+`config` rather than guessing. `guide/` holds the process and review guides, the plugin's, read in
+place and never copied (`config`'s `docs.process.guide`, `docs.review.guide`); `defaults/` the docs
+`/sdlc:setup` copies into a host once, after which the host owns them (`HEALTH.md` is one, and
+`SDLC.md` and `REVIEW.md` are only a host's answers to the guides: each `doc_units()` block of
+theirs stands in for the guide's of the same key when it holds text, or is read after its
+parent's); `templates/` the shape of each file the plugin writes itself, every time
+(`direction.md`, `inbox.md`, `notes.md`, the artifacts, the issue), overridable in
+`.sdlc/templates/`. A missing review doc leaves the review guide alone; other missing docs are
+reported, never replaced. Whether a host's doc is answers or a whole copy from before the split
+(`layout`, read alone until the `process-guide-split` shim goes) is setup's record's to say, never
+its text's.
 
 **The base branch: `git.base`.** `main` in this file means the base branch a host names in
 `[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
@@ -227,7 +233,11 @@ the plugin version, its config keys, and a hash of each block (`doc_units()`: a 
 `- **lead**` bullet) of each default behind a host doc. `drift` compares three ways (the default
 now, that hash, the host's text), so a block the plugin changed and the host never touched is
 proposed (the whole doc, as `proposed`, every other block as the host wrote it), and one the host
-changed never is. `breaking` is only what the plugin would now misread: a key in `RETIRED_KEYS`,
+changed never is. A process or review doc recorded as answers (`record --answers`, which only
+setup passes) has no blocks of the guide's to refresh: its record holds the guide's hash, and
+`drift` says only `guide-changed`, a note to read, and `unknown` for a block no guide heading
+places. `answers` cuts a whole copy to its answers once, for setup to show behind its WAIT.
+`breaking` is only what the plugin would now misread: a key in `RETIRED_KEYS`,
 an override lacking what `TEMPLATE_READS` names. Rename or drop a config key, or make the script
 read a new template heading, and that table gets the entry in the same change. `uninstall`
 removes only setup's (git's files in `.sdlc/`, the plugin's allow rules, the ignore line when
@@ -294,13 +304,15 @@ Changing a skill or the script usually means satisfying these, so know them befo
   inside one. No `---` rules, no skipped heading levels. A doc's note stays in a host's copy, so
   it never says "default". `templates/issue.md` is the one exception: its text is every issue's
   body.
-- **This repo's process docs track the defaults** (`tests/test_defaults.py`): `.sdlc/SDLC.md` and
-  `.sdlc/REVIEW.md` are this repo's filled-in copies of `defaults/SDLC.md` and `defaults/REVIEW.md`.
-  They keep every default heading in order and every default review bullet word for word, adding
-  their own between. An improvement to either that any repo could use goes into the default in the
-  same change; only what is true of this plugin alone stays in the copy. A change that edits
-  `defaults/` also runs `scripts/sdlc.py record` from its own checkout, so `.sdlc/setup.json`
-  matches what it ships: the gate fails while `sdlc.py drift` reports anything here.
+- **This repo's process docs hold only its answers** (`tests/test_defaults.py`): `.sdlc/SDLC.md`
+  and `.sdlc/REVIEW.md` are this plugin's own answers to `guide/process.md` and `guide/review.md`.
+  Every block sits under a heading the guide has, and none restates the guide's word for word. An
+  improvement any repo could use goes into the guide; only what is true of this plugin alone
+  stays here. Every answer slot in the guide is a block of its own, keyed as the prompt that asks
+  for it in `defaults/` (`test_every_prompt_sits_in_a_guide_slot`), and the guide asks nothing
+  itself. A change that edits `defaults/` or `guide/` also runs `scripts/sdlc.py record` from its
+  own checkout, so `.sdlc/setup.json` matches what it ships: the gate fails while `sdlc.py drift`
+  reports anything here.
 - **`stamp_shipped` edits frontmatter lines in place.** Do not refactor it to round-trip through
   `frontmatter.dumps()`: that turns `id: 001` into `1`, reorders keys and writes `idea: null`.
   `tests/test_sdlc.py` pins this.

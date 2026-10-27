@@ -167,9 +167,11 @@ so and find out why. Silently building nothing and reporting success is the fail
 
 ## Step 3 — Review the diff — all four passes
 
-Work the review (`docs.review` from `config`) in order. Read it if it isn't in context; when its
-`source` is `plugin`, the repo has no review of its own and the plugin's default stands in, which
-is worth saying. Do not skim the diff; read it.
+Work the review in order: the plugin's guide (`docs.review.guide` from `config`, when it gives
+one), then the repo's review doc (`docs.review`), whose blocks stand in for the guide's of the
+same heading or lead and add the rest, its own failure classes. Read them if they aren't in
+context; when `docs.review`'s `source` is `plugin`, the repo has no review of its own and the
+guide stands alone, which is worth saying. Do not skim the diff; read it.
 
 1. **Correctness** — walk the requirements (`spec.md` R1, R2, …, or `intent.md`'s Outcome for
    Tier 1) one at a time and find the code for each. A requirement with no code is a finding. Then
@@ -196,7 +198,8 @@ is worth saying. Do not skim the diff; read it.
 Rank findings **Important** or **Nit**, tag each with its pass, and **cap nits at 5** — more than
 that means the change is too big, and that's the finding.
 
-Weigh each Nit under the rubric in the process doc (`docs.process`), its section on nits, and give
+Weigh each Nit under the rubric in the process (`docs.process.guide`, then `docs.process`), its
+section on nits, and give
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
 it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.md`, not a nit. One that
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"

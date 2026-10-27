@@ -15,6 +15,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py answers *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work *)'
 disable-model-invocation: true
@@ -54,7 +55,10 @@ sorts what it finds three ways, and Step 3 keeps them apart in that order:
 - **`report`**: what only a person can decide: a block both sides changed (`conflict`), a block
   that differs where there's no record to say who changed it (`differs`, `base: none`), a config
   key the plugin doesn't read (`unknown`) or one new since the record (`new`), a plugin template
-  that changed under an override (`changed`).
+  that changed under an override (`changed`). For a process or review doc that holds only this
+  repo's answers (`layout: answers`), only two: the plugin's guide changed since the record
+  (`guide-changed`, a note to read, never a refresh), and a block whose heading the guide has
+  nowhere (`unknown`), which no reader can place.
 
 Blocks the host wrote (`own`), edited (`edited`) or took out (`host-removed`) are listed under
 `docs` and never proposed back.
@@ -145,13 +149,28 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is
   `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it. A
   repo on `main` gets no `[git]` section.
-- **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process` and fill in every line that
-  starts with `<`. Those are where this repo differs: the failure it most needs to stop, its
-  always-Tier-2 carve-outs, its gate and slower check, how a commit reaches its users. Keep the
-  rest unless it's wrong here. A `<` line left in is a blank the human has to fill.
-- **The review passes** (`docs.review`, `.sdlc/REVIEW.md`): start from `defaults.review`, and add under Correctness
-  the ways this repo's code actually fails, found in Step 1: what its tests guard against, what its
-  history fixes. Don't invent failure classes the code gives no sign of.
+- **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process`,
+  this repo's answers to the plugin's guide (`docs.process.guide`), which the skills read with it.
+  Fill in every line that starts with `<`. Those are where this repo differs: the failure it most
+  needs to stop, its always-Tier-2 carve-outs, its gate and slower check, how a commit reaches its
+  users. A prompt whose answer is the guide's is deleted, its heading kept. Copy a block of the
+  guide in only to change it here. A `<` line left in is a blank the human has to fill.
+- **The review passes** (`docs.review`, `.sdlc/REVIEW.md`): start from `defaults.review`, this
+  repo's additions to the plugin's review guide (`docs.review.guide`), and list the ways this
+  repo's code actually fails, found in Step 1: what its tests guard against, what its history
+  fixes. Don't invent failure classes the code gives no sign of.
+- **A whole copy of the guide**, when `readiness` reports `docs.process` or `docs.review` as
+  `migrate:`: a repo set up before the guide was read in place. Cut it to its answers:
+
+  ```bash
+  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py answers <doc>
+  ```
+
+  `<doc>` is `process` or `review`. It prints the doc as it would read (`text`), the blocks it keeps as this repo's (`kept`), and
+  those it cuts as the plugin's (`cut`: unchanged from what setup offered, or the guide now).
+  Draft `text` as one diff from the doc, naming each block kept and cut. A kept block that is
+  only older plugin text, which a repo set up before setup's record can't tell apart, is the
+  human's to cut in that diff.
 - **The health doc** (`docs.health`, `.sdlc/HEALTH.md`), when `readiness` reports it
   `missing`, which it does only once there is a scan. Start from `defaults.health`, and fill its
   table from what Step 1 found the scan checks (its task file, its script) and what the human says
@@ -253,10 +272,12 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset <name>
 Then record what setup offered, so the next `drift` compares against it. `--created` names each
 file this run created (none on a refresh), and `--gitignore-line` is given when this run added the
 `.claude/worktrees/` line to `.gitignore`: `/sdlc:uninstall` removes only what the record says
-setup wrote. Then prove it:
+setup wrote. `--answers` names each of `process` and `review` this run wrote as answers to the
+guide, from a template or cut by `answers`: the record, never the text, says which layout a doc
+has. Then prove it:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> --answers <docs> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check
 ```

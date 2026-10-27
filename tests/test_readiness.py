@@ -107,6 +107,21 @@ def test_a_process_doc_still_holding_the_template_is_a_warning(tmp_path: Path, c
     assert _items(_readiness(root, capsys))["docs.process"] == "warn"
 
 
+def test_a_full_copy_of_the_guide_is_a_nudge_to_migrate(tmp_path: Path, capsys) -> None:
+    """A whole copy, from before the guide was read in place, warns until setup cuts it; once the
+    record says answers, it is ok. Never required, so a skill never stops on it."""
+    root = _repo(tmp_path)
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "SDLC.md").write_text("# Process\n\nFilled in.\n", encoding="utf-8")
+    out = _readiness(root, capsys)
+    item = next(i for i in out["items"] if i["name"] == "docs.process")
+    assert item["status"] == "warn" and item["detail"].startswith("migrate:")
+    assert not item["required"] and out["ready"] is True
+    record = {"docs": {"process": {"path": ".sdlc/SDLC.md", "layout": "answers"}}}
+    (root / ".sdlc" / "setup.json").write_text(json.dumps(record), encoding="utf-8")
+    assert _items(_readiness(root, capsys))["docs.process"] == "ok"
+
+
 def test_the_review_falling_back_to_the_plugins_counts_as_missing(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
     assert _items(_readiness(root, capsys))["docs.review"] == "missing"

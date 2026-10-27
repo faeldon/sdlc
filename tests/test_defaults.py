@@ -41,9 +41,12 @@ EXCEPTIONS = {
 CHANGE_TEMPLATES = {"templates/intent.md", "templates/spec.md", "templates/plan.md"}
 FILES = sorted(
     p.relative_to(ROOT).as_posix()
-    for p in [*ROOT.glob("defaults/*.md"), *ROOT.glob("templates/*.md")]
+    for p in [*ROOT.glob("defaults/*.md"), *ROOT.glob("templates/*.md"), *ROOT.glob("guide/*.md")]
     if p.relative_to(ROOT).as_posix() not in EXCEPTIONS
 )
+# The guides are read in place from the plugin and never copied into a host, so their notes say
+# what the plugin does; every other shipped doc's note stays in a host's copy.
+GUIDES = {"defaults/SDLC.md": "guide/process.md", "defaults/REVIEW.md": "guide/review.md"}
 DOC_TITLE_RE = re.compile(r"^# [A-Z][a-z]+( [a-z]+)?$")
 CHANGE_TITLE_RE = re.compile(r"^# NNN — TITLE( · (spec|plan))?$")
 KEY_LINE_RE = re.compile(r"^(# )?([A-Za-z_][\w-]*):")
@@ -111,7 +114,7 @@ def note_problems(name: str, text: str) -> list[str]:
 
 
 def host_copy_problems(name: str, text: str) -> list[str]:
-    if name in CHANGE_TEMPLATES:
+    if name in CHANGE_TEMPLATES or name in GUIDES.values():
         return []  # the filled artifact replaces the note; it never reaches a host's doc
     found = [m.group(0) for line in _note(text) if (m := HOST_COPY_RE.search(line))]
     return [f"{name}: note says {w!r}, which is false in a host's copy" for w in found]
@@ -232,12 +235,22 @@ def test_the_inbox_note_defines_seed_and_its_kinds() -> None:
     assert "`[seed]` tag, from before ideas had their own, reads as `[idea]`" in note
 
 
-@pytest.mark.parametrize("doc", ["defaults/SDLC.md", ".sdlc/SDLC.md"])
-def test_the_process_doc_names_the_seed_kinds_and_the_change_types(doc: str) -> None:
-    text = _text(doc)
+def test_the_process_guide_names_the_seed_kinds_and_the_change_types() -> None:
+    text = _text("guide/process.md")
     section = text.split("### Seeds, and the changes they become\n", 1)[1].split("\n## ", 1)[0]
     for word in ("[idea]", "[bug]", "[nit]", "feature", "fix", "refactor", "docs", "chore"):
         assert f"`{word}`" in section, word
+
+
+@pytest.mark.parametrize(("answers", "guide"), GUIDES.items())
+def test_every_prompt_sits_in_a_guide_slot(answers: str, guide: str) -> None:
+    """A host's answer stands in for, or follows, a guide block by key, so every prompt setup
+    fills must sit in a block whose key the guide has: a slot. And the guide asks nothing itself."""
+    slots = dict(sdlc.doc_units(_text(guide)))
+    prompted = [k for k, t in sdlc.doc_units(_text(answers)) if sdlc.PROMPT_RE.search(t)]
+    assert prompted, f"{answers} has prompts"
+    assert [k for k in prompted if k not in slots] == []
+    assert not sdlc.PROMPT_RE.search(_text(guide)), f"{guide} carries a prompt"
 
 
 def test_no_shipped_text_writes_a_seed_heading() -> None:
@@ -247,6 +260,7 @@ def test_no_shipped_text_writes_a_seed_heading() -> None:
         *ROOT.glob("plugins/factory/skills/*/SKILL.md"),
         *ROOT.glob("templates/*.md"),
         *ROOT.glob("defaults/*.md"),
+        *ROOT.glob("guide/*.md"),
         ROOT / "docs" / "REFERENCE.md",
     ]
     assert not [str(p.relative_to(ROOT)) for p in paths if "] [seed]" in p.read_text("utf-8")]
@@ -267,51 +281,36 @@ def test_the_factory_builder_starts_checks_from_the_same_text_as_the_template() 
     assert f"````markdown\n{_text('templates/checks.md')}````" in builder
 
 
-# This repo's own copies of the defaults it ships. An improvement made to one that any repo could
-# use belongs in the default too, so the two are held together: the copy keeps every heading of
-# the default in order (adding its own between them), and every review bullet word for word.
-OWN_COPIES = {"defaults/SDLC.md": ".sdlc/SDLC.md", "defaults/REVIEW.md": ".sdlc/REVIEW.md"}
+# This repo's own answers to the guides it ships. Only what is this plugin's alone lives there:
+# every block sits under a heading the guide has, so a reader can place it, and none restates the
+# guide's block word for word, which would only be a copy waiting to drift. An improvement any
+# repo could use goes into the guide.
+OWN_ANSWERS = {".sdlc/SDLC.md": "guide/process.md", ".sdlc/REVIEW.md": "guide/review.md"}
 
 
-def _headings(text: str) -> list[str]:
-    """The title, then every heading block's key, in order: what setup's drift compares too."""
-    title = [line for line in sdlc._body_of(text).splitlines() if line.startswith("# ")][:1]
-    return title + [key for key, _ in sdlc.doc_units(text) if not key.endswith("**")]
+@pytest.mark.parametrize(("answers", "guide"), OWN_ANSWERS.items())
+def test_this_repos_answers_are_guide_keys(answers: str, guide: str) -> None:
+    keys = {k for k, _ in sdlc.doc_units(_text(guide))}
+    units = sdlc.doc_units(_text(answers))
+    stray = [k for k, _ in units if k != "#" and not sdlc._under_guide(k, keys)]
+    assert stray == [], f"{answers} has blocks {guide} can't place"
+    assert not [ln for ln in _text(answers).splitlines() if ln == "---"], f"{answers} has a rule"
 
 
-def _in_order(wanted: list[str], have: list[str]) -> bool:
-    rest = iter(have)
-    return all(any(w == h for h in rest) for w in wanted)
+@pytest.mark.parametrize(("answers", "guide"), OWN_ANSWERS.items())
+def test_this_repos_answers_restate_no_guide_block(answers: str, guide: str) -> None:
+    said = {sdlc.unit_hash(t) for k, t in sdlc.doc_units(_text(guide)) if k != "#"}
+    # A heading with nothing under it only places what follows: it restates nothing.
+    units = [(k, t) for k, t in sdlc.doc_units(_text(answers)) if len(t.strip().splitlines()) > 1]
+    same = [k for k, t in units if k != "#" and sdlc.unit_hash(t) in said]
+    assert same == [], f"{answers} restates {guide} at {same}: cut them"
 
 
-@pytest.mark.parametrize(("default", "copy"), OWN_COPIES.items())
-def test_this_repos_copy_keeps_the_defaults_sections(default: str, copy: str) -> None:
-    assert _in_order(_headings(_text(default)), _headings(_text(copy))), (
-        f"{copy} has lost or reordered a section of {default}: move the change to both"
-    )
-    assert not [ln for ln in _text(copy).splitlines() if ln == "---"], f"{copy} has a `---` rule"
-
-
-def _bullets(text: str) -> list[str]:
-    """Each `- **lead**` bullet's first paragraph, as written."""
-    return [
-        re.split(r"\n(?=- |\n|$)", body, maxsplit=1)[0]
-        for key, body in sdlc.doc_units(text)
-        if key.endswith("**")
-    ]
-
-
-def test_this_repos_review_keeps_every_default_failure_class() -> None:
-    bullets = _bullets(_text("defaults/REVIEW.md"))
-    assert bullets, "the default's bullets were read"
-    missing = [b.splitlines()[0] for b in bullets if b not in _text(".sdlc/REVIEW.md")]
-    assert not missing, f".sdlc/REVIEW.md differs from defaults/REVIEW.md at: {missing}"
-
-
-def test_a_copy_that_drops_a_section_fails() -> None:
-    assert not _in_order(["## A", "## B"], ["## B", "## A"])
-    assert not _in_order(["## A", "## B"], ["## A"])
-    assert _in_order(["## A", "## B"], ["## A", "## Own", "## B"])
+def test_a_block_the_guide_can_t_place_is_stray() -> None:
+    keys = {"## A", "## A > ### B"}
+    assert sdlc._under_guide("## A > ### B > - **x**", keys)
+    assert sdlc._under_guide("## A > ### Own", keys)
+    assert not sdlc._under_guide("## Own", keys)
 
 
 # What `sdlc.py record` clears, by drift class: it makes each default block the new base, re-lists

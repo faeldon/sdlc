@@ -58,15 +58,18 @@ def _git(root: Path, *args: str) -> str:
 
 @pytest.fixture
 def plugin(tmp_path: Path, monkeypatch) -> Path:
-    """A fake plugin: its defaults and templates, at version 1.1.0."""
+    """A fake plugin: its defaults, its review guide (what a full copy of a review tracks) and
+    its templates, at version 1.1.0."""
     where = tmp_path / "plugin"
     (where / "defaults").mkdir(parents=True)
+    (where / "guide").mkdir()
     (where / "templates").mkdir()
-    (where / "defaults" / "REVIEW.md").write_text(REVIEW, encoding="utf-8")
+    (where / "guide" / "review.md").write_text(REVIEW, encoding="utf-8")
     for name in ("intent.md", "issue.md"):
         text = (ROOT / "templates" / name).read_text(encoding="utf-8")
         (where / "templates" / name).write_text(text, encoding="utf-8")
     monkeypatch.setattr(sdlc, "DEFAULTS_DIR", where / "defaults")
+    monkeypatch.setattr(sdlc, "GUIDE_DIR", where / "guide")
     monkeypatch.setattr(sdlc, "TEMPLATE_DIR", where / "templates")
     monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.1.0")
     return where
@@ -88,7 +91,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _default(plugin: Path, text: str) -> None:
-    (plugin / "defaults" / "REVIEW.md").write_text(text, encoding="utf-8")
+    (plugin / "guide" / "review.md").write_text(text, encoding="utf-8")
 
 
 def _host(repo: Path, text: str) -> None:
@@ -119,7 +122,7 @@ def test_record_writes_the_manifest_shape(repo: Path, plugin: Path) -> None:
     assert manifest["version"] == "1.1.0"
     assert "commands.check" in manifest["config_keys"]
     review = manifest["docs"]["review"]
-    assert review["path"] == ".sdlc/REVIEW.md" and review["default"] == "REVIEW.md"
+    assert review["path"] == ".sdlc/REVIEW.md" and review["default"] == "review.md"
     assert list(review["units"]) == ["#", "## Pass 1", BULLET_A, BULLET_B, "## Pass 2"]
     assert set(manifest["templates"]) == {"intent.md", "issue.md"}
     assert "process" not in manifest["docs"], "a doc the host doesn't have has no base"
@@ -161,7 +164,7 @@ def test_drift_added(repo: Path, plugin: Path) -> None:
     assert _classes(repo)["added"] == ["## Pass 1 > - **Works only here.**"]
     (refresh,) = sdlc.drift(repo)["refresh"]
     assert refresh["units"][0]["anchor"] == BULLET_B
-    assert refresh["proposed"] == (plugin / "defaults" / "REVIEW.md").read_text(encoding="utf-8")
+    assert refresh["proposed"] == (plugin / "guide" / "review.md").read_text(encoding="utf-8")
 
 
 def test_drift_refreshed(repo: Path, plugin: Path) -> None:
@@ -602,7 +605,7 @@ def test_a_repeated_key_is_its_own_block(repo: Path, plugin: Path) -> None:
 
 
 def test_the_shipped_defaults_have_one_block_per_key() -> None:
-    paths = sorted((ROOT / "defaults").glob("*.md"))
+    paths = sorted([*(ROOT / "defaults").glob("*.md"), *(ROOT / "guide").glob("*.md")])
     assert paths, "the defaults were found"
     for path in paths:
         keys = [k for k, _ in sdlc.doc_units(path.read_text(encoding="utf-8"))]
@@ -632,3 +635,94 @@ def test_uninstall_removes_the_settings_file_setup_created(repo: Path, plugin: P
     _git(repo, "commit", "-qam", "record the settings")
     assert sdlc.cmd_uninstall(repo) == 0
     assert not (repo / ".claude" / "settings.json").exists()
+
+
+# ── An answers file: the host's review holds only its additions to the guide ──────────────────
+
+ANSWERS = """# Review
+
+> This repo's additions.
+
+## Pass 1
+
+- **A loop that never ends.** Ours.
+
+## Our own pass
+
+Not under any heading the guide has.
+"""
+
+
+def test_record_with_answers_writes_the_layout_and_the_guide_s_hash(repo, plugin) -> None:
+    _host(repo, ANSWERS)
+    manifest = _record(repo)
+    assert "layout" not in manifest["docs"]["review"], "never read from the text"
+    assert sdlc.cmd_record(repo, [], False, ["review"]) == 0
+    review = json.loads((repo / ".sdlc" / "setup.json").read_text("utf-8"))["docs"]["review"]
+    guide = (plugin / "guide" / "review.md").read_text(encoding="utf-8")
+    want = {"path": ".sdlc/REVIEW.md", "layout": "answers", "guide": sdlc.unit_hash(guide)}
+    assert review == want
+    assert _record(repo)["docs"]["review"]["layout"] == "answers", "a later record keeps it"
+    assert sdlc.cmd_record(repo, [], False, ["policy"]) == 1
+
+
+def test_an_answers_file_drifts_by_the_guide_alone(repo, plugin) -> None:
+    _host(repo, ANSWERS)
+    assert sdlc.cmd_record(repo, [], False, ["review"]) == 0
+    out = sdlc.drift(repo)
+    assert out["refresh"] == [] and out["docs"]["review"]["layout"] == "answers"
+    unknown = [r for r in out["report"] if r.get("class") == "unknown" and r["what"] == "doc"]
+    assert [r["unit"] for r in unknown] == ["## Our own pass"], "a bullet under Pass 1 is placed"
+    assert not [r for r in out["report"] if r.get("class") == "guide-changed"]
+
+    _default(plugin, REVIEW.replace("The contract.", "The contract, now longer."))
+    out = sdlc.drift(repo)
+    changed = [r for r in out["report"] if r.get("class") == "guide-changed"]
+    assert len(changed) == 1 and changed[0]["guide"].endswith("review.md")
+    assert out["refresh"] == [] and out["breaking"] == [], "a note to read, never a refresh"
+
+
+TEMPLATE = "# Review\n\n> This repo's additions to the review guide.\n\n## Pass 1\n\n<prompt>\n"
+
+
+def test_answers_cuts_a_full_copy_to_what_the_host_wrote(repo, plugin) -> None:
+    """Untouched plugin text goes; an edited bullet and one of the host's own stay, under the
+    heading they sat beneath, and the template's title and note replace the copy's."""
+    (plugin / "defaults" / "REVIEW.md").write_text(TEMPLATE, encoding="utf-8")
+    _record(repo)
+    _host(repo, REVIEW.replace("A bare except.", "A bare except, or a pass.").replace(
+        "It asserts nothing.\n", "It asserts nothing.\n- **A loop that never ends.** Ours.\n"
+    ))  # fmt: skip
+    out = sdlc.answers_for(repo, "review")
+    assert out["kept"] == [BULLET_A, "## Pass 1 > - **A loop that never ends.**"]
+    assert out["cut"] == ["#", "## Pass 1", BULLET_B, "## Pass 2"]
+    assert out["text"] == (
+        "# Review\n\n> This repo's additions to the review guide.\n\n## Pass 1\n\n"
+        "- **An error swallowed.** A bare except, or a pass.\n"
+        "- **A loop that never ends.** Ours.\n"
+    )
+    assert (repo / ".sdlc" / "REVIEW.md").read_text("utf-8") != out["text"], "nothing written"
+
+
+def test_answers_without_a_record_cuts_only_what_the_guide_says_now(repo, plugin) -> None:
+    """With no record, an older plugin's text can't be told from the host's: it is kept, and
+    shows in the diff setup puts before its WAIT."""
+    (plugin / "defaults" / "REVIEW.md").write_text(TEMPLATE, encoding="utf-8")
+    _default(plugin, REVIEW.replace("The contract.", "The contract, now longer."))
+    out = sdlc.answers_for(repo, "review")
+    assert out["kept"] == ["## Pass 2"] and "## Pass 1" in out["cut"]
+    _record(repo)
+    assert sdlc.answers_for(repo, "review")["kept"] == ["## Pass 2"], "recorded after the change"
+
+
+def test_answers_refuses_a_doc_already_cut(repo, plugin, capsys) -> None:
+    assert sdlc.cmd_record(repo, [], False, ["review"]) == 0
+    assert sdlc.cmd_answers(repo, "review") == 1
+    assert "already answers" in capsys.readouterr().err
+
+
+def test_a_full_copy_still_drifts_block_by_block_against_the_guide(repo, plugin) -> None:
+    _record(repo)
+    _default(plugin, REVIEW.replace("The contract.", "The contract, now longer."))
+    out = sdlc.drift(repo)
+    assert [u["unit"] for u in out["refresh"][0]["units"]] == ["## Pass 2"]

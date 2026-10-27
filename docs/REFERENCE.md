@@ -35,8 +35,8 @@ close_list = "ls /tmp/cache-{suffix}"       # read-only: what a closed change le
 close_cleanup = "! make drop {id}"          # handed to the human by /sdlc:close; never run by a skill
 
 [docs]
-process = ".sdlc/SDLC.md"                   # the default: tiers, stages, releases
-review = ".sdlc/REVIEW.md"                  # the default; falls back to the plugin's defaults/REVIEW.md
+process = ".sdlc/SDLC.md"                   # the default: your answers to the plugin's process guide
+review = ".sdlc/REVIEW.md"                  # the default: what you add to its review guide; without one, the guide alone
 policy = "CLAUDE.md"                        # the default (AGENTS.md when that's the only one): the invariants /sdlc:spec designs inside
 read_before_design = ["docs/conventions.md"]
 explore = "/db:explore"                     # a skill or command for looking at the system itself
@@ -121,10 +121,26 @@ merged into it by fast-forward.
 
 The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left to your project.
 
-- **`docs.process`** (`.sdlc/SDLC.md`) holds the tier table and what each stage means here.
-  `defaults/SDLC.md` is the plugin's generic one, which setup fills in.
-- **`docs.review`** (`.sdlc/REVIEW.md`) holds the review passes. Without one, `/sdlc:ship` works
-  through `defaults/REVIEW.md` and says so.
+- **`docs.process`** (`.sdlc/SDLC.md`) holds your answers to the plugin's process guide
+  (`guide/process.md`, which `config` names as `docs.process.guide`): the failure your process
+  stops, what is always Tier 2 here, your gate, how a commit reaches your users. The guide holds
+  the rest, the tiers and what each stage means, and is read in place from the installed plugin,
+  so an update reaches you without a setup diff. Setup starts your file from `defaults/SDLC.md`.
+- **`docs.review`** (`.sdlc/REVIEW.md`) holds what you add to the plugin's review guide
+  (`guide/review.md`, `docs.review.guide`): the ways your code has failed. Without one,
+  `/sdlc:ship` works through the guide alone and says so.
+- **How the two are read.** Each file is cut into blocks at each heading and each `- **lead**`
+  bullet. A block of yours with the same heading path, or lead, as one of the guide's stands in
+  for it when it holds text of its own; any other is read after its parent's block in the guide;
+  a heading with nothing under it only places what follows. To change something the guide says,
+  copy its block into your file and edit it there.
+- **A whole copy, from before 1.5.0.** A repo set up earlier has the whole guide copied into
+  `.sdlc/SDLC.md` and `.sdlc/REVIEW.md`. `config` reports it as `layout: full` and the skills read
+  it alone, as before, until `/sdlc:setup` cuts it to your answers: `sdlc.py answers process` (and
+  `review`) shows what it would keep and cut, blocks setup offered unchanged going and anything you
+  wrote staying, as a diff behind setup's one approval. `.sdlc/setup.json` then records the doc as
+  `layout: answers`, and `drift` only notes when the plugin's guide changed (`guide-changed`). The
+  whole-copy reading is a shim, removed in 1.6.0.
 - **`docs.policy`** holds the invariants a design has to stay inside: `CLAUDE.md`, or `AGENTS.md`
   when the repo has no `CLAUDE.md`. Set it to name another file.
 - **`docs.health`** (`.sdlc/HEALTH.md`) holds what each finding your scan can report
@@ -139,7 +155,8 @@ and it produces findings rather than a pass or fail. A task of your own named `d
 is usually your scan; setup proposes it for `commands.scan`. It is unrelated to the plugin's
 `sdlc.py readiness`, which only says whether the repo is set up for the plugin.
 
-**`defaults/` and `templates/`.** A file in the plugin's `defaults/` is a doc `/sdlc:setup` copies
+**`guide/`, `defaults/` and `templates/`.** A file in the plugin's `guide/` is read in place and
+never copied: the process and review guides. A file in `defaults/` is a doc `/sdlc:setup` copies
 into your repo once; from then on it's yours, and the plugin only reads it. A file in `templates/`
 is the shape of a file the plugin writes itself, each time it creates or rewrites one, and a
 same-named file in `.sdlc/templates/` replaces it.

@@ -40,8 +40,12 @@ def test_a_host_with_nothing_gets_null_commands_and_the_plugins_files(tmp_path: 
     assert all(v is None for v in out["commands"].values())
     assert {t["source"] for t in out["templates"].values()} == {"plugin"}
     assert out["docs"]["review"]["source"] == "plugin"
-    assert Path(out["docs"]["review"]["path"]) == sdlc.DEFAULTS_DIR / "REVIEW.md"
+    assert Path(out["docs"]["review"]["path"]) == sdlc.GUIDE_DIR / "review.md"
     assert Path(out["docs"]["review"]["path"]).is_file()
+    assert out["docs"]["review"]["guide"] is None, "the guide alone, read once"
+    process = out["docs"]["process"]
+    assert (process["exists"], process["layout"]) == (False, "answers")
+    assert Path(process["guide"]) == sdlc.GUIDE_DIR / "process.md", "the guide with no answers"
 
 
 def test_a_missing_policy_doc_is_reported_not_defaulted(tmp_path: Path, capsys):
@@ -68,7 +72,13 @@ def test_the_process_docs_default_to_sdlc(tmp_path: Path, capsys):
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "REVIEW.md").write_text("# review\n", encoding="utf-8")
     _, out = _config(tmp_path, capsys)
-    assert out["docs"]["review"] == {"path": ".sdlc/REVIEW.md", "exists": True, "source": "host"}
+    assert out["docs"]["review"] == {
+        "path": ".sdlc/REVIEW.md",
+        "exists": True,
+        "source": "host",
+        "layout": "full",
+        "guide": None,
+    }
 
 
 def test_the_policy_is_agents_md_only_without_a_claude_md(tmp_path: Path, capsys):
@@ -111,7 +121,13 @@ def test_host_settings_and_files_win(tmp_path: Path, capsys):
     assert out["commands"]["build_when"] == "^src/"
     assert out["commands"]["scan"] is None
     assert out["docs"]["explore"] == "/db:explore"
-    assert out["docs"]["review"] == {"path": ".sdlc/REVIEW.md", "exists": True, "source": "host"}
+    assert out["docs"]["review"] == {
+        "path": ".sdlc/REVIEW.md",
+        "exists": True,
+        "source": "host",
+        "layout": "full",
+        "guide": None,
+    }
     assert out["docs"]["read_before_design"] == [
         {"path": "docs/conventions.md", "exists": True, "source": "host"}
     ]
@@ -199,6 +215,8 @@ def test_a_review_in_work_is_read_in_the_checkout_it_runs_in(tmp_path: Path, cap
         "path": ".sdlc/work/REVIEW.md",
         "exists": True,
         "source": "host",
+        "layout": "full",
+        "guide": None,
     }
     assert out["work"] == {
         "dir": str(tree / ".sdlc" / "work"),
@@ -376,3 +394,18 @@ def test_a_base_that_isnt_a_string_is_a_warning(tmp_path: Path, capsys):
     _, out = _config(root, capsys)
     assert "git.base must be a string" in out["warnings"]
     assert out["git"]["base"] == "main"
+
+
+def test_an_answers_doc_names_the_guide_to_read_before_it(tmp_path: Path, capsys):
+    """Setup's record decides the layout, never the doc's text: recorded as answers, a host doc
+    comes with the guide's path; without a record, it is a full copy read alone."""
+    host = tmp_path / ".sdlc"
+    host.mkdir()
+    (host / "SDLC.md").write_text("# Process\n", encoding="utf-8")
+    _, out = _config(tmp_path, capsys)
+    assert (out["docs"]["process"]["layout"], out["docs"]["process"]["guide"]) == ("full", None)
+    record = {"docs": {"process": {"path": ".sdlc/SDLC.md", "layout": "answers"}}}
+    (host / "setup.json").write_text(json.dumps(record), encoding="utf-8")
+    _, out = _config(tmp_path, capsys)
+    assert out["docs"]["process"]["layout"] == "answers"
+    assert Path(out["docs"]["process"]["guide"]) == sdlc.GUIDE_DIR / "process.md"

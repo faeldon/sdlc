@@ -397,9 +397,9 @@ BLOCKED = '        lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(s
 
 
 def _plugin_copy(dest: Path) -> Path:
-    """The files the script reads from its plugin: manifest, scripts, templates, defaults."""
+    """The files the script reads from its plugin: manifest, scripts, templates, defaults, guide."""
     ignore = shutil.ignore_patterns("__pycache__")
-    for name in (".claude-plugin", "scripts", "templates", "defaults"):
+    for name in (".claude-plugin", "scripts", "templates", "defaults", "guide"):
         shutil.copytree(PLUGIN / name, dest / name, ignore=ignore)
     return dest
 
@@ -497,7 +497,8 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
 
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
-    shutil.copy(plugin / "defaults" / "REVIEW.md", root / ".sdlc" / "REVIEW.md")
+    # A host set up before the guide was read in place: a whole copy of it, drifting block by block.
+    shutil.copy(plugin / "guide" / "review.md", root / ".sdlc" / "REVIEW.md")
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
     created = (".sdlc/config.toml", ".sdlc/REVIEW.md", ".gitignore")
     made = run("record", "--created", *created, "--gitignore-line")
@@ -505,7 +506,7 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Set the repo up for the sdlc plugin")
 
-    review = plugin / "defaults" / "REVIEW.md"
+    review = plugin / "guide" / "review.md"
     text = review.read_text(encoding="utf-8")
     first = next(line for line in text.splitlines() if line.startswith("## "))
     review.write_text(text.replace(first, f"{first}\n\nOne more sentence.", 1), encoding="utf-8")

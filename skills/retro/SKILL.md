@@ -97,8 +97,9 @@ What `retro` gives:
 
 `config` says where each is. Read them once:
 
-- **The process doc** (`docs.process`): its stages, tiers and "Signals worth watching". This is
-  what "working" means here.
+- **The process doc** (`docs.process`), read after the plugin's guide (`docs.process.guide`, when
+  `config` gives one), its blocks standing in for the guide's of the same heading or lead: the
+  stages, tiers and "Signals worth watching". This is what "working" means here.
 - **The policy doc** (`docs.policy`): the invariants. An architecture finding that needs one moved
   says so.
 - **The direction doc** (`docs.direction`), if it exists: what the last retrospective set. The

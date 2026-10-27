@@ -209,6 +209,33 @@ def test_skills_read_host_specifics_from_config(name: str) -> None:
         assert key in text or f"`{short}`" in text, f"{name}: never reads {key}"
 
 
+# Each skill that reads the process or review doc reads the plugin's guide with it: a host's doc
+# holds only its answers, so a reader of the host's doc alone misses the process itself.
+READS_GUIDE = {
+    "sdlc:intent": ["docs.process.guide"],
+    "sdlc:spec": ["docs.process.guide", "docs.review.guide"],
+    "sdlc:ship": ["docs.process.guide", "docs.review.guide"],
+    "sdlc:retro": ["docs.process.guide"],
+    "sdlc:bug": ["docs.process.guide"],
+    "sdlc:triage": ["docs.process.guide"],
+    "sdlc:setup": ["docs.process.guide", "docs.review.guide"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(READS_GUIDE))
+def test_readers_of_the_process_read_the_guide_with_it(name: str) -> None:
+    text = BY_ID[name].read_text(encoding="utf-8")
+    assert [key for key in READS_GUIDE[name] if f"`{key}`" not in text] == []
+
+
+def test_the_factory_s_agents_read_a_review_doc_as_additions_to_the_guide() -> None:
+    """The factory's cached copy can't reach the sdlc plugin's guide; its agents carry the passes
+    and read the host's review doc for what this repo adds."""
+    for agent in ("reviewer-code", "spec-writer"):
+        text = (ROOT / "plugins" / "factory" / "agents" / f"{agent}.md").read_text("utf-8")
+        assert "review guide" in text, agent
+
+
 def test_intent_asks_with_a_number_the_tool_just_gave() -> None:
     """The draft for one change showed a number another session's worktree had already taken."""
     text = (ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8")

@@ -112,6 +112,22 @@ def test_without_the_bullet_the_default_doc_s_words_hold(tmp_path: Path) -> None
     assert sdlc.severities(root, sdlc.load_config(root)[0]) == ["high", "med", "low"]
 
 
+def test_an_answers_doc_s_bullet_stands_in_for_the_guide_s(tmp_path: Path) -> None:
+    """Recorded as answers or not, the host's bullet is read first, then the guide's."""
+    root = _repo(tmp_path)
+    (root / ".sdlc").mkdir(exist_ok=True)
+    record = {"docs": {"process": {"path": ".sdlc/SDLC.md", "layout": "answers"}}}
+    (root / ".sdlc" / "setup.json").write_text(json.dumps(record), encoding="utf-8")
+    (root / ".sdlc" / "SDLC.md").write_text(
+        "# Process\n\n## Running the stages\n\n### Stage 5 — Ship → `/sdlc:ship`\n\n"
+        "#### Bugs: what's already broken\n\n- **severity:** `p1`, down · `p2`, not\n",
+        encoding="utf-8",
+    )
+    assert sdlc.severities(root, sdlc.load_config(root)[0]) == ["p1", "p2"]
+    (root / ".sdlc" / "SDLC.md").write_text("# Process\n", encoding="utf-8")
+    assert sdlc.severities(root, sdlc.load_config(root)[0]) == ["high", "med", "low"]
+
+
 # Reading and checking.
 
 

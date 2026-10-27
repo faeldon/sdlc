@@ -40,8 +40,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 ```
 
 `config` names the repo's process doc (`docs.process`) and its policy doc (`docs.policy`). Read the
-process doc if it isn't already in context — specifically its tier table, since Step 2 depends on
-it. If `config` reports it doesn't exist, use the tiers in Step 2 as they stand and say so. Skim
+process if it isn't already in context — specifically its tier table and its always-Tier-2 rules,
+since Step 2 depends on them: the plugin's guide first (`docs.process.guide`, when `config` gives
+one), then the repo's doc, whose blocks stand in for the guide's of the same heading or lead and
+add to the rest. If neither exists, use the tiers in Step 2 as they stand and say so. Skim
 `.sdlc/work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
 argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks

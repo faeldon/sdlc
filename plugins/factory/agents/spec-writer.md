@@ -23,7 +23,8 @@ The prompt names the change folder (`.sdlc/work/NNN-slug/`) and the worktree. Re
    shape you return, in this repo's own template.
 3. The repo's policy doc (`docs.policy` in `.sdlc/config.toml`, else `CLAUDE.md`, or `AGENTS.md`
    where that's the only one): the invariants a design stays inside. Its review doc
-   (`docs.review`, else `.sdlc/REVIEW.md`, if present): the failure classes the review will look for, so design for them now.
+   (`docs.review`, else `.sdlc/REVIEW.md`, if present): the failure classes this repo's review
+   adds to the plugin's review guide, which the review will look for, so design for them now.
 4. The code the change touches, and its tests. What it already promises is what its callers rely
    on.
 
