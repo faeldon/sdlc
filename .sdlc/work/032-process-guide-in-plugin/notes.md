@@ -15,6 +15,6 @@ the plugin's paragraph and the second, unfilled prompt included: a block is kept
 under the key it had. Setup's diff shows it for the person to tidy. This repo's own migration was
 placed by hand into the new slots for the same reason.
 
-- [ ] `answers` moves a filled prompt's text into the guide slot that now asks for it (the old
+- [x] `answers` moves a filled prompt's text into the guide slot that now asks for it (the old
   `## The point of the process` answer to `### The failure it stops`, and the rest), so a
-  migrated host's answers sit where the template's would.
+  migrated host's answers sit where the template's would. → seed: 2026-10-27-10

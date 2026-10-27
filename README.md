@@ -171,6 +171,10 @@ A repo set up before 1.4.0 keeps its changes in `work/` at its root. Setup offer
 `.sdlc/work/` once, in a commit of its own, when no change is open and, if you release, after
 `/sdlc:release`: from then on, history from before the move isn't read again.
 
+A repo set up before 1.5.0 has the whole process and review guides copied into `.sdlc/SDLC.md` and
+`.sdlc/REVIEW.md`. They keep working as they are; setup offers to cut each to only what you wrote,
+behind its one approval, and from then on the guides reach you with each update.
+
 ## More
 
 - [`docs/REFERENCE.md`](docs/REFERENCE.md): every config key, the templates, the docs, numbering,

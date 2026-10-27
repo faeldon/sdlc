@@ -75,7 +75,9 @@ by its `docs` key (`process`, `review`, `health`, `product`, `project`), a templ
 file name (`intent.md`), or `all` of both. For a doc, the draft is its default again with every
 `<` prompt filled the way a first setup fills it (Steps 1 to 3), and above it the blocks the reset
 loses: each one `drift` lists as `own` or `edited`, shown as a diff, so nobody loses an edit
-without seeing it. For an override, there's nothing to draft: the reset deletes it and the
+without seeing it. A process or review doc that `config` gives `layout: answers` holds nothing
+but this repo's answers, so `drift` lists none of its blocks: every block but its title and note is
+what the reset loses, shown as the whole doc against the template. For an override, there's nothing to draft: the reset deletes it and the
 plugin's template is used again, so show the override against `templates[...]` in `config` and
 what it loses. A reset is a write like any other, behind Step 4.
 

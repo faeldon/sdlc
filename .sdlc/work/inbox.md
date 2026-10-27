@@ -479,27 +479,6 @@ Cost: S
 Value: low
 Raised by: 030-ship-preflight (correctness)
 
-## [2026-10-27-5] [building] Keep the plugin's process guide in the plugin, and only a host's answers in .sdlc/
-
-Building in .sdlc/work/032-process-guide-in-plugin/.
-
-Setup copies the whole of `defaults/SDLC.md` (499 lines) into a host, though only its seven `<`
-prompts and a few settings are the host's: the failure to stop, worktree needs, Stage 1 push-backs,
-the gate's prose, the path to users, scans, the always-Tier-2 carve-outs, severity words, change
-types and the nit rubric. The rest describes the plugin itself, and editing it in a host changes
-nothing but makes the doc wrong; keeping a host's 30 lines while taking the plugin's updates to the
-other 470 is most of what `drift`'s block hashes and three-way compare exist for. Same for
-`REVIEW.md`: the default passes are the plugin's, the added failure classes the host's.
-Read the guide and the default review in place from the plugin, as the review fallback already
-does; the host's `.sdlc/SDLC.md` and `REVIEW.md` hold only its answers and additions, and skills
-read both. No edit protection: there is nothing of the plugin's left in the host to protect.
-The trade-off is visibility: a host no longer reads the whole process in its own repo, and a
-plugin update changes it without a setup diff to review. The host file's note links the guide at
-the installed version, and setup or status reports when the guide changed since setup's record, as
-a note to read, never a refresh. Existing hosts migrate once (setup cuts their docs to their
-answers, keeping what they edited, shown as a diff), a shim with a `remove_in`. HEALTH, PRODUCT,
-PROJECT and the direction doc stay as they are: they are wholly the host's.
-
 ## [2026-10-27-8] [nit] _inbox_commit takes eleven parameters
 
 `cmd_inbox_commit()` hands its whole state to `_inbox_commit()` to hold the lock around it; a
@@ -510,3 +489,21 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 031-idea-skill (cost)
+
+## [2026-10-27-9] [nit] record on a whole copy forgets the default it was copied from
+
+`cmd_record` hashes a full-layout process or review doc against the guide, replacing the old
+default's hashes, so an `answers` run after any setup on 1.5.0 keeps untouched old plugin text
+for the person to cut. Keep the earlier record's units for a full copy until it migrates.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: M
+Value: low
+Raised by: 032-process-guide-in-plugin (correctness)
+
+## [2026-10-27-10] [idea] Let answers move a filled prompt into its guide slot
+
+`sdlc.py answers` keeps a filled prompt under its old key, so a migrated host's answer to "the
+failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
+Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
