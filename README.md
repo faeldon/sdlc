@@ -167,13 +167,14 @@ never changes them; setup shows what the new defaults changed, drafts the blocks
 and lists apart anything the plugin would now misread. `/sdlc:setup reset <doc>` puts one back to
 the default. See [After an update](docs/REFERENCE.md#after-an-update-refresh-reset-uninstall).
 
-A repo set up before 1.4.0 keeps its changes in `work/` at its root. Setup offers to move it to
-`.sdlc/work/` once, in a commit of its own, when no change is open and, if you release, after
-`/sdlc:release`: from then on, history from before the move isn't read again.
+A repo set up before 1.4.0 keeps its changes in the old `work/` at its root, which 1.5.0 no
+longer reads. Move `work/` to `.sdlc/work/` once by hand, in a commit of its own
+(`git mv work .sdlc/work`, Move work to .sdlc/work), when no change is open and, if you release,
+after `/sdlc:release`.
 
 A repo set up before 1.5.0 has the whole process and review guides copied into `.sdlc/SDLC.md` and
-`.sdlc/REVIEW.md`. They keep working as they are; setup offers to cut each to only what you wrote,
-behind its one approval, and from then on the guides reach you with each update.
+`.sdlc/REVIEW.md`, which 1.5.0 reads after the guides, so every rule twice. Run
+`/sdlc:setup reset process` (and `review`) to get back to only what you wrote.
 
 ## More
 

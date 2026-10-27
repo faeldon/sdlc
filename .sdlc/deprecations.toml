@@ -9,15 +9,3 @@
 # remove_in = "2.0.0"                     # quoted X.Y.Z: the release that no longer carries it
 # where = "scripts/sdlc.py load_config"   # where the shim is
 # test = "tests/test_sdlc.py::test_old_flag_still_reads"   # optional: the test that goes with it
-
-[[shim]]
-name = "work-folder-move"
-remove_in = "1.5.0"
-where = "scripts/sdlc.py OLD_WORK and the fallback in work_rel, old_folder, cmd_move_work, the readiness item; plugins/factory/scripts/factory.py work_rel; skills/setup/SKILL.md the move (reading history at both names in next_entry_ids and CHANGE_FOLDERS stays for good)"
-test = "tests/test_work_folder.py::test_move_work_moves_the_old_folder_in_one_commit"
-
-[[shim]]
-name = "process-guide-split"
-remove_in = "1.6.0"
-where = "scripts/sdlc.py answers_for, cmd_answers and the answers parser, the `full` layout in doc_path, cmd_record and drift, the readiness migrate item; skills/setup/SKILL.md the migration (doc_layout's answers default, severities() and drift's guide-changed stay)"
-test = "tests/test_setup_lifecycle.py::test_answers_cuts_a_full_copy_to_what_the_host_wrote"

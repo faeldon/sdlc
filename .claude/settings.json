@@ -16,8 +16,7 @@
       "Bash(uv run --quiet --script */scripts/sdlc.py intake *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py closes *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py preflight *)",
-      "Bash(uv run --quiet --script */scripts/sdlc.py nits *)",
-      "Bash(uv run --quiet --script */scripts/sdlc.py answers *)"
+      "Bash(uv run --quiet --script */scripts/sdlc.py nits *)"
     ]
   },
   "attribution": {

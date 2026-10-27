@@ -182,12 +182,8 @@ def find_change(root: Path, ident: str) -> tuple[Path | None, str | None]:
 
 
 def work_rel(root: Path) -> str:
-    """The change folder, relative to the checkout: `.sdlc/work`, or the old `work` in a repo that
-    has it and hasn't moved. `sdlc.py`'s `work_rel()` rule, kept here because this script never
-    imports that one; a change's worktree holds what its main checkout did when it branched. Until
-    1.5.0, as there."""
-    if (root / "work").is_dir() and not (root / ".sdlc" / "work").is_dir():
-        return "work"
+    """The change folder, relative to the checkout: `.sdlc/work`, as `sdlc.py`'s `work_rel()` says,
+    kept here because this script never imports that one."""
     return ".sdlc/work"
 
 

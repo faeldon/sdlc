@@ -80,9 +80,9 @@ def _land(root: Path, number: str, slug: str, rel: str) -> None:
     assert closed.returncode == 0, closed.stdout + closed.stderr
 
 
-def test_a_repo_on_the_old_folder_works_there_then_moves_once(tmp_path: Path) -> None:
-    """A repo set up before 1.4.0 keeps `work/` and is nudged; `move-work` moves it once, and the
-    next change lands under `.sdlc/work/`, numbered on from the last."""
+def test_a_repo_moved_off_the_old_folder_numbers_on_from_its_history(tmp_path: Path) -> None:
+    """A repo that closed changes under the old `work/` and moved it by hand: the change folder is
+    `.sdlc/work/`, and the next change is numbered on from the `Close` history keeps."""
     root = tmp_path / "old"
     (root / "work").mkdir(parents=True)
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
@@ -90,21 +90,15 @@ def test_a_repo_on_the_old_folder_works_there_then_moves_once(tmp_path: Path) ->
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "Close 001-before-the-move")
+    (root / ".sdlc").mkdir()
+    _git(root, "mv", "work", ".sdlc/work")
+    _git(root, "commit", "-q", "-m", "Move work to .sdlc/work")
 
-    assert json.loads(_run(root, "config").stdout)["work"]["rel"] == "work"
-    assert "■ Change folder: work/ is the old change folder" in _run(root, "status").stdout
-    assert _run(root, "check", "--strict").returncode == 0, "a nudge, never a problem"
-    _land(root, "001", "before-the-move", "work")
-
-    moved = _run(root, "move-work")
-    assert moved.returncode == 0, moved.stdout + moved.stderr
-    assert _git(root, "log", "-1", "--format=%s") == "Move work to .sdlc/work"
-    assert not (root / "work").exists() and (root / ".sdlc" / "work" / "inbox.md").is_file()
-    assert "Change folder" not in _run(root, "status").stdout
-
+    assert json.loads(_run(root, "config").stdout)["work"]["rel"] == ".sdlc/work"
     _land(root, "002", "after-the-move", ".sdlc/work")
     subjects = _git(root, "log", "--format=%s").splitlines()
-    assert subjects[0] == "Close 002-after-the-move" and "Close 001-before-the-move" in subjects
+    assert subjects[0] == "Close 002-after-the-move"
     assert _run(root, "next").stdout.strip() == "003"
 
 
@@ -497,19 +491,19 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
 
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
-    # A host set up before the guide was read in place: a whole copy of it, drifting block by block.
-    shutil.copy(plugin / "guide" / "review.md", root / ".sdlc" / "REVIEW.md")
+    # A doc setup copied whole, which drifts block by block against its default.
+    shutil.copy(plugin / "defaults" / "HEALTH.md", root / ".sdlc" / "HEALTH.md")
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    created = (".sdlc/config.toml", ".sdlc/REVIEW.md", ".gitignore")
+    created = (".sdlc/config.toml", ".sdlc/HEALTH.md", ".gitignore")
     made = run("record", "--created", *created, "--gitignore-line")
     assert made.returncode == 0, made.stderr
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Set the repo up for the sdlc plugin")
 
-    review = plugin / "guide" / "review.md"
-    text = review.read_text(encoding="utf-8")
+    health = plugin / "defaults" / "HEALTH.md"
+    text = health.read_text(encoding="utf-8")
     first = next(line for line in text.splitlines() if line.startswith("## "))
-    review.write_text(text.replace(first, f"{first}\n\nOne more sentence.", 1), encoding="utf-8")
+    health.write_text(text.replace(first, f"{first}\n\nOne more sentence.", 1), encoding="utf-8")
     found = run("drift")
     assert found.returncode == 0, found.stderr
     drift = json.loads(found.stdout)

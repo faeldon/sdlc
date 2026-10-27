@@ -63,9 +63,9 @@ theirs stands in for the guide's of the same key when it holds text, or is read 
 parent's); `templates/` the shape of each file the plugin writes itself, every time
 (`direction.md`, `inbox.md`, `notes.md`, the artifacts, the issue), overridable in
 `.sdlc/templates/`. A missing review doc leaves the review guide alone; other missing docs are
-reported, never replaced. Whether a host's doc is answers or a whole copy from before the split
-(`layout`, read alone until the `process-guide-split` shim goes) is setup's record's to say, never
-its text's.
+reported, never replaced. A host's process and review docs are always answers (`layout:
+answers`), whatever their text: a whole copy from before 1.5.0 is read after the guide like any
+answers, and `/sdlc:setup reset` is how such a host gets back to answers alone.
 
 **The base branch: `git.base`.** `main` in this file means the base branch a host names in
 `[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
@@ -88,11 +88,10 @@ for state, the lock and the worktree list. An ignored `.sdlc/work/` is refused b
 
 **The change folder's path: `work_rel()`.** Every path to it, on disk and in git, is built from
 `work_rel()`, never a literal (`test_no_literal_work_path_in_the_script`): `WORK`, `.sdlc/work`,
-or until 1.5.0 the old `work` in a repo that hasn't moved (on disk, or in history once every
-folder has closed). A change's checkout is `checkout_of(folder)`, read from the path. Readers of
-history look only where the folder is now, so `move-work` (setup's to run, once) refuses while
-anything is open or unreleased; only `next_entry_ids()` reads the register at both names, kept for
-good. This repo stays on `work/` until 027 is released, then moves through `/sdlc:setup`.
+always. The old `work` (before 1.4.0) is `HISTORY_WORK`, named only where history is read, for
+good: `CHANGE_FOLDERS` (a diff's change folders), `next_entry_ids()` (the register at both names)
+and `checkout_of(folder)`, which reads a change's checkout from its path. A repo still on `work/`
+moves it by hand (`git mv work .sdlc/work`); release and retro read only where the folder is now.
 
 **Numbering: `ids_mode()`.** It follows the tracker: `github` when `archive.target` is a tracker
 that numbers changes (its `claim()` opens the issue and the folder takes its number), else
@@ -233,10 +232,9 @@ the plugin version, its config keys, and a hash of each block (`doc_units()`: a 
 `- **lead**` bullet) of each default behind a host doc. `drift` compares three ways (the default
 now, that hash, the host's text), so a block the plugin changed and the host never touched is
 proposed (the whole doc, as `proposed`, every other block as the host wrote it), and one the host
-changed never is. A process or review doc recorded as answers (`record --answers`, which only
-setup passes) has no blocks of the guide's to refresh: its record holds the guide's hash, and
-`drift` says only `guide-changed`, a note to read, and `unknown` for a block no guide heading
-places. `answers` cuts a whole copy to its answers once, for setup to show behind its WAIT.
+changed never is. The process and review docs, always answers, have no blocks of the guide's to
+refresh: their record holds the guide's hash, and `drift` says only `guide-changed`, a note to
+read, and `unknown` for a block no guide heading places.
 `breaking` is only what the plugin would now misread: a key in `RETIRED_KEYS`,
 an override lacking what `TEMPLATE_READS` names. Rename or drop a config key, or make the script
 read a new template heading, and that table gets the entry in the same change. `uninstall`

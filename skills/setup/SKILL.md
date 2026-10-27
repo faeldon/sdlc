@@ -15,9 +15,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py answers *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work *)'
 disable-model-invocation: true
 ---
 
@@ -55,8 +53,8 @@ sorts what it finds three ways, and Step 3 keeps them apart in that order:
 - **`report`**: what only a person can decide: a block both sides changed (`conflict`), a block
   that differs where there's no record to say who changed it (`differs`, `base: none`), a config
   key the plugin doesn't read (`unknown`) or one new since the record (`new`), a plugin template
-  that changed under an override (`changed`). For a process or review doc that holds only this
-  repo's answers (`layout: answers`), only two: the plugin's guide changed since the record
+  that changed under an override (`changed`). For the process and review docs, which hold only
+  this repo's answers (`layout: answers`), only two: the plugin's guide changed since the record
   (`guide-changed`, a note to read, never a refresh), and a block whose heading the guide has
   nowhere (`unknown`), which no reader can place.
 
@@ -75,9 +73,11 @@ by its `docs` key (`process`, `review`, `health`, `product`, `project`), a templ
 file name (`intent.md`), or `all` of both. For a doc, the draft is its default again with every
 `<` prompt filled the way a first setup fills it (Steps 1 to 3), and above it the blocks the reset
 loses: each one `drift` lists as `own` or `edited`, shown as a diff, so nobody loses an edit
-without seeing it. A process or review doc that `config` gives `layout: answers` holds nothing
-but this repo's answers, so `drift` lists none of its blocks: every block but its title and note is
-what the reset loses, shown as the whole doc against the template. For an override, there's nothing to draft: the reset deletes it and the
+without seeing it. The process and review docs hold nothing but this repo's answers to the
+plugin's guide, so `drift` lists none of their blocks: every block but the title and note is what
+the reset loses, shown as the whole doc against the template. A repo set up before 1.5.0 holds a
+whole copy of the guide there, which the skills read twice; its reset is how it gets back to
+answers, carrying over only what it changed. For an override, there's nothing to draft: the reset deletes it and the
 plugin's template is used again, so show the override against `templates[...]` in `config` and
 what it loses. A reset is a write like any other, behind Step 4.
 
@@ -161,18 +161,6 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   repo's additions to the plugin's review guide (`docs.review.guide`), and list the ways this
   repo's code actually fails, found in Step 1: what its tests guard against, what its history
   fixes. Don't invent failure classes the code gives no sign of.
-- **A whole copy of the guide**, when `readiness` reports `docs.process` or `docs.review` as
-  `migrate:`: a repo set up before the guide was read in place. Cut it to its answers:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py answers <doc>
-  ```
-
-  `<doc>` is `process` or `review`. It prints the doc as it would read (`text`), the blocks it keeps as this repo's (`kept`), and
-  those it cuts as the plugin's (`cut`: unchanged from what setup offered, or the guide now).
-  Draft `text` as one diff from the doc, naming each block kept and cut. A kept block that is
-  only older plugin text, which a repo set up before setup's record can't tell apart, is the
-  human's to cut in that diff.
 - **The health doc** (`docs.health`, `.sdlc/HEALTH.md`), when `readiness` reports it
   `missing`, which it does only once there is a scan. Start from `defaults.health`, and fill its
   table from what Step 1 found the scan checks (its task file, its script) and what the human says
@@ -220,12 +208,6 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   `permissions.allow`, keeping everything already there. They cover only the script's read-only
   subcommands; everything that writes keeps asking. Say that the file is shared: it is committed
   and applies to everyone who works in the repo.
-- **The change folder**, when `readiness`'s `work moved` item is `warn`: moving the old `work/`
-  to `.sdlc/work/`, so the plugin adds no top-level folder. Say what it costs: history isn't
-  rewritten, and from then on release, retro and `bugs --introduced` read only `.sdlc/work/`, so
-  what closed before the move is out of their reach. The script refuses while any change is open,
-  and, in a repo with `release.version_files`, while any closed change is unreleased: say which,
-  and that `/sdlc:release` comes first. Half-moved (both folders) is the human's to finish by hand.
 - **Issue forms**, only when `archive.target` is `github`: each of `readiness`'s `issue_forms`
   not yet `present`, copied from its `from` file to its path under `.github/ISSUE_TEMPLATE/`, with
   the bug form's `<severities>` line replaced by one `- <word>` option per word of the process
@@ -254,15 +236,6 @@ Ask literally, listing every path:
 
 ## Step 5 — Write and prove it
 
-An approved move of the change folder comes first, before anything else is written, since it
-needs a clean tree. It is the script's, one `git mv` and its own commit, `Move work to .sdlc/work`:
-
-```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py move-work
-```
-
-A refusal is said as it stands, and the rest of the approved list is written all the same.
-
 Write each file, `Edit` each existing one exactly as approved: a `refresh` doc is written as its
 approved `proposed` text. A template override being reset is deleted by the script, which takes
 only a file name in `.sdlc/templates/` and refuses one with uncommitted edits:
@@ -274,12 +247,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset <name>
 Then record what setup offered, so the next `drift` compares against it. `--created` names each
 file this run created (none on a refresh), and `--gitignore-line` is given when this run added the
 `.claude/worktrees/` line to `.gitignore`: `/sdlc:uninstall` removes only what the record says
-setup wrote. `--answers` names each of `process` and `review` this run wrote as answers to the
-guide, from a template or cut by `answers`: the record, never the text, says which layout a doc
-has. Then prove it:
+setup wrote. Then prove it:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> --answers <docs> && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check
 ```

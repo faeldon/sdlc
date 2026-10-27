@@ -76,8 +76,8 @@ def test_the_process_docs_default_to_sdlc(tmp_path: Path, capsys):
         "path": ".sdlc/REVIEW.md",
         "exists": True,
         "source": "host",
-        "layout": "full",
-        "guide": None,
+        "layout": "answers",
+        "guide": str(sdlc.GUIDE_DIR / "review.md"),
     }
 
 
@@ -125,8 +125,8 @@ def test_host_settings_and_files_win(tmp_path: Path, capsys):
         "path": ".sdlc/REVIEW.md",
         "exists": True,
         "source": "host",
-        "layout": "full",
-        "guide": None,
+        "layout": "answers",
+        "guide": str(sdlc.GUIDE_DIR / "review.md"),
     }
     assert out["docs"]["read_before_design"] == [
         {"path": "docs/conventions.md", "exists": True, "source": "host"}
@@ -215,8 +215,8 @@ def test_a_review_in_work_is_read_in_the_checkout_it_runs_in(tmp_path: Path, cap
         "path": ".sdlc/work/REVIEW.md",
         "exists": True,
         "source": "host",
-        "layout": "full",
-        "guide": None,
+        "layout": "answers",
+        "guide": str(sdlc.GUIDE_DIR / "review.md"),
     }
     assert out["work"] == {
         "dir": str(tree / ".sdlc" / "work"),
@@ -396,16 +396,12 @@ def test_a_base_that_isnt_a_string_is_a_warning(tmp_path: Path, capsys):
     assert out["git"]["base"] == "main"
 
 
-def test_an_answers_doc_names_the_guide_to_read_before_it(tmp_path: Path, capsys):
-    """Setup's record decides the layout, never the doc's text: recorded as answers, a host doc
-    comes with the guide's path; without a record, it is a full copy read alone."""
+def test_a_process_doc_is_answers_read_after_the_guide(tmp_path: Path, capsys):
+    """A host's process doc holds its answers to the plugin's guide, record or none: it always
+    comes with the guide's path, read before it."""
     host = tmp_path / ".sdlc"
     host.mkdir()
     (host / "SDLC.md").write_text("# Process\n", encoding="utf-8")
-    _, out = _config(tmp_path, capsys)
-    assert (out["docs"]["process"]["layout"], out["docs"]["process"]["guide"]) == ("full", None)
-    record = {"docs": {"process": {"path": ".sdlc/SDLC.md", "layout": "answers"}}}
-    (host / "setup.json").write_text(json.dumps(record), encoding="utf-8")
     _, out = _config(tmp_path, capsys)
     assert out["docs"]["process"]["layout"] == "answers"
     assert Path(out["docs"]["process"]["guide"]) == sdlc.GUIDE_DIR / "process.md"

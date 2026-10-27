@@ -135,12 +135,11 @@ The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left t
   a heading with nothing under it only places what follows. To change something the guide says,
   copy its block into your file and edit it there.
 - **A whole copy, from before 1.5.0.** A repo set up earlier has the whole guide copied into
-  `.sdlc/SDLC.md` and `.sdlc/REVIEW.md`. `config` reports it as `layout: full` and the skills read
-  it alone, as before, until `/sdlc:setup` cuts it to your answers: `sdlc.py answers process` (and
-  `review`) shows what it would keep and cut, blocks setup offered unchanged going and anything you
-  wrote staying, as a diff behind setup's one approval. `.sdlc/setup.json` then records the doc as
-  `layout: answers`, and `drift` only notes when the plugin's guide changed (`guide-changed`). The
-  whole-copy reading is a shim, removed in 1.6.0.
+  `.sdlc/SDLC.md` and `.sdlc/REVIEW.md`. From 1.5.0 every process and review doc is read as
+  answers (`layout: answers`), after the guide, so a whole copy has the skills read each rule
+  twice. Run `/sdlc:setup reset process` (and `review`): it shows the doc against the answers
+  template, behind its one approval, and you carry over only what you changed. `drift` then notes
+  only when the plugin's guide changed (`guide-changed`).
 - **`docs.policy`** holds the invariants a design has to stay inside: `CLAUDE.md`, or `AGENTS.md`
   when the repo has no `CLAUDE.md`. Set it to name another file.
 - **`docs.health`** (`.sdlc/HEALTH.md`) holds what each finding your scan can report
@@ -245,15 +244,12 @@ and commits nothing. A later setup numbers on from that history.
 
 **The change folder** is `.sdlc/work/`, beside the rest of what the plugin keeps, so adopting it
 adds no top-level folder. Its path is fixed. A repo set up before 1.4.0 has the old `work/` at
-its root, and keeps working there, history included, with a `■ Change folder` nudge in `status`
-and a `work moved` item in `readiness` (never a `check` problem). `/sdlc:setup` offers the move
-once: `sdlc.py move-work`, from the main checkout on the base branch, one `git mv` in a commit of
-its own, `Move work to .sdlc/work`. It refuses while any change is open, since each holds its
-folder under the old name, and, in a repo with `release.version_files`, while a closed change is
-unreleased: history isn't rewritten, and after the move release, retro and `bugs --introduced`
-read only `.sdlc/work/`, so what closed before is out of their reach. Release first. Register ids
-keep counting across it. The old folder, its nudge and `move-work` go in 1.5.0
-(`.sdlc/deprecations.toml`); moving the folder again isn't supported.
+its root, which 1.5.0 no longer reads: move it once by hand, from the main checkout on the base
+branch with no change open and, if you release, after `/sdlc:release`, as
+`git mv work .sdlc/work` in a commit of its own (`Move work to .sdlc/work`). History isn't
+rewritten, so release, retro and `bugs --introduced` read only `.sdlc/work/` from then on;
+change numbers and register ids keep counting across the move, since they read history at both
+names. Moving the folder again isn't supported.
 
 `.sdlc/work/` is committed. A change's folder, `.sdlc/work/NNN-slug/`, lives on its own branch, in its own
 worktree (`.claude/worktrees/NNN-slug`), so the session working on it writes its artifacts where

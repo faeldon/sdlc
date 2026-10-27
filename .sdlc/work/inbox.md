@@ -417,17 +417,6 @@ and how an old host with no record is told what can't be attributed to setup. Ed
 host's to commit, like the rest of uninstall. Raised 2026-10-26, after uninstalling from a host
 set up by an early version.
 
-## [2026-10-26-12] [nit] move-work leaves work/ behind when it holds ignored files
-
-`git mv` moves what git tracks; an ignored file keeps work/ on disk, and the repo then reads as
-half-moved. Move or remove what's left, or refuse with the list.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 027-work-path (correctness)
-
 ## [2026-10-26-13] [idea] Support moving the change folder, once a host needs it
 
 027 fixed the folder at .sdlc/work/ and supports one move only, from the old work/. Moving it
@@ -489,18 +478,6 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 031-idea-skill (cost)
-
-## [2026-10-27-9] [nit] record on a whole copy forgets the default it was copied from
-
-`cmd_record` hashes a full-layout process or review doc against the guide, replacing the old
-default's hashes, so an `answers` run after any setup on 1.5.0 keeps untouched old plugin text
-for the person to cut. Keep the earlier record's units for a full copy until it migrates.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: M
-Value: low
-Raised by: 032-process-guide-in-plugin (correctness)
 
 ## [2026-10-27-10] [idea] Let answers move a filled prompt into its guide slot
 

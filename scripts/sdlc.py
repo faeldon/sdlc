@@ -48,7 +48,6 @@ So this tool answers the questions that are queries rather than decisions:
     closes      the issues a change's `closes:` line names, with their titles, as JSON
     mark-triaged  label, comment on and relate each open issue the repo records
     needs-info  ask an issue's author for the detail triage needs
-    move-work   move the old `work/` change folder to `.sdlc/work/`, once, in a commit of its own
     undone      a change's unticked `- [ ]` items in notes.md, as JSON
     readiness   whether this repo is set up for the plugin, item by item, with the commands its own
                 task files suggest for the gate, the slower check and the scans, as JSON
@@ -426,19 +425,9 @@ def register_path(work: Path) -> Path:
     return work / INBOX
 
 
-def doc_layout(root: Path, key: str) -> str:
-    """`answers` when setup's record says the host's process or review doc holds only its answers
-    to the guide, else `full`: a whole copy from before the guide was read in place, read alone."""
-    manifest = read_manifest(root)[0] or {}
-    recorded = manifest.get("docs", {}).get(key)
-    return (
-        "answers" if isinstance(recorded, dict) and recorded.get("layout") == "answers" else "full"
-    )
-
-
 def doc_path(root: Path, key: str, rel: str) -> dict:
     """Where a host doc is, and whether it exists. The process and review docs also name the
-    plugin's guide to read before them (`guide`, None for a full copy) and their `layout`. Only
+    plugin's guide to read before them (`guide`) and their `layout`, always `answers`. Only
     the review stands in for a missing doc, with the guide alone: a ship with no review passes to
     work through isn't a ship, while a missing policy doc is a fact the skill should say out loud
     rather than paper over with a generic one."""
@@ -446,8 +435,7 @@ def doc_path(root: Path, key: str, rel: str) -> dict:
     if (root / rel).is_file():
         found = {"path": rel, "exists": True, "source": "host"}
         if guide:
-            layout = doc_layout(root, key)
-            found.update(layout=layout, guide=guide if layout == "answers" else None)
+            found.update(layout="answers", guide=guide)
         return found
     if key == "review":
         return {
@@ -672,58 +660,26 @@ def slugify(text: str) -> str:
 # The change folder, relative to a checkout's root. `.sdlc/work`, beside the rest of what the
 # plugin keeps, so adopting it adds no top-level folder.
 WORK = ".sdlc/work"
-# Where it was before 1.4.0. A repo still holding it keeps working there, history included, with a
-# nudge to move (`old_folder()`), until `/sdlc:setup` runs `move-work`. A shim: in 1.5.0 the
-# change folder is `WORK` alone (`.sdlc/deprecations.toml`, `work-folder-move`).
-OLD_WORK = "work"
+# Where it was before 1.4.0, as history still holds it. Only readers of history name it, for
+# good: a repo's changes from before the move keep their numbers and their `Close` commits.
+HISTORY_WORK = "work"
 # A path in a change's diff that is a change's own folder, under either name: history keeps both.
-CHANGE_FOLDERS = (f"{WORK}/", f"{OLD_WORK}/")
+CHANGE_FOLDERS = (f"{WORK}/", f"{HISTORY_WORK}/")
 
 
 def work_rel(root: Path) -> str:
-    """The change folder of `root`'s repo, relative to a checkout's root: `WORK`, or `OLD_WORK` in
-    a repo that hasn't moved. Read from the main checkout, so every worktree agrees with it. An
-    old repo whose changes have all closed may hold no `work/` on disk (close removes each folder),
-    so with neither folder there, history decides: `OLD_WORK` if any commit ever touched it. That
-    answer is cached per process, since nothing a command does adds `work/` to history; the folders
-    on disk, which `move-work` changes, are read every time."""
-    home = main_root(root)
-    if (home / WORK).is_dir():
-        return WORK
-    if (home / OLD_WORK).is_dir():
-        return OLD_WORK
-    key = home.resolve()
-    if key not in _OLD_HISTORY:
-        found = _git(home, "log", "-1", "--all", "--format=%h", "--", f"{OLD_WORK}/")
-        _OLD_HISTORY[key] = bool(found)
-    return OLD_WORK if _OLD_HISTORY[key] else WORK
-
-
-_OLD_HISTORY: dict[Path, bool] = {}
+    """The change folder of `root`'s repo, relative to a checkout's root: `WORK`. Every path to it,
+    on disk and in git, is built from this, so nothing names the folder twice."""
+    return WORK
 
 
 def work_dir(root: Path) -> Path:
     return root / work_rel(root)
 
 
-def old_folder(root: Path) -> str | None:
-    """The nudge for a repo still on the old change folder, or one half-moved; None once moved.
-    Said by `status` and `readiness`, never a `check` problem, which is a gate. A shim, with
-    `work_rel()`'s fallback, until 1.5.0."""
-    home = main_root(root)
-    if (home / OLD_WORK).is_dir() and (home / WORK).is_dir():
-        return (
-            f"both {OLD_WORK}/ and {WORK}/ exist: half-moved. {WORK}/ is read; move what is left "
-            f"in {OLD_WORK}/ into it by hand and commit"
-        )
-    if work_rel(home) == OLD_WORK:
-        return f"{OLD_WORK}/ is the old change folder: run /sdlc:setup to move it to {WORK}/"
-    return None
-
-
 def checkout_of(folder: Path) -> Path:
-    """The checkout a change folder `<checkout>/<WORK or OLD_WORK>/NNN-slug` sits in, read from its
-    path alone, so it holds outside git too."""
+    """The checkout a change folder `<checkout>/<WORK or HISTORY_WORK>/NNN-slug` sits in, read from
+    its path alone, so it holds outside git too, and for a path history or a transcript holds."""
     parent = folder.parent
     if parent.name == Path(WORK).name and parent.parent.name == Path(WORK).parent.name:
         return parent.parent.parent
@@ -1635,7 +1591,7 @@ def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
             texts.append((work_dir(checkout) / INBOX).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             continue
-    paths = [f"{w}/{name}" for w in (WORK, OLD_WORK) for name in (INBOX, OLD_INBOX)]
+    paths = [f"{w}/{name}" for w in (WORK, HISTORY_WORK) for name in (INBOX, OLD_INBOX)]
     log = _git(home, "log", "--all", "-p", "--format=", "-G", rf"\[{day}-", "--", *paths)
     texts.append(log or "")
     used = [int(m.group(1)) for t in texts for line in t.splitlines() if (m := heading.match(line))]
@@ -5889,78 +5845,6 @@ def cmd_needs_info(root: Path, number: int, questions_file: str) -> int:
     return 1 if err else 0
 
 
-# ---------------------------------------------------------------- the change folder's move
-#
-# Once, per repo: the old `work/` moved to `.sdlc/work/` in a commit of its own, `/sdlc:setup`'s to
-# offer behind its one WAIT. History isn't rewritten, and readers look only where the folder is now,
-# so what closed before the move is out of their reach: nothing may be open or unreleased. A shim,
-# with `work_rel()`'s fallback and `old_folder()`, until 1.5.0.
-
-MOVE_SUBJECT = f"Move {OLD_WORK} to {WORK}"
-
-
-def cmd_move_work(root: Path) -> int:
-    """Move the old change folder to `.sdlc/work/`: one `git mv` and one commit, from the main
-    checkout on the base branch with a clean tree. Refused while any change is open (its folder
-    is on its branch, under the old name) or, in a repo that releases, while one is unreleased
-    (release reads its intent from history, at the folder's current name). JSON; never pushes."""
-    home = main_root(root)
-    cfg, _, _ = load_config(home)
-    report: dict = {"commit": None, "refusals": [], "done": []}
-    refusals = report["refusals"]
-
-    def emit(code: int) -> int:
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        return code
-
-    if root.resolve() != home.resolve():
-        refusals.append(f"run it from the main checkout ({home}), not a change's worktree")
-    trunk = cfg["git"]["base"]
-    if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
-        refusals.append(why)
-    elif _git(home, "branch", "--show-current") != trunk:
-        refusals.append(f"the main checkout ({home}) isn't on {trunk}")
-    if (home / WORK).exists():
-        refusals.append(f"{WORK}/ already exists: there is nothing to move into")
-    elif not (home / OLD_WORK).is_dir():
-        refusals.append(f"there is no {OLD_WORK}/ to move")
-    dirty = [p for _, p in _status_entries(home)]
-    if dirty:
-        refusals.append("commit or put back these first: " + ", ".join(sorted(dirty)))
-    changes = [p.name for p in change_dirs(home)]
-    changes += [b for t, b in worktrees(home) if DIR_RE.match(b) and b not in changes]
-    if changes:
-        refusals.append(
-            f"close or drop every change first, since each holds its folder under {OLD_WORK}/: "
-            + ", ".join(sorted(changes))
-        )
-    ignored = subprocess.run(
-        ["git", "-C", str(home), "check-ignore", "-q", f"{WORK}/"], capture_output=True
-    )
-    if ignored.returncode == 0:
-        refusals.append(f"{WORK}/ is gitignored: remove the line that ignores it first")
-    if cfg["release"]["version_files"] and trunk and not refusals:
-        names = [c["name"] for c in unreleased(home, cfg, read=False)["changes"]]
-        if names:
-            refusals.append(
-                "release first: these closed changes aren't released, and after the move release "
-                "can't read them: " + ", ".join(names)
-            )
-    if refusals:
-        return emit(1)
-    (home / WORK).parent.mkdir(parents=True, exist_ok=True)
-    for args in (["mv", "--", OLD_WORK, WORK], ["commit", "-q", "-m", MOVE_SUBJECT]):
-        if err := _git_err(home, *args):
-            refusals.append(f"git {args[0]} failed: {err}")
-            if args[0] == "commit":
-                _git(home, "mv", "--", WORK, OLD_WORK)
-            return emit(1)
-    report["commit"] = MOVE_SUBJECT
-    report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
-    report["done"] += [f"moved {OLD_WORK}/ to {WORK}/", "commit"]
-    return emit(0)
-
-
 # ---------------------------------------------------------------- readiness
 #
 # What /sdlc:setup works from: each thing a repo can set up for this plugin, whether it has, and
@@ -6033,7 +5917,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "answers",
+    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -6092,8 +5976,6 @@ def cmd_readiness(root: Path) -> int:
         item("work", "ok", f"{work_rel(home)}/ is committed", required=True)
     else:
         item("work", "missing", ignored_message(home), required=True)
-    moving = old_folder(root)
-    item("work moved", "warn" if moving else "ok", moving or f"the change folder is {WORK}/")
     cfg_file = root / HOST_DIR / "config.toml"
     if not cfg_file.is_file():
         item("config", "missing", f"no {HOST_DIR}/config.toml: every setting is its default")
@@ -6113,14 +5995,6 @@ def cmd_readiness(root: Path) -> int:
             item(f"docs.{key}", "missing", f"{rel} doesn't exist; the plugin's guide stands in")
         elif is_unfilled(Path(found["path"]) if Path(found["path"]).is_absolute() else root / rel):
             item(f"docs.{key}", "warn", f"{rel} is still the template: fill in its `<` prompts")
-        elif found.get("layout") == "full":
-            # A shim (deprecations.toml): a nudge, never required, until every host has migrated.
-            item(
-                f"docs.{key}",
-                "warn",
-                f"migrate: {rel} is a whole copy of the plugin's guide; /sdlc:setup cuts it to "
-                "this repo's answers",
-            )
         else:
             item(f"docs.{key}", "ok", rel)
     fields, problems = project_doc(root, cfg)
@@ -6315,36 +6189,27 @@ def read_manifest(root: Path) -> tuple[dict | None, str | None]:
 
 
 def _copy_source(key: str) -> tuple[Path, str]:
-    """The plugin text a host's full copy of a doc tracks, and its name: the guide for the process
-    and review docs (what their copies were taken from), else the default setup copied."""
+    """The plugin text a host doc tracks, and its name: the guide for the process and review docs
+    (which hold the host's answers to it), else the default setup copied."""
     if key in GUIDES:
         return GUIDE_DIR / GUIDES[key], GUIDES[key]
     return DEFAULTS_DIR / HOST_DOCS[key], HOST_DOCS[key]
 
 
-def cmd_record(
-    root: Path, created: list[str], gitignore_line: bool, answers: list[str] | tuple = ()
-) -> int:
+def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
     """Write `.sdlc/setup.json`: this plugin's version, its config keys, and a hash of each block
     of each default behind a host doc, as of now. Writes nothing else. Setup runs it after every
     write, so the next drift compares against what the host was last offered.
 
-    A process or review doc named in `answers`, or recorded as answers before, holds only the
-    host's answers to the guide: it gets `layout: answers` and a hash of the whole guide, so drift
-    can say when the guide changed, and no block hashes, since nothing of the guide's is in it.
-    Setup names them after it writes answers files; the layout is never read from the text."""
+    The process and review docs hold only the host's answers to the guide: each gets
+    `layout: answers` and a hash of the whole guide, so drift can say when the guide changed,
+    and no block hashes, since nothing of the guide's is in it."""
     if not (root / HOST_DIR / "config.toml").is_file():
         print(f"⚠  no {HOST_DIR}/config.toml: run /sdlc:setup first", file=sys.stderr)
         return 1
     bad = [p for p in created if Path(p).is_absolute() or ".." in Path(p).parts]
     if bad:
         print(f"⚠  --created takes paths inside the repo: {', '.join(bad)}", file=sys.stderr)
-        return 1
-    unknown = [k for k in answers if k not in GUIDES]
-    if unknown:
-        print(
-            f"⚠  --answers takes {' or '.join(GUIDES)}, not {', '.join(unknown)}", file=sys.stderr
-        )
         return 1
     cfg = load_config(root)[0]
     before = read_manifest(root)[0] or {}
@@ -6355,7 +6220,7 @@ def cmd_record(
             continue
         source, name = _copy_source(key)
         text = source.read_text(encoding="utf-8")
-        if key in answers or (key in GUIDES and doc_layout(root, key) == "answers"):
+        if key in GUIDES:
             docs[key] = {"path": rel, "layout": "answers", "guide": unit_hash(text)}
         else:
             units = {k: unit_hash(v) for k, v in doc_units(text)}
@@ -6501,53 +6366,6 @@ def _answers_drift(
     return found
 
 
-def answers_for(root: Path, key: str) -> dict:
-    """What a full copy of the process or review doc becomes as an answers file: each block whose
-    hash is the default's as setup's record offered it, or the guide's now, is the plugin's and
-    cut; every other block is the host's and kept, under the headings it sat beneath, and the
-    answers template's title and note replace the copy's. Read-only: setup shows it as a diff
-    behind its WAIT and writes it. A shim, until every host has migrated (deprecations.toml)."""
-    cfg = load_config(root)[0]
-    rel = cfg["docs"][key]
-    if not rel or not (root / rel).is_file():
-        return {"doc": key, "path": rel, "refusal": f"no {rel or 'doc'} to cut"}
-    if doc_layout(root, key) == "answers":
-        return {"doc": key, "path": rel, "refusal": f"{rel} is already answers to the guide"}
-    recorded = ((read_manifest(root)[0] or {}).get("docs", {}).get(key) or {}).get("units") or {}
-    guide = {k: unit_hash(t) for k, t in doc_units((GUIDE_DIR / GUIDES[key]).read_text("utf-8"))}
-    template = dict(doc_units((DEFAULTS_DIR / HOST_DOCS[key]).read_text(encoding="utf-8")))
-    blocks, kept, cut, placed = [("#", template["#"])], [], [], set()
-    for k, text in doc_units((root / rel).read_text(encoding="utf-8")):
-        if k == "#" or unit_hash(text) in (recorded.get(k), guide.get(k)):
-            cut.append(k)
-            continue
-        # A kept block keeps its place: each heading above it that was cut comes back alone.
-        parts = k.split(" > ")
-        for i in range(1, len(parts)):
-            above = " > ".join(parts[:i])
-            if above not in placed:
-                blocks.append((above, parts[i - 1]))
-                placed.add(above)
-        blocks.append((k, text))
-        placed.add(k)
-        kept.append(k)
-    # A blank line between blocks, but none between two bullets, so a list stays tight.
-    out = blocks[0][1].rstrip("\n")
-    for (before, _), (k, text) in zip(blocks, blocks[1:], strict=False):
-        out += ("\n" if before.endswith("**") and k.endswith("**") else "\n\n") + text.rstrip("\n")
-    return {"doc": key, "path": rel, "text": out + "\n", "kept": kept, "cut": cut}
-
-
-def cmd_answers(root: Path, key: str) -> int:
-    """Print what `answers_for` would make of a full copy, as JSON. Writes nothing."""
-    out = answers_for(root, key)
-    if "refusal" in out:
-        print(f"⚠  {out['refusal']}: nothing to migrate", file=sys.stderr)
-        return 1
-    print(json.dumps(out, indent=2, ensure_ascii=False))
-    return 0
-
-
 def drift(root: Path) -> dict:
     """What a newer plugin changed under a host's setup, read-only. `breaking` is what the plugin
     would now misread (a retired config key, an override lacking what the script reads, a doc the
@@ -6592,7 +6410,7 @@ def drift(root: Path) -> dict:
         host_text = (root / rel).read_text(encoding="utf-8")
         source, name = _copy_source(key)
         recorded = (manifest or {}).get("docs", {}).get(key)
-        if key in GUIDES and doc_layout(root, key) == "answers":
+        if key in GUIDES:
             out["docs"][key] = {"path": rel, "layout": "answers", "guide": str(source)}
             out["report"] += _answers_drift(rel, source, host_text, recorded, version)
             continue
@@ -7103,8 +6921,6 @@ def print_status(a: dict) -> None:
     # `check --strict` is a gate, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
-    if a.get("work_move"):
-        print(f"\n■ Change folder: {a['work_move']}")
     due = a.get("retro_due")
     if due and due["due"]:
         print(f"\n■ Retro due: {'; '.join(due['why'])}  /sdlc:retro")
@@ -7212,11 +7028,6 @@ def main() -> int:
     p_info.add_argument("number", type=int)
     p_info.add_argument("--questions-file", required=True, help="the approved questions")
 
-    sub.add_parser(
-        "move-work",
-        help="move the old change folder to .sdlc/work/ in a commit of its own, from main",
-    )
-
     p_entry = sub.add_parser(
         "next-entry", help="the id the next inbox entry would take today; writes nothing"
     )
@@ -7277,11 +7088,6 @@ def main() -> int:
     sub.add_parser(
         "drift", help="what changed under this repo's setup since it ran, as JSON; writes nothing"
     )
-    p_answers = sub.add_parser(
-        "answers",
-        help="a full copy of the process or review doc cut to its answers; writes nothing",
-    )
-    p_answers.add_argument("doc", choices=sorted(GUIDES))
     p_record = sub.add_parser(
         "record", help="write .sdlc/setup.json: the defaults setup offered, for the next drift"
     )
@@ -7289,10 +7095,6 @@ def main() -> int:
     p_record.add_argument(
         "--gitignore-line", action="store_true", help=f"setup added {WORKTREES_LINE} to .gitignore"
     )
-    p_record.add_argument(
-        "--answers", nargs="*", default=[], metavar="DOC",
-        help="process, review: docs setup wrote as answers to the guide",
-    )  # fmt: skip
     p_reset = sub.add_parser("reset", help="delete one .sdlc/templates/ override")
     p_reset.add_argument("name", help="the template's file name, e.g. intent.md")
     p_reset.add_argument("--check", action="store_true", help="preconditions only, write nothing")
@@ -7343,10 +7145,8 @@ def main() -> int:
         return cmd_readiness(root)
     if args.cmd == "drift":
         return cmd_drift(root)
-    if args.cmd == "answers":
-        return cmd_answers(root, args.doc)
     if args.cmd == "record":
-        return cmd_record(root, args.created, args.gitignore_line, args.answers)
+        return cmd_record(root, args.created, args.gitignore_line)
     if args.cmd == "reset":
         return cmd_reset(root, args.name, args.check)
     if args.cmd == "uninstall":
@@ -7383,8 +7183,6 @@ def main() -> int:
         return cmd_mark_triaged(root)
     if args.cmd == "needs-info":
         return cmd_needs_info(root, args.number, args.questions_file)
-    if args.cmd == "move-work":
-        return cmd_move_work(root)
     if args.cmd == "next-entry":
         for entry_id in next_entry_ids(home, date.today().isoformat(), max(args.count, 1)):
             print(entry_id)
@@ -7448,7 +7246,6 @@ def main() -> int:
     bugs = [b for b in bug_entries(home, words)[0] if b["id"] not in fixing]
     a["bugs"] = bugs_summary(bugs, words, date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
-    a["work_move"] = old_folder(root)
     print_status(a)
     return 0
 
