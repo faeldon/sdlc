@@ -239,7 +239,10 @@ read, and `unknown` for a block no guide heading places.
 an override lacking what `TEMPLATE_READS` names. Rename or drop a config key, or make the script
 read a new template heading, and that table gets the entry in the same change. `uninstall`
 removes only setup's (git's files in `.sdlc/`, the plugin's allow rules, the ignore line when
-recorded) and refuses while any change is live. The nudge in `status` is never a problem:
+recorded, the `attribution` object when recorded and unchanged) and refuses while any change is
+live. `git.attribution` has no default on purpose: unset is a question setup asks, `false` has
+setup merge `ATTRIBUTION_OFF` (an object, never a bare `false`) into the shared settings, which
+`attribution_status()` checks, and record notes as setup's. The nudge in `status` is never a problem:
 `check --strict` is a gate.
 
 **Context docs are checked at ship, not close.** `sdlc.py context` lists `docs.context` and each

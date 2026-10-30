@@ -12,6 +12,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -344,18 +346,18 @@ def _with_origin(tmp_path: Path, branch: str) -> Path:
 
 def test_the_base_is_main_when_there_is_one(tmp_path: Path, capsys):
     _, out = _config(_repo_on(tmp_path, "main"), capsys)
-    assert out["git"] == {"base": "main", "base_source": "detected"}
+    assert out["git"] == {"base": "main", "base_source": "detected", "attribution": None}
 
 
 def test_with_no_main_the_base_is_the_branch_origin_head_names(tmp_path: Path, capsys):
     _, out = _config(_with_origin(tmp_path, "master"), capsys)
-    assert out["git"] == {"base": "master", "base_source": "detected"}
+    assert out["git"] == {"base": "master", "base_source": "detected", "attribution": None}
 
 
 def test_with_no_main_and_no_origin_the_base_is_unset(tmp_path: Path, capsys):
     root = _repo_on(tmp_path, "master")
     _, out = _config(root, capsys)
-    assert out["git"] == {"base": None, "base_source": "unset"}
+    assert out["git"] == {"base": None, "base_source": "unset", "attribution": None}
     assert "no base branch" in sdlc.trunk_refusal(root, None)
     assert any(w.startswith("git.base: no base branch") for w in out["warnings"])
 
@@ -382,7 +384,7 @@ def test_the_configured_base_wins_over_one_detected(tmp_path: Path, capsys):
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[git]\nbase = "trunk"\n', encoding="utf-8")
     _, out = _config(root, capsys)
-    assert out["git"] == {"base": "trunk", "base_source": "config"}
+    assert out["git"] == {"base": "trunk", "base_source": "config", "attribution": None}
     assert sdlc.trunk_refusal(root, "trunk") is None
     assert "'gone' doesn't exist here" in sdlc.trunk_refusal(root, "gone")
 
@@ -405,3 +407,20 @@ def test_a_process_doc_is_answers_read_after_the_guide(tmp_path: Path, capsys):
     _, out = _config(tmp_path, capsys)
     assert out["docs"]["process"]["layout"] == "answers"
     assert Path(out["docs"]["process"]["guide"]) == sdlc.GUIDE_DIR / "process.md"
+
+
+@pytest.mark.parametrize("line, want", [("", None), ("attribution = true", True),
+                                        ("attribution = false", False)])  # fmt: skip
+def test_git_attribution_is_unset_until_the_host_answers(tmp_path: Path, capsys, line, want):
+    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc" / "config.toml").write_text(f"[git]\n{line}\n", encoding="utf-8")
+    _, out = _config(tmp_path, capsys)
+    assert out["git"]["attribution"] is want
+
+
+def test_git_attribution_must_be_true_or_false(tmp_path: Path, capsys):
+    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc" / "config.toml").write_text('[git]\nattribution = "no"\n')
+    _, out = _config(tmp_path, capsys)
+    assert out["git"]["attribution"] is None
+    assert "git.attribution must be true or false" in out["warnings"]

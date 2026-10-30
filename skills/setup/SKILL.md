@@ -107,6 +107,11 @@ so a later setup reads what was written, not what was said.
   product, propose GitHub when `readiness`'s `archive` is `github` and its `gh auth` is `ok`;
   otherwise local.
 
+**Then attribution, whenever `config`'s `git.attribution` is null**, a first setup or a later one
+(`readiness`'s `attribution` item says `not chosen`): ask "Should Claude's attribution appear in
+this repo's commits and pull requests? (on / off)". Propose no answer: it is the host's to make,
+and the answer is written down, so it is asked once.
+
 Then one short round, only for what Step 1 couldn't settle:
 
 - **The gate** (`commands.check`): which candidate it is, or the command if none fits. It's the
@@ -149,8 +154,8 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
 - **`.sdlc/config.toml`**: only the keys that differ from their defaults, each with a comment
   saying why. Include `[archive] target`, either way. Include `[git] base` when the base branch
   isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is
-  `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it. A
-  repo on `main` gets no `[git]` section.
+  `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it.
+  Include `[git] attribution` when Step 2 asked: `true` for on, `false` for off.
 - **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process`,
   this repo's answers to the plugin's guide (`docs.process.guide`), which the skills read with it.
   Fill in every line that starts with `<`. Those are where this repo differs: the failure it most
@@ -206,8 +211,12 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   `docs.policy` to a separate file instead.
 - **`.claude/settings.json`**: the rules `readiness` lists under `permissions.missing`, merged into
   `permissions.allow`, keeping everything already there. They cover only the script's read-only
-  subcommands; everything that writes keeps asking. Say that the file is shared: it is committed
-  and applies to everyone who works in the repo.
+  subcommands; everything that writes keeps asking. With attribution off, also the object
+  `readiness` gives as `attribution.merge`, as the file's `attribution` key, exactly as given:
+  never `"attribution": false`, which older Claude Code rejects along with the whole file. Say
+  that the file is shared: it is committed and applies to everyone who works in the repo. A
+  `.claude/settings.local.json` that sets its own attribution wins over it, which `readiness`
+  warns about; that file is each person's, never setup's to edit.
 - **Issue forms**, only when `archive.target` is `github`: each of `readiness`'s `issue_forms`
   not yet `present`, copied from its `from` file to its path under `.github/ISSUE_TEMPLATE/`, with
   the bug form's `<severities>` line replaced by one `- <word>` option per word of the process
@@ -262,7 +271,8 @@ passed; a gate that fails on a clean tree isn't one yet.
 ## Step 6 — Report and stop
 
 Start with the three profile answers and what each decided: which optional docs were drafted or
-left out, and how changes are numbered and archived. Then report each item and what became of
+left out, and how changes are numbered and archived. Then the attribution answer, when Step 2
+asked it, and what it wrote. Then report each item and what became of
 it, what was left at its default and why, and anything the
 human still has to do (a `<` line left in a doc, `gh auth login`). After a product doc, name
 each open change `check` reported for a missing `serves:` line: its intent is in its own worktree,

@@ -118,7 +118,8 @@ BULLET_B = "## Pass 1 > - **A test that can't fail.**"
 def test_record_writes_the_manifest_shape(repo: Path, plugin: Path) -> None:
     manifest = _record(repo)
     assert set(manifest) == {
-        "version", "config_keys", "docs", "templates", "created", "gitignore_line"
+        "version", "config_keys", "docs", "templates", "created", "gitignore_line",
+        "attribution",
     }  # fmt: skip
     assert manifest["version"] == "1.1.0"
     assert "commands.check" in manifest["config_keys"]
@@ -459,6 +460,70 @@ def test_uninstall_lists_the_context_lines_naming_the_plugin(bare: Path, plugin,
     plan = json.loads(capsys.readouterr().out)
     assert plan["mentions"] == [{"path": "AGENTS.md", "line": 3, "text": "Run /sdlc:intent first."}]
     assert sorted(plan["remove"]) == [".sdlc/HEALTH.md", ".sdlc/config.toml", ".sdlc/setup.json"]
+
+
+def _answer_off(root: Path, settings_value: object) -> None:
+    """The host answered off; the shared settings hold `settings_value` as their attribution."""
+    (root / ".sdlc" / "config.toml").write_text(
+        '[commands]\ncheck = "true"\n\n[git]\nattribution = false\n', encoding="utf-8"
+    )
+    path = root / ".claude" / "settings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["attribution"] = settings_value
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def test_record_marks_the_attribution_setup_s_only_when_off_and_matching(bare, plugin) -> None:
+    _set_up(bare)
+    assert _record(bare)["attribution"] is False, "unanswered: nothing of setup's"
+    _answer_off(bare, {"commit": "Ours"})
+    assert _record(bare)["attribution"] is False, "a value the host wrote is the host's"
+    _answer_off(bare, sdlc.ATTRIBUTION_OFF)
+    assert _record(bare)["attribution"] is True
+
+
+def test_uninstall_takes_setup_s_attribution_and_leaves_one_it_didn_t_write(
+    bare, plugin, capsys
+) -> None:
+    _set_up(bare)
+    _answer_off(bare, sdlc.ATTRIBUTION_OFF)
+    _record(bare)
+    _git(bare, "add", "-A")
+    _git(bare, "commit", "-q", "-m", "answer off")
+    capsys.readouterr()
+    assert sdlc.cmd_uninstall(bare) == 0
+    settings = json.loads((bare / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert "attribution" not in settings and settings["model"] == "x"
+
+    _git(bare, "checkout", "-q", "--", ".")
+    _git(bare, "clean", "-q", "-fd")
+    _answer_off(bare, {"commit": "Changed since"})
+    _git(bare, "add", "-A")
+    _git(bare, "commit", "-q", "-m", "changed by hand")
+    capsys.readouterr()
+    assert sdlc.cmd_uninstall(bare) == 0
+    plan = json.loads(capsys.readouterr().out)
+    why = "its attribution isn't setup's, or changed since setup wrote it"
+    assert {"path": ".claude/settings.json attribution", "why": why} in plan["left"]
+    settings = json.loads((bare / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["attribution"] == {"commit": "Changed since"}
+
+
+def test_uninstall_removes_a_settings_file_setup_created_once_empty(repo, plugin) -> None:
+    (repo / ".sdlc" / "config.toml").write_text(
+        '[commands]\ncheck = "true"\n\n[git]\nattribution = false\n', encoding="utf-8"
+    )
+    (repo / ".claude").mkdir(exist_ok=True)
+    settings = {
+        "permissions": {"allow": list(sdlc.ALLOW_RULES)},
+        "attribution": sdlc.ATTRIBUTION_OFF,
+    }
+    (repo / ".claude" / "settings.json").write_text(json.dumps(settings) + "\n", encoding="utf-8")
+    assert sdlc.cmd_record(repo, [".claude/settings.json"], False) == 0
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "setup")
+    assert sdlc.cmd_uninstall(repo) == 0
+    assert not (repo / ".claude" / "settings.json").exists()
 
 
 def test_uninstall_keeps_a_preexisting_ignore_line(repo: Path, plugin: Path) -> None:

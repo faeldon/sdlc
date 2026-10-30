@@ -179,22 +179,6 @@ there, or nothing, and the nudge says so rather than suggesting a push that rele
 through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
 revised 2026-10-26: never automatic, and a nudge when landed work piles up.
 
-## [2026-10-25-21] [idea] Agent attribution in a host's commits, off by default
-
-The commits `sdlc.py` makes (`Close`, `Drop`, release, retro) carry only the `Sdlc-*` trailers,
-but the ones a session makes for a skill (ship's commit, the factory's build) take the harness's
-`Co-Authored-By:` line and, on a pull request, its "Generated with Claude Code" footer. This repo
-forbids them in AGENTS.md; a host gets them unless it writes the same rule. Make it a config key
-(`[git] attribution = false` by default) that setup turns into Claude Code's own `attribution`
-setting in the host's `.claude/settings.json`, beside the allow rules it already writes there, and
-records, so `uninstall` takes it out and `drift()` sees a host that changed it. The object form,
-`{"commit": "", "pr": "", "sessionUrl": false}` (an empty string hides that line, `sessionUrl`
-the session link a cloud session appends), not `"attribution": false`: Claude Code before
-v2.1.281 rejects that and skips the whole settings file, allow rules and all. Have the skills that
-commit say the same in prose, since `.claude/settings.local.json` and managed settings override
-the project file. Ask at setup rather than assume: some teams want the line. Also decide whether the
-text the plugin writes into issues follows the same key. Raised 2026-10-25.
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts

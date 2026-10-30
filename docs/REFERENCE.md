@@ -71,6 +71,7 @@ stop_allowance = 1                          # the default: stops beyond a change
 
 [git]
 base = "master"                             # optional: the branch changes start from and land on; unset = detected
+attribution = false                         # unset until setup asks: false hides the agent's lines, true keeps them
 ```
 
 The placeholders:
@@ -107,6 +108,21 @@ call. `config` prints the answer as `git.base`, with `git.base_source` saying wh
 `config`, `detected` or `unset`. `/sdlc:setup` writes `base` when the branch it detects isn't
 `main`, so a later change to `origin/HEAD` can't move it, and asks for it when nothing is
 detected.
+
+**`git.attribution`** is the host's answer to whether a session's commits and pull requests name
+the agent (the harness's `Co-Authored-By:` line and "Generated with" footer; the commits
+`sdlc.py` makes carry only `Sdlc-*` trailers either way). It has no default:
+
+- **Unset:** nothing is written, and `/sdlc:setup` asks, on a first setup or a later one, proposing
+  no answer. `readiness` reports `attribution: missing`, not chosen.
+- **`false`:** setup merges `"attribution": {"commit": "", "pr": "", "sessionUrl": false}` into
+  `.claude/settings.json`, beside the allow rules: the object form, since Claude Code before
+  v2.1.281 rejects `"attribution": false` and skips the whole file. `readiness` gives that object
+  as `attribution.merge` until the file holds it, and warns when `.claude/settings.local.json` sets
+  another, which wins over the shared file. `/sdlc:ship` leaves the lines out of its commit too.
+  Setup's record notes the object, and `/sdlc:uninstall` removes it only when it is still exactly
+  that.
+- **`true`:** the harness's own lines, and nothing written.
 
 With no base branch, or one that doesn't exist here, every command that writes refuses before it
 does anything: `new` before it claims a number, so no GitHub issue is opened for a change that

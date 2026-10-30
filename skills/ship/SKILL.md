@@ -345,6 +345,11 @@ how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the c
 `Write` is for those files only, and `.sdlc/work/inbox.md`'s first time: everything else this step
 changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
 
+**When `config`'s `git.attribution` is `false`**, the commit carries the approved message and
+nothing more: no `Co-Authored-By:` line naming an agent and no "Generated with" line, whatever the
+harness's own guidance says. The host chose that at setup, and a `.claude/settings.local.json` can
+still turn the harness's lines back on.
+
 Then, with a `--leave <path>` for each path Step 0's approval set apart:
 
 ```bash

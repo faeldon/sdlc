@@ -278,6 +278,10 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
     # Unset, it is `main` when there is one, else the branch `origin/HEAD` names (`_resolve_trunk`).
     "git": {
         "base": None,
+        # Whether a session's commits and pull requests name the agent. Unset, setup asks and
+        # writes nothing; `false` has setup write `ATTRIBUTION_OFF` into the shared settings;
+        # `true` keeps the harness's own lines, and nothing is written.
+        "attribution": None,
     },
 }
 # Each tracker is a module in scripts/trackers/, so adding one adds a target. GitHub first, as the
@@ -308,7 +312,7 @@ LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS)
 INT_KEYS = ("after_releases", "idle_minutes", "stop_allowance")
 INT_MIN = {"idle_minutes": 1}
 # Every key that holds true or false.
-BOOL_KEYS = ("transcripts",)
+BOOL_KEYS = ("transcripts", "attribution")
 
 
 def load_config(root: Path) -> tuple[dict, list[str], bool]:
@@ -5921,6 +5925,12 @@ READ_ONLY = (
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
+# Each person's own settings, which override the shared ones: read, never written.
+LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
+# What `git.attribution = false` has setup write into the shared settings: the object form, an
+# empty string hiding each line. Never `"attribution": false`, which Claude Code before v2.1.281
+# rejects, skipping the whole file, allow rules and all.
+ATTRIBUTION_OFF = {"commit": "", "pr": "", "sessionUrl": False}
 
 
 def _allowed(root: Path) -> list[str]:
@@ -5929,6 +5939,35 @@ def _allowed(root: Path) -> list[str]:
         return [a for a in allow if isinstance(a, str)]
     except (OSError, ValueError, KeyError, TypeError):
         return []
+
+
+def _settings_attribution(root: Path, rel: Path) -> object | None:
+    """The `attribution` a settings file holds, or None when it holds none or can't be read."""
+    try:
+        data = json.loads((root / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("attribution") if isinstance(data, dict) else None
+
+
+def attribution_status(root: Path, cfg: dict) -> tuple[str, str, str, dict | None]:
+    """(name, status, detail, merge) for the host's answer on attribution against its settings:
+    `merge` is the object setup writes into the shared settings, or None when there's nothing to
+    write. Unset is a question setup still has to ask, never a default."""
+    value = cfg["git"]["attribution"]
+    if value is None:
+        detail = "not chosen: setup asks whether commits and pull requests name the agent"
+        return "attribution", "missing", detail, None
+    if value:
+        return "attribution", "ok", "on: the harness's own", None
+    local = _settings_attribution(root, LOCAL_SETTINGS)
+    if local is not None and local != ATTRIBUTION_OFF:
+        detail = f"off, but {LOCAL_SETTINGS} sets its own attribution, which wins over {SETTINGS}"
+        return "attribution", "warn", detail, None
+    if _settings_attribution(root, SETTINGS) == ATTRIBUTION_OFF:
+        return "attribution", "ok", f"off: {SETTINGS} hides the agent's lines", None
+    detail = f"off, but {SETTINGS} doesn't hide the agent's lines yet"
+    return "attribution", "missing", detail, dict(ATTRIBUTION_OFF)
 
 
 def permissions_status(root: Path) -> tuple[str, str, str]:
@@ -6063,6 +6102,8 @@ def cmd_readiness(root: Path) -> int:
         for name, status, detail in tracker(home, cfg).readiness():
             item(name, status, detail)
     item(*permissions_status(root))
+    name, status, detail, merge = attribution_status(root, cfg)
+    item(name, status, detail)
     if not cfg_file.is_file():
         item("drift", "n/a", "not set up yet")
     else:
@@ -6086,6 +6127,8 @@ def cmd_readiness(root: Path) -> int:
             "rules": ALLOW_RULES,
             "missing": [r for r in ALLOW_RULES if r not in _allowed(root)],
         },
+        # The host's answer, and the object setup merges into the shared settings for it.
+        "attribution": {"value": cfg["git"]["attribution"], "merge": merge},
         # What setup copies from, when the repo has none of its own.
         "defaults": {key: str(DEFAULTS_DIR / name) for key, name in HOST_DOCS.items()},
         # The issue forms setup offers a repo tracked on GitHub, where each goes, and whether it is
@@ -6235,6 +6278,9 @@ def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
         },
         "created": sorted({*before.get("created", []), *(Path(p).as_posix() for p in created)}),
         "gitignore_line": bool(before.get("gitignore_line")) or gitignore_line,
+        # Setup's: the host answered off, and the shared settings hide the agent's lines.
+        "attribution": cfg["git"]["attribution"] is False
+        and _settings_attribution(root, SETTINGS) == ATTRIBUTION_OFF,
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"  wrote  {MANIFEST}  (plugin {manifest['version']}, {len(docs)} doc(s))")
@@ -6651,10 +6697,21 @@ def uninstall_plan(root: Path) -> dict:
         rules = [r for r in allow if isinstance(r, str) and PLUGIN_RULE_RE.match(r)]
     except (OSError, ValueError, KeyError, TypeError):
         rules = []
-    if rules:
+    attribution = _settings_attribution(home, SETTINGS)
+    # Setup's object goes only when its record says setup wrote it and nobody changed it since.
+    ours = bool(manifest.get("attribution")) and attribution == ATTRIBUTION_OFF
+    if attribution is not None and not ours:
+        why = "its attribution isn't setup's, or changed since setup wrote it"
+        plan["left"].append({"path": f"{SETTINGS} attribution", "why": why})
+    if rules or ours:
         created = str(SETTINGS) in manifest.get("created", [])
         plan["edit"].append(
-            {"path": str(SETTINGS), "remove_rules": rules, "remove_if_empty": created}
+            {
+                "path": str(SETTINGS),
+                "remove_rules": rules,
+                "remove_attribution": ours,
+                "remove_if_empty": created,
+            }  # fmt: skip
         )
     ignore = home / ".gitignore"
     if ignore.is_file() and WORKTREES_LINE in ignore.read_text(encoding="utf-8").splitlines():
@@ -6715,10 +6772,13 @@ def cmd_uninstall(root: Path, check_only: bool = False) -> int:
         path = home / edit["path"]
         if "remove_rules" in edit:
             data = json.loads(path.read_text(encoding="utf-8"))
-            allow = data["permissions"]["allow"]
-            data["permissions"]["allow"] = [r for r in allow if r not in edit["remove_rules"]]
-            # Setup's own file goes too, once its rules were all it held.
-            stub = data == {"permissions": {"allow": []}}
+            if edit["remove_rules"]:
+                allow = data["permissions"]["allow"]
+                data["permissions"]["allow"] = [r for r in allow if r not in edit["remove_rules"]]
+            if edit.get("remove_attribution"):
+                data.pop("attribution", None)
+            # Setup's own file goes too, once its rules and its attribution were all it held.
+            stub = data in ({}, {"permissions": {"allow": []}}, {"permissions": {}})
             if edit.get("remove_if_empty") and stub:
                 path.unlink()
             else:

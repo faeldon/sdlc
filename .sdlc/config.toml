@@ -18,6 +18,10 @@ context = ["AGENTS.md", "README.md", "docs/REFERENCE.md", "docs/CONTRIBUTING.md"
 # Numbered by GitHub issues on faeldon/sdlc, and archived to them.
 target = "github"
 
+[git]
+# Nothing public names the agent (AGENTS.md): .claude/settings.json hides the harness's lines.
+attribution = false
+
 [release]
 # The plugins' version lives in their manifests and in pyproject.toml, bumped together: sdlc and
 # the optional sdlc-factory always release as one version.

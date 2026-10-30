@@ -54,7 +54,9 @@ From your repo's root, in Claude Code:
 
 It reads the repo the way `/init` does and first asks what kind of repo it is, proposing each
 answer: lightweight (a throwaway, a spike) or a product with users, one person or a team, and
-changes tracked on GitHub or locally. Then it asks only what it can't work out (your gate command,
+changes tracked on GitHub or locally. It asks whether Claude's attribution should appear in your
+commits and pull requests, and with it off, hides those lines through `.claude/settings.json`.
+Then it asks only what it can't work out (your gate command,
 anything slow worth checking separately, what a design here must never break), and drafts:
 
 - `.sdlc/config.toml`: the commands the skills run, such as your test-and-lint gate;

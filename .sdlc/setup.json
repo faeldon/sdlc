@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "config_keys": [
     "archive.command",
     "archive.target",
@@ -20,6 +20,7 @@
     "docs.project",
     "docs.read_before_design",
     "docs.review",
+    "git.attribution",
     "git.base",
     "metrics.idle_minutes",
     "metrics.stop_allowance",
@@ -69,5 +70,6 @@
     "spec.md": "sha256:44e198408d01b8a0"
   },
   "created": [],
-  "gitignore_line": false
+  "gitignore_line": false,
+  "attribution": true
 }

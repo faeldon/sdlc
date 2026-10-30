@@ -127,7 +127,7 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
         "ignored": False,
         "register": str(root / ".sdlc" / "work" / "inbox.md"),
     }
-    assert out["git"] == {"base": trunk, "base_source": "detected"}
+    assert out["git"] == {"base": trunk, "base_source": "detected", "attribution": None}
 
     def main_checkout() -> tuple[str, list[str]]:
         return _git(root, "status", "--porcelain"), sorted(

@@ -215,3 +215,61 @@ def test_the_health_doc_is_off_without_a_scan_and_drafted_once_there_is_one(
     assert _items(_readiness(root, capsys))["docs.health"] == "warn", "still the template"
     (root / ".sdlc" / "HEALTH.md").write_text("# Health\n\n## Findings\n\n| a | b |\n", "utf-8")
     assert _items(_readiness(root, capsys))["docs.health"] == "ok"
+
+
+# Attribution: the host's answer, against its settings.
+
+
+def _attribution(root: Path, capsys) -> tuple[dict, dict]:
+    out = _readiness(root, capsys)
+    return next(i for i in out["items"] if i["name"] == "attribution"), out["attribution"]
+
+
+def _answer(root: Path, value: str) -> None:
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "config.toml").write_text(f"[git]\nattribution = {value}\n")
+
+
+def _settings(root: Path, name: str, data: dict) -> None:
+    (root / ".claude").mkdir(exist_ok=True)
+    (root / ".claude" / name).write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_the_attribution_object_is_never_a_bare_false() -> None:
+    assert sdlc.ATTRIBUTION_OFF == {"commit": "", "pr": "", "sessionUrl": False}
+
+
+def test_unanswered_attribution_is_a_question_for_setup(tmp_path: Path, capsys) -> None:
+    item, part = _attribution(_repo(tmp_path), capsys)
+    assert item["status"] == "missing" and item["detail"].startswith("not chosen")
+    assert not item["required"] and part == {"value": None, "merge": None}
+
+
+def test_attribution_on_writes_nothing(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _answer(root, "true")
+    item, part = _attribution(root, capsys)
+    assert item["status"] == "ok" and part["merge"] is None
+
+
+def test_attribution_off_asks_for_the_object_until_the_settings_hold_it(
+    tmp_path: Path, capsys
+) -> None:
+    root = _repo(tmp_path)
+    _answer(root, "false")
+    item, part = _attribution(root, capsys)
+    assert item["status"] == "missing" and part["merge"] == sdlc.ATTRIBUTION_OFF
+    _settings(root, "settings.json", {"attribution": {"commit": "Ours"}})
+    assert _attribution(root, capsys)[1]["merge"] == sdlc.ATTRIBUTION_OFF, "another value"
+    _settings(root, "settings.json", {"attribution": sdlc.ATTRIBUTION_OFF})
+    item, part = _attribution(root, capsys)
+    assert item["status"] == "ok" and part["merge"] is None
+
+
+def test_attribution_off_warns_when_local_settings_override_it(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _answer(root, "false")
+    _settings(root, "settings.json", {"attribution": sdlc.ATTRIBUTION_OFF})
+    _settings(root, "settings.local.json", {"attribution": {"commit": "Mine"}})
+    item, _ = _attribution(root, capsys)
+    assert item["status"] == "warn" and ".claude/settings.local.json" in item["detail"]

@@ -98,6 +98,7 @@ READS_CONFIG = {
         "docs.review",
         "docs.context",
         "git.base",
+        "git.attribution",
         "work.register",
     ],
     "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target", "git.base"],
@@ -132,6 +133,7 @@ READS_CONFIG = {
         "work.register",
     ],
     "sdlc:setup": [
+        "git.attribution",
         "commands.check",
         "commands.build",
         "commands.build_when",
@@ -467,6 +469,18 @@ def test_setup_offers_the_issue_forms_only_on_github_and_never_over_a_host_s() -
     assert "**Issue forms**, only when `archive.target` is `github`" in step3
     assert "`issue_forms`" in step3 and "`<severities>`" in step3
     assert "One already `present` is the repo's: never redraft it" in step3
+
+
+def test_setup_asks_about_attribution_and_ship_honours_the_answer() -> None:
+    """Setup asks while the answer is unset, proposing none, and writes the object form; ship's
+    commit then carries no agent line when the answer is off."""
+    setup = " ".join((ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "Should Claude's attribution appear in this repo's commits and pull requests?" in setup
+    assert "Propose no answer" in setup and "`attribution.merge`" in setup
+    assert 'never `"attribution": false`' in setup
+    ship = " ".join((ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "When `config`'s `git.attribution` is `false`" in ship
+    assert "no `Co-Authored-By:` line naming an agent" in ship
 
 
 def test_setup_neither_moves_the_change_folder_nor_cuts_a_whole_copy() -> None:
