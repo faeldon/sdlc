@@ -468,3 +468,162 @@ Raised by: 031-idea-skill (cost)
 `sdlc.py answers` keeps a filled prompt under its old key, so a migrated host's answer to "the
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
+
+## [2026-11-03-1] [idea] Review rules for evidence, bug classes, root causes and a plain summary
+
+Phase 1 of taking in the Claude Code team's account of code review ("How the Claude Code team
+does code review", Oct 2026). Five rules for `guide/review.md`, each one any repo could use:
+- every finding cites a file and line as its evidence, never a guess from a name;
+- a finding names the class of bug, so the fix covers every instance, not the one line shown;
+- on a change with `fixes:`, the correctness pass asks whether the diff fixes the root cause or a
+  symptom;
+- the findings open with a count, and say plainly "nothing to fix" when there is nothing;
+- a repo's review doc gets a slot for the paths its review skips (vendored, generated, fixtures),
+  beside the generated files the guide already skips.
+Guide and defaults only, with `sdlc.py record` rerun. The post's advice on what a good REVIEW.md
+says ("for docs it's 'it lies'") is worth a line in the slot that asks for a repo's failure classes.
+Raised 2026-11-03.
+
+## [2026-11-03-2] [idea] A pre-existing finding becomes a bug seed, not a blocker
+
+Ship ranks findings Important or Nit. The post adds a third tag, Pre-existing, "so a bug the PR
+didn't introduce doesn't look like the author's fault": the reviewer mostly re-flagged old code
+(about 59% of what it kept flagging). A finding in code the diff didn't change is reported apart,
+never blocks the commit, and ship proposes it as a `[bug]` entry (with its `Severity:` and
+`Paths:`) behind its one WAIT, the way it proposes nits. Counted as `preexisting=` on the
+`Sdlc-Findings` trailer. Phase 1. Raised 2026-11-03.
+
+After: 2026-11-03-1
+
+## [2026-11-03-3] [idea] Every finding gets a disposition, and retro counts the review's noise
+
+The post sorts each review comment by how the author answered it: fixed, wrong, intentional, or
+didn't matter, and counts how often a clean change gets a finding that would have led someone to
+make a harmful change. Ship asks the person's disposition of each finding (a fixed one before the
+commit, a dismissed one with its word and a line of reason), extends the `Sdlc-Findings` trailer
+with the counts (extend, never redefine), and retro reports the review's precision by pass. Pairs
+with 2026-10-26-6: a ship stopped by a finding later marked fixed is the review working, a stop for
+one marked wrong is noise. Phase 1. Raised 2026-11-03.
+
+After: 2026-11-03-2
+
+## [2026-11-03-4] [idea] Sensitive paths set a change's risk, and the depth of its review
+
+The post: "the change sets the tier, not the author", and some paths always get a person. Our tiers
+size the paperwork, not the risk. A config key (`[review] sensitive = [...]`, path globs such as
+CI workflows, release scripts, installers, auth) lets `preflight` report a `risk` part from the
+diff, mechanically. A sensitive diff gets the deep review: the build check always runs, no
+Important can be approved unfixed, and the WAIT names the sensitive paths. Setup asks for the list.
+Phase 2. Raised 2026-11-03.
+
+After: 2026-11-03-3
+
+## [2026-11-03-5] [idea] A fresh-context review at ship
+
+Ship reviews in the session that built the change, which anchors it on the builder's reasoning.
+The post's step before every PR is "a second agent reviews the diff in a fresh context." Ship
+spawns one subagent with only the diff, the intent or spec and the review docs, and shows its
+findings as evidence beside its own passes: one its passes confirm is a finding, one they don't is
+said so, with why, as ship does with the factory's verdicts. Always on a sensitive diff
+(2026-11-03-4); a question of cost otherwise. Phase 2. Raised 2026-11-03.
+
+After: 2026-11-03-4
+
+## [2026-11-03-6] [idea] Say how to undo a change when a revert isn't enough
+
+The post's PR template asks how the change was tested and how to revert it. For us a revert of the
+change's commit undoes most changes, so ask only when it doesn't: a migration, data written
+elsewhere, a published artifact, a host's files setup copies. Ship asks for a `How to undo:` line
+in the commit message when the diff touches what the process doc names as not undone by a
+revert, and the spec template gets the same prompt for Tier 2. Phase 2. Raised 2026-11-03.
+
+After: 2026-11-03-5
+
+## [2026-11-03-7] [idea] Retro traces each escaped bug to the review that let it through
+
+The post turns incidents into a set the reviewer is scored against, and asks of each "which layer
+should have caught the issue". We already hold both halves: a fixed bug's `Introduced by:` and the
+introducing change's `Sdlc-Findings` trailer. Retro pairs them, shows what the review found on the
+change that let the bug in, and proposes the bug's class as a `- **lead**` in the review doc's
+"ways this repo's code fails", the slot that exists for it and that nothing feeds. Recurring
+Important findings of one class get the same proposal, or a lint rule or test instead. Read beside
+2026-10-25-12, which records which change a fix reworks. Phase 3. Raised 2026-11-03.
+
+After: 2026-11-03-6
+
+## [2026-11-03-8] [idea] Retro tightens the review when escaped bugs rise
+
+The post's unbuilt circuit breaker: tighten approval when the revert and incident numbers move.
+When retro's count of bugs introduced per closed change rises over the last window, it proposes
+the tightening behind its WAIT: a path onto the sensitive list (2026-11-03-4), a failure class
+made blocking, or the fresh-context review always on. And loosening, with evidence, when the
+numbers hold. Phase 3. Raised 2026-11-03.
+
+After: 2026-11-03-7
+
+## [2026-11-03-9] [idea] The factory verifies reviewers' findings before the builder reworks them
+
+The post runs several bug hunters in parallel and posts a finding only when enough verifiers vote
+it real, dropping style-only ones, and says noise costs more with an agent author: "a person can
+wave off a nit in seconds. An agent fixes it", a commit and a round. Between review and rework, a
+verify step checks each `- CHANGE:` line against the code and keeps only the confirmed ones;
+`factory.py` counts the dropped ones in the round's files, and close measures them. Phase 4.
+Raised 2026-11-03.
+
+After: 2026-11-03-8
+
+## [2026-11-03-10] [idea] Factory rounds that converge
+
+The post saw one PR go through more than fifty review-and-fix rounds overnight, the reviewer
+finding "a few more old ones each round". Our cap of three stops the runaway; what's missing:
+- from round 2, reviewers read only the rework's diff and the round's open `CHANGE:` lines
+  (`factory.py` snapshots each round's tree with `git stash create` or `write-tree`, never a
+  commit);
+- a finding already raised is never raised again;
+- code the change didn't touch is a pre-existing finding (2026-11-03-2), never a `CHANGE:`;
+- at the cap, the approver asks the person to step back and reconsider the approach, not only for
+  a verdict.
+The post's numbers after the same changes: mean reviews to pass 2.08 to 1.32. Phase 4. Raised
+2026-11-03.
+
+After: 2026-11-03-9, 2026-11-03-2
+
+## [2026-11-03-11] [idea] The factory scales its reviewers and rounds to a change's risk
+
+`factory.toml` sets one `reviewers` list and one `rounds` for every change. The post's review has
+Quick, Standard and Deep, "deep where a missed bug costs more than the extra review time". With
+the risk ship reads (2026-11-03-4), a low-risk change runs one reviewer for one round and a
+sensitive one all three for the full rounds; the build approval shows which and why, and the most
+agent runs it can take. Phase 4. Raised 2026-11-03.
+
+After: 2026-11-03-10, 2026-11-03-4
+
+## [2026-11-03-12] [idea] The builder shows its evidence, and a behaviour check runs the change
+
+The post: give the agent something it can run and "ask it to show the output instead of saying
+it's done", which the creator of Claude Code puts at two to three times better results. The
+builder's round reports carry each command it ran and the tail of its output. A behaviour check,
+apart from the test reviewer, runs the change's `checks.md` and the end-to-end path the spec
+describes, and reports what ran and what it returned. Phase 4. Raised 2026-11-03.
+
+After: 2026-11-03-11
+
+## [2026-11-03-13] [idea] A replay eval for the factory's reviewers, from escaped bugs
+
+The post runs its reviewer daily against past changes that caused incidents, each confirmed by
+someone who knows the code, and keeps a prompt, tool or model change only if the score rises. Ours
+is the diffs that introduced the register's fixed bugs, traced by 2026-11-03-7: a `factory.py
+eval` replays the reviewers on each introducing diff and reports which caught its bug. Run when
+an agent's prompt or model changes, never on its own. Phase 4. Raised 2026-11-03.
+
+After: 2026-11-03-12, 2026-11-03-7
+
+## [2026-11-03-14] [idea] A scheduled review of existing code that files bugs
+
+The post runs review agents nightly over existing code, to catch old bugs before a change trips
+on them. An optional factory skill reviews a slice of the repo (the paths a sensitive list names,
+or the least recently changed) and proposes each finding as a `[bug]` entry the way `/sdlc:bug`
+files one, behind one WAIT, never fixing anything. Pairs with 2026-11-03-2: pre-existing findings
+already land there. Phase 4. Raised 2026-11-03.
+
+After: 2026-11-03-13
