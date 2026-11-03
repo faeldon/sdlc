@@ -550,7 +550,11 @@ def test_ship_removes_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path,
 def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> None:
     root = _repo(
         tmp_path,
-        _bug("2026-10-01-1", "One", extra="Introduced by: 000-start\n"),
+        _bug(
+            "2026-10-01-1",
+            "One",
+            extra="Paths: `src/drafts.py`, src/list/\nIntroduced by: 000-start\n",
+        ),
         _bug("2026-10-02-1", "Two", "low"),
     )
     _git(root, "checkout", "-q", "-b", "001-keep-drafts")
@@ -559,11 +563,19 @@ def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> N
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Ship 001-keep-drafts")
     assert sdlc.fix_trailers(root, "001-keep-drafts") == [
-        "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start",
-        "Sdlc-Fixes: 2026-10-02-1 severity=low reported=2026-10-02 introduced_by=unknown",
-        "Sdlc-Fixes: 2026-10-03-9 severity=unknown reported=unknown introduced_by=unknown",
+        "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start "
+        "paths=src/drafts.py,src/list/",
+        "Sdlc-Fixes: 2026-10-02-1 severity=low reported=2026-10-02 introduced_by=unknown "
+        "paths=unknown",
+        "Sdlc-Fixes: 2026-10-03-9 severity=unknown reported=unknown introduced_by=unknown "
+        "paths=unknown",
     ]
     assert sdlc.fix_trailers(root, "no-such-branch") == []
+    parsed = sdlc.metrics.parse_trailers(
+        "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start "
+        "paths=src/drafts.py,src/list/"
+    )
+    assert parsed["fixes"]["2026-10-01-1"]["paths"] == "src/drafts.py,src/list/"
 
 
 def test_only_a_close_records_fixes_never_a_drop() -> None:
@@ -608,7 +620,16 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
     assert [(b["id"], b["severity"], b["age_days"]) for b in out["open"]] == [
         ("2026-10-03-1", "med", 22)
     ]
-    assert out["escapes"] == [{"change": "001-start", "bugs": 1, "tier": 1}]
+    assert out["escapes"] == [
+        {
+            "change": "001-start",
+            "bugs": 1,
+            "tier": 1,
+            # Fixed: its title left with the entry, and a trailer from before `paths=`.
+            "escaped": [{"id": "2026-10-01-1", "title": None, "severity": "high", "paths": None}],
+            "review": {"state": "unknown", "counts": None, "findings": []},
+        }
+    ]
     assert out["unattributed"] == 1, "the open bug no one has attributed"
 
 
@@ -624,6 +645,13 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         "open": [],
         "escapes": [],
         "unattributed": 0,
+        "rate": {
+            "window": {"escapes": 0, "changes": 0, "rate": None},
+            "previous": None,
+            "trend": "unknown",
+        },
+        "important": [],
+        "important_unknown": 0,
     }
 
 
@@ -649,9 +677,179 @@ def test_retro_counts_escapes_only_from_its_window(tmp_path: Path) -> None:
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Retrospective 2026-10-01")
     out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
-    assert out["escapes"] == [{"change": "001-start", "bugs": 1, "tier": 1}]
+    assert [(e["change"], e["bugs"], [b["id"] for b in e["escaped"]]) for e in out["escapes"]] == [
+        ("001-start", 1, ["2026-10-10-1"])
+    ]
     assert out["unattributed"] == 0 and out["reported"] == {"high": 1}
     assert len(out["open"]) == 3, "every open bug is still listed by age"
+
+
+# What retro says of the review an escape got past.
+
+FINDINGS = """\
+# Findings
+
+> What ship's review found.
+
+## F1. [important] [correctness] A draft saved twice keeps two
+
+Evidence: src/drafts.py:3
+Class: a write with no check for the row it replaces
+Disposition: fixed
+
+## F2. [nit] [cost] A helper with one caller
+
+Evidence: src/list/view.py:9
+Class: a layer with one caller
+Disposition: minor
+Reason: harmless
+"""
+
+
+def _reviewed(
+    root: Path, name: str, path: str, findings: str | None = None, trailer: str | None = None
+) -> None:
+    """`_close`, with the review ship leaves: findings.md in the folder, the trailer on the
+    change's own commit, either or neither."""
+    number, slug = name.split("-", 1)
+    folder = root / ".sdlc" / "work" / name
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text(INTENT.format(id=number, slug=slug), encoding="utf-8")
+    if findings:
+        (folder / "findings.md").write_text(findings, encoding="utf-8")
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(f"{name}\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"Ship {name}", *(["-m", trailer] if trailer else []))
+    _git(root, "rm", "-rq", f".sdlc/work/{name}")
+    _git(root, "commit", "-q", "-m", f"Close {name}")
+
+
+TRAILER = "Sdlc-Findings: important=1 nit=1 correctness=1 contract=0 cost=1 context=0"
+
+
+@pytest.mark.parametrize(
+    ("findings", "trailer", "state"),
+    [(FINDINGS, TRAILER, "file"), (None, TRAILER, "trailer"), (None, None, "unknown")],
+)
+def test_each_escape_carries_the_review_its_change_got(
+    tmp_path: Path, findings: str | None, trailer: str | None, state: str
+) -> None:
+    root = _repo(tmp_path)
+    _reviewed(root, "001-start", "src/drafts.py", findings, trailer)
+    _inbox(root, _bug("2026-10-10-1", "Two drafts", extra="Paths: src/drafts.py\n"
+                      "Introduced by: 001-start\n"))  # fmt: skip
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File 2026-10-10-1")
+    (escape,) = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["escapes"]
+    assert escape["escaped"] == [
+        {"id": "2026-10-10-1", "title": "Two drafts", "severity": "high",
+         "paths": ["src/drafts.py"]}
+    ]  # fmt: skip
+    review = escape["review"]
+    assert review["state"] == state, "no file and no trailer is unknown, never a clean review"
+    assert (review["counts"] is None) == (trailer is None)
+    found = [(f["id"], f["disposition"], f["on_paths"]) for f in review["findings"]]
+    assert found == ([("F1", "fixed", True), ("F2", "minor", False)] if findings else [])
+
+
+@pytest.mark.parametrize(
+    ("evidence", "paths", "on"),
+    [
+        ("src/drafts.py:3", ["src/drafts.py"], True),
+        ("src/list/view.py:9", ["src/list/"], True),
+        ("src/list:1", ["src/list/view.py"], True),
+        ("`src/drafts.py:3` and more", ["src/drafts.py"], True),
+        ("src/drafts_old.py:3", ["src/drafts.py"], False),
+        ("src/listing.py:1", ["src/list"], False),
+        ("src/drafts.py:3", None, None),
+    ],
+)
+def test_a_finding_is_on_a_bugs_paths_when_one_holds_the_other(
+    evidence: str, paths: list[str] | None, on: bool | None
+) -> None:
+    assert sdlc._on_paths(evidence, paths) is on
+
+
+def _windows(root: Path, before: int, now: int, prev_bugs: int, now_bugs: int) -> None:
+    """Changes and bugs in two windows: before the first retrospective, then between it and the
+    second (the previous window), then after (this one). Bugs are tied to 001-start."""
+    _close(root, "001-start", "src/a.py")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "Retrospective 2026-10-01")
+    for i in range(before):
+        _close(root, f"{i + 2:03d}-before", f"src/b{i}.py")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "Retrospective 2026-10-10")
+    for i in range(now):
+        _close(root, f"{i + 100:03d}-now", f"src/n{i}.py")
+    bugs = [_bug(f"2026-10-0{i + 2}-1", "Then", extra="Introduced by: 001-start\n")
+            for i in range(prev_bugs)]  # fmt: skip
+    bugs += [_bug(f"2026-10-1{i + 1}-1", "Now", extra="Introduced by: 001-start\n")
+             for i in range(now_bugs)]  # fmt: skip
+    _inbox(root, *bugs, _bug("2026-10-12-9", "No one's"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File the bugs")
+
+
+@pytest.mark.parametrize(
+    ("before", "now", "prev_bugs", "now_bugs", "trend"),
+    [
+        (5, 5, 1, 3, "up"),
+        (5, 5, 3, 1, "down"),
+        (5, 5, 2, 2, "flat"),
+        (4, 5, 1, 3, "unknown"),
+        (5, 4, 1, 3, "unknown"),
+    ],
+)
+def test_the_escape_rate_moves_against_the_window_before(
+    tmp_path: Path, before: int, now: int, prev_bugs: int, now_bugs: int, trend: str
+) -> None:
+    root = _repo(tmp_path)
+    _windows(root, before, now, prev_bugs, now_bugs)
+    rate = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
+    assert rate["window"] == {"escapes": now_bugs, "changes": now,
+                              "rate": round(now_bugs / now, 2)}  # fmt: skip
+    assert rate["previous"] == {"escapes": prev_bugs, "changes": before,
+                                "rate": round(prev_bugs / before, 2)}  # fmt: skip
+    assert rate["trend"] == trend, "under five changes in either window says nothing"
+
+
+def test_a_bug_fixed_anywhere_in_history_counts_in_the_window_it_was_reported(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _windows(root, 5, 5, 0, 0)
+    fixes = (
+        "Sdlc-Fixes: 2026-10-03-1 severity=high reported=2026-10-03 introduced_by=001-start "
+        "paths=src/a.py"
+    )
+    _git(root, "commit", "-q", "--allow-empty", "-m", "Close 200-fix", "-m", fixes)
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out["rate"]["previous"]["escapes"] == 1
+    assert out["rate"]["window"]["escapes"] == 0, "a retired or unattributed bug never counts"
+
+
+def test_without_two_retrospectives_there_is_no_window_before(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-start", "src/a.py")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "Retrospective 2026-10-01")
+    rate = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
+    assert rate["previous"] is None and rate["trend"] == "unknown"
+    assert [r["date"] for r in sdlc.retrospectives(root, "main")] == ["2026-10-01"]
+
+
+def test_the_windows_important_findings_are_listed_and_the_unreviewed_counted(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _reviewed(root, "001-start", "src/drafts.py", FINDINGS, TRAILER)
+    _reviewed(root, "002-list", "src/list/view.py", None, TRAILER)
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    assert out["important"] == [
+        {"change": "001-start", "id": "F1", "pass": "correctness",
+         "title": "A draft saved twice keeps two",
+         "class": "a write with no check for the row it replaces", "disposition": "fixed"}
+    ]  # fmt: skip
+    assert out["important_unknown"] == 1, "a trailer alone holds no classes"
 
 
 def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:

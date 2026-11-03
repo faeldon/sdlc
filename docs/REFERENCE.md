@@ -604,14 +604,24 @@ rework (leaving out the files more than a third of them touch, listed apart), op
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
 trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
 reason, the issues triage closed without a change by verdict (`triaged`), the days from report
-to fix, the open ones by age, and the escapes: each introducing change with its tier, and how
-many no one tied to a change.
+to fix, the open ones by age, and the escapes: each introducing change with its tier, its bugs
+and their paths (`escaped`), and the review it got (`review`): `state` is `file` when its
+`findings.md` is in history, each finding marked `on_paths` when its `Evidence:` sits on a bug's
+paths (null when they weren't recorded), `trailer` when only the `Sdlc-Findings` counts are, and
+`unknown`, never a clean review, when neither is. Then how many no one tied to a change
+(`unattributed`); `rate`, the escapes per closed change in this window and the one between the
+two retrospectives before it, by the bugs' reported dates, with a `trend` of `up`, `down`, `flat`,
+or `unknown` when either window has fewer than five closed changes; and `important`, the window's
+Important findings with their class, beside `important_unknown`, the changes with no
+`findings.md`.
 
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there
 is one, and appends the seeds. `sdlc.py retro-commit` commits those files and nothing else, as the
-next retrospective's boundary. It never edits code, skills or the process doc.
+next retrospective's boundary. It never edits code, skills, the process doc, the review doc or
+`.sdlc/config.toml`: a lesson an escape holds for the review (a failure class for the review doc,
+a path for `[review]`) is a seed with the exact text, made by a change that ship reviews.
 
 Goals and milestones in the direction doc keep ids across retrospectives (`- G1. …`, `### M1. …`
 with a `Groups:` line naming its changes and seeds), and each one ends struck through as `Done`,
@@ -649,8 +659,8 @@ away goes under `stage: spike`, which owes no artifact; its cost is reported apa
 `Sdlc-Spike`, never as rework.
 
 The bugs a change fixes are recorded too, one `Sdlc-Fixes: <id> severity=<w> reported=<date>
-introduced_by=<NNN-slug|unknown>` line each, from its intent's `fixes:` and the entry as the
-branch last held it; a bug retired without a fix gets `Sdlc-Retired: <id> severity=<w>
+introduced_by=<NNN-slug|unknown> paths=<p1>,<p2>|unknown` line each, from its intent's `fixes:`
+and the entry as the branch last held it (a line from before `paths=` reads as paths unknown); a bug retired without a fix gets `Sdlc-Retired: <id> severity=<w>
 reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing. An issue
 triage closed gets `Sdlc-Triaged: #<N> verdict=<word> ref=<what it rests on>` on its `Triage` or
 `File` commit, its reason as a `Why #<N>:` line in the body.

@@ -45,6 +45,7 @@ Then look for the failures that don't announce themselves:
 
 None recorded yet. A repo lists here the failure classes its own history shows, each a
 `- **lead**` bullet pinned by a test the diff should still pass for the right reason.
+`/sdlc:retro` proposes them, from the bugs that got past a review and the findings it made.
 
 ## Pass 2 — Contract
 

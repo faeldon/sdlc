@@ -363,7 +363,8 @@ fixes one, its intent naming it on a `fixes:` line; `/sdlc:ship` removes the ent
 and `/sdlc:close` records it on the `Close` commit as an `Sdlc-Fixes:` trailer, so history says
 which change fixed what. One that needs no fix is retired by `/sdlc:bug`, with its reason.
 `/sdlc:retro` counts them: reported, fixed and retired in its window, days from report to fix,
-and escapes per introducing change against its tier.
+and escapes per introducing change against its tier and the review it got, with their rate
+against the window before.
 
 ### Closing and the archive → `/sdlc:close`
 

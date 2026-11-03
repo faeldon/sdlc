@@ -42,12 +42,12 @@
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:65396a7db0e409b4"
+      "guide": "sha256:b521942caeb9dc74"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",
       "layout": "answers",
-      "guide": "sha256:88ede1f19a5a4743"
+      "guide": "sha256:0cba551d9b8b0e5a"
     },
     "product": {
       "path": ".sdlc/PRODUCT.md",

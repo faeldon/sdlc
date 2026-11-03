@@ -1094,6 +1094,16 @@ def findings_entries(folder: Path) -> dict:
     if is_unfilled(path):
         out["problems"].append(f"{FINDINGS} is still the template: fill it or delete it")
         return out
+    out["entries"], out["problems"] = _findings_from_text(text)
+    out["open"] = [e["id"] for e in out["entries"] if e["disposition"] == "open"]
+    return out
+
+
+def _findings_from_text(text: str) -> tuple[list[dict], list[str]]:
+    """findings.md's entries and problems from its text: the one parser, for a file on disk
+    (`findings_entries()`) and one read from history (`_review_at()`)."""
+    entries: list[dict] = []
+    problems: list[str] = []
     sections: list[tuple[str, dict]] = []
     fenced = False
     for line in text.splitlines():
@@ -1112,7 +1122,7 @@ def findings_entries(folder: Path) -> dict:
     for heading, fields in sections:
         m = FINDING_RE.match(heading)
         if not m:
-            out["problems"].append(f"{FINDINGS}: {heading!r} isn't `## F<n>. [rank] [pass] title`")
+            problems.append(f"{FINDINGS}: {heading!r} isn't `## F<n>. [rank] [pass] title`")
             continue
         ident, rank, pass_, title = f"F{m.group(1)}", m.group(2).strip(), m.group(3).strip(), m[4]
         disposition = fields.get("Disposition", "")
@@ -1136,16 +1146,15 @@ def findings_entries(folder: Path) -> dict:
         if "By" in fields and fields["By"] not in FINDING_BY:
             wrong.append(f"By must be one of {'|'.join(FINDING_BY)}, got {fields['By']!r}")
         if wrong:
-            out["problems"] += [f"{FINDINGS}: {ident}: {w}" for w in wrong]
+            problems += [f"{FINDINGS}: {ident}: {w}" for w in wrong]
             continue
-        entry = {"id": ident, "rank": FINDING_RANKS[rank], "pass": pass_, "title": title.strip(),
-                 "evidence": fields["Evidence"], "class": fields["Class"],
-                 "disposition": disposition, "reason": fields.get("Reason"),
-                 "by": fields.get("By")}  # fmt: skip
-        out["entries"].append(entry)
-        if disposition == "open":
-            out["open"].append(ident)
-    return out
+        entries.append(
+            {"id": ident, "rank": FINDING_RANKS[rank], "pass": pass_, "title": title.strip(),
+             "evidence": fields["Evidence"], "class": fields["Class"],
+             "disposition": disposition, "reason": fields.get("Reason"),
+             "by": fields.get("By")}
+        )  # fmt: skip
+    return entries, problems
 
 
 def findings_trailer(entries: list[dict]) -> str:
@@ -2901,9 +2910,15 @@ def fix_trailers(main: Path, branch: str) -> list[str]:
             severity = (fields.get("Severity") or "unknown").replace(" ", "-")
             introduced = (fields.get("Introduced by") or "unknown").strip()
             reported = e["date"] if e else "unknown"
+            # The register loses the entry with the fix, so retro reads its paths here.
+            paths = ",".join(
+                p.strip().strip("`").replace(" ", "")
+                for p in (fields.get("Paths") or "").split(",")
+                if p.strip()
+            )
             lines.append(
                 f"Sdlc-Fixes: {f} severity={severity} reported={reported} "
-                f"introduced_by={introduced}"
+                f"introduced_by={introduced} paths={paths or 'unknown'}"
             )
         return lines
     except Exception:
@@ -4457,6 +4472,8 @@ RETRO_PREFIX = "Retrospective "
 RETRO_RE = re.compile(r"^Retrospective (\d{4}-\d{2}-\d{2})$")
 # A later change touching an earlier one's files within this many days reads as rework.
 REWORK_DAYS = 7
+# Fewer closed changes than this in either window, and the escape rate's trend is `unknown`.
+RATE_MIN_CHANGES = 5
 # A file touched by more than this share of the window's changes is common to them, not rework:
 # sharing it says nothing. Only once the share holds a pair (six changes, at a third), since in a
 # smaller window the two changes of any pair would already be more than it.
@@ -4530,18 +4547,25 @@ def _days_between(start: str, end: str) -> int | None:
         return None
 
 
-def last_retrospective(home: Path, trunk: str | None) -> dict | None:
-    """The newest `Retrospective YYYY-MM-DD` commit on the base branch's first-parent line, the
-    boundary of the next one. retro-commit writes the subject, so it is never a guess."""
+def retrospectives(home: Path, trunk: str | None) -> list[dict]:
+    """Every `Retrospective YYYY-MM-DD` commit on the base branch's first-parent line, newest
+    first: each one the boundary of the next. retro-commit writes the subject, so it is never a
+    guess."""
     if not trunk:
-        return None
+        return []
     log = _git(home, "log", "--first-parent", "--format=%h%x00%s", trunk) or ""
+    found = []
     for line in log.splitlines():
         sha, _, subject = line.partition("\x00")
         m = RETRO_RE.match(subject)
         if m:
-            return {"sha": sha, "date": m.group(1)}
-    return None
+            found.append({"sha": sha, "date": m.group(1)})
+    return found
+
+
+def last_retrospective(home: Path, trunk: str | None) -> dict | None:
+    """The newest retrospective, the boundary of the next one."""
+    return next(iter(retrospectives(home, trunk)), None)
 
 
 def prose_metrics(home: Path, cfg: dict) -> dict:
@@ -5319,9 +5343,27 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         d for f in fixed if (d := _days_between(f.get("reported", ""), f["date"])) is not None
     )
     history = {c["name"]: c for c in closed_changes(home, None, trunk, read=True)}
+    reviews: dict[str, dict] = {}
+
+    def review(name: str) -> dict:
+        """What the change's ship review left, read once."""
+        if name not in reviews:
+            rec = history.get(name)
+            reviews[name] = (
+                _review_at(home, name, rec["sha"], rec.get("findings"))
+                if rec
+                else {"state": "unknown", "counts": None, "findings": []}
+            )
+        return reviews[name]
+
     escapes: dict[str, dict] = {}
     unattributed = 0
-    opened = ({"introduced_by": b["introduced_by"], "reported": b["reported"]} for b in open_bugs)
+    opened = [
+        {"id": b["id"], "title": b["title"], "severity": b["severity"] or None,
+         "paths": b["paths"] or None, "introduced_by": b["introduced_by"],
+         "reported": b["reported"]}
+        for b in open_bugs
+    ]  # fmt: skip
     for source in [*fixed, *opened]:
         if not in_window(source.get("reported")):
             continue
@@ -5330,8 +5372,64 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
             unattributed += 1
             continue
         name = next((n for n in history if names_change(n, by)), by)
-        row = escapes.setdefault(name, {"bugs": 0, "tier": (history.get(name) or {}).get("tier")})
+        row = escapes.setdefault(
+            name, {"bugs": 0, "tier": (history.get(name) or {}).get("tier"), "escaped": []}
+        )
         row["bugs"] += 1
+        row["escaped"].append(
+            {"id": source.get("id"), "title": source.get("title"),
+             "severity": source.get("severity"), "paths": _bug_paths(source.get("paths"))}
+        )  # fmt: skip
+    for name, row in escapes.items():
+        known = [p for b in row["escaped"] for p in b["paths"] or []]
+        paths = known if any(b["paths"] is not None for b in row["escaped"]) else None
+        seen = review(name)
+        marked = [{**f, "on_paths": _on_paths(f["evidence"], paths)} for f in seen["findings"]]
+        row["review"] = {**seen, "findings": marked}
+
+    # The escape rate, this window's against the one before: bugs reported in a window and tied
+    # to a change, over the changes closed in it, whenever they're fixed. Retired ones never.
+    ever_fixed = [
+        f
+        for rec in history.values()
+        for f in ((rec.get("metrics") or {}).get("fixes") or {}).values()
+    ]
+    attributed = [
+        str(b["reported"])
+        for b in [*opened, *ever_fixed]
+        if b.get("introduced_by") not in (None, "", "unknown")
+        and str(b.get("reported") or "unknown") != "unknown"
+    ]
+
+    def window_rate(first: str | None, last: str | None, closed: int) -> dict:
+        n = sum((first is None or r >= first) and (last is None or r < last) for r in attributed)
+        return {"escapes": n, "changes": closed, "rate": round(n / closed, 2) if closed else None}
+
+    now = window_rate(start, None, len(changes))
+    bounds = retrospectives(home, trunk)
+    before = None
+    if len(bounds) >= 2:
+        newer, older = bounds[0], bounds[1]
+        closed = len(closed_changes(home, older["sha"], newer["sha"], read=False))
+        before = window_rate(older["date"], newer["date"], closed)
+    trend = "unknown"
+    if before and min(now["changes"], before["changes"]) >= RATE_MIN_CHANGES:
+        a, b = now["rate"], before["rate"]
+        trend = "up" if a > b else "down" if a < b else "flat"
+
+    # The window's Important findings, for a class that recurs across changes.
+    important, important_unknown = [], 0
+    for rec in changes:
+        seen = review(rec["name"])
+        if seen["state"] != "file":
+            important_unknown += 1
+            continue
+        important += [
+            {"change": rec["name"], **{k: f[k] for k in ("id", "pass", "title", "class",
+                                                         "disposition")}}
+            for f in seen["findings"]
+            if f["rank"] == "important"
+        ]  # fmt: skip
 
     def by_severity(rows: list[dict] | list[str]) -> dict[str, int]:
         counts = Counter(r if isinstance(r, str) else r.get("severity") or "unset" for r in rows)
@@ -5361,6 +5459,45 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         ),
         "escapes": [{"change": n, **row} for n, row in sorted(escapes.items())],
         "unattributed": unattributed,
+        "rate": {"window": now, "previous": before, "trend": trend},
+        "important": important,
+        "important_unknown": important_unknown,
+    }
+
+
+def _bug_paths(raw: object) -> list[str] | None:
+    """A bug's paths, from the register (a list) or an `Sdlc-Fixes` line's `paths=` (text, or
+    `unknown`); None when nobody recorded them, as on a line written before the key."""
+    if isinstance(raw, list):
+        return raw or None
+    if not isinstance(raw, str) or raw in ("", "unknown"):
+        return None
+    return [p for p in raw.split(",") if p]
+
+
+def _on_paths(evidence: str, paths: list[str] | None) -> bool | None:
+    """Whether a finding's `Evidence:` path is one of an escaped bug's paths, under one, or holds
+    one; None when the bug's paths are unknown."""
+    if paths is None:
+        return None
+    where = (evidence.split() or [""])[0].split(":", 1)[0].strip("`").rstrip("/")
+    for p in paths:
+        p = p.strip("`").rstrip("/")
+        if where and p and (where == p or where.startswith(p + "/") or p.startswith(where + "/")):
+            return True
+    return False
+
+
+def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
+    """What a closed change's ship review left, from its own commit: its findings.md (`file`), only
+    the `Sdlc-Findings` counts (`trailer`), or neither (`unknown`, never a clean review)."""
+    text = _git(home, "show", f"{sha}:{work_rel(home)}/{name}/{FINDINGS}")
+    entries = _findings_from_text(text)[0] if text else []
+    keys = ("id", "rank", "pass", "title", "class", "disposition", "by", "evidence")
+    return {
+        "state": "file" if text else "trailer" if counts else "unknown",
+        "counts": counts,
+        "findings": [{k: e[k] for k in keys} for e in entries],
     }
 
 

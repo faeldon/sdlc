@@ -60,7 +60,14 @@ What `retro` gives:
   `Close` commit's `Sdlc-Fixes:`) and `retired` (from each `Retire` commit's `Sdlc-Retired:`,
   by reason), `triaged` (the issues triage closed without a change, from each `Sdlc-Triaged:`, by
   verdict), `days_to_fix` (median and max), `open` (oldest first), and `escapes`: each change a
-  bug was `Introduced by`, with its tier, and `unattributed`, the bugs no one tied to a change.
+  bug was `Introduced by`, with its tier, the bugs (`escaped`, each with its paths, null when
+  nobody recorded them) and `review`, what that change's ship review left: `state` `file` (its
+  `findings.md`, each finding marked `on_paths` when it sits on a bug's paths), `trailer` (only
+  the counts) or `unknown`, which is never a clean review. Then `unattributed`, the bugs no one
+  tied to a change; `rate`, the escapes per closed change in this window and the one before, and
+  its `trend` (`up`, `down`, `flat`, or `unknown` when either window is too small to say); and
+  `important`, the window's Important findings with their class, beside `important_unknown`,
+  the changes with no `findings.md` to read.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
@@ -151,11 +158,27 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 
    Then `bugs`: what got through. Weigh each escape against the introducing change's tier: a
    Tier 1 that let a high-severity bug through says the tier rule let something risky skip its
-   spec; a Tier 2 says its review passes missed a class of failure, which is a finding for the
-   review doc, proposed as an intent title. Say how many are `unattributed`, since an escape no
-   one tied to a change counts toward neither. A bug open long, or `days_to_fix` growing, is a
-   finding whose disposition is the intent that fixes it. Bugs themselves are `/sdlc:bug`'s to
-   file and retire, never this skill's.
+   spec. Then say which layer should have caught it, from its `review`:
+   - **no finding `on_paths`**: the passes missed it, a class the review doesn't look for;
+   - **a finding `on_paths` answered `wrong`, `minor`, `intentional` or `recorded`**: the review
+     saw it and let it through, a finding about how that answer was reached;
+   - **`unknown`**: say so; it is never evidence the review was clean.
+
+   A missed class, or a class two or more changes' `important` findings share, is a finding whose
+   disposition is a seed holding the exact `- **lead**` bullet for the review doc's "The ways this
+   repo's code fails" (or the lint rule or test that would catch it instead), citing the bug ids,
+   the change and the findings it rests on. Say how many are `unattributed`, since an escape no
+   one tied to a change counts toward neither.
+
+   Then `rate`. On `up`, propose tightening the review as a seed: the exact path for `[review]
+   sensitive` in `.sdlc/config.toml`, the fresh review on every change, or a class made blocking,
+   whichever the escapes point to. On `down` or `flat` with `review.sensitive` or
+   `review.irreversible` set in `config`, a loosening may be one, with the same evidence. On
+   `unknown`, say why and propose nothing about the review's depth. Each such seed states both
+   rates and how many changes they rest on: a few changes are anecdote.
+
+   A bug open long, or `days_to_fix` growing, is a finding whose disposition is the intent that
+   fixes it. Bugs themselves are `/sdlc:bug`'s to file and retire, never this skill's.
 4. **Product**, only when `product` isn't null. Whether the work is going where the users are,
    judged from `product.evidence` against each outcome's measure in the product doc. Score every
    open outcome in `product.items` the way the direction pass scores its items (done, dropped,
@@ -189,7 +212,9 @@ Every finding ends in exactly one of these, or it doesn't go in the report:
 - **Seed**: a `.sdlc/work/inbox.md` entry, `## [<id>] [idea] Title`, with a short paragraph: the
   problem, the evidence, and "Raised by the retrospective of YYYY-MM-DD." A finding that comes in
   phases is one seed per phase, each later one with an `After: <earlier seed's id>` line, so
-  `/sdlc:status` puts forward only the phase that's next.
+  `/sdlc:status` puts forward only the phase that's next. A change to the review doc or to
+  `[review]` is a seed too, its body holding the exact text proposed (the bullet, the path), so
+  the change that makes it gets ship's review.
 - **Intent**: a proposed title for `/sdlc:intent`, for one that needs a decision now. Don't open it:
   that skill has its own gate.
 - **Dropped**: with its reason, which goes under the direction doc's *Dropped findings*.
@@ -254,7 +279,8 @@ so no product pass: run /sdlc:setup product to add one.` Then stop.
 
 ## Out of scope
 
-- Editing code, skills, the process doc or the policy doc: that's a change, through `/sdlc:intent`.
+- Editing code, skills, the process doc, the policy doc, the review doc or `.sdlc/config.toml`:
+  that's a change, through `/sdlc:intent`.
 - Editing the product doc's users, problem, measures or bets: only its outcome lines.
 - Quoting evidence output into the direction doc, the product doc or `.sdlc/work/inbox.md`: findings
   are written in this skill's own words, and a line of evidence goes in only when the human

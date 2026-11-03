@@ -469,26 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-7] [idea] Retro traces each escaped bug to the review that let it through
-
-The post turns incidents into a set the reviewer is scored against, and asks of each "which layer
-should have caught the issue". We already hold both halves: a fixed bug's `Introduced by:` and the
-introducing change's `Sdlc-Findings` trailer. Retro pairs them, shows what the review found on the
-change that let the bug in, and proposes the bug's class as a `- **lead**` in the review doc's
-"ways this repo's code fails", the slot that exists for it and that nothing feeds. Recurring
-Important findings of one class get the same proposal, or a lint rule or test instead. Read beside
-2026-10-25-12, which records which change a fix reworks. Phase 3. Raised 2026-11-03.
-
-## [2026-11-03-8] [idea] Retro tightens the review when escaped bugs rise
-
-The post's unbuilt circuit breaker: tighten approval when the revert and incident numbers move.
-When retro's count of bugs introduced per closed change rises over the last window, it proposes
-the tightening behind its WAIT: a path onto the sensitive list (2026-11-03-4), a failure class
-made blocking, or the fresh-context review always on. And loosening, with evidence, when the
-numbers hold. Phase 3. Raised 2026-11-03.
-
-After: 2026-11-03-7
-
 ## [2026-11-03-9] [idea] The factory verifies reviewers' findings before the builder reworks them
 
 The post runs several bug hunters in parallel and posts a finding only when enough verifiers vote
@@ -497,8 +477,6 @@ wave off a nit in seconds. An agent fixes it", a commit and a round. Between rev
 verify step checks each `- CHANGE:` line against the code and keeps only the confirmed ones;
 `factory.py` counts the dropped ones in the round's files, and close measures them. Phase 4.
 Raised 2026-11-03.
-
-After: 2026-11-03-8
 
 ## [2026-11-03-10] [idea] Factory rounds that converge
 
@@ -544,7 +522,7 @@ is the diffs that introduced the register's fixed bugs, traced by 2026-11-03-7: 
 eval` replays the reviewers on each introducing diff and reports which caught its bug. Run when
 an agent's prompt or model changes, never on its own. Phase 4. Raised 2026-11-03.
 
-After: 2026-11-03-12, 2026-11-03-7
+After: 2026-11-03-12
 
 ## [2026-11-03-14] [idea] A scheduled review of existing code that files bugs
 
@@ -578,3 +556,26 @@ Paths: skills/setup/SKILL.md
 Cost: S
 Value: low
 Raised by: 036-review-depth-by-risk (correctness)
+
+## [2026-11-04-1] [nit] Retro's never-writes test greps retro-commit's source
+
+`test_retro_proposes_review_changes_as_seeds_and_never_writes_them` asserts `review` and
+`config.toml` are absent from `cmd_retro_commit`'s source, so only a rename fails it. Commit a
+retro whose tree also changes `.sdlc/REVIEW.md` and assert the refusal instead.
+
+Theme: tests
+Paths: tests/test_skills.py
+Cost: S
+Value: low
+Raised by: 037-escaped-bugs-tune-review (correctness)
+
+## [2026-11-04-2] [nit] A findings.md from history that no longer parses reads as fewer findings
+
+`_review_at` drops `_findings_from_text`'s problems, so an unparseable section vanishes from
+`review.findings` and `important` while `state` says `file`. Carry them as `review.problems`.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 037-escaped-bugs-tune-review (correctness)

@@ -133,6 +133,8 @@ READS_CONFIG = {
         "docs.product",
         "retro.evidence",
         "work.register",
+        "review.sensitive",
+        "review.irreversible",
     ],
     "sdlc:setup": [
         "git.attribution",
@@ -326,6 +328,32 @@ def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
         "never for editing code, skills or the process doc"
         in frontmatter.load(skill)["description"]
     )
+
+
+def test_retro_proposes_review_changes_as_seeds_and_never_writes_them() -> None:
+    """An escape's lesson for the review doc or `[review]` reaches them through a change and its
+    ship review: retro proposes the exact text as a seed, and its one commit still holds only the
+    direction doc, the register and the product doc."""
+    import inspect
+
+    skill = ROOT / "skills" / "retro" / "SKILL.md"
+    text = frontmatter.load(skill).content
+    out_of_scope = " ".join(text.split("## Out of scope")[1].split())
+    assert "the review doc or `.sdlc/config.toml`" in out_of_scope
+    process = " ".join(text.split("3. **Process.**")[1].split("4. **Product**")[0].split())
+    for word in ("`on_paths`", "`unknown`", "`rate`", "`important`", "`- **lead**`", "seed"):
+        assert word in process, word
+    assert frontmatter.load(skill)["allowed-tools"] == [
+        "Read",
+        "Write",
+        "Edit",
+        'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)',
+        'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro *)',
+        'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit *)',
+        'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)',
+    ]
+    source = inspect.getsource(sdlc.cmd_retro_commit)
+    assert "review" not in source and "config.toml" not in source
 
 
 def test_retro_closes_its_own_loop_and_release_says_when_one_is_due() -> None:

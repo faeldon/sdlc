@@ -191,8 +191,12 @@ into the main checkout's register (which must be clean) and back out of the work
 drop would lose it. A removed entry needs a reason of its kind (`RETIRE_REASONS`), and a nit, or
 an entry an open change's `idea:` or `fixes:` names (`_open_claims()`: the `[building]` tag rides
 on the change's branch), is never removed there. Ship deletes a change's `fixes:` entries, and close's
-`fix_trailers()` writes their `Sdlc-Fixes:` lines. Retro's `bugs_retro()` counts them from the
-register and those trailers, and `Sdlc-Retired:` is written for bugs alone.
+`fix_trailers()` writes their `Sdlc-Fixes:` lines, paths included, since the entry is gone by
+then. Retro's `bugs_retro()` counts them from the register and those trailers, and pairs each
+escape with the review its introducing change got (`_review_at()`: its `findings.md` from that
+change's own commit, parsed by `findings_entries()`'s `_findings_from_text()`), so a missed class
+is evidence, never a guess; it proposes, the review doc and `[review]` stay a change's to edit.
+`Sdlc-Retired:` is written for bugs alone.
 
 **Intake: `recorded_issues()`.** Issues people file on GitHub reach the repo through
 `/sdlc:triage`, and each one the repo records has exactly one record: an entry's `Issue: #12, #15`
