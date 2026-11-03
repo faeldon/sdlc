@@ -85,6 +85,10 @@ Two apply everywhere:
 - Tag each finding with its pass: `[correctness]`, `[contract]`, `[cost]`.
 - **Count first.** The findings open with their count by rank, and say "nothing to fix" plainly
   when there are none.
+- **A second reviewer's findings count like any.** On a diff that touches a sensitive path, a
+  reviewer that never saw the session that built it reviews the diff too. Each of its findings is
+  answered like the review's own, and one that can't be confirmed from its evidence is dismissed
+  with why, never dropped unseen.
 - **Out of scope, never reported:** generated files, and formatting a formatter already fixes.
 
 ### Paths this repo's review skips

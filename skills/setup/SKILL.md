@@ -124,6 +124,13 @@ Then one short round, only for what Step 1 couldn't settle:
   `health` is usually this, not the plugin's own `readiness`. And **worktree setup**
   (`commands.worktree_setup`): what a fresh worktree lacks that the repo's tools need. None is fine
   for either.
+- **Risky paths** (`review.sensitive` and `review.irreversible`): the paths whose changes always
+  get `/sdlc:ship`'s deep review (a fresh-context reviewer, the build check whatever `build_when`
+  says, the paths named in its question), and the paths a revert doesn't undo (migrations, data,
+  what's published or copied elsewhere), for which ship's commit says how to recover. Offer
+  candidates Step 1 found: CI workflow files, release and install scripts, `migrations/`. Each entry
+  is a `dir/` prefix or an fnmatch glob. None is a fine answer for either, and ship then reviews
+  every change alike.
 - **The invariants**: what a design here must never break. These go in the policy doc
   (`docs.policy`: `CLAUDE.md`, or `AGENTS.md` when that's the repo's only one), which ship's
   contract pass reads.
@@ -155,7 +162,8 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   saying why. Include `[archive] target`, either way. Include `[git] base` when the base branch
   isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is
   `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it.
-  Include `[git] attribution` when Step 2 asked: `true` for on, `false` for off.
+  Include `[git] attribution` when Step 2 asked: `true` for on, `false` for off. Include
+  `[review] sensitive` and `[review] irreversible` when Step 2's answer named any.
 - **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process`,
   this repo's answers to the plugin's guide (`docs.process.guide`), which the skills read with it.
   Fill in every line that starts with `<`. Those are where this repo differs: the failure it most

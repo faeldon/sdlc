@@ -178,9 +178,46 @@ def test_the_trailer_counts_ranks_passes_and_dispositions(tmp_path: Path) -> Non
     assert sdlc.findings_trailer(entries) == (
         "Sdlc-Findings: important=1 nit=2 preexisting=1 correctness=2 contract=0 cost=2 "
         "context=0 fixed=correctness:1 recorded=correctness:1,cost:1 wrong=cost:1 "
-        "intentional=0 minor=0"
+        "intentional=0 minor=0 fresh=0 fresh_wrong=0"
     )
-    assert sdlc.findings_trailer([]).endswith("fixed=0 recorded=0 wrong=0 intentional=0 minor=0")
+    assert sdlc.findings_trailer([]).endswith(
+        "fixed=0 recorded=0 wrong=0 intentional=0 minor=0 fresh=0 fresh_wrong=0"
+    )
+
+
+FRESH = """\
+
+## F5. [important] [correctness] A guard that only one caller has
+
+Evidence: drafts/store.py:50
+Class: a check at one call site of several
+Disposition: fixed
+By: fresh
+
+## F6. [nit] [cost] A name that could be shorter
+
+Evidence: drafts/list.py:3
+Class: style
+Disposition: wrong
+Reason: ship's passes couldn't confirm it: the name matches its neighbours
+By: fresh
+"""
+
+
+def test_the_fresh_reviewer_s_findings_are_marked_and_counted(tmp_path: Path) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", FINDINGS + FRESH))
+    assert found["problems"] == []
+    assert [e["by"] for e in found["entries"]] == [None, None, None, None, "fresh", "fresh"]
+    trailer = sdlc.findings_trailer(found["entries"])
+    assert trailer.endswith("fresh=2 fresh_wrong=1")
+    parsed = metrics.parse_trailers("Ship it\n\n" + trailer)["findings"]
+    assert (parsed["fresh"], parsed["fresh_wrong"]) == (2, 1)
+
+
+def test_a_by_line_naming_anyone_else_is_a_problem(tmp_path: Path) -> None:
+    text = FINDINGS + FRESH.replace("By: fresh", "By: someone", 1)
+    found = sdlc.findings_entries(_write(tmp_path / "c", text))
+    assert any("By must be one of fresh, got 'someone'" in p for p in found["problems"])
 
 
 def test_an_old_and_a_new_trailer_both_parse_unchanged(tmp_path: Path) -> None:

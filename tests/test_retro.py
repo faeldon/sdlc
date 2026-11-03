@@ -938,7 +938,8 @@ def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> N
 
 NEW_FINDINGS = (
     "Sdlc-Findings: important=1 nit=2 preexisting=1 correctness=2 contract=0 cost=2 context=0 "
-    "fixed=correctness:1 recorded=cost:1,correctness:1 wrong=cost:1 intentional=0 minor=0"
+    "fixed=correctness:1 recorded=cost:1,correctness:1 wrong=cost:1 intentional=0 minor=0 "
+    "fresh=2 fresh_wrong=1"
 )
 
 
@@ -969,6 +970,8 @@ def test_findings_with_dispositions_add_up_beside_an_old_trailer(tmp_path: Path)
     assert d["fixed"]["correctness"] == 1 and d["wrong"]["cost"] == 1
     assert d["recorded"] == {"correctness": 1, "contract": 0, "cost": 1, "context": 0}
     assert sum(d["minor"].values()) == 0
+    # The fresh reviewer's numbers come only from the trailer that carries them.
+    assert (found["fresh"], found["fresh_wrong"], found["fresh_counted"]) == (2, 1, 1)
 
 
 # ---------------------------------------------------------------- the product doc's outcomes

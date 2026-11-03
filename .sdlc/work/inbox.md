@@ -469,36 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-4] [idea] Sensitive paths set a change's risk, and the depth of its review
-
-The post: "the change sets the tier, not the author", and some paths always get a person. Our tiers
-size the paperwork, not the risk. A config key (`[review] sensitive = [...]`, path globs such as
-CI workflows, release scripts, installers, auth) lets `preflight` report a `risk` part from the
-diff, mechanically. A sensitive diff gets the deep review: the build check always runs, no
-Important can be approved unfixed, and the WAIT names the sensitive paths. Setup asks for the list.
-Phase 2. Raised 2026-11-03.
-
-## [2026-11-03-5] [idea] A fresh-context review at ship
-
-Ship reviews in the session that built the change, which anchors it on the builder's reasoning.
-The post's step before every PR is "a second agent reviews the diff in a fresh context." Ship
-spawns one subagent with only the diff, the intent or spec and the review docs, and shows its
-findings as evidence beside its own passes: one its passes confirm is a finding, one they don't is
-said so, with why, as ship does with the factory's verdicts. Always on a sensitive diff
-(2026-11-03-4); a question of cost otherwise. Phase 2. Raised 2026-11-03.
-
-After: 2026-11-03-4
-
-## [2026-11-03-6] [idea] Say how to undo a change when a revert isn't enough
-
-The post's PR template asks how the change was tested and how to revert it. For us a revert of the
-change's commit undoes most changes, so ask only when it doesn't: a migration, data written
-elsewhere, a published artifact, a host's files setup copies. Ship asks for a `How to undo:` line
-in the commit message when the diff touches what the process doc names as not undone by a
-revert, and the spec template gets the same prompt for Tier 2. Phase 2. Raised 2026-11-03.
-
-After: 2026-11-03-5
-
 ## [2026-11-03-7] [idea] Retro traces each escaped bug to the review that let it through
 
 The post turns incidents into a set the reviewer is scored against, and asks of each "which layer
@@ -508,8 +478,6 @@ change that let the bug in, and proposes the bug's class as a `- **lead**` in th
 "ways this repo's code fails", the slot that exists for it and that nothing feeds. Recurring
 Important findings of one class get the same proposal, or a lint rule or test instead. Read beside
 2026-10-25-12, which records which change a fix reworks. Phase 3. Raised 2026-11-03.
-
-After: 2026-11-03-6
 
 ## [2026-11-03-8] [idea] Retro tightens the review when escaped bugs rise
 
@@ -556,7 +524,7 @@ the risk ship reads (2026-11-03-4), a low-risk change runs one reviewer for one 
 sensitive one all three for the full rounds; the build approval shows which and why, and the most
 agent runs it can take. Phase 4. Raised 2026-11-03.
 
-After: 2026-11-03-10, 2026-11-03-4
+After: 2026-11-03-10
 
 ## [2026-11-03-12] [idea] The builder shows its evidence, and a behaviour check runs the change
 
@@ -587,3 +555,26 @@ files one, behind one WAIT, never fixing anything. Pairs with 2026-11-03-2: pre-
 already land there. Phase 4. Raised 2026-11-03.
 
 After: 2026-11-03-13
+
+## [2026-11-03-15] [nit] A skipped fresh review is caught only by ship's prose
+
+A clean fresh review leaves no `By: fresh` entry, so the script can't tell it from one that never
+ran. Have findings.md's note say `Fresh review: ran` or `skipped, <why>`, `findings` read it, and
+`ship` refuse a deep diff with neither.
+
+Theme: robustness
+Paths: scripts/sdlc.py, skills/ship/SKILL.md
+Cost: M
+Value: med
+Raised by: 036-review-depth-by-risk (correctness)
+
+## [2026-11-03-16] [nit] Setup offers risky-path candidates its Step 1 never looks for
+
+Step 1 reads the README, task files, tests and entry points, not CI workflows or release scripts,
+which Step 2's `[review]` question offers as candidates. Name them in Step 1.
+
+Theme: docs
+Paths: skills/setup/SKILL.md
+Cost: S
+Value: low
+Raised by: 036-review-depth-by-risk (correctness)

@@ -100,6 +100,8 @@ READS_CONFIG = {
         "git.base",
         "git.attribution",
         "work.register",
+        "review.sensitive",
+        "review.irreversible",
     ],
     "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target", "git.base"],
     "sdlc:drop": ["archive.target", "git.base"],
@@ -134,6 +136,8 @@ READS_CONFIG = {
     ],
     "sdlc:setup": [
         "git.attribution",
+        "review.sensitive",
+        "review.irreversible",
         "commands.check",
         "commands.build",
         "commands.build_when",
@@ -589,10 +593,12 @@ def _manifest(root: Path) -> dict:
 
 def test_sdlc_loads_nothing_from_plugins() -> None:
     """`sdlc`'s source is the repo root, so `plugins/factory/` travels in its cached copy. It stays
-    unread only while `sdlc` keeps its default scans: skills from `skills/`, and no agents."""
+    unread only while `sdlc` keeps its default scans: skills from `skills/`, and agents from
+    `agents/`, which holds `sdlc`'s own reviewer and none of the factory's."""
     sdlc = _manifest(ROOT)
     assert not {"skills", "agents", "commands", "hooks"} & set(sdlc), "a manifest key widens a scan"
-    assert not (ROOT / "agents").exists() and not (ROOT / "commands").exists()
+    assert {p.name for p in (ROOT / "agents").iterdir()} == {"reviewer.md"}
+    assert not (ROOT / "commands").exists()
     assert not (ROOT / "hooks").exists()
 
 
@@ -625,6 +631,18 @@ def test_agents_have_their_tools_and_nothing_more() -> None:
         tools = {t.strip() for t in str(post["tools"]).split(",")}
         assert tools == AGENT_TOOLS[name], f"{name}: {sorted(tools)}"
         assert "never" in post.content.lower() and "commit" in post.content, f"{name}: no rule"
+
+
+def test_sdlc_s_reviewer_reads_and_nothing_more() -> None:
+    """The fresh-context reviewer a deep ship spawns can't write or run anything: what it returns
+    reaches findings.md only through ship, behind ship's WAIT."""
+    post = frontmatter.load(ROOT / "agents" / "reviewer.md")
+    assert post["name"] == "reviewer" and len(post["description"]) > 80
+    assert "Not for" in post["description"]
+    assert {t.strip() for t in str(post["tools"]).split(",")} == {"Read", "Grep", "Glob"}
+    assert "By: fresh" in post.content and "never" in post.content
+    ship = frontmatter.load(ROOT / "skills" / "ship" / "SKILL.md")
+    assert "Agent" in ship["allowed-tools"] and '"sdlc:reviewer"' in ship.content
 
 
 def test_adapted_agents_keep_the_notice() -> None:

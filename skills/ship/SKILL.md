@@ -8,6 +8,7 @@ allowed-tools:
   - Edit
   - Grep
   - Glob
+  - Agent
   - 'Bash(cd *)'
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
@@ -105,6 +106,12 @@ Keep its output in view; the steps below read its parts by name, and run none of
 - **`checks`**: the change's acceptance checks, which Step 1 shows and runs.
 - **`findings`**: what an earlier run of this review found, from the change's `findings.md`, which
   Step 3 builds on.
+- **`risk`**: the paths this diff touches that `config`'s `review.sensitive` and
+  `review.irreversible` name, and `deep`, true when a sensitive one is touched. A deep diff gets
+  the build check whatever `build_when` says (Step 2) and the fresh-context reviewer (Step 3); an
+  irreversible one gets `How to recover:` in its commit (Step 4). Risk never changes the tier: it
+  deepens the review, nothing else. The script reads `[review]` from the base branch's checkout,
+  so a change can't lighten its own review by editing it.
 - **`context`**: the docs the context pass weighs in Step 3.
 
 Empty is the usual answer for the first three. A non-empty `problems` names the part that has one;
@@ -154,6 +161,9 @@ regex; with none set, always):
 ```bash
 git diff --name-only HEAD | grep -qE '<build_when>' && <build>
 ```
+
+**On a deep diff (`risk.deep`), run `commands.build` whatever `build_when` says:** a sensitive path
+is reason enough. With no build check configured, say so, as below.
 
 The gate is meant to be fast, so it can't tell you everything; the build check is the repo's slower
 answer to the questions only a real build can settle. The process doc says what it covers.
@@ -212,10 +222,22 @@ it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
 answer below. The rest are proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
+**On a deep diff, a fresh-context review too,** after your own passes. Spawn the plugin's reviewer
+with the `Agent` tool, `subagent_type: "sdlc:reviewer"`, and a prompt holding only the diff
+(`git diff HEAD`, the untracked files' paths with it), the change's folder, and the paths of
+`docs.review.guide` and `docs.review`: nothing of this session's reasoning, which is what it is
+there to be free of. It reads and returns text; it writes nothing. Each finding it returns joins
+the file below with a `By: fresh` line. One your own passes confirm, or that you confirm now by
+reading its evidence, takes the disposition you'd propose for any finding; one you can't confirm is
+proposed `wrong`, with a `Reason:` saying why, for the person to overturn. Never drop one: the
+person sees every fresh finding. **When the reviewer can't run** (no `Agent` tool here, or the run
+fails), say so in Step 4 and add a line to the file's note, `Fresh review: skipped, <why>`; Step 5
+then says so in the question. A deep diff never lands with its fresh review silently missing.
+
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
 `pre-existing`; `correctness`, `contract`, `cost` or `context`), with its `Evidence:`, `Class:` and
-`Disposition:` lines. This is the one write besides `base` this skill makes before its WAIT, by a
+`Disposition:` lines, and `By: fresh` on the fresh reviewer's. This is the one write besides `base` this skill makes before its WAIT, by a
 named exception to confirm-before-writing, on every run, a run that stops included: it writes
 only the change's own uncommitted folder, decides nothing (the WAIT approves every disposition
 in it), and the next run rewrites it. It is how a finding fixed between two runs is counted.
@@ -276,6 +298,13 @@ then its `Severity:` (one of the process doc's words, as `/sdlc:bug` asks) and `
 a first body line `Found by the review of <NNN-slug>.` No `Introduced by:`: that line is for one
 confirmed.
 
+**How to recover**, when `risk.irreversible` names paths: a revert of this commit won't undo what
+they reach, so the message carries a `How to recover:` paragraph after the body, one line per path
+(or per group of them), each naming the way back: the command that reverses it, or `fix forward:`
+and what the follow-up change would do (for files a host copies at setup, a release without them
+and `/sdlc:setup` in each host). For Tier 2, start from `plan.md`'s Rollback section. Show it with
+the message; Step 5's question says it was shown.
+
 **Agent verdicts.** When Step 0 found `decision.md`, show it under the findings: the decision, its
 reasons and its open items, first and plainly when it is `ESCALATE`. Then every decision in
 `decisions.md` still unticked: each is an assumption the build rests on that the person hasn't
@@ -334,18 +363,20 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 ## Step 5 — WAIT for explicit approval
 
-The script words the question from what Step 4 decided. Pass `--context` when the context pass
-proposed an edit, `--nits` when nits are added or retired, `--bugs` when pre-existing findings are
-filed as bugs, and each issue on `closes:` once, as `--closing N` when this change resolved it or
-`--split N` when it is split off as a seed:
+The script words the question from what Step 4 decided, and reads for itself the sensitive paths
+the diff touches and whether it needed `How to recover:`, so neither can be left out. Pass
+`--context` when the context pass proposed an edit, `--nits` when nits are added or retired,
+`--bugs` when pre-existing findings are filed as bugs, `--fresh-skipped "<why>"` when a deep diff's
+fresh review couldn't run, and each issue on `closes:` once, as `--closing N` when this change
+resolved it or `--split N` when it is split off as a seed:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --closing <N> --split <K>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --fresh-skipped "<why>" --closing <N> --split <K>
 ```
 
 Ask exactly what it prints. With every clause in, it reads:
 
-> `Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), with how to recover it shown, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
 A refusal names an issue left out, given twice, or not on `closes:`: settle it in Step 4, then run
 it again. Never word the question by hand.
@@ -353,7 +384,7 @@ it again. Never word the question by hand.
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone
 items' dispositions, every finding's disposition in `findings.md`, the nits, the bugs, the context
-update and the release impact too. A change to one of
+update, `How to recover:` and the release impact too. A change to one of
 them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
@@ -429,7 +460,7 @@ so rather than commit it.
 ## Step 7 — Report and stop
 
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
-name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the bugs filed by id, which context docs were updated (or
+name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), the bugs filed by id, which context docs were updated (or
 that none needed it), the release impact recorded, each undone
 item and where it went (the seed's title, or dropped and why), the nits recorded and retired by
 id, and anything else deliberately

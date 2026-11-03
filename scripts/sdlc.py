@@ -88,6 +88,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import fnmatch
 import hashlib
 import importlib.util
 import json
@@ -274,6 +275,14 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # gates its tier and way of running pass, plus this.
         "stop_allowance": 1,
     },
+    "review": {
+        # Paths whose changes always get /sdlc:ship's deep review: the build check whatever
+        # `build_when` says, a fresh-context reviewer, and the paths named in its question.
+        "sensitive": [],
+        # Paths a revert doesn't undo (data, a published artifact, what setup copies into hosts),
+        # for which ship's commit says how to recover. Both: `dir/` prefixes or fnmatch globs.
+        "irreversible": [],
+    },
     # The branch every change starts from and lands on, which release tags and publish pushes.
     # Unset, it is `main` when there is one, else the branch `origin/HEAD` names (`_resolve_trunk`).
     "git": {
@@ -307,7 +316,8 @@ DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md", "fi
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
 COMMAND_LISTS = ("evidence",)
-LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS)
+REVIEW_LISTS = ("sensitive", "irreversible")
+LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS)
 # Every key that holds a whole number, with its least value where that isn't 0.
 INT_KEYS = ("after_releases", "idle_minutes", "stop_allowance")
 INT_MIN = {"idle_minutes": 1}
@@ -569,6 +579,8 @@ def cmd_config(root: Path) -> int:
         "release": cfg["release"],
         "retro": cfg["retro"],
         "metrics": cfg["metrics"],
+        # This checkout's lists; ship's `risk` reads the base branch's, which a change can't edit.
+        "review": cfg["review"],
         "git": cfg["git"],
         "templates": templates,
         "warnings": warnings,
@@ -1059,7 +1071,10 @@ FINDING_RANKS = {"important": "important", "nit": "nit", "pre-existing": "preexi
 FINDING_PASSES = ("correctness", "contract", "cost", "context")
 DISMISSALS = ("wrong", "intentional", "minor")
 DISPOSITIONS = ("open", "fixed", "recorded", *DISMISSALS)
-FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason")
+FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason", "By")
+# Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
+# a deep diff gets (`agents/reviewer.md`).
+FINDING_BY = ("fresh",)
 
 
 def findings_entries(folder: Path) -> dict:
@@ -1118,12 +1133,15 @@ def findings_entries(folder: Path) -> dict:
             )
         elif disposition in DISMISSALS and not fields.get("Reason"):
             wrong.append(f"`{disposition}` with no `Reason:` line")
+        if "By" in fields and fields["By"] not in FINDING_BY:
+            wrong.append(f"By must be one of {'|'.join(FINDING_BY)}, got {fields['By']!r}")
         if wrong:
             out["problems"] += [f"{FINDINGS}: {ident}: {w}" for w in wrong]
             continue
         entry = {"id": ident, "rank": FINDING_RANKS[rank], "pass": pass_, "title": title.strip(),
                  "evidence": fields["Evidence"], "class": fields["Class"],
-                 "disposition": disposition, "reason": fields.get("Reason")}  # fmt: skip
+                 "disposition": disposition, "reason": fields.get("Reason"),
+                 "by": fields.get("By")}  # fmt: skip
         out["entries"].append(entry)
         if disposition == "open":
             out["open"].append(ident)
@@ -1133,8 +1151,9 @@ def findings_entries(folder: Path) -> dict:
 def findings_trailer(entries: list[dict]) -> str:
     """The `Sdlc-Findings` line for a change's findings: the count by rank and by pass, as ship
     has always written it, then each disposition but `open` as its count by pass
-    (`fixed=correctness:2,context:1`), or `0`. Old keys keep their meaning; retro reads a trailer
-    without dispositions as one whose answers are unknown."""
+    (`fixed=correctness:2,context:1`), or `0`, then how many the fresh reviewer raised and how
+    many of those were answered `wrong`. Old keys keep their meaning; retro reads a trailer
+    without dispositions, or without `fresh`, as one whose answers are unknown there."""
     counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
     passes = {p: sum(e["pass"] == p for e in entries) for p in FINDING_PASSES}
     words = [f"{k}={v}" for k, v in {**counts, **passes}.items()]
@@ -1142,6 +1161,9 @@ def findings_trailer(entries: list[dict]) -> str:
         by = {p: sum(e["pass"] == p and e["disposition"] == d for e in entries)
               for p in FINDING_PASSES}  # fmt: skip
         words.append(f"{d}=" + (",".join(f"{p}:{n}" for p, n in by.items() if n) or "0"))
+    fresh = [e for e in entries if e.get("by") == "fresh"]
+    words.append(f"fresh={len(fresh)}")
+    words.append(f"fresh_wrong={sum(e['disposition'] == 'wrong' for e in fresh)}")
     return "Sdlc-Findings: " + " ".join(words)
 
 
@@ -2018,6 +2040,38 @@ def cmd_undone(root: Path, ident: str) -> int:
         return 1
     print(json.dumps(_undone_report(root, path), indent=2, ensure_ascii=False))
     return 0
+
+
+# How many sensitive paths ship's question names before it says how many more.
+RISK_SHOWN = 5
+
+
+def risk_paths(paths: list[str], patterns: list[str]) -> list[str]:
+    """The `paths` any of `patterns` names, in order: an entry ending in `/` names every path under
+    it, any other is an fnmatch glob over the repo-relative path, its `*` crossing `/`."""
+
+    def named(p: str) -> bool:
+        return any(
+            p.startswith(pat) if pat.endswith("/") else fnmatch.fnmatchcase(p, pat)
+            for pat in patterns
+        )
+
+    return [p for p in paths if named(p)]
+
+
+def _risk_report(root: Path, path: Path) -> dict | None:
+    """What a change's diff against the base branch touches of `review.sensitive` and
+    `review.irreversible`, for `preflight` and ship's question: a rename counts by both its paths.
+    `deep` when a sensitive path is touched. None when the checkout has no merge base."""
+    cfg = load_config(main_root(root))[0]
+    trunk = cfg["git"]["base"]
+    found = changed_paths(checkout_of(path), trunk) if trunk else None
+    if found is None:
+        return None
+    paths = list(dict.fromkeys(p for _, p_, to in found[1] for p in (p_, to) if p))
+    sensitive = risk_paths(paths, cfg["review"]["sensitive"])
+    irreversible = risk_paths(paths, cfg["review"]["irreversible"])
+    return {"sensitive": sensitive, "irreversible": irreversible, "deep": bool(sensitive)}
 
 
 def _nits_report(root: Path, path: Path | None, touching: list[str] | None) -> dict | None:
@@ -3237,9 +3291,9 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 def landing_reach(paths: list[str]) -> dict:
     """What a landed change to this plugin asks of the sessions and hosts running it from a clone:
     `scripts` are live in every session at once, and so are the guides, read in place at each
-    stage; `skills` and the factory's `agents` (by namespaced name) are read when a session
-    starts, so need `/reload-plugins`, and `hosts` (setup's defaults and templates) need
-    `/sdlc:setup` in each host. Only the kinds the paths touch."""
+    stage; `skills` and the `agents`, sdlc's and the factory's (by namespaced name), are read
+    when a session starts, so need `/reload-plugins`, and `hosts` (setup's defaults and
+    templates) need `/sdlc:setup` in each host. Only the kinds the paths touch."""
     scripts, skills, agents, hosts = False, set(), set(), []
     for path in paths:
         parts = path.split("/")
@@ -3251,6 +3305,8 @@ def landing_reach(paths: list[str]) -> dict:
             skills.add(f"sdlc-factory:{parts[3]}")
         elif parts[:3] == ["plugins", "factory", "agents"] and path.endswith(".md"):
             agents.add(f"sdlc-factory:{parts[-1].removesuffix('.md')}")
+        elif parts[0] == "agents" and len(parts) == 2 and path.endswith(".md"):
+            agents.add(f"sdlc:{parts[1].removesuffix('.md')}")
         elif parts[0] in ("defaults", "templates"):
             hosts.append(path)
     found = {
@@ -5014,6 +5070,7 @@ def _no_findings() -> dict:
         "passes": dict.fromkeys(FINDING_PASSES, 0),
         "dispositions": {d: dict.fromkeys(FINDING_PASSES, 0) for d in DISPOSITIONS[1:]},
         "answered": 0,
+        "fresh": 0, "fresh_wrong": 0, "fresh_counted": 0,
     }  # fmt: skip
 
 
@@ -5025,6 +5082,11 @@ def _add_findings(total: dict, found: dict) -> None:
         total[k] += found.get(k) if isinstance(found.get(k), int) else 0
     for p in FINDING_PASSES:
         total["passes"][p] += found.get(p) if isinstance(found.get(p), int) else 0
+    # The fresh reviewer's count, only from trailers that carry it, as `fresh_counted` says.
+    if isinstance(found.get("fresh"), int):
+        total["fresh_counted"] += 1
+        total["fresh"] += found["fresh"]
+        total["fresh_wrong"] += found.get("fresh_wrong") or 0
     if not all(d in found for d in DISPOSITIONS[1:]):
         return
     total["answered"] += 1
@@ -5809,9 +5871,9 @@ def cmd_intake(root: Path) -> int:
 def cmd_preflight(root: Path, ident: str) -> int:
     """Everything /sdlc:ship's Step 0 looks up about a change, as one JSON object: its undone
     items, the nits its diff touches, the issues it would close, its acceptance checks, the
-    findings an earlier run of its review left, and the context docs its diff could have made
-    wrong, each part as its own command gives it. Writes
-    nothing, so it is allowed without a prompt. Exits 1 when a part reports problems, after
+    findings an earlier run of its review left, the sensitive and irreversible paths it touches,
+    and the context docs its diff could have made wrong, each part as its own command gives it.
+    Writes nothing, so it is allowed without a prompt. Exits 1 when a part reports problems, after
     printing every part."""
     path = _one_change(root, ident)
     if path is None:
@@ -5826,6 +5888,7 @@ def cmd_preflight(root: Path, ident: str) -> int:
         "closes": _closes_report(root, path),
         "checks": _checks_report(path),
         "findings": _findings_report(path),
+        "risk": _risk_report(root, path),
         "context": _context_report(checkout, trunk),
     }
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
@@ -5853,13 +5916,17 @@ def ship_question(
     split: list[int],
     register: str,
     bugs: bool = False,
+    sensitive: list[str] | None = None,
+    irreversible: bool = False,
+    fresh_skipped: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
     one, so the question never leaves one out. Each clause is in only when its fact is: the
-    context update shown, the nits recorded in `register`, the pre-existing findings filed there as
-    bugs, the issues closed and split off, and the issue update unless `archive.target` is
-    `none`."""
+    sensitive paths the diff touches, a fresh review that didn't run, how to recover what a revert
+    can't undo, the context update shown, the nits recorded in `register`, the pre-existing
+    findings filed there as bugs, the issues closed and split off, and the issue update unless
+    `archive.target` is `none`."""
     named = set(closes)
     stray = sorted(n for n in {*closing, *split} if n not in named)
     if stray:
@@ -5871,6 +5938,16 @@ def ship_question(
     if left:
         return None, f"{_issues(left)} on closes: but given to neither --closing nor --split"
     clauses = []
+    if sensitive:
+        shown = sensitive[:RISK_SHOWN]
+        more = len(sensitive) - len(shown)
+        names = [*shown, f"{more} more"] if more else shown
+        listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+        clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {listed}")
+    if fresh_skipped:
+        clauses.append(f"without the fresh review ({fresh_skipped})")
+    if irreversible:
+        clauses.append("with how to recover it shown")
     if context:
         clauses.append("with the context update shown")
     if nits:
@@ -5892,17 +5969,22 @@ def ship_question(
 
 
 def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
-                      closing: list[int], split: list[int], bugs: bool = False) -> int:  # fmt: skip
-    """Print ship's WAIT question for a change, from what its Step 4 decided. Writes nothing."""
+                      closing: list[int], split: list[int], bugs: bool = False,
+                      fresh_skipped: str | None = None) -> int:  # fmt: skip
+    """Print ship's WAIT question for a change, from what its Step 4 decided and what its diff
+    touches, which the script reads itself so the skill can't leave a sensitive path out. Writes
+    nothing."""
     path = _one_change(root, ident)
     if path is None:
         return 1
     home = main_root(root)
     cfg = load_config(home)[0]
     rel = work_rel(root)
+    risk = _risk_report(root, path) or {"sensitive": [], "irreversible": []}
     question, why = ship_question(
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
+        risk["sensitive"], bool(risk["irreversible"]), fresh_skipped,
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -7242,6 +7324,9 @@ def main() -> int:
     p_pre.add_argument("--nits", action="store_true", help="nits are added or retired")
     p_pre.add_argument("--bugs", action="store_true", help="pre-existing findings are filed")
     p_pre.add_argument(
+        "--fresh-skipped", metavar="WHY", help="a deep diff's fresh review didn't run, and why"
+    )
+    p_pre.add_argument(
         "--closing", action="append", type=int, default=[], metavar="N",
         help="an issue on closes: this change resolved; repeatable",
     )  # fmt: skip
@@ -7411,8 +7496,9 @@ def main() -> int:
         return cmd_closes(root, args.id)
     if args.cmd == "preflight" and args.question:
         return cmd_ship_question(
-            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
-        )
+            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs,
+            args.fresh_skipped,
+        )  # fmt: skip
     if args.cmd == "preflight":
         return cmd_preflight(root, args.id)
     if args.cmd == "mark-triaged":

@@ -74,7 +74,9 @@ true
 """
 
 FULL = (
-    "Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, "
+    "Commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), "
+    "with how to recover it shown, "
+    "with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, "
     "the bugs shown filed in .sdlc/work/inbox.md, "
     "closing #N and #M when it lands and splitting #K off as a seed, and "
     ".sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? "
@@ -177,7 +179,9 @@ def test_question_with_every_clause_matches_ship_s_example() -> None:
     """The skill's example sentence, every clause in, is what the script renders: N, M and K
     stand in for the numbers, and the folder for the change's."""
     question, why = _ask(folder=".sdlc/work/NNN-<slug>", closes=[1, 2, 3], context=True,
-                         nits=True, bugs=True, closing=[1, 2], split=[3])  # fmt: skip
+                         nits=True, bugs=True, closing=[1, 2], split=[3],
+                         sensitive=["<a>", "<b>"], irreversible=True,
+                         fresh_skipped="<why>")  # fmt: skip
     assert why is None
     assert question == FULL.replace("#N", "#1").replace("#M", "#2").replace("#K", "#3")
     skill = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")

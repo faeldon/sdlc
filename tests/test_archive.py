@@ -765,6 +765,10 @@ def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -
         (["plugins/factory/skills/build/SKILL.md"], {"skills": ["sdlc-factory:build"]}),
         (["plugins/factory/agents/reviewer-code.md"], {"agents": ["sdlc-factory:reviewer-code"]}),
         (
+            ["agents/reviewer.md", "plugins/factory/agents/approver.md"],
+            {"agents": ["sdlc-factory:approver", "sdlc:reviewer"]},
+        ),
+        (
             ["templates/intent.md", "defaults/SDLC.md"],
             {"hosts": ["defaults/SDLC.md", "templates/intent.md"]},
         ),

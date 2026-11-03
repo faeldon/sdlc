@@ -266,6 +266,14 @@ refuses while one is `open`. A Pre-existing finding never blocks; ship files it 
 trailer's dispositions are new keys beside the old ones, so `metrics_summary()` reads a trailer
 without them as unanswered (`answered`), never as a clean review.
 
+**Risk: `_risk_report()`.** `[review] sensitive` and `irreversible` are matched against the
+change's diff by the script (`risk_paths()`), never judged by a skill, and read from the base
+branch's config, so a change can't lighten its own review. A sensitive hit makes the diff deep:
+ship runs the build check, spawns `agents/reviewer.md` (`sdlc:reviewer`, the core plugin's one
+agent: `Read`, `Grep`, `Glob`, nothing that writes) for a fresh-context review whose findings carry
+`By: fresh`, and `cmd_ship_question()` names the paths itself. An irreversible hit adds `How to
+recover:` to the commit and its clause to the question. Risk never changes a tier.
+
 **Acceptance checks: `acceptance()`.** A change's `checks.md`, one `## ` section and one `sh` block
 per check. `checks` lists them (read-only, allowed); `accept` runs them from the change's checkout
 and fails one that exits non-zero, times out or leaves the tree changed. `accept` is never in
@@ -273,7 +281,8 @@ and fails one that exits non-zero, times out or leaves the tree changed. `accept
 in prose, so the harness asks with the commands just shown. They are never rerun by a later change.
 
 **The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
-cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`). Its
+cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
+`sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. Its
 mechanism is `factory.py`, because its own cached copy has no `sdlc.py`. Agents that judge have
 no Write; only the builder edits, and nothing commits. Decisions that are the person's go
 through `decisions.md`, asked by the build session. `sdlc` only reads, at ship, the files a run

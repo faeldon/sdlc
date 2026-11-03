@@ -69,6 +69,10 @@ transcripts = true                          # the default: close reads this repo
 idle_minutes = 30                           # the default: a longer wait is the person away, not answering
 stop_allowance = 1                          # the default: stops beyond a change's gates its person should expect
 
+[review]
+sensitive = [".github/workflows/", "scripts/release*"]  # optional: paths whose changes get ship's deep review
+irreversible = ["migrations/"]              # optional: paths a revert doesn't undo; ship's commit says how to recover
+
 [git]
 base = "master"                             # optional: the branch changes start from and land on; unset = detected
 attribution = false                         # unset until setup asks: false hides the agent's lines, true keeps them
@@ -87,6 +91,19 @@ A version line is `"version": "1.2.0"` (JSON) or `version = "1.2.0"` (TOML). A f
 or more than one, is refused rather than guessed at.
 
 A `[docs]` path under `.sdlc/work/` is read like any other, from the checkout `config` runs in.
+
+### Risky paths: `[review]`
+
+`sensitive` and `irreversible` each list repo-relative paths: an entry ending in `/` names every path
+under it, any other is an fnmatch glob (`*` crosses `/`), and a renamed file counts by both its
+names. `sdlc.py preflight NNN` reports what the change's diff touches of each as its `risk` part,
+read from the base branch's checkout, so a change can't lighten its own review by editing them. A
+diff touching a `sensitive` path is `deep`: `/sdlc:ship` runs `commands.build` whatever
+`build_when` says, has the plugin's `sdlc:reviewer` agent review the diff in a fresh context (its
+findings marked `By: fresh` in `findings.md`), and its question names the paths. One touching an
+`irreversible` path carries a `How to recover:` paragraph in its commit: for each, the command that
+reverses it, or the fix forward. Risk never changes a change's tier. With neither set, every change
+ships alike.
 
 ### The base branch: `[git] base`
 
@@ -619,9 +636,10 @@ Waits while a `depends_on:` change is still open count as **blocked**. It also r
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
 per sub-agent role. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
 commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
-each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`).
-A trailer from before dispositions keeps its counts, and `/sdlc:retro` reads its answers as
-unknown.
+each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
+then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of
+those were answered `wrong`. A trailer from before dispositions, or before `fresh`, keeps its counts,
+and `/sdlc:retro` reads what it lacks as unknown.
 
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,
 no or unknown, and `Sdlc-Rework` counts the trial and error inside the change (the spec or plan

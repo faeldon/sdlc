@@ -316,6 +316,13 @@ more than 5 means the change is too big. Every finding is answered before the co
 recorded, or dismissed with a reason, in the change's `findings.md`, so the review's noise can be
 counted.
 
+**Depth follows risk, not the tier.** A diff touching a path the config marks sensitive
+(`[review] sensitive`) gets the deep review: the build check whatever its trigger says, a
+fresh-context reviewer that never saw the session that built it, and the paths named in ship's
+question. One touching a path a revert doesn't undo (`[review] irreversible`) carries a `How to
+recover:` paragraph: the command that reverses it, or the fix forward. The tier stays as intent set
+it: it sizes the paperwork, and risk found at ship deepens the review instead.
+
 #### The path to users
 
 The release loop below is the whole path from `main` to the people who use the repo, and ship

@@ -34,18 +34,20 @@
     "release.tag",
     "release.version_files",
     "retro.after_releases",
-    "retro.evidence"
+    "retro.evidence",
+    "review.irreversible",
+    "review.sensitive"
   ],
   "docs": {
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:3d585ee4013162b4"
+      "guide": "sha256:65396a7db0e409b4"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",
       "layout": "answers",
-      "guide": "sha256:1b9fba945ea8cdd5"
+      "guide": "sha256:88ede1f19a5a4743"
     },
     "product": {
       "path": ".sdlc/PRODUCT.md",
@@ -62,7 +64,7 @@
   "templates": {
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:a0a6652daa7e6765",
-    "findings.md": "sha256:5443ca16759d44ca",
+    "findings.md": "sha256:0db250ee2511f2b9",
     "inbox.md": "sha256:97a3b22b5151ebba",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:8244f74828b145b1",

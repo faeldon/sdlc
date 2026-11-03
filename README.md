@@ -148,6 +148,10 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
 - **What each change cost.** `/sdlc:close` records each change's time, tokens, stops and rework
   on its `Close` commit, read from this repo's Claude Code transcripts on your machine, numbers
   only, never text. `metrics.transcripts = false` turns it off.
+- **Deeper review where it matters.** List risky paths in `.sdlc/config.toml`'s `[review]`
+  (`sensitive`, `irreversible`). A diff touching a sensitive one gets a second, fresh-context
+  reviewer and the build check, named in ship's question; one touching an irreversible one says
+  in its commit how to recover. With neither set, every change ships alike.
 - **Dropping a change.** `/sdlc:drop` closes a change that won't ship: it records why and how far
   it got, closes its issue as not planned, and keeps its commits reachable from `main`.
 - **The factory** (`sdlc-factory`). Hands a change's spec, build and review to agents working in

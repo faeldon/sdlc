@@ -42,7 +42,7 @@ or host does then depends on what the change touched:
 | The change touched | Open sessions see it | What to do |
 |---|---|---|
 | `scripts/` (and the factory's) | at once: every skill runs the script from the clone | nothing |
-| `skills/`, the factory's `agents/` | when the session starts | `/reload-plugins` in each open session, or restart it |
+| `skills/`, `agents/` and the factory's `agents/` | when the session starts | `/reload-plugins` in each open session, or restart it |
 | `guide/` | at once: read in place at each stage | nothing |
 | `defaults/`, `templates/`, a config key | never: the host owns its copies | `/sdlc:setup` in each host repo |
 
