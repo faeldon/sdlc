@@ -301,8 +301,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/inbox.md`, a change's `notes.md` and its `checks.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md")
+# `work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`.
+DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md", "findings.md")
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -1049,6 +1049,102 @@ def acceptance(folder: Path) -> dict:
     return out
 
 
+# A change's review findings: each `## F<n>. [rank] [pass] title` section of its findings.md, which
+# /sdlc:ship writes after every review, a run that stops included, and commits with the change.
+# Each holds `Evidence:`, `Class:`, `Disposition:` and, for a dismissal, `Reason:` lines. `ship`
+# refuses while one is still `open`; the `Sdlc-Findings` trailer is counted from the file.
+FINDINGS = "findings.md"
+FINDING_RE = re.compile(r"^##\s+F(\d+)\.\s*\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.+)$")
+FINDING_RANKS = {"important": "important", "nit": "nit", "pre-existing": "preexisting"}
+FINDING_PASSES = ("correctness", "contract", "cost", "context")
+DISMISSALS = ("wrong", "intentional", "minor")
+DISPOSITIONS = ("open", "fixed", "recorded", *DISMISSALS)
+FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason")
+
+
+def findings_entries(folder: Path) -> dict:
+    """A change's review findings, in file order, the ones still `open`, and what's wrong with its
+    findings.md. Never raises: an unreadable or malformed file is a problem, and a section with
+    one is left out of the entries."""
+    path = folder / FINDINGS
+    out: dict = {"path": FINDINGS, "exists": path.is_file(), "entries": [], "open": [],
+                 "problems": []}  # fmt: skip
+    if not out["exists"]:
+        return out
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        out["problems"].append(f"{FINDINGS} can't be read: {e}")
+        return out
+    if is_unfilled(path):
+        out["problems"].append(f"{FINDINGS} is still the template: fill it or delete it")
+        return out
+    sections: list[tuple[str, dict]] = []
+    fenced = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("## "):
+            sections.append((line.strip(), {}))
+            continue
+        m = re.match(rf"^({'|'.join(FINDING_KEYS)}):\s*(.*)$", line)
+        if m and sections and m.group(1) not in sections[-1][1]:
+            sections[-1][1][m.group(1)] = m.group(2).strip()
+    seen: set[str] = set()
+    for heading, fields in sections:
+        m = FINDING_RE.match(heading)
+        if not m:
+            out["problems"].append(f"{FINDINGS}: {heading!r} isn't `## F<n>. [rank] [pass] title`")
+            continue
+        ident, rank, pass_, title = f"F{m.group(1)}", m.group(2).strip(), m.group(3).strip(), m[4]
+        disposition = fields.get("Disposition", "")
+        wrong = []
+        if ident in seen:
+            wrong.append("its id is used twice")
+        seen.add(ident)
+        if rank not in FINDING_RANKS:
+            wrong.append(f"rank must be one of {'|'.join(FINDING_RANKS)}, got {rank!r}")
+        if pass_ not in FINDING_PASSES:
+            wrong.append(f"pass must be one of {'|'.join(FINDING_PASSES)}, got {pass_!r}")
+        for key in ("Evidence", "Class"):
+            if not fields.get(key):
+                wrong.append(f"no `{key}:` line")
+        if disposition not in DISPOSITIONS:
+            wrong.append(
+                f"Disposition must be one of {'|'.join(DISPOSITIONS)}, got {disposition!r}"
+            )
+        elif disposition in DISMISSALS and not fields.get("Reason"):
+            wrong.append(f"`{disposition}` with no `Reason:` line")
+        if wrong:
+            out["problems"] += [f"{FINDINGS}: {ident}: {w}" for w in wrong]
+            continue
+        entry = {"id": ident, "rank": FINDING_RANKS[rank], "pass": pass_, "title": title.strip(),
+                 "evidence": fields["Evidence"], "class": fields["Class"],
+                 "disposition": disposition, "reason": fields.get("Reason")}  # fmt: skip
+        out["entries"].append(entry)
+        if disposition == "open":
+            out["open"].append(ident)
+    return out
+
+
+def findings_trailer(entries: list[dict]) -> str:
+    """The `Sdlc-Findings` line for a change's findings: the count by rank and by pass, as ship
+    has always written it, then each disposition but `open` as its count by pass
+    (`fixed=correctness:2,context:1`), or `0`. Old keys keep their meaning; retro reads a trailer
+    without dispositions as one whose answers are unknown."""
+    counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
+    passes = {p: sum(e["pass"] == p for e in entries) for p in FINDING_PASSES}
+    words = [f"{k}={v}" for k, v in {**counts, **passes}.items()]
+    for d in DISPOSITIONS[1:]:
+        by = {p: sum(e["pass"] == p and e["disposition"] == d for e in entries)
+              for p in FINDING_PASSES}  # fmt: skip
+        words.append(f"{d}=" + (",".join(f"{p}:{n}" for p, n in by.items() if n) or "0"))
+    return "Sdlc-Findings: " + " ".join(words)
+
+
 def _age_days(rec: dict, today: date) -> int | None:
     try:
         return (today - date.fromisoformat(rec["created"])).days
@@ -1407,6 +1503,9 @@ def analyze(root: Path, today: date | None = None) -> dict:
             continue
         for detail in acceptance(folder)["problems"]:
             problems.append({"dir": where, "kind": "checks", "detail": detail})
+        # A finding still `open` is a review not yet answered, which only `ship` refuses.
+        for detail in findings_entries(folder)["problems"]:
+            problems.append({"dir": where, "kind": "findings", "detail": detail})
         if tier is None or stage is None:
             continue
         for name, due_from in (("spec.md", SPEC_REQUIRED_FROM), ("plan.md", PLAN_REQUIRED_FROM)):
@@ -1997,6 +2096,28 @@ def _checks_report(path: Path) -> dict:
     return {"change": path.name, **acceptance(path)}
 
 
+def _findings_report(path: Path) -> dict:
+    """A change's review findings, for `findings` and `preflight`: the entries, the ones still
+    `open`, the count by rank, and the `Sdlc-Findings` line ship's commit carries."""
+    found = findings_entries(path)
+    entries = found["entries"]
+    counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
+    return {"change": path.name, **found, "counts": counts,
+            "trailer": findings_trailer(entries)}  # fmt: skip
+
+
+def cmd_findings(root: Path, ident: str) -> int:
+    """A change's findings.md as JSON, for /sdlc:ship's Step 4: its findings, the ones still
+    `open`, their counts and the `Sdlc-Findings` line, so ship never counts by hand. Exits 1 on a
+    problem or an open finding. Writes nothing."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    found = _findings_report(path)
+    print(json.dumps(found, indent=2, ensure_ascii=False))
+    return 1 if found["problems"] or found["open"] else 0
+
+
 def _status_lines(checkout: Path) -> set[str]:
     return set((_git(checkout, "status", "--porcelain") or "").splitlines())
 
@@ -2065,6 +2186,18 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
     intent = path / "intent.md"
     if not intent.is_file():
         print(f"⚠  {path.name} has no intent.md — nothing to stamp", file=sys.stderr)
+        return 1
+
+    # Every finding the review raised gets an answer before the change lands: fixed, recorded as
+    # a seed, or dismissed with a reason. A change with no findings.md predates the file.
+    unanswered = findings_entries(path)["open"]
+    if unanswered:
+        print(
+            f"⚠  {path.name}/{FINDINGS} has {len(unanswered)} finding(s) still open: "
+            f"{', '.join(unanswered)}. Fix each, or give it the disposition the person approved, "
+            "and re-run. Not stamping.",
+            file=sys.stderr,
+        )
         return 1
 
     # An undone item that lands as-is is never read again. Shipping with a known gap is fine; with
@@ -3285,7 +3418,9 @@ ISSUE_FIELDS = (
     "title", "name", "tier", "stage", "impact", "branch", "commit", "depends_on", "updated",
     "problem", "outcome", "artifacts",
 )  # fmt: skip
-ARTIFACT_ORDER = {"intent.md": 0, "spec.md": 1, "plan.md": 2, "notes.md": 3, "checks.md": 4}
+ARTIFACT_ORDER = {
+    "intent.md": 0, "spec.md": 1, "plan.md": 2, "notes.md": 3, "checks.md": 4, "findings.md": 5,
+}  # fmt: skip
 HEADING_RE = re.compile(r"^(#{1,6}) ")
 
 
@@ -4833,10 +4968,9 @@ def metrics_summary(
     for c in captured:
         m = c["metrics"]
         key = f"tier {c['tier']}, {m.get('mode') or 'manual'}"
-        g = groups.setdefault(key, {"changes": [], "findings": {"important": 0, "nit": 0}})
+        g = groups.setdefault(key, {"changes": [], "findings": _no_findings()})
         g["changes"].append(m)
-        for k in ("important", "nit"):
-            g["findings"][k] += (c.get("findings") or {}).get(k) or 0
+        _add_findings(g["findings"], c.get("findings") or {})
     out: dict = {
         "captured": len(captured),
         "uncaptured": len(changes) - len(captured),
@@ -4871,6 +5005,34 @@ def metrics_summary(
             "in_change": _in_change_summary(ms, median),
         }
     return out
+
+
+def _no_findings() -> dict:
+    """What a group's ship findings add up to before any change is counted."""
+    return {
+        "important": 0, "nit": 0, "preexisting": 0,
+        "passes": dict.fromkeys(FINDING_PASSES, 0),
+        "dispositions": {d: dict.fromkeys(FINDING_PASSES, 0) for d in DISPOSITIONS[1:]},
+        "answered": 0,
+    }  # fmt: skip
+
+
+def _add_findings(total: dict, found: dict) -> None:
+    """Add one change's `Sdlc-Findings` to `total`. Counts add whatever the trailer's age; its
+    dispositions add only when it carries them, and `answered` counts those changes, so a
+    trailer from before dispositions is unknown there, never zero."""
+    for k in ("important", "nit", "preexisting"):
+        total[k] += found.get(k) if isinstance(found.get(k), int) else 0
+    for p in FINDING_PASSES:
+        total["passes"][p] += found.get(p) if isinstance(found.get(p), int) else 0
+    if not all(d in found for d in DISPOSITIONS[1:]):
+        return
+    total["answered"] += 1
+    for d in DISPOSITIONS[1:]:
+        # `fixed=correctness:2` reads as a dict, `fixed=0` as 0, and a lone `pass:n` as a dict.
+        by = found[d] if isinstance(found[d], dict) else {}
+        for p in FINDING_PASSES:
+            total["dispositions"][d][p] += by.get(p) or 0
 
 
 def _in_change_summary(ms: list[dict], median) -> dict:
@@ -5646,8 +5808,9 @@ def cmd_intake(root: Path) -> int:
 
 def cmd_preflight(root: Path, ident: str) -> int:
     """Everything /sdlc:ship's Step 0 looks up about a change, as one JSON object: its undone
-    items, the nits its diff touches, the issues it would close, its acceptance checks and the
-    context docs its diff could have made wrong, each part as its own command gives it. Writes
+    items, the nits its diff touches, the issues it would close, its acceptance checks, the
+    findings an earlier run of its review left, and the context docs its diff could have made
+    wrong, each part as its own command gives it. Writes
     nothing, so it is allowed without a prompt. Exits 1 when a part reports problems, after
     printing every part."""
     path = _one_change(root, ident)
@@ -5662,10 +5825,11 @@ def cmd_preflight(root: Path, ident: str) -> int:
         "nits": _nits_report(root, path, None),
         "closes": _closes_report(root, path),
         "checks": _checks_report(path),
+        "findings": _findings_report(path),
         "context": _context_report(checkout, trunk),
     }
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
-    for name in ("nits", "checks"):
+    for name in ("nits", "checks", "findings"):
         problems += [f"{name}: {p}" for p in (parts[name] or {}).get("problems") or []]
     out = {"change": path.name, "tier": rec["tier"], "stage": rec["stage"],
            "folder": _shown(path, root), **parts, "problems": problems}  # fmt: skip
@@ -5688,12 +5852,14 @@ def ship_question(
     closing: list[int],
     split: list[int],
     register: str,
+    bugs: bool = False,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
     one, so the question never leaves one out. Each clause is in only when its fact is: the
-    context update shown, the nits recorded in `register`, the issues closed and split off, and
-    the issue update unless `archive.target` is `none`."""
+    context update shown, the nits recorded in `register`, the pre-existing findings filed there as
+    bugs, the issues closed and split off, and the issue update unless `archive.target` is
+    `none`."""
     named = set(closes)
     stray = sorted(n for n in {*closing, *split} if n not in named)
     if stray:
@@ -5709,6 +5875,8 @@ def ship_question(
         clauses.append("with the context update shown")
     if nits:
         clauses.append(f"the nits shown recorded in {register}")
+    if bugs:
+        clauses.append(f"the bugs shown filed in {register}")
     issues = []
     if closing:
         issues.append(f"closing {_issues(sorted(closing))} when it lands")
@@ -5724,7 +5892,7 @@ def ship_question(
 
 
 def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
-                      closing: list[int], split: list[int]) -> int:  # fmt: skip
+                      closing: list[int], split: list[int], bugs: bool = False) -> int:  # fmt: skip
     """Print ship's WAIT question for a change, from what its Step 4 decided. Writes nothing."""
     path = _one_change(root, ident)
     if path is None:
@@ -5734,7 +5902,7 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
     rel = work_rel(root)
     question, why = ship_question(
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
-        cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md",
+        cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -5921,7 +6089,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits",
+    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = Path(".claude") / "settings.json"
@@ -7072,6 +7240,7 @@ def main() -> int:
     )
     p_pre.add_argument("--context", action="store_true", help="a context update was proposed")
     p_pre.add_argument("--nits", action="store_true", help="nits are added or retired")
+    p_pre.add_argument("--bugs", action="store_true", help="pre-existing findings are filed")
     p_pre.add_argument(
         "--closing", action="append", type=int, default=[], metavar="N",
         help="an issue on closes: this change resolved; repeatable",
@@ -7103,6 +7272,11 @@ def main() -> int:
         "checks", help="a change's acceptance checks in checks.md, as JSON; runs nothing"
     )
     p_checks.add_argument("id", help="the 3-digit id, e.g. 025")
+
+    p_findings = sub.add_parser(
+        "findings", help="a change's review findings in findings.md, as JSON; writes nothing"
+    )
+    p_findings.add_argument("id", help="the 3-digit id, e.g. 025")
 
     p_accept = sub.add_parser(
         "accept", help="run a change's acceptance checks from its checkout; never pre-approved"
@@ -7236,7 +7410,9 @@ def main() -> int:
     if args.cmd == "closes":
         return cmd_closes(root, args.id)
     if args.cmd == "preflight" and args.question:
-        return cmd_ship_question(root, args.id, args.context, args.nits, args.closing, args.split)
+        return cmd_ship_question(
+            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
+        )
     if args.cmd == "preflight":
         return cmd_preflight(root, args.id)
     if args.cmd == "mark-triaged":
@@ -7253,6 +7429,8 @@ def main() -> int:
         return cmd_nits(root, args.touching, args.change)
     if args.cmd == "checks":
         return cmd_checks(root, args.id)
+    if args.cmd == "findings":
+        return cmd_findings(root, args.id)
     if args.cmd == "accept":
         return cmd_accept(root, args.id)
     if args.cmd == "drop":

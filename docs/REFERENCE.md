@@ -203,7 +203,10 @@ written from a real artifact.
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
 or the factory first writes one. None has prompts: its note carries the rules. `checks.md`
 is what a change's acceptance checks start as; its one example section's prompts make an untouched
-copy a scaffold, which `sdlc.py check` reports rather than runs.
+copy a scaffold, which `sdlc.py check` reports rather than runs. `findings.md` is the shape of the
+file `/sdlc:ship` writes its review's findings into; an override keeps its `## F<n>. [rank]
+[pass] title` headings and `Evidence:`, `Class:`, `Disposition:` and `Reason:` lines, which
+`sdlc.py` counts.
 
 `issue.md` here replaces the layout of the change's issue. Its placeholders are `{{title}}`,
 `{{name}}`, `{{tier}}`, `{{stage}}`, `{{impact}}`, `{{branch}}`, `{{commit}}`, `{{depends_on}}`,
@@ -379,10 +382,23 @@ have written them, so a person sees them and answers the prompt. A failing check
 failing gate. The file reaches history and the change's issue with the folder; a check that can't
 run (looking at a rendered page) is written in `notes.md` instead.
 
+Ship's review writes what it found to `.sdlc/work/NNN-slug/findings.md`, after every run, one
+that stops on an Important finding included: the one file, besides bringing the branch up to date,
+ship writes before it asks, since it holds no decision and the next run rewrites it. Each finding
+is a `## F<n>. [rank] [pass] title` section, its rank `important`, `nit` or `pre-existing` (a fault
+in lines the diff didn't touch, which never blocks the change and is filed as a `[bug]`), with
+its `Evidence:` (`path:line`), `Class:` and `Disposition:`: `open` until it is answered, then
+`fixed`, `recorded` (as a nit or a bug), or `wrong`, `intentional` or `minor` with a `Reason:`. A
+rerun keeps each id, marks one the diff no longer shows `fixed`, and never raises again one the
+person dismissed. `sdlc.py findings NNN` reads it and prints the counts and the `Sdlc-Findings`
+line the commit carries; `sdlc.py ship` refuses while a finding is `open`. The file reaches
+history and the change's issue with the folder.
+
 `/sdlc:ship` reads all of this in one call, `sdlc.py preflight NNN`: the change's undone notes,
-the nits its diff touches, the issues on its `closes:` line, its acceptance checks and the context
-docs its diff could have made wrong, each part as `undone`, `nits --change`, `closes`, `checks`
-and `context` give it. It writes nothing, and setup's read-only rules allow it, `nits` too.
+the nits its diff touches, the issues on its `closes:` line, its acceptance checks, its earlier
+findings and the context docs its diff could have made wrong, each part as `undone`,
+`nits --change`, `closes`, `checks`, `findings` and `context` give it. It writes nothing, and
+setup's read-only rules allow it, `nits` and `findings` too.
 `preflight NNN --question` words ship's approval question from what its review decided
 (`--context`, `--nits`, and each issue on `closes:` once as `--closing N` or `--split N`), and
 refuses an issue left out.
@@ -602,7 +618,10 @@ Waits while a `depends_on:` change is still open count as **blocked**. It also r
 (gates, questions and anything else that waited on the person) against the gates the way of
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
 per sub-agent role. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
-commit.
+commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
+each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`).
+A trailer from before dispositions keeps its counts, and `/sdlc:retro` reads its answers as
+unknown.
 
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,
 no or unknown, and `Sdlc-Rework` counts the trial and error inside the change (the spec or plan

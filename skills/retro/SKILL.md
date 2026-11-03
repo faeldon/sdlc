@@ -75,7 +75,8 @@ What `retro` gives:
     blocked apart;
   - stops against the gates `required` and the host's `target`;
   - tokens per stage and per sub-agent role;
-  - ship's findings;
+  - ship's findings: by rank (`preexisting` apart), by pass, and their `dispositions` by pass,
+    summed only over the `answered` changes, whose trailers carry them;
   - `in_change`: rework within each change, not the follow-up `rework` above. The first-time
     rate per stage (`first_time`) and for whole changes (`all_first`), the median of each rework
     count, and what spikes cost, kept apart from rework.
@@ -135,7 +136,11 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    - which stage or role the tokens pile up in;
    - from `in_change`, which stage most often misses first time and which rework count drives it
      (a spec edited after design is a Stage 2 problem; failed gate runs a build one), and whether
-     spikes are buying fewer misses later.
+     spikes are buying fewer misses later;
+   - the review's noise: per pass, the findings answered `wrong` against all its answered ones,
+     and `intentional` and `minor` beside them. A pass that is mostly noise is a finding for the
+     review doc. Read it only beside `answered`: a few changes are anecdote, and a trailer from
+     before dispositions is unknown there, never a clean review.
 
    Say how many changes the numbers rest on, and that `uncaptured` ones aren't in them.
 

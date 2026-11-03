@@ -10,5 +10,13 @@
 
 ### The ways this repo's code fails
 
-<Each way this repo's code has actually failed, as a `- **lead**` bullet: what its tests guard
-against, what its history fixes. None found is an answer; delete this prompt then.>
+<Each way this repo's code has actually failed, as a `- **lead**` bullet: what failure looks like
+here (for docs, "it lies"; for config, "it misroutes"), what its tests guard against, what its
+history fixes. None found is an answer; delete this prompt then.>
+
+## Reporting rules
+
+### Paths this repo's review skips
+
+<The paths the review never reads (vendored code, fixtures, snapshots), each with why. None is an
+answer; delete this prompt then.>

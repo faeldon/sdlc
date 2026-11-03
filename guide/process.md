@@ -310,8 +310,11 @@ docs and the change's folder. `/sdlc:ship` never pushes and never deploys.
 the repo adds in `.sdlc/REVIEW.md`: **correctness** against
 the numbered requirements · **contract** against the invariants in the policy doc · **cost and
 simplification**. The fourth is the plugin's: **context**, whether the policy doc and the other docs
-that give a session its context still tell the truth after the diff. Findings are Important or Nit;
-nits cap at 5, and more than 5 means the change is too big.
+that give a session its context still tell the truth after the diff. Findings are Important or Nit,
+or Pre-existing (a fault the diff didn't make, filed as a bug, never blocking); nits cap at 5, and
+more than 5 means the change is too big. Every finding is answered before the commit, fixed,
+recorded, or dismissed with a reason, in the change's `findings.md`, so the review's noise can be
+counted.
 
 #### The path to users
 

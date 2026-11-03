@@ -37,6 +37,9 @@ Then look for the failures that don't announce themselves:
   file, an environment variable, a tool on `PATH`, a network service the tests happen to reach.
 - **A destructive operation where a safe one exists:** a force flag, a recursive delete, a
   migration or overwrite with no way back, run without the check that makes it safe.
+- **A symptom fixed in place of its cause.** On a change that fixes a bug (its `fixes:` line), ask
+  whether the diff removes what made the bug possible or only the case that was reported: a guard
+  around one caller, while every other caller still reaches the broken code.
 
 ### The ways this repo's code fails
 
@@ -69,8 +72,22 @@ Two apply everywhere:
 
 ## Reporting rules
 
-- Findings are ranked **Important** or **Nit**. Important = wrong behaviour, a broken contract, or a
-  requirement with no code or no test. Everything else is a Nit.
+- Findings are ranked **Important**, **Nit** or **Pre-existing**. Important = wrong behaviour, a
+  broken contract, or a requirement with no code or no test. Pre-existing = a fault in lines the
+  diff neither adds nor changes, and doesn't newly reach: it isn't this change's, so it never
+  blocks it, and it is filed as a bug of its own. A new call into old broken code is the diff's
+  finding, ranked Important or Nit. Everything else is a Nit.
+- **Evidence, not a guess.** Every finding cites the `path:line` it rests on, read, never inferred
+  from a name. A finding with nothing to cite isn't one.
+- **Name the class.** Say what kind of mistake it is and whether the same mistake appears
+  elsewhere, so the fix covers every instance, not the one line shown.
 - **Cap nits at 5.** If there are more, the change is too big — that's the finding.
 - Tag each finding with its pass: `[correctness]`, `[contract]`, `[cost]`.
+- **Count first.** The findings open with their count by rank, and say "nothing to fix" plainly
+  when there are none.
 - **Out of scope, never reported:** generated files, and formatting a formatter already fixes.
+
+### Paths this repo's review skips
+
+None beyond the out-of-scope above. A repo lists here the paths its review never reads (vendored
+code, fixtures, snapshots), each with why.

@@ -115,8 +115,9 @@ skipped, never fatal.
 **Bringing a branch up to date: `cmd_base()`.** Ship's Step 0 runs it before the gate, since
 close only fast-forwards: the branch fast-forwards to `main` when it has no commits of its own
 (git carries the uncommitted work or refuses), rebases from a clean tree when it has, and any
-conflict is aborted and refused. It is the one write a skill makes before its WAIT, by a named
+conflict is aborted and refused. It is one of two writes a skill makes before its WAIT, by a named
 exception to confirm-before-writing: it moves only the change's own branch and prints the undo.
+The other is ship's `findings.md` (below).
 Never a stash (the stack is shared across worktrees), and never a merge of `main` into the
 branch, which close would put on `main`'s first-parent line, where `closed_changes()` walks.
 
@@ -250,10 +251,20 @@ setup merge `ATTRIBUTION_OFF` (an object, never a bare `false`) into the shared 
 Ship shows any edit with its findings and commits it with the change; close has no `Edit`.
 
 **Ship's lookups: `cmd_preflight()`.** Ship reads a change through one read-only `preflight`
-call, each part (`undone`, `nits`, `closes`, `checks`, `context`) built by the same
+call, each part (`undone`, `nits`, `closes`, `checks`, `findings`, `context`) built by the same
 `_<part>_report()` its own command prints, and asks the WAIT question `preflight --question`
 words (`ship_question()`), never one worded by hand. A new list ship needs is a new part there,
 not a new command in the skill.
+
+**Review findings: `findings_entries()`.** Ship writes its review to the change's `findings.md`
+after every run, before its WAIT, by a named exception to confirm-before-writing like `base`'s: it
+writes only the change's own uncommitted folder, decides nothing (the WAIT approves each
+disposition), and the next run rewrites it, keeping each `F<n>` id, so a finding fixed between
+runs is counted. The script only reads it: `findings` prints the `Sdlc-Findings` line
+(`findings_trailer()`, never counted by hand), `check` reports a malformed file, and `ship`
+refuses while one is `open`. A Pre-existing finding never blocks; ship files it as a `[bug]`. The
+trailer's dispositions are new keys beside the old ones, so `metrics_summary()` reads a trailer
+without them as unanswered (`answered`), never as a clean review.
 
 **Acceptance checks: `acceptance()`.** A change's `checks.md`, one `## ` section and one `sh` block
 per check. `checks` lists them (read-only, allowed); `accept` runs them from the change's checkout

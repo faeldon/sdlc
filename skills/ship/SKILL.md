@@ -14,6 +14,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py findings *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
@@ -64,8 +65,9 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base <NNN>
 ```
 
 `/sdlc:close` only fast-forwards, so a gate and a review run on a base `main` has moved past are
-spent on code that never lands, and run again after the rebase. This is the one write this skill
-makes before its WAIT, without asking, because it touches nothing unless it is clean: a
+spent on code that never lands, and run again after the rebase. This is one of two writes this
+skill makes before its WAIT, without asking (the other is Step 3's `findings.md`), because it
+touches nothing unless it is clean: a
 fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
 clean tree. `current` needs no mention. `fast-forwarded` or `rebased`: say so, with `behind` (the
 commits that came in) and the `undo` line, and carry on. **`refused`: stop here,** before Step 1,
@@ -101,6 +103,8 @@ Keep its output in view; the steps below read its parts by name, and run none of
   unfixed. Step 4 proposes retiring the ones it fixed or made moot.
 - **`closes`**: the issues the intent's `closes:` line names, which Step 4 asks about one by one.
 - **`checks`**: the change's acceptance checks, which Step 1 shows and runs.
+- **`findings`**: what an earlier run of this review found, from the change's `findings.md`, which
+  Step 3 builds on.
 - **`context`**: the docs the context pass weighs in Step 3.
 
 Empty is the usual answer for the first three. A non-empty `problems` names the part that has one;
@@ -195,8 +199,11 @@ guide stands alone, which is worth saying. Do not skim the diff; read it.
    one sentence on why. A repo with no context doc at all gets a proposal for one only when the
    diff adds something that meets the bar.
 
-Rank findings **Important** or **Nit**, tag each with its pass, and **cap nits at 5** — more than
-that means the change is too big, and that's the finding.
+Rank findings **Important**, **Nit** or **Pre-existing**, tag each with its pass, cite its
+`path:line` and name its class, as the guide's reporting rules say, and **cap nits at 5** — more
+than that means the change is too big, and that's the finding. A Pre-existing finding, a fault in
+lines this diff neither adds nor changes and doesn't newly reach, never blocks the commit: it is
+proposed as a bug of its own in Step 4.
 
 Weigh each Nit under the rubric in the process (`docs.process.guide`, then `docs.process`), its
 section on nits, and give
@@ -205,9 +212,36 @@ it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.
 is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
 answer below. The rest are proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
+**Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
+in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
+`pre-existing`; `correctness`, `contract`, `cost` or `context`), with its `Evidence:`, `Class:` and
+`Disposition:` lines. This is the one write besides `base` this skill makes before its WAIT, by a
+named exception to confirm-before-writing, on every run, a run that stops included: it writes
+only the change's own uncommitted folder, decides nothing (the WAIT approves every disposition
+in it), and the next run rewrites it. It is how a finding fixed between two runs is counted.
+
+- **When `preflight`'s `findings` part holds an earlier run's,** build on it: keep every id, mark
+  one this diff no longer shows `fixed`, never raise again one answered `wrong`, `intentional` or
+  `minor` (the person has heard it), and number a new one after the highest id.
+- **Each new finding's disposition is the one this skill proposes:** an Important one is `open`,
+  until it is fixed; a Nit proposed as a `[nit]` entry, or a Pre-existing one proposed as a bug,
+  is `recorded`; a Nit not worth recording is `minor`, with a `Reason:` line.
+- **With no findings at all,** the file is the title and note alone, and says nothing to fix.
+
 ## Step 4 — Present findings and the draft commit
 
-Show the findings, then the exact commit message you propose. Match the repo's style, read from
+Read the file back the way the commit will count it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py findings <NNN>
+```
+
+A `problems` entry is a section Step 3 wrote wrong: fix the file and run it again. Open with its
+`counts` (`2 important, 1 nit, 1 pre-existing`, or "nothing to fix"), then show each finding with
+its id, rank, pass, evidence, class and disposition. **The person answers each one:** a
+disposition they change (a finding they say is `wrong`, `intentional` or `minor`, with why) is an
+"edit the message" answer, and the file is rewritten and read back before the question is asked
+again. Then the exact commit message you propose. Match the repo's style, read from
 `git log --oneline -10`. When that style names a change's type (`fix: …`), use the words the
 process doc's "Seeds, and the changes they become" gives (`feature`, `fix`, `refactor`…, or the
 host's own list there). Absent a clear style: imperative, no Conventional Commits prefix, reads
@@ -226,12 +260,21 @@ its artifacts link to each other once pushed. `Refs`, not `Closes`: `/sdlc:close
 after it has archived into it, through the `Closes #N` its `Close` commit carries.
 
 End the message with this review's findings as a trailer, a line in its last paragraph (beside
-`Refs #NNN` when there is one), counts only:
-`Sdlc-Findings: important=<n> nit=<n> correctness=<n> contract=<n> cost=<n> context=<n>`, each
-pass's count of findings, Important and Nit together. History keeps it, so `/sdlc:retro` can count
-what ship catches; `/sdlc:close` records the rest of the change's numbers on its own commit.
+`Refs #NNN` when there is one): the `trailer` line `findings` printed, exactly, which reads
+`Sdlc-Findings: important=<n> nit=<n> preexisting=<n> correctness=<n> contract=<n> cost=<n>
+context=<n>` and then each disposition's count by pass. Never count it by hand. History keeps it,
+so `/sdlc:retro` can count what ship catches and what the person made of it; `/sdlc:close` records
+the rest of the change's numbers on its own commit.
 
-If there are **Important** findings, do not offer to commit. Say what needs fixing and stop.
+If a finding is still `open` (an **Important** one not yet fixed), do not offer to commit. Say what
+needs fixing and stop; `findings.md` keeps it for the next run, and `sdlc.py ship` refuses while one
+is open.
+
+**Pre-existing findings.** Propose each as the bug entry it becomes, with an id from the
+`next-entry` call below: `## [<id>] [bug] <title>`, a line or two on what's wrong and its evidence,
+then its `Severity:` (one of the process doc's words, as `/sdlc:bug` asks) and `Paths:` lines, and
+a first body line `Found by the review of <NNN-slug>.` No `Introduced by:`: that line is for one
+confirmed.
 
 **Agent verdicts.** When Step 0 found `decision.md`, show it under the findings: the decision, its
 reasons and its open items, first and plainly when it is `ESCALATE`. Then every decision in
@@ -252,8 +295,8 @@ body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Lea
 that has nothing in it.
 
 **Ids.** Take an id for every entry this ship would add to `.sdlc/work/inbox.md`, the new nits, the
-seeds undone items are carried to and the seeds issues are split off as, all in one call, `<N>`
-being how many, so no two share one:
+pre-existing bugs, the seeds undone items are carried to and the seeds issues are split off as,
+all in one call, `<N>` being how many, so no two share one:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry --count <N>
@@ -292,23 +335,25 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 ## Step 5 — WAIT for explicit approval
 
 The script words the question from what Step 4 decided. Pass `--context` when the context pass
-proposed an edit, `--nits` when nits are added or retired, and each issue on `closes:` once, as
-`--closing N` when this change resolved it or `--split N` when it is split off as a seed:
+proposed an edit, `--nits` when nits are added or retired, `--bugs` when pre-existing findings are
+filed as bugs, and each issue on `closes:` once, as `--closing N` when this change resolved it or
+`--split N` when it is split off as a seed:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --closing <N> --split <K>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --closing <N> --split <K>
 ```
 
 Ask exactly what it prints. With every clause in, it reads:
 
-> `Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
 
 A refusal names an issue left out, given twice, or not on `closes:`: settle it in Step 4, then run
 it again. Never word the question by hand.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone
-items' dispositions, the nits, the context update and the release impact too. A change to one of
+items' dispositions, every finding's disposition in `findings.md`, the nits, the bugs, the context
+update and the release impact too. A change to one of
 them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
@@ -331,9 +376,10 @@ intent's `closes:` line, and append its seed to the register with its `Issue: #N
 `Split from <NNN-slug>:` line. The seed lands with the change; the `sync` below lets the issue go
 from the change's issue, and `/sdlc:close` tells it which seed it stays open as.
 
-Then the nits, exactly as approved: append each new entry to the register after its last one,
-and delete each retired entry, heading to the line before the next `## `. If it doesn't exist,
-`Write` it at that path first from `templates["inbox.md"]` in `config`, as it is, then append.
+Then the nits and the pre-existing bugs, exactly as approved: append each new entry to the
+register after its last one, and delete each retired nit, heading to the line before the next
+`## `. If it doesn't exist, `Write` it at that path first from `templates["inbox.md"]` in
+`config`, as it is, then append. `findings.md` is already as approved: nothing here edits it.
 
 Then make the approved context edits, exactly as shown, in this checkout: they land in the same
 commit as the code they describe.
@@ -342,7 +388,7 @@ Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter.
 
 If the change came from a `.sdlc/work/inbox.md` seed and the built thing deviated from the sketch, say
 how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
-`Write` is for those files only, and `.sdlc/work/inbox.md`'s first time: everything else this step
+`Write` is for those files only, `findings.md` in Step 3, and `.sdlc/work/inbox.md`'s first time: everything else this step
 changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
 
 **When `config`'s `git.attribution` is `false`**, the commit carries the approved message and
@@ -383,7 +429,7 @@ so rather than commit it.
 ## Step 7 — Report and stop
 
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
-name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by pass, which context docs were updated (or
+name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the bugs filed by id, which context docs were updated (or
 that none needed it), the release impact recorded, each undone
 item and where it went (the seed's title, or dropped and why), the nits recorded and retired by
 id, and anything else deliberately

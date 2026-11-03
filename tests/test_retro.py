@@ -929,7 +929,46 @@ def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> N
     [rec] = sdlc.closed_changes(root, None, "main")
     assert rec["findings"] == {"important": 1, "nit": 3, "cost": 2}
     group = sdlc.metrics_summary([rec])["groups"]["tier 2, manual"]
-    assert group["findings"] == {"important": 1, "nit": 3}
+    found = group["findings"]
+    assert (found["important"], found["nit"], found["preexisting"]) == (1, 3, 0)
+    assert found["passes"]["cost"] == 2
+    # A trailer from before dispositions is unknown there, never zero answers.
+    assert found["answered"] == 0
+
+
+NEW_FINDINGS = (
+    "Sdlc-Findings: important=1 nit=2 preexisting=1 correctness=2 contract=0 cost=2 context=0 "
+    "fixed=correctness:1 recorded=cost:1,correctness:1 wrong=cost:1 intentional=0 minor=0"
+)
+
+
+def test_findings_with_dispositions_add_up_beside_an_old_trailer(tmp_path: Path) -> None:
+    """Counts add from every trailer; dispositions only from the ones that carry them."""
+    root = _repo(tmp_path)
+    for nid, slug, trailer in (
+        ("004", "old-trailer", "Sdlc-Findings: important=1 nit=3 cost=2"),
+        ("005", "new-trailer", NEW_FINDINGS),
+    ):
+        folder = root / ".sdlc" / "work" / f"{nid}-{slug}"
+        folder.mkdir(parents=True)
+        (folder / "intent.md").write_text(
+            INTENT.format(id=nid, slug=slug, tier=2, impact="patch", created="2026-10-01",
+                          title=slug), encoding="utf-8",
+        )  # fmt: skip
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "Ship it", "-m", trailer)
+        _git(root, "rm", "-r", "-q", f".sdlc/work/{nid}-{slug}")
+        _git(root, "commit", "-q", "-m", f"Close {nid}-{slug}", "-m",
+             "Sdlc-Mode: manual\nSdlc-Totals: agent=5 stops=5 required=5 target=2")  # fmt: skip
+    recs = sdlc.closed_changes(root, None, "main")
+    found = sdlc.metrics_summary(recs)["groups"]["tier 2, manual"]["findings"]
+    assert (found["important"], found["nit"], found["preexisting"]) == (2, 5, 1)
+    assert found["passes"]["correctness"] == 2 and found["passes"]["cost"] == 4
+    assert found["answered"] == 1
+    d = found["dispositions"]
+    assert d["fixed"]["correctness"] == 1 and d["wrong"]["cost"] == 1
+    assert d["recorded"] == {"correctness": 1, "contract": 0, "cost": 1, "context": 0}
+    assert sum(d["minor"].values()) == 0
 
 
 # ---------------------------------------------------------------- the product doc's outcomes

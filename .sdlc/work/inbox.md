@@ -469,44 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-1] [idea] Review rules for evidence, bug classes, root causes and a plain summary
-
-Phase 1 of taking in the Claude Code team's account of code review ("How the Claude Code team
-does code review", Oct 2026). Five rules for `guide/review.md`, each one any repo could use:
-- every finding cites a file and line as its evidence, never a guess from a name;
-- a finding names the class of bug, so the fix covers every instance, not the one line shown;
-- on a change with `fixes:`, the correctness pass asks whether the diff fixes the root cause or a
-  symptom;
-- the findings open with a count, and say plainly "nothing to fix" when there is nothing;
-- a repo's review doc gets a slot for the paths its review skips (vendored, generated, fixtures),
-  beside the generated files the guide already skips.
-Guide and defaults only, with `sdlc.py record` rerun. The post's advice on what a good REVIEW.md
-says ("for docs it's 'it lies'") is worth a line in the slot that asks for a repo's failure classes.
-Raised 2026-11-03.
-
-## [2026-11-03-2] [idea] A pre-existing finding becomes a bug seed, not a blocker
-
-Ship ranks findings Important or Nit. The post adds a third tag, Pre-existing, "so a bug the PR
-didn't introduce doesn't look like the author's fault": the reviewer mostly re-flagged old code
-(about 59% of what it kept flagging). A finding in code the diff didn't change is reported apart,
-never blocks the commit, and ship proposes it as a `[bug]` entry (with its `Severity:` and
-`Paths:`) behind its one WAIT, the way it proposes nits. Counted as `preexisting=` on the
-`Sdlc-Findings` trailer. Phase 1. Raised 2026-11-03.
-
-After: 2026-11-03-1
-
-## [2026-11-03-3] [idea] Every finding gets a disposition, and retro counts the review's noise
-
-The post sorts each review comment by how the author answered it: fixed, wrong, intentional, or
-didn't matter, and counts how often a clean change gets a finding that would have led someone to
-make a harmful change. Ship asks the person's disposition of each finding (a fixed one before the
-commit, a dismissed one with its word and a line of reason), extends the `Sdlc-Findings` trailer
-with the counts (extend, never redefine), and retro reports the review's precision by pass. Pairs
-with 2026-10-26-6: a ship stopped by a finding later marked fixed is the review working, a stop for
-one marked wrong is noise. Phase 1. Raised 2026-11-03.
-
-After: 2026-11-03-2
-
 ## [2026-11-03-4] [idea] Sensitive paths set a change's risk, and the depth of its review
 
 The post: "the change sets the tier, not the author", and some paths always get a person. Our tiers
@@ -515,8 +477,6 @@ CI workflows, release scripts, installers, auth) lets `preflight` report a `risk
 diff, mechanically. A sensitive diff gets the deep review: the build check always runs, no
 Important can be approved unfixed, and the WAIT names the sensitive paths. Setup asks for the list.
 Phase 2. Raised 2026-11-03.
-
-After: 2026-11-03-3
 
 ## [2026-11-03-5] [idea] A fresh-context review at ship
 
@@ -586,7 +546,7 @@ finding "a few more old ones each round". Our cap of three stops the runaway; wh
 The post's numbers after the same changes: mean reviews to pass 2.08 to 1.32. Phase 4. Raised
 2026-11-03.
 
-After: 2026-11-03-9, 2026-11-03-2
+After: 2026-11-03-9
 
 ## [2026-11-03-11] [idea] The factory scales its reviewers and rounds to a change's risk
 

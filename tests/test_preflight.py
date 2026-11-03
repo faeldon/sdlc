@@ -75,6 +75,7 @@ true
 
 FULL = (
     "Commit this, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, "
+    "the bugs shown filed in .sdlc/work/inbox.md, "
     "closing #N and #M when it lands and splitting #K off as a seed, and "
     ".sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? "
     "(yes / fix a finding first / edit the message)"
@@ -176,7 +177,7 @@ def test_question_with_every_clause_matches_ship_s_example() -> None:
     """The skill's example sentence, every clause in, is what the script renders: N, M and K
     stand in for the numbers, and the folder for the change's."""
     question, why = _ask(folder=".sdlc/work/NNN-<slug>", closes=[1, 2, 3], context=True,
-                         nits=True, closing=[1, 2], split=[3])  # fmt: skip
+                         nits=True, bugs=True, closing=[1, 2], split=[3])  # fmt: skip
     assert why is None
     assert question == FULL.replace("#N", "#1").replace("#M", "#2").replace("#K", "#3")
     skill = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
@@ -193,6 +194,7 @@ SHIPPED = ".sdlc/work/001-reopen-drafts/ stamped shipped"
         ({"target": "none"}, f"Commit this, with {SHIPPED}? (yes"),
         ({"context": True}, f"Commit this, with the context update shown, and {SHIPPED}, then"),
         ({"nits": True}, "Commit this, the nits shown recorded in .sdlc/work/inbox.md, and .sdlc"),
+        ({"bugs": True}, "Commit this, the bugs shown filed in .sdlc/work/inbox.md, and .sdlc"),
         ({"closes": [4], "closing": [4]}, "Commit this, closing #4 when it lands, and .sdlc"),
         ({"closes": [4, 5], "closing": [5, 4]}, "closing #4 and #5 when it lands, and"),
         ({"closes": [4, 5, 6], "closing": [4, 5, 6]}, "closing #4, #5 and #6 when it lands, and"),
@@ -211,6 +213,8 @@ def test_question_clause(kw, expected) -> None:
         assert "context update" not in question
     if "nits" not in kw:
         assert "nits shown" not in question
+    if "bugs" not in kw:
+        assert "bugs shown" not in question
     if not kw.get("closing"):
         assert "closing" not in question
     if not kw.get("split"):
@@ -247,4 +251,4 @@ def test_question_through_the_command(change, capsys) -> None:
 
 
 def test_preflight_and_nits_are_allowed_without_a_prompt() -> None:
-    assert {"preflight", "nits"} <= set(sdlc.READ_ONLY)
+    assert {"preflight", "nits", "findings"} <= set(sdlc.READ_ONLY)
