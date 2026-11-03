@@ -469,14 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-12] [idea] The builder shows its evidence, and a behaviour check runs the change
-
-The post: give the agent something it can run and "ask it to show the output instead of saying
-it's done", which the creator of Claude Code puts at two to three times better results. The
-builder's round reports carry each command it ran and the tail of its output. A behaviour check,
-apart from the test reviewer, runs the change's `checks.md` and the end-to-end path the spec
-describes, and reports what ran and what it returned. Phase 4. Raised 2026-11-03.
-
 ## [2026-11-03-13] [idea] A replay eval for the factory's reviewers, from escaped bugs
 
 The post runs its reviewer daily against past changes that caused incidents, each confirmed by
@@ -484,8 +476,8 @@ someone who knows the code, and keeps a prompt, tool or model change only if the
 is the diffs that introduced the register's fixed bugs, traced by 2026-11-03-7: a `factory.py
 eval` replays the reviewers on each introducing diff and reports which caught its bug. Run when
 an agent's prompt or model changes, never on its own. Phase 4. Raised 2026-11-03.
-
-After: 2026-11-03-12
+Agreed in 039's spec: the diff as text, files read at the commit with git show; caught means a
+CHANGE: on the bug's paths, each shown for the person to judge.
 
 ## [2026-11-03-14] [idea] A scheduled review of existing code that files bugs
 
@@ -494,6 +486,8 @@ on them. An optional factory skill reviews a slice of the repo (the paths a sens
 or the least recently changed) and proposes each finding as a `[bug]` entry the way `/sdlc:bug`
 files one, behind one WAIT, never fixing anything. Pairs with 2026-11-03-2: pre-existing findings
 already land there. Phase 4. Raised 2026-11-03.
+Agreed in 039's spec: an uncommitted report of proposed [bug] entries, filed by /sdlc:bug through
+inbox-commit behind its own WAIT; run when asked, with /schedule shown in the README.
 
 After: 2026-11-03-13
 
@@ -542,3 +536,10 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 037-escaped-bugs-tune-review (correctness)
+
+## [2026-11-04-4] [idea] The test reviewer runs checks.md, which only accept should
+
+`plugins/factory/agents/reviewer-test.md` tells the test reviewer to run each `checks.md`
+section's `sh` block itself; the behaviour check (039) is told never to, since an agent may have
+written them and `/sdlc:ship`'s `accept` runs them under a prompt. Make the two agree. See
+.sdlc/work/039-factory-evidence-and-replay/notes.md.

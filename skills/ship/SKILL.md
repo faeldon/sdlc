@@ -90,7 +90,10 @@ for the builder, `- DROPPED:` with why), and the person's calls the agents raise
 `.sdlc/work/NNN-slug/decisions.md` (`- [x]` decided, `- [ ]` assumed). When they exist, read the
 decision, the highest round's reviews, every `verified.md` and the ledger: they are evidence for
 Step 3, never a substitute for it. A dropped change your own passes confirm is a finding like any
-other. A change with none of them is reviewed exactly as below.
+other. The builder's reports in `build/round-<N>.md` and the behaviour check's
+`reviews/round-<N>/behaviour.md` end with a `## Evidence` section, each command with its output and
+exit: what the agents say they ran, which Step 1's gate and acceptance checks still run for
+themselves. A change with none of them is reviewed exactly as below.
 
 Then everything else this skill looks up about the change, in one call that writes nothing:
 

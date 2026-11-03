@@ -49,6 +49,9 @@ spec.
   touch as `- PREEXISTING:`, carried to `notes.md` for ship, never reworked here.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
+- **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
+  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. `factory.py` stops
+  the run on a reply without it, so "the gate passes" is never taken on an agent's word.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
   one touching any runs the full depth, and a run never lightens. With no list, every run is full.
@@ -76,6 +79,7 @@ options and its recommendation. They're gathered into the change's ledger,
 | `reviewer-code` | correctness against the spec, contract, readability, cost | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
 | `reviewer-test` | every requirement proven by a test that can fail | no |
+| `reviewer-behaviour` | runs the gate and the spec's end-to-end path; reads `checks.md`, never runs it | no |
 | `verifier` | keeps or drops each requested change, checked against the code | no |
 | `approver` | READY or ESCALATE, for the person at ship | no |
 
@@ -85,7 +89,7 @@ Only the builder edits. The others return text, and the skill writes it to the c
 
 ```
 .sdlc/work/NNN-slug/
-  build/round-<N>.md            the builder's reports
+  build/round-<N>.md            the builder's reports, each ending with its ## Evidence
   build/round-<N>.files         what each round's build left, hashed by path
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for
@@ -104,7 +108,7 @@ factory change and one built by hand are measured the same way.
 Optional. The defaults:
 
 ```toml
-reviewers = ["code", "security", "test"]   # the full depth: which reviewers run each round
+reviewers = ["code", "security", "test", "behaviour"]   # the full depth: which reviewers run
 rounds = 3                                 # review rounds before the approver decides anyway (1-5)
 
 [light]                                    # the depth a diff touching no sensitive path gets
@@ -115,7 +119,7 @@ rounds = 2
 # builder = "sonnet"
 ```
 
-A run takes at most `2 + rounds × (reviewers + 2)` agent runs at the full depth (17 with the
+A run takes at most `2 + rounds × (reviewers + 2)` agent runs at the full depth (20 with the
 defaults: each round's reviewers, the verifier and the builder's rework), and the build skill shows
 the number before you approve it, whatever depth the diff turns out to need.
 

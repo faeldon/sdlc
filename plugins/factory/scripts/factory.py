@@ -49,12 +49,12 @@ from pathlib import Path
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # Every role a model can be set for, and the reviewers a repo can choose among.
-ROLES = ("spec-writer", "builder", "code", "security", "test", "verifier", "approver")
-REVIEWERS = ("code", "security", "test")
+ROLES = ("spec-writer", "builder", "code", "security", "test", "behaviour", "verifier", "approver")
+REVIEWERS = ("code", "security", "test", "behaviour")
 # `reviewers` and `rounds` are the full depth; `light` the one a diff touching no path in the
 # base branch's `[review] sensitive` gets, once a host lists any.
 DEFAULTS: dict = {
-    "reviewers": ["code", "security", "test"],
+    "reviewers": ["code", "security", "test", "behaviour"],
     "rounds": 3,
     "light": {"reviewers": ["code"], "rounds": 2},
     "models": {},
@@ -81,6 +81,12 @@ DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 DROP_WHY = " — "
 # What an approver must write when the rounds ran out with changes still kept.
 RECONSIDER = "## Reconsider the approach"
+# What a builder report and a behaviour check end with: each command run (`$ <command>`), the tail
+# of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
+EVIDENCE = "## Evidence"
+EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
+# The reviewers whose replies owe evidence too: the ones that run the change.
+RUNS_THE_CHANGE = ("behaviour",)
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -500,6 +506,30 @@ def build_round(folder: Path) -> int:
     return max((int(n) for n in names if n.isdigit()), default=0)
 
 
+def read_evidence(text: str, where: str) -> list[str]:
+    """What's wrong with a reply's `## Evidence` section: missing, no command in it, or a command
+    whose `exit:` line never comes before the next command or the section's end."""
+    lines = text.splitlines()
+    if EVIDENCE not in [line.strip() for line in lines]:
+        return [f"{where} has no `{EVIDENCE}` section: each command it ran, its output, its exit"]
+    start = [line.strip() for line in lines].index(EVIDENCE) + 1
+    commands, open_cmd, problems = 0, None, []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        if line.lstrip().startswith("$ "):
+            if open_cmd:
+                problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
+            open_cmd, commands = line.strip()[2:], commands + 1
+        elif EXIT_RE.match(line):
+            open_cmd = None
+    if open_cmd:
+        problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
+    if not commands:
+        problems.append(f"{where}'s `{EVIDENCE}` shows no command run (`$ <command>`)")
+    return problems
+
+
 def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, str | None]:
     """The approver's decision, or what's wrong with it. After a run whose rounds ran out with
     changes still kept, only an ESCALATE that asks the person to reconsider the approach will do."""
@@ -649,6 +679,15 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     out["repeats"] = [a for a in asked if a in out["settled"]]
     # With no base branch nothing is known to be touched, so nothing is called untouched.
     out["untouched"] = [a for a in asked if _untouched(root, a.split(": ", 1)[1], run["changed"])]
+    if built:
+        report = folder / "build" / f"round-{built}.md"
+        problems += read_evidence(report.read_text(encoding="utf-8"), f"build/round-{built}.md")
+    for r in rounds:
+        for role in RUNS_THE_CHANGE:
+            reply = folder / "reviews" / f"round-{r['round']}" / f"{role}.md"
+            if role in r["reviews"]:
+                where = f"reviews/round-{r['round']}/{role}.md"
+                problems += read_evidence(reply.read_text(encoding="utf-8"), where)
     if moved:
         problems.append(f"HEAD moved from {head} to {now}: no agent may commit")
     if last and last["round"] > built:

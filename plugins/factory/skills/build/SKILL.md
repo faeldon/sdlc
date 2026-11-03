@@ -52,7 +52,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start <NNN> -
 ```
 
 `config` and `start` give the run's shape from `.sdlc/factory.toml`: the full depth's reviewers
-(`factory.reviewers`, default code, security and test) and round limit (`factory.rounds`,
+(`factory.reviewers`, default code, security, test and behaviour, the one that runs the gate and
+the spec's end-to-end path) and round limit (`factory.rounds`,
 default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds), any model
 a role is set to (`factory.models`), and `max_runs`, the most agent runs this can take, counted at
 the full depth.
@@ -75,7 +76,10 @@ before they agree to it. Name the files the run will write: code and `plan.md` b
 `build/round-<N>.md`, `reviews/round-<N>/<role>.md`, `reviews/round-<N>/verified.md` and
 `decision.md` by this skill, from the agents' replies; `build/round-<N>.files` by `snapshot`;
 `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't resolve. Say
-that the run will stop to ask them about any blocking decision, so they know to stay near it.
+that the run will stop to ask them about any blocking decision, so they know to stay near it, and
+that every builder report and behaviour check must end with its `## Evidence` (each command run,
+its output, its exit), or the run stops: the behaviour check runs the gate and the spec's path, and
+reads `checks.md` without running it, which `/sdlc:ship` does under a prompt.
 
 ## Step 2 — WAIT for explicit approval
 
@@ -172,6 +176,12 @@ agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` 
    - **`stop`**: report its `problems` and stop. The change stays at `stage: build`. A reviewer
      reply that doesn't open with a verdict, a decision that doesn't open with one, or `HEAD`
      moving (an agent committed) is a stop: never patch a verdict in, and never reset a commit.
+     **A missing `## Evidence` is the one stop this run can mend itself,** once: resume the agent
+     whose reply lacks it (the builder through `SendMessage`, or a new behaviour check for that
+     round) with `Your reply has no ## Evidence, or a command without its exit: run what your
+     claims rest on again and reply with it.`, and `Write` the new reply over the old one,
+     exactly as returned. Never write the evidence yourself. A second reply without it is a stop
+     like any other.
 3. **Hand it back.**
 
    ```bash

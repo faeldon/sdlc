@@ -294,7 +294,9 @@ leaves in the change's folder. A round's `CHANGE:` lines reach the builder only 
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
 `[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
 `sdlc.py`'s by a test, like its regexes: `verdicts` writes nothing, so a run that reviewed at the
-full depth stays full by what its rounds hold, never by a state file.
+full depth stays full by what its rounds hold, never by a state file. A builder report and a
+behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
+checks; the behaviour check never runs `checks.md`, which only `accept` runs, under a prompt.
 
 ## Invariants the tests enforce
 

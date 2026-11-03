@@ -651,6 +651,8 @@ AGENT_TOOLS = {
     "reviewer-code": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-security": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-test": {"Read", "Grep", "Glob", "Bash"},
+    # It runs the gate and the spec's path; never checks.md (`accept` does, under a prompt).
+    "reviewer-behaviour": {"Read", "Grep", "Glob", "Bash"},
     # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
     "verifier": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
@@ -729,6 +731,25 @@ def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
     assert "## Reconsider the approach" in approver and "verified.md" in approver
 
 
+def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None:
+    """The builder and the behaviour check end every reply with `## Evidence`, `$` lines and
+    exits; the behaviour check reads checks.md and never runs it, since an agent may have written
+    those commands and `accept` runs them only under a person's prompt."""
+    builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
+    assert "**End it with `## Evidence`:**" in builder and "exit: <n>" in builder
+    behaviour = (FACTORY / "agents" / "reviewer-behaviour.md").read_text(encoding="utf-8")
+    assert "## checks.md: read, never run" in behaviour
+    assert "**Never run\nthem yourself**" in behaviour or "**Never run them yourself**" in behaviour
+    assert "End with `## Evidence`" in behaviour and "[commands] check" in behaviour
+    assert "- PREEXISTING:" in behaviour and "never raise a settled point again" in behaviour
+    build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
+    stop = " ".join(build.split("**`stop`**")[1].split("3. **Hand it back.**")[0].split())
+    assert "A missing `## Evidence` is the one stop this run can mend itself,** once" in stop
+    assert "Never write the evidence yourself" in stop, (
+        "the agent re-runs; the session never fakes it"
+    )
+
+
 def test_ship_reads_the_agents_verdicts() -> None:
     """When a change was built by agents, ship reads their decision and reviews as evidence for its
     own passes, and shows them; a change without them is reviewed as before."""
@@ -736,6 +757,7 @@ def test_ship_reads_the_agents_verdicts() -> None:
     step0 = text.split("## Step 0")[1].split("## Step 1")[0]
     assert "decision.md" in step0 and "reviews/round-<N>/" in step0
     assert "reviews/round-<N>/verified.md" in step0, "what the verifier dropped, and why"
+    assert "`## Evidence`" in step0 and "behaviour.md" in step0, "claims, not runs"
     step4 = text.split("## Step 4")[1].split("## Step 5")[0]
     assert "**Agent verdicts.**" in step4 and "ESCALATE" in step4
     assert "never stands in" in step4

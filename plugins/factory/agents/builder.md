@@ -112,3 +112,19 @@ A short report: the slices built, the tests added and what they prove, the gate'
 count), what changed in `plan.md`, and anything left in `notes.md`. In a rework round, one line per
 `- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
 skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.
+
+**End it with `## Evidence`:** every command a claim above rests on (the gate, the tests, anything
+you say passed or failed), each as the command on a `$ ` line, the tail of what it printed, and
+`exit: <n>`:
+
+```
+## Evidence
+
+$ ./check.sh
+1271 passed in 121.72s
+exit: 0
+```
+
+Claim no result this section doesn't show: "the gate passes" with no `$` line for the gate is a
+claim, not a result. A failing command goes in too, with its exit. The skill's script refuses a
+report without this section, or with a command missing its `exit:`, and the run stops there.

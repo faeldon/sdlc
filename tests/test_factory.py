@@ -90,13 +90,21 @@ def _review(root: Path, n: int, role: str, verdict: str, *changes: str) -> None:
     folder = root / ".sdlc" / "work" / NAME / "reviews" / f"round-{n}"
     folder.mkdir(parents=True, exist_ok=True)
     body = "".join(f"- CHANGE: {c}\n" for c in changes)
-    (folder / f"{role}.md").write_text(f"{verdict}\n{body}\n## Notes\n\nFine.\n", encoding="utf-8")
+    tail = EVIDENCE if role == "behaviour" else ""
+    text = f"{verdict}\n{body}\n## Notes\n\nFine.\n{tail}"
+    (folder / f"{role}.md").write_text(text, encoding="utf-8")
+
+
+# What a builder report and a behaviour check end with: each command, its output's tail, its exit.
+EVIDENCE = "\n## Evidence\n\n$ ./check.sh\n12 passed\nexit: 0\n"
+FULL = ["code", "security", "test", "behaviour"]
 
 
 def _build_report(root: Path, n: int, *lines: str) -> None:
     folder = root / ".sdlc" / "work" / NAME / "build"
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"round-{n}.md").write_text("Built slice 1.\n" + "".join(lines), encoding="utf-8")
+    text = "Built slice 1.\n" + "".join(lines) + EVIDENCE
+    (folder / f"round-{n}.md").write_text(text, encoding="utf-8")
 
 
 def _verified(root: Path, n: int, kept: list[str] = (), dropped: list[str] = ()) -> None:
@@ -113,7 +121,7 @@ def _round(root: Path, n: int, **verdicts: str) -> None:
     """Review round `n`, as the loop makes one: after the builder's report for that round."""
     if not (root / ".sdlc" / "work" / NAME / "build" / f"round-{n}.md").exists():
         _build_report(root, n)
-    for role in ("code", "security", "test"):
+    for role in FULL:
         verdict = verdicts.get(role, "PASS")
         changes = (f"{role} fix {n}",) if verdict == "CHANGES" else ()
         _review(root, n, role, f"VERDICT: {verdict}", *changes)
@@ -125,7 +133,7 @@ def _round(root: Path, n: int, **verdicts: str) -> None:
 def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
     cfg, warnings = factory.load_config(tmp_path)
     assert cfg == {
-        "reviewers": ["code", "security", "test"],
+        "reviewers": FULL,
         "rounds": 3,
         "light": {"reviewers": ["code"], "rounds": 2},
         "models": {},
@@ -191,7 +199,7 @@ def test_start_checks_the_tier_and_stage(tmp_path, capsys, tier, stage, purpose,
     assert (code == 0) is ok and (not out["refusals"]) is ok, out["refusals"]
     assert out["head"] == _git(root, "rev-parse", "--short", "HEAD")
     if ok:
-        assert out["change"] == NAME and out["max_runs"] == 17
+        assert out["change"] == NAME and out["max_runs"] == 20, "2 + 3 rounds × (4 + 2)"
 
 
 def test_a_tier_1_spec_is_told_its_approach_is_the_spec(tmp_path, capsys) -> None:
@@ -243,7 +251,7 @@ def test_a_build_with_no_review_is_a_review_of_its_round(tmp_path, capsys) -> No
     _build_report(root, 1)
     out = _verdicts(root, capsys)
     assert (out["next"], out["round"]) == ("review", 1)
-    assert out["missing"] == ["code", "security", "test"]
+    assert out["missing"] == FULL
 
 
 def test_an_incomplete_round_is_reviewed_again_for_the_missing(tmp_path, capsys) -> None:
@@ -251,7 +259,11 @@ def test_an_incomplete_round_is_reviewed_again_for_the_missing(tmp_path, capsys)
     _build_report(root, 1)
     _review(root, 1, "code", "VERDICT: PASS")
     out = _verdicts(root, capsys)
-    assert (out["next"], out["round"], out["missing"]) == ("review", 1, ["security", "test"])
+    assert (out["next"], out["round"], out["missing"]) == (
+        "review",
+        1,
+        ["security", "test", "behaviour"],
+    )
 
 
 def test_changes_rework_until_the_rounds_run_out(tmp_path, capsys) -> None:
@@ -264,11 +276,7 @@ def test_changes_rework_until_the_rounds_run_out(tmp_path, capsys) -> None:
     # not reworked again.
     _build_report(root, 2)
     out = _verdicts(root, capsys)
-    assert (out["next"], out["round"], out["missing"]) == (
-        "review",
-        2,
-        ["code", "security", "test"],
-    )
+    assert (out["next"], out["round"], out["missing"]) == ("review", 2, FULL)
     _round(root, 2, test="CHANGES")
     _verified(root, 2, kept=["test: test fix 2"])
     assert _verdicts(root, capsys)["next"] == "rework"
@@ -531,11 +539,13 @@ def test_what_earlier_rounds_answered_is_settled_and_a_repeat_is_named(tmp_path,
     _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:1: rename a", "src/a.py:1: add a doc")
     _review(root, 1, "security", "VERDICT: PASS")
     _review(root, 1, "test", "VERDICT: PASS")
+    _review(root, 1, "behaviour", "VERDICT: PASS")
     _verified(root, 1, kept=["code: src/a.py:1: rename a"], dropped=["code: src/a.py:1: add a doc"])
     _build_report(root, 2)
     _review(root, 2, "code", "VERDICT: CHANGES", "src/a.py:1: add a doc", "README.md:1: old")
     _review(root, 2, "security", "VERDICT: PASS")
     _review(root, 2, "test", "VERDICT: PASS")
+    _review(root, 2, "behaviour", "VERDICT: PASS")
     out = _verdicts(root, capsys)
     assert out["next"] == "verify"
     assert out["settled"] == ["code: src/a.py:1: add a doc", "code: src/a.py:1: rename a"]
@@ -580,7 +590,7 @@ def test_with_no_sensitive_list_every_run_is_full(tmp_path, capsys) -> None:
     _touch(root, "src/a.py")
     _build_report(root, 1)
     out = _verdicts(root, capsys)
-    assert (out["depth"], out["missing"], out["limit"]) == ("full", ["code", "security", "test"], 3)
+    assert (out["depth"], out["missing"], out["limit"]) == ("full", FULL, 3)
 
 
 def test_a_diff_touching_no_sensitive_path_runs_light(tmp_path, capsys) -> None:
@@ -603,7 +613,7 @@ def test_a_sensitive_path_deepens_the_run_and_it_never_lightens(tmp_path, capsys
     _build_report(root, 2)
     out = _verdicts(root, capsys)
     assert (out["depth"], out["sensitive"]) == ("full", ["src/secret/key.py"])
-    assert out["missing"] == ["code", "security", "test"] and out["limit"] == 3
+    assert out["missing"] == FULL and out["limit"] == 3
     for role in ("code", "security", "test"):
         _review(root, 2, role, "VERDICT: PASS")
     (root / "src" / "secret" / "key.py").unlink()
@@ -617,6 +627,71 @@ def test_the_sensitive_list_is_the_base_branch_s_not_the_change_s(tmp_path, caps
     _touch(root, "src/a.py")
     _build_report(root, 1)
     assert _verdicts(root, capsys)["depth"] == "light", "editing the list here changes nothing"
+
+
+def _report(root: Path, n: int, text: str) -> None:
+    """A builder report written as-is, evidence or not."""
+    folder = root / ".sdlc" / "work" / NAME / "build"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"round-{n}.md").write_text(text, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "text, problem",
+    [
+        ("Built it. The gate passed.\n", "has no `## Evidence` section"),
+        ("Built it.\n\n## Evidence\n\nAll green.\n", "shows no command run"),
+        ("Built.\n\n## Evidence\n\n$ ./check.sh\n12 passed\n$ pytest\nexit: 0\n", "`./check.sh`"),
+        ("Built.\n\n## Evidence\n\n$ ./check.sh\n12 passed\n\n## Notes\n\nexit: 0\n", "no `exit:`"),
+    ],
+)
+def test_a_builder_report_without_its_evidence_stops_the_run(
+    tmp_path, capsys, text: str, problem: str
+) -> None:
+    root = _change(tmp_path)
+    _report(root, 1, text)
+    out = _verdicts(root, capsys)
+    assert out["next"] == "stop"
+    assert any("build/round-1.md" in p and problem in p for p in out["problems"]), out["problems"]
+
+
+def test_a_report_showing_each_command_and_its_exit_goes_on(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    fenced = "```\n$ ./check.sh\n12 passed\nexit: 0\n$ uv run pytest -q\n3 failed\nexit: 1\n```\n"
+    _report(root, 1, f"Built.\n\n## Evidence\n\n{fenced}")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["problems"]) == ("review", []), "a failing exit is evidence too"
+
+
+def test_only_the_newest_report_owes_evidence(tmp_path, capsys) -> None:
+    """A run started before the rule keeps its old reports; the next one is checked."""
+    root = _change(tmp_path)
+    _report(root, 1, "Built before evidence was asked for.\n")
+    _round(root, 1, code="CHANGES")
+    _verified(root, 1, kept=["code: code fix 1"])
+    _build_report(root, 2)
+    assert _verdicts(root, capsys)["next"] == "review"
+
+
+def test_the_behaviour_check_owes_evidence_too(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    _round(root, 1)
+    reply = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "behaviour.md"
+    reply.write_text("VERDICT: PASS\n\n## Notes\n\nIt ran fine.\n")
+    out = _verdicts(root, capsys)
+    assert out["next"] == "stop"
+    assert any("reviews/round-1/behaviour.md" in p for p in out["problems"]), out["problems"]
+
+
+def test_a_host_s_own_reviewers_are_kept_and_behaviour_is_one_it_can_name(tmp_path) -> None:
+    (tmp_path / ".sdlc").mkdir()
+    config = tmp_path / ".sdlc" / "factory.toml"
+    config.write_text('reviewers = ["code", "test"]\n', encoding="utf-8")
+    assert factory.load_config(tmp_path)[0]["reviewers"] == ["code", "test"]
+    config.write_text('reviewers = ["behaviour"]\n', encoding="utf-8")
+    cfg, warnings = factory.load_config(tmp_path)
+    assert cfg["reviewers"] == ["behaviour"] and warnings == []
+    assert factory.max_runs(factory.load_config(tmp_path / "none")[0]) == 20
 
 
 @pytest.mark.parametrize(
