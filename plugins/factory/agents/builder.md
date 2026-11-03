@@ -100,13 +100,15 @@ build on the answer, never re-raise it.
 
 ## Rework rounds
 
-When the skill resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/`. Every file there whose first
-line is `VERDICT: CHANGES` lists what must change as `- CHANGE:` lines. Address each one, or, if a
-change is wrong, say why in `notes.md` rather than ignoring it. Rerun the tests and the gate.
+When the skill resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/verified.md`: the
+verifier has checked every `- CHANGE:` the reviewers asked for against the code, and its
+`- KEPT:` lines are the ones to address. Address each one, or, if a change is wrong after all, say
+why in `notes.md` rather than ignoring it. A `- DROPPED:` line is not yours to act on. Rerun the
+tests and the gate.
 
 ## What you return
 
 A short report: the slices built, the tests added and what they prove, the gate's result (its test
 count), what changed in `plan.md`, and anything left in `notes.md`. In a rework round, one line per
-`- CHANGE:` saying what you did about it. Then every `- DECISION:` line you raised this time. The
+`- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
 skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.

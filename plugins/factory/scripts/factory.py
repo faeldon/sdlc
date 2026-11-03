@@ -36,6 +36,8 @@ them. A default one lets the run go on, recorded as assumed until the person con
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import re
 import subprocess
@@ -47,9 +49,16 @@ from pathlib import Path
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # Every role a model can be set for, and the reviewers a repo can choose among.
-ROLES = ("spec-writer", "builder", "code", "security", "test", "approver")
+ROLES = ("spec-writer", "builder", "code", "security", "test", "verifier", "approver")
 REVIEWERS = ("code", "security", "test")
-DEFAULTS: dict = {"reviewers": ["code", "security", "test"], "rounds": 3, "models": {}}
+# `reviewers` and `rounds` are the full depth; `light` the one a diff touching no path in the
+# base branch's `[review] sensitive` gets, once a host lists any.
+DEFAULTS: dict = {
+    "reviewers": ["code", "security", "test"],
+    "rounds": 3,
+    "light": {"reviewers": ["code"], "rounds": 2},
+    "models": {},
+}
 MAX_ROUNDS = 5
 # The stages a factory step moves a change between. `shipped` stays `sdlc ship`'s alone.
 STAGES = ("plan", "design", "build", "test")
@@ -62,6 +71,16 @@ STARTS = {
 VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
+# A problem in code the change didn't touch: filed for later, never reworked.
+PREEXISTING_RE = re.compile(r"^\s*- PREEXISTING:\s*(.+?)\s*$")
+# The verifier's answer to each `CHANGE:` of a round, in `reviews/round-<N>/verified.md`: kept for
+# the builder, or dropped with why (after the last ` — `).
+VERIFIED = "verified.md"
+KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
+DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
+DROP_WHY = " — "
+# What an approver must write when the rounds ran out with changes still kept.
+RECONSIDER = "## Reconsider the approach"
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -111,7 +130,13 @@ def names_change(name: str, ident: str) -> bool:
 def load_config(root: Path) -> tuple[dict, list[str]]:
     """`.sdlc/factory.toml` over the defaults, and what was wrong with it. A bad key is a warning,
     never quietly ignored: a reviewer spelled `secruity` would otherwise never run."""
-    cfg = {"reviewers": list(DEFAULTS["reviewers"]), "rounds": DEFAULTS["rounds"], "models": {}}
+    light = DEFAULTS["light"]
+    cfg = {
+        "reviewers": list(DEFAULTS["reviewers"]),
+        "rounds": DEFAULTS["rounds"],
+        "light": {"reviewers": list(light["reviewers"]), "rounds": light["rounds"]},
+        "models": {},
+    }
     path = root / CONFIG_FILE
     if not path.is_file():
         return cfg, []
@@ -120,22 +145,13 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     except tomllib.TOMLDecodeError as e:
         return cfg, [f"{CONFIG_FILE} won't parse: {e}"]
     warnings = [f"unknown key {key}" for key in data if key not in DEFAULTS]
-    reviewers = data.get("reviewers", cfg["reviewers"])
-    if not isinstance(reviewers, list) or not all(isinstance(r, str) for r in reviewers):
-        warnings.append("reviewers must be a list of names")
+    _depth_keys(data, cfg, "", warnings)
+    table = data.get("light", {})
+    if not isinstance(table, dict):
+        warnings.append("light must be a table of reviewers and rounds")
     else:
-        unknown = [r for r in reviewers if r not in REVIEWERS]
-        warnings += [f"unknown reviewer {r!r}: one of {', '.join(REVIEWERS)}" for r in unknown]
-        known = [r for r in dict.fromkeys(reviewers) if r in REVIEWERS]
-        if known:
-            cfg["reviewers"] = known
-        else:
-            warnings.append("no known reviewer is configured, so the defaults run")
-    rounds = data.get("rounds", cfg["rounds"])
-    if isinstance(rounds, int) and not isinstance(rounds, bool) and 1 <= rounds <= MAX_ROUNDS:
-        cfg["rounds"] = rounds
-    else:
-        warnings.append(f"rounds must be a whole number from 1 to {MAX_ROUNDS}")
+        warnings += [f"unknown key light.{key}" for key in table if key not in light]
+        _depth_keys(table, cfg["light"], "light.", warnings)
     models = data.get("models", {})
     if not isinstance(models, dict):
         warnings.append("models must be a table of role = model")
@@ -148,6 +164,33 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
             else:
                 cfg["models"][role] = model
     return cfg, warnings
+
+
+def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> None:
+    """A depth's `reviewers` and `rounds` from `data` into `into`, the top level's or `[light]`'s,
+    each bad value a warning that leaves the default in place."""
+    reviewers = data.get("reviewers", into["reviewers"])
+    if not isinstance(reviewers, list) or not all(isinstance(r, str) for r in reviewers):
+        warnings.append(f"{prefix}reviewers must be a list of names")
+    else:
+        unknown = [r for r in reviewers if r not in REVIEWERS]
+        warnings += [
+            f"unknown reviewer {r!r} in {prefix}reviewers: one of {', '.join(REVIEWERS)}"
+            if prefix
+            else f"unknown reviewer {r!r}: one of {', '.join(REVIEWERS)}"
+            for r in unknown
+        ]
+        known = [r for r in dict.fromkeys(reviewers) if r in REVIEWERS]
+        if known:
+            into["reviewers"] = known
+        else:
+            warnings.append(f"no known reviewer is configured in {prefix or 'the top level'}, so "
+                            "the defaults run")  # fmt: skip
+    rounds = data.get("rounds", into["rounds"])
+    if isinstance(rounds, int) and not isinstance(rounds, bool) and 1 <= rounds <= MAX_ROUNDS:
+        into["rounds"] = rounds
+    else:
+        warnings.append(f"{prefix}rounds must be a whole number from 1 to {MAX_ROUNDS}")
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -188,9 +231,122 @@ def work_rel(root: Path) -> str:
 
 
 def max_runs(cfg: dict) -> int:
-    """The most agent runs one build can take: the builder, the approver, and each round's
-    reviewers and builder resume. An upper bound to show before a person approves the cost."""
-    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + 1)
+    """The most agent runs one build can take, at the full depth: the builder, the approver, and
+    each round's reviewers, verifier and builder resume. An upper bound to show before a person
+    approves the cost, whatever depth the diff turns out to need."""
+    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + 2)
+
+
+# The base branch's review lists, read here because the factory's cached copy has no `sdlc.py`.
+SDLC_CONFIG = Path(".sdlc") / "config.toml"
+
+
+def _base(root: Path) -> str | None:
+    """The branch a change lands on: `[git] base` in `.sdlc/config.toml`, else `main` when it
+    exists. None when neither is a branch here."""
+    try:
+        data = tomllib.loads((root / SDLC_CONFIG).read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        data = {}
+    git = data.get("git")
+    named = git.get("base") if isinstance(git, dict) else None
+    for ref in (named, "main"):
+        if isinstance(ref, str) and ref and _git(root, "rev-parse", "--verify", "-q", ref):
+            return ref
+    return None
+
+
+def _sensitive(root: Path, base: str) -> list[str]:
+    """`[review] sensitive` as the base branch holds it, never this checkout's: a change can't
+    lighten its own review by editing the list."""
+    try:
+        data = tomllib.loads(_git(root, "show", f"{base}:{SDLC_CONFIG.as_posix()}") or "")
+    except tomllib.TOMLDecodeError:
+        return []
+    review = data.get("review")
+    listed = review.get("sensitive") if isinstance(review, dict) else None
+    return [p for p in listed if isinstance(p, str)] if isinstance(listed, list) else []
+
+
+def _changed_paths(root: Path, base: str) -> list[str]:
+    """Every path the change touches against where it left the base branch, uncommitted and
+    untracked included, both sides of a rename, leaving out the change folders."""
+    fork = _git(root, "merge-base", base, "HEAD")
+    tracked = _git(root, "diff", "--name-only", "--no-renames", fork) if fork else None
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard")
+    paths = (tracked or "").splitlines() + (untracked or "").splitlines()
+    return sorted({p for p in paths if p and not p.startswith(work_rel(root) + "/")})
+
+
+def risk_paths(paths: list[str], patterns: list[str]) -> list[str]:
+    """The `paths` any of `patterns` names, in order: an entry ending in `/` names every path under
+    it, any other is an fnmatch glob over the repo-relative path, its `*` crossing `/`. Copied
+    from `sdlc.py`, and pinned to it by a test."""
+
+    def named(p: str) -> bool:
+        return any(
+            p.startswith(pat) if pat.endswith("/") else fnmatch.fnmatchcase(p, pat)
+            for pat in patterns
+        )
+
+    return [p for p in paths if named(p)]
+
+
+def depth(root: Path, cfg: dict, rounds: list[dict]) -> dict:
+    """The depth this run reviews at, from the diff as it stands: `full` with no sensitive list
+    (every run, as before there was a choice), when the diff touches a listed path, or once any
+    round ran beyond `[light]` (a run never lightens); `light` otherwise. Writes nothing."""
+    base = _base(root)
+    listed = _sensitive(root, base) if base else []
+    changed = _changed_paths(root, base) if base else []
+    hit = risk_paths(changed, listed)
+    light = cfg["light"]
+    beyond = any(
+        r["round"] > light["rounds"] or set(r["reviews"]) - set(light["reviewers"]) for r in rounds
+    )
+    if not listed:
+        level, why = "full", "the base branch lists no [review] sensitive paths"
+    elif hit:
+        shown = ", ".join(hit[:5]) + (f" and {len(hit) - 5} more" if len(hit) > 5 else "")
+        level, why = "full", f"the diff touches sensitive path(s) {shown}"
+    elif beyond:
+        level, why = "full", "an earlier round ran at the full depth, and a run never lightens"
+    else:
+        level, why = "light", "the diff touches no sensitive path"
+    chosen = cfg if level == "full" else light
+    return {"depth": level, "sensitive": hit, "why": why, "changed": changed,
+            "reviewers": list(chosen["reviewers"]), "rounds": chosen["rounds"]}  # fmt: skip
+
+
+def snapshot_path(folder: Path, n: int) -> Path:
+    return folder / "build" / f"round-{n}.files"
+
+
+def read_snapshot(folder: Path, n: int) -> dict[str, str] | None:
+    """`build/round-<N>.files` as path → hash, or None when there is none."""
+    path = snapshot_path(folder, n)
+    if not path.is_file():
+        return None
+    found = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        digest, sep, name = line.partition("  ")
+        if sep and name:
+            found[name] = digest
+    return found
+
+
+def reworked(folder: Path, n: int) -> list[str] | None:
+    """The paths round `n`'s build changed since round `n - 1`'s, by their snapshots: every
+    changed path in round 1. None when a snapshot is missing, so the reviewers read it all."""
+    now = read_snapshot(folder, n)
+    if now is None:
+        return None
+    if n == 1:
+        return sorted(now)
+    before = read_snapshot(folder, n - 1)
+    if before is None:
+        return None
+    return sorted(p for p in set(now) | set(before) if now.get(p) != before.get(p))
 
 
 def emit(out: dict, code: int = 0) -> int:
@@ -228,9 +384,10 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
 
 
 def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[str]]:
-    """Every `reviews/round-<N>/`, in order: each configured reviewer's verdict and the changes it
-    asks for, and whether the round is complete. A file whose first line isn't a verdict is a
-    problem, never a guess."""
+    """Every `reviews/round-<N>/`, in order: each reviewer's verdict, the changes it asks for and
+    the pre-existing problems it found, the verifier's answer when there is one, and whether the
+    round is complete for `reviewers`, the ones the run's depth expects. A file whose first line
+    isn't a verdict is a problem, never a guess."""
     base = folder / "reviews"
     found = []
     problems = []
@@ -238,7 +395,7 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
     for path in sorted(dirs, key=lambda p: int(p.name[6:])):
         n = int(path.name[6:])
         reviews = {}
-        for role in reviewers:
+        for role in REVIEWERS:
             file = path / f"{role}.md"
             if not file.is_file():
                 continue
@@ -251,9 +408,90 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
                 )
                 continue
             changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
-            reviews[role] = {"verdict": m.group(1), "changes": changes}
-        found.append({"round": n, "reviews": reviews, "complete": set(reviews) == set(reviewers)})
+            if m.group(1) == "CHANGES" and not changes:
+                # Nothing to verify or rework: a malformed reply, refused like one with no verdict.
+                problems.append(
+                    f"reviews/round-{n}/{role}.md says VERDICT: CHANGES but lists no - CHANGE: line"
+                )
+                continue
+            preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, lines[1:]) if c]
+            reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting}
+        verified, wrong = read_verified(path / VERIFIED, n, reviews)
+        problems += wrong
+        complete = set(reviewers) <= set(reviews)
+        found.append({"round": n, "reviews": reviews, "complete": complete, "verified": verified})
     return found, problems
+
+
+def read_verified(path: Path, n: int, reviews: dict) -> tuple[dict | None, list[str]]:
+    """The verifier's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Every
+    `CHANGE:` the round's `CHANGES` verdicts ask for is answered exactly once, and every answer
+    names one: anything else is a problem, so no change is reworked or dropped unread."""
+    if not path.is_file():
+        return None, []
+    kept, dropped = [], []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if m := KEPT_RE.match(line):
+            kept.append({"role": m.group(1), "change": m.group(2)})
+        elif m := DROPPED_RE.match(line):
+            change, sep, why = m.group(2).rpartition(DROP_WHY)
+            text = change if sep else m.group(2)
+            dropped.append({"role": m.group(1), "change": text.strip(), "why": why.strip()})
+    asked = [
+        (role, c) for role, r in reviews.items() if r["verdict"] == "CHANGES" for c in r["changes"]
+    ]
+    answered = [(a["role"], a["change"]) for a in kept + dropped]
+    where = f"reviews/round-{n}/{VERIFIED}"
+    problems = [
+        f"{where} answers {role}: {c} {answered.count((role, c))} times, not once"
+        for role, c in dict.fromkeys(asked)
+        if answered.count((role, c)) != 1
+    ]
+    problems += [
+        f"{where} answers {role}: {c}, which no review of round {n} asks for"
+        for role, c in dict.fromkeys(answered)
+        if (role, c) not in asked
+    ]
+    return {"kept": kept, "dropped": dropped}, problems
+
+
+def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
+    """The rounds, their problems and the run's depth, each round's `complete` judged against the
+    reviewers that depth expects."""
+    rounds, problems = read_rounds(folder, cfg["reviewers"])
+    run = depth(root, cfg, rounds)
+    for r in rounds:
+        r["complete"] = set(run["reviewers"]) <= set(r["reviews"])
+    return rounds, problems, run
+
+
+def _change_path(change: str) -> str:
+    """The path a `CHANGE:` names, `path/to/file.py:42: what` → `path/to/file.py`."""
+    return change.split(":", 1)[0].strip().strip("`")
+
+
+def _untouched(root: Path, change: str, changed: list[str]) -> bool:
+    """Whether a `CHANGE:` is about code the change didn't touch: its path exists here and isn't
+    among `changed`. A path that doesn't exist yet is one the change is asked to create, never
+    pre-existing; with no changed paths known (no base branch), nothing is called untouched."""
+    path = _change_path(change)
+    return bool(changed) and path not in changed and (root / path).is_file()
+
+
+def settled(rounds: list[dict], before: int) -> list[str]:
+    """What the rounds before round `before` answered, as `role: change`: every dropped change,
+    and every kept one the round after it no longer asks for. A reviewer never raises one again."""
+    out = []
+    for i, r in enumerate(rounds):
+        if r["round"] >= before:
+            break
+        v = r["verified"] or {"kept": [], "dropped": []}
+        out += [f"{d['role']}: {d['change']}" for d in v["dropped"]]
+        later = rounds[i + 1] if i + 1 < len(rounds) else None
+        if later:
+            asked = {c for rv in later["reviews"].values() for c in rv["changes"]}
+            out += [f"{k['role']}: {k['change']}" for k in v["kept"] if k["change"] not in asked]
+    return list(dict.fromkeys(out))
 
 
 def build_round(folder: Path) -> int:
@@ -262,14 +500,22 @@ def build_round(folder: Path) -> int:
     return max((int(n) for n in names if n.isdigit()), default=0)
 
 
-def read_decision(folder: Path) -> tuple[str | None, str | None]:
+def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, str | None]:
+    """The approver's decision, or what's wrong with it. After a run whose rounds ran out with
+    changes still kept, only an ESCALATE that asks the person to reconsider the approach will do."""
     path = folder / "decision.md"
     if not path.is_file():
         return None, None
-    lines = path.read_text(encoding="utf-8").splitlines()
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
     m = DECISION_RE.match(lines[0]) if lines else None
     if not m:
         return None, "decision.md doesn't open with DECISION: READY or DECISION: ESCALATE"
+    if exhausted and (m.group(1) != "ESCALATE" or RECONSIDER not in lines):
+        return None, (
+            f"the rounds ran out with changes kept, so decision.md must be ESCALATE with a "
+            f"`{RECONSIDER}` section"
+        )
     return m.group(1), None
 
 
@@ -349,7 +595,9 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
 
     - `build`: no builder report yet: run the builder (`build/round-1.md`).
     - `review`: run the reviewers for `round` (all of them, or the `missing` ones).
-    - `rework`: resume the builder with `round`'s changes; its report is `build/round-<round+1>.md`.
+    - `verify`: run the verifier on `round`'s changes, before any rework.
+    - `rework`: resume the builder with `round`'s kept changes; its report is
+      `build/round-<round+1>.md`.
     - `approve`: carry what's unresolved to notes.md and run the approver.
     - `decide`: a blocking decision in `decisions.md` is waiting for the person (`pending`).
     - `done`: the decision is in.
@@ -360,25 +608,47 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     an answer the person gave, so no build reaches the approver unreviewed.
 
     Run `decisions` first: this reads the ledger as it stands, and writes nothing.
+
+    Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
+    changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
+    raised again), and for the verifier, `repeats` (a change raised again) and `untouched` (one on
+    a path the change doesn't touch: pre-existing, never reworked).
     """
     cfg, warnings = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
-    rounds, problems = read_rounds(folder, cfg["reviewers"])
-    decision, problem = read_decision(folder)
+    rounds, problems, run = _rounds_at_depth(root, folder, cfg)
+    last = rounds[-1] if rounds else None
+    changes = last and any(v["verdict"] == "CHANGES" for v in last["reviews"].values())
+    kept = bool(last and last["verified"] and last["verified"]["kept"])
+    exhausted = bool(last and last["complete"] and changes and kept)
+    exhausted = exhausted and last["round"] >= run["rounds"]
+    decision, problem = read_decision(folder, exhausted)
     problems += [problem] if problem else []
     now = _git(root, "rev-parse", "--short", "HEAD")
     moved = bool(head) and now is not None and not now.startswith(head) and not head.startswith(now)
     out: dict = {"change": folder.name, "rounds": rounds, "decision": decision, "head": now}
     out.update(head_moved=moved, problems=problems, warnings=warnings, round=None, missing=[])
     out["exhausted"] = False
+    out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
+    out["limit"] = run["rounds"]
     ledger = read_ledger(folder)
     out["pending"] = [d["id"] for d in ledger if d["kind"] == "blocking" and not d["decided"]]
     out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
-    last = rounds[-1] if rounds else None
     built = build_round(folder)
     out["built"] = built
+    out["reworked"] = reworked(folder, built) if built else None
+    out["settled"] = settled(rounds, last["round"] if last else 0)
+    asked = [
+        f"{role}: {c}"
+        for role, r in (last["reviews"].items() if last else ())
+        if r["verdict"] == "CHANGES"
+        for c in r["changes"]
+    ]
+    out["repeats"] = [a for a in asked if a in out["settled"]]
+    # With no base branch nothing is known to be touched, so nothing is called untouched.
+    out["untouched"] = [a for a in asked if _untouched(root, a.split(": ", 1)[1], run["changed"])]
     if moved:
         problems.append(f"HEAD moved from {head} to {now}: no agent may commit")
     if last and last["round"] > built:
@@ -392,35 +662,43 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     elif built == 0:
         out["next"], out["round"] = "build", 1
     elif last is None or last["round"] < built:
-        out["next"], out["round"], out["missing"] = "review", built, list(cfg["reviewers"])
+        out["next"], out["round"], out["missing"] = "review", built, list(run["reviewers"])
     elif not last["complete"]:
         out["next"], out["round"] = "review", last["round"]
-        out["missing"] = [r for r in cfg["reviewers"] if r not in last["reviews"]]
-    elif any(v["verdict"] == "CHANGES" for v in last["reviews"].values()):
-        if last["round"] < cfg["rounds"]:
-            out["next"], out["round"] = "rework", last["round"]
-        else:
-            out["next"], out["round"], out["exhausted"] = "approve", last["round"], True
+        out["missing"] = [r for r in run["reviewers"] if r not in last["reviews"]]
+    elif changes and last["verified"] is None:
+        out["next"], out["round"] = "verify", last["round"]
+    elif kept and last["round"] < run["rounds"]:
+        out["next"], out["round"] = "rework", last["round"]
     else:
-        out["next"], out["round"] = "approve", last["round"]
+        out["next"], out["round"], out["exhausted"] = "approve", last["round"], exhausted
     return emit(out)
 
 
 def cmd_carry(root: Path, ident: str) -> int:
-    """Each change the last complete round still asks for, as an unticked `- [ ]` line in
-    notes.md, so `/sdlc:ship` must give it a disposition. Once only: a line already there, ticked
-    or not, isn't added again."""
+    """Each change the last complete round still asks for and the verifier kept (every one, in a
+    round from before there was a verifier), and every pre-existing problem a reviewer found, as an
+    unticked `- [ ]` line in notes.md, so `/sdlc:ship` must give each a disposition. Once only: a
+    line already there, ticked or not, isn't added again."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
-    rounds, _ = read_rounds(folder, cfg["reviewers"])
+    rounds, _, _ = _rounds_at_depth(root, folder, cfg)
     done = [r for r in rounds if r["complete"]]
     wanted = []
     if done:
-        for role, review in done[-1]["reviews"].items():
-            if review["verdict"] == "CHANGES":
-                wanted += [f"{role}: {text}" for text in review["changes"]]
+        last = done[-1]
+        if last["verified"] is not None:
+            wanted += [f"{k['role']}: {k['change']}" for k in last["verified"]["kept"]]
+        else:
+            for role, review in last["reviews"].items():
+                if review["verdict"] == "CHANGES":
+                    wanted += [f"{role}: {text}" for text in review["changes"]]
+    for r in rounds:
+        for review in r["reviews"].values():
+            wanted += [f"pre-existing: {text}" for text in review["preexisting"]]
+    wanted = list(dict.fromkeys(wanted))
     notes = folder / "notes.md"
     text = notes.read_text(encoding="utf-8") if notes.is_file() else ""
     added = [item for item in wanted if item not in text]
@@ -432,6 +710,30 @@ def cmd_carry(root: Path, ident: str) -> int:
         text += "\n" + "".join(f"- [ ] {item}\n" for item in added)
         notes.write_text(text, encoding="utf-8")
     return emit({"change": folder.name, "notes": str(notes), "added": added})
+
+
+def cmd_snapshot(root: Path, ident: str, n: int) -> int:
+    """Write `build/round-<N>.files`: a hash of every path the change touches as round `n`'s build
+    left it, so the next round's reviewers read what the rework changed. A file in the change's
+    folder, never a commit, a stash or anything under `.git/`."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    if n < 1:
+        return emit({"refusals": ["a round is 1 or more"]}, 1)
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    lines = []
+    for p in _changed_paths(root, base):
+        file = root / p
+        digest = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+        lines.append(f"{digest}  {p}\n")
+    path = snapshot_path(folder, n)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(lines), encoding="utf-8")
+    rel = str(path.relative_to(root))
+    return emit({"change": folder.name, "snapshot": rel, "paths": len(lines)})
 
 
 def set_stage(text: str, stage: str, today: str) -> tuple[str, list[str]]:
@@ -482,6 +784,9 @@ def main() -> int:
     p_decisions.add_argument("id")
     p_carry = sub.add_parser("carry", help="unresolved changes to notes.md as `- [ ]` items")
     p_carry.add_argument("id")
+    p_snapshot = sub.add_parser("snapshot", help="hash what a round's build left, for the next")
+    p_snapshot.add_argument("id")
+    p_snapshot.add_argument("--round", dest="round", type=int, required=True)
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
@@ -497,6 +802,8 @@ def main() -> int:
         return cmd_decisions(root, args.id)
     if args.cmd == "carry":
         return cmd_carry(root, args.id)
+    if args.cmd == "snapshot":
+        return cmd_snapshot(root, args.id, args.round)
     return cmd_stage(root, args.id, args.stage)
 
 

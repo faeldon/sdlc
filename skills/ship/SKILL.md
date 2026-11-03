@@ -85,10 +85,12 @@ them.
 **Agents' verdicts, when there are any.** A change built by agents (the optional `sdlc-factory`
 plugin) has `.sdlc/work/NNN-slug/decision.md`, opening `DECISION: READY` or `DECISION: ESCALATE`, and
 its reviews in `.sdlc/work/NNN-slug/reviews/round-<N>/<role>.md`, each opening `VERDICT: PASS` or
-`VERDICT: CHANGES`, and the person's calls the agents raised in `.sdlc/work/NNN-slug/decisions.md`
-(`- [x]` decided, `- [ ]` assumed). When they exist, read the decision, the highest round's
-reviews and the ledger: they are evidence for Step 3, never a substitute for it. A change with
-none of them is reviewed exactly as below.
+`VERDICT: CHANGES`, each round's verifier answers in `reviews/round-<N>/verified.md` (`- KEPT:`
+for the builder, `- DROPPED:` with why), and the person's calls the agents raised in
+`.sdlc/work/NNN-slug/decisions.md` (`- [x]` decided, `- [ ]` assumed). When they exist, read the
+decision, the highest round's reviews, every `verified.md` and the ledger: they are evidence for
+Step 3, never a substitute for it. A dropped change your own passes confirm is a finding like any
+other. A change with none of them is reviewed exactly as below.
 
 Then everything else this skill looks up about the change, in one call that writes nothing:
 

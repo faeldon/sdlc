@@ -42,6 +42,17 @@ Read the tests before the code; they show what the builder meant.
 
 You may run the repo's tests or gate to check a claim. Run nothing that writes.
 
+## Later rounds, and what isn't this change's
+
+From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
+(`reworked`), the changes the verifier kept for it, and what is `settled`. Review those paths and
+whether each kept change was done; never raise a settled point again, and never raise something
+new in code an earlier round already passed unless the rework broke it. A round you join for the
+first time, you review the whole change.
+
+A problem in code this change didn't touch is not a CHANGE: return it as
+`- PREEXISTING: path/to/file.py:42: what is wrong`, filed for later, never reworked here.
+
 ## What you return
 
 The first line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`. CHANGES when there is any

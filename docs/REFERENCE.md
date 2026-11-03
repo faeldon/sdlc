@@ -654,7 +654,10 @@ and `/sdlc:retro` reads what it lacks as unknown.
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,
 no or unknown, and `Sdlc-Rework` counts the trial and error inside the change (the spec or plan
 edited after their stage, `revise` answers, failed gate runs, ship reruns, lines written against
-lines kept, and for the factory its rounds, verdicts and decisions). Exploration you mean to throw
+lines kept, and for the factory its rounds, verdicts and decisions, with an `Sdlc-Review` line per
+reviewer: its `CHANGES` verdicts, its requests and, from a run with a verifier, how many of them
+the verifier `dropped`; a run from before that has no `dropped`, read as unknown). Exploration you
+mean to throw
 away goes under `stage: spike`, which owes no artifact; its cost is reported apart as
 `Sdlc-Spike`, never as rework.
 

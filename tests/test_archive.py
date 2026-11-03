@@ -889,14 +889,14 @@ FACTORY_FILES = {
 }
 
 
-def _factory_shipped(root: Path) -> str:
+def _factory_shipped(root: Path, files: dict[str, str] = FACTORY_FILES) -> str:
     """A change the factory built, shipped with 7 lines of code and 3 of tests beside its
     folder; its name."""
     folder = _open(root)
     tree = sdlc.checkout_of(folder)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
-    for name, text in FACTORY_FILES.items():
+    for name, text in files.items():
         (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_text(text, encoding="utf-8")
     (tree / "lib.py").write_text("x = 1\n" * 7)
@@ -926,6 +926,22 @@ def test_close_records_rework_and_the_happy_path_from_the_factorys_files(
                                "test": {"changes": 0, "requests": 0}}  # fmt: skip
     assert back["happy"]["build"] == "unknown", "no transcripts: never guessed"
     assert "/" not in "\n".join(ln for ln in body.splitlines() if ln.startswith("Sdlc-"))
+
+
+def test_what_the_verifier_dropped_is_counted_on_each_reviewer(tmp_path, gh, capsys) -> None:
+    """A run with a verifier says `dropped` for every reviewer, none included; a run from before
+    it, above, says nothing, so its trailer reads as unknown there."""
+    root = _repo(tmp_path)
+    verified = "- KEPT: code: name it\n- DROPPED: code: test it — the test exists\n"
+    name = _factory_shipped(root, {**FACTORY_FILES, "reviews/round-1/verified.md": verified})
+    assert sdlc._factory_files(root, name)["reviews"] == {
+        "code": {"changes": 1, "requests": 2, "dropped": 1},
+        "test": {"changes": 0, "requests": 0, "dropped": 0},
+    }
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    back = sdlc.metrics.parse_trailers(_git(root, "log", "-1", "--format=%B", "main"))
+    assert back["reviews"]["code"]["dropped"] == 1 and back["reviews"]["test"]["dropped"] == 0
 
 
 def test_the_diffs_size_is_the_same_after_the_merge(tmp_path, gh, capsys) -> None:

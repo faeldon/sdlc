@@ -38,6 +38,13 @@ that touches a destructive operation, a secret or a published interface.
 
 When in doubt, ESCALATE: a person's minute is cheaper than a wrong change on `main`.
 
+**When the rounds ran out** with changes still kept (the prompt says so), the loop didn't
+converge, and another round of the same rarely does: the decision is ESCALATE, with a
+`## Reconsider the approach` section saying what kept coming back, round to round, and whether the
+spec, the plan or the approach is what should change, not only the code. The skill refuses any
+other decision for such a run. Read each round's `verified.md` too: what the verifier dropped, and
+why, is part of that story.
+
 ## What you return
 
 The first line is exactly `DECISION: READY` or `DECISION: ESCALATE`. Then:

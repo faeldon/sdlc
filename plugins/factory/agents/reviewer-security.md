@@ -43,6 +43,17 @@ each with STRIDE before listing findings. Then check, as far as the diff reaches
 Focus on what is exploitable, not theoretical. Never suggest disabling a control as a fix. You may
 run read-only commands (tests, `git log`, a dependency audit) to check a claim.
 
+## Later rounds, and what isn't this change's
+
+From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
+(`reworked`), the changes the verifier kept for it, and what is `settled`. Review those paths and
+whether each kept change was done; never raise a settled point again, and never raise something
+new in code an earlier round already passed unless the rework broke it. A round you join for the
+first time, you review the whole change.
+
+A problem in code this change didn't touch is not a CHANGE: return it as
+`- PREEXISTING: path/to/file.py:42: what is wrong`, filed for later, never reworked here.
+
 ## What you return
 
 The first line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`. CHANGES when there is any

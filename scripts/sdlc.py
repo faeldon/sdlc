@@ -2745,12 +2745,15 @@ FACTORY_VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 FACTORY_DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 FACTORY_CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 FACTORY_LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
+FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:
     """What the factory left in the change's commit, as counts: review rounds, each reviewer's
-    `CHANGES` verdicts and change requests, the approver's decision, and the ledger's blocking
-    and default decisions. None for a change built by hand (no `decision.md`)."""
+    `CHANGES` verdicts, change requests and requests the verifier dropped (`dropped`, from each
+    round's `verified.md`), the approver's decision, and the ledger's blocking and default
+    decisions. None for a change built by hand (no `decision.md`)."""
     folder = f"{work_rel(main)}/{branch}"
     decision = _git(main, "show", f"{branch}:{folder}/decision.md")
     if decision is None:
@@ -2766,10 +2769,21 @@ def _factory_files(main: Path, branch: str) -> dict | None:
             continue
         rounds.add(parts[1])
         lines = (_git(main, "show", f"{branch}:{path}") or "").splitlines()
+        if parts[2] == "verified.md":
+            # The verifier's answers, counted on the reviewer whose request it dropped.
+            for m in filter(None, map(FACTORY_DROPPED_RE.match, lines)):
+                r = reviews.setdefault(m.group(1), {"changes": 0, "requests": 0})
+                r["dropped"] = r.get("dropped", 0) + 1
+            continue
         verdict = FACTORY_VERDICT_RE.match(lines[0]) if lines else None
         r = reviews.setdefault(parts[2].removesuffix(".md"), {"changes": 0, "requests": 0})
         r["changes"] += int(bool(verdict) and verdict.group(1) == "CHANGES")
         r["requests"] += sum(1 for line in lines[1:] if FACTORY_CHANGE_RE.match(line))
+    if any(p.endswith("/verified.md") for p in listed.splitlines()):
+        # A run with a verifier says `dropped` for every reviewer, 0 included; one from before
+        # it says nothing, so its trailer reads as unknown there, never as nothing dropped.
+        for r in reviews.values():
+            r.setdefault("dropped", 0)
     ledger = _git(main, "show", f"{branch}:{folder}/decisions.md") or ""
     entries = [e for e in map(FACTORY_LEDGER_RE.match, ledger.splitlines()) if e]
     defaults = [e for e in entries if e.group(4) == "default"]

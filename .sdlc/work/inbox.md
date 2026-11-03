@@ -469,41 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-9] [idea] The factory verifies reviewers' findings before the builder reworks them
-
-The post runs several bug hunters in parallel and posts a finding only when enough verifiers vote
-it real, dropping style-only ones, and says noise costs more with an agent author: "a person can
-wave off a nit in seconds. An agent fixes it", a commit and a round. Between review and rework, a
-verify step checks each `- CHANGE:` line against the code and keeps only the confirmed ones;
-`factory.py` counts the dropped ones in the round's files, and close measures them. Phase 4.
-Raised 2026-11-03.
-
-## [2026-11-03-10] [idea] Factory rounds that converge
-
-The post saw one PR go through more than fifty review-and-fix rounds overnight, the reviewer
-finding "a few more old ones each round". Our cap of three stops the runaway; what's missing:
-- from round 2, reviewers read only the rework's diff and the round's open `CHANGE:` lines
-  (`factory.py` snapshots each round's tree with `git stash create` or `write-tree`, never a
-  commit);
-- a finding already raised is never raised again;
-- code the change didn't touch is a pre-existing finding (2026-11-03-2), never a `CHANGE:`;
-- at the cap, the approver asks the person to step back and reconsider the approach, not only for
-  a verdict.
-The post's numbers after the same changes: mean reviews to pass 2.08 to 1.32. Phase 4. Raised
-2026-11-03.
-
-After: 2026-11-03-9
-
-## [2026-11-03-11] [idea] The factory scales its reviewers and rounds to a change's risk
-
-`factory.toml` sets one `reviewers` list and one `rounds` for every change. The post's review has
-Quick, Standard and Deep, "deep where a missed bug costs more than the extra review time". With
-the risk ship reads (2026-11-03-4), a low-risk change runs one reviewer for one round and a
-sensitive one all three for the full rounds; the build approval shows which and why, and the most
-agent runs it can take. Phase 4. Raised 2026-11-03.
-
-After: 2026-11-03-10
-
 ## [2026-11-03-12] [idea] The builder shows its evidence, and a behaviour check runs the change
 
 The post: give the agent something it can run and "ask it to show the output instead of saying
@@ -511,8 +476,6 @@ it's done", which the creator of Claude Code puts at two to three times better r
 builder's round reports carry each command it ran and the tail of its output. A behaviour check,
 apart from the test reviewer, runs the change's `checks.md` and the end-to-end path the spec
 describes, and reports what ran and what it returned. Phase 4. Raised 2026-11-03.
-
-After: 2026-11-03-11
 
 ## [2026-11-03-13] [idea] A replay eval for the factory's reviewers, from escaped bugs
 

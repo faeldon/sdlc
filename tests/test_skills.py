@@ -156,7 +156,12 @@ READS_CONFIG = {
         "git.base",
     ],
     "sdlc-factory:spec": ["factory.models"],
-    "sdlc-factory:build": ["factory.reviewers", "factory.rounds", "factory.models"],
+    "sdlc-factory:build": [
+        "factory.reviewers",
+        "factory.rounds",
+        "factory.light",
+        "factory.models",
+    ],
 }
 
 
@@ -646,6 +651,8 @@ AGENT_TOOLS = {
     "reviewer-code": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-security": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-test": {"Read", "Grep", "Glob", "Bash"},
+    # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
+    "verifier": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
 }
 ADAPTED = {"spec-writer", "builder", "reviewer-code", "reviewer-security", "reviewer-test"}
@@ -695,12 +702,40 @@ def test_judging_agents_return_text_the_skill_writes() -> None:
     assert "in one\n     message" in build or "in one message" in build, "reviewers in parallel"
 
 
+def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
+    """A verifier answers every change before the builder reworks any, the builder addresses only
+    the kept ones, and the one question states both depths, or the full one alone when the base
+    branch lists no sensitive paths."""
+    build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
+    step3 = build.split("## Step 3")[1].split("## Step 4")[0]
+    assert step3.index("**`verify`**") < step3.index("**`rework`**")
+    assert "sdlc-factory:verifier" in step3 and "verified.md" in step3
+    assert "Address every KEPT line" in step3 and "snapshot <NNN> --round <N>" in step3
+    assert "## Reconsider the approach" in step3
+    wait = build.split("## Step 2")[1].split("## Step 3")[0]
+    question = " ".join(wait.split())
+    assert (
+        "<reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to "
+        "<light rounds> when the diff touches no sensitive path), a verifier checks each "
+        "round's changes, the approver decides, at most <max_runs> agent runs" in question
+    )
+    assert "Leave out the parenthesis" in wait
+    builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
+    assert "- KEPT:" in builder and "`- DROPPED:` line is not yours" in builder
+    for role in ("code", "security", "test"):
+        text = (FACTORY / "agents" / f"reviewer-{role}.md").read_text(encoding="utf-8")
+        assert "- PREEXISTING:" in text and "never raise a settled point again" in text, role
+    approver = (FACTORY / "agents" / "approver.md").read_text(encoding="utf-8")
+    assert "## Reconsider the approach" in approver and "verified.md" in approver
+
+
 def test_ship_reads_the_agents_verdicts() -> None:
     """When a change was built by agents, ship reads their decision and reviews as evidence for its
     own passes, and shows them; a change without them is reviewed as before."""
     text = BY_ID["sdlc:ship"].read_text(encoding="utf-8")
     step0 = text.split("## Step 0")[1].split("## Step 1")[0]
     assert "decision.md" in step0 and "reviews/round-<N>/" in step0
+    assert "reviews/round-<N>/verified.md" in step0, "what the verifier dropped, and why"
     step4 = text.split("## Step 4")[1].split("## Step 5")[0]
     assert "**Agent verdicts.**" in step4 and "ESCALATE" in step4
     assert "never stands in" in step4

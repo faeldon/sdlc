@@ -290,7 +290,11 @@ cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from
 mechanism is `factory.py`, because its own cached copy has no `sdlc.py`. Agents that judge have
 no Write; only the builder edits, and nothing commits. Decisions that are the person's go
 through `decisions.md`, asked by the build session. `sdlc` only reads, at ship, the files a run
-leaves in the change's folder.
+leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
+verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
+`[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
+`sdlc.py`'s by a test, like its regexes: `verdicts` writes nothing, so a run that reviewed at the
+full depth stays full by what its rounds hold, never by a state file.
 
 ## Invariants the tests enforce
 
