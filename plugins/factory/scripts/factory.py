@@ -809,6 +809,278 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     return emit({"change": folder.name, "stage": stage})
 
 
+# ---------------------------------------------------------------- what escaped, and old code
+#
+# The eval replays the reviewers on the diffs that let real bugs through, and the review looks at
+# code no change touches. Both read what `sdlc.py` writes (the register's `[bug]` entries, the
+# `Close` commits' `Sdlc-Fixes` and `Sdlc-Base` lines) with copies of its parsing, pinned to it by
+# tests, since this plugin's cached copy has no `sdlc.py`. Neither writes the register: a review's
+# bugs reach it only through `/sdlc:bug`.
+
+INBOX = Path(".sdlc") / "work" / "inbox.md"
+BUG_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})-(\d+)\]\s*\[bug\]\s*(.+)$")
+FIELD_RE = re.compile(r"^(Severity|Paths|Introduced by):\s*(.+)$")
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+TRAILER_RE = re.compile(r"^Sdlc-(Fixes|Base):\s*(.*)$")
+CLOSE_PREFIX = "Close "
+# Where the eval and the review write, uncommitted: a folder that ignores itself, so a run never
+# dirties a checkout and needs nothing of setup.
+REPORTS = Path(".sdlc") / "reports"
+REPORT_KINDS = ("eval", "review")
+SCORE_RE = re.compile(r"^- ([a-z]+): (\d+) of (\d+) caught")
+
+
+def _words(rest: str) -> tuple[str | None, dict[str, str]]:
+    """An `Sdlc-*` line's value: its leading name, when the first word isn't `key=value`, and its
+    `key=value` words. Copied from `metrics.parse_trailers`, values kept as text."""
+    words = rest.split()
+    name = words[0] if words and "=" not in words[0] else None
+    fields = {}
+    for word in words[1:] if name else words:
+        k, _, v = word.partition("=")
+        fields[k] = v
+    return name, fields
+
+
+def bug_paths(raw: object) -> list[str] | None:
+    """A bug's paths, from the register (a list) or an `Sdlc-Fixes` line's `paths=` (text, or
+    `unknown`); None when nobody recorded them. Copied from `sdlc.py`'s `_bug_paths()`."""
+    if isinstance(raw, list):
+        return raw or None
+    if not isinstance(raw, str) or raw in ("", "unknown"):
+        return None
+    return [p for p in raw.split(",") if p]
+
+
+def on_paths(evidence: str, paths: list[str] | None) -> bool | None:
+    """Whether a finding's path is one of a bug's paths, under one, or holds one; None when the
+    bug's paths are unknown. Copied from `sdlc.py`'s `_on_paths()`."""
+    if paths is None:
+        return None
+    where = (evidence.split() or [""])[0].split(":", 1)[0].strip("`").rstrip("/")
+    for p in paths:
+        p = p.strip("`").rstrip("/")
+        if where and p and (where == p or where.startswith(p + "/") or p.startswith(where + "/")):
+            return True
+    return False
+
+
+def open_bugs(root: Path) -> list[dict]:
+    """The register's `[bug]` entries: id, title, reported date, severity, paths and the change
+    they were introduced by, read as `sdlc.py`'s `bug_entries()` reads them."""
+    path = root / INBOX
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    found: list[dict] = []
+    current: dict | None = None
+    fenced = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if m := BUG_RE.match(line):
+            current = {"id": f"{m.group(1)}-{m.group(2)}", "title": m.group(3).strip(),
+                       "reported": m.group(1), "fields": {}}  # fmt: skip
+            found.append(current)
+        elif line.startswith("#"):
+            current = None
+        elif current is not None and (f := FIELD_RE.match(line.strip())):
+            current["fields"].setdefault(f.group(1), f.group(2).strip())
+    out = []
+    for b in found:
+        fields = b.pop("fields")
+        paths = fields.get("Paths", "")
+        by = (fields.get("Introduced by") or "").strip() or None
+        out.append({**b, "severity": fields.get("Severity", "").strip(),
+                    "paths": [p.strip().strip("`") for p in paths.split(",") if p.strip()],
+                    "introduced_by": by})  # fmt: skip
+    return out
+
+
+def closes(root: Path, base: str) -> tuple[dict[str, dict], list[dict]]:
+    """Every `Close <name>` on the base branch's first-parent line: the change's own commit (the
+    close's parent) and the `Sdlc-Base:` it recorded, by name; and every `Sdlc-Fixes:` line on
+    them, as the bugs those changes fixed."""
+    log = _git(root, "log", "--first-parent", "--format=%x1e%H%x00%P%x00%B", base) or ""
+    by_name: dict[str, dict] = {}
+    fixed: list[dict] = []
+    for record in log.split("\x1e"):
+        sha, _, rest = record.partition("\x00")
+        parents, _, body = rest.partition("\x00")
+        subject = body.strip().splitlines()[0] if body.strip() else ""
+        if not subject.startswith(CLOSE_PREFIX) or not parents.split():
+            continue
+        name = subject[len(CLOSE_PREFIX) :].strip()
+        rec = {"commit": parents.split()[0], "base": None}
+        for line in body.splitlines():
+            if m := TRAILER_RE.match(line.strip()):
+                if m.group(1) == "Base":
+                    rec["base"] = m.group(2).strip() or None
+                else:
+                    bug, fields = _words(m.group(2))
+                    if bug:
+                        fixed.append({"id": bug, **fields})
+        by_name.setdefault(name, rec)
+    return by_name, fixed
+
+
+def cmd_escapes(root: Path, limit: int) -> int:
+    """The bugs that escaped a review and the change each came in with, newest reported first: the
+    fixed ones from `Sdlc-Fixes`, the open ones from the register. Each with the diff to replay:
+    from the close's `Sdlc-Base:` to the change's commit, or its last commit alone (`partial`)
+    when the close recorded no base. Read-only."""
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    by_name, fixed = closes(root, base)
+    bugs = [
+        {"id": f["id"], "title": None, "reported": f.get("reported"), "severity": f.get("severity"),
+         "paths": bug_paths(f.get("paths")), "introduced_by": f.get("introduced_by")}
+        for f in fixed
+    ] + [{**b, "paths": b["paths"] or None} for b in open_bugs(root)]  # fmt: skip
+    found, unattributed, unknown = [], 0, 0
+    for b in bugs:
+        by = b["introduced_by"]
+        if not by or by == "unknown":
+            unattributed += 1
+            continue
+        name = next((n for n in by_name if names_change(n, by)), None)
+        if name is None:
+            unknown += 1
+            continue
+        rec = by_name[name]
+        start = rec["base"] or f"{rec['commit']}^"
+        found.append({**b, "change": name, "commit": rec["commit"], "base": start,
+                      "partial": rec["base"] is None})  # fmt: skip
+    found.sort(key=lambda e: str(e.get("reported") or ""), reverse=True)
+    return emit({"escapes": found[:limit], "listed": len(found), "limit": limit,
+                 "unattributed": unattributed, "unknown_change": unknown})  # fmt: skip
+
+
+def cmd_report_dir(root: Path, kind: str) -> int:
+    """A fresh run folder under `.sdlc/reports/`, which ignores itself, for an eval or a review to
+    write into: `<kind>-<date>-<n>/`."""
+    reports = root / REPORTS
+    reports.mkdir(parents=True, exist_ok=True)
+    ignore = reports / ".gitignore"
+    if not ignore.is_file():
+        ignore.write_text("*\n", encoding="utf-8")
+    stamp = f"{kind}-{date.today().isoformat()}"
+    n = 1 + sum(1 for p in reports.glob(f"{stamp}-*") if p.is_dir())
+    run = reports / f"{stamp}-{n}"
+    run.mkdir()
+    return emit({"run": str(run.relative_to(root))})
+
+
+def _run_order(path: Path) -> tuple[str, int]:
+    """A run's place among its kind: its date, then its number within the day."""
+    stem = path.name.removesuffix(".md")
+    day, _, n = stem.rpartition("-")
+    return day, int(n) if n.isdigit() else 0
+
+
+def cmd_score(root: Path, run_rel: str) -> int:
+    """Score an eval's run: a reviewer caught a bug when one of its `CHANGE:` lines sits on the
+    bug's paths, missed it when none does, and is `unknown` when the paths weren't recorded, never
+    missed. Write `<run>.md` beside the run, with each reviewer's score against the last eval's."""
+    run = root / run_rel
+    data = json.loads((run / "escapes.json").read_text(encoding="utf-8"))
+    escapes = data["escapes"] if isinstance(data, dict) else data
+    scores: dict[str, dict] = {}
+    bugs = []
+    for b in escapes:
+        results = {}
+        for reply in sorted((run / b["id"]).glob("*.md")):
+            role = reply.stem
+            changes = [
+                c.group(1)
+                for c in map(CHANGE_RE.match, reply.read_text(encoding="utf-8").splitlines())
+                if c
+            ]
+            hits = [c for c in changes if on_paths(c, b.get("paths"))]
+            result = "unknown" if b.get("paths") is None else "caught" if hits else "missed"
+            results[role] = {"result": result, "lines": hits}
+            s = scores.setdefault(role, {"caught": 0, "scored": 0})
+            if result != "unknown":
+                s["scored"] += 1
+                s["caught"] += result == "caught"
+        bugs.append({"id": b["id"], "change": b.get("change"), "results": results})
+    earlier = [p for p in (root / REPORTS).glob("eval-*.md") if _run_order(p) < _run_order(run)]
+    previous: dict[str, tuple[int, int]] = {}
+    if earlier:
+        last = max(earlier, key=_run_order)
+        for line in last.read_text(encoding="utf-8").splitlines():
+            if m := SCORE_RE.match(line):
+                previous[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    lines = [f"# Eval {run.name}", "", "## Reviewers", ""]
+    for role, s in sorted(scores.items()):
+        was = previous.get(role)
+        then = f" (was {was[0]} of {was[1]})" if was else ""
+        lines.append(f"- {role}: {s['caught']} of {s['scored']} caught{then}")
+        s["previous"] = {"caught": was[0], "scored": was[1]} if was else None
+    lines += ["", "## Bugs", ""]
+    for b in bugs:
+        lines.append(f"### {b['id']} ({b['change']})")
+        for role, r in sorted(b["results"].items()):
+            lines.append(f"- {role}: {r['result']}")
+            lines += [f"  - `{text}`" for text in r["lines"]]
+        lines.append("")
+    report = run.parent / f"{run.name}.md"
+    report.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return emit({"report": str(report.relative_to(root)), "reviewers": scores, "bugs": bugs})
+
+
+def _open_change_paths(root: Path, base: str) -> set[str]:
+    """Every path an open change's worktree touches: a review of old code leaves them alone."""
+    listing = _git(root, "worktree", "list", "--porcelain") or ""
+    touched: set[str] = set()
+    tree = None
+    for line in listing.splitlines():
+        if line.startswith("worktree "):
+            tree = Path(line[len("worktree ") :])
+        elif line.startswith("branch refs/heads/") and tree is not None:
+            branch = line[len("branch refs/heads/") :]
+            if DIR_RE.match(branch) and tree.resolve() != root.resolve():
+                touched |= set(_changed_paths(tree, base))
+    return touched
+
+
+def cmd_slice(root: Path, paths: list[str], limit: int) -> int:
+    """The code a review looks at: the paths named; else the tracked files under the base
+    branch's `[review] sensitive`; else the `limit` least recently changed tracked files. Paths an
+    open change touches are always left out. Read-only."""
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    # The change folders and the register are the process's records, not code to review.
+    tracked = [
+        p
+        for p in (_git(root, "ls-files") or "").splitlines()
+        if not p.startswith(work_rel(root) + "/")
+    ]
+    if paths:
+        chosen, why = list(paths), "the paths named"
+    elif hit := risk_paths(tracked, _sensitive(root, base)):
+        chosen, why = hit[:limit], "the base branch's [review] sensitive paths"
+    else:
+        # One walk, newest first: the first time a path shows up is when it last changed.
+        last: dict[str, int] = {}
+        stamp = 0
+        log = _git(root, "log", "--format=%x00%ct", "--name-only", "HEAD") or ""
+        for line in log.splitlines():
+            if line.startswith("\x00"):
+                stamp = int(line[1:] or 0)
+            elif line and line not in last:
+                last[line] = stamp
+        oldest = sorted(tracked, key=lambda p: (last.get(p, 0), p))
+        chosen, why = oldest[:limit], f"the {limit} least recently changed tracked files"
+    busy = _open_change_paths(root, base)
+    left_out = [p for p in chosen if p in busy]
+    return emit({"paths": [p for p in chosen if p not in busy], "why": why,
+                 "left_out": left_out, "limit": limit})  # fmt: skip
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="The sdlc-factory layer's mechanism.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -829,6 +1101,15 @@ def main() -> int:
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
+    p_escapes = sub.add_parser("escapes", help="escaped bugs and the diffs that let them in")
+    p_escapes.add_argument("--limit", type=int, default=10)
+    p_report = sub.add_parser("report-dir", help="a fresh run folder under .sdlc/reports/")
+    p_report.add_argument("--kind", choices=REPORT_KINDS, required=True)
+    p_score = sub.add_parser("score", help="score an eval's run against the last one")
+    p_score.add_argument("run")
+    p_slice = sub.add_parser("slice", help="the code a review of old code looks at")
+    p_slice.add_argument("--paths", nargs="*", default=[])
+    p_slice.add_argument("--limit", type=int, default=10)
     args = ap.parse_args()
     root = repo_root()
     if args.cmd == "config":
@@ -843,6 +1124,14 @@ def main() -> int:
         return cmd_carry(root, args.id)
     if args.cmd == "snapshot":
         return cmd_snapshot(root, args.id, args.round)
+    if args.cmd == "escapes":
+        return cmd_escapes(root, args.limit)
+    if args.cmd == "report-dir":
+        return cmd_report_dir(root, args.kind)
+    if args.cmd == "score":
+        return cmd_score(root, args.run)
+    if args.cmd == "slice":
+        return cmd_slice(root, args.paths, args.limit)
     return cmd_stage(root, args.id, args.stage)
 
 

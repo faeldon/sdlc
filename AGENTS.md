@@ -297,6 +297,10 @@ verifier's `verified.md`, and the run's depth comes from the diff against the ba
 full depth stays full by what its rounds hold, never by a state file. A builder report and a
 behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
 checks; the behaviour check never runs `checks.md`, which only `accept` runs, under a prompt.
+The eval and the review read what `sdlc.py` writes (the register's bugs, `Sdlc-Fixes` and
+`Sdlc-Base` on `Close` commits) through copies of its parsing, each pinned by a test, write only
+under `.sdlc/reports/`, a folder that ignores itself, and never write the register: a review's
+bugs reach it through `/sdlc:bug` and `inbox-commit` alone.
 
 ## Invariants the tests enforce
 
@@ -305,7 +309,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec` and `build`) have exactly one heading
+  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec`, `build`, `eval` and `review`) have exactly one heading
   containing `WAIT`. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill

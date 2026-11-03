@@ -33,6 +33,21 @@ built is a change.
   take. Then it runs unattended, except to ask you about a blocking decision, and stops at
   `stage: test` with everything **uncommitted**. `/sdlc:ship` reviews it and makes the one commit.
 
+Two more skills stand outside any change, each run only when you ask, behind one approval that
+states the most agent runs it takes. Both write only under `.sdlc/reports/`, a folder that ignores
+itself, so neither ever dirties a checkout.
+
+- **`/sdlc-factory:eval [--limit N]`**: replays the reviewers on the diffs that let real bugs
+  through (each `[bug]` with an `Introduced by:`, and each bug a change fixed, from its `Close`
+  commit's `Sdlc-Fixes`), as text, read-only, and scores which reviewer raised a `CHANGE:` on each
+  bug's paths, against the last eval. Run it before and after changing a reviewer's prompt or
+  model: keep the change only if the score holds or rises.
+- **`/sdlc-factory:review [paths…]`**: has the code and security reviewers look at code no change
+  touches (your paths; else the `[review] sensitive` paths; else the least recently changed
+  files; never a path an open change touches) and writes what they find as proposed `[bug]`
+  entries. It files nothing: `/sdlc:bug <report>` files the ones you pick. To run it regularly,
+  put `/sdlc-factory:review` on a `/schedule` routine: it still stops at its approval.
+
 The agents never commit, push or merge, and the run stops if `HEAD` moves. **Under the factory,
 the builder's `plan.md` is accepted by your approval of the run**, not read by you in plan mode
 first. That is the trade this layer makes; the reviewers check the build against the plan and the
@@ -128,8 +143,11 @@ the number before you approve it, whatever depth the diff turns out to need.
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
 stage allows the step, where `HEAD` was, what each review's first line says, the verifier's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`). It doesn't
-call `sdlc.py`: installed from the marketplace, each plugin is cached on its own.
+`review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); for the eval and the
+review, which bugs escaped and through which diff (`escapes`), the slice of code to look at
+(`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It doesn't call
+`sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads the
+register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
 
 ## License
 

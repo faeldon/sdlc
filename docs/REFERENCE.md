@@ -317,7 +317,8 @@ an entry it can't read.
 process doc's, from the `- **severity:**` bullet in its section headed `Bugs…`, most severe first
 (`high` · `med` · `low` when it has none). `/sdlc:bug` files one, retires one that needs no fix
 (`duplicate`, `not-a-bug`, `wontfix` or `cant-reproduce`) or retags one filed as the wrong kind,
-behind one approval, and `sdlc.py inbox-commit` commits the inbox alone, on the base branch in
+or, given the path of a report `/sdlc-factory:review` wrote, files the proposed bugs the person
+picks from it, each with its own id, behind one approval, and `sdlc.py inbox-commit` commits the inbox alone, on the base branch in
 the main checkout, as `File <id>`, `Retire <id>` or `Update <id>`, a retired bug's
 `Sdlc-Retired:` trailer saying why. `/sdlc:idea` files, edits or retires an idea the same way,
 its reasons `duplicate`, `superseded` or `declined`, written as a `Reason <id>:` line. Both run

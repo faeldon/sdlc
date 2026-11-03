@@ -67,6 +67,8 @@ GATED = {
     ),
     "sdlc-factory:spec",
     "sdlc-factory:build",
+    "sdlc-factory:eval",
+    "sdlc-factory:review",
 }
 
 # Every config key a skill reads, by skill. A skill that stops naming its key has gone back to
@@ -162,6 +164,8 @@ READS_CONFIG = {
         "factory.light",
         "factory.models",
     ],
+    "sdlc-factory:eval": ["factory.reviewers", "factory.models"],
+    "sdlc-factory:review": ["factory.models"],
 }
 
 
@@ -170,7 +174,7 @@ def test_skills_were_found() -> None:
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
     more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea"}
     assert {f"sdlc:{n}" for n in names | more} | {
-        "sdlc-factory:spec", "sdlc-factory:build"
+        "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review"
     } == set(BY_ID)  # fmt: skip
 
 
@@ -748,6 +752,27 @@ def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None
     assert "Never write the evidence yourself" in stop, (
         "the agent re-runs; the session never fakes it"
     )
+
+
+def test_the_eval_and_the_review_write_reports_and_never_the_register() -> None:
+    """Both write only under `.sdlc/reports/`, after one WAIT stating the agent runs; the eval
+    replays diffs as text, never checking anything out; the review's bugs reach the register only
+    through `/sdlc:bug`, which files a report's picks behind its own one WAIT."""
+    for name in ("sdlc-factory:eval", "sdlc-factory:review"):
+        post = frontmatter.load(BY_ID[name])
+        wait = post.content.split("WAIT for explicit approval")[1].split("## Step 3")[0]
+        assert "agent runs" in wait and ".sdlc/reports/" in wait, name
+        assert "Edit" not in post["allowed-tools"], f"{name} edits nothing"
+        assert not any("sdlc.py" in t or "git " in t for t in post["allowed-tools"]), name
+    replay = BY_ID["sdlc-factory:eval"].read_text(encoding="utf-8")
+    assert "git diff <base> <commit>" in replay and "git show <commit>:<path>" in replay
+    assert "nothing is checked out, stashed or committed" in " ".join(replay.split())
+    review = " ".join(BY_ID["sdlc-factory:review"].read_text(encoding="utf-8").split())
+    assert "## [?] [bug]" in review and "/sdlc:bug <run>/review.md" in review
+    assert "It fixes nothing and files nothing." in review and "`left_out`" in review
+    bug = " ".join(BY_ID["sdlc:bug"].read_text(encoding="utf-8").split())
+    assert "**From a report.**" in bug and "next-entry --count <n>" in bug
+    assert 'commit them as "File <ids>"? (yes / edit them / no)' in bug
 
 
 def test_ship_reads_the_agents_verdicts() -> None:

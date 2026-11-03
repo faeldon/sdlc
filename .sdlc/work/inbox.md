@@ -469,28 +469,6 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 
-## [2026-11-03-13] [idea] A replay eval for the factory's reviewers, from escaped bugs
-
-The post runs its reviewer daily against past changes that caused incidents, each confirmed by
-someone who knows the code, and keeps a prompt, tool or model change only if the score rises. Ours
-is the diffs that introduced the register's fixed bugs, traced by 2026-11-03-7: a `factory.py
-eval` replays the reviewers on each introducing diff and reports which caught its bug. Run when
-an agent's prompt or model changes, never on its own. Phase 4. Raised 2026-11-03.
-Agreed in 039's spec: the diff as text, files read at the commit with git show; caught means a
-CHANGE: on the bug's paths, each shown for the person to judge.
-
-## [2026-11-03-14] [idea] A scheduled review of existing code that files bugs
-
-The post runs review agents nightly over existing code, to catch old bugs before a change trips
-on them. An optional factory skill reviews a slice of the repo (the paths a sensitive list names,
-or the least recently changed) and proposes each finding as a `[bug]` entry the way `/sdlc:bug`
-files one, behind one WAIT, never fixing anything. Pairs with 2026-11-03-2: pre-existing findings
-already land there. Phase 4. Raised 2026-11-03.
-Agreed in 039's spec: an uncommitted report of proposed [bug] entries, filed by /sdlc:bug through
-inbox-commit behind its own WAIT; run when asked, with /schedule shown in the README.
-
-After: 2026-11-03-13
-
 ## [2026-11-03-15] [nit] A skipped fresh review is caught only by ship's prose
 
 A clean fresh review leaves no `By: fresh` entry, so the script can't tell it from one that never
@@ -543,3 +521,15 @@ Raised by: 037-escaped-bugs-tune-review (correctness)
 section's `sh` block itself; the behaviour check (039) is told never to, since an agent may have
 written them and `/sdlc:ship`'s `accept` runs them under a prompt. Make the two agree. See
 .sdlc/work/039-factory-evidence-and-replay/notes.md.
+
+## [2026-11-04-5] [nit] The factory's review proposes severities it may not be able to read
+
+`/sdlc-factory:review` proposes each bug's `Severity:` from the process doc's words, but a host
+whose doc has no bugs section takes them from `sdlc`'s guide, which the factory's cached copy
+can't read. Leave `Severity:` for `/sdlc:bug` to ask when the host's doc has no words.
+
+Theme: robustness
+Paths: plugins/factory/skills/review/SKILL.md
+Cost: S
+Value: low
+Raised by: 040-factory-eval-and-review (correctness)
