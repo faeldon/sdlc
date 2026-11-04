@@ -533,3 +533,51 @@ Paths: plugins/factory/skills/review/SKILL.md
 Cost: S
 Value: low
 Raised by: 040-factory-eval-and-review (correctness)
+
+## [2026-11-04-6] [idea] Ship reads its rare branches only when preflight says they apply
+
+Ship's skill is the largest (487 lines, about 7,800 tokens) and 8 of the window's 14 changes edited
+it, each adding a branch every run then reads: agent verdicts, pre-existing bugs, the issues it
+closes, how to recover, undone items. Most runs need none of them, and `preflight` already says
+which apply (its `undone`, `closes` and `risk` parts, and whether a `decision.md` exists). Move each
+branch to a file beside the skill that ship reads only when its part is non-empty, keeping the WAIT
+and every rule in `SKILL.md`, with `tests/test_skills.py` covering those files' commands the way it
+covers the skill's. A plain change then reads a fraction of it, and the next feature lands in a
+file of its own. Raised by the retrospective of 2026-11-04.
+
+## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
+
+Rerunning `/sdlc:setup` on a repo that is set up reads the whole skill (307 lines, about 5,500
+tokens) to reach an answer `readiness` and `drift` already decide: nothing to write. Have
+`readiness` say `complete` when every item is `ok` and `drift` has nothing in `breaking`, `refresh`
+or `report`, and move the first setup's steps (the profile round, the drafts) to a file setup reads
+only when it isn't. Raised by the retrospective of 2026-11-04.
+
+After: 2026-11-04-6
+
+## [2026-11-04-8] [idea] Pay down the tests nits
+
+The `tests` theme holds five open nits, the threshold the process guide sets for one paydown
+change: 2026-10-24-7 (a half that can't fail), 2026-10-25-22 and 2026-11-04-1 (tests that grep a
+function's source), 2026-10-26-3 (no adoption test runs `closes:`) and 2026-10-26-14 (nothing pins
+that readiness lost its inbox item). Fix them in one change, each retired by its ship. Raised by
+the retrospective of 2026-11-04.
+
+## [2026-11-04-9] [idea] Re-draw this repo's always-Tier-2 carve-outs
+
+Every change in the window whose intent could be read was Tier 2 (11 of 11, against 12 of 20 the
+window before), and the product doc bets that most changes are Tier 1. `.sdlc/SDLC.md` puts any
+change to what `sdlc.py` reads or writes in a host, and any skill's WAIT or `allowed-tools`, in
+Tier 2 whatever its size, and nearly every change here touches one of them. Decide which of those
+need a spec here (an `allowed-tools` rule added beside the command it covers, which the tests pin,
+may not), re-draw the carve-outs, and revise the bet in `.sdlc/PRODUCT.md` if the answer is that
+Tier 2 is this repo's norm. Raised by the retrospective of 2026-11-04.
+
+## [2026-11-04-10] [idea] Move retro's history readers out of sdlc.py
+
+`scripts/sdlc.py` is 7,729 lines, up from 7,047 at the last retrospective, and 12 of the window's 14
+changes touched it; that retrospective proposed splitting it as an intent nobody opened. Its retro
+section alone runs about 1,400 lines, read-only and called only by `retro` and `retro-commit`. Move
+it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history walks it shares with
+release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
+One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
