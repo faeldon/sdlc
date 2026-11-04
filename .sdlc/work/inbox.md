@@ -581,3 +581,15 @@ section alone runs about 1,400 lines, read-only and called only by `retro` and `
 it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history walks it shares with
 release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
+
+## [2026-11-04-11] [bug] Script can't run on Windows: fcntl import, and a lock taken on a directory
+
+`sdlc.py` imports `fcntl` at module level (`scripts/sdlc.py:90`), so every command fails with
+`ModuleNotFoundError: No module named 'fcntl'` on native Windows, setup included, and with it every
+skill. Its one use, `_main_lock()` (`scripts/sdlc.py:1780`), `flock`s a file descriptor opened on
+`.sdlc/` itself, which Windows won't open either, so swapping in `msvcrt.locking` alone isn't
+enough: the lock needs a file. It should run on Windows as it does elsewhere. To see it: install
+the plugin on native Windows with uv 0.13.7 and run `/sdlc:setup`. Present since 1.0.0.
+
+Severity: high
+Paths: scripts/sdlc.py
