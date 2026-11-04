@@ -33,7 +33,9 @@ first. Nothing is pushed except by `/sdlc:publish`.
 You need [Claude Code](https://claude.com/claude-code), git, and
 [`uv`](https://docs.astral.sh/uv/): every skill runs the plugin's script through
 `uv run --script`, which brings its own dependencies, so your repo needs no Python setup of its
-own. For GitHub issues (optional, below), the `gh` CLI, logged in.
+own. For GitHub issues (optional, below), the `gh` CLI, logged in. It runs on macOS, Linux and
+Windows; on Windows through [Git for Windows](https://gitforwindows.org/), whose Git Bash Claude
+Code needs there anyway, and whose `sh` runs the commands you configure.
 
 The plugin's marketplace is this repo, `faeldon/sdlc`, holding two plugins: `sdlc`, and
 the optional `sdlc-factory`.

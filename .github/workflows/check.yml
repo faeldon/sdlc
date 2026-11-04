@@ -1,0 +1,32 @@
+# The gate off the author's machine. Linux runs what ./check.sh runs but `claude plugin validate`,
+# whose CLI no runner has; Windows runs the tests marked `portable`, the ones that must pass there
+# too. Nothing here pushes: it runs on the pushes /sdlc:publish makes, or by hand on a branch
+# someone pushed (`gh workflow run check.yml --ref <branch>`).
+name: check
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: git config --global user.name ci && git config --global user.email ci@example.com
+      - run: uv run --group dev ruff check .
+      - run: uv run --group dev ruff format --check .
+      - run: uv run --group dev pytest -q
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Git for Windows' bash, which Claude Code runs the skills in there.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: git config --global user.name ci && git config --global user.email ci@example.com
+      - run: uv run --group dev pytest -q -m portable

@@ -13,6 +13,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -80,6 +82,7 @@ def test_it_writes_nothing(tmp_path: Path, capsys) -> None:
     assert before == after
 
 
+@pytest.mark.portable
 def test_candidates_come_from_the_repos_own_task_files(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
     (root / "Makefile").write_text(

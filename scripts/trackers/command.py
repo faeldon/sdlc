@@ -8,9 +8,23 @@ Loaded by path from `sdlc.py` (`tracker()`), only when `archive.target = "comman
 
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def _sh(command: str) -> list[str]:
+    """A copy of `sdlc.py`'s `_sh()`, since a tracker never imports it, pinned to it by a test:
+    `archive.command` through `sh -c`, `/bin/sh` or on Windows Git for Windows' `sh`, never
+    `cmd.exe`. Raises OSError when Windows has none."""
+    if os.name != "nt":
+        return ["/bin/sh", "-c", command]
+    found = shutil.which("sh")
+    if found is None:
+        raise OSError("no sh on PATH: install Git for Windows, whose sh runs a host's commands")
+    return [found, "-c", command]
 
 
 class Tracker:
@@ -42,7 +56,12 @@ class Tracker:
             slug=change["slug"],
             sha=change["sha"],
         )
-        ran = subprocess.run(command, shell=True, cwd=self.home, capture_output=True, text=True)
+        try:
+            ran = subprocess.run(
+                _sh(command), cwd=self.home, capture_output=True, encoding="utf-8", errors="replace"
+            )
+        except OSError as e:
+            return None, f"archive.command didn't run: {e}"
         lines = [ln.strip() for ln in ran.stdout.splitlines() if ln.strip()]
         if ran.returncode != 0 or not lines:
             why = ran.stderr.strip() or "it printed nowhere"

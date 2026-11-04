@@ -28,6 +28,7 @@ repo owner's, under git's configured user, and the only trailers it carries are 
 ```bash
 ./check.sh                                   # the full gate: ruff check, ruff format --check, pytest, claude plugin validate --strict
 uv run --group dev pytest -q                 # tests only
+uv run --group dev pytest -q -m portable     # what CI's Windows job runs
 uv run --group dev pytest tests/test_sdlc.py::test_name -q   # one test
 uv run --group dev ruff format .             # fix formatting
 claude --plugin-dir <path-to-clone>              # load the plugin in a session without the marketplace
@@ -96,7 +97,8 @@ moves it by hand (`git mv work .sdlc/work`); release and retro read only where t
 **Numbering: `ids_mode()`.** It follows the tracker: `github` when `archive.target` is a tracker
 that numbers changes (its `claim()` opens the issue and the folder takes its number), else
 `local`, and the target defaults to `none`. Never fall back from one to the other: two schemes
-hand out a number twice. Locally, `claim()` takes an `flock` on the main checkout's `.sdlc/`, and
+hand out a number twice. Locally, `claim()` takes `_main_lock()`, on `sdlc.lock` in the git common
+dir (shared by every worktree, never in a tree: `flock`, or `msvcrt` on Windows), and
 `new` writes `.sdlc/last-id` in the change's worktree, so the bump lands with the change and the
 main checkout is never dirty. `next_id()` is one past the highest of that counter, the folders
 and the open worktrees (`_worktree_highest()`), seeding a missing counter from the `Close` and
@@ -355,6 +357,14 @@ Changing a skill or the script usually means satisfying these, so know them befo
   in the `dev` group of `pyproject.toml`; keep the two in step. `tests/test_adoption.py` runs a
   change from `new` to `close` via `uv run --script` in a bare scratch repo (with `VIRTUAL_ENV`
   dropped) to prove a missing dependency or host assumption would fail.
+- **The scripts run on Windows** (`tests/test_windows.py`): no module that exists on one platform
+  (`fcntl`, `msvcrt`) is imported at the top of a script, only inside the function that needs it;
+  every text-mode `subprocess.run` names `encoding="utf-8"` (with `errors="replace"` for a host's
+  commands), since the default is the locale's code page; never `shell=True`, but `_sh()`, which
+  is `sh -c` everywhere (`trackers/command.py`'s copy is pinned to it); every `write_text` passes
+  `newline="\n"`; a repo path shown or compared with git's output is `as_posix()`. A test that
+  must pass on Windows is marked `portable`: CI's Windows job (`.github/workflows/check.yml`)
+  runs only those, since the rest lean on shebang fakes Windows can't run.
 - The manifest name must stay `sdlc` (it namespaces every skill), and the license `MIT`,
   matching `LICENSE`.
 

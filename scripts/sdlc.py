@@ -87,7 +87,6 @@ It declares its own dependencies (the block above), so it runs the same in any r
 from __future__ import annotations
 
 import argparse
-import fcntl
 import fnmatch
 import hashlib
 import importlib.util
@@ -103,7 +102,7 @@ import tomllib
 import unicodedata
 from collections import Counter
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
 from datetime import time as dtime
 from pathlib import Path
@@ -599,7 +598,7 @@ def repo_root() -> Path:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=True,
         )
         return Path(out.stdout.strip())
@@ -613,11 +612,32 @@ def _git(root: Path, *args: str) -> str | None:
     """stdout of a git command run in `root`, or None if git is absent or the command fails."""
     try:
         out = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+            ["git", "-C", str(root), *args], capture_output=True, encoding="utf-8", check=True
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return out.stdout.strip()
+
+
+def _utf8_streams() -> None:
+    """Write UTF-8 to stdout and stderr whatever the console's code page, which on Windows has no
+    `■` or `→`. A stream that can't be reconfigured (a test's capture) is left as it is."""
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(encoding="utf-8")
+
+
+def _sh(command: str) -> list[str]:
+    """The argv that runs a host's command, or a check's, through `sh -c` on every platform:
+    `/bin/sh`, as `shell=True` uses, and on Windows the `sh` on PATH, Git for Windows', never
+    `cmd.exe`, so one config means one thing everywhere. Raises OSError when Windows has none.
+    `trackers/command.py` keeps a copy, pinned to this one by a test."""
+    if os.name != "nt":
+        return ["/bin/sh", "-c", command]
+    found = shutil.which("sh")
+    if found is None:
+        raise OSError("no sh on PATH: install Git for Windows, whose sh runs a host's commands")
+    return [found, "-c", command]
 
 
 _MAIN_ROOTS: dict[Path, Path] = {}
@@ -748,7 +768,7 @@ def change_dirs(root: Path) -> list[Path]:
 def _shown(path: Path, root: Path) -> str:
     """`path` relative to `root` when it is inside it, else absolute: a sibling worktree's."""
     try:
-        return str(path.relative_to(root))
+        return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
 
@@ -1745,7 +1765,7 @@ def _add_worktree(home: Path, name: str, base: str) -> tuple[Path | None, str | 
     made = subprocess.run(
         ["git", "-C", str(home), "worktree", "add", "-b", name, str(tree), base],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     return (tree, None) if made.returncode == 0 else (None, made.stderr.strip())
 
@@ -1756,8 +1776,8 @@ def claim(
     """Take the next number and make the change: (folder, worktree, None), or (None, None, why).
 
     With `base`, the change gets its worktree and branch from it, and its folder inside; without,
-    its folder goes in `where`'s `work/` (the main checkout's by default). Under an exclusive lock
-    on the main checkout's `.sdlc/`, which every worktree shares: a `mkdir` alone isn't one, since
+    its folder goes in `where`'s `work/` (the main checkout's by default). Under `_main_lock()`,
+    which every worktree shares: a `mkdir` alone isn't one, since
     two sessions that read the same id for different slugs would both get it. What is made under
     the lock (the worktree's branch, or the folder) is what the next claim counts, so the counter
     can be written after the lock is released."""
@@ -1776,18 +1796,72 @@ def claim(
         return dest, tree, None
 
 
+def _msvcrt_lock(fd: int) -> None:
+    """Wait for byte 0 of the lock file, on Windows. `LK_LOCK` gives up after ten tries, so it
+    can't be the wait: retry the non-blocking form until the holder lets go. Only a held lock
+    (EACCES, or EDEADLOCK, 36, the C runtime's) is retried; any other failure raises, as a
+    `flock` would, rather than hang."""
+    import errno
+    import msvcrt
+    import time
+
+    held = {errno.EACCES, getattr(errno, "EDEADLOCK", 36)}
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError as e:
+            if e.errno not in held:
+                raise
+            time.sleep(0.05)
+
+
+def _msvcrt_unlock(fd: int) -> None:
+    import msvcrt
+
+    os.lseek(fd, 0, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+def _flock_lock(fd: int) -> None:
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+
+def _flock_unlock(fd: int) -> None:
+    pass  # closing the descriptor releases a flock
+
+
+# Each module is imported only where it exists: neither is at the top of the file.
+_lock, _unlock = (_msvcrt_lock, _msvcrt_unlock) if os.name == "nt" else (_flock_lock, _flock_unlock)
+
+
+def _lock_path(home: Path) -> Path:
+    """The file `_main_lock()` locks: `sdlc.lock` in the git common dir, which every worktree
+    shares and no tree or `git status` shows, or `.sdlc/lock` outside git. A file, since Windows
+    won't open a directory to lock it."""
+    common = _git(home, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return Path(common) / "sdlc.lock" if common else main_root(home) / ".sdlc" / "lock"
+
+
 @contextmanager
 def _main_lock(home: Path) -> Iterator[None]:
-    """An exclusive lock on the main checkout's `.sdlc/`, which every worktree shares, held for
-    the `with` block: what `claim()` takes a number under, and `inbox-commit` the register."""
-    lock = state_path(home, LAST_ID).parent
-    lock.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock, os.O_RDONLY)
+    """An exclusive lock on `_lock_path()`, which every worktree shares, held for the `with`
+    block: what `claim()` takes a number under, and `inbox-commit` the register. The file stays
+    after: removing it would let a waiter hold a lock on a name the next caller makes anew."""
+    lock = _lock_path(home)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
+        _lock(fd)
+        try:
+            yield
+        finally:
+            _unlock(fd)
     finally:
-        os.close(fd)  # and with it the lock
+        os.close(fd)  # and with it a flock
 
 
 def cmd_new(
@@ -1885,7 +1959,7 @@ def cmd_new(
         )
         if artifact == "intent.md":
             text = text.replace("tier: 1", f"tier: {tier}", 1)
-        (dest / artifact).write_text(text, encoding="utf-8")
+        (dest / artifact).write_text(text, encoding="utf-8", newline="\n")
         print(f"  created  {dest / artifact}  ({origin} template)")
 
     print(f"\n■ {name} — tier {tier}, stage: plan")
@@ -2014,15 +2088,19 @@ def cmd_lookup(root: Path, names: list[str]) -> int:
         elif field["lookup"] == "list":
             row["values"] = field["values"]
         elif field["lookup"] == "command":
-            ran = subprocess.run(
-                field["command"].replace("{field}", name),
-                shell=True, cwd=home, capture_output=True, text=True,
-            )  # fmt: skip
-            if ran.returncode == 0:
-                row["values"] = [ln.strip() for ln in ran.stdout.splitlines() if ln.strip()]
+            try:
+                ran = subprocess.run(
+                    _sh(field["command"].replace("{field}", name)),
+                    cwd=home, capture_output=True, encoding="utf-8", errors="replace",
+                )  # fmt: skip
+            except OSError as e:
+                row["error"] = f"the lookup command didn't run: {e}"
             else:
-                why_not = ran.stderr.strip() or "no output"
-                row["error"] = f"the lookup command exited {ran.returncode}: {why_not}"
+                if ran.returncode == 0:
+                    row["values"] = [ln.strip() for ln in ran.stdout.splitlines() if ln.strip()]
+                else:
+                    why_not = ran.stderr.strip() or "no output"
+                    row["error"] = f"the lookup command exited {ran.returncode}: {why_not}"
         elif found is None or not hasattr(found, "lookup"):
             row["error"] = f"no tracker to ask: {why or 'it has no lookups'}"
         else:
@@ -2198,7 +2276,7 @@ def cmd_accept(root: Path, ident: str) -> int:
     results = []
 
     def text(out: str | bytes | None) -> str:
-        # A timeout's partial output is bytes even with text=True.
+        # A timeout's partial output is bytes even in text mode.
         return out.decode("utf-8", "replace") if isinstance(out, bytes) else out or ""
 
     for check in found["checks"]:
@@ -2207,10 +2285,11 @@ def cmd_accept(root: Path, ident: str) -> int:
         start = datetime.now(UTC)
         try:
             run = subprocess.run(
-                ["sh", "-c", check["command"]],
+                _sh(check["command"]),
                 cwd=checkout,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=CHECK_TIMEOUT,
                 stdin=subprocess.DEVNULL,
             )
@@ -2218,6 +2297,8 @@ def cmd_accept(root: Path, ident: str) -> int:
         except subprocess.TimeoutExpired as e:
             code = None
             output = f"{text(e.stdout)}{text(e.stderr)}\ntimed out after {CHECK_TIMEOUT}s"
+        except OSError as e:
+            code, output = None, f"didn't run: {e}"
         seconds = round((datetime.now(UTC) - start).total_seconds(), 1)
         left = sorted(_status_lines(checkout) - before)
         results.append(
@@ -2333,7 +2414,7 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
             file=sys.stderr,
         )
         return 1
-    intent.write_text(stamped, encoding="utf-8")
+    intent.write_text(stamped, encoding="utf-8", newline="\n")
     print(
         f"■ shipped {path.name}  (stage: shipped, {stamp}): commit {_shown(path, root)}/ with "
         "the change"
@@ -2397,7 +2478,7 @@ def _drop_seed(ideas: Path, start: int) -> None:
     if not after:  # the last entry: no blank line left trailing the one before it
         while before and not before[-1].strip():
             before.pop()
-    ideas.write_text("".join(before + after), encoding="utf-8")
+    ideas.write_text("".join(before + after), encoding="utf-8", newline="\n")
 
 
 def _entry_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
@@ -2485,7 +2566,7 @@ def _status_entries(tree: Path) -> list[tuple[str, str]]:
     made = subprocess.run(
         ["git", "-C", str(tree), "status", "--porcelain", "-z", "--untracked-files=all"],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
     )
     entries = made.stdout.split("\0") if made.returncode == 0 else []
     paths, i = [], 0
@@ -2570,7 +2651,7 @@ def cmd_drop(root: Path, ident: str | None, check_only: bool = False) -> int:
         report["refusals"].append(f"{rel}/intent.md: couldn't find {', '.join(unplaced)}")
         return emit(1)
     if stamped != text:
-        (path / "intent.md").write_text(stamped, encoding="utf-8")
+        (path / "intent.md").write_text(stamped, encoding="utf-8", newline="\n")
         report["done"].append("stamp")
     adds = [rel, *(p for p in owned if (tree / p).exists())]
     for args in (["add", "--", *adds], ["commit", "-q", "-m", f"Record why {name} was dropped"]):
@@ -2717,7 +2798,7 @@ def cmd_base(root: Path, ident: str | None) -> int:
         err = _git_err(tree, "merge", "--ff-only", "-q", trunk)
         if err:
             if kept is not None:
-                counter.write_text(kept, encoding="utf-8")
+                counter.write_text(kept, encoding="utf-8", newline="\n")
             return refuse(f"{trunk} changed what this change's uncommitted work changes: {err}")
         ours = int(kept.strip()) if kept is not None and kept.strip().isdigit() else 0
         if kept is not None and (_read_number(counter) or 0) < ours:
@@ -3012,7 +3093,9 @@ def _close_commit(
             *(["-m", "\n".join(trailers)] if trailers else []),
         ],
     ):  # fmt: skip
-        made = subprocess.run(["git", "-C", str(main), *args], capture_output=True, text=True)
+        made = subprocess.run(
+            ["git", "-C", str(main), *args], capture_output=True, encoding="utf-8"
+        )
         if made.returncode != 0:
             # Put the folder back, or the rerun that finishes this would find main dirty.
             _git(main, "reset", "-q", "HEAD", "--", folder)
@@ -3058,7 +3141,7 @@ def _handoff(main: Path, argv: list[str], ran: str, report: dict) -> int:
     made = subprocess.run(
         [*_script_cmd(), str(script), "close", *argv],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         env=os.environ | {HANDOFF_ENV: ran},
     )
     try:
@@ -3405,7 +3488,7 @@ def _run_own(script: Path, argv: list[str]) -> int | None:
     made = subprocess.run(
         [*_script_cmd(), str(script), *argv],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         env=os.environ | {OWN_SCRIPT_ENV: "ran"},
     )
     voiced = made.stdout.strip() or any(
@@ -3711,7 +3794,7 @@ def _write_state(where: Path, name: str, value: str) -> None:
     path = where / ".sdlc" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(value, encoding="utf-8")
+    tmp.write_text(value, encoding="utf-8", newline="\n")
     os.replace(tmp, path)
 
 
@@ -4120,7 +4203,7 @@ def with_changelog(text: str, version: str, notes: str, today: str) -> str:
 def _git_err(root: Path, *args: str) -> str | None:
     """None when the git command succeeds, else what it said: never empty, since a hook can fail
     a command without a word."""
-    made = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    made = subprocess.run(["git", "-C", str(root), *args], capture_output=True, encoding="utf-8")
     if made.returncode == 0:
         return None
     return made.stderr.strip() or made.stdout.strip() or f"exited {made.returncode}"
@@ -4275,7 +4358,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         err = None
         try:
             ran = subprocess.run(
-                report["after_bump"], shell=True, cwd=home, capture_output=True, text=True,
+                _sh(report["after_bump"]), cwd=home, capture_output=True, encoding="utf-8",
                 errors="replace", timeout=AFTER_BUMP_TIMEOUT, stdin=subprocess.DEVNULL,
             )  # fmt: skip
             if ran.returncode != 0:
@@ -4306,7 +4389,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         err = None
         try:
             ran = subprocess.run(
-                report["prepare"], shell=True, cwd=home, capture_output=True, text=True,
+                _sh(report["prepare"]), cwd=home, capture_output=True, encoding="utf-8",
                 errors="replace", timeout=AFTER_BUMP_TIMEOUT, stdin=subprocess.DEVNULL,
             )  # fmt: skip
             if ran.returncode != 0:
@@ -4442,10 +4525,13 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
 
     def run_command() -> str | None:
         # No terminal and no stdin: the approval came before, so a command that asks fails now.
-        ran = subprocess.run(
-            report["command"], shell=True, cwd=home, capture_output=True, text=True,
-            stdin=subprocess.DEVNULL,
-        )  # fmt: skip
+        try:
+            ran = subprocess.run(
+                _sh(report["command"]), cwd=home, capture_output=True, encoding="utf-8",
+                errors="replace", stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+        except OSError as e:
+            return f"release.publish didn't run: {e}"
         if ran.returncode != 0:
             return f"release.publish exited {ran.returncode}: {ran.stderr.strip()}"
         return _git_err(home, "notes", "--ref", "sdlc", "add", "-f", "-m", "published", tag)
@@ -4804,7 +4890,7 @@ def _evidence(home: Path, commands: list[str]) -> list[dict]:
         try:
             # Output that isn't UTF-8 (a binary export, a stray byte) is replaced, not raised.
             ran = subprocess.run(
-                command, shell=True, cwd=home, capture_output=True, text=True,
+                _sh(command), cwd=home, capture_output=True, encoding="utf-8",
                 errors="replace", timeout=EVIDENCE_TIMEOUT,
             )  # fmt: skip
         except subprocess.TimeoutExpired:
@@ -5586,7 +5672,9 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         return emit(1)
     report["paths"] = changed
     for args in (["add", "--", *changed], ["commit", "-q", "-m", report["commit"], "--", *changed]):
-        made = subprocess.run(["git", "-C", str(home), *args], capture_output=True, text=True)
+        made = subprocess.run(
+            ["git", "-C", str(home), *args], capture_output=True, encoding="utf-8"
+        )
         if made.returncode != 0:
             refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
             return emit(1)
@@ -5840,19 +5928,23 @@ def _inbox_commit(
         steps = [["commit", "-q", "--allow-empty", *message]]
     if in_tree:
         register.parent.mkdir(parents=True, exist_ok=True)
-        register.write_text(new_text, encoding="utf-8")
+        register.write_text(new_text, encoding="utf-8", newline="\n")
     for args in steps:
-        made = subprocess.run(["git", "-C", str(home), *args], capture_output=True, text=True)
+        made = subprocess.run(
+            ["git", "-C", str(home), *args], capture_output=True, encoding="utf-8"
+        )
         if made.returncode != 0:
             refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
             if in_tree:
                 _git(home, "reset", "-q", "--", rel)
-                register.write_text(main_text, encoding="utf-8")
+                register.write_text(main_text, encoding="utf-8", newline="\n")
             return 1
     report["done"].append("commit")
     report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
     if in_tree:
-        tree_register.write_text(_splice_entries(tree_text, tree_head, ids), encoding="utf-8")
+        tree_register.write_text(
+            _splice_entries(tree_text, tree_head, ids), encoding="utf-8", newline="\n"
+        )
         report["done"].append("worktree")
     return 0
 
@@ -6311,8 +6403,8 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
     for folder in (root, root / "scripts", root / "bin"):
         if folder.is_dir():
             for p in sorted(folder.glob("*.sh")):
-                rel = p.relative_to(root)
-                found.append((f"./{rel}", str(rel)))
+                rel = p.relative_to(root).as_posix()
+                found.append((f"./{rel}", rel))
     return found
 
 
@@ -6325,9 +6417,9 @@ READ_ONLY = (
     "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
-SETTINGS = Path(".claude") / "settings.json"
+SETTINGS = ".claude/settings.json"  # as git prints it, on every platform
 # Each person's own settings, which override the shared ones: read, never written.
-LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
+LOCAL_SETTINGS = ".claude/settings.local.json"
 # What `git.attribution = false` has setup write into the shared settings: the object form, an
 # empty string hiding each line. Never `"attribution": false`, which Claude Code before v2.1.281
 # rejects, skipping the whole file, allow rules and all.
@@ -6342,7 +6434,7 @@ def _allowed(root: Path) -> list[str]:
         return []
 
 
-def _settings_attribution(root: Path, rel: Path) -> object | None:
+def _settings_attribution(root: Path, rel: str) -> object | None:
     """The `attribution` a settings file holds, or None when it holds none or can't be read."""
     try:
         data = json.loads((root / rel).read_text(encoding="utf-8"))
@@ -6524,7 +6616,7 @@ def cmd_readiness(root: Path) -> int:
         "items": items,
         "candidates": detect_candidates(root),
         "permissions": {
-            "file": str(SETTINGS),
+            "file": SETTINGS,
             "rules": ALLOW_RULES,
             "missing": [r for r in ALLOW_RULES if r not in _allowed(root)],
         },
@@ -6550,7 +6642,7 @@ def cmd_readiness(root: Path) -> int:
 # copied, and `drift` compares three ways (the default now, that hash, the host's text) to tell
 # what the plugin changed from what the host did. Neither writes a host doc: setup drafts the
 # refresh, behind its one WAIT.
-MANIFEST = Path(HOST_DIR) / "setup.json"
+MANIFEST = f"{HOST_DIR}/setup.json"
 # Each [docs] key setup fills from a default, and the default it copies.
 HOST_DOCS = {
     "process": "SDLC.md",
@@ -6683,7 +6775,9 @@ def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
         "attribution": cfg["git"]["attribution"] is False
         and _settings_attribution(root, SETTINGS) == ATTRIBUTION_OFF,
     }
-    (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (root / MANIFEST).write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     print(f"  wrote  {MANIFEST}  (plugin {manifest['version']}, {len(docs)} doc(s))")
     return 0
 
@@ -6834,7 +6928,7 @@ def drift(root: Path) -> dict:
         out["report"].append(
             {
                 "what": "manifest",
-                "where": str(MANIFEST),
+                "where": MANIFEST,
                 "class": "unreadable",
                 "detail": unreadable,
             }
@@ -6844,7 +6938,7 @@ def drift(root: Path) -> dict:
         out["report"].append(
             {
                 "what": "manifest",
-                "where": str(MANIFEST),
+                "where": MANIFEST,
                 "class": "downgrade",
                 "detail": f"recorded by {version}, newer than this {plugin}: nothing proposed",
             }
@@ -6898,7 +6992,7 @@ def drift(root: Path) -> dict:
         out["breaking"].append(
             {
                 "what": "config",
-                "where": str(cfg_file.relative_to(root)),
+                "where": cfg_file.relative_to(root).as_posix(),
                 "detail": "won't parse",
                 "fix": "fix the TOML",
             }
@@ -7071,7 +7165,7 @@ def uninstall_plan(root: Path) -> dict:
         if DIR_RE.match(branch) and tree.resolve() != home.resolve() and branch not in named:
             refused.append(f"worktree {branch} still stands at {tree}")
     settings = home / SETTINGS
-    touched = (f"{HOST_DIR}/", str(SETTINGS), ".gitignore")
+    touched = (f"{HOST_DIR}/", SETTINGS, ".gitignore")
     # The change folder sits under `.sdlc/`, but it is the repo's record, never setup's to remove.
     own = f"{work_rel(home)}/"
     refused += [
@@ -7083,11 +7177,11 @@ def uninstall_plan(root: Path) -> dict:
     plan: dict = {"refused": refused, "remove": remove, "edit": [], "left": []}
     left = (
         sorted(
-            str(p.relative_to(home))
+            p.relative_to(home).as_posix()
             for p in (home / HOST_DIR).rglob("*")
             if p.is_file()
-            and str(p.relative_to(home)) not in plan["remove"]
-            and not str(p.relative_to(home)).startswith(own)
+            and p.relative_to(home).as_posix() not in plan["remove"]
+            and not p.relative_to(home).as_posix().startswith(own)
         )
         if (home / HOST_DIR).is_dir()
         else []
@@ -7105,10 +7199,10 @@ def uninstall_plan(root: Path) -> dict:
         why = "its attribution isn't setup's, or changed since setup wrote it"
         plan["left"].append({"path": f"{SETTINGS} attribution", "why": why})
     if rules or ours:
-        created = str(SETTINGS) in manifest.get("created", [])
+        created = SETTINGS in manifest.get("created", [])
         plan["edit"].append(
             {
-                "path": str(SETTINGS),
+                "path": SETTINGS,
                 "remove_rules": rules,
                 "remove_attribution": ours,
                 "remove_if_empty": created,
@@ -7184,14 +7278,14 @@ def cmd_uninstall(root: Path, check_only: bool = False) -> int:
                 path.unlink()
             else:
                 text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-                path.write_text(text, encoding="utf-8")
+                path.write_text(text, encoding="utf-8", newline="\n")
         else:
             lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
             kept = [ln for ln in lines if ln.rstrip("\r\n") != edit["remove_line"]]
             if edit.get("remove_if_empty") and not "".join(kept).strip():
                 path.unlink()
             else:
-                path.write_text("".join(kept), encoding="utf-8")
+                path.write_text("".join(kept), encoding="utf-8", newline="\n")
     return 0
 
 
@@ -7394,6 +7488,7 @@ def print_status(a: dict) -> None:
 
 
 def main() -> int:
+    _utf8_streams()
     ap = argparse.ArgumentParser(
         description="Track the change artifacts under .sdlc/work/ (see the repo's process doc)."
     )

@@ -43,6 +43,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from contextlib import suppress
 from datetime import date
 from pathlib import Path
 
@@ -110,11 +111,19 @@ def _git(root: Path, *args: str) -> str | None:
     """stdout of a git command run in `root`, or None if git is absent or the command fails."""
     try:
         out = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+            ["git", "-C", str(root), *args], capture_output=True, encoding="utf-8", check=True
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return out.stdout.strip()
+
+
+def _utf8_streams() -> None:
+    """Write UTF-8 to stdout and stderr whatever the console's code page, which on Windows has no
+    `■` or `→`. A stream that can't be reconfigured (a test's capture) is left as it is."""
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(encoding="utf-8")
 
 
 def repo_root() -> Path:
@@ -611,7 +620,7 @@ def cmd_decisions(root: Path, ident: str) -> int:
         path = folder / "decisions.md"
         body = path.read_text(encoding="utf-8") if path.is_file() else "# Decisions\n\n"
         body += "" if body.endswith("\n") else "\n"
-        path.write_text(body + "".join(new_lines), encoding="utf-8")
+        path.write_text(body + "".join(new_lines), encoding="utf-8", newline="\n")
     pending = [d["id"] for d in ledger if d["kind"] == "blocking" and not d["decided"]]
     assumed = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
     return emit(
@@ -747,7 +756,7 @@ def cmd_carry(root: Path, ident: str) -> int:
         if not text.endswith("\n"):
             text += "\n"
         text += "\n" + "".join(f"- [ ] {item}\n" for item in added)
-        notes.write_text(text, encoding="utf-8")
+        notes.write_text(text, encoding="utf-8", newline="\n")
     return emit({"change": folder.name, "notes": str(notes), "added": added})
 
 
@@ -770,8 +779,8 @@ def cmd_snapshot(root: Path, ident: str, n: int) -> int:
         lines.append(f"{digest}  {p}\n")
     path = snapshot_path(folder, n)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(lines), encoding="utf-8")
-    rel = str(path.relative_to(root))
+    path.write_text("".join(lines), encoding="utf-8", newline="\n")
+    rel = path.relative_to(root).as_posix()
     return emit({"change": folder.name, "snapshot": rel, "paths": len(lines)})
 
 
@@ -805,7 +814,7 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     text, unplaced = set_stage(intent.read_text(encoding="utf-8"), stage, date.today().isoformat())
     if unplaced:
         return emit({"refusals": [f"intent.md has no {', '.join(unplaced)} line"]}, 1)
-    intent.write_text(text, encoding="utf-8")
+    intent.write_text(text, encoding="utf-8", newline="\n")
     return emit({"change": folder.name, "stage": stage})
 
 
@@ -965,12 +974,12 @@ def cmd_report_dir(root: Path, kind: str) -> int:
     reports.mkdir(parents=True, exist_ok=True)
     ignore = reports / ".gitignore"
     if not ignore.is_file():
-        ignore.write_text("*\n", encoding="utf-8")
+        ignore.write_text("*\n", encoding="utf-8", newline="\n")
     stamp = f"{kind}-{date.today().isoformat()}"
     n = 1 + sum(1 for p in reports.glob(f"{stamp}-*") if p.is_dir())
     run = reports / f"{stamp}-{n}"
     run.mkdir()
-    return emit({"run": str(run.relative_to(root))})
+    return emit({"run": run.relative_to(root).as_posix()})
 
 
 def _run_order(path: Path) -> tuple[str, int]:
@@ -1027,8 +1036,8 @@ def cmd_score(root: Path, run_rel: str) -> int:
             lines += [f"  - `{text}`" for text in r["lines"]]
         lines.append("")
     report = run.parent / f"{run.name}.md"
-    report.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    return emit({"report": str(report.relative_to(root)), "reviewers": scores, "bugs": bugs})
+    report.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
+    return emit({"report": report.relative_to(root).as_posix(), "reviewers": scores, "bugs": bugs})
 
 
 def _open_change_paths(root: Path, base: str) -> set[str]:
@@ -1082,6 +1091,7 @@ def cmd_slice(root: Path, paths: list[str], limit: int) -> int:
 
 
 def main() -> int:
+    _utf8_streams()
     ap = argparse.ArgumentParser(description="The sdlc-factory layer's mechanism.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("config", help=f"{CONFIG_FILE} over the defaults, as JSON")

@@ -77,6 +77,11 @@ It's offline: GitHub is driven through a fake `gh` on `PATH` (`tests/test_archiv
 from. A run that collects no tests is a failure. `pyproject.toml` only gives the tests an
 environment; the script declares its own dependencies inline, and the two lists are kept in step.
 
+Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all but `claude plugin
+validate`, and on Windows the tests marked `portable` (`uv run --group dev pytest -q -m portable`
+here). It runs on every push, which only `/sdlc:publish` makes, or by hand on a branch you pushed:
+`gh workflow run check.yml --ref <branch>`.
+
 ## How a change is made here
 
 The plugin runs on its own repo. Open a change with `/sdlc:intent`, and it goes through the

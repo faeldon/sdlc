@@ -24,8 +24,14 @@ attribution = false
 
 [review]
 # The manifests (what installs), the shared permissions and attribution, the trackers (what
-# touches a host's GitHub) and the gate itself: changes here get the deep review.
-sensitive = [".claude-plugin/", ".claude/settings.json", "scripts/trackers/", "check.sh"]
+# touches a host's GitHub) and the gates themselves, local and CI: changes here get the deep review.
+sensitive = [
+  ".claude-plugin/",
+  ".claude/settings.json",
+  "scripts/trackers/",
+  "check.sh",
+  ".github/workflows/",
+]
 # What setup copies into a host: a revert here never reaches a host that already ran setup.
 irreversible = ["defaults/", "templates/"]
 

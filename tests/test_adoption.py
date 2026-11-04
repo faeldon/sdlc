@@ -25,7 +25,10 @@ GIT_ID = {
     "GIT_COMMITTER_EMAIL": "t@t",
 }
 
-pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do")
+pytestmark = [
+    pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do"),
+    pytest.mark.portable,
+]
 
 
 def _run(cwd: Path, *args: str, path: str | None = None) -> subprocess.CompletedProcess:
@@ -38,7 +41,7 @@ def _run(cwd: Path, *args: str, path: str | None = None) -> subprocess.Completed
         ["uv", "run", "--quiet", "--script", str(SCRIPT), *args],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         env=env,
     )
 
@@ -47,7 +50,7 @@ def _git(cwd: Path, *args: str) -> str:
     out = subprocess.run(
         ["git", "-C", str(cwd), *args],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=True,
         env=os.environ | GIT_ID,
     )
@@ -72,7 +75,10 @@ def _land(root: Path, number: str, slug: str, rel: str) -> None:
     tree = root / ".claude" / "worktrees" / f"{number}-{slug}"
     intent = tree / rel / f"{number}-{slug}" / "intent.md"
     assert intent.is_file(), made.stdout
-    intent.write_text(intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1))
+    intent.write_text(
+        intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1),
+        encoding="utf-8",
+    )
     (tree / f"{slug}.txt").write_text("the change itself\n", encoding="utf-8")
     assert _run(tree, "ship", number).returncode == 0
     _git(tree, "commit", "-q", "-m", f"ship {number}")
@@ -255,7 +261,9 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     tree = root / ".claude" / "worktrees" / "001-fix-report"
     intent = tree / ".sdlc" / "work" / "001-fix-report" / "intent.md"
     text = intent.read_text(encoding="utf-8").replace("impact:\n", "impact: patch\n", 1)
-    intent.write_text(text.replace("depends_on:\n", f"depends_on:\nfixes: [{bug_id}]\n", 1))
+    intent.write_text(
+        text.replace("depends_on:\n", f"depends_on:\nfixes: [{bug_id}]\n", 1), encoding="utf-8"
+    )
     (tree / "report.txt").write_text("every row\n", encoding="utf-8")
     check = _run(tree, "check", "--strict")
     assert check.returncode == 0, check.stdout + check.stderr
@@ -352,6 +360,10 @@ def test_before_the_first_change_and_after_the_last_everything_answers(tmp_path:
     assert nxt.returncode == 0 and nxt.stdout.strip() == "001"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Git for Windows runs only from its own folder, not a git.exe linked alone",
+)
 def test_with_no_tracker_a_change_runs_where_gh_doesnt_exist(tmp_path: Path) -> None:
     """A tracker is optional: with `target = "none"` and no `gh` anywhere on PATH, a change still
     goes from `new` to `close`, and `sync` says there is nothing to sync."""
@@ -372,7 +384,10 @@ def test_with_no_tracker_a_change_runs_where_gh_doesnt_exist(tmp_path: Path) -> 
     assert made.returncode == 0, made.stderr
     tree = root / ".claude" / "worktrees" / "001-plain"
     intent = tree / ".sdlc" / "work" / "001-plain" / "intent.md"
-    intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
+    intent.write_text(
+        intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1),
+        encoding="utf-8",
+    )
     synced = _run(tree, "sync", path=path)
     assert synced.returncode == 0, synced.stderr
     assert json.loads(synced.stdout)["nothing to sync"] == "archive.target is none"
@@ -414,7 +429,7 @@ def _by(script: Path, cwd: Path, *args: str, ran: str | None = None):
     env |= GIT_ID | ({"SDLC_CLOSE_RAN": ran} if ran else {})
     return subprocess.run(
         ["uv", "run", "--quiet", "--script", str(script), *args],
-        cwd=cwd, capture_output=True, text=True, env=env,
+        cwd=cwd, capture_output=True, encoding="utf-8", env=env,
     )  # fmt: skip
 
 
@@ -435,7 +450,10 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
         assert made.returncode == 0, made.stderr
         tree = next((root / ".claude" / "worktrees").glob(f"*-{slug}"))
         intent = tree / ".sdlc" / "work" / tree.name / "intent.md"
-        intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
+        intent.write_text(
+            intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1),
+            encoding="utf-8",
+        )
         edit(tree)
         number = tree.name.split("-")[0]
         shipped = _by(script, tree, "ship", number)
@@ -460,7 +478,9 @@ def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Pa
 
     # A stale copy, with no probe at all, starts a close; main's script, with both, finishes it.
     stale = _plugin_copy(tmp_path / "cache") / "scripts" / "sdlc.py"
-    out, body = land("plain", lambda tree: (tree / "feature.txt").write_text("x\n"), by=stale)
+    out, body = land(
+        "plain", lambda tree: (tree / "feature.txt").write_text("x\n", encoding="utf-8"), by=stale
+    )
     assert out["ran"] == "main's code" and "Sdlc-Probe: second" in body
     assert _git(root, "status", "--porcelain") == ""
 
@@ -485,7 +505,7 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
             ["uv", "run", "--quiet", "--script", str(script), *args],
             cwd=root,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             env=env,
         )
 

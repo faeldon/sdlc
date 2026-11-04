@@ -63,7 +63,7 @@ class Tracker:
 
     def _gh(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["gh", *args], cwd=self.home, capture_output=True, text=True, input=stdin
+            ["gh", *args], cwd=self.home, capture_output=True, encoding="utf-8", input=stdin
         )
 
     def unavailable(self) -> str | None:
@@ -72,7 +72,7 @@ class Tracker:
         if not shutil.which("gh"):
             return "gh isn't installed"
         remotes = subprocess.run(
-            ["git", "-C", str(self.home), "remote", "-v"], capture_output=True, text=True
+            ["git", "-C", str(self.home), "remote", "-v"], capture_output=True, encoding="utf-8"
         )
         if "github.com" not in (remotes.stdout if remotes.returncode == 0 else ""):
             return "no remote on github.com"

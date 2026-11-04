@@ -774,6 +774,7 @@ def test_an_open_change_holds_its_number_with_main_counter_behind(tmp_path: Path
     assert sdlc.next_id(root) == "003"
 
 
+@pytest.mark.portable
 def test_concurrent_claims_get_distinct_numbers(tmp_path: Path, monkeypatch) -> None:
     """Sessions that read the next id at the same moment, for different slugs. A bare `mkdir`
     would hand every one of them 001; the lock makes them take turns."""
@@ -800,6 +801,7 @@ def test_concurrent_claims_get_distinct_numbers(tmp_path: Path, monkeypatch) -> 
     assert sorted(p.name[:3] for p in made if p) == ["001", "002", "003", "004"]
 
 
+@pytest.mark.portable
 def test_concurrent_worktree_claims_get_distinct_numbers(tmp_path: Path, monkeypatch) -> None:
     """With worktrees, the branch made under the lock is what the next claim counts."""
     root = _repo(tmp_path)

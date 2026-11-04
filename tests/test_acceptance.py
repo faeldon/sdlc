@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+# Accept runs each check through `_sh()`, so these prove it on Windows too.
+pytestmark = pytest.mark.portable
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -62,7 +65,7 @@ def _checks(*sections: str) -> str:
 
 def _git(root: Path, *args: str) -> str:
     out = subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(root), *args], capture_output=True, encoding="utf-8", check=True
     )
     return out.stdout.strip()
 
@@ -227,7 +230,8 @@ def test_accept_leaves_work_already_uncommitted_alone(repo: Path, capsys) -> Non
 
 
 def test_accept_runs_from_the_checkout_root(repo: Path, capsys, monkeypatch) -> None:
-    _write(repo, _checks(_check("Where", "pwd")))
+    # Git Bash's `pwd` says /c/Users/..., its `-W` the Windows form; elsewhere `-W` fails quietly.
+    _write(repo, _checks(_check("Where", "pwd -W 2>/dev/null || pwd")))
     monkeypatch.chdir(repo / ".sdlc" / "work")
     code, out = _cmd(capsys, sdlc.cmd_accept, repo)
     assert code == 0

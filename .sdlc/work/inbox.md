@@ -582,14 +582,35 @@ it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history 
 release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
 
-## [2026-11-04-11] [bug] Script can't run on Windows: fcntl import, and a lock taken on a directory
+## [2026-11-04-12] [nit] The LF test checks write_text only, not a write-mode open
 
-`sdlc.py` imports `fcntl` at module level (`scripts/sdlc.py:90`), so every command fails with
-`ModuleNotFoundError: No module named 'fcntl'` on native Windows, setup included, and with it every
-skill. Its one use, `_main_lock()` (`scripts/sdlc.py:1780`), `flock`s a file descriptor opened on
-`.sdlc/` itself, which Windows won't open either, so swapping in `msvcrt.locking` alone isn't
-enough: the lock needs a file. It should run on Windows as it does elsewhere. To see it: install
-the plugin on native Windows with uv 0.13.7 and run `/sdlc:setup`. Present since 1.0.0.
+`test_every_file_written_is_lf` walks `write_text` calls; a later `open(p, "w")` would write CRLF on
+Windows unnoticed. Walk write-mode `open` calls too.
 
-Severity: high
-Paths: scripts/sdlc.py
+Theme: tests
+Paths: tests/test_windows.py
+Cost: S
+Value: low
+Raised by: 041-windows-lock (correctness)
+
+## [2026-11-04-13] [nit] The CI workflow runs twice on every publish
+
+`on: push` fires for the branch push and again for the tag push `/sdlc:publish` makes. Filter it
+to branches.
+
+Theme: cost
+Paths: .github/workflows/check.yml
+Cost: S
+Value: low
+Raised by: 041-windows-lock (cost)
+
+## [2026-11-04-14] [nit] The factory's `_utf8_streams` copy isn't pinned to sdlc.py's
+
+The repo pins its other copies by test (`risk_paths()`, the regexes, `trackers/command.py`'s
+`_sh`); this one can drift. Pin it the same way.
+
+Theme: tests
+Paths: plugins/factory/scripts/factory.py, tests/test_windows.py
+Cost: S
+Value: low
+Raised by: 041-windows-lock (contract)

@@ -28,3 +28,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The Windows CI job runs only these: a test that must pass there too is marked, so the job's
+# reach is written down rather than implied.
+markers = ["portable: must pass on Windows too; the Windows CI job runs only these"]

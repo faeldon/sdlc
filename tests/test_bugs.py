@@ -461,6 +461,7 @@ def test_a_worktree_refuses_what_it_cant_file(tmp_path: Path, capsys) -> None:
     assert "Five" in (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.portable
 def test_inbox_commit_waits_for_the_lock_claim_takes(tmp_path: Path, capsys) -> None:
     """Two sessions filing at once: the second waits until the first lets go."""
     root = _repo(tmp_path, _idea("2026-10-01-1", "One"))

@@ -429,12 +429,13 @@ def _set_up(root: Path) -> None:
 
 def _files(root: Path) -> dict[str, str]:
     return {
-        str(p.relative_to(root)): p.read_text(encoding="utf-8")
+        p.relative_to(root).as_posix(): p.read_text(encoding="utf-8")
         for p in root.rglob("*")
         if p.is_file() and ".git" not in p.relative_to(root).parts
     }
 
 
+@pytest.mark.portable
 def test_uninstall_leaves_the_pre_setup_tree(bare: Path, plugin: Path) -> None:
     before = _files(bare)
     _set_up(bare)

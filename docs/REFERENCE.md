@@ -87,6 +87,14 @@ The placeholders:
 - `commands.close_list`: `{suffix}` is the change's branch name with `-` as `_`.
 - `commands.close_cleanup`: `{id}` is the change's number.
 
+The commands `sdlc.py` runs itself (`release.after_bump`, `release.prepare`, `release.publish`,
+`retro.evidence`, a project field's `command` lookup, `archive.command`, and each acceptance
+check) run as `sh -c "<command>"` from the repo root on every platform: `/bin/sh` on macOS and
+Linux, and on Windows the `sh` on `PATH`, Git for Windows', never `cmd.exe`. So one config means
+the same thing in every session, and the same as the skills' own commands, which Claude Code runs
+in Git Bash there. With no `sh` on Windows the command is refused, saying so. Their output is read
+as UTF-8, with any byte that isn't UTF-8 replaced.
+
 A version line is `"version": "1.2.0"` (JSON) or `version = "1.2.0"` (TOML). A file with none,
 or more than one, is refused rather than guessed at.
 
@@ -438,7 +446,8 @@ after it.
 - **From a counter**, otherwise: `.sdlc/last-id` holds the last number handed out, and is
   committed. `new` writes it in the change's own worktree, so it reaches `main` with the change's
   commit. Until then `main`'s counter trails what is open, so a number is one past the highest of
-  the counter, the folders in `.sdlc/work/` and the open change worktrees, claimed under a lock. A change
+  the counter, the folders in `.sdlc/work/` and the open change worktrees, claimed under a lock
+  (`sdlc.lock` in the repo's git dir, which every worktree shares and `git status` never shows). A change
   removed by hand before it reaches `main` frees its number; one dropped with `/sdlc:drop` keeps
   it, since its `Drop` commit brings the counter to `main`. A fresh clone carries on from the
   committed counter. Two changes open at once both edit it; the second to close rebases and keeps
