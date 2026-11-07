@@ -5112,7 +5112,7 @@ def retro_due(home: Path, cfg: dict) -> dict:
 
 # The totals a retrospective compares, as medians per tier and way of running.
 COMPARED = (
-    "elapsed", "agent", "response", "away", "blocked", "stops", "required", "permission",
+    "elapsed", "agent", "response", "away", "blocked", "stops", "required", "prompts",
     "ship_runs", "reenter", "in", "cache_read", "out",
 )  # fmt: skip
 
@@ -5154,6 +5154,7 @@ def metrics_summary(
     out: dict = {
         "captured": len(captured),
         "uncaptured": len(changes) - len(captured),
+        "prompts": _prompt_report(captured),
         "groups": {},
     }
     for key, g in groups.items():
@@ -5185,6 +5186,30 @@ def metrics_summary(
             "in_change": _in_change_summary(ms, median),
         }
     return out
+
+
+def _prompt_report(captured: list[dict]) -> dict:
+    """The tool prompts across the window, from each `Close` commit's `Sdlc-Prompt` lines: each
+    name's asks and rejections and how many changes it came from, most asked first, and how many
+    changes ran in each permission mode. Only commits that carry `prompts=` are `recorded`: an
+    older one's `permission=` counted questions and plan approvals, and is never read here."""
+    names: dict[str, dict] = {}
+    modes: Counter = Counter()
+    recorded = 0
+    for c in captured:
+        m = c["metrics"]
+        if not isinstance(m["totals"].get("prompts"), int):
+            continue
+        recorded += 1
+        for mode in str(m["totals"].get("prompt_modes") or "-").split(","):
+            modes[mode] += 1
+        for name, p in (m.get("prompts") or {}).items():
+            row = names.setdefault(name, {"asked": 0, "rejected": 0, "changes": 0})
+            row["asked"] += p.get("asked") or 0
+            row["rejected"] += p.get("rejected") or 0
+            row["changes"] += 1
+    ordered = dict(sorted(names.items(), key=lambda kv: (-kv[1]["asked"], kv[0])))
+    return {"recorded": recorded, "names": ordered, "modes": dict(sorted(modes.items()))}
 
 
 def _no_findings() -> dict:

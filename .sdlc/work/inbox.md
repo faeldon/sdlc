@@ -328,14 +328,6 @@ Cost: S
 Value: low
 Raised by: 026-github-intake (correctness)
 
-## [2026-10-26-4] [idea] Close records what each permission stop asked for
-
-Close counts a change's permission prompts among its stops (median 3 for a Tier 2 change and 2.5
-for a Tier 1 in the last window), but not which tool or command each was for, so nobody can tell
-the ones a skill's `allowed-tools` should have covered from the ones that ask on purpose (`accept`).
-Record each prompt's tool and the command's first word, numbers and names only, on the `Close`
-commit, and let retro group them across the window. Raised by the retrospective of 2026-10-26.
-
 ## [2026-10-26-5] [idea] Cover the permission prompts a skill's rules should have
 
 Once close names them, take the prompts that recur across changes and aren't asking on purpose,

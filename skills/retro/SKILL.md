@@ -81,6 +81,10 @@ What `retro` gives:
   - the four clocks: elapsed (calendar time, never effort), agent, response, and away, with
     blocked apart;
   - stops against the gates `required` and the host's `target`;
+  - `prompts`, the tool prompts the person answered, across the window: each by name
+    (`Bash:git:push`, `Edit`) with `asked`, `rejected` and the `changes` it came from, the
+    permission `modes` the changes ran in, and how many changes `recorded` them (a `Close` commit
+    from before has none, never zero);
   - tokens per stage and per sub-agent role;
   - ship's findings: by rank (`preexisting` apart), by pass, and their `dispositions` by pass,
     summed only over the `answered` changes, whose trailers carry them;
@@ -140,6 +144,9 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    each `unmeasured` signal, and whether it's worth a seed to measure it. From `metrics`:
    - where a change's time goes (agent against the human's response, away and blocked);
    - how far stops are above `required` and `target`;
+   - which prompts recur across changes (`prompts`), against the modes they ran in: a prompt a
+     skill's rules should have covered is a seed naming the skill and the rule; in `auto` the
+     classifier decides and asks no one, so few prompts there says nothing about the rules;
    - which stage or role the tokens pile up in;
    - from `in_change`, which stage most often misses first time and which rework count drives it
      (a spec edited after design is a Stage 2 problem; failed gate runs a build one), and whether

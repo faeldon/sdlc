@@ -133,6 +133,25 @@ def test_a_sub_agent_counts_toward_the_change_by_its_parent_call(tmp_path: Path)
     assert set(roles) == {"builder"} and roles["builder"]["runs"] == 1
 
 
+def test_a_prompt_answered_for_a_sub_agent_s_tool_is_counted(tmp_path: Path) -> None:
+    """A reviewer's tool prompt stops the person as the session's own do."""
+    folder = tmp_path / "projects" / "-made-up-repo"
+    _write(folder, "s0", [cmd(0, "sdlc:ship"), asst(1, "m1", [tool("Agent", "a1")])])
+    sub = folder / "s0" / "subagents"
+    _write(sub, "agent-a1", [
+        asst(2, "x1", [tool("Bash", "b1", command="git log --oneline -3")]),
+        result(3, "b1", permissionDecision={"decision": "accept", "source": "user_temporary"}),
+        asst(4, "x2", [tool("Read", "r1", file_path="/x/a.md")]),
+        result(5, "r1", permissionDecision={"decision": "accept", "source": "config"}),
+    ])  # fmt: skip
+    (sub / "agent-a1.meta.json").write_text(
+        json.dumps({"agentType": "sdlc:reviewer", "toolUseId": "a1"})
+    )
+    summary = _summary(metrics.read_events([folder], BRANCH, "012", None))
+    assert summary["prompts"] == {"Bash:git:log": {"asked": 1, "rejected": 0}}
+    assert summary["stages"]["ship"]["prompts"] == 1
+
+
 @pytest.mark.parametrize(
     "path, kind",
     [(f"work/{BRANCH}/spec.md", "spec"), (f"/abs/work/{BRANCH}/notes.md", "notes"),
@@ -257,7 +276,7 @@ def test_a_reply_is_kept_as_its_class_only(text: str, reply: str) -> None:
     assert metrics._reply(text) == reply
 
 
-def test_permission_prompts_and_gate_runs_are_counted(tmp_path: Path) -> None:
+def test_tool_prompts_and_gate_runs_are_counted(tmp_path: Path) -> None:
     events = _events(tmp_path, [
         cmd(0, "sdlc:ship"),
         asst(1, "m1", [tool("Bash", "c1", command="./check.sh 2>&1 | tail -3")]),
@@ -267,8 +286,106 @@ def test_permission_prompts_and_gate_runs_are_counted(tmp_path: Path) -> None:
         asst(5, "m3", [tool("Bash", "c3", command="git status")]),
         result(6, "c3", permissionDecision={"source": "config"}),
     ])  # fmt: skip
-    ship = _summary(events)["stages"]["ship"]
-    assert (ship["checks"], ship["checks_failed"], ship["permission"]) == (2, 1, 1)
+    summary = _summary(events)
+    ship = summary["stages"]["ship"]
+    assert (ship["checks"], ship["checks_failed"], ship["prompts"]) == (2, 1, 1)
+    assert summary["prompts"] == {"Bash:check.sh": {"asked": 1, "rejected": 0}}
+
+
+def _decided(source: str, decision: str = "accept", **extra) -> dict:
+    return {"decision": decision, "source": source, **extra}
+
+
+def test_a_prompt_is_a_tool_the_person_was_asked_to_allow(tmp_path: Path) -> None:
+    """R1: the person's own decisions on a tool, rejections included; never their questions or
+    plan gates, which are `question` and `gate`, and never a rule, the mode or the classifier."""
+    script = "FOO=1 uv run --quiet --script /x/scripts/sdlc.py accept 042"
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:ship"),
+        asst(1, "m1", [tool("Bash", "b1", command="git push -q origin main")]),
+        result(2, "b1", permissionDecision=_decided("user_temporary", grantScope="once")),
+        asst(3, "m2", [tool("Bash", "b2", command=script)]),
+        result(4, "b2", permissionDecision=_decided("user_reject", "reject")),
+        asst(5, "m3", [tool("AskUserQuestion", "q1", questions=[])]),
+        result(6, "q1", permissionDecision=_decided("user_temporary", grantScope="once")),
+        asst(7, "m4", [tool("ExitPlanMode", "p1")]),
+        result(8, "p1", permissionDecision=_decided("user_temporary", grantScope="session")),
+        asst(9, "m5", [tool("Bash", "b3", command="git status")]),
+        result(10, "b3", permissionDecision=_decided("config", reasonType="classifier")),
+        result(11, "gone", permissionDecision=_decided("user_temporary")),
+    ])  # fmt: skip
+    prompts = [(e["name"], e["rejected"]) for e in events if e["kind"] == "permission"]
+    assert prompts == [
+        ("Bash:git:push", False),
+        ("Bash:sdlc.py:accept", True),
+        ("unknown", False),
+    ]
+    summary = _summary(events)
+    assert summary["totals"]["prompts"] == 3
+    assert summary["prompts"]["Bash:sdlc.py:accept"] == {"asked": 1, "rejected": 1}
+    ship = summary["stages"]["ship"]
+    assert (ship["question"], ship["gate"]) == (1, 1)  # still counted, as a question and the plan
+
+
+@pytest.mark.parametrize(
+    ("command", "name"),
+    [
+        ("git -C /x/y push -q origin main", "Bash:git:push"),
+        ("cd /x/y && make -j4 test", "Bash:make"),
+        ('cd "$(git rev-parse --show-toplevel)" && ./scripts/client-report.sh --token abc',
+         "Bash:client-report.sh"),
+        ("uv run --quiet --script /x/plugins/factory/scripts/factory.py verdicts 042",
+         "Bash:factory.py:verdicts"),
+        ("uv run --group dev pytest -q", "Bash:uv"),
+        ("gh issue view 41 --json state", "Bash:gh:issue"),
+        ("echo 'unbalanced", "Bash:echo"),
+        ("A=1 B=2", "Bash:unknown"),
+        ("", "Bash:unknown"),
+    ],
+)  # fmt: skip
+def test_a_prompt_is_named_by_its_program_never_its_arguments(command: str, name: str) -> None:
+    """R2: the program's basename, and a fixed subcommand for git, gh and the plugin's scripts."""
+    got = metrics._prompt_name("Bash", {"command": command})
+    assert got == name
+    assert not {"/", "=", " "} & set(got)
+
+
+def test_a_tool_other_than_bash_is_named_by_the_tool() -> None:
+    assert metrics._prompt_name("Edit", {"file_path": "/x/secret.txt"}) == "Edit"
+    assert metrics._prompt_name("mcp__notes__search", {"q": "x"}) == "mcp__notes__search"
+    assert metrics._prompt_name("", {}) == "unknown"
+
+
+def test_the_modes_a_change_ran_in_are_kept_beside_its_prompts(tmp_path: Path) -> None:
+    """R4: `auto` decides without asking, so a reader needs the mode to read zero prompts."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:ship"),
+        user(1, "go on", permissionMode="auto"),
+        user(2, "and on", permissionMode="plan"),
+    ], [
+        user(3, "more", permissionMode="default"),
+    ])  # fmt: skip
+    assert _summary(events)["totals"]["prompt_modes"] == "auto,default"
+    assert (
+        _summary(_events(tmp_path / "none", [cmd(0, "sdlc:ship")]))["totals"]["prompt_modes"] == "-"
+    )
+
+
+def test_prompts_round_trip_through_the_trailers(tmp_path: Path) -> None:
+    """R3: `Sdlc-Prompt` lines and `prompts=` back out as written; no `permission=` any more."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:ship"),
+        user(1, "go on", permissionMode="default"),
+        asst(2, "m1", [tool("Bash", "b1", command="git push origin main")]),
+        result(3, "b1", permissionDecision=_decided("user_reject", "reject")),
+    ])  # fmt: skip
+    lines = metrics.trailers(_summary(events))
+    assert "Sdlc-Prompt: Bash:git:push asked=1 rejected=1" in lines
+    assert not any("permission=" in line for line in lines)
+    back = metrics.parse_trailers("\n".join(lines))
+    assert back["prompts"] == {"Bash:git:push": {"asked": 1, "rejected": 1}}
+    assert (back["totals"]["prompts"], back["totals"]["prompt_modes"]) == (1, "default")
+    assert back["stages"]["ship"]["prompts"] == 1
 
 
 def test_edits_are_kept_as_artifact_kinds(tmp_path: Path) -> None:

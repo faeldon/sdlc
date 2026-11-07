@@ -1173,3 +1173,31 @@ def test_retro_commit_refuses_a_product_doc_that_drops_an_open_outcome(tmp_path,
     refusals = json.loads(capsys.readouterr().out)["refusals"]
     assert any("O1 was open and the new product doc drops it" in r for r in refusals), refusals
     assert _git(root, "rev-parse", "HEAD") == before
+
+
+def test_retro_compares_tool_prompts_only_where_close_recorded_them(tmp_path: Path) -> None:
+    """A `Close` commit from before prompts were named carries `permission=`, which counted
+    questions and plan approvals: it is unrecorded for prompts, never zero, and never summed in."""
+    root = _repo(tmp_path)
+    _measured(root, "001-keep-one-draft", 10, 6)  # old: permission=1, no prompts=
+    _close(root, "002-draft-titles", tier=2)
+    close = _git(root, "log", "-1", "--format=%B")
+    _git(root, "commit", "-q", "--amend", "-m", close + "\n\n" + "\n".join([
+        "Sdlc-Mode: manual",
+        "Sdlc-Coverage: transcripts=1 stages=design,ship",
+        "Sdlc-Totals: elapsed=60 agent=20 response=5 away=0 blocked=0 stops=6 required=5 "
+        "target=6 allowance=1 prompts=3 prompt_modes=default ship_runs=1 reenter=0 in=1 "
+        "cache_read=100 out=10",
+        "Sdlc-Prompt: Bash:git:push asked=2 rejected=1",
+        "Sdlc-Prompt: Edit asked=1 rejected=0",
+    ]))  # fmt: skip
+    m = _retro(root)["metrics"]
+    assert m["groups"]["tier 2, manual"]["median"]["prompts"] == 3, "the old commit isn't 0"
+    assert m["prompts"] == {
+        "recorded": 1,
+        "names": {
+            "Bash:git:push": {"asked": 2, "rejected": 1, "changes": 1},
+            "Edit": {"asked": 1, "rejected": 0, "changes": 1},
+        },
+        "modes": {"default": 1},
+    }

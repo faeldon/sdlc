@@ -223,7 +223,8 @@ not code's. Release, publish and measuring never read the register
 
 **Metrics: `scripts/metrics.py`.** Pure functions, loaded by path, no import of `sdlc.py`. Close's
 `measure` step reads this repo's Claude Code transcripts (`_project_dirs()`, its own folders
-exactly), attributes them to the change by branch, keeps numbers only, and writes them as
+exactly), attributes them to the change by branch, keeps numbers and names only (an artifact
+kind, a role, a prompt's tool and program), and writes them as
 `Sdlc-*` trailers on the `Close` commit: history keeps them. The event list and trailer format
 are a contract: extend them, never redefine. Measuring never refuses: a failure is
 `Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,

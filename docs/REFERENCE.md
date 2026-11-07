@@ -654,7 +654,18 @@ machine, for numbers only: never message text, a path or a session id
 Waits while a `depends_on:` change is still open count as **blocked**. It also records the stops
 (gates, questions and anything else that waited on the person) against the gates the way of
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
-per sub-agent role. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
+per sub-agent role.
+
+Beside the stops, never among them, it records the tool prompts the person answered: a tool use
+they were asked to allow and allowed or rejected, never their own questions or plan approvals
+(counted as stops already), and never one the rules, the mode or the classifier decided. Each is
+named by the tool, and for `Bash` by the program it ran, with the subcommand for `git`, `gh` and
+the plugin's scripts (`Bash:git:push`, `Bash:sdlc.py:accept`, `Edit`), never an argument or a
+path: one `Sdlc-Prompt: <name> asked=<n> rejected=<n>` line each, `prompts=` on `Sdlc-Totals` and
+each `Sdlc-Stage`, and `prompt_modes=` on `Sdlc-Totals`, the permission modes the change ran in
+(`auto` asks no one, so its zero says nothing about a skill's rules). An older `Close` commit
+carries `permission=` instead, which counted questions and plan approvals, not prompts:
+`/sdlc:retro` reads it as unrecorded. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
 commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
 each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
 then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of

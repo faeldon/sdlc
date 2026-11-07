@@ -22,7 +22,13 @@ An event is a dict with `ts` (an aware datetime) and `kind`:
 
     skill{name}  turn{ms}  human{reply, command}  tokens{in, cache_create, cache_read, out}
     edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  check{ok}
-    permission  subagent{role, ms, in, cache_create, cache_read, out}
+    permission{name, rejected}  mode{modes}  subagent{role, ms, in, cache_create, cache_read, out}
+
+A `permission` is a tool prompt the person answered (`_prompts()`): never their own questions or
+plan gates, which are `question` and `plan`, and never a `config` decision. Its `name` is the
+tool, and for `Bash` the program, from `_prompt_name()`: `Bash:git:push`. It is written as an
+`Sdlc-Prompt` line and `prompts=`; a `Close` commit from before that carries `permission=`,
+which counted questions and plan approvals, and is never read as prompts.
 
 `edit.role` is set on an edit a sub-agent made, and absent on the session's own. `artifact()` is
 the classifier, public so a reader of the change's diff names its files the same way.
@@ -39,6 +45,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import statistics
 from datetime import datetime
 from pathlib import Path
@@ -279,8 +286,9 @@ def _usage(msg: dict) -> dict:
 
 def _subagent(path: Path, branch: str) -> dict | None:
     """One sub-agent's run, from its transcript and the `.meta.json` beside it: role, time and
-    tokens, the parent tool call that started it, and its edits, as `edit` events tagged with
-    its role (the factory's builder writes the code)."""
+    tokens, the parent tool call that started it, its edits, as `edit` events tagged with its
+    role (the factory's builder writes the code), and the tool prompts the person answered for
+    it, as `permission` events: they stop the person as the session's own do."""
     try:
         meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -291,8 +299,11 @@ def _subagent(path: Path, branch: str) -> dict | None:
     tokens = dict.fromkeys(TOKEN_KEYS.values(), 0)
     edits = []
     seen: set[str] = set()
+    uses: dict[str, tuple[str, dict]] = {}
     for e in entries:
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+        if e.get("type") == "user" and _ts(e):
+            edits.extend({"ts": _ts(e), **p} for p in _prompts(e, msg.get("content"), uses))
         if e.get("type") != "assistant":
             continue
         if isinstance(msg.get("usage"), dict) and msg.get("id") not in seen:
@@ -301,6 +312,9 @@ def _subagent(path: Path, branch: str) -> dict | None:
                 tokens[k] += v
         content = msg.get("content")
         for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                uses[str(block.get("id"))] = (str(block.get("name")), inp)
             if isinstance(block, dict) and block.get("name") in EDIT_TOOLS and _ts(e):
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 target = str(inp.get("file_path") or inp.get("notebook_path") or "")
@@ -321,8 +335,88 @@ def _subagent(path: Path, branch: str) -> dict | None:
     return {"parent": meta.get("toolUseId"), "events": [run, *edits]}
 
 
+# The person's questions and plan gates: answered by the person, but counted as `question` and
+# `gate`, never as a prompt to allow a tool.
+NOT_PROMPTS = ("AskUserQuestion", "EnterPlanMode", "ExitPlanMode")
+SEPARATORS = ("&&", "||", ";", "|")
+# Programs whose subcommand is part of the name: what they were asked to do, never an argument.
+SUBCOMMANDS = ("git", "gh")
+PLUGIN_SCRIPTS = ("sdlc.py", "factory.py")
+
+
+def _prompts(entry: dict, content: object, uses: dict[str, tuple[str, dict]]) -> list[dict]:
+    """The tool prompts a user entry answers: a decision the person made (`user_temporary`, or
+    `user_reject`), on a tool other than their own questions and plan gates. A `config` decision
+    (a rule, the mode, the classifier) never stopped anyone."""
+    decision = entry.get("permissionDecision")
+    if not isinstance(decision, dict) or not str(decision.get("source", "")).startswith("user_"):
+        return []
+    found = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+        tool, inp = uses.get(str(block.get("tool_use_id")), ("", {}))
+        if tool in NOT_PROMPTS:
+            continue
+        rejected = decision.get("decision") == "reject"
+        found.append({"kind": "permission", "name": _prompt_name(tool, inp), "rejected": rejected})
+    return found
+
+
+def _prompt_name(tool: str, inp: dict) -> str:
+    """What a prompt was for, as names only: the tool, and for `Bash` the program's basename, with
+    the subcommand for `git`, `gh` and the plugin's own scripts. Never an argument, a path or a
+    flag: `Bash:git:push`, `Bash:sdlc.py:accept`, `Edit`, or `unknown` for what can't be read."""
+    if not tool:
+        return "unknown"
+    if tool != "Bash":
+        return _word(tool)
+    command = str(inp.get("command") or "")
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    segments: list[list[str]] = [[]]
+    for word in words:
+        if word in SEPARATORS:
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    segment = next((s for s in segments if s and s[0] != "cd"), [])
+    while segment and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", segment[0]):
+        segment = segment[1:]
+    if not segment:
+        return "Bash:unknown"
+    program, rest = Path(segment[0]).name, segment[1:]
+    parts = [program]
+    if program in SUBCOMMANDS:
+        parts.append(_subcommand(rest))
+    elif program == "uv" and "--script" in rest:
+        after = rest[rest.index("--script") + 1 :]
+        script = Path(after[0]).name if after else "unknown"
+        if script in PLUGIN_SCRIPTS:  # the plugin's own script is what ran, not uv
+            parts = [script, _subcommand(after[1:])]
+    return "Bash:" + ":".join(_word(p) or "unknown" for p in parts)
+
+
+# Options that take a value of their own (`git -C <dir>`), so the value isn't the subcommand.
+VALUED = ("-C", "-c", "-R", "--repo", "--git-dir", "--work-tree")
+
+
+def _subcommand(words: list[str]) -> str:
+    skip = False
+    for word in words:
+        if skip:
+            skip = False
+        elif word in VALUED:
+            skip = True
+        elif not word.startswith("-"):
+            return word
+    return "unknown"
+
+
 def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None) -> list[dict]:
-    """The change's events from every session in `dirs`, oldest first. Numbers only."""
+    """The change's events from every session in `dirs`, oldest first. Numbers and names only."""
     events: list[dict] = []
     check = (check_cmd or "").strip()
     for folder in dirs:
@@ -336,10 +430,14 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
             checks: dict[str, datetime] = {}
             agents: set[str] = set()
             seen: set[str] = set()
+            uses: dict[str, tuple[str, dict]] = {}
+            modes: set[str] = set()
+            last: datetime | None = None
             for entry, mine in zip(entries, keep, strict=True):
                 ts = _ts(entry)
                 if not mine or ts is None:
                     continue
+                last = ts
                 kind = entry.get("type")
                 msg = entry.get("message") if isinstance(entry.get("message"), dict) else {}
                 content = msg.get("content")
@@ -348,9 +446,10 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                     ms = ms if isinstance(ms, int) else 0
                     events.append({"ts": ts, "kind": "turn", "ms": ms})
                 elif kind == "user":
-                    decision = entry.get("permissionDecision")
-                    if isinstance(decision, dict) and decision.get("source") == "user_temporary":
-                        events.append({"ts": ts, "kind": "permission"})
+                    mode = entry.get("permissionMode")
+                    if isinstance(mode, str) and mode != "plan":
+                        modes.add(mode)
+                    events.extend({"ts": ts, **p} for p in _prompts(entry, content, uses))
                     if isinstance(content, list):
                         for block in content:
                             if (
@@ -381,6 +480,7 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                             continue
                         name = block.get("name")
                         inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                        uses[str(block.get("id"))] = (str(name), inp)
                         if name in EDIT_TOOLS:
                             target = str(inp.get("file_path") or inp.get("notebook_path") or "")
                             added, removed = _changed_lines(name, inp)
@@ -403,6 +503,8 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                                 checks[str(block.get("id"))] = ts
                         elif name == "Agent":
                             agents.add(str(block.get("id")))
+            if last is not None:
+                events.append({"ts": last, "kind": "mode", "modes": sorted(modes)})
             for sub in sorted((folder / path.stem / "subagents").glob("agent-*.jsonl")):
                 found = _subagent(sub, branch)
                 if found and found["parent"] in agents:
@@ -429,7 +531,7 @@ def _blank_stage() -> dict:
         "gate": 0,
         "question": 0,
         "extra": 0,
-        "permission": 0,
+        "prompts": 0,
         "reply": [],
         "checks": 0,
         "checks_failed": 0,
@@ -440,7 +542,7 @@ def _blank_stage() -> dict:
 
 def _active(stage: dict) -> bool:
     """Whether anything was counted in a stage, seen as a segment or not."""
-    counted = ("agent", "away", "blocked", "gate", "question", "extra", "permission", "checks")
+    counted = ("agent", "away", "blocked", "gate", "question", "extra", "prompts", "checks")
     return bool(
         stage["response"]
         or stage["edits"]
@@ -468,6 +570,8 @@ def summarize(
     idle = cfg["idle_minutes"] * 60
     stages = {s: _blank_stage() for s in STAGES}
     roles: dict[str, dict] = {}
+    by_prompt: dict[str, dict] = {}
+    prompt_modes: set[str] = set()
     blocked_by = dict.fromkeys(dep_closes, 0.0)
     stops: list[dict] = []
     segments: list[dict] = []
@@ -497,6 +601,9 @@ def summarize(
         stops.extend(span["stops"])
 
     for event in events:
+        if event["kind"] == "mode":  # a session's modes, not a moment: it moves no clock
+            prompt_modes.update(event["modes"])
+            continue
         opens = _stage_of(event)
         if opens and opens != current:
             if segments:
@@ -545,7 +652,10 @@ def summarize(
         elif kind == "question":
             stops.append({"stage": current or "intent", "kind": "question", "reply": None})
         elif kind == "permission":
-            here["permission"] += 1
+            here["prompts"] += 1
+            asked = by_prompt.setdefault(event["name"], {"asked": 0, "rejected": 0})
+            asked["asked"] += 1
+            asked["rejected"] += 1 if event["rejected"] else 0
         elif kind == "check":
             here["checks"] += 1
             here["checks_failed"] += 0 if event["ok"] else 1
@@ -600,7 +710,10 @@ def summarize(
         # Measured against its own gates: a change that stops only at them is on target.
         "target": len(required) + cfg["stop_allowance"],
         "allowance": cfg["stop_allowance"],
-        "permission": sum(s["permission"] for s in stages.values()),
+        # Tool prompts the person answered, beside `stops`, never in it; and the modes they could
+        # come in: in `auto`, the classifier decides and asks no one.
+        "prompts": sum(s["prompts"] for s in stages.values()),
+        "prompt_modes": ",".join(sorted(prompt_modes)) or "-",
         "ship_runs": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:ship"),
         "reenter": reenter,
     }
@@ -615,6 +728,7 @@ def summarize(
         # the stage lines always add up to the totals.
         "stages": {s: v for s, v in stages.items() if v["segments"] or _active(v)},
         "roles": roles,
+        "prompts": by_prompt,
         "blocked": blocked_by,
         "stops": stops,
         "segments": segments,
@@ -638,6 +752,7 @@ def history_summary(elapsed_seconds: float, way: str, tier: int, cfg: dict, reas
         "totals": totals,
         "stages": {},
         "roles": {},
+        "prompts": {},
         "blocked": {},
         "stops": [],
         "segments": [],
@@ -845,7 +960,7 @@ def trailers(summary: dict) -> list[str]:
             "gate": s["gate"],
             "question": s["question"],
             "extra": s["extra"],
-            "permission": s["permission"],
+            "prompts": s["prompts"],
             "reply": ",".join(s["reply"]) or "-",
             "checks": s["checks"],
             "checks_failed": s["checks_failed"],
@@ -857,6 +972,8 @@ def trailers(summary: dict) -> list[str]:
         fields = {"runs": r["runs"], "agent": _minutes(r["agent"])}
         fields.update({k: r[k] for k in TOKEN_KEYS.values()})
         lines.append(f"Sdlc-Role: {_word(role)} {_pairs(fields)}")
+    for name, p in sorted((summary.get("prompts") or {}).items()):
+        lines.append(f"Sdlc-Prompt: {_word(name)} {_pairs(p)}")
     for dep, seconds in sorted(summary["blocked"].items()):
         lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(seconds)}")
     return lines
@@ -915,6 +1032,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out["stages"][name] = fields
         elif key == "role" and name:
             out["roles"][name] = fields
+        elif key == "prompt" and name:
+            out.setdefault("prompts", {})[name] = fields
         elif key == "blocked" and name:
             out["blocked"][name] = fields.get("minutes", 0)
         elif key == "review" and name:
