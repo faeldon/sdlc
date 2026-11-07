@@ -88,9 +88,10 @@ The plugin runs on its own repo. Open a change with `/sdlc:intent`, and it goes 
 stages like any host's: [`guide/process.md`](../guide/process.md) is the process (tiers, the
 three loops) and [`.sdlc/SDLC.md`](../.sdlc/SDLC.md) this repo's answers to it (what is always
 Tier 2 here, its gate); [`guide/review.md`](../guide/review.md) and
-[`.sdlc/REVIEW.md`](../.sdlc/REVIEW.md) are the review passes `/sdlc:ship` works through. Two things are always Tier 2 here, whatever the size of the diff:
-anything that changes what `sdlc.py` reads or writes in a host repo, and a skill's WAIT step or
-`allowed-tools`. A bug fix starts with a failing test.
+[`.sdlc/REVIEW.md`](../.sdlc/REVIEW.md) are the review passes `/sdlc:ship` works through. What can
+lose a host's work, hand out a number twice or let something run unasked is always Tier 2 here,
+whatever the size of the diff (`.sdlc/SDLC.md` lists it); an additive change goes by its size. A
+bug fix starts with a failing test.
 
 The repo is numbered by GitHub issues, so an intent opens an issue on `faeldon/sdlc`.
 

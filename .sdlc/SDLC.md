@@ -23,12 +23,22 @@ put a checkable claim between a change and the people who rely on it.
 
 ### Always Tier 2, whatever the size of the diff
 
-- **Anything that changes what `sdlc.py` reads or writes in a host repo**: a config key, the
-  intent frontmatter, the `.sdlc/work/` layout, how numbers are allocated, how a change is archived or
-  its folder removed. One line here can hand out a number twice or remove a folder that never
-  reached `main`, in a repo the tests have never seen.
-- **A skill's WAIT step or `allowed-tools`.** Either one changes what runs without asking, which
-  is the plugin's main promise to a host.
+What can lose a host's work, hand out a number twice, or let something run unasked, found in a
+repo the tests have never seen:
+
+- **How numbers are allocated, or how a change's folder is committed, archived or removed**, and
+  the `.sdlc/work/` layout. One line here can hand out a number twice or remove a folder that never
+  reached `main`.
+- **A change to what something a host already has means**: an existing config key, frontmatter
+  key, file the plugin writes or trailer, its meaning changed or its writing stopped (042's
+  `permission=`). A host's history and its retrospectives read the old meaning.
+- **A skill's WAIT step**: what it approves, or when. It is the plugin's main promise to a host.
+- **An `allowed-tools` rule that lets a command that writes run without asking.**
+
+An additive change goes by its size instead: a new config or frontmatter key whose default keeps
+today's behaviour, a new read-only output (a field in `status`'s or `retro`'s JSON), a new trailer
+line beside the old ones, or an `allowed-tools` rule for a read-only command already in the skill's
+bash blocks, which `tests/test_skills.py` pins.
 
 ## Where a change is worked: one worktree per change
 

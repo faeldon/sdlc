@@ -555,16 +555,6 @@ function's source), 2026-10-26-3 (no adoption test runs `closes:`) and 2026-10-2
 that readiness lost its inbox item). Fix them in one change, each retired by its ship. Raised by
 the retrospective of 2026-11-04.
 
-## [2026-11-04-9] [idea] Re-draw this repo's always-Tier-2 carve-outs
-
-Every change in the window whose intent could be read was Tier 2 (11 of 11, against 12 of 20 the
-window before), and the product doc bets that most changes are Tier 1. `.sdlc/SDLC.md` puts any
-change to what `sdlc.py` reads or writes in a host, and any skill's WAIT or `allowed-tools`, in
-Tier 2 whatever its size, and nearly every change here touches one of them. Decide which of those
-need a spec here (an `allowed-tools` rule added beside the command it covers, which the tests pin,
-may not), re-draw the carve-outs, and revise the bet in `.sdlc/PRODUCT.md` if the answer is that
-Tier 2 is this repo's norm. Raised by the retrospective of 2026-11-04.
-
 ## [2026-11-04-10] [idea] Move retro's history readers out of sdlc.py
 
 `scripts/sdlc.py` is 7,729 lines, up from 7,047 at the last retrospective, and 12 of the window's 14
