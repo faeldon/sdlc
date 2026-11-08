@@ -9,6 +9,7 @@ runs UX and UI reviewers against a running app. agent-skills has no such agent, 
 `frontend-ui-engineering` skill to write them from, and the plugin can't know a repo has a UI: it
 needs a declaration (a `factory.toml` key, or `commands.preview` for a dev server) before a UI
 reviewer can run. Raised 2026-10-24.
+Theme: factory
 
 ## [2026-10-24-2] [idea] A factory queue, and parallel runs across worktrees
 
@@ -16,12 +17,14 @@ The factory runs one change per session. A queue (`/sdlc-factory:next` over seed
 open intents) and several runs at once, one per worktree, would let ideas move while nobody
 watches. GitHub issues and `work/ideas.md` are already the queue; this is the runner. Raised
 2026-10-24.
+Theme: factory
 
 ## [2026-10-24-3] [idea] A factory status board
 
 A page that shows each running change's stage, round and verdicts as they land, from the change
 folders' files, the way the factory it learned from shows a dashboard. Read-only. Raised
 2026-10-24.
+Theme: factory
 
 ## [2026-10-24-4] [idea] A retro report and process views from each change's numbers
 
@@ -32,6 +35,7 @@ and throughput doesn't), changes open at once, the human's wait time against age
 throughput by tier per week alongside cycle time and rework, roughly DORA's set. Avoid a single
 velocity figure, which invites optimising the number. A dashboard is optional and comes after the
 report: the process doc keeps "no dashboard" for the signals. Raised 2026-10-24.
+Theme: retro
 
 ## [2026-10-24-5] [idea] Architecture indicators for the retro loop
 
@@ -47,6 +51,7 @@ architecture pass:
 Language-specific measures (complexity, dependency cycles) come from the host through a configured
 command, the way `commands.scan` works, since the plugin knows nothing about what a host builds.
 Raised 2026-10-24.
+Theme: retro
 
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
@@ -56,6 +61,7 @@ reviews through pull requests would want ship to push the branch and open a PR (
 PR's review to stand alongside ship's. An opt-in way of landing, not a default, and an exception
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
+Theme: landing
 
 ## [2026-10-25-1] [idea] A process map of the three loops, kept true by the gate
 
@@ -65,6 +71,7 @@ acceptance checks, review passes) and what it writes. Mermaid in the repo (`docs
 rendered by GitHub), with a test that fails when a stage, skill or WAIT is missing from it; HTML
 or a diagramming tool can be generated from it later. Decide whether hosts get a copy from setup.
 Raised 2026-10-25.
+Theme: docs
 
 ## [2026-10-25-2] [idea] Decide at intent whether a change reaches hosts
 
@@ -74,6 +81,7 @@ was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent a
 (plugin only, host-facing, or both, with this repo as the first user) and record it, so the spec
 designs for the host from the start and ship can check the change delivered on it. Raised
 2026-10-25.
+Theme: intent
 
 ## [2026-10-25-3] [idea] A glossary of the process's terms
 
@@ -84,6 +92,7 @@ line and points at where it's specified, with a test that fails when a term the 
 (`STAGES`, tiers, impacts, nit costs and values, review passes) has no entry. Hosts read it on
 GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
 should use its terms. Raised 2026-10-25.
+Theme: docs
 
 ## [2026-10-25-4] [idea] A changelog that keeps its own layout
 
@@ -93,6 +102,7 @@ a Changelog file's `## [Unreleased]` section is left above the new one. Let a ho
 releases go (`<!-- sdlc:releases -->`, inserted after), falling back to today's place, and make the
 section heading a template a host can override. Tier 2: it changes what release writes in a host.
 Raised 2026-10-25 by a host.
+Theme: release
 
 ## [2026-10-25-5] [idea] Version lines release can't read, and the first release's baseline
 
@@ -102,6 +112,7 @@ version, release's `git tag -a` hint points at the last commit that touched the 
 which can predate the repo's adoption of the plugin, so the first release takes in every change
 closed since. Read the dunder form, and point the hint at the adoption commit when that is later.
 Raised 2026-10-25 by a host.
+Theme: release
 
 ## [2026-10-25-6] [idea] Publish's "published" note never leaves the machine
 
@@ -112,6 +123,7 @@ the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote.
 --notes-from-tag`), that `release.prepare` can show what a push will upload (`git lfs push
 --dry-run`), and that releases outside `release.tag`'s pattern live outside the loop. Raised
 2026-10-25 by a host.
+Theme: release
 
 ## [2026-10-25-7] [idea] Close warns before its merge deletes files in the main checkout
 
@@ -120,6 +132,7 @@ deletes them there when close fast-forwards `main`. They are in history, but the
 told. `close --check` could list the tracked paths the merge removes, so the approval names them.
 Not an automatic `after_close` command: `close_cleanup` stays the person's to run. Raised
 2026-10-25 by a host.
+Theme: landing
 
 ## [2026-10-25-8] [idea] Small gaps in sync and worktree setup
 
@@ -127,6 +140,7 @@ Not an automatic `after_close` command: `close_cleanup` stays the person's to ru
 on the old one. `commands.worktree_setup` gets `{worktree}` but not `{main}`, so a host linking
 untracked data from the main checkout works the path out from `git rev-parse --git-common-dir`.
 Tier 1 together. Raised 2026-10-25 by a host.
+Theme: robustness
 
 ## [2026-10-25-9] [idea] A local channel for bug reports and feature requests from other sessions
 
@@ -138,6 +152,7 @@ message or a drop folder the plugin's session reads, and that session triages it
 bug entry behind one approval. A report never names the host in what lands here (the repo's
 nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
+Theme: intake
 
 ## [2026-10-25-12] [idea] Rework as a declared fix, with surviving lines as the cross-check
 
@@ -158,6 +173,7 @@ The file pairs, `REWORK_DAYS` as a match rule and `rework_common` go. Close's in
 change fixes (024): a change can have both, a bug it fixes and the change that let it through,
 which that bug's `Introduced by:` line already records, so retro can cross-check the two.
 See work/021-rework-shared-files/.
+Theme: retro
 
 ## [2026-10-25-19] [idea] Say when to push, and nudge when landed work piles up unpushed
 
@@ -178,6 +194,7 @@ repo's marketplace): a pushed version bump is already a publish, so release may 
 there, or nothing, and the nudge says so rather than suggesting a push that releases. Landing
 through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
 revised 2026-10-26: never automatic, and a nudge when landed work piles up.
+Theme: landing
 
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
@@ -194,6 +211,7 @@ Decide what a template's frontmatter counts as (it is keys, not a block), whethe
 `templates/issue.md`, whose text is every issue's body, splits into blocks at all, and what a
 record from before this change reads as (`base: none`, so `differs`, never proposed). Raised
 2026-10-25.
+Theme: setup
 
 ## [2026-10-25-24] [idea] Record each change's type, and let the host decide where it shows
 
@@ -205,6 +223,7 @@ config: a subject prefix (`fix: …`, Conventional Commits) for a repo that uses
 `Sdlc-Type:` trailer on the `Close` commit beside `Sdlc-Fixes:`, or nowhere. Retro can then count
 changes by type, and release can group its notes by it. Tier 2: a new intent key and what
 `sdlc.py` writes in a host. Raised 2026-10-25, from 025's vocabulary.
+Theme: intent
 
 ## [2026-10-24-7] [nit] A deprecations status test whose patched half can't fail
 
@@ -336,6 +355,7 @@ cover it. This is what brings the median Tier 1 change within its stop target (7
 last window). Raised by the retrospective of 2026-10-26.
 
 After: 2026-10-26-4
+Theme: permissions
 
 ## [2026-10-26-6] [idea] A ship that fixes its own review finding is not a miss
 
@@ -345,6 +365,7 @@ through first time in 5 of 12 Tier 2 changes and 4 of 8 Tier 1 in the last windo
 numbers can't say which. Count a ship that stopped for a finding its own review raised apart from
 one rerun for any other reason, and let `first_time` count only the second kind. Raised by the
 retrospective of 2026-10-26.
+Theme: retro
 
 ## [2026-10-26-7] [idea] Pay down the robustness nits
 
@@ -353,6 +374,7 @@ change: 2026-10-25-13 and 2026-10-25-14 (status's `After:` handling), 2026-10-25
 after-bump staged, missing from a failed release's report), 2026-10-25-18 (a change sized from an
 intent committed early) and 2026-10-26-1 (an issue that hears nothing until the next marking).
 Fix them in one change, each retired by its ship. Raised by the retrospective of 2026-10-26.
+Theme: robustness
 
 ## [2026-10-26-8] [idea] Leave each change's measured numbers out of retro's and release's output
 
@@ -361,6 +383,7 @@ in the last window (about 39 KB of 78 KB compact, twenty changes), and `release 
 it again. Retro's skill reads only the medians in `metrics`, and release reads none. Leave the
 per-change blob out by default, behind a flag for anyone who wants it, so each retrospective and
 release reads a fraction of the tokens. Raised by the retrospective of 2026-10-26.
+Theme: cost
 
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
@@ -375,6 +398,7 @@ it. Then decide what triage does with an issue from a template that lacks them (
 missing facts, as `needs-info` does), and what `drift` and `uninstall` make of a host template
 setup extended rather than created. Raised 2026-10-26, after running setup on a host with its own
 templates.
+Theme: intake
 
 ## [2026-10-26-11] [idea] Uninstall offers to clean the plugin's mentions out of a host
 
@@ -392,6 +416,7 @@ counts as a mention (a regex over paths and skill names, or the docs `context` a
 and how an old host with no record is told what can't be attributed to setup. Edits stay the
 host's to commit, like the rest of uninstall. Raised 2026-10-26, after uninstalling from a host
 set up by an early version.
+Theme: setup
 
 ## [2026-10-26-13] [idea] Support moving the change folder, once a host needs it
 
@@ -400,6 +425,7 @@ again, or choosing a path, was left out on purpose: no host needs it. It would n
 commit with an `Sdlc-Work: from= to=` trailer, a resolver giving the folder at any commit, and a
 rule every reader of history follows. History from .sdlc/work/ on sits at one path, so nothing
 from before has to be carried back. See work/027-work-path/spec.md (Alternatives rejected).
+Theme: setup
 
 ## [2026-10-26-14] [nit] No test pins that readiness lost its inbox item
 
@@ -460,6 +486,7 @@ Raised by: 031-idea-skill (cost)
 `sdlc.py answers` keeps a filled prompt under its old key, so a migrated host's answer to "the
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
+Theme: setup
 
 ## [2026-11-03-15] [nit] A skipped fresh review is caught only by ship's prose
 
@@ -513,6 +540,7 @@ Raised by: 037-escaped-bugs-tune-review (correctness)
 section's `sh` block itself; the behaviour check (039) is told never to, since an agent may have
 written them and `/sdlc:ship`'s `accept` runs them under a prompt. Make the two agree. See
 .sdlc/work/039-factory-evidence-and-replay/notes.md.
+Theme: factory
 
 ## [2026-11-04-5] [nit] The factory's review proposes severities it may not be able to read
 
@@ -536,6 +564,7 @@ branch to a file beside the skill that ship reads only when its part is non-empt
 and every rule in `SKILL.md`, with `tests/test_skills.py` covering those files' commands the way it
 covers the skill's. A plain change then reads a fraction of it, and the next feature lands in a
 file of its own. Raised by the retrospective of 2026-11-04.
+Theme: cost
 
 ## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
 
@@ -546,6 +575,7 @@ or `report`, and move the first setup's steps (the profile round, the drafts) to
 only when it isn't. Raised by the retrospective of 2026-11-04.
 
 After: 2026-11-04-6
+Theme: cost
 
 ## [2026-11-04-8] [idea] Pay down the tests nits
 
@@ -554,6 +584,7 @@ change: 2026-10-24-7 (a half that can't fail), 2026-10-25-22 and 2026-11-04-1 (t
 function's source), 2026-10-26-3 (no adoption test runs `closes:`) and 2026-10-26-14 (nothing pins
 that readiness lost its inbox item). Fix them in one change, each retired by its ship. Raised by
 the retrospective of 2026-11-04.
+Theme: tests
 
 ## [2026-11-04-10] [idea] Move retro's history readers out of sdlc.py
 
@@ -563,6 +594,7 @@ section alone runs about 1,400 lines, read-only and called only by `retro` and `
 it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history walks it shares with
 release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
+Theme: refactor
 
 ## [2026-11-04-12] [nit] The LF test checks write_text only, not a write-mode open
 
