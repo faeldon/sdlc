@@ -46,7 +46,14 @@ architecture pass:
 - churn hotspots (the files most changes touch, weighted by size; today `scripts/sdlc.py`,
   touched by nearly every change);
 - files that change together;
-- the largest files and how they grow.
+- the largest files and how they grow;
+- the test suite's size and the gate's runtime, and how both grow.
+
+The suite gets a pruning pass too: the process guide sets each test's lifetime when it is written,
+and ship flags a test that can't fail or that only a revert could fail, but only in the diff it
+reviews. Nothing looks at the tests already in the suite again: one whose code was rewritten, one
+that repeats a newer test, one that now passes for the wrong reason, the slowest. Retro proposes
+the candidates as a `tests` paydown seed, and the person decides which go.
 
 Language-specific measures (complexity, dependency cycles) come from the host through a configured
 command, the way `commands.scan` works, since the plugin knows nothing about what a host builds.
