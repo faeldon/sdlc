@@ -384,19 +384,34 @@ entry by its id, written bare, or by its title, quoted, and titles are read for 
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in
 `.sdlc/work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an
 `After: <id>, <id>` line in a seed's body makes it wait while any seed it names is still in the
-register and not being built. Each line's command is `/sdlc:intent <id>`. A seed
+register and not being built. An idea or a bug may also carry a `Theme:` line, as every nit
+does, and a `Priority: high|med|low` line (`check` reports any other word, and a `Priority:` on a
+nit, whose `Cost:` and `Value:` rank it). Each line's command is `/sdlc:intent <id>`. A seed
 being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
 Candidates come in this order, each once, under the first rule it meets:
 
-1. `[bug]` entries, most severe first, then oldest;
-2. each open milestone's first `Groups:` seed that is ready, in the doc's order;
-3. a seed whose `After:` seeds have all left the register, the next in its series;
-4. nits of cost `S`, one line per theme, oldest theme first;
-5. every other ready idea, oldest first (`idea`).
+1. ideas and bugs marked `Priority: high`, bugs most severe first, then oldest (`priority high`);
+2. `[bug]` entries, most severe first, then oldest;
+3. each open milestone's first `Groups:` seed that is ready, in the doc's order;
+4. a seed whose `After:` seeds have all left the register, the next in its series;
+5. nits of cost `S`, one line per theme, oldest theme first;
+6. every other ready idea, oldest first (`idea`);
+7. ideas and bugs marked `Priority: low`, oldest first (`priority low`).
 
-Five are shown, then a count. Below them, an open milestone whose grouped changes and seeds are all
-closed says so, for `/sdlc:retro` to settle, and an `After:` line that can never be met (it names
-nothing, or seeds that wait on each other) is a `⚠`, never a `check` problem.
+An entry with no `Priority:` line, or `med`, ranks as it would with none. Ten are shown, each with
+its `[theme]`, then a count, and `status --all` lists every candidate, grouped by theme. Below
+them, `Themes:` counts each theme's open entries by kind (nits of every cost included), the theme
+with the best-ranked line first and `(no theme)` last, then how many seeds wait on an `After:`.
+With five or more open ideas and bugs lacking a `Theme:`, a line names `/sdlc:idea --themes`, which
+proposes one for each behind a single approval, from the main checkout, and commits them as one
+`Update <id>, …`.
+An open milestone whose grouped changes and seeds are all closed says so, for `/sdlc:retro` to
+settle, and an `After:` line that can never be met (it names nothing, or seeds that wait on each
+other) is a `⚠`, never a `check` problem.
+
+Each open change's line ends with when it was last touched: its branch's own last commit, or the
+newest file its worktree has changed. One untouched for a day is `quiet`, and `/sdlc:status`
+recommends finishing an open change only once it is: one touched since has a session on it.
 
 A change may keep its **acceptance checks** in `.sdlc/work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one

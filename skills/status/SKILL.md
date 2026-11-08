@@ -43,15 +43,25 @@ That is the entire input. `sdlc.py status` already gives id, tier, stage, age in
 artifacts exist, the title, and the counts of undone items and unresolved open questions — don't
 go looking for any of it elsewhere.
 
+**Each open change's line ends with when it was last touched**: `· touched 12m ago`, from its
+branch's own last commit and its worktree's changed files. One untouched for a day reads
+`· quiet, touched 2d ago`. A change that isn't quiet is **in flight**: a session is most likely on
+it already, so it is never the recommendation.
+
 **`■ Next up` is what comes after the open changes**, so you never need `.sdlc/work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
-and orders them by a fixed rule: `bug` entries first, then each open milestone's next grouped seed
-(`M1 (…)`), then the next seed in a series (`next in series after "…"`), then cost-`S` nits by
-theme (`nits`), then every other idea (`idea`). Each line ends with the command that starts it,
-`/sdlc:intent <id>` with the entry's id.
-A seed already being built, or waiting on an earlier seed in its series, is left out. The lines
-below the list say which milestone has nothing left in its groups, and which `After:` lines can
-never be met (`⚠`).
+and orders them by a fixed rule: entries marked `Priority: high` first (`priority high · …`), then
+`bug` entries, then each open milestone's next grouped seed (`M1 (…)`), then the next seed in a
+series (`next in series after "…"`), then cost-`S` nits by theme (`nits`), then every other idea
+(`idea`), and entries marked `Priority: low` last. Ten lines are shown, each with its reason, its
+`[theme]` when it has one, and the command that starts it, `/sdlc:intent <id>` with the entry's id;
+`status --all` lists every candidate, grouped by theme. A seed already being built, or waiting on
+an earlier seed in its series, is left out; the count of those waiting comes after the list.
+`Themes:` counts the open entries of each theme by kind, best-ranked theme first and `(no theme)`
+last: a theme is work that can be taken on together. With five or more ideas and bugs lacking a
+theme, a line says so and names `/sdlc:idea --themes`, which proposes them all behind one approval:
+mention it when `(no theme)` is most of the list. The lines below say which milestone has
+nothing left in its groups, and which `After:` lines can never be met (`⚠`).
 
 **The `~` markers in the artifact column are load-bearing.** `sdlc.py new --tier 2` scaffolds
 `spec.md` and `plan.md` from the plugin's templates, so a change whose spec and plan are still
@@ -115,26 +125,26 @@ everything in this table — lead the report with them.
 Compact. The status output has already been printed to the human; do not re-list every change line
 by line. Give them what the tool didn't:
 
-1. **One line of shape** — how many open, where they're bunched (e.g. "4 open, all at `stage: plan`
-   — nothing has been built yet").
+1. **One line of shape** — how many open, how many of them in flight, where they're bunched (e.g.
+   "4 open, 3 in flight, the quiet one at `stage: plan`").
 2. **Problems**, if `check --strict` failed. Otherwise skip the heading entirely.
-3. **Recommended next** — one item, an open change (`NNN-slug`) or a `Next up` line, with a
+3. **Recommended next** — one item, a quiet open change (`NNN-slug`) or a `Next up` line, with a
    sentence on *why it's the one* (unblocks others, smallest, oldest, already half-built, the
-   milestone it moves) and the exact command to run.
-4. **Runners-up** — at most two, one line each.
+   milestone it moves, marked high) and the exact command to run.
+4. **Runners-up** — at most two, one line each. One may be a theme from `Themes:` when its entries
+   would go well together as one change.
 
-Pick the recommendation on this order of precedence, stopping at the first that applies:
+Pick the recommendation on this order of precedence, stopping at the first that applies. An open
+change in flight (not marked `quiet`) is never picked: say it's in flight in the shape line.
 
 1. Anything `check --strict` flags as broken — fix the pipeline before extending it.
-2. A change already at `stage: build` or later — finish what's started before opening more.
-3. A change in `Ready to close` — `/sdlc:close NNN` lands it.
-4. A change others are declared to depend on: nothing that reads a thing can be built, or pointed
-   at it, until the thing exists.
-5. The lowest tier among the rest of the open changes — a Tier 1 is roughly fifteen lines of
-   intent and an afternoon.
-6. `Unreleased` lists changes — `/sdlc:release`, from the main checkout.
-7. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
-8. The first `Next up` line — its own command. Runners-up come from the lines after it.
+2. A change in `Ready to close` — `/sdlc:close NNN` lands it.
+3. A quiet change already at `stage: build` or later — finish what's started before opening more.
+4. A quiet change others are declared to depend on: nothing that reads a thing can be built, or
+   pointed at it, until the thing exists.
+5. `Unreleased` lists changes — `/sdlc:release`, from the main checkout.
+6. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
+7. The first `Next up` line — its own command. Runners-up come from the lines after it.
 
 With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 

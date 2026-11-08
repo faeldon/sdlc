@@ -151,10 +151,12 @@ OLD_HEADING_RE = re.compile(r"^##\s*\[\d{4}-\d{2}-\d{2}(?:-\d+)?\]\s*\[[^\]]+\]\
 # The facts an entry holds as body lines, `Key: value`, read as text, the first of each kept. A
 # seed that waits on others has `After: "Some title", "Another"`, the titles quoted as a
 # milestone's `Groups:` line has them, and status holds it back while one is still open; `Issue:`
-# names the tracker issues it was filed from, `#12, #15`, the first the others' parent; the rest
-# are a bug's or a nit's own.
+# names the tracker issues it was filed from, `#12, #15`, the first the others' parent; `Theme:`
+# groups any entry with others and `Priority:` ranks an idea or a bug; the rest are a bug's or a
+# nit's own.
 BODY_KEYS = (
     "After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by", "Issue",
+    "Priority",
 )  # fmt: skip
 BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
 # A reference to an entry, on an `idea:`, `fixes:`, `After:` or `Groups:` line, is its id, written
@@ -1403,6 +1405,38 @@ def entry_kind(entry: dict) -> str:
     return "bug" if is_bug(entry) else "nit" if is_nit(entry) else "idea"
 
 
+# An idea or a bug may carry `Priority: high|med|low`: high is put forward before everything else,
+# low after everything else, and med, or no line, where the rules put it. A nit has none: its
+# `Cost:` and `Value:` are its rank.
+PRIORITIES = ("high", "med", "low")
+
+
+def entry_priority(entry: dict) -> str | None:
+    """The entry's `Priority:` word, lowercased; None without the line."""
+    word = (entry["fields"].get("Priority") or "").strip().lower()
+    return word or None
+
+
+def entry_theme(entry: dict) -> str | None:
+    """The entry's `Theme:`, which a nit always has and an idea or a bug may; None without one."""
+    return (entry["fields"].get("Theme") or "").strip() or None
+
+
+def priority_problems(entries: list[dict]) -> list[str]:
+    """A `Priority:` word that isn't one of PRIORITIES, or a `Priority:` on a nit."""
+    problems = []
+    for e in entries:
+        word = entry_priority(e)
+        if word is None:
+            continue
+        if is_nit(e):
+            problems.append(f"{e['id']}: a nit has no Priority: its Cost: and Value: rank it")
+        elif word not in PRIORITIES:
+            words, got = "|".join(PRIORITIES), e["fields"]["Priority"]
+            problems.append(f"{e['id']}: Priority must be one of {words}, got {got!r}")
+    return problems
+
+
 # The process doc names the severity words in a `- **severity:**` bullet in its section whose
 # heading starts with `Bugs`, backticked and most severe first.
 SEVERITY_RE = re.compile(r"^- \*\*severity:\*\*\s*(.*)$")
@@ -1646,6 +1680,8 @@ def analyze(root: Path, today: date | None = None) -> dict:
             problems.append({"dir": f"{rel}/", "kind": "closes", "detail": detail})
     for detail in nit_entries(root)[1]:
         problems.append({"dir": register, "kind": "nits", "detail": detail})
+    for detail in priority_problems(entries):
+        problems.append({"dir": register, "kind": "priority", "detail": detail})
     bugs, bug_problems = bug_entries(root)
     for detail in bug_problems:
         problems.append({"dir": register, "kind": "bugs", "detail": detail})
@@ -2723,6 +2759,36 @@ def behind_trunk(main: Path, branch: str, trunk: str | None) -> int | None:
         return None
     out = _git(main, "rev-list", "--count", f"refs/heads/{branch}..refs/heads/{trunk}")
     return int(out) if out and out.isdigit() else None
+
+
+# An open change nothing has touched for this long is quiet: no session is likely on it, so the
+# status skill may recommend finishing it. A busier one is in flight, someone's already.
+QUIET_HOURS = 24
+
+
+def last_touched(root: Path, rec: dict, trunk: str | None) -> float | None:
+    """When an open change was last worked on, as a POSIX timestamp: the newest of its branch's
+    own last commit and the times the files `git status` lists in its checkout were modified.
+    None when neither says anything. Read-only: one log and one status per change."""
+    checkout = checkout_of(Path(root, rec["dir"]))
+    branch = f"refs/heads/{rec['id']}-{rec['slug']}"
+    span = f"refs/heads/{trunk}..{branch}" if trunk else branch
+    times = []
+    out = _git(checkout, "log", "-1", "--format=%ct", span)
+    if out and out.isdigit():
+        times.append(float(out))
+    for rel in _dirty_paths(checkout):
+        with suppress(OSError):
+            times.append((checkout / rel).stat().st_mtime)
+    return max(times) if times else None
+
+
+def _ago(seconds: float) -> str:
+    """`12m`, `5h` or `3d`: how long ago, roughly."""
+    minutes = max(int(seconds // 60), 0)
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h" if minutes < 24 * 60 else f"{minutes // (24 * 60)}d"
 
 
 def cmd_base(root: Path, ident: str | None) -> int:
@@ -4956,13 +5022,21 @@ def _direction_text(home: Path, cfg: dict) -> str:
 # under the first rule it meets. A fixed order a person can argue with line by line, never a
 # score; the status skill weighs it against the open changes, release and retro.
 NEXT_RULES = (
+    ("priority", "ideas and bugs marked Priority: high, bugs most severe first, then oldest"),
     ("bug", "entries tagged [bug], most severe first, then oldest"),
     ("milestone", "each open milestone's first grouped seed that is ready, in the doc's order"),
     ("series", "ready seeds whose After: seeds have all left the register, oldest first"),
     ("nits", "open nits of cost S, one line per theme, oldest theme first"),
     ("idea", "every other ready idea, oldest first"),
+    ("low", "ideas and bugs marked Priority: low, oldest first"),
 )
-NEXT_SHOWN = 5
+NEXT_SHOWN = 10
+# The theme an entry without a `Theme:` line is counted under, printed last.
+NO_THEME = "(no theme)"
+# How many open ideas and bugs with no `Theme:` make status point at `/sdlc:idea --themes`, which
+# proposes them all behind one approval. Fewer is the trickle `/sdlc:idea` and `/sdlc:bug` theme
+# as they file.
+THEMELESS_NUDGE = 5
 
 
 def _seed_state(entry: dict, open_titles: set[str], building: set[str]) -> str:
@@ -5005,26 +5079,44 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     open_titles = {e["title"] for e in ideas if e["title"] not in states}
     for e in ideas:
         states.setdefault(e["title"], _seed_state(e, open_titles, building))
-    ready = sorted((e for e in ideas if states[e["title"]] == "ready"), key=lambda e: e["date"])
+    every = sorted((e for e in ideas if states[e["title"]] == "ready"), key=lambda e: e["date"])
+    # High and low are ranked apart from the rules between them, so an entry without a
+    # `Priority:` line ranks among the rest exactly as it did before there was one.
+    high = [e for e in every if entry_priority(e) == "high"]
+    low = [e for e in every if entry_priority(e) == "low"]
+    ready = [e for e in every if entry_priority(e) not in ("high", "low")]
     known = {e["title"] for e in ideas}
     milestones = [i for i in doc["items"] if i["kind"] == "milestone" and i["status"] == "open"]
+    words = severities(home, cfg)
 
     def seed(rule: str, label: str, e: dict) -> dict:
-        return {"rule": rule, "label": label, "title": e["title"],
+        return {"rule": rule, "label": label, "title": e["title"], "id": e["id"],
+                "kind": entry_kind(e), "theme": entry_theme(e),
                 "age_days": _age_days({"created": e["date"]}, today),
                 "command": f"/sdlc:intent {e['id'] or e['title']}"}  # fmt: skip
+
+    def kind_label(e: dict) -> str:
+        return f"bug {e['fields'].get('Severity') or '?'}" if is_bug(e) else "idea"
+
+    def by_severity(entries: list[dict]) -> list[dict]:
+        return sorted(
+            entries,
+            key=lambda e: (severity_rank(e["fields"].get("Severity"), words), e["date"]),
+        )
 
     items: list[dict] = []
     taken: set[str] = set()
     for rule, _ in NEXT_RULES:
         found: list[dict] = []
-        if rule == "bug":
-            words = severities(home, cfg)
-            bugs = sorted(
-                (e for e in ready if is_bug(e)),
-                key=lambda e: (severity_rank(e["fields"].get("Severity"), words), e["date"]),
-            )
-            found = [seed(rule, f"bug {e['fields'].get('Severity') or '?'}", e) for e in bugs]
+        if rule == "priority":
+            ranked = by_severity([e for e in high if is_bug(e)])
+            ranked += [e for e in high if not is_bug(e)]
+            found = [seed(rule, f"priority high · {kind_label(e)}", e) for e in ranked]
+        elif rule == "low":
+            found = [seed(rule, f"priority low · {kind_label(e)}", e) for e in low]
+        elif rule == "bug":
+            bugs = by_severity([e for e in ready if is_bug(e)])
+            found = [seed(rule, kind_label(e), e) for e in bugs]
         elif rule == "milestone":
             untaken = [e for e in ready if e["title"] not in taken]
             for m in milestones:
@@ -5045,6 +5137,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
             for theme, t in sorted(themes.items(), key=lambda kv: kv[1]["oldest"] or ""):
                 found.append({"rule": rule, "label": "nits",
                               "title": f"[{theme}] {t['count']} open, cost S",
+                              "id": None, "kind": "nit", "theme": theme,
                               "age_days": t["age_days"],
                               "command": f"/sdlc:intent pay down the [{theme}] nits"})  # fmt: skip
         else:
@@ -5053,6 +5146,10 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
             if item["rule"] == "nits" or item["title"] not in taken:
                 taken.add(item["title"])
                 items.append(item)
+
+    # Waiting seeds are open too: a theme counts them, though none is a candidate yet.
+    pending = [e for e in ideas if states[e["title"]] == "waiting"]
+    themes, grouped = _next_themes(items, every + pending, nits, today)
 
     done = []
     if milestones:
@@ -5075,7 +5172,61 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     for loop in _after_loops(waiting):
         names = ", ".join(f'"{t}"' for t in loop)
         warnings.append(f"these seeds wait on each other, so none will come up: {names}")
-    return {"items": items, "done_milestones": done, "warnings": warnings}
+    themeless = sum(
+        1 for e in ideas if states[e["title"]] in ("ready", "waiting") and not entry_theme(e)
+    )
+    return {"items": items, "done_milestones": done, "warnings": warnings, "themes": themes,
+            "waiting": len(waiting), "themeless": themeless, "all": grouped}  # fmt: skip
+
+
+def _next_themes(
+    items: list[dict], seeds: list[dict], nits: list[dict], today: date
+) -> tuple[list[dict], list[dict]]:
+    """Every theme the open ideas and bugs (ready or waiting, so the counts match the no-theme
+    nudge's) and the open nits (of any cost) carry, each with its
+    entries counted by kind, its oldest's age and its best-ranked line in `items`, ordered by that
+    rank (a theme with no line, after those with one, oldest first), and NO_THEME last. And beside
+    it, for `status --all`, each theme's entries in rank order: its ranked seeds, then its nits."""
+    rank = {i["id"]: n for n, i in enumerate(items) if i["id"]}
+    rank_of_nits = {i["theme"]: n for n, i in enumerate(items) if i["rule"] == "nits"}
+    by: dict[str, dict] = {}
+
+    def add(theme: str | None, kind: str, raised: str, at: int | None) -> dict:
+        t = by.setdefault(theme or NO_THEME, {"theme": theme or NO_THEME, "counts": {},
+                                              "oldest": None, "rank": None})  # fmt: skip
+        t["counts"][kind] = t["counts"].get(kind, 0) + 1
+        if raised and (t["oldest"] is None or raised < t["oldest"]):
+            t["oldest"] = raised
+        if at is not None and (t["rank"] is None or at < t["rank"]):
+            t["rank"] = at
+        return t
+
+    for e in seeds:
+        add(entry_theme(e), entry_kind(e), e["date"], rank.get(e["id"]))
+    for n in nits:
+        add(n["theme"] or None, "nit", n["raised"], rank_of_nits.get(n["theme"]))
+    for t in by.values():
+        t["age_days"] = _age_days({"created": t["oldest"] or ""}, today)
+    themes = sorted(
+        by.values(),
+        key=lambda t: (
+            t["theme"] == NO_THEME,
+            t["rank"] is None,
+            t["rank"] or 0,
+            t["oldest"] or "9999",
+        ),  # fmt: skip
+    )
+    grouped = []
+    for t in themes:
+        name = None if t["theme"] == NO_THEME else t["theme"]
+        rows = [i for i in items if i["id"] and i["theme"] == name]
+        rows += [{"rule": "nit", "label": f"nit {n['cost'] or '?'}", "title": n["title"],
+                  "id": n["id"], "kind": "nit", "theme": name,
+                  "age_days": _age_days({"created": n["raised"]}, today),
+                  "command": f"/sdlc:intent pay down the [{n['theme']}] nits"}
+                 for n in nits if (n["theme"] or None) == name]  # fmt: skip
+        grouped.append({"theme": t["theme"], "items": rows})
+    return themes, grouped
 
 
 def retro_due(home: Path, cfg: dict) -> dict:
@@ -7428,6 +7579,10 @@ def print_status(a: dict) -> None:
             undone += (
                 f"  · behind {a.get('trunk')} by {rec['behind']}: /sdlc:ship brings it up to date"
             )
+        if "quiet" in rec:
+            ago = rec["touched_ago"]
+            touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
+            undone += f"  · quiet, {touched}" if rec["quiet"] else f"  · {touched}"
         print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
         if rec["title"]:
             print(f"                              {rec['title']}")
@@ -7485,13 +7640,41 @@ def print_status(a: dict) -> None:
 
     # Left out when the registers hold nothing to put forward, as Unreleased is.
     nxt = a.get("next_up")
-    if nxt and (nxt["items"] or nxt["done_milestones"] or nxt["warnings"]):
+    if nxt and (nxt["items"] or nxt["themes"] or nxt["done_milestones"] or nxt["warnings"]):
         print(f"\n■ Next up: {len(nxt['items'])}")
-        for item in nxt["items"][:NEXT_SHOWN]:
+
+        def line(item: dict, indent: str) -> str:
             age = f"{item['age_days']}d" if item["age_days"] is not None else "?"
-            print(f"    {item['label']}  {item['title']}  ({age})  → {item['command']}")
-        if len(nxt["items"]) > NEXT_SHOWN:
-            print(f"    (+{len(nxt['items']) - NEXT_SHOWN} more)")
+            # A nits line names its theme in its title already.
+            theme = f"[{item['theme']}] " if item["theme"] and item["rule"] != "nits" else ""
+            return f"{indent}{item['label']}  {theme}{item['title']}  ({age})  → {item['command']}"
+
+        if a.get("all"):
+            for group in nxt["all"]:
+                print(f"    {group['theme']}")
+                for item in group["items"]:
+                    print(line({**item, "theme": None}, "      "))
+        else:
+            for item in nxt["items"][:NEXT_SHOWN]:
+                print(line(item, "    "))
+            if len(nxt["items"]) > NEXT_SHOWN:
+                print(f"    (+{len(nxt['items']) - NEXT_SHOWN} more: status --all)")
+            if nxt["themes"]:
+                print("    Themes:")
+            for t in nxt["themes"]:
+                total = sum(t["counts"].values())
+                kinds = ", ".join(
+                    f"{n} {k}s" if n > 1 else f"{n} {k}"
+                    for k in ("bug", "idea", "nit")
+                    if (n := t["counts"].get(k))
+                )
+                age = f", oldest {t['age_days']}d" if t["age_days"] is not None else ""
+                print(f"      {t['theme']}  {total} ({kinds}){age}")
+        if nxt["waiting"]:
+            print(f"    {nxt['waiting']} waiting on earlier seeds")
+        if nxt["themeless"] >= THEMELESS_NUDGE:
+            n = nxt["themeless"]
+            print(f"    {n} ideas and bugs have no theme: /sdlc:idea --themes proposes them")
         for m in nxt["done_milestones"]:
             print(f"    {m} has nothing left in its groups: /sdlc:retro decides whether it's done")
         for w in nxt["warnings"]:
@@ -7519,7 +7702,10 @@ def main() -> int:
     )
     sub = ap.add_subparsers(dest="cmd")
 
-    sub.add_parser("status", help="what's open, at what stage (the default)")
+    p_status = sub.add_parser("status", help="what's open, at what stage (the default)")
+    p_status.add_argument(
+        "--all", action="store_true", help="every candidate in Next up, grouped by theme"
+    )
 
     p_new = sub.add_parser("new", help="scaffold the next change folder")
     p_new.add_argument("slug", help="kebab-case name, e.g. reopen-drafts")
@@ -7831,6 +8017,12 @@ def main() -> int:
     # Here, not in `analyze()`: a stale base is a nudge, and `check` is a gate.
     for rec in a["open"] + a["ready"]:
         rec["behind"] = behind_trunk(home, f"{rec['id']}-{rec['slug']}", a["trunk"])
+    now = datetime.now(UTC).timestamp()
+    for rec in a["open"]:
+        touched = last_touched(root, rec, a["trunk"])
+        rec["touched_ago"] = None if touched is None else now - touched
+        rec["quiet"] = touched is None or now - touched > QUIET_HOURS * 3600
+    a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
     a["retro_due"] = retro_due(home, cfg)

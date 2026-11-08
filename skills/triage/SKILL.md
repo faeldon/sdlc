@@ -140,7 +140,13 @@ Then each new entry exactly as it will be appended, with its `Issue:` line:
 Severity: <one of severities>
 Paths: <path>, <path>
 Issue: #52
+Theme: <theme, unless the person dropped it>
+Priority: <high or low, only when the person said so>
 ```
+
+Propose a new entry's `Theme:` as `/sdlc:idea` and `/sdlc:bug` do, from the words the register's
+entries already use, and add `Priority:` only when the person says so. A related issue never
+changes the `Theme:` or `Priority:` an entry already has.
 
 Write it so it names no host: a report from another repo says what the plugin did, never which repo
 it was in or what that repo builds. Each related issue's new `Issue:` line, each covered change's

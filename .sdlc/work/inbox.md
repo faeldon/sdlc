@@ -608,3 +608,13 @@ it a skill of its own. Second, one change should be able to take a whole theme's
 `idea:` names one seed and ship deletes only that one.
 Theme: status
 Raised 2026-11-08.
+
+## [2026-11-08-2] [nit] A change folder in the main checkout reads as in flight from any dirty file
+
+last_touched() reads every dirty path in the checkout; for a folder in the main checkout, keep
+only the paths under the change's own folder.
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 044-status-ranks-the-backlog (correctness)

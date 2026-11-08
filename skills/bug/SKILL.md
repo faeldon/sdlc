@@ -49,6 +49,16 @@ Ask only about what the human hasn't said:
 - **How bad**: one of `severities`, with the process doc's meaning for each beside it. Never pick
   for the human.
 
+Don't ask for these two; propose the first and take the second only when it's said:
+
+- **Its theme**: a word the register's entries already use in their `Theme:` lines (`Read` the
+  file `config`'s `work.register` names), the one closest to the bug, or a new one when none
+  fits. Status groups entries by it. The person may change it or drop it. A bug filed without
+  one may get it later from `/sdlc:idea --themes`, the one edit of a bug that isn't this skill's.
+- **Its priority**, only when the person says it's more urgent than its severity
+  (`Priority: high`) or can wait (`Priority: low`). Status puts high before everything else, low
+  after it; with no line, a bug ranks by its severity.
+
 Write it so it names no host. A report from another repo says what the plugin did, never which
 repo it was in, or what that repo builds.
 
@@ -102,6 +112,8 @@ Show the entry exactly as it will be appended:
 Severity: <one of severities>
 Paths: <path>, <path>
 Introduced by: <NNN-slug, only as confirmed>
+Theme: <theme, unless the person dropped it>
+Priority: <high or low, only when the person said so>
 ```
 
 For a retirement, the entry and its reason; for a retag, the heading and lines as they become.

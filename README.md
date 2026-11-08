@@ -114,9 +114,10 @@ The tiers:
 `/sdlc:status` tells you where every open change is and what to do next, from any worktree. Requests
 not ready to be a change go in `.sdlc/work/inbox.md`, where `/sdlc:idea` files them from any
 checkout and `/sdlc:intent <id>` can start from one; give one
-an `After: <id>` line to make it wait for another, and status's **Next up** puts forward the one to
-start once the open changes are done. Something already broken is a bug: `/sdlc:bug` files it
-with a severity, and it comes first.
+an `After: <id>` line to make it wait for another, and status's **Next up** puts forward the ten to
+start once the open changes are done, with each theme's count (`status --all` lists every one).
+Something already broken is a bug: `/sdlc:bug` files it with a severity, and it comes first,
+unless an entry is marked `Priority: high`, which comes before everything.
 
 ## Optional features
 

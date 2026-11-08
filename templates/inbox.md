@@ -7,7 +7,9 @@
 > count from `sdlc.py next-entry`, then a few lines on why and where it came from. A `[bug]` has
 > `Severity:` (a word from the process doc), `Paths:` and, once confirmed, `Introduced by:
 > NNN-slug` lines; a `[nit]` has `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug
-> (pass)` lines. A seed that must wait for others carries an `After: <id>, <id>` line. An entry is
+> (pass)` lines. An idea or a bug may carry a `Theme:` line, which groups it with others in
+> status, and a `Priority: high` or `Priority: low` line, which puts it before or after everything
+> else. A seed that must wait for others carries an `After: <id>, <id>` line. An entry is
 > named by its id, written bare, or by its title, quoted. `/sdlc:status` reads the tags and those
 > lines to put forward what's next. `/sdlc:intent` promotes a seed into a change, whose type
 > (`feature`, `fix`, `refactor`, `docs`, `chore`…, listed in the process doc) its kind suggests,
