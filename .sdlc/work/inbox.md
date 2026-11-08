@@ -10,6 +10,7 @@ runs UX and UI reviewers against a running app. agent-skills has no such agent, 
 needs a declaration (a `factory.toml` key, or `commands.preview` for a dev server) before a UI
 reviewer can run. Raised 2026-10-24.
 Theme: factory
+Priority: low
 
 ## [2026-10-24-2] [idea] A factory queue, and parallel runs across worktrees
 
@@ -18,6 +19,7 @@ open intents) and several runs at once, one per worktree, would let ideas move w
 watches. GitHub issues and `work/ideas.md` are already the queue; this is the runner. Raised
 2026-10-24.
 Theme: factory
+Priority: low
 
 ## [2026-10-24-3] [idea] A factory status board
 
@@ -25,6 +27,7 @@ A page that shows each running change's stage, round and verdicts as they land, 
 folders' files, the way the factory it learned from shows a dashboard. Read-only. Raised
 2026-10-24.
 Theme: factory
+Priority: low
 
 ## [2026-10-24-4] [idea] A retro report and process views from each change's numbers
 
@@ -69,6 +72,7 @@ PR's review to stand alongside ship's. An opt-in way of landing, not a default, 
 to "only publish pushes" made on purpose. It builds on the issue closing when its `Close` commit
 reaches the remote. Raised 2026-10-24.
 Theme: landing
+Priority: low
 
 ## [2026-10-25-1] [idea] A process map of the three loops, kept true by the gate
 
@@ -79,6 +83,7 @@ rendered by GitHub), with a test that fails when a stage, skill or WAIT is missi
 or a diagramming tool can be generated from it later. Decide whether hosts get a copy from setup.
 Raised 2026-10-25.
 Theme: docs
+Priority: low
 
 ## [2026-10-25-2] [idea] Decide at intent whether a change reaches hosts
 
@@ -89,6 +94,7 @@ was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent a
 designs for the host from the start and ship can check the change delivered on it. Raised
 2026-10-25.
 Theme: intent
+Priority: low
 
 ## [2026-10-25-3] [idea] A glossary of the process's terms
 
@@ -100,6 +106,7 @@ line and points at where it's specified, with a test that fails when a term the 
 GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
 should use its terms. Raised 2026-10-25.
 Theme: docs
+Priority: low
 
 ## [2026-10-25-4] [idea] A changelog that keeps its own layout
 
@@ -110,6 +117,7 @@ releases go (`<!-- sdlc:releases -->`, inserted after), falling back to today's 
 section heading a template a host can override. Tier 2: it changes what release writes in a host.
 Raised 2026-10-25 by a host.
 Theme: release
+Priority: low
 
 ## [2026-10-25-5] [idea] Version lines release can't read, and the first release's baseline
 
@@ -120,6 +128,7 @@ which can predate the repo's adoption of the plugin, so the first release takes 
 closed since. Read the dunder form, and point the hint at the adoption commit when that is later.
 Raised 2026-10-25 by a host.
 Theme: release
+Priority: low
 
 ## [2026-10-25-6] [idea] Publish's "published" note never leaves the machine
 
@@ -131,6 +140,7 @@ the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote.
 --dry-run`), and that releases outside `release.tag`'s pattern live outside the loop. Raised
 2026-10-25 by a host.
 Theme: release
+Priority: low
 
 ## [2026-10-25-7] [idea] Close warns before its merge deletes files in the main checkout
 
@@ -202,6 +212,7 @@ there, or nothing, and the nudge says so rather than suggesting a push that rele
 through pull requests is the other half of this, seeded on its own above. Raised 2026-10-25;
 revised 2026-10-26: never automatic, and a nudge when landed work piles up.
 Theme: landing
+Priority: high
 
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
@@ -219,6 +230,7 @@ Decide what a template's frontmatter counts as (it is keys, not a block), whethe
 record from before this change reads as (`base: none`, so `differs`, never proposed). Raised
 2026-10-25.
 Theme: setup
+Priority: low
 
 ## [2026-10-25-24] [idea] Record each change's type, and let the host decide where it shows
 
@@ -231,6 +243,7 @@ config: a subject prefix (`fix: …`, Conventional Commits) for a repo that uses
 changes by type, and release can group its notes by it. Tier 2: a new intent key and what
 `sdlc.py` writes in a host. Raised 2026-10-25, from 025's vocabulary.
 Theme: intent
+Priority: low
 
 ## [2026-10-24-7] [nit] A deprecations status test whose patched half can't fail
 
@@ -363,6 +376,7 @@ last window). Raised by the retrospective of 2026-10-26.
 
 After: 2026-10-26-4
 Theme: permissions
+Priority: high
 
 ## [2026-10-26-6] [idea] A ship that fixes its own review finding is not a miss
 
@@ -382,6 +396,7 @@ after-bump staged, missing from a failed release's report), 2026-10-25-18 (a cha
 intent committed early) and 2026-10-26-1 (an issue that hears nothing until the next marking).
 Fix them in one change, each retired by its ship. Raised by the retrospective of 2026-10-26.
 Theme: robustness
+Priority: high
 
 ## [2026-10-26-8] [idea] Leave each change's measured numbers out of retro's and release's output
 
@@ -424,6 +439,7 @@ and how an old host with no record is told what can't be attributed to setup. Ed
 host's to commit, like the rest of uninstall. Raised 2026-10-26, after uninstalling from a host
 set up by an early version.
 Theme: setup
+Priority: low
 
 ## [2026-10-26-13] [idea] Support moving the change folder, once a host needs it
 
@@ -433,6 +449,7 @@ commit with an `Sdlc-Work: from= to=` trailer, a resolver giving the folder at a
 rule every reader of history follows. History from .sdlc/work/ on sits at one path, so nothing
 from before has to be carried back. See work/027-work-path/spec.md (Alternatives rejected).
 Theme: setup
+Priority: low
 
 ## [2026-10-26-14] [nit] No test pins that readiness lost its inbox item
 
@@ -494,6 +511,7 @@ Raised by: 031-idea-skill (cost)
 failure it stops" stays in `## The point of the process` rather than `### The failure it stops`.
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 Theme: setup
+Priority: low
 
 ## [2026-11-03-15] [nit] A skipped fresh review is caught only by ship's prose
 
@@ -548,6 +566,7 @@ section's `sh` block itself; the behaviour check (039) is told never to, since a
 written them and `/sdlc:ship`'s `accept` runs them under a prompt. Make the two agree. See
 .sdlc/work/039-factory-evidence-and-replay/notes.md.
 Theme: factory
+Priority: high
 
 ## [2026-11-04-5] [nit] The factory's review proposes severities it may not be able to read
 
@@ -572,6 +591,7 @@ and every rule in `SKILL.md`, with `tests/test_skills.py` covering those files' 
 covers the skill's. A plain change then reads a fraction of it, and the next feature lands in a
 file of its own. Raised by the retrospective of 2026-11-04.
 Theme: cost
+Priority: high
 
 ## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
 
@@ -602,6 +622,7 @@ it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history 
 release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
 Theme: refactor
+Priority: low
 
 ## [2026-11-04-12] [nit] The LF test checks write_text only, not a write-mode open
 
