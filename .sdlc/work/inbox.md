@@ -50,7 +50,18 @@ architecture pass:
   touched by nearly every change);
 - files that change together;
 - the largest files and how they grow;
-- the test suite's size and the gate's runtime, and how both grow.
+- the test suite's size and the gate's runtime, and how both grow;
+- verbosity against complexity: how much a change's code comments say, and how much the human
+  and the agent said in its conversation, set beside how complex the change is (its diff, its
+  tier, and the host's complexity measure where there is one), so a change that commented or
+  talked far more than its size needed stands out. Close already records the conversation's
+  tokens and turns per stage (`Sdlc-Totals`, `Sdlc-Stage`); comments come from the diff. If this
+  makes the seed too big, it goes into a seed of its own;
+- tool calls: how often each tool is called in a change, by stage (by program for a shell call),
+  set beside what the calls led to (an edit kept, a check run, a finding), to show which calls
+  are most useful and which are spent. Close already names each tool prompt on the `Close`
+  commit; this counts every call, prompted or not. If this makes the seed too big, it goes into
+  a seed of its own.
 
 The suite gets a pruning pass too: the process guide sets each test's lifetime when it is written,
 and ship flags a test that can't fail or that only a revert could fail, but only in the diff it
