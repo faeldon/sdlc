@@ -40,6 +40,8 @@ COLOURS = {
 # A comment holding an overflowed artifact opens `<!-- sdlc:NNN-slug:spec.md -->`. A rerun skips
 # one already posted, so nothing is posted twice.
 COMMENT_RE = re.compile(r"^<!-- sdlc:[^:]+:(\S+) -->$")
+# The lines `_closing()` and `archive()` write on a Close commit, read back by `closed_by()`.
+CLOSING_RE = re.compile(r"^Closes #(\d+)", re.M)
 
 
 def _url(made: subprocess.CompletedProcess) -> str:
@@ -650,6 +652,12 @@ class Tracker:
             else f"couldn't read the default branch: {why}"
         )
         return False
+
+    @staticmethod
+    def closed_by(message: str) -> list[int]:
+        """The issues a commit message closes once it reaches the default branch: its `Closes #N`
+        lines. Reads no network, so `status` can count what a push would close."""
+        return [int(n) for n in CLOSING_RE.findall(message)]
 
     @staticmethod
     def _closing(url: str) -> str:

@@ -322,6 +322,9 @@ def test_the_plugin_intent_keeps_the_sections_hosts_mirror():
 
 # ── 018: the base branch ─────────────────────────────────────────────────────────────────────
 
+# The rest of `[git]`, at its defaults with no tracker: nothing pushes but publish.
+GIT_REST = {"push": [], "nudge_after_changes": 1}
+
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
@@ -348,18 +351,28 @@ def _with_origin(tmp_path: Path, branch: str) -> Path:
 
 def test_the_base_is_main_when_there_is_one(tmp_path: Path, capsys):
     _, out = _config(_repo_on(tmp_path, "main"), capsys)
-    assert out["git"] == {"base": "main", "base_source": "detected", "attribution": None}
+    assert out["git"] == {
+        "base": "main",
+        "base_source": "detected",
+        "attribution": None,
+        **GIT_REST,
+    }
 
 
 def test_with_no_main_the_base_is_the_branch_origin_head_names(tmp_path: Path, capsys):
     _, out = _config(_with_origin(tmp_path, "master"), capsys)
-    assert out["git"] == {"base": "master", "base_source": "detected", "attribution": None}
+    assert out["git"] == {
+        "base": "master",
+        "base_source": "detected",
+        "attribution": None,
+        **GIT_REST,
+    }
 
 
 def test_with_no_main_and_no_origin_the_base_is_unset(tmp_path: Path, capsys):
     root = _repo_on(tmp_path, "master")
     _, out = _config(root, capsys)
-    assert out["git"] == {"base": None, "base_source": "unset", "attribution": None}
+    assert out["git"] == {"base": None, "base_source": "unset", "attribution": None, **GIT_REST}
     assert "no base branch" in sdlc.trunk_refusal(root, None)
     assert any(w.startswith("git.base: no base branch") for w in out["warnings"])
 
@@ -386,7 +399,7 @@ def test_the_configured_base_wins_over_one_detected(tmp_path: Path, capsys):
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[git]\nbase = "trunk"\n', encoding="utf-8")
     _, out = _config(root, capsys)
-    assert out["git"] == {"base": "trunk", "base_source": "config", "attribution": None}
+    assert out["git"] == {"base": "trunk", "base_source": "config", "attribution": None, **GIT_REST}
     assert sdlc.trunk_refusal(root, "trunk") is None
     assert "'gone' doesn't exist here" in sdlc.trunk_refusal(root, "gone")
 
@@ -426,3 +439,26 @@ def test_git_attribution_must_be_true_or_false(tmp_path: Path, capsys):
     _, out = _config(tmp_path, capsys)
     assert out["git"]["attribution"] is None
     assert "git.attribution must be true or false" in out["warnings"]
+
+
+# ── 046: which steps push ────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("config, want", [
+    ("", []),
+    ('[archive]\ntarget = "github"\n', ["close", "release"]),
+    ('[archive]\ntarget = "github"\n[git]\npush = []\n', []),
+    ('[git]\npush = ["close"]\n', ["close"]),
+])  # fmt: skip
+def test_git_push_defaults_to_both_steps_only_with_github(tmp_path: Path, capsys, config, want):
+    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc" / "config.toml").write_text(config, encoding="utf-8")
+    cfg = sdlc.load_config(tmp_path)[0]
+    assert cfg["git"]["push"] == want
+
+
+def test_git_push_names_only_close_and_release(tmp_path: Path, capsys):
+    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc" / "config.toml").write_text('[git]\npush = ["ship"]\n')
+    cfg, warnings, _ = sdlc.load_config(tmp_path)
+    assert cfg["git"]["push"] == [] and "git.push must be a list of close and release" in warnings

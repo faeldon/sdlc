@@ -159,4 +159,4 @@ built now, or nothing, and `/sdlc:status` puts it forward.
 
 - Building the idea, or opening the change that does: that's `/sdlc:intent <id>`.
 - Bugs: `/sdlc:bug` files them. Nits: ship writes those.
-- Pushing. Only `/sdlc:publish` pushes.
+- Pushing. Only `/sdlc:publish`, and close and release when `git.push` names them, push.

@@ -22,6 +22,8 @@
     "docs.review",
     "git.attribution",
     "git.base",
+    "git.nudge_after_changes",
+    "git.push",
     "metrics.idle_minutes",
     "metrics.stop_allowance",
     "metrics.transcripts",
@@ -44,7 +46,7 @@
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:63754c3011fa6177"
+      "guide": "sha256:930c7b1202db3ee7"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",

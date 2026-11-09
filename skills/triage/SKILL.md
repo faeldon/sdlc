@@ -213,4 +213,4 @@ now, or nothing, and `/sdlc:status` puts the new entries forward with the rest.
 
 - Fixing anything, or opening the change that does: that's `/sdlc:intent <id>`.
 - Closing an issue an entry or a change records: it closes when its change lands, after ship asks.
-- Pushing. Only `/sdlc:publish` pushes.
+- Pushing. Only `/sdlc:publish`, and close and release when `git.push` names them, push.

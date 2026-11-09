@@ -255,7 +255,7 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # /sdlc:publish will upload, into untracked or ignored paths only: its output is shown
         # at publish's approval. {version}, {tag}
         "prepare": None,
-        "remote": "origin",  # where /sdlc:publish pushes main and the tag
+        "remote": "origin",  # where publish, close and release (`git.push`) push main and the tag
         "publish": None,  # run by /sdlc:publish after the push; {version}, {tag}
         # The shims the host keeps and the version that removes each, which release refuses to
         # cut while one is due. Off while the file doesn't exist.
@@ -297,6 +297,14 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # writes nothing; `false` has setup write `ATTRIBUTION_OFF` into the shared settings;
         # `true` keeps the harness's own lines, and nothing is written.
         "attribution": None,
+        # The steps that push the base branch to `release.remote`, each behind the question it
+        # already asks: "close" (after its Close commit) and "release" (with the tag). Unset, both
+        # where `archive.target` is github, so a closed change's issue closes as close ends, and
+        # none elsewhere (`_resolve_docs`); `[]` leaves every push to /sdlc:publish.
+        "push": None,
+        # `status` and close's report suggest a push once this many closed changes sit on the base
+        # branch and not on the remote; 0 turns the nudge off.
+        "nudge_after_changes": 1,
     },
 }
 # Each tracker is a module in scripts/trackers/, so adding one adds a target. GitHub first, as the
@@ -327,10 +335,13 @@ LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS)
 # Every key that holds a whole number, with its least value where that isn't 0.
 INT_KEYS = (
     "after_releases", "due_after_changes", "due_after_days", "idle_minutes", "stop_allowance",
+    "nudge_after_changes",
 )  # fmt: skip
 INT_MIN = {"idle_minutes": 1}
 # Every key that holds true or false.
 BOOL_KEYS = ("transcripts", "attribution")
+# The steps `git.push` may name.
+PUSH_POINTS = ("close", "release")
 
 
 def load_config(root: Path) -> tuple[dict, list[str], bool]:
@@ -366,6 +377,11 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
                     cfg[section][key] = value
                 else:
                     warnings.append(f"{section}.{key} must be a whole number, {least} or more")
+            elif key == "push":
+                if isinstance(value, list) and all(v in PUSH_POINTS for v in value):
+                    cfg[section][key] = value
+                else:
+                    warnings.append(f"git.push must be a list of {' and '.join(PUSH_POINTS)}")
             elif key in BOOL_KEYS:
                 if isinstance(value, bool):
                     cfg[section][key] = value
@@ -384,11 +400,14 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
 def _resolve_docs(root: Path, cfg: dict, chosen: set[str]) -> dict:
     """With no CLAUDE.md, the policy is an AGENTS.md if there is one, unless the host set
     `docs.policy` (`chosen`). Every reader takes `cfg["docs"]`, so this is the one place it is
-    decided. The base branch is resolved here too, for the same reason (`_resolve_trunk`)."""
+    decided. The base branch is resolved here too, for the same reason (`_resolve_trunk`), and
+    `git.push`'s default, which follows the tracker."""
     agents_only = not (root / "CLAUDE.md").is_file() and (root / "AGENTS.md").is_file()
     if "policy" not in chosen and agents_only:
         cfg["docs"]["policy"] = "AGENTS.md"
     cfg["git"]["base"], cfg["git"]["base_source"] = _resolve_trunk(root, cfg["git"]["base"])
+    if cfg["git"]["push"] is None:
+        cfg["git"]["push"] = list(PUSH_POINTS) if cfg["archive"]["target"] == "github" else []
     return cfg
 
 
@@ -3345,6 +3364,19 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         _git(main, "update-ref", start, tip)
     if own and kind == "shipped" and (reaches := _reaches(main, branch)):
         report["reaches"] = reaches
+    # What the push of the base branch sends, newest first: the Close or Drop commit while this run
+    # has yet to write it, the change's own commits not on the base branch yet, then everything the
+    # base branch already holds that the remote doesn't. A dropped branch may be behind the base
+    # branch, and a rerun may find the merge done, so it's never read from the branch's tip alone.
+    report["push"] = plan = _push_plan(main, cfg, "close")
+    if plan["on"] and plan["unpushed"] is not None:
+        if kind == "dropped":
+            written = bool(_drop_commit(main, branch, trunk))
+        else:
+            written = landed and not _git(main, "ls-files", f"{work_rel(main)}/{branch}")
+        own = (_git(main, "log", "--format=%h %s", f"{trunk}..{branch}") or "").splitlines()
+        coming = [] if written else [f"(new) {'Drop' if kind == 'dropped' else 'Close'} {branch}"]
+        plan["unpushed"]["ahead"] = coming + own + plan["unpushed"]["ahead"]
 
     sha = _git(main, "rev-parse", "--short", branch) or "?"
     kept: dict = {}
@@ -3433,6 +3465,18 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
                 report["base_ref"] = f"{start} kept: {gone}"
         return err
 
+    def push() -> None:
+        # Never a refusal: the change has landed, and publish pushes what this couldn't. In `done`
+        # only once it went, so `done` never says main is on the remote when it isn't.
+        sent = _unpushed(main, cfg)
+        if err := _push(main, plan["remote"], f"refs/heads/{trunk}"):
+            report["push_failed"] = (
+                f"{err}; /sdlc:publish pushes it, or set [git] push = [] to leave it to publish"
+            )
+            return
+        plan["closed"] = sent["closes"] if sent else []
+        report["done"].append("push")
+
     if kind == "dropped":
         landing = [("verify", verify), ("measure", measure), ("archive", mirror)]
         landing.append(("record", record))
@@ -3445,7 +3489,8 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         ("delete branch", delete_branch),
     ]
     if check_only:
-        report["skipped"] = [f"{name} (--check)" for name, _ in steps]
+        names = [name for name, _ in steps] + (["push"] if plan["on"] else [])
+        report["skipped"] = [f"{name} (--check)" for name in names]
         return emit(0)
 
     inside = Path.cwd().resolve().is_relative_to(tree.resolve())
@@ -3470,6 +3515,10 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             # The rest runs as the code this merge brought.
             report["skipped"] = [n for n, _ in steps[i + 1 :]]
             return _handoff(main, [branch], "merged", report)
+    if plan["on"]:
+        push()
+    elif nudge := _nudge(main, cfg):
+        report["unpushed"] = nudge
     return emit(0)
 
 
@@ -3892,8 +3941,8 @@ def _read_text(path: Path) -> str | None:
 # The release loop runs after a batch of closed changes, from the main checkout. History is the
 # source: every `Close NNN-slug` commit since the current version's tag names a change, and the
 # commit before it, the change's own, holds the intent.md whose `impact:` ship settled. `release`
-# bumps the version files, commits and tags, all local and undoable; `publish` pushes and runs the
-# host's command. Only publish pushes, and only behind its own approval.
+# bumps the version files, commits and tags, undoable until pushed; `publish` pushes and runs the
+# host's command. Close and release push too when `git.push` names them, behind their questions.
 
 # One `version` line per version file: JSON's `"version": "1.2.0",` or TOML's `version = "1.2.0"`.
 # Not `target-version = ...`: the key must open the line.
@@ -4420,6 +4469,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
                     refusals.append(problem)
         if rel["after_bump"]:
             report["untracked"] = []
+        report["push"] = _push_plan(home, cfg, "release")
     if refusals:
         return emit(1)
 
@@ -4547,6 +4597,15 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
             refusals.append(f"{name} failed: {err}")
             return emit(1)
         report["done"].append(name)
+    if report["push"]["on"]:
+        # The release is made either way: a push that fails is said, and publish finishes it.
+        trunk = cfg["git"]["base"]
+        for ref in (f"refs/heads/{trunk}", f"refs/tags/{tag}"):
+            if err := _push(home, report["push"]["remote"], ref):
+                report["push_failed"] = f"{err}; /sdlc:publish pushes it"
+                break
+        else:
+            report["done"].append("push")
     # With the new tag counted: a release is the usual moment a retrospective falls due.
     report["retro_due"] = retro_due(home, cfg)
     return emit(0)
@@ -4557,11 +4616,98 @@ def _remote_sha(home: Path, remote: str, ref: str) -> str | None:
     return out.split()[0] if out else None
 
 
+def _push(home: Path, remote: str, ref: str) -> str | None:
+    """Push one ref; why not, or None. The plugin's only push, called by publish, and by close and
+    release when `git.push` names them. Never --force: a remote that has moved refuses, and that
+    refusal is the answer. It never asks: no terminal prompt for credentials and stdin closed, so a
+    remote that wants a password fails at once and is reported, rather than waiting on nobody."""
+    made = subprocess.run(
+        ["git", "-C", str(home), "push", "-q", remote, ref], capture_output=True, encoding="utf-8",
+        errors="replace", stdin=subprocess.DEVNULL, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )  # fmt: skip
+    if made.returncode == 0:
+        return None
+    return made.stderr.strip() or made.stdout.strip() or f"exited {made.returncode}"
+
+
+def _pushed(home: Path, remote: str, ref: str) -> bool:
+    """Whether the remote holds `ref` as this repo does: a rerun's push is skipped, not repeated."""
+    return _remote_sha(home, remote, ref) == _git(home, "rev-parse", ref)
+
+
+def _unpushed(home: Path, cfg: dict) -> dict | None:
+    """What the base branch holds that its remote-tracking ref doesn't: each commit, the
+    closed and dropped changes among them, the oldest one's age, and the issues their closing
+    lines would close, read by the tracker's `closed_by()` when it has one. Read locally, never
+    over the network, so a tracking ref older than the remote under-counts and never errs; None
+    with no tracking ref to compare against."""
+    remote, trunk = cfg["release"]["remote"], cfg["git"]["base"]
+    if not trunk:
+        return None
+    ref = f"refs/remotes/{remote}/{trunk}"
+    if _git(home, "rev-parse", "-q", "--verify", ref) is None:
+        return None
+    out = _git(home, "log", "--format=%h%x02%s%x02%ct%x02%b%x03", f"{ref}..{trunk}") or ""
+    found: dict = {"remote": remote, "branch": trunk, "ahead": [], "changes": 0, "closes": []}
+    closed_by = getattr(tracker(home, cfg), "closed_by", None)
+    oldest = None
+    for rec in out.split("\x03"):
+        if not rec.strip():
+            continue
+        sha, subject, when, body = rec.strip("\n").split("\x02", 3)
+        found["ahead"].append(f"{sha} {subject}")
+        for prefix in (CLOSE_PREFIX, DROP_PREFIX):
+            if subject.startswith(prefix) and DIR_RE.match(subject[len(prefix) :]):
+                found["changes"] += 1
+                oldest = int(when)  # newest first, so the last one seen is the oldest
+                found["closes"] += closed_by(body) if closed_by else []
+    found["closes"].sort()
+    now = datetime.now(UTC).timestamp()
+    found["oldest_days"] = None if oldest is None else int((now - oldest) // 86400)
+    return found
+
+
+def unpushed_line(up: dict) -> str:
+    """`_unpushed()` in one line: how many closed changes, how old, and the issues a push closes."""
+    n, days = up["changes"], up["oldest_days"]
+    line = f"{n} closed change{'s' if n != 1 else ''} not on {up['remote']}/{up['branch']}"
+    line += f", oldest {days}d" if days is not None else ""
+    line += f" ({len(up['ahead'])} commits)"
+    if up["closes"]:
+        line += "; a push closes " + ", ".join(f"#{i}" for i in up["closes"])
+    return line
+
+
+def _push_plan(home: Path, cfg: dict, point: str) -> dict:
+    """Whether `point` (close or release) pushes, and what: `on`, the remote and branch, and the
+    commits and issues `_unpushed()` reads, or `off_because` when `git.push` doesn't name it or
+    there's no remote. A missing tracking ref leaves `unpushed` None: the push still goes."""
+    remote = cfg["release"]["remote"]
+    plan: dict = {"on": False, "remote": remote, "branch": cfg["git"]["base"]}
+    if point not in cfg["git"]["push"]:
+        plan["off_because"] = f"git.push doesn't name {point}"
+    elif _git(home, "remote", "get-url", remote) is None:
+        plan["off_because"] = f"no remote {remote!r}: set release.remote"
+    else:
+        plan["on"] = True
+        plan["unpushed"] = _unpushed(home, cfg)
+    return plan
+
+
+def _nudge(home: Path, cfg: dict) -> dict | None:
+    """`_unpushed()` once it holds `git.nudge_after_changes` closed changes; None below that, at 0,
+    or with no tracking ref."""
+    n = cfg["git"]["nudge_after_changes"]
+    found = _unpushed(home, cfg) if n else None
+    return found if found and found["changes"] >= n else None
+
+
 def cmd_publish(root: Path, check_only: bool = False) -> int:
-    """Push the base branch (`git.base`) and the release tag, then run the host's publish command:
-    the one step in the plugin that sends anything anywhere. Never forced, so a remote that has
-    moved is refused. A rerun skips what the remote already has and a publish command that
-    already succeeded."""
+    """Push the base branch (`git.base`) and the release tag, then run the host's publish command.
+    Never forced, so a remote that has moved is refused. A rerun skips what the remote already has
+    and a publish command that already succeeded. Once the tag is on the remote, the base branch
+    may have moved past it: what landed since is pushed alone, the retry for a push close or
+    release couldn't make. While the tag isn't, a base branch past it is refused."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     rel = cfg["release"]
@@ -4597,9 +4743,11 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     # What release's `release.prepare` built for this tag, for the approval to show.
     report["prepared"] = _git(home, "notes", "--ref", PREPARED_REF, "show", tag)
     tagged = _git(home, "rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}")
+    tag_ref = f"refs/tags/{tag}"
     if tagged is None:
         refusals.append(f"no tag {tag}: run /sdlc:release first")
-    elif trunk and tagged != _git(home, "rev-parse", trunk):
+    elif trunk and tagged != _git(home, "rev-parse", trunk) and not _pushed(home, remote, tag_ref):
+        # Once the tag is on the remote, what follows it is landed work, pushed alone.
         refusals.append(
             f"{trunk} has moved past {tag}: publish a release before closing more changes onto "
             "it, or release again"
@@ -4612,9 +4760,6 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
             refusals.append(problem)
     if refusals:
         return emit(1)
-
-    def pushed(ref: str) -> bool:
-        return _remote_sha(home, remote, ref) == _git(home, "rev-parse", ref)
 
     def published() -> bool:
         return "published" in (_git(home, "notes", "--ref", "sdlc", "show", tag) or "")
@@ -4633,17 +4778,21 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
         return _git_err(home, "notes", "--ref", "sdlc", "add", "-f", "-m", "published", tag)
 
     def push(ref: str):
-        # Never --force: a remote that has moved refuses, and that refusal is the answer.
-        return lambda: _git_err(home, "push", "-q", remote, ref)
+        return lambda: _push(home, remote, ref)
 
-    trunk_ref, tag_ref = f"refs/heads/{trunk}", f"refs/tags/{tag}"
+    trunk_ref = f"refs/heads/{trunk}"
+    report["unpushed"] = _unpushed(home, cfg)
     steps = [
-        (f"push {trunk}", lambda: pushed(trunk_ref), push(trunk_ref)),
-        ("push tag", lambda: pushed(tag_ref), push(tag_ref)),
+        (f"push {trunk}", lambda: _pushed(home, remote, trunk_ref), push(trunk_ref)),
+        ("push tag", lambda: _pushed(home, remote, tag_ref), push(tag_ref)),
         ("publish command", lambda: not report["command"] or published(), run_command),
     ]
     if check_only:
-        report["skipped"] = [f"{name} (--check)" for name, _, _ in steps]
+        # What the remote already has, so the skill asks about what would run: everything, main
+        # alone once the tag is out, or nothing at all.
+        report["already"] = [name for name, done_already, _ in steps if done_already()]
+        report["will_run"] = [name for name, _, _ in steps if name not in report["already"]]
+        report["skipped"] = [f"{name} (--check)" for name in report["will_run"]]
         return emit(0)
     for i, (name, done_already, step) in enumerate(steps):
         if done_already():
@@ -7725,6 +7874,8 @@ def print_status(a: dict) -> None:
     # `check --strict` is a gate, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
+    if up := a.get("unpushed"):
+        print(f"\n■ Unpushed: {unpushed_line(up)}  /sdlc:publish")
     rdue = (rel or {}).get("due")
     if rdue and rdue["due"]:
         print(f"\n■ Release due: {'; '.join(rdue['why'])}  /sdlc:release")
@@ -8072,6 +8223,7 @@ def main() -> int:
     rel_cfg = cfg["release"]
     a["release_due_after"] = (rel_cfg["due_after_changes"], rel_cfg["due_after_days"])
     a["retro_due"] = retro_due(home, cfg)
+    a["unpushed"] = _nudge(home, cfg)
     # Here, not in `analyze()`: `check` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
     words = severities(home, cfg)

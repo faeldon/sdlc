@@ -1,6 +1,6 @@
 ---
 name: close
-description: Close a shipped change from the session you're in — bring the session back to the main checkout, fast-forward main to the change's branch, mirror its folder to the tracker (its GitHub issue by default), remove the folder from main in a "Close NNN-slug" commit, remove its worktree and branch, and hand the human whatever cleanup command the repo names for a closed change. Use after /sdlc:ship has committed the change in its worktree, or to finish a drop /sdlc:drop committed. Not for a change that is neither shipped nor dropped (it refuses), not for starting a drop (that's /sdlc:drop), and never for pushing, tagging or running the cleanup itself.
+description: Close a shipped change from the session you're in — bring the session back to the main checkout, fast-forward main to the change's branch, mirror its folder to the tracker (its GitHub issue by default), remove the folder from main in a "Close NNN-slug" commit, remove its worktree and branch, push main when git.push names close (a GitHub repo's default), and hand the human whatever cleanup command the repo names for a closed change. Use after /sdlc:ship has committed the change in its worktree, or to finish a drop /sdlc:drop committed. Not for a change that is neither shipped nor dropped (it refuses), not for starting a drop (that's /sdlc:drop), and never for a push git.push doesn't name, tagging, or running the cleanup itself.
 argument-hint: "[NNN — the change; default: the worktree this session is in]"
 allowed-tools:
   - Read
@@ -25,9 +25,11 @@ of its own, `Close NNN-slug`, and nothing piles up in `.sdlc/work/`. The tracker
 `config`: its GitHub issue by default) is where people read it; when one is configured it must
 take the copy and read it back before the folder goes, and when there is none, history alone is
 fine. The archive renders the issue a last time from the landed folder, with `stage: shipped`:
-what `sdlc.py sync` kept current while the change was open. Close never pushes, so it labels the
-issue `landed` and leaves it open, and the `Close` commit says `Closes #N`: GitHub closes the
-issue once that commit reaches the default branch. Where the default branch isn't `main`, close
+what `sdlc.py sync` kept current while the change was open. It labels the issue `landed`, and
+the `Close` commit says `Closes #N`: GitHub closes the issue once that commit reaches the default
+branch. When `config`'s `git.push` names `close`, the default where `archive.target` is
+`github`, that is now: the same approval pushes `main` as close's last step, never forced.
+Otherwise the issue stays open until `/sdlc:publish` or the human pushes. Where the default branch isn't `main`, close
 closes the issue itself.
 
 **A dropped change closes too**, once `/sdlc:drop` has committed it on its branch (`kind:
@@ -66,7 +68,11 @@ None found is a fine answer. With no `close_list`, there is nothing to list; ski
 
 Show the human: the change, the worktree and branch that will go, the commit `main` will move to,
 where the change will be mirrored (or why it won't be), what `close_list` found, and every
-refusal. **If there are refusals, stop here** and say what each needs: `/sdlc:ship` first, commit
+refusal. When `push.on` is true, show what the push will send to `push.remote`:
+`push.unpushed.ahead`, one commit a line, the coming `Close` (or `Drop`) commit first, then the
+change's own, then anything else `main` holds that the remote doesn't (inbox commits, another
+change's close). It is all of it: git pushes the branch, not one change. With
+`push.unpushed` null, say there's no tracking ref to list them from, and the push still goes. **If there are refusals, stop here** and say what each needs: `/sdlc:ship` first, commit
 or remove the stray files, put the main checkout on `main` and commit what's in it, rebase the
 branch onto `main` and ship again, or fix `archive` in `.sdlc/config.toml`.
 
@@ -80,8 +86,10 @@ For a dropped change, ask instead:
 
 > `Close dropped NNN-slug: archive it to <where> and close it as not planned, record a "Drop NNN-slug" commit on <git.base> that changes no files, then remove its worktree and delete its branch? (yes / no)`
 
-`<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave out `archive it to <where>, ` (and `and close
-it as not planned`).
+`<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave
+out `archive it to <where>, ` (and `and close it as not planned`). When `push.on` is true, end
+with `…delete its branch, then push <git.base> to <remote>?`: the yes covers the push and every
+commit shown, and they can't be taken back once pushed.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 
@@ -99,8 +107,9 @@ it as not planned`).
    ```
 
    - Exit 0: merged, mirrored (`archive.location`), folder removed in the `Close` commit, worktree
-     removed, branch deleted. For a dropped change: mirrored, recorded in the `Drop` commit,
-     worktree removed, branch deleted.
+     removed, branch deleted, and pushed when `push` is in `done`. For a dropped change: mirrored,
+     recorded in the `Drop` commit, worktree removed, branch deleted, pushed the same way. A push
+     the remote refused is `push_failed`, never a failed close: the change has landed.
    - Exit 3: landed and its folder removed, but the worktree was kept because this process runs
      inside it (a session that came in by `cd`, which `ExitWorktree` can't bring back). Say so;
      finish with `/sdlc:close NNN` from a session in the main checkout.
@@ -111,9 +120,13 @@ it as not planned`).
 ## Step 4 — Report and stop
 
 Report what `done` lists, `main`'s new commits (`git log -2 --oneline <git.base>`), where the change was
-mirrored (`archive.location`) or why it wasn't, and where the session is now. With
-`archive.closes`, say the issue stays open, labelled `landed`, until `main` reaches GitHub, by
-`/sdlc:publish` or a push of the human's own, and GitHub closes it then. With
+mirrored (`archive.location`) or why it wasn't, and where the session is now. When `push` is in
+`done`, say `main` is on the remote and GitHub closes the issues in `push.closed` now. With
+`push_failed`, say why, and that `/sdlc:publish` pushes it (never force a remote that has moved).
+Otherwise, with `archive.closes`, say the issue stays open, labelled `landed`, until `main`
+reaches GitHub, by `/sdlc:publish` or a push of the human's own, and GitHub closes it then. With
+`unpushed` in the report (push off), say what waits for a push, as status does: its closed
+changes and the issues a push closes, and `/sdlc:publish`. With
 `archive.closed_because`, say close closed the issue now, and why. Say what `measure`
 recorded on the `Close` commit, from its `coverage`: which stages this machine's transcripts saw,
 or `none:` and why (transcripts off in `metrics.transcripts`, none for this change, or the reader
@@ -136,11 +149,12 @@ same as skills; `hosts`, the files named, which reach a host only through `/sdlc
 reads the change's diff to see which of these apply. Say nothing about it when the report has
 none.
 
-Be explicit that nothing was pushed or tagged.
+Be explicit about what was pushed (or that nothing was), and that nothing was tagged.
 
 ## Out of scope
 
-- `git push`, tags, pull requests. Never.
+- `git push` from this skill, tags, pull requests. Never: the script's own push step is the only
+  one, and only when `git.push` names close.
 - `--force`, `git branch -D`, `ExitWorktree` with `remove`.
 - Running `commands.close_cleanup`, or deleting anything other than the change's own folder, which
   only `sdlc.py close` removes, in a commit, once the change is on `main`. The human's command, by

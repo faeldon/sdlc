@@ -80,8 +80,14 @@ If `check` reports `.sdlc/work/ is gitignored`, the repo isn't set up for the pl
 `/sdlc:setup`, which says what else is missing, and stop. `/sdlc:intent` would be refused.
 
 If `.sdlc/work/` doesn't exist or `status` reports nothing open, say so plainly, skip Step 2, and pick
-from Step 3's precedence: a `priority high` line, a due release, retro, then `Next up`, and
+from Step 3's precedence: unpushed work, a `priority high` line, a due release, retro, then
+`Next up`, and
 `/sdlc:intent` only when none of those apply.
+
+**`■ Unpushed` is landed work the remote doesn't have**: closed changes on `main` past its
+remote-tracking ref, with the issues a push closes, once there are `git.nudge_after_changes` of
+them. Read locally, so it is as fresh as the last push or fetch. It appears when close's push is
+off or failed; `/sdlc:publish` pushes them.
 
 **A release is recommended only when it is due**: `■ Release due` names why (a major change,
 `release.due_after_changes` changes of minor impact or higher, or the oldest unreleased close
@@ -147,12 +153,14 @@ change in flight (not marked `quiet`) is never picked: say it's in flight in the
 3. A quiet change already at `stage: build` or later — finish what's started before opening more.
 4. A quiet change others are declared to depend on: nothing that reads a thing can be built, or
    pointed at it, until the thing exists.
-5. A `Next up` line marked `priority high`, bug or idea — its own command: urgent work goes before
+5. `Unpushed` — `/sdlc:publish`, from the main checkout: landed work on one machine alone is work
+   that can be lost, and the issues it closes still read as open.
+6. A `Next up` line marked `priority high`, bug or idea — its own command: urgent work goes before
    a release.
-6. `Release due` — `/sdlc:release`, from the main checkout. An `Unreleased` section that says
+7. `Release due` — `/sdlc:release`, from the main checkout. An `Unreleased` section that says
    `not due` is a batch still filling: mention it only as a runner-up when the person asks.
-7. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
-8. The first `Next up` line — its own command. Runners-up come from the lines after it.
+8. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
+9. The first `Next up` line — its own command. Runners-up come from the lines after it.
 
 With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 

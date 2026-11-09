@@ -308,9 +308,14 @@ def test_close_lands_mirrors_and_removes_through_the_script_and_never_by_hand() 
     )
 
 
-def test_only_publish_pushes() -> None:
-    """The production gate: ship and close stop at a commit, release at a local tag. Publish is
-    the one skill, and `cmd_publish` the one function, that pushes, behind its own approval."""
+def _function(source: str, name: str) -> str:
+    return source.split(f"\ndef {name}(")[1].split("\ndef ")[0]
+
+
+def test_only_the_named_steps_push() -> None:
+    """The production gate: no skill pushes, and the script pushes in one function, `_push()`,
+    called by publish behind its own approval, and by close and release only when `git.push`
+    names them, behind the question each already asks. Ship never pushes."""
     for skill in SKILLS:
         rules = [r for r in _bash_rules(skill) if "push" in r]
         pushes = [c for c in _block_commands(skill.read_text(encoding="utf-8")) if "git push" in c]
@@ -318,8 +323,29 @@ def test_only_publish_pushes() -> None:
     publish = frontmatter.load(ROOT / "skills" / "publish" / "SKILL.md")
     assert "sdlc.py publish" in publish.content
     source = (ROOT / "scripts" / "sdlc.py").read_text(encoding="utf-8")
-    body = source.split("\ndef cmd_publish(")[1].split("\ndef ")[0]
-    assert source.count('"push"') == body.count('"push"') > 0, "a push outside cmd_publish"
+    body = _function(source, "_push")
+    # A git call naming push: `_git(home, "push", …)`, `_git_err(…)`, or a `["git", …]` list.
+    git_push = re.compile(r'_git\w*\(\s*\w+,\s*"push"|\["git",[^\]]*"push"')
+    assert len(git_push.findall(source)) == len(git_push.findall(body)) == 1, "a push outside"
+    call = next(line for line in body.splitlines() if git_push.search(line))
+    assert "force" not in call and '"-f"' not in call, call
+    callers = {
+        name
+        for name in re.findall(r"\ndef (\w+)\(", source)
+        if name != "_push" and "_push(" in _function(source, name).replace("def _push(", "")
+    }
+    assert callers == {"cmd_publish", "cmd_close", "cmd_release"}, callers
+    for name in ("cmd_close", "cmd_release"):
+        assert "_push_plan(" in _function(source, name), f"{name} pushes without git.push"
+
+
+def test_release_skill_lines_stay_short() -> None:
+    """Nit 2026-10-24-9: past the frontmatter, release's lines fit 100 characters, but the
+    question it asks literally."""
+    text = (ROOT / "skills" / "release" / "SKILL.md").read_text(encoding="utf-8")
+    body = text.split("\n---\n", 1)[1]
+    long = [line for line in body.splitlines() if len(line) > 100 and not line.startswith("> `")]
+    assert long == []
 
 
 def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:

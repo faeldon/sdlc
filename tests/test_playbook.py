@@ -150,7 +150,7 @@ PRESCRIPTIONS = [
         [
             r"The agent prepares the release and a person authorizes it",
             r"`/sdlc:release`.*All local",
-            r"`/sdlc:publish`.*the one step that sends anything anywhere",
+            r"`/sdlc:publish`.*can.t be taken back",
         ],
     ),
     (

@@ -125,10 +125,12 @@ branch, which close would put on `main`'s first-parent line, where `closed_chang
 
 **Closing: `cmd_close()`.** Steps in order: `merge --ff-only`, `verify`, `measure`, `archive`
 (the tracker's `archive()`, read back), `remove folder` (`_close_commit()`), `remove worktree`,
-`delete branch`. A failed step stops there and a rerun resumes, skipping what is done. Close
-never pushes: a shipped change's issue is labelled `landed` and left open, and `Closes #N` ends
-the `Close` commit's message, so GitHub closes it when the commit reaches the default branch
-(where that isn't `main`, close closes it itself). In the plugin's own repo only, `_handoff()`
+`delete branch`, then `push` when `git.push` names `close` (`_push_plan()`; unset, it does where
+`archive.target` is `github`). A failed step stops there and a rerun resumes, skipping what is
+done, but a refused push is `push_failed`, never a failed close: the change has landed, and
+publish pushes it. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
+commit's message, so GitHub closes it when the commit reaches the default branch (where that isn't
+`main`, close closes it itself). In the plugin's own repo only, `_handoff()`
 reruns close through `main`'s script when this copy is a stale cache, and through the merged
 script after a merge that brought `scripts/`, so a change closes on its own code;
 `SDLC_CLOSE_RAN` stops a loop. There too, `reaches` (`landing_reach()`, over the change's whole
@@ -155,8 +157,11 @@ Then `release.prepare`, which must change no tracked file (one it changes is put
 and whose output's tail is noted on the tag under `refs/notes/sdlc-prepared` for publish's approval:
 its own notes ref, since `cmd_publish` reads the `sdlc` ref for the word `published`.
 That is safe only because `_release_refusals()` refuses a main checkout with uncommitted tracked
-changes: loosen that and the release commit sweeps up unrelated work. `cmd_publish` is the only
-code that pushes. A shim in `sdlc.py` gets an entry in
+changes: loosen that and the release commit sweeps up unrelated work. `_push()` is the only
+code that pushes, called by `cmd_publish` and by `cmd_close` and `cmd_release` when `git.push`
+names them; once the tag is on the remote, publish pushes `main` alone, the retry for a push
+they couldn't make. `_unpushed()` reads what `main` holds past its remote-tracking ref, locally,
+for status's `Unpushed`. A shim in `sdlc.py` gets an entry in
 `.sdlc/deprecations.toml`, and `cmd_release` refuses a version that would still carry it. A
 path kept for good (the no-manifest drift, and whatever reads what history holds, which never
 migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
@@ -317,9 +322,11 @@ Changing a skill or the script usually means satisfying these, so know them befo
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill
   must run its script's `config` and name the config keys listed in `READS_CONFIG`.
-- **Only publish pushes** (`tests/test_skills.py::test_only_publish_pushes`): no other skill has a
-  `push` rule or runs `git push`, and `"push"` appears in `sdlc.py` only inside `cmd_publish`. Ship
-  and close stop at a commit, release at a local tag.
+- **Only the named steps push** (`tests/test_skills.py::test_only_the_named_steps_push`): no
+  skill has a `push` rule or runs `git push`; `sdlc.py`'s one git push is in `_push()`, never
+  forced, called only by `cmd_publish`, and by `cmd_close` and `cmd_release` through
+  `_push_plan()`, so each pushes only when `git.push` names it, behind the question it already
+  asks. Ship never pushes.
 - **Narrow `allowed-tools`** (`tests/test_skills.py`): a skill's `allowed-tools` *grants* each tool
   without a prompt for the turn that runs it; it restricts nothing. So no skill lists plain `Bash`:
   each lists a `Bash(...)` rule per command it runs, written exactly as the skill runs it (quotes

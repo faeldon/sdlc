@@ -79,7 +79,7 @@ environment; the script declares its own dependencies inline, and the two lists 
 
 Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all but `claude plugin
 validate`, and on Windows the tests marked `portable` (`uv run --group dev pytest -q -m portable`
-here). It runs on every push, which only `/sdlc:publish` makes, or by hand on a branch you pushed:
+here). It runs on every push, which close, release and `/sdlc:publish` make, or by hand on a branch you pushed:
 `gh workflow run check.yml --ref <branch>`.
 
 ## How a change is made here
@@ -123,7 +123,7 @@ skipped gate still reports green from memory.
 
 **Every near-miss becomes a test.** A rule that must always hold needs a test or a hook behind
 it, not only a sentence in a skill. [`AGENTS.md`](../AGENTS.md), *Invariants the tests enforce*,
-lists them: narrow `allowed-tools`, only publish pushes, nothing about a project or a workspace,
+lists them: narrow `allowed-tools`, only the named steps push, nothing about a project or a workspace,
 one shape for the shipped docs, and the rest.
 
 **Nothing public names the agent.** No commit, pull request, issue or release note here says an

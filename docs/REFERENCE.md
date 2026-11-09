@@ -56,7 +56,7 @@ tag = "v{version}"                          # the default: the release tag, and 
 changelog = "CHANGELOG.md"                  # optional: the notes are added to the top of it
 after_bump = "uv lock"                      # optional: run by /sdlc:release after the bump; the tracked files it changes are committed too; {version}, {tag}
 prepare = "npm pack"                        # optional: run by /sdlc:release after after_bump; builds into untracked or ignored paths only; what it prints is shown at /sdlc:publish; {version}, {tag}
-remote = "origin"                           # the default: where /sdlc:publish pushes main and the tag
+remote = "origin"                           # the default: where publish, and close and release by `[git] push`, push main and the tag
 publish = "npm publish"                     # optional: run by /sdlc:publish after the push, with no terminal and stdin closed; {version}, {tag}
 deprecations = ".sdlc/deprecations.toml"    # the default: each shim and the version that removes it; off while absent
 due_after_changes = 5                       # the default: minor-or-higher changes before status says Release due; 0 = off
@@ -78,6 +78,8 @@ irreversible = ["migrations/"]              # optional: paths a revert doesn't u
 [git]
 base = "master"                             # optional: the branch changes start from and land on; unset = detected
 attribution = false                         # unset until setup asks: false hides the agent's lines, true keeps them
+push = ["close", "release"]                 # optional: the steps that push main, inside their own approval; unset = both with archive.target github, else []
+nudge_after_changes = 1                     # the default: status says Unpushed once this many closed changes aren't on the remote; 0 = off
 ```
 
 The placeholders:
@@ -118,8 +120,8 @@ ships alike.
 ### The base branch: `[git] base`
 
 Every change branches from the base branch and lands back on it. Ship brings a branch up to date
-with it, close fast-forwards it, release tags it, publish pushes it, and status, release and the
-retrospective read history along its first-parent line. Wherever these docs say `main`, they
+with it, close fast-forwards it, release tags it, close, release or publish pushes it, and
+status, release and the retrospective read history along its first-parent line. Wherever these docs say `main`, they
 mean this branch.
 
 `git.base` set is the base branch. Unset, it is worked out, in this order:
@@ -489,8 +491,9 @@ nothing needs `gh`. Only Tier 1 and 2 changes reach one: Tier 0 has no folder an
   artifacts, never the issue, which the next sync overwrites. A change listed in the intent's
   `depends_on:` line shows as blocking it. `/sdlc:close` renders it a last time, labels it
   `landed` and reads it back before it removes the folder. The issue stays open until the change is on GitHub: the `Close` commit
-  says `Closes #N`, so GitHub closes it when that commit reaches the default branch, by
-  `/sdlc:publish`, a push of your own, or a merged pull request. Where the default branch isn't
+  says `Closes #N`, so GitHub closes it when that commit reaches the default branch, by close's
+  own push (`[git] push`, on by default with GitHub), `/sdlc:publish`, a push of your own, or a
+  merged pull request. Where the default branch isn't
   `main`, close closes the issue itself and says why. An artifact too long for the body becomes a
   comment. A dropped change's issue is closed as not planned. Each issue on the intent's
   `closes:` line is a sub-issue of the change's, so the person who filed it follows the change;
@@ -600,11 +603,12 @@ pushing to the plugin; a new untracked file it makes is listed, never committed.
 (one it changes is put back and the release refused), and the end of whose output is kept on the
 tag as a git note (`refs/notes/sdlc-prepared`). Until it is
 published, `git tag -d <tag> && git reset --keep HEAD~1` takes it back. `/sdlc:publish`, behind an approval
-of its own, pushes `main` and the tag, never forced, and runs `release.publish` if the repo has
+of its own, pushes `main` and the tag release didn't, never forced, and runs `release.publish` if the repo has
 one, showing at that approval what `release.prepare` built. Every command release and publish
 run (`after_bump`, `prepare`, `publish`) runs non-interactively, with no terminal, stdin closed
 and its output captured: one that asks a question fails at once, so give it its non-interactive
-flag, or build in `prepare` and keep `publish` to the upload. It is the only step in the plugin that pushes. A repo without a tag for its current version
+flag, or build in `prepare` and keep `publish` to the upload. Once the tag is on the remote,
+publish pushes what landed on `main` since, alone. A repo without a tag for its current version
 is told the `git tag -a` command that makes one; a repo with no `version_files` gets the listing
 and nothing else. Dropped changes are never released.
 

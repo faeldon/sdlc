@@ -211,7 +211,10 @@ def _repo(tmp_path: Path, github: bool = True, trunk: str = "main") -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
-    named = f'[git]\nbase = "{trunk}"\n' if trunk != "main" else ""
+    # `origin` is a real GitHub URL, so close's push, on by default with GitHub, is turned off:
+    # these tests never reach the network. tests/test_push.py pushes to a bare repo instead.
+    git = (f'base = "{trunk}"\n' if trunk != "main" else "") + ("push = []\n" if github else "")
+    named = f"[git]\n{git}" if git else ""
     if github or named:
         _config(root, ('[archive]\ntarget = "github"\n' if github else "") + named)
     _git(root, "init", "-q", "-b", trunk)

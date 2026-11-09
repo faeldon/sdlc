@@ -413,13 +413,23 @@ person authorizes it**, in two steps with an approval each:
    `release.after_bump` if one is set (a lock file regenerated from the new version, say),
    then `release.prepare` if one is set (a build of what publish will upload, into untracked or
    ignored paths only), commits `Release X.Y.Z` with what all of that changed, and tags it (`release.tag`,
-   `v{version}` by default). All local: until it is published,
+   `v{version}` by default). When `[git] push` names `release`, the same approval pushes `main`
+   and the tag; otherwise it is all local, and until it is published,
    `git tag -d <tag> && git reset --keep HEAD~1` takes it back.
-2. **`/sdlc:publish`** pushes `main` and the tag to `release.remote` (never forced: a remote that
-   has moved is refused), then runs `release.publish`, the repo's own delivery, if it has one: an
-   upload, a GitHub release, a deploy. It is the one step that sends anything anywhere, and it
-   can't be taken back: a published release that turns out wrong is followed by a new patch
-   release, not withdrawn.
+2. **`/sdlc:publish`** pushes `main` and the tag to `release.remote` if release didn't (never
+   forced: a remote that has moved is refused), then runs `release.publish`, the repo's own
+   delivery, if it has one: an upload, a GitHub release, a deploy. It can't be taken back: a
+   published release that turns out wrong is followed by a new patch release, not withdrawn.
+
+**When work reaches the remote.** A closed change is on the local `main` alone until something
+pushes it: no backup, and its issue open. `[git] push` names the steps that push, each inside the
+approval it already asks for: `close` (after its `Close` commit) and `release` (with the tag). Unset,
+both, where `archive.target` is `github`; `[]` leaves every push to `/sdlc:publish`, which once a
+release is out pushes what has landed since, alone. `/sdlc:status` says **Unpushed** when closed
+changes wait on `main` past its remote-tracking ref (`[git] nudge_after_changes`, 1 by default).
+Where the remote's `main` is what users install from, a plugin marketplace among them, a push at
+close puts landed work in front of new installs before its release: set `push = ["release"]` or
+`[]` to keep that for publishing.
 
 The boundary is the tag for the version the files hold now, so a release is always everything
 since the version this repo is on. Changes still open are listed and left out. With no

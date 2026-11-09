@@ -21,12 +21,14 @@ rely on gets a spec and a plan.
 | `/sdlc:triage` | when people have filed GitHub issues: check each, then file, attach or close it |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
 | `/sdlc:release` | when `/sdlc:status` says Release due: the version they add up to, committed and tagged |
-| `/sdlc:publish` | after release: push `main` and the tag, then run your publish command |
+| `/sdlc:publish` | after release, or when status says Unpushed: push `main` (and the tag), then run your publish command |
 | `/sdlc:retro` | after a few releases: look back across them and set the direction |
 | `/sdlc:uninstall` | when a repo stops using the plugin: remove what setup wrote, once nothing is open |
 
 Every skill that writes shows you exactly what it will write and asks a literal yes/no question
-first. Nothing is pushed except by `/sdlc:publish`.
+first. Nothing is pushed without one of those yeses: in a GitHub repo, close's and release's
+include pushing `main` (`[git] push` in `.sdlc/config.toml`, `[]` to leave it to
+`/sdlc:publish`), and `/sdlc:status` says when landed work isn't on the remote yet.
 
 ## Install
 
@@ -142,8 +144,8 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   them. `/sdlc:setup` drafts it for a product, and `/sdlc:setup product` adds it later.
 - **Releases.** Each change records at ship whether it is a `major`, `minor`, `patch` or no change
   for your users. `/sdlc:release` proposes the version the closed changes add up to, bumps your
-  version files, commits and tags it locally; `/sdlc:publish` pushes it and runs your publish
-  command.
+  version files, commits and tags it, and in a GitHub repo pushes it; `/sdlc:publish` runs your
+  publish command, and pushes whatever release didn't.
 - **Retrospectives.** After a couple of releases, `/sdlc:status` says **Retro due**.
   `/sdlc:retro` looks across what shipped (cost, architecture, process, product, direction), rewrites
   the direction doc (`.sdlc/DIRECTION.md`) and turns findings into seeds in `.sdlc/work/inbox.md`. It

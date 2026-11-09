@@ -1,7 +1,7 @@
 ---
 name: release
-description: Cut a release from the changes closed since the last one — list them from git history with the impact each recorded at ship, propose the version they add up to, and after one approval bump the version files, add the notes to the changelog if one is set, commit "Release X.Y.Z" and tag it, all locally. Use from the main checkout after a batch of /sdlc:close runs, when it's time for users to get them. Not for a single change still open (ship and close it first), and never for pushing or publishing, which is /sdlc:publish.
-argument-hint: "[X.Y.Z — only to release as a version other than the computed one, e.g. a deliberate 1.0.0]"
+description: Cut a release from the changes closed since the last one — list them from git history with the impact each recorded at ship, propose the version they add up to, and after one approval bump the version files, add the notes to the changelog if one is set, commit "Release X.Y.Z" and tag it, then push main and the tag when git.push names release. Use from the main checkout after a batch of /sdlc:close runs, when it's time for users to get them. Not for a single change still open (ship and close it first), and never for running the host's publish command, which is /sdlc:publish.
+argument-hint: "[X.Y.Z — only for a version other than the computed one, e.g. 1.0.0]"
 allowed-tools:
   - Read
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
@@ -15,8 +15,10 @@ disable-model-invocation: true
 The first half of the release loop. The change loop (intent → spec → plan → build → ship →
 close) runs once per change and ends on `main`. Releasing runs after a batch of those, over
 whatever has landed since the last release: it reads each change's `impact:` from its own commit
-in history, takes the highest as the bump, and makes one local commit and one tag. Nothing leaves
-the machine here; that is `/sdlc:publish`, behind its own approval.
+in history, takes the highest as the bump, and makes one local commit and one tag. When
+`config`'s `git.push` names `release` (a GitHub repo's default), the same approval pushes `main`
+and the tag to `release.remote`, never forced; otherwise nothing leaves the machine here, and
+`/sdlc:publish` pushes behind its own approval. Publish still runs the host's publish command.
 
 **History is the source.** Close removes each change's folder from `main`, but the change's own
 commit still holds its intent, and the `Close NNN-slug` commit after it names the change. The
@@ -34,9 +36,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py unreleased
 is called (`release.tag`, `v{version}` by default), whether the notes also go to a file
 (`release.changelog`), and the command, if any, that runs after the bump (`release.after_bump`:
 a lock file regenerated from the new version, say), and the command, if any, that builds what
-`/sdlc:publish` will upload (`release.prepare`). `unreleased` lists each change since the tag (`changes`: id, title,
-impact, and `closed: false` for one whose close stopped after its merge), the ones still open in
-worktrees (`open`, not in this release), and the proposed `next` version with its `bump`.
+`/sdlc:publish` will upload (`release.prepare`). `unreleased` lists each change since the tag
+(`changes`: id, title, impact, and `closed: false` for one whose close stopped after its merge),
+the ones still open in worktrees (`open`, not in this release), and the proposed `next` version
+with its `bump`.
 `config`'s `git.base` is the branch changes land on and the release is cut from, `main` unless
 the repo's is another; where this skill says `main`, it means that branch.
 
@@ -67,9 +70,11 @@ it runs after the version files are set, every tracked file it changes goes into
 commit with them, and anything new it leaves untracked is listed, never committed. When
 `prepare` is in the output, show it too: it runs after `after_bump`, builds into untracked or
 ignored paths only (a tracked file it changes is put back and refused), and the end of what it
-prints is kept on the tag, for `/sdlc:publish` to show at its approval. If `refusals` is non-empty, show them and stop: each
-says what it needs (the main checkout, on `main`, committed; a tag that doesn't exist yet;
-something with an impact other than `none`).
+prints is kept on the tag, for `/sdlc:publish` to show at its approval. When `push.on` is true,
+say `main` and the tag will be pushed to `push.remote`, with the commits in `push.unpushed.ahead`
+that go with them; when it is false, `push.off_because` says why nothing is pushed. If `refusals`
+is non-empty, show them and stop: each says what it needs (the main checkout, on `main`,
+committed; a tag that doesn't exist yet; something with an impact other than `none`).
 
 ## Step 2 — WAIT for explicit approval
 
@@ -79,7 +84,9 @@ Ask literally:
 
 With `after_bump` set, say it after the files: `…set it in <files>, run <after_bump> and commit
 what it changes, commit "Release <next>"…`. With `prepare` set, say it after that: `…, run
-<prepare> to build what publish will upload, commit "Release <next>"…`.
+<prepare> to build what publish will upload, commit "Release <next>"…`. With `push.on`, end
+with `…and tag it <tag>, then push <git.base> and <tag> to <remote>?` in place of `Nothing is
+pushed.`: a pushed release reaches whoever installs from the remote.
 
 **Do nothing more until the human says yes.** Approval is for this release only. Another version
 is a new plan: run Step 1 again with `--version` and ask again.
@@ -92,27 +99,32 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py release
 
 With `--version X.Y.Z` exactly as approved, if one was. Exit 0 is `done`: the version files, the
 changelog when configured, the `after_bump` command when configured, the `prepare` command when
-configured, the commit, the tag, and the `note` of what was prepared. Exit 1 reports the step
+configured, the commit, the tag, the `note` of what was prepared, and `push` when it pushed. A
+failed push never fails the release: `push_failed` says why, and the release stays made and local
+for `/sdlc:publish` to push. Exit 1 reports the step
 that failed and what it said, in `refusals`; the files are put back when the `after_bump` or
 `prepare` command or the commit fails, so a rerun finds `main` as it was, apart from any
 `untracked` file the command left, which the output lists.
 
 ## Step 4 — Report and stop
 
-Report the version, the commit and tag, the notes, what was prepared (`prepared`, and
-`note_error` if the note couldn't be kept, in which case publish will show nothing prepared), and
-the `undo` the output gives: until
-`/sdlc:publish` pushes it, `git tag -d <tag> && git reset --keep HEAD~1` takes the release back.
-That command is the human's to run, not this skill's.
+Report the version, the commit and tag, the notes, and what was prepared (`prepared`, and
+`note_error` if the note couldn't be kept, in which case publish will show nothing prepared).
 
-Say plainly that nothing was pushed, and end with the next step: **`/sdlc:publish`**, now or once
-the release has been looked at. If the output's `retro_due.due` is true, add one line after it:
-a retrospective is due, its `why`, and **`/sdlc:retro`** once this release is published. Don't run
-it: that's the human's call.
+- **Pushed** (`push` in `done`): say `main` and the tag are on the remote now and can't be taken
+  back. End with **`/sdlc:publish`** only when `release.publish` is set, to run it.
+- **Not pushed** (push off, or `push_failed` with why): give the `undo` the output gives. Until
+  it is pushed, `git tag -d <tag> && git reset --keep HEAD~1` takes the release back, a command
+  the human runs, not this skill. Say plainly that nothing was pushed, and end with
+  **`/sdlc:publish`**, now or once the release has been looked at.
+
+If the output's `retro_due.due` is true, add one line after it: a retrospective is due, its `why`,
+and **`/sdlc:retro`** once this release is published. Don't run it: that's the human's call.
 
 ## Out of scope
 
-- Pushing, publishing, a GitHub release. That's `/sdlc:publish`, behind its own approval.
+- Running the publish command, a GitHub release, or a push `git.push` doesn't name. That's
+  `/sdlc:publish`, behind its own approval. Never `--force`.
 - Editing a version file by hand, or picking the bump from commit messages: the impacts were
   settled at ship, with the diff in front of someone.
 - Running the `undo`. The human's command.
