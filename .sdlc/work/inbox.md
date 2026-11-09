@@ -73,6 +73,7 @@ Language-specific measures (complexity, dependency cycles) come from the host th
 command, the way `commands.scan` works, since the plugin knows nothing about what a host builds.
 Raised 2026-10-24.
 Theme: retro
+Priority: high
 
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
