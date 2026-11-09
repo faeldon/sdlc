@@ -108,7 +108,7 @@ takes in what the loop inside it produced:
 | Loop | Runs | Takes in | Leaves | Gate |
 |---|---|---|---|---|
 | **Change** | once per change, several in parallel | an idea, a finding, a seed | a reviewed commit on `main` (ship), its folder archived (close) | one WAIT each at intent, spec, ship, close |
-| **Release** | once per batch of closed changes | the `impact:` of each change closed since the last tag | a version, a tag and its notes (release); then the push and the host's publish (publish) | one WAIT at release, one at publish: reversible and irreversible kept apart |
+| **Release** | when `status` says Release due (5 changes of minor impact or more, a major one, or the oldest 14 days closed) | the `impact:` of each change closed since the last tag | a version, a tag and its notes (release); then the push and the host's publish (publish) | one WAIT at release, one at publish: reversible and irreversible kept apart |
 | **Retro** | when `status` says Retro due (2 releases, or a major one), or when the direction is unclear | the history since the last retrospective, its releases, the process and policy docs, the product doc (if any) with its evidence and what each change served, the skills, and what each change cost | the direction doc (goals, milestones, the next major release), the product doc's outcome lines, and seeds in `.sdlc/work/inbox.md` | one WAIT |
 
 **No loop reaches past the one inside it.** A release only takes changes that have closed. A
@@ -530,6 +530,6 @@ retrospective, and says which it can't.
 3. Plan mode to build it. Save the plan if it's more than a couple of files.
 4. `/sdlc:ship`. Read the review findings properly: that's the whole return on the process.
 5. `/sdlc:close` once it's committed.
-6. After a few of those, `/sdlc:release`, then `/sdlc:publish` when it's time users had them.
+6. When `/sdlc:status` says Release due, `/sdlc:release`, then `/sdlc:publish` when it's time users had them.
 
 A Tier 1 intent is about fifteen lines.

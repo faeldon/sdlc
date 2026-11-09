@@ -20,7 +20,7 @@ rely on gets a spec and a plan.
 | `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one |
 | `/sdlc:triage` | when people have filed GitHub issues: check each, then file, attach or close it |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
-| `/sdlc:release` | after a batch of changes: the version they add up to, committed and tagged |
+| `/sdlc:release` | when `/sdlc:status` says Release due: the version they add up to, committed and tagged |
 | `/sdlc:publish` | after release: push `main` and the tag, then run your publish command |
 | `/sdlc:retro` | after a few releases: look back across them and set the direction |
 | `/sdlc:uninstall` | when a repo stops using the plugin: remove what setup wrote, once nothing is open |

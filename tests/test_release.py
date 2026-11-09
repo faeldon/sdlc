@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -505,8 +506,57 @@ def test_status_shows_what_is_unreleased(tmp_path: Path, capsys, monkeypatch) ->
     root = _repo(tmp_path)
     _close(root, "002-reopen-drafts", "minor")
     out = _status(root, capsys, monkeypatch)
-    assert "■ Unreleased: 1\n    since v0.4.2 → 0.5.0 (minor)  /sdlc:release" in out
+    assert "■ Unreleased: 1\n    since v0.4.2 → 0.5.0 (minor)  not due: 1 of 5 minor changes" in out
     assert "002  reopen-drafts" in out
+    assert "Release due" not in out
+
+
+def test_status_says_release_due_once_the_batch_is_big_enough(tmp_path, capsys, monkeypatch):
+    root = _repo(tmp_path, config=CONFIG + "due_after_changes = 2\n")
+    _close(root, "002-reopen-drafts", "minor")
+    _close(root, "003-export-totals", "patch")
+    assert "Release due" not in _status(root, capsys, monkeypatch)
+    _close(root, "004-keep-drafts", "minor")
+    out = _status(root, capsys, monkeypatch)
+    assert "since v0.4.2 → 0.5.0 (minor)  /sdlc:release" in out
+    assert "■ Release due: 2 changes of minor impact or higher  /sdlc:release" in out
+
+
+def _changes(*impacts: str, closed: str = "2026-11-01") -> list[dict]:
+    return [{"id": f"{i:03}", "impact": imp, "close_date": closed} for i, imp in enumerate(impacts)]
+
+
+RULES = {"due_after_changes": 5, "due_after_days": 14}
+
+
+@pytest.mark.portable
+def test_a_release_is_due_at_five_minor_changes_and_not_before() -> None:
+    today = date(2026, 11, 2)
+    below = sdlc.release_due(_changes("minor", "minor", "minor", "minor", "patch"), RULES, today)
+    assert below == {"due": False, "why": [], "minor": 4, "oldest": 1}
+    at = sdlc.release_due(_changes("minor", "minor", "minor", "major", "minor"), RULES, today)
+    assert at["due"] and "5 changes of minor impact or higher" in at["why"]
+
+
+@pytest.mark.portable
+def test_one_major_change_is_due_alone() -> None:
+    out = sdlc.release_due(_changes("major"), {**RULES, "due_after_changes": 0}, date(2026, 11, 2))
+    assert out["due"] and out["why"] == ["major change 000"]
+
+
+@pytest.mark.portable
+def test_a_batch_two_weeks_old_is_due_and_a_landed_change_has_no_age() -> None:
+    batch = [*_changes("none", closed="2026-11-01"), {"id": "009", "impact": "patch"}]
+    assert sdlc.release_due(batch, RULES, date(2026, 11, 14))["due"] is False
+    out = sdlc.release_due(batch, RULES, date(2026, 11, 15))
+    assert out["why"] == ["the oldest closed 14d ago"] and out["oldest"] == 14
+
+
+@pytest.mark.portable
+def test_a_rule_at_zero_is_off() -> None:
+    off = {"due_after_changes": 0, "due_after_days": 0}
+    out = sdlc.release_due(_changes(*["minor"] * 9, closed="2026-01-01"), off, date(2026, 11, 2))
+    assert out["due"] is False
 
 
 def test_status_leaves_the_section_out_where_releasing_isnt_set_up(tmp_path, capsys, monkeypatch):

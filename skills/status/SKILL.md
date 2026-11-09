@@ -80,8 +80,13 @@ If `check` reports `.sdlc/work/ is gitignored`, the repo isn't set up for the pl
 `/sdlc:setup`, which says what else is missing, and stop. `/sdlc:intent` would be refused.
 
 If `.sdlc/work/` doesn't exist or `status` reports nothing open, say so plainly, skip Step 2, and pick
-from Step 3's precedence: release, retro, then `Next up`, and `/sdlc:intent` only when none of
-those apply.
+from Step 3's precedence: a `priority high` line, a due release, retro, then `Next up`, and
+`/sdlc:intent` only when none of those apply.
+
+**A release is recommended only when it is due**: `■ Release due` names why (a major change,
+`release.due_after_changes` changes of minor impact or higher, or the oldest unreleased close
+`release.due_after_days` old). Below that, the `Unreleased` line says `not due` and how far off
+it is; `/sdlc:release` still works whenever the person chooses.
 
 ## Step 2 — Map each open change to its next action
 
@@ -142,9 +147,12 @@ change in flight (not marked `quiet`) is never picked: say it's in flight in the
 3. A quiet change already at `stage: build` or later — finish what's started before opening more.
 4. A quiet change others are declared to depend on: nothing that reads a thing can be built, or
    pointed at it, until the thing exists.
-5. `Unreleased` lists changes — `/sdlc:release`, from the main checkout.
-6. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
-7. The first `Next up` line — its own command. Runners-up come from the lines after it.
+5. A `Next up` line marked `priority high`, bug or idea — its own command: urgent work goes before
+   a release.
+6. `Release due` — `/sdlc:release`, from the main checkout. An `Unreleased` section that says
+   `not due` is a batch still filling: mention it only as a runner-up when the person asks.
+7. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
+8. The first `Next up` line — its own command. Runners-up come from the lines after it.
 
 With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 

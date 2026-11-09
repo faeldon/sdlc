@@ -59,6 +59,8 @@ prepare = "npm pack"                        # optional: run by /sdlc:release aft
 remote = "origin"                           # the default: where /sdlc:publish pushes main and the tag
 publish = "npm publish"                     # optional: run by /sdlc:publish after the push, with no terminal and stdin closed; {version}, {tag}
 deprecations = ".sdlc/deprecations.toml"    # the default: each shim and the version that removes it; off while absent
+due_after_changes = 5                       # the default: minor-or-higher changes before status says Release due; 0 = off
+due_after_days = 14                         # the default: days since the oldest unreleased close before it's due; 0 = off
 
 [retro]
 after_releases = 2                          # the default: releases before status says Retro due; 0 = only a major one
@@ -577,6 +579,14 @@ release:
 | `minor` | can do something new |
 | `patch` | does the same things, working or described better |
 | `none` | receives nothing different: tests, tooling, anything outside what is released |
+
+**When one is due.** `sdlc.py status` shows **Release due** once the unreleased batch holds a
+`major` change, `release.due_after_changes` changes of impact `minor` or higher (5 by default), or
+a change closed `release.due_after_days` days ago or more (14 by default); 0 turns either count
+off. Below that, *Unreleased* lists the batch and says how far it is from due, and
+`/sdlc:status` recommends what's next instead. It is a nudge: `/sdlc:release` runs whenever you
+choose. A host reading the plugin from a clone has every landed change already, so the release is
+for everyone else and for the version's record.
 
 `sdlc.py unreleased` reads them back from history: every `Close NNN-slug` commit since the tag of
 the version the repo is on, and the change's own commit before it. `/sdlc:release` proposes the

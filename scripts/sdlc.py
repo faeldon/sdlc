@@ -260,6 +260,11 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # The shims the host keeps and the version that removes each, which release refuses to
         # cut while one is due. Off while the file doesn't exist.
         "deprecations": ".sdlc/deprecations.toml",
+        # When `status` says a release is due, rather than only listing what's unreleased: this
+        # many changes of impact minor or higher, or the oldest unreleased close this many days
+        # old. A major change is always due. 0 turns that rule off.
+        "due_after_changes": 5,
+        "due_after_days": 14,
     },
     # When `status` says a retrospective is due. A major release always makes one due.
     "retro": {
@@ -320,7 +325,9 @@ COMMAND_LISTS = ("evidence",)
 REVIEW_LISTS = ("sensitive", "irreversible")
 LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS)
 # Every key that holds a whole number, with its least value where that isn't 0.
-INT_KEYS = ("after_releases", "idle_minutes", "stop_allowance")
+INT_KEYS = (
+    "after_releases", "due_after_changes", "due_after_days", "idle_minutes", "stop_allowance",
+)  # fmt: skip
 INT_MIN = {"idle_minutes": 1}
 # Every key that holds true or false.
 BOOL_KEYS = ("transcripts", "attribution")
@@ -4194,6 +4201,7 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
         "bump": None,
         "next": None,
         "nothing": False,
+        "due": None,
     }
     if not rel["version_files"]:
         out["configure"] = "release.version_files"
@@ -4241,10 +4249,32 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
             out["version"], [c["impact"] for c in out["changes"]]
         )
         out["nothing"] = out["next"] is None
+        if out["next"]:
+            out["due"] = release_due(out["changes"], rel, date.today())
     overdue, due = shims_due(reg["shims"], out["version"], out["next"])
     unversioned = [] if out["version"] else reg["shims"]
     out["deprecations"] = {"overdue": overdue, "due": due, "unversioned": unversioned}
     return out
+
+
+def release_due(changes: list[dict], rel: dict, today: date) -> dict:
+    """Whether the unreleased batch is big or old enough that `status` recommends releasing it:
+    any `major`, `due_after_changes` changes of impact minor or higher, or the oldest close
+    `due_after_days` old. A change landed but not closed has no close date and no age. Never
+    refuses anything: `/sdlc:release` runs whenever a person chooses."""
+    counted = [c for c in changes if c.get("impact") in ("major", "minor")]
+    dates = sorted(c["close_date"] for c in changes if c.get("close_date"))
+    oldest = _days_between(dates[0], today.isoformat()) if dates else None
+    n, days = rel["due_after_changes"], rel["due_after_days"]
+    why = []
+    majors = [c["id"] for c in changes if c.get("impact") == "major"]
+    if majors:
+        why.append(f"major change {', '.join(majors)}")
+    if n and len(counted) >= n:
+        why.append(f"{len(counted)} changes of minor impact or higher")
+    if days and oldest is not None and oldest >= days:
+        why.append(f"the oldest closed {oldest}d ago")
+    return {"due": bool(why), "why": why, "minor": len(counted), "oldest": oldest}
 
 
 def release_notes(changes: list[dict], github: bool) -> str:
@@ -7555,6 +7585,15 @@ def _context_report(root: Path, base: str | None) -> dict | None:
     return out
 
 
+def _not_due(due: dict, a: dict) -> str:
+    """The Unreleased line's tail below the threshold: how far the batch is from due."""
+    n, days = a.get("release_due_after", (0, 0))
+    parts = [f"{due.get('minor', 0)} of {n} minor changes"] if n else []
+    if days and due.get("oldest") is not None:
+        parts.append(f"oldest {due['oldest']}d of {days}")
+    return "not due: " + ", ".join(parts) if parts else "not due"
+
+
 def print_status(a: dict) -> None:
     print(f"{a['work']} — {len(a['open'])} open, {len(a['changes'])} total   today: {a['today']}")
 
@@ -7622,7 +7661,9 @@ def print_status(a: dict) -> None:
         elif rel["nothing"]:
             print(f"    nothing to release since {rel['since']}")
         else:
-            print(f"    since {rel['since']} → {rel['next']} ({rel['bump']})  /sdlc:release")
+            due = rel.get("due") or {}
+            line = f"    since {rel['since']} → {rel['next']} ({rel['bump']})"
+            print(f"{line}  /sdlc:release" if due.get("due") else f"{line}  {_not_due(due, a)}")
         # Warned about, never a problem: an overdue shim mustn't fail every change's gate.
         for kind, state in SHIM_STATES.items():
             for s in shims.get(kind, []):
@@ -7684,6 +7725,9 @@ def print_status(a: dict) -> None:
     # `check --strict` is a gate, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
+    rdue = (rel or {}).get("due")
+    if rdue and rdue["due"]:
+        print(f"\n■ Release due: {'; '.join(rdue['why'])}  /sdlc:release")
     due = a.get("retro_due")
     if due and due["due"]:
         print(f"\n■ Retro due: {'; '.join(due['why'])}  /sdlc:retro")
@@ -8025,6 +8069,8 @@ def main() -> int:
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
+    rel_cfg = cfg["release"]
+    a["release_due_after"] = (rel_cfg["due_after_changes"], rel_cfg["due_after_days"])
     a["retro_due"] = retro_due(home, cfg)
     # Here, not in `analyze()`: `check` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))

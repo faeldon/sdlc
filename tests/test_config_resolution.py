@@ -256,6 +256,8 @@ def test_the_release_section_resolves_with_its_defaults(tmp_path: Path, capsys):
         "remote": "origin",
         "publish": None,
         "deprecations": ".sdlc/deprecations.toml",
+        "due_after_changes": 5,
+        "due_after_days": 14,
     }
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
     (tmp_path / ".sdlc" / "config.toml").write_text(

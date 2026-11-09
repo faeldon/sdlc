@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.7.0",
   "config_keys": [
     "archive.command",
     "archive.target",
@@ -28,6 +28,8 @@
     "release.after_bump",
     "release.changelog",
     "release.deprecations",
+    "release.due_after_changes",
+    "release.due_after_days",
     "release.prepare",
     "release.publish",
     "release.remote",
@@ -42,7 +44,7 @@
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:b521942caeb9dc74"
+      "guide": "sha256:63754c3011fa6177"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",
@@ -65,7 +67,7 @@
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:a0a6652daa7e6765",
     "findings.md": "sha256:0db250ee2511f2b9",
-    "inbox.md": "sha256:97a3b22b5151ebba",
+    "inbox.md": "sha256:68a79a8d80d0ea10",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:8244f74828b145b1",
     "notes.md": "sha256:b7a4be5bca95078c",
