@@ -1201,3 +1201,32 @@ def test_retro_compares_tool_prompts_only_where_close_recorded_them(tmp_path: Pa
         },
         "modes": {"default": 1},
     }
+
+
+def test_retro_reads_extra_stop_kinds_only_where_close_classified_them(tmp_path: Path) -> None:
+    """An older `Close` commit counted harness entries and other commands as `extra`, with no
+    kinds: it is unrecorded here, never none. A newer one's `Sdlc-Extra` lines add up by kind."""
+    root = _repo(tmp_path)
+    _measured(root, "001-keep-one-draft", 10, 6)  # old: no harness= on Sdlc-Totals
+    _close(root, "002-draft-titles", tier=2)
+    close = _git(root, "log", "-1", "--format=%B")
+    _git(root, "commit", "-q", "--amend", "-m", close + "\n\n" + "\n".join([
+        "Sdlc-Mode: manual",
+        "Sdlc-Coverage: transcripts=1 stages=design,ship",
+        "Sdlc-Totals: elapsed=60 agent=20 response=5 away=0 blocked=0 stops=8 required=5 "
+        "target=6 allowance=1 prompts=0 prompt_modes=auto harness=3 command=1 ship_runs=1 "
+        "reenter=0 in=1 cache_read=100 out=10",
+        "Sdlc-Extra: design after_gate=1 revise=0 asked=1 unprompted=0 interrupt=0 harness=1 "
+        "command=1",
+        "Sdlc-Extra: ship after_gate=0 revise=1 asked=0 unprompted=0 interrupt=0 harness=2 "
+        "command=0",
+    ]))  # fmt: skip
+    extra = _retro(root)["metrics"]["extra"]
+    assert (extra["recorded"], extra["harness"], extra["command"]) == (1, 3, 1)
+    assert extra["kinds"] == {
+        "after_gate": {"count": 1, "changes": 1},
+        "revise": {"count": 1, "changes": 1},
+        "asked": {"count": 1, "changes": 1},
+        "unprompted": {"count": 0, "changes": 0},
+        "interrupt": {"count": 0, "changes": 0},
+    }

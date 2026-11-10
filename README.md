@@ -95,8 +95,9 @@ say `main`, they mean that branch.
    own worktree.
 2. **`/sdlc:spec`**, for a Tier 2 change only: numbered, checkable requirements, the design and
    what it rejected, inside your repo's invariants.
-3. **Plan mode**: start it, let Claude read the code against the spec, approve the plan (it's
-   saved as `plan.md`), and let it build. Run your gate as you go.
+3. **Plan mode**: `/sdlc:spec` starts it on your yes (a Tier 1 intent offers to), Claude reads
+   the code against the spec, you approve the plan (it's saved as `plan.md`), and it builds. Run
+   your gate as you go.
 4. **`/sdlc:ship`**: runs the gate, reviews the diff in passes (correctness against the
    requirements, your invariants, cost, and whether the docs a session reads still tell the
    truth), shows the findings, settles what the change means for a release, and on your yes makes

@@ -347,17 +347,6 @@ Cost: S
 Value: low
 Raised by: 026-github-intake (correctness)
 
-## [2026-10-26-5] [idea] Cover the permission prompts a skill's rules should have
-
-Once close names them, take the prompts that recur across changes and aren't asking on purpose,
-and give each the rule its skill was missing, or move its logic into `sdlc.py` where a rule can
-cover it. This is what brings the median Tier 1 change within its stop target (7 against 5 in the
-last window). Raised by the retrospective of 2026-10-26.
-
-After: 2026-10-26-4
-Theme: permissions
-Priority: high
-
 ## [2026-10-26-6] [idea] A ship that fixes its own review finding is not a miss
 
 `happy()` marks ship `no` whenever the person answers anything but yes inside it, so "fix a finding
@@ -698,3 +687,24 @@ an unattended build that lands and pushes (prompt injection); unattended token s
 run today, not per queue.
 Theme: factory
 Raised 2026-11-10.
+
+## [2026-11-10-2] [idea] Cover the tool prompts a default-mode host's skills meet
+
+What 2026-10-26-5 first set out to do, left once 047 found no prompt recorded here
+(`prompt_modes=auto` on every Close commit): once a host running in `default` mode records
+`Sdlc-Prompt` lines, give each recurring prompt that isn't asking on purpose the `allowed-tools`
+rule its skill lacks, or move its logic into `sdlc.py`. See .sdlc/work/047-cut-extra-stops/notes.md.
+Theme: permissions
+Raised 2026-11-10.
+
+## [2026-11-10-3] [bug] Membership reads skill names quoted in harness entries
+
+Found by the review of 047-cut-extra-stops.
+`metrics._membership()` searches every user entry for `<command-name>/sdlc:…`, compaction summaries
+and task notices included: a summary quoting `/sdlc:intent` can move where a change's main-branch
+run starts, and one quoting a skill (or a notice typed after close's approval) inside close's run
+ends that run early, so close's stops and tokens go uncounted. 047 keeps these entries out of
+`read_events`; membership needs the same check (`origin.kind`, `isCompactSummary`).
+Severity: med
+Paths: scripts/metrics.py
+Theme: retro

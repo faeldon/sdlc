@@ -45,10 +45,11 @@ def turn(t: float, minutes: float, branch: str = BRANCH) -> dict:
             "durationMs": int(minutes * 60_000)}  # fmt: skip
 
 
-def asst(t: float, mid: str, tools: list[dict] = (), branch: str = BRANCH, tokens: int = 10):
+def asst(t: float, mid: str, tools: list[dict] = (), branch: str = BRANCH, tokens: int = 10,
+         text: str = SENTINEL):  # fmt: skip
     usage = {"input_tokens": 1, "cache_creation_input_tokens": tokens,
              "cache_read_input_tokens": tokens * 100, "output_tokens": tokens}  # fmt: skip
-    content = [{"type": "text", "text": SENTINEL}, *tools]
+    content = [{"type": "text", "text": text}, *tools]
     return {"type": "assistant", "timestamp": _at(t), "gitBranch": branch,
             "message": {"id": mid, "content": content, "usage": usage}}  # fmt: skip
 
@@ -252,6 +253,96 @@ def test_the_gate_is_the_last_approval_and_the_rest_are_extra_or_questions(tmp_p
     assert design["reply"] == ["approve"]
     assert s["stages"]["build"]["gate"] == 1, "the plan approval is a gate too"
     assert s["totals"]["stops"] == 5
+    assert design["kinds"] == {"after_gate": 1, "revise": 0, "asked": 0, "unprompted": 1,
+                               "interrupt": 0}  # fmt: skip
+
+
+def _spec_session(*between: dict) -> list[dict]:
+    """A spec run with one prose answer, and `between` after it, before the WAIT."""
+    return [
+        cmd(0, "sdlc:spec"),
+        turn(1, 1), user(2, "what about drafts?"),
+        *between,
+        turn(8, 1), user(9, "yes"),
+    ]  # fmt: skip
+
+
+def test_harness_entries_are_not_the_person(tmp_path: Path) -> None:
+    """R1: a background task's notice and a compaction summary add no stop and end no wait."""
+    plain = _summary(_events(tmp_path / "a", _spec_session()))
+    events = _events(tmp_path / "b", _spec_session(
+        turn(3, 1),
+        user(4, "<task-notification>done</task-notification>",
+             origin={"kind": "task-notification", "producer": "session-task"}),
+        user(5, f"This session is being continued. {SENTINEL}", isCompactSummary=True),
+    ))  # fmt: skip
+    assert {e["kind"] for e in events} >= {"harness"}
+    s = _summary(events)
+    design = s["stages"]["design"]
+    assert (design["extra"], design["harness"], s["totals"]["harness"]) == (1, 2, 2)
+    assert s["totals"]["stops"] == plain["totals"]["stops"]
+    assert design["away"] == plain["stages"]["design"]["away"]
+    assert design["response"] == plain["stages"]["design"]["response"] == [60.0, 60.0]
+
+
+def test_another_slash_command_is_not_a_stop(tmp_path: Path) -> None:
+    """R2: `/reload-plugins` is the person's, and a command like the plugins' own: no stop."""
+    plain = _summary(_events(tmp_path / "a", _spec_session()))
+    s = _summary(_events(tmp_path / "b", _spec_session(turn(3, 1), cmd(4, "reload-plugins"))))
+    assert (s["stages"]["design"]["command"], s["totals"]["command"]) == (1, 1)
+    assert s["totals"]["stops"] == plain["totals"]["stops"]
+    assert s["coverage"] == plain["coverage"], "only the plugins' skills open stages"
+
+
+def test_each_extra_stop_has_its_kind(tmp_path: Path) -> None:
+    """R3: by shape alone: answering a prose question, revising before the WAIT, moving on after
+    it, an interrupt, and the rest."""
+    events = _events(tmp_path, [
+        turn(0, 0.5), user(0.5, "an idea before anything"),
+        cmd(1, "sdlc:spec"),
+        asst(2, "m1", text="Shall I fold it in?"), turn(2, 1), user(3, "fold it in"),
+        asst(4, "m2"), turn(4, 1), user(5, "revise R2 first"),
+        turn(6, 1), user(7, "[Request interrupted by user]"),
+        turn(8, 1), user(9, "yes"),
+        turn(10, 1), user(11, "now plan it"),
+    ])  # fmt: skip
+    s = _summary(events)
+    kinds = s["stages"]["design"]["kinds"]
+    assert kinds == {"after_gate": 1, "revise": 1, "asked": 1, "unprompted": 0, "interrupt": 1}
+    assert s["stages"]["intent"]["kinds"]["unprompted"] == 1
+    assert s["stages"]["design"]["extra"] == sum(kinds.values())
+
+
+def test_no_text_leaves_a_human_event(tmp_path: Path) -> None:
+    """R3: a human or harness event holds classes and flags, never what was said."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"),
+        asst(1, "m1", text=f"{SENTINEL}?"), turn(1, 1), user(2, f"no {SENTINEL}"),
+        user(3, SENTINEL, isCompactSummary=True),
+    ])  # fmt: skip
+    for e in events:
+        if e["kind"] in ("human", "harness"):
+            rest = {k: v for k, v in e.items() if k not in ("ts", "kind")}
+            assert all(isinstance(v, bool) for k, v in rest.items() if k != "reply"), e
+            assert rest.get("reply") in (None, "approve", "revise", "other")
+
+
+def test_extra_kinds_round_trip_through_the_trailers(tmp_path: Path) -> None:
+    """R4: `Sdlc-Extra` per stage with any, and `harness=`/`command=` on `Sdlc-Totals` always."""
+    events = _events(tmp_path, _spec_session(
+        turn(3, 1), cmd(4, "reload-plugins"),
+        user(5, "<task-notification/>", origin={"kind": "task-notification"}),
+    ) + [cmd(20, "sdlc:ship"), turn(21, 1), user(22, "yes")])  # fmt: skip
+    lines = metrics.trailers(_summary(events))
+    assert (
+        "Sdlc-Extra: design after_gate=0 revise=0 asked=0 unprompted=1 interrupt=0 harness=1 "
+        "command=1"
+    ) in lines
+    assert not any(line.startswith("Sdlc-Extra: ship") for line in lines), "nothing extra there"
+    back = metrics.parse_trailers("\n".join(lines))
+    assert back["extra"]["design"]["unprompted"] == 1 and set(back["extra"]) == {"design"}
+    assert (back["totals"]["harness"], back["totals"]["command"]) == (1, 1)
+    assert back["stages"]["design"]["extra"] == 1
 
 
 def test_the_factorys_build_gate_comes_first_and_its_decisions_are_questions(tmp_path) -> None:

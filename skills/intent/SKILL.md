@@ -9,6 +9,7 @@ allowed-tools:
   - Grep
   - Glob
   - EnterWorktree
+  - EnterPlanMode
   - 'Bash(cd *)'
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
@@ -182,6 +183,11 @@ updated again at spec and ship; `/sdlc:close` archives it. With issue fields cho
 too: `…with this title and this intent, in milestone Q4 2026, assigned to ana and bo, in a new
 worktree…`.
 
+For **Tier 1**, end it with plan mode, so the person doesn't have to ask for it after the yes:
+`…off <git.base>, then start plan mode? (yes / yes, without plan mode / change the tier / edit a
+section)`. Starting plan mode approves nothing; the plan is approved when plan mode ends. A Tier 2
+question stays as it is: `/sdlc:spec` comes first.
+
 **Do not write anything until the human says go.** Approval is per-invocation, never standing — the
 same gate `/sdlc:spec` and `/sdlc:ship` use, for the same reason.
 
@@ -255,12 +261,16 @@ the meantime, and the change is NNN, not the number approved.
 The session is now in the worktree, so the next action happens here. Only if `EnterWorktree` didn't
 move it, the next action starts with a new session there: `cd "<worktree path>" && claude`.
 
-- **Tier 1** → "start it in plan mode when you're ready; save the approved plan as `plan.md` if it's
-  more than a couple of files."
+- **Tier 1**, answered `yes` → call `EnterPlanMode` last, once the session is in the worktree:
+  plan mode reads the code, and the plan the person approves when it ends is saved as `plan.md`
+  if it's more than a couple of files. If the tool isn't available or refuses, say the next step
+  instead, as below.
+- **Tier 1**, answered `yes, without plan mode` → "start it in plan mode when you're ready; save
+  the approved plan as `plan.md` if it's more than a couple of files."
 - **Tier 2** → "run `/sdlc:spec` next."
 
-Do **not** continue into Stage 2 or 3 in this same turn. Do not start editing code. This skill's
-job ends here.
+Do **not** continue into Stage 2 or 3 in this same turn beyond entering plan mode, which writes
+nothing and approves nothing. Do not start editing code. This skill's job ends here.
 
 ## Out of scope
 

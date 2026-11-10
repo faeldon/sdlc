@@ -5485,6 +5485,7 @@ def metrics_summary(
         "captured": len(captured),
         "uncaptured": len(changes) - len(captured),
         "prompts": _prompt_report(captured),
+        "extra": _extra_report(captured),
         "groups": {},
     }
     for key, g in groups.items():
@@ -5540,6 +5541,27 @@ def _prompt_report(captured: list[dict]) -> dict:
             row["changes"] += 1
     ordered = dict(sorted(names.items(), key=lambda kv: (-kv[1]["asked"], kv[0])))
     return {"recorded": recorded, "names": ordered, "modes": dict(sorted(modes.items()))}
+
+
+def _extra_report(captured: list[dict]) -> dict:
+    """The extra stops across the window, from each `Close` commit's `Sdlc-Extra` lines: each
+    kind's count and how many changes it came from, and the harness entries and other commands
+    left out of the stops. Only commits that carry `harness=` on `Sdlc-Totals` are `recorded`: an
+    older one counted those as `extra`, unclassified, and is never read here as none."""
+    kinds = {k: {"count": 0, "changes": 0} for k in metrics.EXTRA_KINDS}
+    recorded = harness = command = 0
+    for c in captured:
+        m = c["metrics"]
+        if not isinstance(m["totals"].get("harness"), int):
+            continue
+        recorded += 1
+        harness += m["totals"]["harness"]
+        command += m["totals"].get("command") or 0
+        for kind, row in kinds.items():
+            n = sum((s.get(kind) or 0) for s in (m.get("extra") or {}).values())
+            row["count"] += n
+            row["changes"] += 1 if n else 0
+    return {"recorded": recorded, "kinds": kinds, "harness": harness, "command": command}
 
 
 def _no_findings() -> dict:

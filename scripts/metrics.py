@@ -20,7 +20,8 @@ Rework within a change, read from the same events and summary, written on lines 
 
 An event is a dict with `ts` (an aware datetime) and `kind`:
 
-    skill{name}  turn{ms}  human{reply, command}  tokens{in, cache_create, cache_read, out}
+    skill{name}  turn{ms}  human{reply, command, plugin, asked, interrupt}  harness
+    tokens{in, cache_create, cache_read, out}
     edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  check{ok}
     permission{name, rejected}  mode{modes}  subagent{role, ms, in, cache_create, cache_read, out}
 
@@ -36,9 +37,18 @@ the classifier, public so a reader of the change's diff names its files the same
 No message text, file path or session id leaves `read_events`: a reply is a class (approve,
 revise, other), an edit an artifact kind, a check pass or fail.
 
-Read stops as upper bounds and token spans as lower: a harness message that arrives as a plain user
-entry (a "Tool loaded." turn) looks like something the person typed, so it can add an `extra` stop
-and end a wait early. The transcripts don't mark it, so it isn't guessed at.
+An entry the harness sent, a background task's notice (`origin.kind: task-notification`) or a
+compaction summary (`isCompactSummary`), is a `harness` event, never the person: no stop, no wait.
+A slash command is a `command`, never a stop; `plugin` when it is one of the plugins' skills, which
+alone open stages. Each other typed entry is an `extra` stop, given a kind when its span closes
+(`EXTRA_KINDS`): `after_gate` once the gated skill's WAIT is answered, `revise` before it, `asked`
+when the agent's last text ended with a question, `interrupt` for an interrupted turn, and
+`unprompted` for the rest. They are written as `Sdlc-Extra` lines, with `harness=` and `command=`
+on `Sdlc-Totals`: a `Close` commit without those counted harness entries and other commands as
+`extra`, and is read as unclassified, never as none.
+
+Read stops as upper bounds and token spans as lower: a harness entry of a shape not named above
+still looks like something the person typed.
 """
 
 from __future__ import annotations
@@ -71,6 +81,10 @@ APPROVE_RE = re.compile(
 )
 REVISE_RE = re.compile(r"\b(revise|edit|change|fix|rethink|no|not yet|instead|rather)\b", re.I)
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+# Why an extra stop happened, read from its shape alone (`summarize()`).
+EXTRA_KINDS = ("after_gate", "revise", "asked", "unprompted", "interrupt")
+COMMAND_RE = re.compile(r"^\s*<command-name>/")
+INTERRUPT_RE = re.compile(r"^\s*\[Request interrupted by user")
 
 STAGES = ("intent", "spike", "design", "build", "test", "ship", "close")
 # What opens a stage: a skill, or the `stage:` an intent is edited to.
@@ -433,6 +447,8 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
             uses: dict[str, tuple[str, dict]] = {}
             modes: set[str] = set()
             last: datetime | None = None
+            asked = False  # whether the agent's last text ended with a question
+
             for entry, mine in zip(entries, keep, strict=True):
                 ts = _ts(entry)
                 if not mine or ts is None:
@@ -461,14 +477,20 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                                 events.append({"ts": ts, "kind": "check", "ok": ok})
                     if entry.get("isMeta") or _only_tool_results(content):
                         continue
+                    origin = entry.get("origin") if isinstance(entry.get("origin"), dict) else {}
+                    if origin.get("kind") == "task-notification" or entry.get("isCompactSummary"):
+                        events.append({"ts": ts, "kind": "harness"})
+                        continue
                     text = _entry_text(content)
                     m = SKILL_RE.search(text)
                     if m:
                         events.append({"ts": ts, "kind": "skill", "name": m.group(1)})
                     if text.strip():
                         events.append(
-                            {"ts": ts, "kind": "human", "reply": _reply(text), "command": bool(m)}
-                        )
+                            {"ts": ts, "kind": "human", "reply": _reply(text),
+                             "command": bool(m or COMMAND_RE.match(text)), "plugin": bool(m),
+                             "asked": asked, "interrupt": bool(INTERRUPT_RE.match(text))}
+                        )  # fmt: skip
                 elif kind == "assistant":
                     mid = msg.get("id")
                     if isinstance(msg.get("usage"), dict) and mid not in seen:
@@ -476,7 +498,12 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                             seen.add(mid)
                         events.append({"ts": ts, "kind": "tokens", **_usage(msg)})
                     for block in content if isinstance(content, list) else []:
-                        if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        if not isinstance(block, dict):
+                            continue
+                        said = block.get("text") if block.get("type") == "text" else None
+                        if isinstance(said, str) and said.strip():
+                            asked = said.rstrip().endswith("?")
+                        if block.get("type") != "tool_use":
                             continue
                         name = block.get("name")
                         inp = block.get("input") if isinstance(block.get("input"), dict) else {}
@@ -531,6 +558,9 @@ def _blank_stage() -> dict:
         "gate": 0,
         "question": 0,
         "extra": 0,
+        "kinds": dict.fromkeys(EXTRA_KINDS, 0),
+        "harness": 0,
+        "command": 0,
         "prompts": 0,
         "reply": [],
         "checks": 0,
@@ -542,7 +572,10 @@ def _blank_stage() -> dict:
 
 def _active(stage: dict) -> bool:
     """Whether anything was counted in a stage, seen as a segment or not."""
-    counted = ("agent", "away", "blocked", "gate", "question", "extra", "prompts", "checks")
+    counted = (
+        "agent", "away", "blocked", "gate", "question", "extra", "harness", "command", "prompts",
+        "checks",
+    )  # fmt: skip
     return bool(
         stage["response"]
         or stage["edits"]
@@ -593,11 +626,17 @@ def summarize(
             # the person moving on, not the gate.
             approvals = [s for s in span["stops"] if s["reply"] == "approve"]
             pick = approvals[-1] if approvals else span["stops"][-1]
+        after = False
         for stop in span["stops"]:
             if stop is pick:
                 stop["kind"] = "gate"
+                after = True
             elif span["skill"] == "sdlc-factory:build":
                 stop["kind"] = "question"
+            elif after:
+                stop["why"] = "after_gate"
+            elif stop["reply"] == "revise":
+                stop["why"] = "revise"
         stops.extend(span["stops"])
 
     for event in events:
@@ -625,6 +664,8 @@ def summarize(
         elif kind == "turn":
             turns.append((event["ts"], event["ms"] / 1000, current or "intent"))
             turn_end, turn_stage = event["ts"], current or "intent"
+        elif kind == "harness":  # the harness spoke, not the person: no wait ends, no stop
+            here["harness"] += 1
         elif kind == "human":
             if turn_end is not None:
                 gap = (event["ts"] - turn_end).total_seconds()
@@ -640,8 +681,17 @@ def summarize(
                         blocked = max(blocked, part)
                     waited["blocked"] += blocked
                     waited["away"] += gap - blocked
-                if not event["command"]:
-                    stop = {"stage": turn_stage, "kind": "extra", "reply": event["reply"]}
+                if event["command"] and not event.get("plugin", True):
+                    stages[turn_stage]["command"] += 1
+                elif not event["command"]:
+                    why = (
+                        "interrupt" if event.get("interrupt")
+                        else "asked" if event.get("asked")
+                        else "unprompted"
+                    )  # fmt: skip
+                    stop = {
+                        "stage": turn_stage, "kind": "extra", "reply": event["reply"], "why": why,
+                    }  # fmt: skip
                     if span is not None:
                         span["stops"].append(stop)
                     else:
@@ -693,6 +743,8 @@ def summarize(
         stage[stop["kind"]] += 1
         if stop["kind"] == "gate":
             stage["reply"].append(stop["reply"])
+        elif stop["kind"] == "extra":
+            stage["kinds"][stop.get("why") or "unprompted"] += 1
 
     plan_made = any(e["kind"] == "plan" and e["action"] == "exit" for e in events)
     required = list(REQUIRED.get((way, tier), REQUIRED[("manual", 2)]))
@@ -714,6 +766,10 @@ def summarize(
         # come in: in `auto`, the classifier decides and asks no one.
         "prompts": sum(s["prompts"] for s in stages.values()),
         "prompt_modes": ",".join(sorted(prompt_modes)) or "-",
+        # Entries that are neither a stop nor the person's reply, beside `stops`: their presence
+        # says this commit's `extra` leaves them out.
+        "harness": sum(s["harness"] for s in stages.values()),
+        "command": sum(s["command"] for s in stages.values()),
         "ship_runs": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:ship"),
         "reenter": reenter,
     }
@@ -974,6 +1030,10 @@ def trailers(summary: dict) -> list[str]:
         lines.append(f"Sdlc-Role: {_word(role)} {_pairs(fields)}")
     for name, p in sorted((summary.get("prompts") or {}).items()):
         lines.append(f"Sdlc-Prompt: {_word(name)} {_pairs(p)}")
+    for name, s in summary["stages"].items():
+        fields = {**s["kinds"], "harness": s["harness"], "command": s["command"]}
+        if any(fields.values()):
+            lines.append(f"Sdlc-Extra: {name} {_pairs(fields)}")
     for dep, seconds in sorted(summary["blocked"].items()):
         lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(seconds)}")
     return lines
@@ -1034,6 +1094,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out["roles"][name] = fields
         elif key == "prompt" and name:
             out.setdefault("prompts", {})[name] = fields
+        elif key == "extra" and name:
+            out.setdefault("extra", {})[name] = fields
         elif key == "blocked" and name:
             out["blocked"][name] = fields.get("minutes", 0)
         elif key == "review" and name:

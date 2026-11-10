@@ -85,6 +85,11 @@ What `retro` gives:
     (`Bash:git:push`, `Edit`) with `asked`, `rejected` and the `changes` it came from, the
     permission `modes` the changes ran in, and how many changes `recorded` them (a `Close` commit
     from before has none, never zero);
+  - `extra`, the stops beyond gates and questions, across the window, by kind: `after_gate`
+    (typed once the WAIT was answered), `revise` (before it), `asked` (answering a question the
+    agent put in prose), `interrupt` and `unprompted`, each with the `changes` it came from; the
+    `harness` entries and other slash commands (`command`) left out of the stops; and how many
+    changes `recorded` them (a `Close` commit from before counted those as stops, unclassified);
   - tokens per stage and per sub-agent role;
   - ship's findings: by rank (`preexisting` apart), by pass, and their `dispositions` by pass,
     summed only over the `answered` changes, whose trailers carry them;
@@ -147,6 +152,9 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    - which prompts recur across changes (`prompts`), against the modes they ran in: a prompt a
      skill's rules should have covered is a seed naming the skill and the rule; in `auto` the
      classifier decides and asks no one, so few prompts there says nothing about the rules;
+   - which kinds of extra stop recur (`extra`): an `after_gate` or `asked` kind recurring across
+     changes is a skill that could ask it in its WAIT instead, and a seed naming the skill;
+     `revise` and `unprompted` are the person's own conversation, worth naming, not cutting;
    - which stage or role the tokens pile up in;
    - from `in_change`, which stage most often misses first time and which rework count drives it
      (a spec edited after design is a Stage 2 problem; failed gate runs a build one), and whether

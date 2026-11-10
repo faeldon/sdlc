@@ -8,6 +8,7 @@ allowed-tools:
   - Edit
   - Grep
   - Glob
+  - EnterPlanMode
   - 'Bash(cd *)'
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
@@ -115,9 +116,11 @@ its `name` beside it, `O1 (Unaided setup)`.
 
 Ask literally:
 
-> `Write this as .sdlc/work/NNN-<slug>/spec.md, advance the change to stage: design and update its issue? (yes / revise a requirement / rethink the design)`
+> `Write this as .sdlc/work/NNN-<slug>/spec.md, advance the change to stage: design, update its issue and then start plan mode? (yes / revise a requirement / rethink the design)`
 
-Leave out ` and update its issue` when `config` says `archive.target` is `none`.
+Leave out ` update its issue` (keeping the comma) when `config` says `archive.target` is `none`.
+Starting plan mode approves nothing: the plan is approved when plan mode ends, as always. It is in
+the question so the person doesn't have to type it after the yes.
 
 **Do not write until the human says go.** Approval is per-invocation, never standing. The yes
 covers the issue update too: it is visible to everyone with access to the repo.
@@ -143,10 +146,11 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>
 "Nothing to sync" is fine (no tracker, or the change gets its issue at close). A failure never
 undoes the spec: report what it printed, and that `sdlc.py sync <NNN>` can be rerun.
 
-## Step 6 — Report and stop
+## Step 6 — Report and hand over to plan mode
 
-Say the spec is written and that the next step is **plan mode** — start a session in plan mode, let
-Claude read the code against this spec, and save the approved plan as `.sdlc/work/NNN-slug/plan.md`.
+Say the spec is written, then call `EnterPlanMode`: plan mode reads the code against this spec, and
+the plan the person approves when it ends is saved as `.sdlc/work/NNN-slug/plan.md`. If the tool
+isn't available or refuses, say the next step is **plan mode** instead, started by the person.
 
 Do **not** start building in this turn. Do not write code, and do not draft `plan.md` by hand — the
 whole value of a plan is that it was produced after reading the code, which is what plan mode does.

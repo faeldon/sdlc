@@ -685,6 +685,16 @@ Waits while a `depends_on:` change is still open count as **blocked**. It also r
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
 per sub-agent role.
 
+A stop is the person: an entry the harness sent (a background task's notice, a compaction summary)
+is counted as `harness=`, and a slash command other than the plugins' skills (`/reload-plugins`)
+as `command=`, both on `Sdlc-Totals`, and neither is a stop. Each stop beyond the gates and
+questions gets a kind, read from its shape, never its words: `after_gate` (typed once a skill's
+WAIT was answered), `revise` (a revision before it), `asked` (an answer to a question the agent
+put in prose), `interrupt`, or `unprompted`, one `Sdlc-Extra: <stage> after_gate=<n> revise=<n>
+asked=<n> unprompted=<n> interrupt=<n> harness=<n> command=<n>` line for each stage with any. A
+`Close` commit without `harness=` counted both as stops, and `/sdlc:retro` reads its kinds as
+unrecorded.
+
 Beside the stops, never among them, it records the tool prompts the person answered: a tool use
 they were asked to allow and allowed or rejected, never their own questions or plan approvals
 (counted as stops already), and never one the rules, the mode or the classifier decided. Each is

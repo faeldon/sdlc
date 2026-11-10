@@ -261,6 +261,19 @@ def test_intent_asks_with_a_number_the_tool_just_gave() -> None:
     assert "if still free when created" in step4
 
 
+def test_spec_and_a_tier_one_intent_start_plan_mode_after_their_wait() -> None:
+    """Typing "plan" after the yes was a stop in every change: the WAIT names plan mode, and the
+    step after it enters it. Entering approves nothing; plan mode's own exit is the plan's gate."""
+    for name in ("spec", "intent"):
+        skill = frontmatter.load(ROOT / "skills" / name / "SKILL.md")
+        assert "EnterPlanMode" in skill["allowed-tools"], name
+        wait, after = skill.content.split("WAIT", 1)[1].split("## Step 5", 1)
+        assert "start plan mode?" in wait, name
+        assert "`EnterPlanMode`" in after.split("## Step 6", 1)[1], name
+    intent = (ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8")
+    assert "yes, without plan mode" in intent
+
+
 def test_intent_moves_the_session_and_close_brings_it_back() -> None:
     intent = frontmatter.load(ROOT / "skills" / "intent" / "SKILL.md")
     close = frontmatter.load(ROOT / "skills" / "close" / "SKILL.md")
