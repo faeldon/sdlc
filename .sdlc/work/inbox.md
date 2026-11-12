@@ -675,3 +675,18 @@ The parts of 2026-10-24-5 that 048-architecture-indicators left out of scope, to
 Any of the three may become a seed of its own when an intent finds it too big.
 Theme: retro
 Raised 2026-11-12.
+
+## [2026-11-12-3] [bug] A change's own script is handed off after argparse, and preflight and findings never are
+
+In the plugin's own repo, `main()` in `scripts/sdlc.py` parses the arguments before it hands
+`ship`, `drop`, `base` and `sync` to the change's own `scripts/sdlc.py`, so the running copy
+rejects a flag the change adds: at 049's ship, `sdlc.py ship 049 --fixed F1,F2 --through F2`
+failed with "unrecognized arguments" until the worktree's script was run by hand. And `preflight`
+and `findings` never hand off, so the same ship read `findings.md` with main's parser, which
+didn't know the `fix` disposition the change added. Expected: a command ship runs from a change's
+worktree runs the change's own script whenever that script differs, new flags included.
+
+Severity: low
+Paths: scripts/sdlc.py
+Introduced by: 015-own-script-handoff
+Theme: robustness
