@@ -644,23 +644,6 @@ Any of the three may become a seed of its own when an intent finds it too big.
 Theme: retro
 Raised 2026-11-12.
 
-## [2026-11-12-5] [bug] A skill started through the Skill tool isn't counted as its stage
-
-Close's measure step missed 051's ship stage: the `Close` commit 54bec13 reads `Sdlc-Coverage:
-transcripts=36 stages=intent,build,close`, with `ship_runs=0` and `Sdlc-Happy: ship=unknown`,
-though `/sdlc:ship` ran in that session and committed 18160df; its turns were counted under build.
-`SKILL_RE` (`scripts/metrics.py:75`) finds a stage only in the `<command-name>` line the harness
-writes when the person types the command. When the prompt reaches the session as plain text and
-the session starts the skill with the Skill tool, the transcript holds a tool call and a meta
-message instead, and the meta message is skipped, so no `skill` event is recorded. It should count
-as the stage it starts. To see it: send ` /sdlc:ship` (with a leading space) so the session
-launches it, close the change, and read the `Close` commit's trailers.
-
-Severity: low
-Paths: scripts/metrics.py
-Introduced by: 050-own-script-and-asked-stops
-Theme: retro
-
 ## [2026-11-12-6] [idea] Behavioural evals for the core skills
 
 pytest covers sdlc.py's mechanism but never runs a model, so a skill regression shows up only as

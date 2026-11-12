@@ -72,7 +72,10 @@ TOKEN_FIELDS = (
 # The short names the timeline and trailers use for them.
 TOKEN_KEYS = dict(zip(TOKEN_FIELDS, ("in", "cache_create", "cache_read", "out"), strict=True))
 # Either plugin's skills, for stage boundaries: `sdlc:spec`, `sdlc-factory:build`.
-SKILL_RE = re.compile(r"<command-name>/(sdlc(?:-factory)?:[a-z0-9-]+)</command-name>")
+PLUGIN_SKILL = r"sdlc(?:-factory)?:[a-z0-9-]+"
+SKILL_RE = re.compile(rf"<command-name>/({PLUGIN_SKILL})</command-name>")
+# The same, as the Skill tool names one the session starts itself.
+SKILL_NAME_RE = re.compile(rf"^{PLUGIN_SKILL}$")
 ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 STAGE_LINE_RE = re.compile(r"^stage:\s*([a-z]+)\s*$", re.M)
 # A change's branch: its number and slug (`sdlc.py`'s `DIR_RE`).
@@ -456,6 +459,29 @@ def _subcommand(words: list[str]) -> str:
     return "unknown"
 
 
+def _started(
+    events: list[dict],
+    ts: datetime,
+    skill: str,
+    last_human: tuple[dict, str, str | None] | None,
+    skill_since: bool,
+) -> None:
+    """A plugin skill the session started with the Skill tool, as the `skill` event a typed one
+    makes. The one the person typed is already counted; one the person asked for in plain text
+    (` /sdlc:ship`) opens where they asked, and their message is the command, no stop; one
+    started unasked opens at the call."""
+    human, text, typed = last_human or (None, "", None)
+    if typed == skill:
+        return
+    asked = re.search(rf"(?<![\w/-])/{re.escape(skill)}(?![\w-])", text)
+    if human is not None and asked and not skill_since:
+        at = next(i for i, e in enumerate(events) if e is human)
+        events.insert(at, {"ts": human["ts"], "kind": "skill", "name": skill})
+        human["command"] = human["plugin"] = True
+        return
+    events.append({"ts": ts, "kind": "skill", "name": skill})
+
+
 def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None) -> list[dict]:
     """The change's events from every session in `dirs`, oldest first. Numbers and names only."""
     events: list[dict] = []
@@ -475,6 +501,12 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
             modes: set[str] = set()
             last: datetime | None = None
             asked = False  # whether the agent's last text ended with a question
+            # The person's last message: its human event, its text and the skill it typed; and
+            # whether a skill has started since it.
+            last_human: tuple[dict, str, str | None] | None = None
+            skill_since = False
+            # Plugin skills the Skill tool was asked to start, by call: counted once one ran.
+            pending: dict[str, tuple[str, datetime]] = {}
 
             for entry, mine in zip(entries, keep, strict=True):
                 ts = _ts(entry)
@@ -495,13 +527,17 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                     events.extend({"ts": ts, **p} for p in _prompts(entry, content, uses))
                     if isinstance(content, list):
                         for block in content:
-                            if (
-                                isinstance(block, dict)
-                                and block.get("type") == "tool_result"
-                                and block.get("tool_use_id") in checks
-                            ):
+                            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                                continue
+                            ident = block.get("tool_use_id")
+                            if ident in checks:
                                 ok = not block.get("is_error")
                                 events.append({"ts": ts, "kind": "check", "ok": ok})
+                            elif ident in pending:
+                                skill, called = pending.pop(ident)
+                                if not block.get("is_error"):  # a refused call ran nothing
+                                    _started(events, called, skill, last_human, skill_since)
+                                    skill_since = True
                     if entry.get("isMeta") or _only_tool_results(content):
                         continue
                     if _harness(entry):
@@ -512,11 +548,14 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                     if m:
                         events.append({"ts": ts, "kind": "skill", "name": m.group(1)})
                     if text.strip():
-                        events.append(
-                            {"ts": ts, "kind": "human", "reply": _reply(text),
-                             "command": bool(m or COMMAND_RE.match(text)), "plugin": bool(m),
-                             "asked": asked, "interrupt": bool(INTERRUPT_RE.match(text))}
-                        )  # fmt: skip
+                        human = {
+                            "ts": ts, "kind": "human", "reply": _reply(text),
+                            "command": bool(m or COMMAND_RE.match(text)), "plugin": bool(m),
+                            "asked": asked, "interrupt": bool(INTERRUPT_RE.match(text)),
+                        }  # fmt: skip
+                        events.append(human)
+                        last_human = (human, text, m.group(1) if m else None)
+                        skill_since = bool(m)
                 elif kind == "assistant":
                     mid = msg.get("id")
                     if isinstance(msg.get("usage"), dict) and mid not in seen:
@@ -548,6 +587,10 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                         elif name in ("EnterPlanMode", "ExitPlanMode"):
                             action = "enter" if name == "EnterPlanMode" else "exit"
                             events.append({"ts": ts, "kind": "plan", "action": action})
+                        elif name == "Skill":
+                            skill = inp.get("skill")
+                            if isinstance(skill, str) and SKILL_NAME_RE.match(skill):
+                                pending[str(block.get("id"))] = (skill, ts)
                         elif name == "AskUserQuestion":
                             events.append({"ts": ts, "kind": "question"})
                         elif name == "Bash" and check:

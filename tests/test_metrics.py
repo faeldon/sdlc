@@ -189,6 +189,70 @@ def test_stages_from_skills_plan_mode_and_stage_edits_with_reentry(tmp_path: Pat
     assert "intent" not in s["stages"] and "close" not in s["stages"], "unseen, never guessed"
 
 
+def _ship_after_spec(asked: list[dict]) -> list[dict]:
+    """A spec run approved, then ship asked for by `asked`, then its WAIT approved."""
+    return [
+        cmd(0, "sdlc:spec"), turn(1, 1), user(2, "yes"),
+        *asked,
+        turn(14, 2), user(15, "yes"),
+    ]  # fmt: skip
+
+
+def _skill_call(t: float, name: str) -> list[dict]:
+    """The session starting `name` itself: its tool call, the result, the skill's text as meta."""
+    return [
+        asst(t, f"m{t}", [tool("Skill", f"s{t}", skill=name)]),
+        result(t + 0.5, f"s{t}"),
+        user(t + 0.5, "Base directory for this skill: ...", isMeta=True),
+    ]
+
+
+def test_a_skill_the_session_starts_counts_as_typed(tmp_path: Path) -> None:
+    """A ` /sdlc:ship` that reaches the session as text, which then starts the skill with the
+    Skill tool, opens ship where the person asked, and is no stop, as the typed command is."""
+    typed = _summary(_events(tmp_path / "a", _ship_after_spec([cmd(10, "sdlc:ship")])))
+    started = _events(tmp_path / "b", _ship_after_spec(
+        [user(10, " /sdlc:ship"), *_skill_call(11, "sdlc:ship")]
+    ))  # fmt: skip
+    s = _summary(started)
+    assert [seg["stage"] for seg in s["segments"]] == ["design", "ship"]
+    assert s["segments"] == typed["segments"]
+    assert s["coverage"] == typed["coverage"]
+    assert s["totals"]["stops"] == typed["totals"]["stops"]
+    assert s["totals"]["ship_runs"] == typed["totals"]["ship_runs"] == 1
+    assert s["stages"]["design"]["extra"] == typed["stages"]["design"]["extra"] == 0
+
+
+def test_a_typed_command_and_its_skill_call_count_once(tmp_path: Path) -> None:
+    events = _events(tmp_path, [cmd(0, "sdlc:ship"), *_skill_call(1, "sdlc:ship")])
+    assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc:ship"]
+
+
+def test_a_refused_skill_call_opens_nothing(tmp_path: Path) -> None:
+    """A call the harness refuses ran no skill: the stage stays where it was."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"), turn(1, 1), user(2, " /sdlc:ship"),
+        asst(3, "m3", [tool("Skill", "s3", skill="sdlc:ship")]),
+        result(3.5, "s3", error=True),
+    ])  # fmt: skip
+    assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc:spec"]
+    assert [seg["stage"] for seg in _summary(events)["segments"]] == ["design"]
+
+
+def test_a_skill_started_unasked_opens_at_its_call(tmp_path: Path) -> None:
+    """Started with no mention in the person's text, the stage opens at the call; a skill that
+    isn't the plugins' opens nothing."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"), turn(1, 1), user(2, "carry on"),
+        *_skill_call(5, "simplify"),
+        *_skill_call(8, "sdlc:ship"),
+    ])  # fmt: skip
+    assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc:spec", "sdlc:ship"]
+    s = _summary(events)
+    assert s["segments"][-1]["stage"] == "ship"
+    assert s["segments"][-1]["start"] == T0 + timedelta(minutes=8)
+
+
 def test_a_turn_longer_than_its_stage_is_split_across_the_segments(tmp_path: Path) -> None:
     intent = f"/x/work/{BRANCH}/intent.md"
     events = _events(tmp_path, [
