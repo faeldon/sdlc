@@ -224,8 +224,8 @@ Weigh each Nit under the rubric in the process (`docs.process.guide`, then `docs
 section on nits, and give
 it a theme, the paths it touches, a cost and a value. One whose value is high was never a nit: rank
 it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.md`, not a nit. One that
-is cheap and worth it (S and med) is the one to suggest fixing now, the "fix a finding first"
-answer below. The rest are proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
+is cheap and worth it (S and med) is the one to recommend fixing now, as `fix` below. The rest are
+proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
 **On a deep diff, a fresh-context review too,** after your own passes. Spawn the plugin's reviewer
 with the `Agent` tool, `subagent_type: "sdlc:reviewer"`, and a prompt holding only the diff
@@ -235,9 +235,11 @@ there to be free of. It reads and returns text; it writes nothing. Each finding 
 the file below with a `By: fresh` line. One your own passes confirm, or that you confirm now by
 reading its evidence, takes the disposition you'd propose for any finding; one you can't confirm is
 proposed `wrong`, with a `Reason:` saying why, for the person to overturn. Never drop one: the
-person sees every fresh finding. **When the reviewer can't run** (no `Agent` tool here, or the run
-fails), say so in Step 4 and add a line to the file's note, `Fresh review: skipped, <why>`; Step 5
-then says so in the question. A deep diff never lands with its fresh review silently missing.
+person sees every fresh finding. On a deep diff the file's note always says which happened:
+`Fresh review: ran`, or, **when the reviewer can't run** (no `Agent` tool here, or the run fails),
+`Fresh review: skipped, <why>`, said in Step 4 too. The script reads that line: the question
+names a skip, and `sdlc.py ship` refuses a deep diff whose note says neither, so it never lands
+with its fresh review silently missing.
 
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
@@ -250,9 +252,13 @@ in it), and the next run rewrites it. It is how a finding fixed between two runs
 - **When `preflight`'s `findings` part holds an earlier run's,** build on it: keep every id, mark
   one this diff no longer shows `fixed`, never raise again one answered `wrong`, `intentional` or
   `minor` (the person has heard it), and number a new one after the highest id.
-- **Each new finding's disposition is the one this skill proposes:** an Important one is `open`,
-  until it is fixed; a Nit proposed as a `[nit]` entry, or a Pre-existing one proposed as a bug,
-  is `recorded`; a Nit not worth recording is `minor`, with a `Reason:` line.
+- **Each new finding's disposition is the one this skill proposes:** one you recommend fixing
+  before the commit, Important or Nit, is `fix`, with a `Fix:` line saying the exact change, when
+  that change costs S and touches only files the diff already changes (the review guide's
+  reporting rules); an Important one too big for that is `open`, until it is fixed; a Nit
+  proposed as a `[nit]` entry, or a Pre-existing one proposed as a bug, is `recorded`; a Nit not
+  worth recording is `minor`, with a `Reason:` line. A Pre-existing one is never `fix`: it is
+  filed.
 - **With no findings at all,** the file is the title and note alone, and says nothing to fix.
 
 ## Step 4 — Present findings and the draft commit
@@ -293,9 +299,11 @@ context=<n>` and then each disposition's count by pass. Never count it by hand. 
 so `/sdlc:retro` can count what ship catches and what the person made of it; `/sdlc:close` records
 the rest of the change's numbers on its own commit.
 
-If a finding is still `open` (an **Important** one not yet fixed), do not offer to commit. Say what
-needs fixing and stop; `findings.md` keeps it for the next run, and `sdlc.py ship` refuses while one
-is open.
+A finding still `open` (an **Important** one too big to fix inside a yes) means no commit is
+offered: Step 5's question asks to fix it and review again, and `sdlc.py ship` refuses while one is
+`open` or `fix`. Show each `fix` finding's `Fix:` line with it: that is what a yes approves. When
+every `fix` finding is a Nit, the question also offers to commit without fixing them, so show the
+`[nit]` entry each would become, its id taken in the `next-entry` call below.
 
 **Pre-existing findings.** Propose each as the bug entry it becomes, with an id from the
 `next-entry` call below: `## [<id>] [bug] <title>`, a line or two on what's wrong and its evidence,
@@ -368,31 +376,58 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 ## Step 5 — WAIT for explicit approval
 
-The script words the question from what Step 4 decided, and reads for itself the sensitive paths
-the diff touches and whether it needed `How to recover:`, so neither can be left out. Pass
-`--context` when the context pass proposed an edit, `--nits` when nits are added or retired,
-`--bugs` when pre-existing findings are filed as bugs, `--fresh-skipped "<why>"` when a deep diff's
-fresh review couldn't run, and each issue on `closes:` once, as `--closing N` when this change
-resolved it or `--split N` when it is split off as a seed:
+The script words the question from what Step 4 decided and from `findings.md`, and reads for
+itself the sensitive paths the diff touches, whether it needed `How to recover:`, whether the fresh
+review ran, and which findings you recommend fixing, so none can be left out. Pass `--context` when
+the context pass proposed an edit, `--nits` when nits are added or retired, `--bugs` when
+pre-existing findings are filed as bugs, and each issue on `closes:` once, as `--closing N` when
+this change resolved it or `--split N` when it is split off as a seed:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --fresh-skipped "<why>" --closing <N> --split <K>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --closing <N> --split <K>
 ```
 
-Ask exactly what it prints. With every clause in, it reads:
+Ask exactly what it prints. **Its first option, `yes`, is always your recommendation.** With every
+clause in and two findings proposed `fix`, it reads:
 
-> `Commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), with how to recover it shown, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix a finding first / edit the message)`
+> `Fix F2 and F4, then commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), with how to recover it shown, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix all 5 first / commit without fixing, recording F2 and F4 as nits / edit the message)`
 
-A refusal names an issue left out, given twice, or not on `closes:`: settle it in Step 4, then run
-it again. Never word the question by hand.
+With nothing proposed `fix`, it opens `Commit this, …`. With a finding still `open`, it offers no
+commit: `Fix F1 and F2, then review again? (yes / fix all 3 first / edit the findings)`. `fix all N
+first` appears only when more findings could be fixed than you recommend, and `commit without
+fixing` only when every `fix` finding is a Nit. A refusal names an issue left out, given twice, or
+not on `closes:`, or a problem in `findings.md`: settle it in Step 4, then run it again. Never word
+the question by hand.
+
+What each answer does:
+
+- **`yes` to `Fix …, then commit this`:** Step 6 makes each `Fix:` change, reruns the gate and this
+  review, and commits only if all of it comes back clean.
+- **`yes` to `Fix …, then review again`, or `fix all N first`:** make the fixes (every finding the
+  option names, its size whatever it is), run the gate, rerun Step 3, and ask this question again.
+  Nothing commits on this answer.
+- **`commit without fixing`:** each `fix` finding becomes `recorded`, its `[nit]` entry as shown,
+  and Step 6 lands it as it stands.
+- **`edit the message`** or **`edit the findings`:** a different set to fix, a disposition changed,
+  or the message reworded; the file is rewritten and the question asked again.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone
-items' dispositions, every finding's disposition in `findings.md`, the nits, the bugs, the context
-update, `How to recover:` and the release impact too. A change to one of
+items' dispositions, every finding's disposition in `findings.md`, the `Fix:` changes it names, the
+nits, the bugs, the context update, `How to recover:` and the release impact too. A change to one of
 them is an "edit the message" answer, and the question is asked again.
 
 ## Step 6 — Land it
+
+**After a yes to `Fix …, then commit this`, fix first.** Make each `Fix:` change exactly as its line
+says, run the gate (Step 1, the acceptance checks too), and rerun Step 3 on the new diff, which
+marks each one `fixed` and raises anything new after the highest id. Read it back with `sdlc.py
+findings <NNN>`; its new `trailer` line replaces the one in the approved message, and nothing else
+in the message changes. Then, in the landing block below, `ship` takes `--fixed <the ids> --through
+<the highest id the question was asked over>`, and refuses unless each reads `fixed` and nothing new
+was raised. A failing gate, that refusal, or a fix that needs any other change to the message
+(its body, `How to recover:`, an entry) is a stop: show what happened and ask Step 5's question
+again. The yes approved the fixes described, not whatever they turned into.
 
 **The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`. Write
 entries there, never into a second file beside it, which would hide every entry the first one
@@ -432,7 +467,8 @@ nothing more: no `Co-Authored-By:` line naming an agent and no "Generated with" 
 harness's own guidance says. The host chose that at setup, and a `.claude/settings.local.json` can
 still turn the harness's lines back on.
 
-Then, with a `--leave <path>` for each path Step 0's approval set apart:
+Then, with a `--leave <path>` for each path Step 0's approval set apart, and `--fixed F2,F4
+--through F5` after a yes that fixed:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship <NNN>   # stamps, drops the seed, stages
@@ -465,7 +501,7 @@ so rather than commit it.
 ## Step 7 — Report and stop
 
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
-name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), the bugs filed by id, which context docs were updated (or
+name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the fixes made inside the yes and what the rerun said of them, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), the bugs filed by id, which context docs were updated (or
 that none needed it), the release impact recorded, each undone
 item and where it went (the seed's title, or dropped and why), the nits recorded and retired by
 id, and anything else deliberately

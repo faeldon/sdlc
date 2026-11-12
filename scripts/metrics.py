@@ -35,15 +35,17 @@ which counted questions and plan approvals, and is never read as prompts.
 the classifier, public so a reader of the change's diff names its files the same way.
 
 No message text, file path or session id leaves `read_events`: a reply is a class (approve,
-revise, other), an edit an artifact kind, a check pass or fail.
+fix, revise, other), an edit an artifact kind, a check pass or fail. `fix` is asking for the
+review's own findings to be fixed (`FIX_RE`), never counted as a revise.
 
 An entry the harness sent, a background task's notice (`origin.kind: task-notification`) or a
 compaction summary (`isCompactSummary`), is a `harness` event, never the person: no stop, no wait.
 A slash command is a `command`, never a stop; `plugin` when it is one of the plugins' skills, which
 alone open stages. Each other typed entry is an `extra` stop, given a kind when its span closes
-(`EXTRA_KINDS`): `after_gate` once the gated skill's WAIT is answered, `revise` before it, `asked`
-when the agent's last text ended with a question, `interrupt` for an interrupted turn, and
-`unprompted` for the rest. They are written as `Sdlc-Extra` lines, with `harness=` and `command=`
+(`EXTRA_KINDS`): `after_gate` once the gated skill's WAIT is answered, `revise` before it, `fix`
+for asking the review's findings fixed before it, `asked` when the agent's last text ended with a
+question, `interrupt` for an interrupted turn, and `unprompted` for the rest; a line from before
+`fix` reads it as 0. They are written as `Sdlc-Extra` lines, with `harness=` and `command=`
 on `Sdlc-Totals`: a `Close` commit without those counted harness entries and other commands as
 `extra`, and is read as unclassified, never as none.
 
@@ -80,9 +82,12 @@ APPROVE_RE = re.compile(
     re.I,
 )
 REVISE_RE = re.compile(r"\b(revise|edit|change|fix|rethink|no|not yet|instead|rather)\b", re.I)
+# Asking for the review's own findings to be fixed, as ship's question offers ("fix all 5 first",
+# "fix F1"): the review working, not the change reworked, so it is never a `revise`.
+FIX_RE = re.compile(r"^\s*fix\s+(all\b|F\d)", re.I)
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # Why an extra stop happened, read from its shape alone (`summarize()`).
-EXTRA_KINDS = ("after_gate", "revise", "asked", "unprompted", "interrupt")
+EXTRA_KINDS = ("after_gate", "revise", "asked", "unprompted", "interrupt", "fix")
 COMMAND_RE = re.compile(r"^\s*<command-name>/")
 INTERRUPT_RE = re.compile(r"^\s*\[Request interrupted by user")
 
@@ -207,6 +212,8 @@ def _reply(text: str) -> str:
     text = re.sub(r"<[^>]+>.*?</[^>]+>", " ", text, flags=re.S).strip()
     if APPROVE_RE.match(text):
         return "approve"
+    if FIX_RE.match(text):
+        return "fix"
     if REVISE_RE.search(text):
         return "revise"
     return "other"
@@ -635,8 +642,8 @@ def summarize(
                 stop["kind"] = "question"
             elif after:
                 stop["why"] = "after_gate"
-            elif stop["reply"] == "revise":
-                stop["why"] = "revise"
+            elif stop["reply"] in ("revise", "fix"):
+                stop["why"] = stop["reply"]
         stops.extend(span["stops"])
 
     for event in events:
@@ -927,10 +934,20 @@ def rework(
     return out
 
 
-def happy(events: list[dict], summary: dict, factory: dict | None, tier: int, done: dict) -> dict:
+def happy(
+    events: list[dict],
+    summary: dict,
+    factory: dict | None,
+    tier: int,
+    done: dict,
+    review_fixed: int = 0,
+) -> dict:
     """Per stage, whether it went through first time: `yes`, `no`, or `unknown` for a stage
     the transcripts never saw open. `done` is `rework()`'s result. Strict: one failed check is a
-    `no`; rates over many changes absorb the odd flaky test."""
+    `no`; rates over many changes absorb the odd flaky test. Ship alone can also be `fixed`: run
+    more than once with no revise reply, and its findings.md holds `review_fixed` findings marked
+    `fixed`, so it stopped for what its own review found, which is the review working, not a
+    miss. `first` counts it with `yes`."""
     seen = {s for s, v in summary["stages"].items() if v.get("segments")}
     walked = [w for w in _walk(events) if w[1] != "spike"]
     revised = _revised(walked)
@@ -956,13 +973,19 @@ def happy(events: list[dict], summary: dict, factory: dict | None, tier: int, do
         "ship": summary["totals"].get("ship_runs") == 1 and "sdlc:ship" not in revised,
         "close": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:close") == 1,
     }
+    ship_fixed = (
+        summary["totals"].get("ship_runs", 0) > 1
+        and "sdlc:ship" not in revised
+        and review_fixed > 0
+    )
     out: dict = {}
     for stage in HAPPY_STAGES:
         if stage == "design" and tier < 2:
             continue
-        out[stage] = ("yes" if rules[stage] else "no") if stage in seen else "unknown"
-    out["first"] = sum(1 for v in out.values() if v == "yes")
-    out["of"] = sum(1 for v in out.values() if v in ("yes", "no"))
+        mark = "yes" if rules[stage] else "fixed" if stage == "ship" and ship_fixed else "no"
+        out[stage] = mark if stage in seen else "unknown"
+    out["first"] = sum(1 for v in out.values() if v in ("yes", "fixed"))
+    out["of"] = sum(1 for v in out.values() if v in ("yes", "fixed", "no"))
     return out
 
 

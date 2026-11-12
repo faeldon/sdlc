@@ -254,7 +254,7 @@ def test_the_gate_is_the_last_approval_and_the_rest_are_extra_or_questions(tmp_p
     assert s["stages"]["build"]["gate"] == 1, "the plan approval is a gate too"
     assert s["totals"]["stops"] == 5
     assert design["kinds"] == {"after_gate": 1, "revise": 0, "asked": 0, "unprompted": 1,
-                               "interrupt": 0}  # fmt: skip
+                               "interrupt": 0, "fix": 0}  # fmt: skip
 
 
 def _spec_session(*between: dict) -> list[dict]:
@@ -308,7 +308,8 @@ def test_each_extra_stop_has_its_kind(tmp_path: Path) -> None:
     ])  # fmt: skip
     s = _summary(events)
     kinds = s["stages"]["design"]["kinds"]
-    assert kinds == {"after_gate": 1, "revise": 1, "asked": 1, "unprompted": 0, "interrupt": 1}
+    assert kinds == {"after_gate": 1, "revise": 1, "asked": 1, "unprompted": 0, "interrupt": 1,
+                     "fix": 0}  # fmt: skip
     assert s["stages"]["intent"]["kinds"]["unprompted"] == 1
     assert s["stages"]["design"]["extra"] == sum(kinds.values())
 
@@ -335,7 +336,7 @@ def test_extra_kinds_round_trip_through_the_trailers(tmp_path: Path) -> None:
     ) + [cmd(20, "sdlc:ship"), turn(21, 1), user(22, "yes")])  # fmt: skip
     lines = metrics.trailers(_summary(events))
     assert (
-        "Sdlc-Extra: design after_gate=0 revise=0 asked=0 unprompted=1 interrupt=0 harness=1 "
+        "Sdlc-Extra: design after_gate=0 revise=0 asked=0 unprompted=1 interrupt=0 fix=0 harness=1 "
         "command=1"
     ) in lines
     assert not any(line.startswith("Sdlc-Extra: ship") for line in lines), "nothing extra there"
@@ -661,6 +662,59 @@ def test_a_circling_change_counts_each_kind_of_rework() -> None:
     assert first["intent"] == first["design"] == first["build"] == "no"
     assert first["ship"] == first["close"] == "no"
     assert (first["first"], first["of"]) == (0, 5) and first["test"] == "unknown"
+
+
+# Ship run, stopped for its review's findings ("fix them", not a revise word), and run again.
+RERUN = [
+    *CLEAN[:14], skill(14, "sdlc:ship"), say(15, "approve"), say(15.5, "other"),
+    skill(15.8, "sdlc:ship"), say(15.9, "approve"), *CLEAN[16:],
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "events, fixed, ship",
+    [
+        (CLEAN, 0, "yes"),
+        (CLEAN, 2, "yes"),  # fixed inside one run's yes: first time, plainly
+        (RERUN, 2, "fixed"),  # rerun only for its own review's findings
+        (RERUN, 0, "no"),  # rerun with nothing the review fixed
+        ([*RERUN[:-2], say(15.95, "revise"), *RERUN[-2:]], 2, "no"),  # the person revised
+        # "fix all 5 first" inside one run: the review working, never a revise
+        ([*CLEAN[:15], say(15.2, "fix"), *CLEAN[15:]], 1, "yes"),
+        # "fix F1", then ship run again, the finding fixed
+        ([*RERUN[:16], say(15.6, "fix"), *RERUN[16:]], 1, "fixed"),
+    ],
+    ids=[
+        "one-run",
+        "one-run-fixed",
+        "rerun-for-findings",
+        "rerun-for-else",
+        "revised",
+        "fix-all-in-one-run",
+        "fix-then-rerun",
+    ],  # fmt: skip
+)
+def test_a_ship_rerun_for_its_own_findings_reads_fixed(events, fixed, ship) -> None:
+    s = _summary(events, way="manual", tier=2)
+    done = metrics.rework(events, s, None, None, 2)
+    first = metrics.happy(events, s, None, 2, done, fixed)
+    assert first["ship"] == ship
+    assert first["first"] == sum(first[k] in ("yes", "fixed") for k in metrics.HAPPY_STAGES)
+
+
+@pytest.mark.parametrize(
+    "text, reply",
+    [
+        ("fix all 5 first", "fix"),
+        ("Fix F1", "fix"),
+        ("fix F2 and F4, then commit", "fix"),
+        ("fix the spec's second requirement", "revise"),
+        ("commit without fixing, recording F2 as a nit", "other"),
+        ("yes", "approve"),
+    ],
+)
+def test_asking_for_the_reviews_fixes_is_its_own_reply_class(text: str, reply: str) -> None:
+    assert metrics._reply(text) == reply
 
 
 def test_a_failed_check_in_test_is_a_test_rework_not_a_build_one() -> None:

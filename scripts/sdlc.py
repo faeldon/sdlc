@@ -1126,8 +1126,13 @@ FINDING_RE = re.compile(r"^##\s+F(\d+)\.\s*\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.+)$")
 FINDING_RANKS = {"important": "important", "nit": "nit", "pre-existing": "preexisting"}
 FINDING_PASSES = ("correctness", "contract", "cost", "context")
 DISMISSALS = ("wrong", "intentional", "minor")
-DISPOSITIONS = ("open", "fixed", "recorded", *DISMISSALS)
-FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason", "By")
+# `fix` is proposed for fixing before the commit, with a `Fix:` line saying the change; like `open`
+# it can't be committed, so the trailer counts only the dispositions a landed change can hold.
+COUNTED = ("fixed", "recorded", *DISMISSALS)
+DISPOSITIONS = ("open", "fix", *COUNTED)
+FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason", "By", "Fix")
+# A deep diff's findings.md says, in its note, whether the fresh-context review ran.
+FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
 # Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
 # a deep diff gets (`agents/reviewer.md`).
 FINDING_BY = ("fresh",)
@@ -1139,7 +1144,7 @@ def findings_entries(folder: Path) -> dict:
     one is left out of the entries."""
     path = folder / FINDINGS
     out: dict = {"path": FINDINGS, "exists": path.is_file(), "entries": [], "open": [],
-                 "problems": []}  # fmt: skip
+                 "fix": [], "fresh": None, "problems": []}  # fmt: skip
     if not out["exists"]:
         return out
     try:
@@ -1152,7 +1157,27 @@ def findings_entries(folder: Path) -> dict:
         return out
     out["entries"], out["problems"] = _findings_from_text(text)
     out["open"] = [e["id"] for e in out["entries"] if e["disposition"] == "open"]
+    out["fix"] = [e["id"] for e in out["entries"] if e["disposition"] == "fix"]
+    out["fresh"] = findings_fresh(text)
     return out
+
+
+def _finding_number(ident: str) -> int | None:
+    """`F5` → 5; None for anything else."""
+    m = re.fullmatch(r"F(\d+)", ident.strip())
+    return int(m.group(1)) if m else None
+
+
+def findings_fresh(text: str) -> dict | None:
+    """What findings.md's note says of the fresh-context review: `{"ran": True}`, `{"ran": False,
+    "why": ...}`, or None when it says neither, as every file from before the line did."""
+    for line in text.splitlines():
+        if line.startswith("## "):
+            break
+        m = FRESH_RE.match(line.strip())
+        if m:
+            return {"ran": True} if m.group(1) == "ran" else {"ran": False, "why": m.group(2)}
+    return None
 
 
 def _findings_from_text(text: str) -> tuple[list[dict], list[str]]:
@@ -1199,6 +1224,10 @@ def _findings_from_text(text: str) -> tuple[list[dict], list[str]]:
             )
         elif disposition in DISMISSALS and not fields.get("Reason"):
             wrong.append(f"`{disposition}` with no `Reason:` line")
+        elif disposition == "fix" and not fields.get("Fix"):
+            wrong.append("`fix` with no `Fix:` line saying the change")
+        elif disposition == "fix" and rank == "pre-existing":
+            wrong.append("a pre-existing finding is filed as a bug, never `fix`")
         if "By" in fields and fields["By"] not in FINDING_BY:
             wrong.append(f"By must be one of {'|'.join(FINDING_BY)}, got {fields['By']!r}")
         if wrong:
@@ -1208,7 +1237,7 @@ def _findings_from_text(text: str) -> tuple[list[dict], list[str]]:
             {"id": ident, "rank": FINDING_RANKS[rank], "pass": pass_, "title": title.strip(),
              "evidence": fields["Evidence"], "class": fields["Class"],
              "disposition": disposition, "reason": fields.get("Reason"),
-             "by": fields.get("By")}
+             "by": fields.get("By"), "fix": fields.get("Fix")}
         )  # fmt: skip
     return entries, problems
 
@@ -1222,7 +1251,7 @@ def findings_trailer(entries: list[dict]) -> str:
     counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
     passes = {p: sum(e["pass"] == p for e in entries) for p in FINDING_PASSES}
     words = [f"{k}={v}" for k, v in {**counts, **passes}.items()]
-    for d in DISPOSITIONS[1:]:
+    for d in COUNTED:
         by = {p: sum(e["pass"] == p and e["disposition"] == d for e in entries)
               for p in FINDING_PASSES}  # fmt: skip
         words.append(f"{d}=" + (",".join(f"{p}:{n}" for p, n in by.items() if n) or "0"))
@@ -2388,11 +2417,19 @@ def cmd_accept(root: Path, ident: str) -> int:
     return 0 if passed else 1
 
 
-def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) -> int:
+def cmd_ship(
+    root: Path,
+    ident: str,
+    leave: list[str] | tuple[str, ...] = (),
+    fixed: list[str] | tuple[str, ...] = (),
+    through: str | None = None,
+) -> int:
     """Stamp a change shipped, delete the seed its `idea:` names from the register, and stage
     everything its checkout has uncommitted but `leave`, for /sdlc:ship to commit. Runs after
     ship's WAIT; every refusal comes before the first write, and a rerun is harmless. Never
-    commits."""
+    commits. After a yes to `Fix …, then commit`, `fixed` names the findings the yes approved
+    fixing and `through` the highest id the question was asked over: it refuses unless each of
+    them reads `fixed` and the rerun review raised nothing new, so a surprise asks again."""
     path = _one_change(root, ident)
     if path is None:
         return 1
@@ -2404,12 +2441,45 @@ def cmd_ship(root: Path, ident: str, leave: list[str] | tuple[str, ...] = ()) ->
 
     # Every finding the review raised gets an answer before the change lands: fixed, recorded as
     # a seed, or dismissed with a reason. A change with no findings.md predates the file.
-    unanswered = findings_entries(path)["open"]
+    found = findings_entries(path)
+    unanswered = found["open"] + found["fix"]
     if unanswered:
         print(
-            f"⚠  {path.name}/{FINDINGS} has {len(unanswered)} finding(s) still open: "
-            f"{', '.join(unanswered)}. Fix each, or give it the disposition the person approved, "
-            "and re-run. Not stamping.",
+            f"⚠  {path.name}/{FINDINGS} has {len(unanswered)} finding(s) still open or proposed "
+            f"for fixing: {', '.join(unanswered)}. Fix each, or give it the disposition the person "
+            "approved, and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    by_id = {e["id"]: e for e in found["entries"]}
+    unfixed = [f for f in fixed if (by_id.get(f) or {}).get("disposition") != "fixed"]
+    if unfixed:
+        print(
+            f"⚠  {path.name}/{FINDINGS}: {', '.join(unfixed)} approved for fixing but not `fixed` "
+            "after the rerun. Ask the person again. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    last = _finding_number(through) if through else None
+    if through and last is None:
+        print(f"⚠  --through {through}: not a finding id like F5. Not stamping.", file=sys.stderr)
+        return 1
+    new = [e["id"] for e in found["entries"] if last is not None and int(e["id"][1:]) > last]
+    if new:
+        print(
+            f"⚠  {path.name}/{FINDINGS}: the rerun raised {', '.join(new)}, after the question "
+            f"asked over {through}. Show it and ask again. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    # A deep diff never lands with its fresh review silently missing: the note says it ran, or
+    # why it didn't.
+    risk = _risk_report(root, path)
+    if risk and risk["deep"] and found["fresh"] is None:
+        print(
+            f"⚠  {path.name} touches a sensitive path, and its {FINDINGS} doesn't say whether the "
+            "fresh review ran: add `Fresh review: ran`, or `Fresh review: skipped, <why>`, to its "
+            "note and re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1
@@ -3042,7 +3112,9 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         try:
             factory = _factory_files(main, branch)
             done = metrics.rework(events, summary, factory, _change_diff(main, branch), tier)
-            first_time = metrics.happy(events, summary, factory, tier, done)
+            review = _git(main, "show", f"{branch}:{folder}/{FINDINGS}")
+            fixed = sum(e["disposition"] == "fixed" for e in _findings_from_text(review or "")[0])
+            first_time = metrics.happy(events, summary, factory, tier, done, fixed)
             extra = metrics.in_change_trailers(done, first_time, metrics.spike(events, summary))
         except Exception:
             summary["coverage"] += " rework=failed"
@@ -5593,7 +5665,7 @@ def _no_findings() -> dict:
     return {
         "important": 0, "nit": 0, "preexisting": 0,
         "passes": dict.fromkeys(FINDING_PASSES, 0),
-        "dispositions": {d: dict.fromkeys(FINDING_PASSES, 0) for d in DISPOSITIONS[1:]},
+        "dispositions": {d: dict.fromkeys(FINDING_PASSES, 0) for d in COUNTED},
         "answered": 0,
         "fresh": 0, "fresh_wrong": 0, "fresh_counted": 0,
     }  # fmt: skip
@@ -5612,10 +5684,10 @@ def _add_findings(total: dict, found: dict) -> None:
         total["fresh_counted"] += 1
         total["fresh"] += found["fresh"]
         total["fresh_wrong"] += found.get("fresh_wrong") or 0
-    if not all(d in found for d in DISPOSITIONS[1:]):
+    if not all(d in found for d in COUNTED):
         return
     total["answered"] += 1
-    for d in DISPOSITIONS[1:]:
+    for d in COUNTED:
         # `fixed=correctness:2` reads as a dict, `fixed=0` as 0, and a lone `pass:n` as a dict.
         by = found[d] if isinstance(found[d], dict) else {}
         for p in FINDING_PASSES:
@@ -5628,15 +5700,19 @@ def _in_change_summary(ms: list[dict], median) -> dict:
     cost. Retro's own `rework` (a later change fixing this one) is another measure."""
     happy = [m["happy"] for m in ms if m.get("happy")]
     first_time = {}
+    # A ship that stopped only for its own review's findings (`fixed`) went through first time; a
+    # trailer from before that value has only yes and no, read as they always were.
     for stage in metrics.HAPPY_STAGES:
-        marks = [h.get(stage) for h in happy if h.get(stage) in ("yes", "no")]
+        marks = [h.get(stage) for h in happy if h.get(stage) in ("yes", "fixed", "no")]
         if marks:
-            first_time[stage] = round(marks.count("yes") / len(marks), 2)
+            first_time[stage] = round(sum(m != "no" for m in marks) / len(marks), 2)
+    ships = [h.get("ship") for h in happy if h.get("ship") in ("yes", "fixed", "no")]
     judged = [h for h in happy if h.get("of")]
     done = [m["rework"] for m in ms if m.get("rework")]
     spikes = [m["spike"] for m in ms if m.get("spike")]
     return {
         "first_time": first_time,
+        "ship_fixed": round(ships.count("fixed") / len(ships), 2) if ships else None,
         "all_first": (
             round(sum(1 for h in judged if h["first"] == h["of"]) / len(judged), 2)
             if judged
@@ -6607,10 +6683,45 @@ def cmd_preflight(root: Path, ident: str) -> int:
     return 1 if problems else 0
 
 
+def _and(names: list[str]) -> str:
+    """`A`, `A and B`, `A, B and C`."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def _issues(numbers: list[int]) -> str:
-    """`#1`, `#1 and #2`, `#1, #2 and #3`."""
-    named = [f"#{n}" for n in numbers]
-    return named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+    """`#1`, `#1 and #2`, `#1, #2 and #3`, each number once."""
+    return _and([f"#{n}" for n in sorted(set(numbers))])
+
+
+def _question_head(findings: list[dict]) -> tuple[str, list[str], bool]:
+    """How ship's question opens, its options, and whether a yes commits, from the change's
+    findings: ship's recommendation leads, and `yes` takes it. Findings still `open` are fixed and
+    reviewed again before any commit; ones proposed `fix` are fixed inside the yes, then committed.
+    `fix all N first` is offered when more could be fixed than ship recommends: every finding not
+    already `fixed`, dismissed `wrong` or `intentional`, or pre-existing."""
+    open_ = [e["id"] for e in findings if e["disposition"] == "open"]
+    fix = [e for e in findings if e["disposition"] == "fix"]
+    fixable = [
+        e for e in findings
+        if e["rank"] != "preexisting" and e["disposition"] not in ("fixed", "wrong", "intentional")
+    ]  # fmt: skip
+    recommended = [e["id"] for e in findings if e["disposition"] in ("open", "fix")]
+    fix_all = [f"fix all {len(fixable)} first"] if len(fixable) > len(recommended) else []
+    if open_:
+        return (
+            f"Fix {_and(recommended)}, then review again",
+            ["yes", *fix_all, "edit the findings"],
+            False,
+        )
+    if fix:
+        ids = _and([e["id"] for e in fix])
+        unfixed = (
+            [f"commit without fixing, recording {ids} as {'a nit' if len(fix) == 1 else 'nits'}"]
+            if all(e["rank"] == "nit" for e in fix)
+            else []
+        )
+        return f"Fix {ids}, then commit this", ["yes", *fix_all, *unfixed, "edit the message"], True
+    return "Commit this", ["yes", *fix_all, "edit the message"], True
 
 
 def ship_question(
@@ -6625,15 +6736,17 @@ def ship_question(
     bugs: bool = False,
     sensitive: list[str] | None = None,
     irreversible: bool = False,
-    fresh_skipped: str | None = None,
+    fresh: dict | None = None,
+    findings: list[dict] | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
-    one, so the question never leaves one out. Each clause is in only when its fact is: the
-    sensitive paths the diff touches, a fresh review that didn't run, how to recover what a revert
-    can't undo, the context update shown, the nits recorded in `register`, the pre-existing
-    findings filed there as bugs, the issues closed and split off, and the issue update unless
-    `archive.target` is `none`."""
+    one, so the question never leaves one out. It opens with ship's recommendation from
+    `findings` (`_question_head()`). A question that commits has each clause only when its fact
+    is: the sensitive paths the diff touches, a fresh review that didn't run (`fresh`, from
+    findings.md's note), how to recover what a revert can't undo, the context update shown, the
+    nits recorded in `register`, the pre-existing findings filed there as bugs, the issues closed
+    and split off, and the issue update unless `archive.target` is `none`."""
     named = set(closes)
     stray = sorted(n for n in {*closing, *split} if n not in named)
     if stray:
@@ -6644,15 +6757,17 @@ def ship_question(
     left = sorted(named - set(closing) - set(split))
     if left:
         return None, f"{_issues(left)} on closes: but given to neither --closing nor --split"
+    lead, options, commits = _question_head(findings or [])
+    if not commits:
+        return f"{lead}? ({' / '.join(options)})", None
     clauses = []
     if sensitive:
         shown = sensitive[:RISK_SHOWN]
         more = len(sensitive) - len(shown)
         names = [*shown, f"{more} more"] if more else shown
-        listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
-        clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {listed}")
-    if fresh_skipped:
-        clauses.append(f"without the fresh review ({fresh_skipped})")
+        clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {_and(names)}")
+    if fresh and not fresh["ran"]:
+        clauses.append(f"without the fresh review ({fresh['why'] or 'no reason given'})")
     if irreversible:
         clauses.append("with how to recover it shown")
     if context:
@@ -6663,35 +6778,41 @@ def ship_question(
         clauses.append(f"the bugs shown filed in {register}")
     issues = []
     if closing:
-        issues.append(f"closing {_issues(sorted(closing))} when it lands")
+        issues.append(f"closing {_issues(closing)} when it lands")
     if split:
-        seeds = "a seed" if len(split) == 1 else "seeds"
-        issues.append(f"splitting {_issues(sorted(split))} off as {seeds}")
+        seeds = "a seed" if len(set(split)) == 1 else "seeds"
+        issues.append(f"splitting {_issues(split)} off as {seeds}")
     if issues:
         clauses.append(" and ".join(issues))
     stamped = f"{folder}/ stamped shipped"
     body = f", {', '.join(clauses)}, and {stamped}" if clauses else f", with {stamped}"
     then = "" if target == "none" else ", then update its issue"
-    return f"Commit this{body}{then}? (yes / fix a finding first / edit the message)", None
+    return f"{lead}{body}{then}? ({' / '.join(options)})", None
 
 
 def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
-                      closing: list[int], split: list[int], bugs: bool = False,
-                      fresh_skipped: str | None = None) -> int:  # fmt: skip
-    """Print ship's WAIT question for a change, from what its Step 4 decided and what its diff
-    touches, which the script reads itself so the skill can't leave a sensitive path out. Writes
-    nothing."""
+                      closing: list[int], split: list[int], bugs: bool = False) -> int:  # fmt: skip
+    """Print ship's WAIT question for a change, from what its Step 4 decided, its findings.md, and
+    what its diff touches, which the script reads itself so the skill can't leave a sensitive path
+    or a recommended fix out. Writes nothing."""
     path = _one_change(root, ident)
     if path is None:
         return 1
     home = main_root(root)
     cfg = load_config(home)[0]
     rel = work_rel(root)
+    found = findings_entries(path)
+    if found["problems"]:
+        print(
+            f"⚠  {path.name}/{FINDINGS}: {'; '.join(found['problems'])}. Not asking.",
+            file=sys.stderr,
+        )
+        return 1
     risk = _risk_report(root, path) or {"sensitive": [], "irreversible": []}
     question, why = ship_question(
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
-        risk["sensitive"], bool(risk["irreversible"]), fresh_skipped,
+        risk["sensitive"], bool(risk["irreversible"]), found["fresh"], found["entries"],
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -8037,6 +8158,14 @@ def main() -> int:
         "--leave", action="append", default=[], metavar="PATH",
         help="a path not to stage, to commit apart; repeatable",
     )  # fmt: skip
+    p_ship.add_argument(
+        "--fixed",
+        metavar="IDS",
+        help="the findings a yes approved fixing, `F2,F4`: each must read fixed",
+    )
+    p_ship.add_argument(
+        "--through", metavar="ID", help="the highest finding id the question was asked over"
+    )
 
     sub.add_parser("next", help="the id `new` would allocate now; writes nothing")
 
@@ -8084,9 +8213,6 @@ def main() -> int:
     p_pre.add_argument("--context", action="store_true", help="a context update was proposed")
     p_pre.add_argument("--nits", action="store_true", help="nits are added or retired")
     p_pre.add_argument("--bugs", action="store_true", help="pre-existing findings are filed")
-    p_pre.add_argument(
-        "--fresh-skipped", metavar="WHY", help="a deep diff's fresh review didn't run, and why"
-    )
     p_pre.add_argument(
         "--closing", action="append", type=int, default=[], metavar="N",
         help="an issue on closes: this change resolved; repeatable",
@@ -8234,7 +8360,8 @@ def main() -> int:
     if args.cmd == "new":
         return cmd_new(root, args.slug, args.tier, args.title, args.worktree, args.base)
     if args.cmd == "ship":
-        return cmd_ship(root, args.id, args.leave)
+        fixed = [f.strip() for f in (args.fixed or "").split(",") if f.strip()]
+        return cmd_ship(root, args.id, args.leave, fixed, args.through)
     if args.cmd == "next":
         cfg = load_config(home)[0]
         if ids_mode(home, cfg) == "github":
@@ -8257,9 +8384,8 @@ def main() -> int:
         return cmd_closes(root, args.id)
     if args.cmd == "preflight" and args.question:
         return cmd_ship_question(
-            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs,
-            args.fresh_skipped,
-        )  # fmt: skip
+            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
+        )
     if args.cmd == "preflight":
         return cmd_preflight(root, args.id)
     if args.cmd == "mark-triaged":

@@ -277,9 +277,14 @@ writes only the change's own uncommitted folder, decides nothing (the WAIT appro
 disposition), and the next run rewrites it, keeping each `F<n>` id, so a finding fixed between
 runs is counted. The script only reads it: `findings` prints the `Sdlc-Findings` line
 (`findings_trailer()`, never counted by hand), `check` reports a malformed file, and `ship`
-refuses while one is `open`. A Pre-existing finding never blocks; ship files it as a `[bug]`. The
-trailer's dispositions are new keys beside the old ones, so `metrics_summary()` reads a trailer
-without them as unanswered (`answered`), never as a clean review.
+refuses while one is `open` or `fix`. `fix` is ship's recommendation, with a `Fix:` line saying the
+change: `ship_question()` leads with it, so `yes` takes it, and `ship --fixed/--through` is the
+clean-rerun check after the fixes, by the script; `fix` never reaches a commit, so the trailer
+counts only `COUNTED`. The note's `Fresh review: ran|skipped, <why>` line (`findings_fresh()`) is
+the one record of the fresh review; a deep diff without it is refused. A Pre-existing finding
+never blocks; ship files it as a `[bug]`. The trailer's dispositions are new keys beside the old
+ones, so `metrics_summary()` reads a trailer without them as unanswered (`answered`), never as a
+clean review.
 
 **Risk: `_risk_report()`.** `[review] sensitive` and `irreversible` are matched against the
 change's diff by the script (`risk_paths()`), never judged by a skill, and read from the base

@@ -95,7 +95,8 @@ What `retro` gives:
     from before has none, never zero);
   - `extra`, the stops beyond gates and questions, across the window, by kind: `after_gate`
     (typed once the WAIT was answered), `revise` (before it), `asked` (answering a question the
-    agent put in prose), `interrupt` and `unprompted`, each with the `changes` it came from; the
+    agent put in prose), `interrupt`, `fix` (asking for the review's own findings to be fixed,
+    before the WAIT) and `unprompted`, each with the `changes` it came from; the
     `harness` entries and other slash commands (`command`) left out of the stops; and how many
     changes `recorded` them (a `Close` commit from before counted those as stops, unclassified);
   - tokens per stage and per sub-agent role;
@@ -168,6 +169,7 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    - which kinds of extra stop recur (`extra`): an `after_gate` or `asked` kind recurring across
      changes is a skill that could ask it in its WAIT instead, and a seed naming the skill;
      `revise` and `unprompted` are the person's own conversation, worth naming, not cutting;
+     `fix` is the review working, not a cost to cut;
    - which stage or role the tokens pile up in;
    - from `in_change`, which stage most often misses first time and which rework count drives it
      (a spec edited after design is a Stage 2 problem; failed gate runs a build one), and whether

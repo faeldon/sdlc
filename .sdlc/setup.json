@@ -54,7 +54,7 @@
     "review": {
       "path": ".sdlc/REVIEW.md",
       "layout": "answers",
-      "guide": "sha256:0cba551d9b8b0e5a"
+      "guide": "sha256:7c3ec4f4a1dedfb0"
     },
     "product": {
       "path": ".sdlc/PRODUCT.md",
@@ -71,7 +71,7 @@
   "templates": {
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:a0a6652daa7e6765",
-    "findings.md": "sha256:0db250ee2511f2b9",
+    "findings.md": "sha256:6fb257600a25d65d",
     "inbox.md": "sha256:68a79a8d80d0ea10",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:8244f74828b145b1",

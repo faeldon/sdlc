@@ -152,11 +152,12 @@ def test_the_question_names_sensitive_paths_five_then_how_many_more() -> None:
 
 def test_the_question_says_a_skipped_fresh_review_and_a_recovery() -> None:
     assert "without the fresh review (no Agent tool here)" in _ask(
-        fresh_skipped="no Agent tool here"
+        fresh={"ran": False, "why": "no Agent tool here"}
     )
     assert "with how to recover it shown" in _ask(irreversible=True)
     plain = _ask()
     assert "fresh review" not in plain and "recover" not in plain
+    assert "fresh review" not in _ask(fresh={"ran": True})
 
 
 def test_the_command_reads_the_diff_itself(tmp_path: Path, capsys) -> None:

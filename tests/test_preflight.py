@@ -74,14 +74,34 @@ true
 """
 
 FULL = (
-    "Commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), "
-    "with how to recover it shown, "
+    "Fix F2 and F4, then commit this, touching sensitive paths <a> and <b>, "
+    "without the fresh review (<why>), with how to recover it shown, "
     "with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, "
     "the bugs shown filed in .sdlc/work/inbox.md, "
     "closing #N and #M when it lands and splitting #K off as a seed, and "
     ".sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? "
-    "(yes / fix a finding first / edit the message)"
+    "(yes / fix all 5 first / commit without fixing, recording F2 and F4 as nits / "
+    "edit the message)"
 )
+
+
+def _finding(n: int, rank: str = "nit", disposition: str = "recorded") -> dict:
+    return {"id": f"F{n}", "rank": rank, "disposition": disposition}
+
+
+# F2 and F4 recommended, five that could be fixed (F2, F3, F4, F5, F10), and four that can't: one
+# already fixed, one dismissed `wrong`, one `intentional`, one pre-existing.
+FIVE = [
+    _finding(1, "important", "fixed"),
+    _finding(2, "nit", "fix"),
+    _finding(3, "nit", "recorded"),
+    _finding(4, "nit", "fix"),
+    _finding(5, "nit", "minor"),
+    _finding(6, "nit", "wrong"),
+    _finding(7, "preexisting", "recorded"),
+    _finding(9, "nit", "intentional"),
+    _finding(10, "nit", "recorded"),
+]
 
 
 def _git(root: Path, *args: str) -> str:
@@ -181,7 +201,7 @@ def test_question_with_every_clause_matches_ship_s_example() -> None:
     question, why = _ask(folder=".sdlc/work/NNN-<slug>", closes=[1, 2, 3], context=True,
                          nits=True, bugs=True, closing=[1, 2], split=[3],
                          sensitive=["<a>", "<b>"], irreversible=True,
-                         fresh_skipped="<why>")  # fmt: skip
+                         fresh={"ran": False, "why": "<why>"}, findings=FIVE)  # fmt: skip
     assert why is None
     assert question == FULL.replace("#N", "#1").replace("#M", "#2").replace("#K", "#3")
     skill = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
@@ -223,7 +243,76 @@ def test_question_clause(kw, expected) -> None:
         assert "closing" not in question
     if not kw.get("split"):
         assert "splitting" not in question
-    assert question.endswith("? (yes / fix a finding first / edit the message)")
+    assert question.endswith("? (yes / edit the message)")
+
+
+@pytest.mark.parametrize(
+    "findings, lead, options",
+    [
+        ([], "Commit this, with", "(yes / edit the message)"),
+        ([_finding(1, "nit", "fixed")], "Commit this, with", "(yes / edit the message)"),
+        (
+            [_finding(1, "nit", "recorded"), _finding(2, "nit", "minor")],
+            "Commit this, with",
+            "(yes / fix all 2 first / edit the message)",
+        ),
+        (
+            [_finding(1, "nit", "fix")],
+            "Fix F1, then commit this, with",
+            "(yes / commit without fixing, recording F1 as a nit / edit the message)",
+        ),
+        (
+            [_finding(1, "important", "fix"), _finding(2, "nit", "fix")],
+            "Fix F1 and F2, then commit this, with",
+            "(yes / edit the message)",
+        ),
+        (
+            [_finding(1, "important", "fix"), _finding(2, "nit", "recorded")],
+            "Fix F1, then commit this, with",
+            "(yes / fix all 2 first / edit the message)",
+        ),
+        (FIVE, "Fix F2 and F4, then commit this, with", "(yes / fix all 5 first / commit"),
+    ],
+    ids=[
+        "none",
+        "all-fixed",
+        "fixable-only",
+        "one-nit",
+        "important-in-fix",
+        "more-fixable",
+        "five",
+    ],  # fmt: skip
+)
+def test_question_leads_with_what_ship_recommends(findings, lead, options) -> None:
+    question, why = _ask(findings=findings)
+    assert why is None and question.startswith(lead) and options in question
+
+
+def test_an_open_finding_asks_to_fix_and_review_again_never_to_commit() -> None:
+    findings = [
+        _finding(1, "important", "open"),
+        _finding(2, "nit", "fix"),
+        _finding(3, "nit", "recorded"),
+    ]
+    question, why = _ask(findings=findings, context=True, closes=[4], closing=[4])
+    assert why is None
+    assert (
+        question == "Fix F1 and F2, then review again? (yes / fix all 3 first / edit the findings)"
+    )
+    question, why = _ask(findings=findings, closes=[4])
+    assert question is None and "#4 on closes: but given to neither" in why
+
+
+def test_a_repeated_issue_number_reads_once() -> None:
+    question, _ = _ask(closes=[4], closing=[4, 4])
+    assert "closing #4 when it lands" in question and "#4 and #4" not in question
+
+
+def test_the_old_option_is_gone_everywhere() -> None:
+    for folder in ("scripts", "skills"):
+        for path in (ROOT / folder).rglob("*"):
+            if path.is_file() and path.suffix in (".py", ".md"):
+                assert "fix a finding first" not in path.read_text(encoding="utf-8"), path
 
 
 @pytest.mark.parametrize(
@@ -247,11 +336,37 @@ def test_question_through_the_command(change, capsys) -> None:
     assert printed == (
         "Commit this, with the context update shown, closing #12 when it lands and splitting "
         "#15 off as a seed, and .sdlc/work/001-reopen-drafts/ stamped shipped? "
-        "(yes / fix a finding first / edit the message)"
+        "(yes / edit the message)"
     ), "no tracker configured, so no issue update"
     assert sdlc.cmd_ship_question(root, "001", False, False, [12], []) == 1
     captured = capsys.readouterr()
     assert captured.out == "" and "#15 on closes: but given to neither" in captured.err
+
+
+def test_the_command_reads_findings_md_for_the_recommendation_and_the_fresh_review(
+    change, capsys
+) -> None:
+    root, folder = change
+    (folder / "findings.md").write_text(
+        "# Findings\n\n> The note.\n> Fresh review: skipped, no Agent tool here\n\n"
+        "## F1. [nit] [cost] A helper with one caller\n\nEvidence: a.py:1\nClass: c\n"
+        "Disposition: fix\nFix: inline it\n",
+        encoding="utf-8",
+    )
+    assert sdlc.cmd_ship_question(root, "001", False, False, [12], [15]) == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed.startswith("Fix F1, then commit this, without the fresh review (no Agent tool")
+    assert printed.endswith(
+        "(yes / commit without fixing, recording F1 as a nit / edit the message)"
+    )
+    (folder / "findings.md").write_text(
+        "# Findings\n\n## F1. [nit] [cost] A helper\n\n"
+        "Evidence: a.py:1\nClass: c\nDisposition: fix\n",
+        encoding="utf-8",
+    )
+    assert sdlc.cmd_ship_question(root, "001", False, False, [12], [15]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "`fix` with no `Fix:`" in captured.err
 
 
 def test_preflight_and_nits_are_allowed_without_a_prompt() -> None:

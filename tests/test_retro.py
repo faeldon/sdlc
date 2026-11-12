@@ -881,6 +881,21 @@ def test_retro_reads_rework_within_each_change_apart_from_follow_up_rework(tmp_p
     assert group["rework"]["revise"] == 1 and group["rework"]["rewrite"] == 200
     assert group["spike"] == {"changes": 1, "segments": 2, "agent": 12, "edits": 5}
     assert "rework" in out, "retro's own rework, a later change fixing one, is still there"
+    assert group["ship_fixed"] == 0.0
+
+
+def test_a_ship_stopped_for_its_own_findings_counts_as_first_time(tmp_path) -> None:
+    root = _repo(tmp_path)
+    _measured(root, "001-keep-one-draft", 10, 6, (
+        "Sdlc-Happy: intent=yes design=yes build=yes test=unknown ship=fixed close=yes "
+        "first=5 of=5",
+    ))  # fmt: skip
+    _measured(root, "002-draft-titles", 10, 6, (
+        "Sdlc-Happy: intent=yes design=yes build=yes test=unknown ship=no close=yes first=4 of=5",
+    ))  # fmt: skip
+    group = _retro(root)["metrics"]["groups"]["tier 2, manual"]["in_change"]
+    assert group["first_time"]["ship"] == 0.5
+    assert group["ship_fixed"] == 0.5
 
 
 def test_retro_reads_what_close_measured_and_counts_what_it_didnt(tmp_path: Path) -> None:
@@ -1324,4 +1339,5 @@ def test_retro_reads_extra_stop_kinds_only_where_close_classified_them(tmp_path:
         "asked": {"count": 1, "changes": 1},
         "unprompted": {"count": 0, "changes": 0},
         "interrupt": {"count": 0, "changes": 0},
+        "fix": {"count": 0, "changes": 0},  # the lines predate `fix`: read as 0
     }

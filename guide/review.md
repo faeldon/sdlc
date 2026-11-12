@@ -86,6 +86,11 @@ Two apply everywhere:
 - Tag each finding with its pass: `[correctness]`, `[contract]`, `[cost]`.
 - **Count first.** The findings open with their count by rank, and say "nothing to fix" plainly
   when there are none.
+- **Recommend what to fix now, and say how.** A finding whose fix is small (cost S) and touches
+  only files the diff already changes, Important or Nit, is proposed for fixing before the commit,
+  with the exact change on a line of its own. The person's yes approves that change, and the
+  commit still waits for the checks and this review to come back clean on it. A fix bigger than
+  that is never folded into a yes: an Important one is fixed and reviewed again first.
 - **A second reviewer's findings count like any.** On a diff that touches a sensitive path, a
   reviewer that never saw the session that built it reviews the diff too. Each of its findings is
   answered like the review's own, and one that can't be confirmed from its evidence is dismissed

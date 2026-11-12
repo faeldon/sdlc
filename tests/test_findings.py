@@ -117,7 +117,7 @@ def test_entries_are_read_in_order_with_their_lines(tmp_path: Path) -> None:
 def test_no_file_is_no_findings_and_no_problem(tmp_path: Path) -> None:
     found = sdlc.findings_entries(tmp_path)
     assert found == {"path": "findings.md", "exists": False, "entries": [], "open": [],
-                     "problems": []}  # fmt: skip
+                     "fix": [], "fresh": None, "problems": []}  # fmt: skip
 
 
 def test_the_template_is_never_read_as_a_finding() -> None:
@@ -125,8 +125,8 @@ def test_the_template_is_never_read_as_a_finding() -> None:
     problem, never as a finding and never raising."""
     template = (ROOT / "templates" / "findings.md").read_text(encoding="utf-8")
     assert "## F1. [<important|nit|pre-existing>] [<correctness|contract|cost|context>]" in template
-    assert "Disposition: <open|fixed|recorded|wrong|intentional|minor>" in template
-    for key in ("Evidence:", "Class:", "Reason:"):
+    assert f"Disposition: <{'|'.join(sdlc.DISPOSITIONS)}>" in template
+    for key in ("Evidence:", "Class:", "Reason:", "Fix:"):
         assert key in template
     found = sdlc.findings_entries(ROOT / "templates")
     assert found["entries"] == [] and found["problems"]
@@ -304,3 +304,117 @@ def test_ship_refuses_an_open_finding_and_ships_with_no_file(change, capsys) -> 
     (folder / "findings.md").unlink()
     assert sdlc.cmd_ship(root, "001") == 0
     assert "stage: shipped" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- a fix ship recommends
+
+
+FIX = FINDINGS.replace(
+    "Class: a layer with one caller\nDisposition: recorded",
+    "Class: a layer with one caller\nDisposition: fix\nFix: inline `_one_caller` into `render`",
+)
+
+
+def test_a_finding_proposed_for_fixing_carries_its_fix(tmp_path: Path) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", FIX))
+    assert found["problems"] == [] and found["fix"] == ["F2"] and found["open"] == []
+    assert found["entries"][1]["fix"] == "inline `_one_caller` into `render`"
+
+
+@pytest.mark.parametrize(
+    "text, problem",
+    [
+        (FIX.replace("Fix: inline `_one_caller` into `render`\n", ""), "`fix` with no `Fix:`"),
+        (
+            FINDINGS.replace(
+                "Class: bad input that crashes\nDisposition: recorded",
+                "Class: bad input that crashes\nDisposition: fix\nFix: guard the empty title",
+            ),
+            "a pre-existing finding is filed as a bug, never `fix`",
+        ),
+    ],
+    ids=["no-fix-line", "pre-existing"],
+)
+def test_a_fix_needs_its_change_and_never_a_pre_existing_finding(tmp_path, text, problem) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", text))
+    assert any(problem in p for p in found["problems"])
+
+
+def test_the_trailer_never_counts_a_fix(tmp_path: Path) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", FIX))
+    assert " fix=" not in sdlc.findings_trailer(found["entries"])
+
+
+@pytest.mark.parametrize(
+    "note, fresh",
+    [
+        ("> The note.\n> Fresh review: ran\n", {"ran": True}),
+        (
+            "> The note.\n> Fresh review: skipped, no Agent tool here\n",
+            {"ran": False, "why": "no Agent tool here"},
+        ),
+        ("> The note.\n", None),
+    ],
+    ids=["ran", "skipped", "unsaid"],
+)
+def test_the_note_says_whether_the_fresh_review_ran(tmp_path, note, fresh) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", FINDINGS.replace("> The note.\n", note)))
+    assert found["fresh"] == fresh and found["problems"] == []
+
+
+def test_ship_refuses_a_fix_still_proposed(change, capsys) -> None:
+    root, folder = change
+    _write(folder, FIX)
+    assert sdlc.cmd_ship(root, "001") == 1
+    assert "F2" in capsys.readouterr().err
+    assert "stage: build" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+NEW_F5 = (
+    "\n## F5. [nit] [cost] A new one\n\nEvidence: a.py:1\nClass: c\nDisposition: minor\nReason: r\n"
+)
+
+
+@pytest.mark.parametrize(
+    "text, fixed, through, said",
+    [
+        (FIX.replace("Disposition: fix\n", "Disposition: recorded\n"), ["F2"], "F4", "F2"),
+        (FINDINGS + NEW_F5, [], "F4", "F5"),
+        (FINDINGS, [], "five", "not a finding id"),
+    ],
+    ids=["left-unfixed", "raised-after", "bad-through"],
+)
+def test_ship_after_a_fix_refuses_unless_the_rerun_is_clean(
+    change, capsys, text, fixed, through, said
+) -> None:
+    root, folder = change
+    _write(folder, text)
+    assert sdlc.cmd_ship(root, "001", (), fixed, through) == 1
+    assert said in capsys.readouterr().err
+    assert "stage: build" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+def test_ship_after_a_clean_rerun_stamps(change) -> None:
+    root, folder = change
+    _write(folder, FINDINGS)
+    assert sdlc.cmd_ship(root, "001", (), ["F1"], "F4") == 0
+    assert "stage: shipped" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+def test_ship_refuses_a_deep_diff_whose_note_says_nothing_of_the_fresh_review(change, capsys):
+    root, folder = change
+    (root / ".sdlc" / "config.toml").write_text(
+        '[review]\nsensitive = ["drafts/"]\n', encoding="utf-8"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "config")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--ff-only", "001-reopen-drafts")
+    _git(root, "checkout", "-q", "001-reopen-drafts")
+    (root / "drafts").mkdir()
+    (root / "drafts" / "store.py").write_text("x = 1\n", encoding="utf-8")
+    _write(folder, FINDINGS)
+    assert sdlc.cmd_ship(root, "001") == 1
+    assert "Fresh review" in capsys.readouterr().err
+    _write(folder, FINDINGS.replace("> The note.\n", "> The note.\n> Fresh review: ran\n"))
+    assert sdlc.cmd_ship(root, "001") == 0

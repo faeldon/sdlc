@@ -435,12 +435,25 @@ that stops on an Important finding included: the one file, besides bringing the 
 ship writes before it asks, since it holds no decision and the next run rewrites it. Each finding
 is a `## F<n>. [rank] [pass] title` section, its rank `important`, `nit` or `pre-existing` (a fault
 in lines the diff didn't touch, which never blocks the change and is filed as a `[bug]`), with
-its `Evidence:` (`path:line`), `Class:` and `Disposition:`: `open` until it is answered, then
-`fixed`, `recorded` (as a nit or a bug), or `wrong`, `intentional` or `minor` with a `Reason:`. A
-rerun keeps each id, marks one the diff no longer shows `fixed`, and never raises again one the
-person dismissed. `sdlc.py findings NNN` reads it and prints the counts and the `Sdlc-Findings`
-line the commit carries; `sdlc.py ship` refuses while a finding is `open`. The file reaches
-history and the change's issue with the folder.
+its `Evidence:` (`path:line`), `Class:` and `Disposition:`: `open` until it is answered, `fix`
+when ship recommends fixing it before the commit (a change of cost S in files the diff already
+touches, said on a `Fix:` line), then `fixed`, `recorded` (as a nit or a bug), or `wrong`,
+`intentional` or `minor` with a `Reason:`. A rerun keeps each id, marks one the diff no longer
+shows `fixed`, and never raises again one the person dismissed. On a diff that touches a sensitive
+path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. `sdlc.py findings
+NNN` reads it and prints the counts and the `Sdlc-Findings` line the commit carries; `sdlc.py ship`
+refuses while a finding is `open` or `fix`, and a deep diff whose note says neither. The file
+reaches history and the change's issue with the folder.
+
+Ship's question leads with its recommendation, so `yes` always takes it. `sdlc.py preflight NNN
+--question` words it from `findings.md`: `Commit this, …? (yes / edit the message)` when nothing is
+proposed; `Fix F2 and F4, then commit this, …? (yes / fix all 5 first / commit without fixing,
+recording F2 and F4 as nits / edit the message)` when some are, a yes making those fixes, rerunning
+the gate and the review, and committing only when `sdlc.py ship NNN --fixed F2,F4 --through F5`
+finds each `fixed` and nothing new; and `Fix F1, then review again? (yes / fix all 3 first / edit
+the findings)` while one is `open`, which commits nothing. `fix all N first` is there only when more
+could be fixed than ship recommends, and fixes them all, then asks again; `commit without fixing`
+only when every `fix` finding is a nit.
 
 `/sdlc:ship` reads all of this in one call, `sdlc.py preflight NNN`: the change's undone notes,
 the nits its diff touches, the issues on its `closes:` line, its acceptance checks, its earlier
@@ -708,10 +721,11 @@ is counted as `harness=`, and a slash command other than the plugins' skills (`/
 as `command=`, both on `Sdlc-Totals`, and neither is a stop. Each stop beyond the gates and
 questions gets a kind, read from its shape, never its words: `after_gate` (typed once a skill's
 WAIT was answered), `revise` (a revision before it), `asked` (an answer to a question the agent
-put in prose), `interrupt`, or `unprompted`, one `Sdlc-Extra: <stage> after_gate=<n> revise=<n>
-asked=<n> unprompted=<n> interrupt=<n> harness=<n> command=<n>` line for each stage with any. A
-`Close` commit without `harness=` counted both as stops, and `/sdlc:retro` reads its kinds as
-unrecorded.
+put in prose), `interrupt`, `fix` (asking for the review's own findings to be fixed, before it,
+as ship's question offers: never a revise), or `unprompted`, one `Sdlc-Extra: <stage>
+after_gate=<n> revise=<n> asked=<n> unprompted=<n> interrupt=<n> fix=<n> harness=<n> command=<n>`
+line for each stage with any; a line from before `fix` reads it as 0. A `Close` commit without
+`harness=` counted both as stops, and `/sdlc:retro` reads its kinds as unrecorded.
 
 Beside the stops, never among them, it records the tool prompts the person answered: a tool use
 they were asked to allow and allowed or rejected, never their own questions or plan approvals
@@ -730,7 +744,9 @@ those were answered `wrong`. A trailer from before dispositions, or before `fres
 and `/sdlc:retro` reads what it lacks as unknown.
 
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,
-no or unknown, and `Sdlc-Rework` counts the trial and error inside the change (the spec or plan
+no or unknown, ship also `fixed` when it ran again only for findings its own review raised and
+the change fixed (no `revise` answer, a `fixed` finding in its `findings.md`), which retro counts as
+first time and reports apart as `ship_fixed`; a trailer from before has only yes and no. And `Sdlc-Rework` counts the trial and error inside the change (the spec or plan
 edited after their stage, `revise` answers, failed gate runs, ship reruns, lines written against
 lines kept, and for the factory its rounds, verdicts and decisions, with an `Sdlc-Review` line per
 reviewer: its `CHANGES` verdicts, its requests and, from a run with a verifier, how many of them

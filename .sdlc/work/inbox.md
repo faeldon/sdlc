@@ -312,16 +312,6 @@ Cost: S
 Value: low
 Raised by: 026-github-intake (correctness)
 
-## [2026-10-26-6] [idea] A ship that fixes its own review finding is not a miss
-
-`happy()` marks ship `no` whenever the person answers anything but yes inside it, so "fix a finding
-first", which is the review doing its job, counts the same as a loop that circled. Ship went
-through first time in 5 of 12 Tier 2 changes and 4 of 8 Tier 1 in the last window, and those
-numbers can't say which. Count a ship that stopped for a finding its own review raised apart from
-one rerun for any other reason, and let `first_time` count only the second kind. Raised by the
-retrospective of 2026-10-26.
-Theme: retro
-
 ## [2026-10-26-7] [idea] Pay down the robustness nits
 
 The `robustness` theme holds five open nits, the threshold the process doc sets for one paydown
@@ -418,16 +408,6 @@ Cost: S
 Value: low
 Raised by: 030-ship-preflight (correctness)
 
-## [2026-10-27-7] [nit] ship_question renders a repeated issue number twice
-
-`--closing 4 --closing 4` reads "closing #4 and #4"; dedupe the numbers before rendering.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 030-ship-preflight (correctness)
-
 ## [2026-10-27-8] [nit] _inbox_commit takes eleven parameters
 
 `cmd_inbox_commit()` hands its whole state to `_inbox_commit()` to hold the lock around it; a
@@ -446,18 +426,6 @@ failure it stops" stays in `## The point of the process` rather than `### The fa
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 Theme: setup
 Priority: low
-
-## [2026-11-03-15] [nit] A skipped fresh review is caught only by ship's prose
-
-A clean fresh review leaves no `By: fresh` entry, so the script can't tell it from one that never
-ran. Have findings.md's note say `Fresh review: ran` or `skipped, <why>`, `findings` read it, and
-`ship` refuse a deep diff with neither.
-
-Theme: robustness
-Paths: scripts/sdlc.py, skills/ship/SKILL.md
-Cost: M
-Value: med
-Raised by: 036-review-depth-by-risk (correctness)
 
 ## [2026-11-03-16] [nit] Setup offers risky-path candidates its Step 1 never looks for
 
