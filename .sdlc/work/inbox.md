@@ -660,3 +660,22 @@ Severity: low
 Paths: scripts/metrics.py
 Introduced by: 050-own-script-and-asked-stops
 Theme: retro
+
+## [2026-11-12-6] [idea] Behavioural evals for the core skills
+
+pytest covers sdlc.py's mechanism but never runs a model, so a skill regression shows up only as
+rework on a later change. Add a `claude plugin eval` suite for the skills' judgment: what they must
+never do (write before the WAIT, push, put agent attribution in a commit, guess instead of asking
+config, write on the base branch), their judgment calls (intent's tier, ship's question from
+preflight --question, finding dispositions, refusing while a finding is open), and cases seeded
+from skill bugs in the register and Sdlc-Rework history. Each case is a scratch host repo at a
+known stage (reusing test_adoption's builder) with scripted replies, run once to stop at the WAIT
+and once approved through it. Grade by repo state and `sdlc.py check` first, then the transcript's
+tool calls, and use an LLM judge only for prose. Run it by hand behind one approval, never in
+check.sh or CI: at ship, only for the skills a change touches (landing_reach already knows when a
+diff reaches skills/, agents/, guide/ or templates/), the full suite before a release, and when the
+default model changes. Scores go under .sdlc/reports/ and each run compares against the last one.
+Start with about eight cases. To keep cost down: scope runs to the touched skills, prefer
+stop-at-WAIT cases, rerun only failures, and use a cheaper model for cases that test rules.
+Theme: tests
+Raised 2026-11-12.
