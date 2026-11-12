@@ -136,10 +136,12 @@ script after a merge that brought `scripts/`, so a change closes on its own code
 `SDLC_CLOSE_RAN` stops a loop. There too, `reaches` (`landing_reach()`, over the change's whole
 diff) tells the person what the landed change asks of the sessions and hosts running the plugin
 from a clone: scripts live at once, skills and the factory's agents at `/reload-plugins`,
-setup's files at `/sdlc:setup`, or `unknown` and why. The commands that write from a change's
-worktree (`OWN_SCRIPT_CMDS`) have a handoff of their own, apart from close's: `_own_script()`
-runs the change's `scripts/sdlc.py` once the change edits `scripts/`, and a crash there falls
-back to the running copy rather than refusing, since each of them is safe to rerun.
+setup's files at `/sdlc:setup`, or `unknown` and why. The commands ship runs from a change's
+worktree (`OWN_SCRIPT_CMDS`: those that write, and `preflight` and `findings`, whose reading the
+change may have changed) have a handoff of their own, apart from close's: `_own_script()` runs
+the change's `scripts/sdlc.py` once the change edits `scripts/`, before `main()` parses anything,
+so a flag only the change knows reaches it, and a crash there falls back to the running copy
+rather than refusing, since each of them is safe to rerun.
 
 **Dropping.** `/sdlc:drop` writes the reason as the intent's `## Dropped` section; `sdlc.py drop`
 stamps `stage: dropped` and commits the folder on its branch. Close then records it on `main` as

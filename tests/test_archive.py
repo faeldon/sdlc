@@ -744,6 +744,39 @@ def test_main_runs_the_changes_own_script_or_carries_on(
     assert ("nothing to sync" in said.lower() or '"change"' in said) == (answer is None)
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["ship", "001", "--fixed", "F1", "--through", "F1"],
+        ["preflight", "001", "--question", "--a-flag-only-the-change-knows"],
+        ["findings", "001"],
+    ],
+    ids=["ship-new-flags", "preflight", "findings"],
+)
+def test_main_hands_off_before_parsing_so_the_change_s_flags_reach_it(
+    own_tree, monkeypatch, argv
+) -> None:
+    """049's ship: `--fixed` and `--through` were the change's own, and this copy's parser
+    refused them before it could hand off. And ship reads findings.md and words its question
+    through `findings` and `preflight`, which the change may have changed too."""
+    _, tree = own_tree
+    (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(sdlc, "_run_own", lambda script, given: calls.append(given) or 0)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", *argv])
+    monkeypatch.chdir(tree)
+    assert sdlc.main() == 0
+    assert calls == [argv]
+
+
+def test_ship_s_question_from_the_change_s_own_code_is_alone_on_stdout(tmp_path, capsys) -> None:
+    script = _script(tmp_path, "print('Commit this? (yes / edit the message)')\n")
+    assert sdlc._run_own(script, ["preflight", "001", "--question"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "Commit this? (yes / edit the message)\n"
+    assert f"ran {sdlc.OWN_RAN}" in captured.err
+
+
 def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -> None:
     _, tree = own_tree
     (tree / "scripts" / "sdlc.py").write_text("print('the change')\n", encoding="utf-8")

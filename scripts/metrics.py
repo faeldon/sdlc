@@ -44,10 +44,11 @@ A slash command is a `command`, never a stop; `plugin` when it is one of the plu
 alone open stages. Each other typed entry is an `extra` stop, given a kind when its span closes
 (`EXTRA_KINDS`): `after_gate` once the gated skill's WAIT is answered, `revise` before it, `fix`
 for asking the review's findings fixed before it, `asked` when the agent's last text ended with a
-question, `interrupt` for an interrupted turn, and `unprompted` for the rest; a line from before
-`fix` reads it as 0. They are written as `Sdlc-Extra` lines, with `harness=` and `command=`
-on `Sdlc-Totals`: a `Close` commit without those counted harness entries and other commands as
-`extra`, and is read as unclassified, never as none.
+question, its offered answers after it or not (`_ends_with_question()`), `interrupt` for an
+interrupted turn, and `unprompted` for the rest; a line from before `fix` reads it as 0. They are
+written as `Sdlc-Extra` lines, with `harness=` and `command=` on `Sdlc-Totals`: a `Close` commit
+without those counted harness entries and other commands as `extra`, and is read as
+unclassified, never as none.
 
 Read stops as upper bounds and token spans as lower: a harness entry of a shape not named above
 still looks like something the person typed.
@@ -208,6 +209,22 @@ def _names(ident: str, args: str) -> bool:
     return False
 
 
+def _ends_with_question(text: str) -> bool:
+    """Whether the agent's text ended with a question: its last line ends with `?`, or with `?`
+    and the answers it offers, `…? (yes / edit the message)`, as every skill's WAIT does; a
+    closing quote, backtick or emphasis around it doesn't count."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    last = lines[-1].rstrip(" \t`*_\"'") if lines else ""
+    return bool(re.search(r"\?(\s*\([^()]*\))?$", last))
+
+
+def _harness(entry: dict) -> bool:
+    """An entry the harness sent in the person's place: a background task's notice or a
+    compaction summary. Never the person, whatever it quotes."""
+    origin = entry.get("origin") if isinstance(entry.get("origin"), dict) else {}
+    return origin.get("kind") == "task-notification" or bool(entry.get("isCompactSummary"))
+
+
 def _reply(text: str) -> str:
     text = re.sub(r"<[^>]+>.*?</[^>]+>", " ", text, flags=re.S).strip()
     if APPROVE_RE.match(text):
@@ -255,7 +272,8 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
     """Which of one session's entries belong to the change: those on its branch; on `main`, from
     the session's last `/sdlc:intent` before it first reaches the branch; and from a
     `/sdlc:close` naming the change until what is typed after close's approval, the next skill,
-    or another change's branch."""
+    or another change's branch. A harness entry (`_harness()`) never marks either end, whatever
+    skill it quotes."""
     on_branch = [e.get("gitBranch") == branch for e in entries]
     keep = list(on_branch)
     if any(on_branch):
@@ -263,7 +281,8 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
         start = None
         for i in range(first):
             m = SKILL_RE.search(_entry_text((entries[i].get("message") or {}).get("content")))
-            if entries[i].get("type") == "user" and m and m.group(1) == "sdlc:intent":
+            person = entries[i].get("type") == "user" and not _harness(entries[i])
+            if person and m and m.group(1) == "sdlc:intent":
                 start = i
         if start is not None:
             for i in range(start, first):
@@ -271,7 +290,7 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
     # Close's own run: from its invocation until whatever the person types after approving it, the
     # next skill, or another change's branch. A session often goes on to other work after a close.
     for i, entry in enumerate(entries):
-        if entry.get("type") != "user":
+        if entry.get("type") != "user" or _harness(entry):
             continue
         text = _entry_text((entry.get("message") or {}).get("content"))
         m = SKILL_RE.search(text)
@@ -287,6 +306,7 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
                     j > i
                     and entries[j].get("type") == "user"
                     and not entries[j].get("isMeta")
+                    and not _harness(entries[j])
                     and not _only_tool_results(content)
                     and _entry_text(content).strip()
                 )
@@ -484,8 +504,7 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                                 events.append({"ts": ts, "kind": "check", "ok": ok})
                     if entry.get("isMeta") or _only_tool_results(content):
                         continue
-                    origin = entry.get("origin") if isinstance(entry.get("origin"), dict) else {}
-                    if origin.get("kind") == "task-notification" or entry.get("isCompactSummary"):
+                    if _harness(entry):
                         events.append({"ts": ts, "kind": "harness"})
                         continue
                     text = _entry_text(content)
@@ -509,7 +528,7 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                             continue
                         said = block.get("text") if block.get("type") == "text" else None
                         if isinstance(said, str) and said.strip():
-                            asked = said.rstrip().endswith("?")
+                            asked = _ends_with_question(said)
                         if block.get("type") != "tool_use":
                             continue
                         name = block.get("name")

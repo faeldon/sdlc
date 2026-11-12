@@ -56,9 +56,9 @@ Close's report lists all of it, as `reaches`, in this repo only: whether scripts
 skills and agents, and which of setup's files, or `unknown` and why when it couldn't tell.
 
 Before it lands, a change runs its own script where it writes. In this repo, once a change edits
-`scripts/`, `ship`, `drop`, `base` and `sync` run from its worktree hand themselves to that
-worktree's `scripts/sdlc.py`, and say so (`ran the change's own code`); close has its own
-handoff. A change script that crashes hands back to the running copy with a warning, so a
+`scripts/`, `ship`, `drop`, `base`, `sync`, `preflight` and `findings` run from its worktree hand
+themselves to that worktree's `scripts/sdlc.py` before reading their arguments, so a flag the
+change adds works, and say so (`ran the change's own code`); close has its own handoff. A change script that crashes hands back to the running copy with a warning, so a
 half-built script never blocks a stage; one that runs but is wrong is skipped with
 `SDLC_OWN_SCRIPT=off` before the command. Skill text has no handoff: `/reload-plugins` it.
 

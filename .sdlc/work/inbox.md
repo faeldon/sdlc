@@ -397,17 +397,6 @@ Cost: S
 Value: low
 Raised by: 029-close-records-base (correctness)
 
-## [2026-10-27-6] [nit] preflight ignores --context, --nits, --closing and --split without --question
-
-`preflight 030 --closing 5` prints the lookup JSON and drops the flags silently; refuse them
-unless `--question` is given.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 030-ship-preflight (correctness)
-
 ## [2026-10-27-8] [nit] _inbox_commit takes eleven parameters
 
 `cmd_inbox_commit()` hands its whole state to `_inbox_commit()` to hold the lock around it; a
@@ -630,18 +619,6 @@ rule its skill lacks, or move its logic into `sdlc.py`. See .sdlc/work/047-cut-e
 Theme: permissions
 Raised 2026-11-10.
 
-## [2026-11-10-3] [bug] Membership reads skill names quoted in harness entries
-
-Found by the review of 047-cut-extra-stops.
-`metrics._membership()` searches every user entry for `<command-name>/sdlc:…`, compaction summaries
-and task notices included: a summary quoting `/sdlc:intent` can move where a change's main-branch
-run starts, and one quoting a skill (or a notice typed after close's approval) inside close's run
-ends that run early, so close's stops and tokens go uncounted. 047 keeps these entries out of
-`read_events`; membership needs the same check (`origin.kind`, `isCompactSummary`).
-Severity: med
-Paths: scripts/metrics.py
-Theme: retro
-
 ## [2026-11-12-1] [nit] A hotspot's lines: null reads as deleted for a binary or empty file
 
 `hotspots()` takes `lines` from `git grep -I -c ''`, which skips binary and empty files, so a
@@ -675,33 +652,3 @@ The parts of 2026-10-24-5 that 048-architecture-indicators left out of scope, to
 Any of the three may become a seed of its own when an intent finds it too big.
 Theme: retro
 Raised 2026-11-12.
-
-## [2026-11-12-3] [bug] A change's own script is handed off after argparse, and preflight and findings never are
-
-In the plugin's own repo, `main()` in `scripts/sdlc.py` parses the arguments before it hands
-`ship`, `drop`, `base` and `sync` to the change's own `scripts/sdlc.py`, so the running copy
-rejects a flag the change adds: at 049's ship, `sdlc.py ship 049 --fixed F1,F2 --through F2`
-failed with "unrecognized arguments" until the worktree's script was run by hand. And `preflight`
-and `findings` never hand off, so the same ship read `findings.md` with main's parser, which
-didn't know the `fix` disposition the change added. Expected: a command ship runs from a change's
-worktree runs the change's own script whenever that script differs, new flags included.
-
-Severity: low
-Paths: scripts/sdlc.py
-Introduced by: 015-own-script-handoff
-Theme: robustness
-
-## [2026-11-12-4] [bug] An answer to a question that ends with its options counts as unprompted
-
-`metrics.read_events` marks a stop `asked` only when the agent's last text ends with `?`
-(`scripts/metrics.py:512`). Every WAIT question the skills ask ends with its options instead,
-`…? (yes / edit the message)`, so answering one that isn't the stage's gate reads as an
-`unprompted` extra stop. At 049's ship, the yes to "Fix F1, then commit this, …?" and the yes to
-"Fix F2, then review again?" were both counted `unprompted` (`Sdlc-Extra: ship … unprompted=2`,
-stops=9 against a target of 6). Expected: a question whose last line ends `?` followed by its
-options in parentheses reads as asked.
-
-Severity: low
-Paths: scripts/metrics.py
-Introduced by: 047-cut-extra-stops
-Theme: retro

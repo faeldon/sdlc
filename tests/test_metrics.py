@@ -314,6 +314,58 @@ def test_each_extra_stop_has_its_kind(tmp_path: Path) -> None:
     assert s["stages"]["design"]["extra"] == sum(kinds.values())
 
 
+@pytest.mark.parametrize(
+    "text, asked",
+    [
+        ("Shall I fold it in?", True),
+        ("Fix F1, then commit this, with 049-x stamped shipped? (yes / edit the message)", True),
+        ("Fix F2, then review again? (yes / edit the findings)\n\n", True),
+        ("> `Create this as Tier 1 change 050-x? (yes / change the tier / edit a section)`", True),
+        ("**Ready to go?**", True),
+        ("Done. Next: `/sdlc:close 049`.", False),
+        ("It reads (yes / no) everywhere.", False),
+    ],
+)  # fmt: skip
+def test_a_question_ends_with_a_question_mark_its_answers_after_it_or_not(text, asked) -> None:
+    assert metrics._ends_with_question(text) is asked
+
+
+def test_answering_ship_s_question_before_its_gate_is_asked_not_unprompted(tmp_path) -> None:
+    """049's ship: two questions ending with their options, each answered, then the commit's."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:ship"),
+        asst(1, "m1", text="Fix F1, then commit this, …? (yes / edit the message)"),
+        turn(1, 1), user(2, "yes"),
+        asst(3, "m2", text="Fix F2, then review again? (yes / edit the findings)"),
+        turn(3, 1), user(4, "yes"),
+        asst(5, "m3", text="Commit this, …? (yes / edit the message)"),
+        turn(5, 1), user(6, "yes"),
+    ])  # fmt: skip
+    kinds = _summary(events)["stages"]["ship"]["kinds"]
+    assert (kinds["asked"], kinds["unprompted"]) == (2, 0)
+
+
+def test_harness_entries_never_move_where_a_change_s_run_starts_or_ends() -> None:
+    main = "main"
+    summary = user(1, f"Continued. It ran <command-name>/sdlc:intent</command-name> {SENTINEL}",
+                   main, isCompactSummary=True)  # fmt: skip
+    entries = [user(0, "unrelated work", main), summary, user(2, "more", main), user(3, "x")]
+    assert metrics._membership(entries, BRANCH, "012") == [False, False, False, True]
+    notice = user(5, "<command-name>/sdlc:close</command-name><command-args>012</command-args>",
+                  main, origin={"kind": "task-notification"})  # fmt: skip
+    entries = [user(4, "x"), notice, user(6, "elsewhere", main)]
+    assert metrics._membership(entries, BRANCH, "012") == [True, False, False]
+    close = [
+        user(4, "x"), cmd(5, "sdlc:close", "012", main), user(6, "yes", main),
+        user(7, "<task-notification>done</task-notification>", main,
+             origin={"kind": "task-notification"}),
+        user(8, "next thing", main),
+    ]  # fmt: skip
+    assert metrics._membership(close, BRANCH, "012") == [True, True, True, True, False], (
+        "a notice after close's approval doesn't end its run; what's typed next does"
+    )
+
+
 def test_no_text_leaves_a_human_event(tmp_path: Path) -> None:
     """R3: a human or harness event holds classes and flags, never what was said."""
     events = _events(tmp_path, [

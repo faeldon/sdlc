@@ -329,6 +329,18 @@ def test_question_refuses_issues_that_don_t_partition_closes(kw, why) -> None:
     assert question is None and why in said
 
 
+def test_the_question_s_flags_without_question_are_refused_not_dropped(
+    change, capsys, monkeypatch
+) -> None:
+    root, _ = change
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "preflight", "001", "--closing", "12", "--nits"])
+    assert sdlc.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--nits, --closing only word ship's question; add --question" in captured.err
+
+
 def test_question_through_the_command(change, capsys) -> None:
     root, _ = change
     assert sdlc.cmd_ship_question(root, "001", True, False, [12], [15]) == 0
