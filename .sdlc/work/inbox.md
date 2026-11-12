@@ -684,3 +684,26 @@ Paths: scripts/indicators.py, scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 048-architecture-indicators (correctness)
+
+## [2026-11-12-2] [idea] Verbosity, tool-call and test-pruning indicators for the retro loop
+
+The parts of 2026-10-24-5 that 048-architecture-indicators left out of scope, to build on the
+`architecture` block it added to `sdlc.py retro`:
+- verbosity against complexity: how much a change's code comments say, and how much the human and
+  the agent said in its conversation, set beside how complex the change is (its diff, its tier,
+  and the host's complexity measure where there is one, now `retro.indicators`), so a change that
+  commented or talked far more than its size needed stands out. Close already records the
+  conversation's tokens and turns per stage (`Sdlc-Totals`, `Sdlc-Stage`); comments come from the
+  diff;
+- tool calls: how often each tool is called in a change, by stage (by program for a shell call),
+  set beside what the calls led to (an edit kept, a check run, a finding), to show which calls are
+  most useful and which are spent. Close already names each tool prompt on the `Close` commit;
+  this counts every call, prompted or not;
+- a pruning pass for the suite: the process guide sets each test's lifetime when it is written,
+  and ship flags a test that can't fail or that only a revert could fail, but only in the diff it
+  reviews. Nothing looks at the tests already in the suite again: one whose code was rewritten,
+  one that repeats a newer test, one that now passes for the wrong reason, the slowest. Retro
+  proposes the candidates as a `tests` paydown seed, and the person decides which go.
+Any of the three may become a seed of its own when an intent finds it too big.
+Theme: retro
+Raised 2026-11-12.
