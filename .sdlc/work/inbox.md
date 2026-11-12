@@ -690,3 +690,18 @@ Severity: low
 Paths: scripts/sdlc.py
 Introduced by: 015-own-script-handoff
 Theme: robustness
+
+## [2026-11-12-4] [bug] An answer to a question that ends with its options counts as unprompted
+
+`metrics.read_events` marks a stop `asked` only when the agent's last text ends with `?`
+(`scripts/metrics.py:512`). Every WAIT question the skills ask ends with its options instead,
+`…? (yes / edit the message)`, so answering one that isn't the stage's gate reads as an
+`unprompted` extra stop. At 049's ship, the yes to "Fix F1, then commit this, …?" and the yes to
+"Fix F2, then review again?" were both counted `unprompted` (`Sdlc-Extra: ship … unprompted=2`,
+stops=9 against a target of 6). Expected: a question whose last line ends `?` followed by its
+options in parentheses reads as asked.
+
+Severity: low
+Paths: scripts/metrics.py
+Introduced by: 047-cut-extra-stops
+Theme: retro
