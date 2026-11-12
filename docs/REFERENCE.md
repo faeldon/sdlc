@@ -65,6 +65,9 @@ due_after_days = 14                         # the default: days since the oldest
 [retro]
 after_releases = 2                          # the default: releases before status says Retro due; 0 = only a major one
 evidence = ["./scripts/usage-summary.sh"]   # optional: what users did, printed for the product pass; only with a product doc
+indicators = ["./scripts/complexity.sh"]    # optional: measures only a language can tell, printed for the architecture pass
+test_paths = ["checks/"]                    # optional: the paths that are tests, replacing the conventions; `dir/` prefixes or globs
+doc_paths = ["handbook/"]                   # optional: the paths that are docs, replacing the conventions
 
 [metrics]
 transcripts = true                          # the default: close reads this repo's transcripts, numbers only
@@ -92,7 +95,7 @@ The placeholders:
 - `commands.close_cleanup`: `{id}` is the change's number.
 
 The commands `sdlc.py` runs itself (`release.after_bump`, `release.prepare`, `release.publish`,
-`retro.evidence`, a project field's `command` lookup, `archive.command`, and each acceptance
+`retro.evidence`, `retro.indicators`, a project field's `command` lookup, `archive.command`, and each acceptance
 check) run as `sh -c "<command>"` from the repo root on every platform: `/bin/sh` on macOS and
 Linux, and on Windows the `sh` on `PATH`, Git for Windows', never `cmd.exe`. So one config means
 the same thing in every session, and the same as the skills' own commands, which Claude Code runs
@@ -653,6 +656,21 @@ two retrospectives before it, by the bugs' reported dates, with a `trend` of `up
 or `unknown` when either window has fewer than five closed changes; and `important`, the window's
 Important findings with their class, beside `important_unknown`, the changes with no
 `findings.md`.
+
+Its `architecture` is where the code is going, from git alone, for any language. Each closed
+change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
+A path is tests when a directory in it is `test`, `tests`, `spec` or `__tests__`, or its name
+matches `test_*`, `*_test.*`, `*.test.*` or `*.spec.*`; docs when it ends `.md`, `.rst`, `.adoc` or
+`.txt` or sits under `docs/`; code otherwise. `retro.test_paths` and `retro.doc_paths` replace
+either rule, and `kinds` says which held. `size` is each tier's medians over the window.
+`hotspots` (the ten files the most changes touched, with the lines changed and the file's size)
+and `co_change` (pairs of files three or more changes touched together, leaving out a change of
+more than 50 files) read the last 30 closed changes, past the retrospective (`lookback`), since
+one window is too few to show structure. `largest` is the ten largest text files and `totals` each
+kind's files and lines, each now and at the last retrospective, with the growth between. Nothing
+times the gate: a host that wants it, or complexity or dependency cycles, names a command in
+`retro.indicators`, run as `retro.evidence` is (with or without a product doc) and passed through
+as `host`.
 
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one

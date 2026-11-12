@@ -163,7 +163,9 @@ def test_the_direction_doc_resolves_and_isnt_missed_before_the_first_retro(tmp_p
 
 def test_retro_after_releases_is_a_whole_number(tmp_path: Path, capsys):
     _, out = _config(tmp_path, capsys)
-    assert out["retro"] == {"after_releases": 2, "evidence": []}
+    assert out["retro"] == {
+        "after_releases": 2, "evidence": [], "indicators": [], "test_paths": [], "doc_paths": [],
+    }  # fmt: skip
     host = tmp_path / ".sdlc"
     host.mkdir()
     (host / "config.toml").write_text("[retro]\nafter_releases = 3\n", encoding="utf-8")

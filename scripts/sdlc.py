@@ -272,6 +272,13 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # Host commands printing what users did with the product, run by `retro` only while a
         # product doc exists, from the repo root. Counts and summaries, never personal data.
         "evidence": [],
+        # What the architecture pass reads besides git: host commands printing measures only a
+        # language can tell (complexity, dependency cycles), run by `retro` from the repo root.
+        "indicators": [],
+        # The paths that are tests, and docs, when the conventions (`scripts/indicators.py`)
+        # misread the host's layout: `dir/` prefixes or globs. Unset, the conventions.
+        "test_paths": [],
+        "doc_paths": [],
     },
     # What /sdlc:close records about a change, as trailers on its Close commit (scripts/metrics.py).
     "metrics": {
@@ -329,9 +336,10 @@ DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md", "fi
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
-COMMAND_LISTS = ("evidence",)
+COMMAND_LISTS = ("evidence", "indicators")
 REVIEW_LISTS = ("sensitive", "irreversible")
-LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS)
+KIND_LISTS = ("test_paths", "doc_paths")
+LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS, *KIND_LISTS)
 # Every key that holds a whole number, with its least value where that isn't 0.
 INT_KEYS = (
     "after_releases", "due_after_changes", "due_after_days", "idle_minutes", "stop_allowance",
@@ -4823,6 +4831,9 @@ RATE_MIN_CHANGES = 5
 # sharing it says nothing. Only once the share holds a pair (six changes, at a third), since in a
 # smaller window the two changes of any pair would already be more than it.
 REWORK_COMMON_SHARE = 1 / 3
+# The closed changes hotspots and co-change read, back past the retrospective's boundary: where
+# changes land is structure, and one window is too few changes to show it.
+ARCH_LOOKBACK = 30
 # Each evidence command's limits: seconds before it's stopped, and characters of output kept.
 EVIDENCE_TIMEOUT = 60
 EVIDENCE_LIMIT = 20_000
@@ -4851,6 +4862,19 @@ def _load_metrics():
 metrics = _load_metrics()
 # Bound here so `retro` reads them, and its tests can stand in for them, by these names.
 _project_dirs = metrics._project_dirs
+
+
+def _load_indicators():
+    """`scripts/indicators.py`, the architecture pass's counts, by path like `metrics.py`."""
+    spec = importlib.util.spec_from_file_location(
+        "sdlc_indicators", PLUGIN_DIR / "scripts" / "indicators.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+indicators = _load_indicators()
 
 
 def first_paragraph(body: str, heading: str) -> str:
@@ -5662,6 +5686,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     since = last_retrospective(home, trunk)
     changes = closed_changes(home, since["sha"] if since else None, trunk)
     problems: list[str] = [] if trunk else [trunk_refusal(home, trunk)]
+    kind = _kind(cfg)
     touched: dict[str, set[str]] = {}
     # Ship's context pass edits these on every change by design, so sharing them isn't rework.
     every_change = {*cfg["docs"]["context"], cfg["docs"]["process"], cfg["docs"]["policy"]}
@@ -5669,28 +5694,25 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         problems += rec.pop("problems")
         # A change ships as one commit or several, and its size is all of them: its branch from
         # where it started. Without that start, the last commit still says what it touched.
-        base = _change_base(home, rec["name"], rec["sha"], rec["close_sha"])
-        if base:
-            numstat = _git(home, "diff", "--numstat", "--no-renames", base, rec["sha"]) or ""
-        else:
-            numstat = _git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
+        base, rows = _change_rows(home, rec)
+        if not base:
             name = rec["name"]
             problems.append(
                 f"{name}: no commit holds {work_rel(home)}/{name}/intent.md, so its size is unknown"
             )
-        files, lines = [], 0
-        for row in numstat.splitlines():
-            parts = row.split("\t")
-            if len(parts) == 3:
-                files.append(parts[2])
-                lines += sum(int(n) for n in parts[:2] if n.isdigit())
+        files = [path for path, _, _ in rows]
+        lines = sum((added or 0) + (deleted or 0) for _, added, deleted in rows)
         # A change's own folder is its alone; the code and docs around it are what reworks.
         touched[rec["name"]] = {
             f for f in files if not f.startswith(CHANGE_FOLDERS) and f not in every_change
         }
+        size = indicators.change_size(rows, kind)
         rec.update(
             files=len(files) if base else None,
             lines=lines if base else None,
+            added=size["added"] if base else None,
+            deleted=size["deleted"] if base else None,
+            by_kind=size["by_kind"] if base else None,
             days_open=_days_between(rec["created"], rec["close_date"]),
             release=_release_of(home, cfg, rec["sha"]),
         )
@@ -5775,6 +5797,71 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,
         "prose": prose_metrics(home, cfg),
+        "architecture": _architecture(home, cfg, since, changes, kind),
+    }
+
+
+def _change_rows(home: Path, rec: dict) -> tuple[str | None, list]:
+    """A closed change's numstat rows: its whole branch from where it started, or, with no start,
+    its last commit alone. The start comes first, None when it couldn't be found."""
+    base = _change_base(home, rec["name"], rec["sha"], rec["close_sha"])
+    if base:
+        numstat = _git(home, "diff", "--numstat", "--no-renames", base, rec["sha"]) or ""
+    else:
+        numstat = _git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
+    return base, indicators.numstat_rows(numstat)
+
+
+def _kind(cfg: dict):
+    """A path's kind (code, tests or docs): `retro.test_paths` and `retro.doc_paths` where set,
+    the conventions in `scripts/indicators.py` where not."""
+    tests, docs = cfg["retro"]["test_paths"], cfg["retro"]["doc_paths"]
+    is_tests = (lambda p: bool(risk_paths([p], tests))) if tests else indicators.is_test
+    is_docs = (lambda p: bool(risk_paths([p], docs))) if docs else indicators.is_doc
+    return lambda p: indicators.classify(p, is_tests, is_docs)
+
+
+def _line_counts(home: Path, ref: str) -> dict[str, int]:
+    """Lines per text file at `ref`, in one git call."""
+    return indicators.grep_counts(_git(home, "grep", "-I", "-c", "", ref) or "", ref)
+
+
+def _architecture(
+    home: Path, cfg: dict, since: dict | None, changes: list[dict], kind
+) -> dict | None:
+    """What the architecture pass reads: size per tier over the window; hotspots and co-change
+    over the last `ARCH_LOOKBACK` closed changes, past the boundary; the largest files and each
+    kind's totals now and at the last retrospective; and the host's `retro.indicators` output,
+    through `_evidence()`. None without a base branch."""
+    trunk = cfg["git"]["base"]
+    if not trunk:
+        return None
+    register = f"{work_rel(home)}/{INBOX}"
+
+    def skip(path: str) -> bool:
+        return path.startswith(CHANGE_FOLDERS) or path == register
+
+    recent = closed_changes(home, None, trunk, read=False)[-ARCH_LOOKBACK:]
+    lookback = [_change_rows(home, rec)[1] for rec in recent]
+    now = _line_counts(home, trunk)
+    then = _line_counts(home, since["sha"]) if since else None
+    tests, docs = cfg["retro"]["test_paths"], cfg["retro"]["doc_paths"]
+    return {
+        "lookback": {
+            "changes": len(recent),
+            "first": recent[0]["name"] if recent else None,
+            "last": recent[-1]["name"] if recent else None,
+        },
+        "kinds": {"tests": tests or "conventions", "docs": docs or "conventions"},
+        "size": indicators.size_by_tier(changes),
+        "hotspots": indicators.hotspots(lookback, now, skip),
+        "co_change": indicators.co_change(lookback, skip),
+        "largest": indicators.largest(now, then, skip),
+        "totals": {
+            "now": indicators.totals(now, kind, skip),
+            "then": None if then is None else indicators.totals(then, kind, skip),
+        },
+        "host": _evidence(home, cfg["retro"]["indicators"]),
     }
 
 

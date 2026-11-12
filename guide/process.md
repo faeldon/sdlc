@@ -479,7 +479,10 @@ A repo says here what its scans watch for.
 From the main checkout, when `status` says Retro due or the direction is unclear. `sdlc.py retro`
 counts everything since the last `Retrospective YYYY-MM-DD` commit: the changes closed and their
 tiers, impacts, sizes and problems, rework, open changes and seeds, releases, and how large each
-skill is. The skill makes four passes over that and the docs: **cost** (prose doing what a script could),
+skill is. For the architecture pass it adds where the code is going: each change's size as code,
+tests and docs, the files most changes touch and the pairs they touch together, the largest files
+and how each kind has grown since the last retrospective, and whatever the host's
+`retro.indicators` commands print. The skill makes four passes over that and the docs: **cost** (prose doing what a script could),
 **architecture**, **process** (the signals below) and **direction** (goals, milestones, the next
 major release). Every finding becomes a seed, an intent title, or is dropped with its reason. After
 one approval it rewrites the direction doc (`docs.direction`) and appends the seeds, and

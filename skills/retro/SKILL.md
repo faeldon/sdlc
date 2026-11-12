@@ -70,6 +70,14 @@ What `retro` gives:
   the changes with no `findings.md` to read.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
+- `architecture`: where the code is going, from git. Each change in `changes` carries `added`,
+  `deleted` and `by_kind` (`code`, `tests`, `docs`, told apart as `kinds` says: the conventions,
+  or the host's `retro.test_paths` and `retro.doc_paths`), and `size` gives each tier's medians
+  over the window. `hotspots` (the files the most changes touched) and `co_change` (pairs three or
+  more changes touched together) read the last 30 closed changes, past `since` (`lookback`).
+  `largest` gives the biggest files and `totals` each kind's files and lines, both now and at the
+  last retrospective (`then`, `growth`; null on a first one). `host` is a row per
+  `retro.indicators` command, as `evidence` is: what it means is the host's.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
   `done`, `dropped` or `revised`), its format `problems`, the `next_ids` to give new ones, and
   `milestones`: for each open milestone, what every seed and change on its `Groups:` line became
@@ -141,6 +149,11 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 2. **Architecture.** Structural problems the counts or the docs point at: one file or function
    doing several jobs, a boundary missing (something wired in where it should be behind an
    interface), the same logic in two places. Name the files and say what shape would fix it.
+   Each finding cites the `architecture` number behind it: a hotspot, a `co_change` pair, a
+   file's `growth`, a kind's `totals` against `then`, a `host` row. A hotspot or growing code file
+   that `rework_common` or a coupled pair backs is weighed for a split; a pair of a code file and
+   its own test or doc is expected, not coupling. A finding with no number behind it says it rests
+   on reading alone. A lock or generated file in `largest` is named and passed over.
    A code file in `rework_common` is one most changes had to touch: say whether that is a
    boundary missing.
 3. **Process.** The process doc's signals, computed: change age, `rework` (naming what

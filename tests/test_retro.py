@@ -155,7 +155,7 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     out = json.loads(capsys.readouterr().out)
     assert set(out) >= {
         "since", "changes", "dropped", "dropped_at_counts", "problems", "rework", "rework_common",
-        "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
+        "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose", "architecture",
     }  # fmt: skip
     assert _state(root) == before
 
@@ -1138,6 +1138,101 @@ def test_nothing_but_retro_runs_evidence(tmp_path: Path, capsys, monkeypatch) ->
     capsys.readouterr()
     _retro(root)
     assert (root / "ran-evidence").exists()
+
+
+# ---------------------------------------------------------------- architecture
+
+
+def _config(root: Path, text: str) -> None:
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "config.toml").write_text(text, encoding="utf-8")
+
+
+def test_each_change_is_sized_by_kind(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/a.py", "tests/test_a.py", "docs/a.md"))
+    (rec,) = _retro(root)["changes"]
+    assert rec["files"] == 4  # the intent too, as before
+    assert (rec["added"] + rec["deleted"], rec["deleted"]) == (rec["lines"], 0)
+    assert rec["by_kind"]["code"] == {"files": 1, "added": 1, "deleted": 0}
+    assert rec["by_kind"]["tests"]["files"] == 1
+    assert rec["by_kind"]["docs"]["files"] == 2
+
+
+def test_the_hosts_paths_replace_the_conventions(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _config(root, '[retro]\ntest_paths = ["checks/"]\ndoc_paths = ["*.txt"]\n')
+    _close(root, "001-reopen-drafts", files=("checks/a.sh", "tests/test_a.py", "notes.txt"))
+    out = _retro(root)
+    by_kind = out["changes"][0]["by_kind"]
+    assert by_kind["tests"]["files"] == 1
+    assert by_kind["docs"]["files"] == 1
+    # tests/test_a.py, the intent (a .md, no longer docs) and the config the change commits
+    assert by_kind["code"]["files"] == 3
+    assert out["architecture"]["kinds"] == {"tests": ["checks/"], "docs": ["*.txt"]}
+
+
+def test_hotspots_look_back_past_the_retrospective_while_size_stays_in_it(tmp_path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/a.py",))
+    _record(root)
+    _close(root, "002-draft-titles", files=("src/a.py", "src/b.py"))
+    arch = _retro(root)["architecture"]
+    assert arch["lookback"] == {
+        "changes": 2,
+        "first": "001-reopen-drafts",
+        "last": "002-draft-titles",
+    }
+    assert arch["hotspots"][0] == {"file": "src/a.py", "changes": 2, "lines_changed": 2, "lines": 2}
+    assert not any(h["file"].startswith(".sdlc/work/") for h in arch["hotspots"])
+    assert arch["size"]["1"]["changes"] == 1
+
+
+def test_growth_is_against_the_last_retrospective_and_null_without_one(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/a.py",))
+    arch = _retro(root)["architecture"]
+    assert arch["totals"]["then"] is None
+    assert all(r["growth"] is None for r in arch["largest"])
+    _record(root)
+    _close(root, "002-draft-titles", files=("src/a.py",))
+    arch = _retro(root)["architecture"]
+    (row,) = [r for r in arch["largest"] if r["file"] == "src/a.py"]
+    assert (row["lines"], row["then"], row["growth"]) == (2, 1, 1)
+    assert arch["totals"]["now"]["code"] == {"files": 1, "lines": 2}
+    assert arch["totals"]["then"]["code"] == {"files": 1, "lines": 1}
+
+
+def test_the_hosts_indicators_run_without_a_product_doc(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    assert _retro(root)["architecture"]["host"] == []
+    _config(root, '[retro]\nindicators = ["echo 7 cycles"]\n')
+    (row,) = _retro(root)["architecture"]["host"]
+    assert (row["output"], row["error"]) == ("7 cycles\n", None)
+    assert _retro(root)["product"] is None
+
+
+def test_the_architecture_block_stays_small_however_large_the_repo(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    for n in range(200):
+        path = root / "src" / f"m{n:03d}.py"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("x\n" * (n + 1), encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "many files")
+    for n in range(40):
+        files = tuple(f"src/m{(n * 5 + k) % 200:03d}.py" for k in range(5))
+        _close(root, f"{n + 1:03d}-change-{n}", files=files)
+    arch = _retro(root)["architecture"]
+    assert arch["lookback"]["changes"] == sdlc.ARCH_LOOKBACK
+    assert len(json.dumps(arch)) < 8000
+
+
+def test_no_base_branch_means_no_architecture(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    cfg = sdlc.load_config(root)[0]
+    cfg["git"]["base"] = None
+    assert sdlc._architecture(root, cfg, None, [], sdlc._kind(cfg)) is None
 
 
 # ---------------------------------------------------------------- retro-commit and outcomes

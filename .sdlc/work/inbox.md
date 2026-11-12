@@ -40,41 +40,6 @@ velocity figure, which invites optimising the number. A dashboard is optional an
 report: the process doc keeps "no dashboard" for the signals. Raised 2026-10-24.
 Theme: retro
 
-## [2026-10-24-5] [idea] Architecture indicators for the retro loop
-
-A standard set the plugin can compute from git for any repo, for the retrospective's
-architecture pass:
-- how much code each change generated, by tier and per closed change (lines and files added,
-  changed and deleted, and code against tests against docs);
-- churn hotspots (the files most changes touch, weighted by size; today `scripts/sdlc.py`,
-  touched by nearly every change);
-- files that change together;
-- the largest files and how they grow;
-- the test suite's size and the gate's runtime, and how both grow;
-- verbosity against complexity: how much a change's code comments say, and how much the human
-  and the agent said in its conversation, set beside how complex the change is (its diff, its
-  tier, and the host's complexity measure where there is one), so a change that commented or
-  talked far more than its size needed stands out. Close already records the conversation's
-  tokens and turns per stage (`Sdlc-Totals`, `Sdlc-Stage`); comments come from the diff. If this
-  makes the seed too big, it goes into a seed of its own;
-- tool calls: how often each tool is called in a change, by stage (by program for a shell call),
-  set beside what the calls led to (an edit kept, a check run, a finding), to show which calls
-  are most useful and which are spent. Close already names each tool prompt on the `Close`
-  commit; this counts every call, prompted or not. If this makes the seed too big, it goes into
-  a seed of its own.
-
-The suite gets a pruning pass too: the process guide sets each test's lifetime when it is written,
-and ship flags a test that can't fail or that only a revert could fail, but only in the diff it
-reviews. Nothing looks at the tests already in the suite again: one whose code was rewritten, one
-that repeats a newer test, one that now passes for the wrong reason, the slowest. Retro proposes
-the candidates as a `tests` paydown seed, and the person decides which go.
-
-Language-specific measures (complexity, dependency cycles) come from the host through a configured
-command, the way `commands.scan` works, since the plugin knows nothing about what a host builds.
-Raised 2026-10-24.
-Theme: retro
-Priority: high
-
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
 Close lands a change by fast-forwarding `main` locally, and only publish pushes. A team that
@@ -708,3 +673,14 @@ ends that run early, so close's stops and tokens go uncounted. 047 keeps these e
 Severity: med
 Paths: scripts/metrics.py
 Theme: retro
+
+## [2026-11-12-1] [nit] A hotspot's lines: null reads as deleted for a binary or empty file
+
+`hotspots()` takes `lines` from `git grep -I -c ''`, which skips binary and empty files, so a
+much-edited image or empty file shows `lines: null`, which the docstring calls "once it is gone".
+Say which, or count those files' presence from `git ls-tree`.
+Theme: retro
+Paths: scripts/indicators.py, scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 048-architecture-indicators (correctness)

@@ -171,7 +171,10 @@ migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
 `.sdlc/work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id). It
 counts closed and dropped changes, rework (later changes sharing code), the skills' size, and,
 with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
-they run), so `retro` is not in `READ_ONLY`. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
+they run, `retro.indicators`' too), so `retro` is not in `READ_ONLY`. Its `architecture` block
+(`_architecture()`) is counted by `scripts/indicators.py`, pure functions over git's output text,
+loaded by path like `metrics.py`, with no subprocess and no import of `sdlc.py`: `sdlc.py` runs git
+and hands it the text. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
 and reports format problems rather than raising. The product doc (`docs.product`, off while
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.

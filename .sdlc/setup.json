@@ -38,7 +38,10 @@
     "release.tag",
     "release.version_files",
     "retro.after_releases",
+    "retro.doc_paths",
     "retro.evidence",
+    "retro.indicators",
+    "retro.test_paths",
     "review.irreversible",
     "review.sensitive"
   ],
@@ -46,7 +49,7 @@
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:930c7b1202db3ee7"
+      "guide": "sha256:8bd20d2479944b4e"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",

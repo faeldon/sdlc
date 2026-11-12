@@ -24,6 +24,7 @@ SDLC_PY = REPO / "scripts" / "sdlc.py"
 SCRIPTS = [
     SDLC_PY,
     REPO / "scripts" / "metrics.py",
+    REPO / "scripts" / "indicators.py",
     *sorted((REPO / "scripts" / "trackers").glob("*.py")),
     REPO / "plugins" / "factory" / "scripts" / "factory.py",
 ]
