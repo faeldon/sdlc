@@ -23,7 +23,9 @@ earlier round already answered) and `settled` (what those answers were). Read `i
 ## How to judge each change
 
 Keep a change only when the code shows it: the defect is there at the line named, or a requirement
-it names really has no code or no test. You may run the repo's tests to settle a claim. Drop it,
+it names really has no code or no test. You may run the repo's tests to settle a claim, but never
+a `checks.md` section's commands, which only `sdlc.py accept` runs, under a person's prompt: settle
+a claim about a check by reading it. Drop it,
 with why, when:
 
 - the code doesn't do what it says, or already does what it asks;

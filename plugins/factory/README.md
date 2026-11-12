@@ -93,7 +93,7 @@ options and its recommendation. They're gathered into the change's ledger,
 | `builder` | writes `plan.md` and the code, test first, in slices; reworks | yes |
 | `reviewer-code` | correctness against the spec, contract, readability, cost | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
-| `reviewer-test` | every requirement proven by a test that can fail | no |
+| `reviewer-test` | every requirement proven by a test that can fail; reads `checks.md`, never runs it | no |
 | `reviewer-behaviour` | runs the gate and the spec's end-to-end path; reads `checks.md`, never runs it | no |
 | `verifier` | keeps or drops each requested change, checked against the code | no |
 | `approver` | READY or ESCALATE, for the person at ship | no |

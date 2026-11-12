@@ -29,8 +29,12 @@ The change folder and round in the prompt. Read `spec.md` (Tier 2) or the intent
   is a test that can't fail, and a finding.
 - **How each test could fail.** A test in the suite that only reverting the change could fail (a
   file moved, a key renamed) is an acceptance check: ask for it as a section of the change's
-  `checks.md` instead of a test in the suite, and run each section's `sh` block yourself from the
-  repo root; it must exit 0 and leave the tree unchanged. A requirement proved that way is covered.
+  `checks.md` instead of a test in the suite. **Never run a check yourself**, nor anything copied
+  from one: an agent may have written them, and `/sdlc:ship` runs them with `sdlc.py accept` after
+  a person has seen each one. Read each `## ` section and judge it as you would a test: would it
+  fail without the change, can it fail at all, does it leave the tree unchanged. One you expect to
+  fail against the code as it stands, or one that can't fail, is a CHANGE. A requirement a sound
+  check proves is covered.
 - **The edge cases the spec names**: empty, missing, boundary, error path, a second run of
   something meant to run once.
 - **The right level.** Pure logic in unit tests; a boundary crossed in an integration test; mocks
@@ -65,5 +69,5 @@ When a requirement can't be tested as written (it isn't checkable, or two requir
 raise it as `- DECISION: [blocking] ...` with the options and your recommendation, rather than
 guessing what it meant. Read `decisions.md` first: an answered decision is settled.
 
-Then `## Notes`: lower-priority gaps, what is well covered, and the test command you ran with its
-count.
+Then `## Notes`: lower-priority gaps, what is well covered, each check in `checks.md` and what you
+expect of it, and the test command you ran with its count.

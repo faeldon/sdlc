@@ -693,6 +693,7 @@ AGENT_TOOLS = {
     "builder": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
     "reviewer-code": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-security": {"Read", "Grep", "Glob", "Bash"},
+    # It runs the suite; never checks.md, which it reads like a test.
     "reviewer-test": {"Read", "Grep", "Glob", "Bash"},
     # It runs the gate and the spec's path; never checks.md (`accept` does, under a prompt).
     "reviewer-behaviour": {"Read", "Grep", "Glob", "Bash"},
@@ -791,6 +792,28 @@ def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None
     assert "Never write the evidence yourself" in stop, (
         "the agent re-runs; the session never fakes it"
     )
+
+
+# What each agent that reads checks.md says instead of running it.
+NEVER_RUNS_CHECKS = {
+    "reviewer-behaviour": "**Never run them yourself**",
+    "reviewer-test": "**Never run a check yourself**",
+    "verifier": "but never a `checks.md` section's commands",
+}
+
+
+def test_no_agent_but_the_builder_runs_checks() -> None:
+    """An agent wrote checks.md's commands, so only `accept` runs them, under a person's prompt:
+    every agent with Bash but the builder, which writes them, that names checks.md is told never
+    to run one, and none is told to run a section."""
+    for name, tools in AGENT_TOOLS.items():
+        if "Bash" not in tools or name == "builder":
+            continue
+        text = " ".join((FACTORY / "agents" / f"{name}.md").read_text(encoding="utf-8").split())
+        assert "run each section" not in text, name
+        if "checks.md" in text or name in NEVER_RUNS_CHECKS:
+            assert NEVER_RUNS_CHECKS.get(name, "\0") in text, name
+            assert "accept" in text, name
 
 
 def test_the_eval_and_the_review_write_reports_and_never_the_register() -> None:

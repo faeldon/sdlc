@@ -314,7 +314,8 @@ verifier's `verified.md`, and the run's depth comes from the diff against the ba
 `sdlc.py`'s by a test, like its regexes: `verdicts` writes nothing, so a run that reviewed at the
 full depth stays full by what its rounds hold, never by a state file. A builder report and a
 behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
-checks; the behaviour check never runs `checks.md`, which only `accept` runs, under a prompt.
+checks; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
+under a prompt (`test_no_agent_but_the_builder_runs_checks`).
 The eval and the review read what `sdlc.py` writes (the register's bugs, `Sdlc-Fixes` and
 `Sdlc-Base` on `Close` commits) through copies of its parsing, each pinned by a test, write only
 under `.sdlc/reports/`, a folder that ignores itself, and never write the register: a review's

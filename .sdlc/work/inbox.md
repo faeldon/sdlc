@@ -450,15 +450,6 @@ Cost: S
 Value: low
 Raised by: 037-escaped-bugs-tune-review (correctness)
 
-## [2026-11-04-4] [idea] The test reviewer runs checks.md, which only accept should
-
-`plugins/factory/agents/reviewer-test.md` tells the test reviewer to run each `checks.md`
-section's `sh` block itself; the behaviour check (039) is told never to, since an agent may have
-written them and `/sdlc:ship`'s `accept` runs them under a prompt. Make the two agree. See
-.sdlc/work/039-factory-evidence-and-replay/notes.md.
-Theme: factory
-Priority: high
-
 ## [2026-11-04-5] [nit] The factory's review proposes severities it may not be able to read
 
 `/sdlc-factory:review` proposes each bug's `Severity:` from the process doc's words, but a host
