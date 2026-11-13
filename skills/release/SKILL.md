@@ -3,6 +3,7 @@ name: release
 description: Cut a release from the changes closed since the last one — list them from git history with the impact each recorded at ship, propose the version they add up to, and after one approval bump the version files, add the notes to the changelog if one is set, commit "Release X.Y.Z" and tag it, then push main and the tag when git.push names release. Use from the main checkout after a batch of /sdlc:close runs, when it's time for users to get them. Not for a single change still open (ship and close it first), and never for running the host's publish command, which is /sdlc:publish.
 argument-hint: "[X.Y.Z — only for a version other than the computed one, e.g. 1.0.0]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py unreleased *)'
@@ -96,6 +97,12 @@ with `…and tag it <tag>, then push <git.base> and <tag> to <remote>?` in place
 pushed.`: a pushed release reaches whoever installs from the remote. With `cases`, say where the
 skills' cases stand before the options: `…with the skills' cases last run in full <date>, <passed
 or the cases that failed>` or `…with the skills' cases never run in full`.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this release only. Another version
 is a new plan: run Step 1 again with `--version` and ask again.

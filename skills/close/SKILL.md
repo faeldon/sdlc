@@ -3,6 +3,7 @@ name: close
 description: Close a shipped change from the session you're in — bring the session back to the main checkout, fast-forward main to the change's branch, mirror its folder to the tracker (its GitHub issue by default), remove the folder from main in a "Close NNN-slug" commit, remove its worktree and branch, push main when git.push names close (a GitHub repo's default), then run the cleanup command the repo names for a closed change when commands.close_cleanup_runs says close runs it, or hand it to the human. Use after /sdlc:ship has committed the change in its worktree, or to finish a drop /sdlc:drop committed. Not for a change that is neither shipped nor dropped (it refuses), not for starting a drop (that's /sdlc:drop), and never for a push git.push doesn't name, tagging, or running the cleanup from the skill's own bash.
 argument-hint: "[NNN — the change; default: the worktree this session is in]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - ExitWorktree
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py close *)'
@@ -98,6 +99,12 @@ with `…delete its branch, then push <git.base> to <remote>?`: the yes covers t
 commit shown, and they can't be taken back once pushed. When `cleanup.runs` is true, end with
 `…, then run <cleanup.command>?`, after the push when there is one, the command word for word:
 the yes covers it, for this change only, and what it deletes isn't in git.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 

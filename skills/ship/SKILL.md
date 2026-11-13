@@ -3,6 +3,7 @@ name: ship
 description: Close out a change — run the repo's gate and any build check it configures, review the diff against the repo's review passes, including the change's own folder, then commit the code and the folder together (Stage 5 of the repo's process doc). Use when work on a change to this repo's code, config or tooling is finished and ready to land. It never pushes and never deploys; use /sdlc:status to find the change id first if you don't have it.
 argument-hint: "[change id, e.g. 003]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -430,6 +431,12 @@ What each answer does:
   and Step 6 lands it as it stands.
 - **`edit the message`** or **`edit the findings`:** a different set to fix, a disposition changed,
   or the message reworded; the file is rewritten and the question asked again.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
 `git push` — that is not part of this skill under any circumstances. The approval covers the undone

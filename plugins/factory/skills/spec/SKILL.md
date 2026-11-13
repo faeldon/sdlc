@@ -3,6 +3,7 @@ name: spec
 description: Have the factory's spec-writer agent draft a Tier 2 change's spec.md from its intent, show the draft, and after one approval write it and advance the change to stage design — the factory's stand-in for /sdlc:spec. Use from the change's own worktree, after /sdlc:intent, when the repo has sdlc-factory installed and you want an agent to draft the spec. Not for a Tier 1 change (its intent's Approach is the spec), not for one already past stage plan, and not for writing the spec by hand, which is /sdlc:spec.
 argument-hint: "[NNN — the change; this worktree's]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Edit
   - Agent
@@ -54,6 +55,12 @@ person is theirs to answer now, or to leave open in the intent.
 Ask literally:
 
 > `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement / rethink the design)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do not write until the person says yes.** Approval is per-invocation, never standing. A revision
 is a new draft: send it back to the agent with the person's words, show it, and ask again.

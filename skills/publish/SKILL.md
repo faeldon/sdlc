@@ -3,6 +3,7 @@ name: publish
 description: Publish the release /sdlc:release made — push main and its tag to the configured remote, never forced, then run the host's own publish command if it names one — or, once that tag is on the remote, push what has landed on main since, after one approval. Use from the main checkout once a release is tagged and looked at, or when status says Unpushed. Not for making the release (that's /sdlc:release), not with changes closed onto main after an unpushed release (release again), and never to force a remote that has moved.
 argument-hint: ""
 allowed-tools:
+  - AskUserQuestion
   - Read
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py publish *)'
@@ -62,13 +63,19 @@ here** and say what each needs.
 
 Ask literally:
 
-> `Publish <tag>: push <git.base> and <tag> to <remote>, then run <command>? This can't be taken back. (yes / no)`
+> `Publish <tag>: push <git.base> and <tag> to <remote>, then run <command>? This can't be taken back. (no / yes)`
 
 Leave out `, then run <command>` when `publish command` isn't in `will_run`, and `and <tag>`
 when `push tag` isn't. When `prepared` is set, say `…, then run <command> to upload what was
 prepared, shown above?`. When `will_run` is `push <git.base>` alone, ask instead:
 
-> `Push <git.base> to <remote>: the <n> commits shown, closing <issues>? This can't be taken back. (yes / no)`
+> `Push <git.base> to <remote>: the <n> commits shown, closing <issues>? This can't be taken back. (no / yes)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this release and this remote only.
 

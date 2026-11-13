@@ -205,6 +205,54 @@ def test_writing_skills_carry_exactly_one_wait_gate(name: str) -> None:
     assert len(waits) == 1, f"{name}: expected 1 WAIT heading, found {waits}"
 
 
+def _wait_section(name: str) -> str:
+    """A gated skill's WAIT step, from its heading to the next step's."""
+    text = frontmatter.load(BY_ID[name]).content
+    after = re.split(r"(?m)^#+ .*WAIT.*$", text, maxsplit=1)[1]
+    return re.split(r"(?m)^## ", after, maxsplit=1)[0]
+
+
+# A gate's literal question: backticked, its `?` (a short note may follow: "This can't be taken
+# back."), then the answers it offers in parentheses.
+GATE_QUESTION_RE = re.compile(r"`([^`]*\?[^`?()]*) \(([^()`]*)\)`")
+
+
+@pytest.mark.parametrize("name", sorted(GATED))
+def test_every_wait_asks_in_a_dialog(name: str) -> None:
+    """The gate is the plugin's main moment, and a line of text at the end of a draft is its least
+    prominent; on a phone its answers aren't even offered. Each WAIT asks in a dialog, approves
+    only on an explicit yes, and falls back to the text where no dialog can be shown."""
+    wait = _wait_section(name)
+    flat = " ".join(wait.split())
+    assert "Ask it with `AskUserQuestion`" in flat, name
+    assert "Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves" in flat, name
+    assert "dismissed, empty, timed out or refused is a no" in flat, name
+    assert "If the tool is unavailable or refused, ask the same text" in flat, name
+    assert "AskUserQuestion" in frontmatter.load(BY_ID[name])["allowed-tools"], name
+
+
+@pytest.mark.parametrize("name", sorted(GATED))
+def test_every_gate_offers_two_to_four_answers(name: str) -> None:
+    """`AskUserQuestion` takes 2–4 options: every question a WAIT asks offers that many, each one an
+    option, so none is dropped or folded away; a question without its answers has no options."""
+    wait = _wait_section(name)
+    # A `…` clause changes part of a question, and keeps its answers.
+    asked = re.findall(r"`([^`…]+\?)`", wait)
+    assert not asked, f"{name}: a question without its answers: {asked}"
+    found = GATE_QUESTION_RE.findall(wait)
+    assert found, f"{name}: no question with its answers"
+    for question, answers in found:
+        options = [a.strip() for a in answers.split(" / ")]
+        assert 2 <= len(options) <= 4 and all(options), f"{name}: {question} ({answers})"
+        assert "Recommended" not in answers, f"{name}: a gate never nudges toward yes"
+
+
+def test_publish_offers_no_first() -> None:
+    """Publish's push and upload can't be taken back: a stray tap on its dialog never approves."""
+    found = GATE_QUESTION_RE.findall(_wait_section("sdlc:publish"))
+    assert found and all(answers == "no / yes" for _, answers in found)
+
+
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)
 def test_skills_run_the_script_through_uv(skill: Path) -> None:
     """The script declares its own dependencies, so every call goes through `uv run --script`,
@@ -405,6 +453,7 @@ def test_retro_proposes_review_changes_as_seeds_and_never_writes_them() -> None:
     for word in ("`on_paths`", "`unknown`", "`rate`", "`important`", "`- **lead**`", "seed"):
         assert word in process, word
     assert frontmatter.load(skill)["allowed-tools"] == [
+        "AskUserQuestion",
         "Read",
         "Write",
         "Edit",

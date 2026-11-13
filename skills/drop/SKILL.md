@@ -3,6 +3,7 @@ name: drop
 description: Drop a change that won't ship, from its worktree — record why in its intent, commit its folder on its branch, then close it - mirror it to the tracker (its GitHub issue, closed as not planned), record a "Drop NNN-slug" commit on main that keeps main's files and the branch's history, and remove its worktree and branch, behind one approval. Use when a change open in a worktree is being abandoned at any stage. Not for a shipped change (that's /sdlc:close), not for a change with other uncommitted work (it refuses), and never for pushing or deleting anything by force.
 argument-hint: "[NNN — the change; default: the worktree this session is in] [why it's dropped]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Edit
   - ExitWorktree
@@ -72,6 +73,12 @@ Ask literally:
 
 `<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave out `archive it to <where> and close it as not
 planned, `.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 

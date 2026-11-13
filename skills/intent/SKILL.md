@@ -3,6 +3,7 @@ name: intent
 description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work.
 argument-hint: "[what the change is about, or the path to a brief file]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -187,6 +188,12 @@ For **Tier 1**, end it with plan mode, so the person doesn't have to ask for it 
 `…off <git.base>, then start plan mode? (yes / yes, without plan mode / change the tier / edit a
 section)`. Starting plan mode approves nothing; the plan is approved when plan mode ends. A Tier 2
 question stays as it is: `/sdlc:spec` comes first.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do not write anything until the human says go.** Approval is per-invocation, never standing — the
 same gate `/sdlc:spec` and `/sdlc:ship` use, for the same reason.

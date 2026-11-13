@@ -3,6 +3,7 @@ name: idea
 description: File an idea in .sdlc/work/inbox.md, or edit or retire one — takes the idea in the person's own words, checks the register for one that already covers it, drafts the entry with an id from next-entry (and an After line when it follows another seed), and after one approval commits the inbox alone on the base branch as "File <id>", "Update <id>" or "Retire <id>". Use from any checkout, a change's worktree included, when someone has an idea for later; `--themes`, from the main checkout, proposes a Theme line for every idea and bug lacking one, when status says many do. Not for something already broken (/sdlc:bug files it), not for building the idea (/sdlc:intent <id> opens the change), and never for editing code.
 argument-hint: "[the idea, an entry's id to edit or retire, or --themes]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -118,10 +119,16 @@ Ask literally, with the entry's id and what happens to it:
 
 > `Append this idea to .sdlc/work/inbox.md as <id> and commit it as "File <id>"? (yes / edit it / no)`
 
-For an edit: `Change <id> in .sdlc/work/inbox.md as shown and commit it as "Update <id>"?`; for a
-retirement: `Remove <id> from .sdlc/work/inbox.md as <reason> and commit it as "Retire <id>"?`;
+For an edit: `Change <id> in .sdlc/work/inbox.md as shown and commit it as "Update <id>"? (yes / no)`; for a
+retirement: `Remove <id> from .sdlc/work/inbox.md as <reason> and commit it as "Retire <id>"? (yes / no)`;
 for `--themes`: `Add these <n> Theme: lines to .sdlc/work/inbox.md and commit them as "Update
 <ids>"? (yes / edit a row / no)`.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Write nothing until the human says yes.** Approval is for this entry only, or for `--themes`, the
 rows shown.

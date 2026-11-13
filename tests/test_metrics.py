@@ -474,6 +474,78 @@ def test_the_factorys_build_gate_comes_first_and_its_decisions_are_questions(tmp
     assert s["totals"]["required"] == 5
 
 
+def chose(t: float, ident: str, answer: str | None, branch: str = BRANCH, error: bool = False):
+    """A dialog's result: the answer the person chose, or none (dismissed, timed out empty)."""
+    answers = {"Write this?": answer} if answer is not None else {}
+    return result(t, ident, error, branch, toolUseResult={"answers": answers})
+
+
+def test_a_gate_answered_in_a_dialog_is_the_gate_and_other_dialogs_questions(tmp_path) -> None:
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:intent"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]), chose(2, "q1", "O3 (Few stops)"),
+        asst(3, "m2", [tool("AskUserQuestion", "q2")]), chose(4, "q2", "yes"),  # the WAIT
+        turn(5, 5),
+    ])  # fmt: skip
+    assert [e["reply"] for e in events if e["kind"] == "answer"] == ["other", "approve"]
+    intent = _summary(events)["stages"]["intent"]
+    assert (intent["gate"], intent["question"], intent["extra"]) == (1, 1, 0)
+    assert intent["reply"] == ["approve"]
+
+
+def test_a_dialog_nobody_answered_is_a_question_and_never_the_gate(tmp_path) -> None:
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]), chose(2, "q1", None),  # dismissed
+        asst(3, "m2", [tool("AskUserQuestion", "q2")]), chose(4, "q2", "yes", error=True),
+        turn(5, 5), user(6, "no, rethink the design"),
+    ])  # fmt: skip
+    assert not [e for e in events if e["kind"] == "answer"]
+    design = _summary(events)["stages"]["design"]
+    assert (design["gate"], design["question"], design["extra"]) == (1, 2, 0)
+    assert design["reply"] == ["revise"]
+
+
+def test_a_dialogs_wait_is_the_persons_time_never_the_agents(tmp_path) -> None:
+    """Claude Code's turn duration leaves out the time a dialog waits, so the 42 minutes from the
+    command to the turn's end record as a 2-minute turn, and the 40 are the person's."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]),
+        chose(41, "q1", "yes"),  # answered after 40 minutes away
+        turn(42, 2),
+    ])  # fmt: skip
+    design = _summary(events)["stages"]["design"]
+    assert design["away"] == 40 * 60
+    assert design["agent"] == pytest.approx(2 * 60)
+    assert design["gate"] == 1
+
+
+def test_a_revise_chosen_in_a_dialog_counts_as_rework(tmp_path) -> None:
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]), chose(2, "q1", "revise a requirement"),
+        asst(3, "m2", [tool("AskUserQuestion", "q2")]), chose(4, "q2", "yes"),
+        turn(5, 5),
+    ])  # fmt: skip
+    s = _summary(events)
+    assert s["stages"]["design"]["gate"] == 1 and s["stages"]["design"]["question"] == 1
+    assert metrics.rework(events, s, None, None, 2)["revise"] == 1
+
+
+def test_close_approved_in_a_dialog_ends_its_window_at_what_is_typed_next(tmp_path) -> None:
+    events = _events(tmp_path, [
+        cmd(110, "sdlc:close", "12", "main"),
+        asst(111, "m1", [tool("AskUserQuestion", "q1")], branch="main"),
+        chose(112, "q1", "yes", "main"),
+        turn(113, 3, "main"),
+        user(120, f"now something else: {SENTINEL}", "main"),  # after close's approval
+        turn(121, 5, "main"),
+    ])  # fmt: skip
+    assert [e["ms"] for e in events if e["kind"] == "turn"] == [3 * 60_000]
+    assert not [e for e in events if e["kind"] == "human" and not e["command"]]
+
+
 @pytest.mark.parametrize(
     "text, reply",
     [("yes", "approve"), ("Yes, go ahead", "approve"), ("lgtm", "approve"),

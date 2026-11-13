@@ -3,6 +3,7 @@ name: setup
 description: Set a repo up for the sdlc plugin, or check that it still is, and after a plugin update refresh what the update changed under it — first asks whether it's a lightweight repo or a product, run by one person or a team, tracked on GitHub or locally, then gitignores the change worktrees, writes .sdlc/config.toml with the commands the repo's own task files suggest and the numbering the answers pick, scaffolds the process doc and the review passes from the plugin's defaults, generates an AGENTS.md (imported by a one-line CLAUDE.md) when the repo has neither, or proposes additions to the one there is, and allowlists the plugin's read-only commands; for a product it interviews for the product doc (users, outcomes, the evidence commands the retrospective reads), and for a team on GitHub it drafts the project doc (issue fields). Drafts everything, writes after one approval, and commits nothing. Use before a repo's first /sdlc:intent, when /sdlc:status says the repo isn't set up, after `claude plugin update`, with `product` or `project` to add that doc to a repo already set up, or with `reset` to put a doc or template override back to the plugin's default. Not for opening a change (/sdlc:intent), the repo's own drift scans (/sdlc:health), or taking the plugin back out (/sdlc:uninstall).
 argument-hint: "[product | project — add that doc | reset <doc | template | all>]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -247,6 +248,12 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
 Ask literally, listing every path:
 
 > `Write these files and edits: <paths>? (yes / change one / leave one out)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Write nothing until the human says yes.** "Change one" means redraft that one and ask again;
 "leave one out" means drop it from the list and ask again. Approval is for this list only.

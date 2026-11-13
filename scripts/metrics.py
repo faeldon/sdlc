@@ -22,8 +22,15 @@ An event is a dict with `ts` (an aware datetime) and `kind`:
 
     skill{name}  turn{ms}  human{reply, command, plugin, asked, interrupt}  harness
     tokens{in, cache_create, cache_read, out}
-    edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  check{ok}
-    permission{name, rejected}  mode{modes}  subagent{role, ms, in, cache_create, cache_read, out}
+    edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  answer{reply, waited}
+    check{ok}  permission{name, rejected}  mode{modes}
+    subagent{role, ms, in, cache_create, cache_read, out}
+
+A `question` is an `AskUserQuestion` call and its `answer` what the person chose, as a class like
+a typed reply, with the seconds the dialog waited: theirs, never the agent's. Every gate asks in a
+dialog, so inside a gated skill's span a dialog is a candidate for the gate, picked by the same
+rule as a typed reply; one not picked, or never answered (dismissed, timed out, refused), stays a
+`question`.
 
 A `permission` is a tool prompt the person answered (`_prompts()`): never their own questions or
 plan gates, which are `question` and `plan`, and never a `config` decision. Its `name` is the
@@ -60,7 +67,7 @@ import json
 import re
 import shlex
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 TOKEN_FIELDS = (
@@ -162,6 +169,16 @@ def _only_tool_results(content: object) -> bool:
     )
 
 
+def _answers(entry: dict) -> list[str]:
+    """The answers a person chose or typed in an `AskUserQuestion` dialog, from its result's entry:
+    none when they dismissed it, it timed out empty, or the call failed."""
+    found = entry.get("toolUseResult")
+    answers = found.get("answers") if isinstance(found, dict) else None
+    if not isinstance(answers, dict):
+        return []
+    return [a for a in answers.values() if isinstance(a, str) and a.strip()]
+
+
 def _entry_text(content: object) -> str:
     if isinstance(content, str):
         return content
@@ -214,8 +231,8 @@ def _names(ident: str, args: str) -> bool:
 
 def _ends_with_question(text: str) -> bool:
     """Whether the agent's text ended with a question: its last line ends with `?`, or with `?`
-    and the answers it offers, `…? (yes / edit the message)`, as every skill's WAIT does; a
-    closing quote, backtick or emphasis around it doesn't count."""
+    and the answers it offers, `…? (yes / edit the message)`, as a skill's WAIT does where no
+    dialog can be shown; a closing quote, backtick or emphasis around it doesn't count."""
     lines = [ln for ln in text.splitlines() if ln.strip()]
     last = lines[-1].rstrip(" \t`*_\"'") if lines else ""
     return bool(re.search(r"\?(\s*\([^()]*\))?$", last))
@@ -316,6 +333,9 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
                 if typed and (approved or SKILL_RE.search(_entry_text(content))):
                     break
                 if typed and _reply(_entry_text(content)) == "approve":
+                    approved = True
+                # Close's question answered in a dialog: its result, never typed.
+                if j > i and any(_reply(a) == "approve" for a in _answers(entries[j])):
                     approved = True
                 keep[j] = True
     return keep
@@ -495,6 +515,7 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
             if not any(keep):
                 continue
             checks: dict[str, datetime] = {}
+            dialogs: dict[str, datetime] = {}  # AskUserQuestion calls awaiting their answer
             agents: set[str] = set()
             seen: set[str] = set()
             uses: dict[str, tuple[str, dict]] = {}
@@ -538,6 +559,14 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                                 if not block.get("is_error"):  # a refused call ran nothing
                                     _started(events, called, skill, last_human, skill_since)
                                     skill_since = True
+                            elif ident in dialogs:
+                                asked_at = dialogs.pop(ident)
+                                chosen = [] if block.get("is_error") else _answers(entry)
+                                if chosen:  # dismissed, empty or refused: no answer, no stop
+                                    events.append({
+                                        "ts": ts, "kind": "answer", "reply": _reply(chosen[0]),
+                                        "waited": max(0.0, (ts - asked_at).total_seconds()),
+                                    })  # fmt: skip
                     if entry.get("isMeta") or _only_tool_results(content):
                         continue
                     if _harness(entry):
@@ -593,6 +622,7 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                                 pending[str(block.get("id"))] = (skill, ts)
                         elif name == "AskUserQuestion":
                             events.append({"ts": ts, "kind": "question"})
+                            dialogs[str(block.get("id"))] = ts
                         elif name == "Bash" and check:
                             # The gate, alone or piped on (`./check.sh 2>&1 | tail`).
                             if str(inp.get("command", "")).strip().startswith(check):
@@ -685,22 +715,43 @@ def summarize(
     turns: list[tuple[datetime, float, str]] = []  # (end, seconds, stage at its end)
     span: dict | None = None  # the gated skill whose stops are being gathered
 
+    def wait(stage: str, start: datetime, end: datetime) -> None:
+        """The person's wait from `start` to `end`: a response when short, else blocked by an
+        open dependency or away."""
+        gap = (end - start).total_seconds()
+        waited = stages[stage]
+        if gap <= idle:
+            waited["response"].append(gap)
+            return
+        blocked = 0.0
+        for dep, closed in dep_closes.items():
+            until = end if closed is None else min(end, closed)
+            part = max(0.0, (until - start).total_seconds())
+            blocked_by[dep] += part
+            blocked = max(blocked, part)
+        waited["blocked"] += blocked
+        waited["away"] += gap - blocked
+
     def close_span() -> None:
         if not span or not span["stops"]:
             return
-        if GATES[span["skill"]] == "first":
-            pick = span["stops"][0]
+        # A dialog nobody answered can't be the gate: it stays the question it was.
+        answered = [s for s in span["stops"] if s["reply"] is not None]
+        if not answered:
+            pick = None
+        elif GATES[span["skill"]] == "first":
+            pick = answered[0]
         else:
             # The WAIT is the last approval: a request typed after it ("now start the plan") is
             # the person moving on, not the gate.
-            approvals = [s for s in span["stops"] if s["reply"] == "approve"]
-            pick = approvals[-1] if approvals else span["stops"][-1]
+            approvals = [s for s in answered if s["reply"] == "approve"]
+            pick = approvals[-1] if approvals else answered[-1]
         after = False
         for stop in span["stops"]:
             if stop is pick:
                 stop["kind"] = "gate"
                 after = True
-            elif span["skill"] == "sdlc-factory:build":
+            elif stop.get("dialog") or span["skill"] == "sdlc-factory:build":
                 stop["kind"] = "question"
             elif after:
                 stop["why"] = "after_gate"
@@ -737,19 +788,7 @@ def summarize(
             here["harness"] += 1
         elif kind == "human":
             if turn_end is not None:
-                gap = (event["ts"] - turn_end).total_seconds()
-                waited = stages[turn_stage]
-                if gap <= idle:
-                    waited["response"].append(gap)
-                else:
-                    blocked = 0.0
-                    for dep, closed in dep_closes.items():
-                        until = event["ts"] if closed is None else min(event["ts"], closed)
-                        part = max(0.0, (until - turn_end).total_seconds())
-                        blocked_by[dep] += part
-                        blocked = max(blocked, part)
-                    waited["blocked"] += blocked
-                    waited["away"] += gap - blocked
+                wait(turn_stage, turn_end, event["ts"])
                 if event["command"] and not event.get("plugin", True):
                     stages[turn_stage]["command"] += 1
                 elif not event["command"]:
@@ -769,7 +808,19 @@ def summarize(
         elif kind == "plan" and event["action"] == "exit":
             stops.append({"stage": current or "build", "kind": "gate", "reply": "approve"})
         elif kind == "question":
-            stops.append({"stage": current or "intent", "kind": "question", "reply": None})
+            stop = {"stage": current or "intent", "kind": "question", "reply": None}
+            if span is not None:  # it may be the gate: its answer decides
+                span["stops"].append({**stop, "kind": "extra", "dialog": True})
+            else:
+                stops.append(stop)
+        elif kind == "answer":
+            # Waited inside the turn: the person's time. A turn's duration already leaves it out.
+            start = event["ts"] - timedelta(seconds=event["waited"])
+            wait(current or "intent", start, event["ts"])
+            stops_now = span["stops"] if span else []
+            asking = [s for s in stops_now if s.get("dialog") and not s["reply"]]
+            if asking:
+                asking[0]["reply"] = event["reply"]
         elif kind == "permission":
             here["prompts"] += 1
             asked = by_prompt.setdefault(event["name"], {"asked": 0, "rejected": 0})
@@ -922,13 +973,15 @@ def _reentries(segments: list[dict]) -> int:
     return count
 
 
+def _revises(event: dict) -> bool:
+    """A `revise` the person typed or chose in a dialog."""
+    typed = event["kind"] == "human" and not event["command"]
+    return (typed or event["kind"] == "answer") and event["reply"] == "revise"
+
+
 def _revised(walked: list[tuple[dict, str, str | None]]) -> set[str]:
     """The gated skills a person answered `revise` inside. An upper bound, like the stops."""
-    return {
-        span
-        for e, _, span in walked
-        if span and e["kind"] == "human" and not e["command"] and e["reply"] == "revise"
-    }
+    return {span for e, _, span in walked if span and _revises(e)}
 
 
 def rework(
@@ -959,11 +1012,7 @@ def rework(
                 written += e["added"]
             coding = coding or e["artifact"] == "code"
         first_pass = checks.index(True) if True in checks else len(checks)
-        revise = sum(
-            1
-            for e, _, span in walked
-            if span and e["kind"] == "human" and not e["command"] and e["reply"] == "revise"
-        )
+        revise = sum(1 for e, _, span in walked if span and _revises(e))
         out = {
             "spec_edits": spec_edits,
             "spec_lines": spec_lines,

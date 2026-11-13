@@ -3,6 +3,7 @@ name: spec
 description: Turn an open Tier 2 intent into .sdlc/work/NNN-slug/spec.md — numbered testable requirements, the design, which of the repo's invariants it touches, alternatives rejected, and how it will be verified, in the sections of the repo's spec template (Stage 2 of the repo's process doc). Use after /sdlc:intent has created a Tier 2 change and before building it in plan mode. Skip it entirely for Tier 0 and Tier 1 changes, whose intent.md Approach section already covers the design.
 argument-hint: "[change id, e.g. 003]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -121,6 +122,12 @@ Ask literally:
 Leave out ` update its issue` (keeping the comma) when `config` says `archive.target` is `none`.
 Starting plan mode approves nothing: the plan is approved when plan mode ends, as always. It is in
 the question so the person doesn't have to type it after the yes.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do not write until the human says go.** Approval is per-invocation, never standing. The yes
 covers the issue update too: it is visible to everyone with access to the repo.

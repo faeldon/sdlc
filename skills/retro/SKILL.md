@@ -3,6 +3,7 @@ name: retro
 description: Run a retrospective, the outermost loop — look across every change and release since the last one, from counts the script gathers, and make five passes (cost, architecture, process, product, direction). The product pass, when the repo has a product doc, scores its outcomes against the evidence the host's commands print. Each finding becomes a .sdlc/work/inbox.md seed, an intent title, or is dropped with a reason. After one approval, rewrite the direction doc (goals, milestones, the next major release) and the product doc's outcome lines, and commit them with the seeds as "Retrospective YYYY-MM-DD". Use from the main checkout when /sdlc:status says a retrospective is due (after 2 releases, or a major one), or when the direction is unclear. Not for scans or drift (/sdlc:health), not for cutting a release (/sdlc:release), and never for editing code, skills or the process doc.
 argument-hint: "[an area to focus on]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -277,6 +278,12 @@ Ask literally:
 
 When the product doc's outcome lines change too, name it: `Write <docs.direction> and the
 outcomes in <docs.product> with these <K> status changes…, then commit all three as…`.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Write nothing until the human says yes.** Approval is for this draft only: after a revision, show
 it again and ask again.

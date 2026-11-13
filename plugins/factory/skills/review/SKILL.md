@@ -3,6 +3,7 @@ name: review
 description: Review code no change touches — the paths the base branch's [review] sensitive lists, else the least recently changed files, or the paths named — with the factory's code and security reviewers, and after one approval of the agent runs it takes, write what they find as proposed [bug] entries in a report under .sdlc/reports/, for /sdlc:bug to file. Use when asked, or on a /schedule routine, to catch old bugs before a change trips on them. Not for reviewing a change (/sdlc-factory:build, /sdlc:ship), not for filing the bugs (/sdlc:bug does, from the report), and never for fixing anything.
 argument-hint: "[paths… — what to review; else the sensitive paths, else the least recently changed]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Agent
@@ -45,6 +46,12 @@ Show the paths and `why`, what was left out, the reviewers (`code` and `security
 Ask literally:
 
 > `Review these <N> paths with <reviewers> as they stand, at most <runs> agent runs, and write the problems found as proposed bugs to .sdlc/reports/? (yes / change the paths / no)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the person says yes.**
 

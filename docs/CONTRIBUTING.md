@@ -135,8 +135,9 @@ repo belongs in that repo's config or docs, and if it needs a new key to get the
 change.
 
 **One approval per writing skill.** Every skill that writes drafts the exact content, shows it,
-asks a literal yes/no question and waits: exactly one step headed WAIT, never zero (approval is
-never standing) and never two (the second gets skipped).
+asks a literal question in an `AskUserQuestion` dialog (as text where none can be shown) and
+waits: exactly one step headed WAIT, never zero (approval is never standing) and never two (the
+second gets skipped).
 
 **The gate is offline and deterministic.** A gate that needs the network gets skipped, and a
 skipped gate still reports green from memory.

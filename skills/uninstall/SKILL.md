@@ -2,6 +2,7 @@
 name: uninstall
 description: Take the sdlc plugin's setup back out of a repo — lists everything /sdlc:setup wrote (the committed files in .sdlc/, the plugin's allow rules in .claude/settings.json, the .claude/worktrees/ line in .gitignore when setup recorded adding it) and the lines in AGENTS.md or CLAUDE.md that name the plugin, then removes setup's files after one approval and commits nothing. Refuses while any change is open, standing in a worktree, or shipped and not closed, and while anything it would remove has uncommitted edits, so everything it removes is in history. Use when a repo stops using the plugin. Not for resetting one doc or template to the plugin's default (that's /sdlc:setup reset), not for dropping one change (/sdlc:drop), and never for touching .sdlc/work/, the tracker's issues, tags or history.
 allowed-tools:
+  - AskUserQuestion
   - Read
   - 'Bash(cd *)'
   - 'Bash(git rev-parse *)'
@@ -60,6 +61,12 @@ misleads.
 Ask literally, listing every path:
 
 > `Remove these files and edits: <paths>? (yes / no)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Remove nothing until the human says yes.** Approval is for this list only: run `--check` again
 first if anything in the repo changed since Step 0.

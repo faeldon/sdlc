@@ -3,6 +3,7 @@ name: triage
 description: Triage the GitHub issues people filed — reads the open issues no change claims, checks each against the code and the closed changes, proposes a verdict with its evidence (file it as an idea or a bug, add it to an open change's closes:, close it as already resolved, wontfix, not a bug or a duplicate, or ask its author for detail), and after one approval writes and commits the inbox, labels and relates each issue so its filer has a parent to follow. Use from the main checkout when issues have come in. Not for a bug you found yourself (/sdlc:bug files it), not for fixing anything (/sdlc:intent <id> opens the change), and not without a GitHub tracker.
 argument-hint: "[issue numbers to look at, or none for every open one]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -160,6 +161,12 @@ Ask literally, naming what each kind of line does:
 
 Leave out the clauses with nothing in them. A changed line changes what is written, and nothing is
 checked again unless the human asks.
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Write nothing until the human says yes**, on GitHub or in the repo. Approval is for these lines
 only.

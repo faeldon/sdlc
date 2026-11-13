@@ -94,6 +94,8 @@ def test_a_stop_case_keeps_every_never_write_grader(case: str) -> None:
     assert {"Bash", "Write", "Edit"} <= set(prompt["allowed_tools"]), case
     assert graders["asks-config"]["input_match"].endswith(" config"), case
     assert graders["asks-the-question"]["target"] == "last_message", case
+    # No dialog in a run nobody answers: the skill asks its text fallback, which last_message reads.
+    assert "AskUserQuestion" not in prompt["allowed_tools"], case
     for never in ["commits", "pushes", "writes", "edits", *STOP_CASES[case]]:
         g = graders[f"never-{never}"]
         assert (g["min"], g["max"]) == (0, 0), f"{case}: never-{never}"

@@ -465,6 +465,12 @@ the findings)` while one is `open`, which commits nothing. `fix all N first` is 
 could be fixed than ship recommends, and fixes them all, then asks again; `commit without fixing`
 only when every `fix` finding is a nit.
 
+Ship asks it, as every skill asks its approval, in an `AskUserQuestion` dialog: the text before the
+parentheses is the question and each answer in them an option, in order (publish's put `no`
+first). Only a chosen `yes`, or a yes typed in Other, approves; a dialog dismissed or timed out
+writes nothing. Where no dialog can be shown, as in a non-interactive run, the same question is
+asked as text.
+
 `/sdlc:ship` reads all of this in one call, `sdlc.py preflight NNN`: the change's undone notes,
 the nits its diff touches, the issues on its `closes:` line, its acceptance checks, its earlier
 findings and the context docs its diff could have made wrong, each part as `undone`,

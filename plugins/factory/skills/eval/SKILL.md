@@ -3,6 +3,7 @@ name: eval
 description: Replay the factory's reviewers on the diffs that let real bugs through — every escaped bug the register and the Close commits trace to a change — and score which reviewer would have caught each, against the last eval, after one approval of the agent runs it takes. Use when a reviewer's prompt, a model in factory.toml, or the reviewer list changes, to keep the change only if the score holds or rises. Not for reviewing a change (/sdlc-factory:build, /sdlc:ship), not for finding new bugs in old code (/sdlc-factory:review), and never run on its own or on a schedule.
 argument-hint: "[--limit N — how many escaped bugs, newest first; 10 by default]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Agent
@@ -52,6 +53,12 @@ most agent runs: one per reviewer per bug.
 Ask literally:
 
 > `Replay <reviewers> on the introducing diffs of these <N> escaped bugs, at most <runs> agent runs, and write the scores under .sdlc/reports/? (yes / change the limit / no)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Do nothing more until the person says yes.** A different limit is a new Step 0 and a new
 question.

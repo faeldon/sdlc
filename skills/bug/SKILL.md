@@ -3,6 +3,7 @@ name: bug
 description: File a bug in .sdlc/work/inbox.md, or retire or retag one — interviews for what broke and how to reproduce it, takes an id and a severity from the process doc's words, offers the change that last touched the code as its `Introduced by:`, and after one approval commits the inbox alone on the base branch as "File <id>", "Retire <id>" or "Update <id>". Use from any checkout, a change's worktree included, when something already shipped is broken, when a /sdlc-factory:review report proposes bugs to file (given its path), or a bug turns out to be a feature request or a duplicate. Not for something nobody has built yet (an idea, which /sdlc:idea files), not for fixing the bug (/sdlc:intent <id> opens the change that does), and never for editing code.
 argument-hint: "[what broke, an entry's id to retire or retag, or a review report's path]"
 allowed-tools:
+  - AskUserQuestion
   - Read
   - Write
   - Edit
@@ -126,9 +127,15 @@ Ask literally, with the entry's id and what happens to it:
 
 > `Append this bug to .sdlc/work/inbox.md as <id> and commit it as "File <id>"? (yes / edit it / no)`
 
-For a retirement: `Remove <id> from .sdlc/work/inbox.md as <reason> and commit it as "Retire <id>"?`;
-for a retag: `Retag <id> as [<tag>] and commit it as "Update <id>"?`; from a report:
+For a retirement: `Remove <id> from .sdlc/work/inbox.md as <reason> and commit it as "Retire <id>"? (yes / no)`;
+for a retag: `Retag <id> as [<tag>] and commit it as "Update <id>"? (yes / no)`; from a report:
 `Append these <n> bugs to .sdlc/work/inbox.md as <ids> and commit them as "File <ids>"? (yes / edit them / no)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
 
 **Write nothing until the human says yes.** Approval is for this entry only.
 

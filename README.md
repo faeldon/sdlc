@@ -3,8 +3,9 @@
 A Claude Code plugin that takes each change to your repo from an idea to a reviewed commit, in
 stages, with you approving every step that writes. You say why a change is worth making; Claude
 drafts the spec, plans and builds it, reviews the diff, and stops before anything is committed for
-your yes. Changes are sized by risk, so a typo costs nothing and a change that alters what others
-rely on gets a spec and a plan.
+your yes, asked in a dialog whose answers you pick, on a phone as at a terminal. Changes are sized
+by risk, so a typo costs nothing and a change that alters what others rely on gets a spec and a
+plan.
 
 | Skill | When |
 |---|---|
