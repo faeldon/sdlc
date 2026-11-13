@@ -207,7 +207,10 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         "scan": None,  # drift across the whole repo, run by /sdlc:health: findings, not a pass
         "worktree_setup": None,  # run from the main checkout after `new --worktree`; {worktree}
         "close_list": None,  # read-only: what a closed change left behind; {suffix}
-        "close_cleanup": None,  # the human's command to remove it; {id}. Never run by a skill
+        # The command that removes it; {id}. Handed to the human, or, with close_cleanup_runs,
+        # run by close itself as its last step, behind its question. Never run by a skill.
+        "close_cleanup": None,
+        "close_cleanup_runs": False,
     },
     # The process's own docs live in .sdlc/ beside its config, leaving docs/ to the host.
     "docs": {
@@ -348,7 +351,7 @@ INT_KEYS = (
 )  # fmt: skip
 INT_MIN = {"idle_minutes": 1}
 # Every key that holds true or false.
-BOOL_KEYS = ("transcripts", "attribution")
+BOOL_KEYS = ("transcripts", "attribution", "close_cleanup_runs")
 # The steps `git.push` may name.
 PUSH_POINTS = ("close", "release")
 
@@ -366,6 +369,18 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         return _resolve_docs(root, cfg, set()), [f"{HOST_DIR}/config.toml won't parse: {e}"], False
+    warnings = _apply_config(cfg, data)
+    if cfg["archive"]["target"] not in ARCHIVE_TARGETS:
+        warnings.append(f"archive.target must be one of {'|'.join(ARCHIVE_TARGETS)}")
+    if cfg["commands"]["close_cleanup_runs"] and not cfg["commands"]["close_cleanup"]:
+        warnings.append("commands.close_cleanup_runs is on with no close_cleanup: nothing runs")
+    docs = data.get("docs")
+    return _resolve_docs(root, cfg, set(docs) if isinstance(docs, dict) else set()), warnings, True
+
+
+def _apply_config(cfg: dict, data: dict) -> list[str]:
+    """Set each of `data`'s keys in `cfg` that `CONFIG_KEYS` knows and whose value fits, and the
+    warnings for the rest: `load_config()`'s reading, and `_config_at()`'s."""
     warnings = []
     for section, values in data.items():
         if section not in CONFIG_KEYS or not isinstance(values, dict):
@@ -400,10 +415,24 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
                 cfg[section][key] = value
             else:
                 warnings.append(f"{section}.{key} must be a string")
-    if cfg["archive"]["target"] not in ARCHIVE_TARGETS:
-        warnings.append(f"archive.target must be one of {'|'.join(ARCHIVE_TARGETS)}")
-    docs = data.get("docs")
-    return _resolve_docs(root, cfg, set(docs) if isinstance(docs, dict) else set()), warnings, True
+    return warnings
+
+
+def _config_at(home: Path, ref: str) -> dict | None:
+    """The settings `.sdlc/config.toml` held at `ref`, over the defaults, its paths left as
+    written: what close reads its cleanup from, so a change can't turn on its own. A ref with no
+    config is the defaults; None when the ref is missing or its config won't parse."""
+    if _git(home, "rev-parse", "--verify", "-q", ref) is None:
+        return None
+    cfg = {section: dict(keys) for section, keys in CONFIG_KEYS.items()}
+    text = _git(home, "show", f"{ref}:{HOST_DIR}/config.toml")
+    if text is None:
+        return cfg
+    try:
+        _apply_config(cfg, tomllib.loads(text))
+    except tomllib.TOMLDecodeError:
+        return None
+    return cfg
 
 
 def _resolve_docs(root: Path, cfg: dict, chosen: set[str]) -> dict:
@@ -3621,6 +3650,25 @@ def _handoff(main: Path, argv: list[str], ran: str, report: dict) -> int:
     return 1
 
 
+CLEANUP_TIMEOUT = 600  # seconds for the host's cleanup; a hung one is reported, never waited out
+
+
+def _cleanup_plan(cfg: dict | None, fallback: dict, number: str) -> dict | None:
+    """What close's last step runs: `close_cleanup` with `{id}` filled and a leading `!` (the
+    prompt's prefix, which `sh` reads as negation) dropped, and whether it `runs`, from `cfg`, the
+    base branch's config from before the merge. With that unreadable (None), the command comes
+    from `fallback` and nothing runs: it is handed over. None when no cleanup is set."""
+    command = (cfg or fallback)["commands"]["close_cleanup"]
+    if not command:
+        return None
+    plan = {"command": re.sub(r"^!\s*", "", command.replace("{id}", number)), "runs": False}
+    if cfg is None:
+        plan["because"] = "the base branch's config from before the merge can't be read"
+    else:
+        plan["runs"] = bool(cfg["commands"]["close_cleanup_runs"])
+    return plan
+
+
 def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     """Land a shipped change, mirror it, remove its folder, its worktree and its branch; or, for
     a dropped one, mirror it, record it on main in a `Drop` commit, and remove its worktree and
@@ -3636,7 +3684,11 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
     In the plugin's own repo, the close is run by main's script, then by the code its merge
     brought (`_handoff()`), so a change to close runs on its own close, and a stale copy of the
-    plugin never closes anything."""
+    plugin never closes anything.
+
+    With `commands.close_cleanup_runs`, the host's `close_cleanup` runs last, once all of that
+    and the push are done, read from the base branch's config before the merge
+    (`_cleanup_plan()`). A failure is `cleanup_failed`, never a failed close: it has landed."""
     main = main_root(root)
     own = _own_repo(main)
     if own and PLUGIN_DIR.resolve() != main.resolve() and not os.environ.get(HANDOFF_ENV):
@@ -3726,6 +3778,14 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         # before a failed merge is brought up to it; once merged, a rerun keeps it. A failure
         # only leaves the trailer out.
         _git(main, "update-ref", start, tip)
+    # The cleanup's config is the base branch's before the merge: the start ref's once there is
+    # one, main's own while nothing has landed, and none to go by after. A drop lands nothing.
+    if kind == "dropped" or (not landed and not _git(main, "rev-parse", "--verify", "-q", start)):
+        at = cfg
+    else:
+        at = _config_at(main, start)
+    if wipe := _cleanup_plan(at, cfg, branch.split("-")[0]):
+        report["cleanup"] = wipe
     if own and kind == "shipped" and (reaches := _reaches(main, branch)):
         report["reaches"] = reaches
     # What the push of the base branch sends, newest first: the Close or Drop commit while this run
@@ -3841,6 +3901,27 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         plan["closed"] = sent["closes"] if sent else []
         report["done"].append("push")
 
+    def cleanup() -> None:
+        # Never a refusal, like the push: the change has landed and its worktree is gone, so a
+        # rerun can't find it to run this twice. In `done` only once it exited 0.
+        err = None
+        try:
+            ran = subprocess.run(
+                _sh(wipe["command"]), cwd=main, capture_output=True, encoding="utf-8",
+                errors="replace", timeout=CLEANUP_TIMEOUT, stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+            if ran.returncode != 0:
+                said = (ran.stderr.strip() or ran.stdout.strip())[-500:] or "no output"
+                err = f"exited {ran.returncode}: {said}"
+        except subprocess.TimeoutExpired:
+            err = f"timed out after {CLEANUP_TIMEOUT}s"
+        except OSError as e:
+            err = f"didn't run: {e}"
+        if err:
+            report["cleanup_failed"] = err
+        else:
+            report["done"].append("cleanup")
+
     if kind == "dropped":
         landing = [("verify", verify), ("measure", measure), ("archive", mirror)]
         landing.append(("record", record))
@@ -3854,6 +3935,7 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     ]
     if check_only:
         names = [name for name, _ in steps] + (["push"] if plan["on"] else [])
+        names += ["cleanup"] if wipe and wipe["runs"] else []
         report["skipped"] = [f"{name} (--check)" for name in names]
         return emit(0)
 
@@ -3883,6 +3965,8 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         push()
     elif nudge := _nudge(main, cfg):
         report["unpushed"] = nudge
+    if wipe and wipe["runs"]:
+        cleanup()
     return emit(0)
 
 

@@ -39,7 +39,9 @@ def test_a_host_with_nothing_gets_null_commands_and_the_plugins_files(tmp_path: 
     assert code == 0
     assert out["config_file"] is None
     assert set(out["commands"]) == set(sdlc.CONFIG_KEYS["commands"])
-    assert all(v is None for v in out["commands"].values())
+    commands = dict(out["commands"])
+    assert commands.pop("close_cleanup_runs") is False, "the one switch, off"
+    assert all(v is None for v in commands.values())
     assert {t["source"] for t in out["templates"].values()} == {"plugin"}
     assert out["docs"]["review"]["source"] == "plugin"
     assert Path(out["docs"]["review"]["path"]) == sdlc.GUIDE_DIR / "review.md"

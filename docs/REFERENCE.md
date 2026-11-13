@@ -33,6 +33,7 @@ scan = "make scan"                          # drift across the whole repo; /sdlc
 worktree_setup = "make setup {worktree}"    # after /sdlc:intent makes a worktree, run from the main checkout
 close_list = "ls /tmp/cache-{suffix}"       # read-only: what a closed change left outside git
 close_cleanup = "! make drop {id}"          # handed to the human by /sdlc:close; never run by a skill
+close_cleanup_runs = false                  # true: close runs close_cleanup itself, last, behind its question
 
 [docs]
 process = ".sdlc/SDLC.md"                   # the default: your answers to the plugin's process guide
@@ -92,15 +93,24 @@ The placeholders:
   before removing the folder.
 - `commands.worktree_setup`: `{worktree}` is the new worktree's path.
 - `commands.close_list`: `{suffix}` is the change's branch name with `-` as `_`.
-- `commands.close_cleanup`: `{id}` is the change's number.
+- `commands.close_cleanup`: `{id}` is the change's number. A leading `!`, the prompt's prefix for
+  a command the human types, is dropped when close runs it, since `sh` would read it as "not".
 
 The commands `sdlc.py` runs itself (`release.after_bump`, `release.prepare`, `release.publish`,
-`retro.evidence`, `retro.indicators`, a project field's `command` lookup, `archive.command`, and each acceptance
-check) run as `sh -c "<command>"` from the repo root on every platform: `/bin/sh` on macOS and
+`retro.evidence`, `retro.indicators`, a project field's `command` lookup, `archive.command`,
+`commands.close_cleanup` under `close_cleanup_runs`, and each acceptance check) run as `sh -c "<command>"` from the repo root on every platform: `/bin/sh` on macOS and
 Linux, and on Windows the `sh` on `PATH`, Git for Windows', never `cmd.exe`. So one config means
 the same thing in every session, and the same as the skills' own commands, which Claude Code runs
 in Git Bash there. With no `sh` on Windows the command is refused, saying so. Their output is read
 as UTF-8, with any byte that isn't UTF-8 replaced.
+
+With `commands.close_cleanup_runs = true`, `/sdlc:close` names the cleanup in its question, and a
+yes has `sdlc.py close` run it as its last step: after the merge, the `Close` (or `Drop`) commit,
+the worktree's and branch's removal and the push, for a shipped or a dropped change alike, whatever
+`close_list` found, with ten minutes to finish. Both keys are read from the base branch's config as
+it was before the merge, so a change that turns the switch on, or edits the command, takes effect
+from the next close. A cleanup that fails or times out is reported as `cleanup_failed` and handed to
+the human; the close has landed all the same, and won't run it again.
 
 A version line is `"version": "1.2.0"` (JSON) or `version = "1.2.0"` (TOML). A file with none,
 or more than one, is refused rather than guessed at.

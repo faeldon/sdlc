@@ -7,6 +7,7 @@
     "commands.build_when",
     "commands.check",
     "commands.close_cleanup",
+    "commands.close_cleanup_runs",
     "commands.close_list",
     "commands.scan",
     "commands.worktree_setup",

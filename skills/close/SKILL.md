@@ -1,6 +1,6 @@
 ---
 name: close
-description: Close a shipped change from the session you're in — bring the session back to the main checkout, fast-forward main to the change's branch, mirror its folder to the tracker (its GitHub issue by default), remove the folder from main in a "Close NNN-slug" commit, remove its worktree and branch, push main when git.push names close (a GitHub repo's default), and hand the human whatever cleanup command the repo names for a closed change. Use after /sdlc:ship has committed the change in its worktree, or to finish a drop /sdlc:drop committed. Not for a change that is neither shipped nor dropped (it refuses), not for starting a drop (that's /sdlc:drop), and never for a push git.push doesn't name, tagging, or running the cleanup itself.
+description: Close a shipped change from the session you're in — bring the session back to the main checkout, fast-forward main to the change's branch, mirror its folder to the tracker (its GitHub issue by default), remove the folder from main in a "Close NNN-slug" commit, remove its worktree and branch, push main when git.push names close (a GitHub repo's default), then run the cleanup command the repo names for a closed change when commands.close_cleanup_runs says close runs it, or hand it to the human. Use after /sdlc:ship has committed the change in its worktree, or to finish a drop /sdlc:drop committed. Not for a change that is neither shipped nor dropped (it refuses), not for starting a drop (that's /sdlc:drop), and never for a push git.push doesn't name, tagging, or running the cleanup from the skill's own bash.
 argument-hint: "[NNN — the change; default: the worktree this session is in]"
 allowed-tools:
   - Read
@@ -17,7 +17,8 @@ The end of a change's life, after `/sdlc:ship` has committed it, folder and all,
 in its own worktree. What's left is easy to forget or do in the wrong order: fast-forward `main`,
 mirror the change to the tracker, take its folder off `main`, remove the worktree and branch, and
 clean up whatever the worktree made outside git, if the repo names something. One command does all
-but the last behind one approval; the last stays the human's.
+of it behind one approval, the cleanup last and only when `commands.close_cleanup_runs` says close
+runs it; otherwise the cleanup stays the human's.
 
 **The change's own commit is the copy that counts.** Once it is on `main`, its intent, spec, plan
 and notes are in history for good, so the folder can leave the tree: close removes it in a commit
@@ -64,11 +65,16 @@ If `config` sets `commands.close_list`, run it next, with `{suffix}` replaced by
 with `-` as `_`. It is the repo's read-only listing of what a change's worktree left outside git.
 None found is a fine answer. With no `close_list`, there is nothing to list; skip it.
 
+The JSON's `cleanup`, when the repo sets `commands.close_cleanup`, is the command with `{id}`
+filled in, and `runs`: whether close runs it as its last step, after the push, which it does
+whatever `close_list` found. `runs` is read from the base branch's config before the merge, so a
+change can't turn on its own; `because` says why it is false when that config can't be read.
+
 ## Step 1 — Show it
 
 Show the human: the change, the worktree and branch that will go, the commit `main` will move to,
-where the change will be mirrored (or why it won't be), what `close_list` found, and every
-refusal. When `push.on` is true, show what the push will send to `push.remote`:
+where the change will be mirrored (or why it won't be), what `close_list` found, the command
+`cleanup` will run when `cleanup.runs` is true (or `cleanup.because`), and every refusal. When `push.on` is true, show what the push will send to `push.remote`:
 `push.unpushed.ahead`, one commit a line, the coming `Close` (or `Drop`) commit first, then the
 change's own, then anything else `main` holds that the remote doesn't (inbox commits, another
 change's close). It is all of it: git pushes the branch, not one change. With
@@ -89,7 +95,9 @@ For a dropped change, ask instead:
 `<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave
 out `archive it to <where>, ` (and `and close it as not planned`). When `push.on` is true, end
 with `…delete its branch, then push <git.base> to <remote>?`: the yes covers the push and every
-commit shown, and they can't be taken back once pushed.
+commit shown, and they can't be taken back once pushed. When `cleanup.runs` is true, end with
+`…, then run <cleanup.command>?`, after the push when there is one, the command word for word:
+the yes covers it, for this change only, and what it deletes isn't in git.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 
@@ -133,11 +141,14 @@ or `none:` and why (transcripts off in `metrics.transcripts`, none for this chan
 failed), which never stops a close. With `fixes`, name each bug the `Close` commit records as
 fixed, from its `Sdlc-Fixes:` line. When the report has `ran`, say which code ran the close:
 `main's code` (the session's own copy of the plugin wasn't the main checkout's) or `merged code`
-(the change brought the plugin's scripts, so its own code ran the steps after the merge). If `close_list`
-found something and `config` sets `commands.close_cleanup`, end with that one command for the
-human, `{id}` replaced by the change's number, and say plainly that only they run it.
-Never run it from this session: a cleanup that deletes things is the human's command by design,
-and the repo may refuse it from a session anyway.
+(the change brought the plugin's scripts, so its own code ran the steps after the merge). With
+`cleanup` in `done`, say close ran `cleanup.command` and it exited 0. With `cleanup_failed`, say
+why, that the change has landed all the same, and end with `! <cleanup.command>` for the human
+to run once the cause is fixed: close won't run it again, since the change is gone. With
+`cleanup.runs` false, as before: if `close_list` found something, end with
+`! <cleanup.command>` for the human, and say plainly that only they run it.
+Never run it from this session: the script runs a cleanup the human approved, and a cleanup the
+script didn't run is the human's command, which the repo may refuse from a session anyway.
 
 When the report has `reaches` (only in the plugin's own repo), end with what the human's other
 sessions and hosts need, one line for each key it holds: `scripts`, live in every session running
@@ -156,8 +167,8 @@ Be explicit about what was pushed (or that nothing was), and that nothing was ta
 - `git push` from this skill, tags, pull requests. Never: the script's own push step is the only
   one, and only when `git.push` names close.
 - `--force`, `git branch -D`, `ExitWorktree` with `remove`.
-- Running `commands.close_cleanup`, or deleting anything other than the change's own folder, which
-  only `sdlc.py close` removes, in a commit, once the change is on `main`. The human's command, by
-  design.
+- Running `commands.close_cleanup` from this skill's bash, or deleting anything other than the
+  change's own folder, which only `sdlc.py close` removes, in a commit, once the change is on
+  `main`. The cleanup is run by `sdlc.py close` behind the yes that named it, or by the human.
 - Starting a drop: writing its reason and committing it is `/sdlc:drop`, which has the `Edit`
   this skill doesn't.

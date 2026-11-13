@@ -128,7 +128,12 @@ branch, which close would put on `main`'s first-parent line, where `closed_chang
 `delete branch`, then `push` when `git.push` names `close` (`_push_plan()`; unset, it does where
 `archive.target` is `github`). A failed step stops there and a rerun resumes, skipping what is
 done, but a refused push is `push_failed`, never a failed close: the change has landed, and
-publish pushes it. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
+publish pushes it. Last, with `commands.close_cleanup_runs`, `cleanup` runs the host's
+`close_cleanup` (`_cleanup_plan()`), which the question named: read from the base branch's config
+before the merge (`_config_at()` on `refs/sdlc/base/<branch>`), so a change can't turn on its own,
+and a failure is `cleanup_failed`, never a failed close; with the worktree gone, no rerun finds
+the change to run it twice. It is the one thing close deletes beyond the change's own folder,
+worktree and branch, and only behind that yes. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
 commit's message, so GitHub closes it when the commit reaches the default branch (where that isn't
 `main`, close closes it itself). In the plugin's own repo only, `_handoff()`
 reruns close through `main`'s script when this copy is a stale cache, and through the merged

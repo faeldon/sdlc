@@ -105,7 +105,13 @@ READS_CONFIG = {
         "review.sensitive",
         "review.irreversible",
     ],
-    "sdlc:close": ["commands.close_list", "commands.close_cleanup", "archive.target", "git.base"],
+    "sdlc:close": [
+        "commands.close_list",
+        "commands.close_cleanup",
+        "commands.close_cleanup_runs",
+        "archive.target",
+        "git.base",
+    ],
     "sdlc:drop": ["archive.target", "git.base"],
     "sdlc:uninstall": ["archive.target", "docs.policy", "docs.context"],
     "sdlc:release": [
@@ -287,10 +293,17 @@ def test_intent_moves_the_session_and_close_brings_it_back() -> None:
     drop = (ROOT / "skills" / "drop" / "SKILL.md").read_text(encoding="utf-8")
     for text in (close.content, drop):
         assert "No-op: there is no active EnterWorktree session" in " ".join(text.split())
-    # The cleanup is handed over, never run: close may not hold the tool that would run it.
+    # The cleanup is the script's, behind the question that names it, or the human's: the skill's
+    # bash never runs it, so it holds no rule but the script's own and `git log`.
     assert "close_cleanup" in close.content
-    assert any(t.startswith("Bash(") for t in close["allowed-tools"])
+    assert all(
+        "sdlc.py" in t or t == "Bash(git log *)"
+        for t in close["allowed-tools"]
+        if t.startswith("Bash(")
+    )
     assert "Never run it from this session" in close.content
+    wait = close.content.split("## Step 2", 1)[1].split("## Step 3", 1)[0]
+    assert "then run <cleanup.command>?" in wait and "`cleanup.runs` is true" in wait
     ship = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
     assert "/sdlc:close" in ship
 

@@ -175,7 +175,9 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert cfg.returncode == 0, cfg.stderr
     out = json.loads(cfg.stdout)
     assert out["config_file"] is None
-    assert all(v is None for v in out["commands"].values())
+    commands = dict(out["commands"])
+    assert commands.pop("close_cleanup_runs") is False, "the one switch, off"
+    assert all(v is None for v in commands.values())
     assert out["docs"]["review"]["source"] == "plugin"
     assert out["work"] == {
         "dir": str(root / ".sdlc" / "work"),
