@@ -182,6 +182,45 @@ def test_preflight_exits_1_on_a_part_s_problems_and_prints_every_part(change, ca
     assert {"undone", "nits", "closes", "checks", "context"} <= out.keys()
 
 
+def test_preflight_names_the_branches_that_apply(change, capsys) -> None:
+    """The fixture has an undone item and two issues on `closes:`; a factory run's decision puts
+    its file first."""
+    root, folder = change
+    _, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
+    assert out["branches"] == ["undone.md", "closes.md"]
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    _, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
+    assert out["branches"] == ["factory.md", "undone.md", "closes.md"]
+
+
+# A plain change's parts: nothing undone, nothing to close, no risk, no cases.
+PLAIN = {
+    "undone": {"items": []},
+    "closes": {"closes": []},
+    "risk": {"sensitive": [], "irreversible": [], "deep": False},
+    "cases": {"available": False},
+}
+
+
+@pytest.mark.parametrize(
+    "part, value, expected",
+    [
+        (None, None, []),
+        ("undone", {"items": [{"line": 3, "text": "x"}]}, ["undone.md"]),
+        ("closes", {"closes": [{"number": 12}]}, ["closes.md"]),
+        ("risk", {"sensitive": [], "irreversible": ["defaults/x.md"], "deep": False},
+         ["recover.md"]),
+        ("risk", {"sensitive": ["check.sh"], "irreversible": [], "deep": True}, ["fresh.md"]),
+        ("risk", None, []),
+        ("cases", {"available": True, "cases": {}, "scope": ["ship"]}, ["cases.md"]),
+        ("cases", {"available": True, "cases": {}, "scope": []}, []),
+    ],
+)  # fmt: skip
+def test_ship_branches_condition(tmp_path: Path, part, value, expected) -> None:
+    parts = {**PLAIN, **({part: value} if part else {})}
+    assert sdlc.ship_branches(parts, tmp_path) == expected
+
+
 def test_preflight_refuses_an_unknown_id(change, capsys) -> None:
     root, _ = change
     assert sdlc.cmd_preflight(root, "009") == 1

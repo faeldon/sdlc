@@ -474,7 +474,8 @@ asked as text.
 `/sdlc:ship` reads all of this in one call, `sdlc.py preflight NNN`: the change's undone notes,
 the nits its diff touches, the issues on its `closes:` line, its acceptance checks, its earlier
 findings and the context docs its diff could have made wrong, each part as `undone`,
-`nits --change`, `closes`, `checks`, `findings` and `context` give it. It writes nothing, and
+`nits --change`, `closes`, `checks`, `findings` and `context` give it, then `branches`, the files
+beside ship's skill those parts call for, which ship reads and no others. It writes nothing, and
 setup's read-only rules allow it, `nits` and `findings` too.
 `preflight NNN --question` words ship's approval question from what its review decided
 (`--context`, `--nits`, and each issue on `closes:` once as `--closing N` or `--split N`), and

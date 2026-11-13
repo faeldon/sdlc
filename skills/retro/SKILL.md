@@ -70,7 +70,9 @@ What `retro` gives:
   `important`, the window's Important findings with their class, beside `important_unknown`,
   the changes with no `findings.md` to read.
 - `unmeasured`: signals history doesn't record.
-- `prose`: each skill's size, estimated tokens and commands, plus the host docs the skills read.
+- `prose`: each skill's size and estimated tokens (its `SKILL.md`, which every run reads; the files
+  read only when a branch applies are its `branches`) and commands, plus the host docs the skills
+  read.
 - `architecture`: where the code is going, from git. Each change in `changes` carries `added`,
   `deleted` and `by_kind` (`code`, `tests`, `docs`, told apart as `kinds` says: the conventions,
   or the host's `retro.test_paths` and `retro.doc_paths`), and `size` gives each tier's medians

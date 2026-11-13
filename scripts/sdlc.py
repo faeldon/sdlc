@@ -5387,19 +5387,29 @@ def last_retrospective(home: Path, trunk: str | None) -> dict | None:
 
 
 def prose_metrics(home: Path, cfg: dict) -> dict:
-    """How much each skill is, the plugin's: what every session in a host reads and follows. And
+    """How much each skill is, the plugin's: what every session in a host reads and follows. A
+    skill's size is its `SKILL.md`'s, which every run reads; the files beside it, read only when
+    their branch applies, are its `branches`, and its commands are counted across them all. And
     the host docs the skills read on top. Tokens are an estimate, bytes / 4."""
+
+    def size(text: str) -> dict:
+        n = len(text.encode("utf-8"))
+        return {"lines": len(text.splitlines()), "bytes": n, "est_tokens": n // 4}
+
     skills = {}
     for path in sorted((PLUGIN_DIR / "skills").glob("*/SKILL.md")):
         text = path.read_text(encoding="utf-8")
-        size = len(text.encode("utf-8"))
-        commands = bash_commands(text)
+        side = {
+            p.name: p.read_text(encoding="utf-8")
+            for p in sorted(path.parent.glob("*.md"))
+            if p.name != "SKILL.md"
+        }
+        commands = [c for t in (text, *side.values()) for c in bash_commands(t)]
         skills[path.parent.name] = {
-            "lines": len(text.splitlines()),
-            "bytes": size,
-            "est_tokens": size // 4,
+            **size(text),
             "commands": len(commands),
             "script_calls": sum("scripts/sdlc.py" in c for c in commands),
+            **({"branches": {name: size(t) for name, t in side.items()}} if side else {}),
         }
     docs = {}
     wanted = [(k, cfg["docs"][k]) for k in ("process", "policy", "review") if cfg["docs"][k]]
@@ -7028,13 +7038,33 @@ def cmd_intake(root: Path) -> int:
     return 0
 
 
+# Ship's rare branches: each file beside skills/ship/SKILL.md, in the order ship reads them, and
+# when it applies, from preflight's parts and the change's folder. Ship reads only the files this
+# names, so whether a branch applies is the script's call, never the skill's.
+SHIP_BRANCHES = {
+    "factory.md": lambda parts, path: (path / "decision.md").exists(),
+    "undone.md": lambda parts, path: bool(parts["undone"]["items"]),
+    "closes.md": lambda parts, path: bool(parts["closes"]["closes"]),
+    "recover.md": lambda parts, path: bool((parts["risk"] or {}).get("irreversible")),
+    "fresh.md": lambda parts, path: bool((parts["risk"] or {}).get("deep")),
+    "cases.md": lambda parts, path: bool(
+        parts["cases"].get("available") and parts["cases"].get("scope")
+    ),
+}
+
+
+def ship_branches(parts: dict, path: Path) -> list[str]:
+    """The files of `SHIP_BRANCHES` that apply to change `path`, given `preflight`'s parts."""
+    return [name for name, applies in SHIP_BRANCHES.items() if applies(parts, path)]
+
+
 def cmd_preflight(root: Path, ident: str) -> int:
     """Everything /sdlc:ship's Step 0 looks up about a change, as one JSON object: its undone
     items, the nits its diff touches, the issues it would close, its acceptance checks, the
     findings an earlier run of its review left, the sensitive and irreversible paths it touches,
-    and the context docs its diff could have made wrong, each part as its own command gives it.
-    Writes nothing, so it is allowed without a prompt. Exits 1 when a part reports problems, after
-    printing every part."""
+    and the context docs its diff could have made wrong, each part as its own command gives it,
+    then `branches`, the files beside ship's skill that these call for. Writes nothing, so it is
+    allowed without a prompt. Exits 1 when a part reports problems, after printing every part."""
     path = _one_change(root, ident)
     if path is None:
         return 1
@@ -7052,6 +7082,7 @@ def cmd_preflight(root: Path, ident: str) -> int:
         "context": _context_report(checkout, trunk),
         "cases": _cases_report(root, path),
     }
+    parts["branches"] = ship_branches(parts, path)
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
     for name in ("nits", "checks", "findings"):
         problems += [f"{name}: {p}" for p in (parts[name] or {}).get("problems") or []]

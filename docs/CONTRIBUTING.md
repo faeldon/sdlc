@@ -154,7 +154,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 
 | Path | What |
 |---|---|
-| `skills/<name>/SKILL.md` | the `sdlc` skills; the directory name is the skill's name |
+| `skills/<name>/SKILL.md` | the `sdlc` skills; the directory name is the skill's name. Any other `*.md` beside it is a branch file, read only when the script says it applies (ship's, from `preflight`'s `branches`) |
 | `scripts/sdlc.py` | the mechanism, one file, argparse subcommands |
 | `scripts/trackers/` | one module per tracker, loaded by path only when `archive.target` names it |
 | `scripts/metrics.py` | what a change cost, measured at close |

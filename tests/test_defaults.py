@@ -256,8 +256,8 @@ def test_every_prompt_sits_in_a_guide_slot(answers: str, guide: str) -> None:
 def test_no_shipped_text_writes_a_seed_heading() -> None:
     """Ideas are tagged `[idea]`; `[seed]` is named only as the old tag, never written."""
     paths = [
-        *ROOT.glob("skills/*/SKILL.md"),
-        *ROOT.glob("plugins/factory/skills/*/SKILL.md"),
+        *ROOT.glob("skills/*/*.md"),
+        *ROOT.glob("plugins/factory/skills/*/*.md"),
         *ROOT.glob("templates/*.md"),
         *ROOT.glob("defaults/*.md"),
         *ROOT.glob("guide/*.md"),

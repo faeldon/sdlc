@@ -451,19 +451,6 @@ Cost: S
 Value: low
 Raised by: 040-factory-eval-and-review (correctness)
 
-## [2026-11-04-6] [idea] Ship reads its rare branches only when preflight says they apply
-
-Ship's skill is the largest (487 lines, about 7,800 tokens) and 8 of the window's 14 changes edited
-it, each adding a branch every run then reads: agent verdicts, pre-existing bugs, the issues it
-closes, how to recover, undone items. Most runs need none of them, and `preflight` already says
-which apply (its `undone`, `closes` and `risk` parts, and whether a `decision.md` exists). Move each
-branch to a file beside the skill that ship reads only when its part is non-empty, keeping the WAIT
-and every rule in `SKILL.md`, with `tests/test_skills.py` covering those files' commands the way it
-covers the skill's. A plain change then reads a fraction of it, and the next feature lands in a
-file of its own. Raised by the retrospective of 2026-11-04.
-Theme: cost
-Priority: high
-
 ## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
 
 Rerunning `/sdlc:setup` on a repo that is set up reads the whole skill (307 lines, about 5,500
@@ -643,3 +630,13 @@ every command), so it can't be committed or replayed elsewhere. The likely desig
 out of git, captured per machine before a run, and approve cases skipped while theirs is missing.
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
+
+## [2026-11-13-2] [nit] A bare pointer to a renamed side file passes the side-file test
+
+The side-file test checks a bare `file.md` pointer in SKILL.md only against files that exist, so
+a pointer left naming a renamed branch file isn't caught; full `skills/<name>/<file>` paths are.
+Theme: tests
+Paths: tests/test_skills.py
+Cost: S
+Value: low
+Raised by: 056-ship-reads-rare-branches (correctness)

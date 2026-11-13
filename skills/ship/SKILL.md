@@ -83,19 +83,6 @@ the code they describe, and `/sdlc:close` takes the folder off `main` once the c
 Read `.sdlc/work/NNN-slug/intent.md` and, if Tier 2, `spec.md` — you're about to check the diff against
 them.
 
-**Agents' verdicts, when there are any.** A change built by agents (the optional `sdlc-factory`
-plugin) has `.sdlc/work/NNN-slug/decision.md`, opening `DECISION: READY` or `DECISION: ESCALATE`, and
-its reviews in `.sdlc/work/NNN-slug/reviews/round-<N>/<role>.md`, each opening `VERDICT: PASS` or
-`VERDICT: CHANGES`, each round's verifier answers in `reviews/round-<N>/verified.md` (`- KEPT:`
-for the builder, `- DROPPED:` with why), and the person's calls the agents raised in
-`.sdlc/work/NNN-slug/decisions.md` (`- [x]` decided, `- [ ]` assumed). When they exist, read the
-decision, the highest round's reviews, every `verified.md` and the ledger: they are evidence for
-Step 3, never a substitute for it. A dropped change your own passes confirm is a finding like any
-other. The builder's reports in `build/round-<N>.md` and the behaviour check's
-`reviews/round-<N>/behaviour.md` end with a `## Evidence` section, each command with its output and
-exit: what the agents say they ran, which Step 1's gate and acceptance checks still run for
-themselves. A change with none of them is reviewed exactly as below.
-
 Then everything else this skill looks up about the change, in one call that writes nothing:
 
 ```bash
@@ -121,9 +108,15 @@ Keep its output in view; the steps below read its parts by name, and run none of
 - **`context`**: the docs the context pass weighs in Step 3.
 - **`cases`**: in this plugin's own repo, the skills' cases this diff calls for (`scope`), which
   Step 1 runs; `available: false` everywhere else, and then nothing below mentions them.
+- **`branches`**: the files beside this skill this change calls for: `factory.md` (a change built
+  by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, `cases.md`.
 
-Empty is the usual answer for the first three. A non-empty `problems` names the part that has one;
-a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
+Empty is the usual answer for the first three, and for `branches`. A non-empty `problems` names the
+part that has one; a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
+
+**Read each file `branches` names now,** at `${CLAUDE_PLUGIN_ROOT}/skills/ship/<file>`, and no
+other: whether a branch applies is the script's call, never this skill's. A file's `## Step N`
+sections belong to that step, where this skill names the file.
 
 **Check the working tree for unrelated work.** If the diff mixes something else in with this
 change, say so plainly and ask whether to commit them separately. Do not silently bundle them — a
@@ -161,15 +154,7 @@ command exits non-zero, times out, or leaves the working tree changed (`left`). 
 here, as a failing gate does:** report each failing check's name, `output` and `left`. A problem in
 `checks.md` itself, which the `checks` part reports, stops here too.
 
-**Then the skills' own cases, in this plugin's repo only:** `preflight`'s `cases` part. With
-`available` false, or an empty `scope`, there is nothing to run: say nothing of it. Otherwise
-the diff reaches a skill whose behaviour the suite in `evals/` checks under a model. Show the
-cases in `scope` and that the run is paid and capped (at most $5), and only then run
-`sdlc.py run-cases <NNN>`, the same way as `accept`: no rule here, so the person answers the
-prompt it raises, and never a command line with `eval` in it, which the harness refuses from a
-worktree. It prints each case's score beside the last run's, and `failed`. A `skipped` run (no
-`claude`, an unavailable eval, the cost ceiling) never stops ship: Step 3's note says why. A failed
-case doesn't stop here either: Step 3 makes it a finding.
+**Then the skills' own cases,** in `cases.md`, when `branches` names it.
 
 ## Step 2 — If the diff calls for it, run the build check
 
@@ -240,27 +225,8 @@ it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.
 is cheap and worth it (S and med) is the one to recommend fixing now, as `fix` below. The rest are
 proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
-**On a deep diff, a fresh-context review too,** after your own passes. Spawn the plugin's reviewer
-with the `Agent` tool, `subagent_type: "sdlc:reviewer"`, and a prompt holding only the diff
-(`git diff HEAD`, the untracked files' paths with it), the change's folder, and the paths of
-`docs.review.guide` and `docs.review`: nothing of this session's reasoning, which is what it is
-there to be free of. It reads and returns text; it writes nothing. Each finding it returns joins
-the file below with a `By: fresh` line. One your own passes confirm, or that you confirm now by
-reading its evidence, takes the disposition you'd propose for any finding; one you can't confirm is
-proposed `wrong`, with a `Reason:` saying why, for the person to overturn. Never drop one: the
-person sees every fresh finding. On a deep diff the file's note always says which happened:
-`Fresh review: ran`, or, **when the reviewer can't run** (no `Agent` tool here, or the run fails),
-`Fresh review: skipped, <why>`, said in Step 4 too. The script reads that line: the question
-names a skip, and `sdlc.py ship` refuses a deep diff whose note says neither, so it never lands
-with its fresh review silently missing.
-
-**With a `cases` scope from Step 0, the note says what the skills' cases did too:** `Skill evals:
-ran, <passed> of <cases>`, or `Skill evals: skipped, <why>` when Step 1's run was skipped or the
-person declined its prompt. Each case in `failed` is an **Important** `[correctness]` finding,
-`open`: its `Evidence:` the run's folder and the case, its `Class:` a skill doing what its text
-forbids. One the person says failed for the model's sake, not the change's, is answered `wrong`
-with why, never left out. As with the fresh review, the question names a skip, and `sdlc.py ship`
-refuses a scoped diff whose note says neither.
+**On a deep diff, a fresh-context review too,** in `fresh.md`, which `branches` names then; and
+**the skills' cases' line in the note,** in `cases.md`.
 
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
@@ -332,30 +298,8 @@ then its `Severity:` (one of the process doc's words, as `/sdlc:bug` asks) and `
 a first body line `Found by the review of <NNN-slug>.` No `Introduced by:`: that line is for one
 confirmed.
 
-**How to recover**, when `risk.irreversible` names paths: a revert of this commit won't undo what
-they reach, so the message carries a `How to recover:` paragraph after the body, one line per path
-(or per group of them), each naming the way back: the command that reverses it, or `fix forward:`
-and what the follow-up change would do (for files a host copies at setup, a release without them
-and `/sdlc:setup` in each host). For Tier 2, start from `plan.md`'s Rollback section. Show it with
-the message; Step 5's question says it was shown.
-
-**Agent verdicts.** When Step 0 found `decision.md`, show it under the findings: the decision, its
-reasons and its open items, first and plainly when it is `ESCALATE`. Then every decision in
-`decisions.md` still unticked: each is an assumption the build rests on that the person hasn't
-confirmed, and the approval below confirms it or sends the change back. Then each reviewer's
-verdict from the highest round. A `CHANGES` your own passes confirm is a finding like any other; one they
-don't is said so, with why. The decision informs the person's approval and never stands in for it.
-
-**Undone items.** For each item Step 0 listed, propose one of two dispositions:
-
-- **carry it forward:** a new `.sdlc/work/inbox.md` seed, with a short title of its own;
-- **drop it:** with a one-line reason (done after all, superseded, not worth doing).
-
-There is no third option, such as keeping it as an open question in `intent.md`: a shipped intent
-is read no more than its notes. An undone item doesn't block shipping; a known gap can ship once
-it's written down somewhere that gets read. Put the dispositions in the commit message, after the
-body, as a `Carried forward:` and a `Dropped:` paragraph, one line per item. Leave out a paragraph
-that has nothing in it.
+**How to recover** (`recover.md`), **agent verdicts** (`factory.md`), **undone items**
+(`undone.md`) and **issues it closes** (`closes.md`): each when `branches` names its file.
 
 **Ids.** Take an id for every entry this ship would add to `.sdlc/work/inbox.md`, the new nits, the
 pre-existing bugs, the seeds undone items are carried to and the seeds issues are split off as,
@@ -376,14 +320,6 @@ stays, and needs no mention.
 `.sdlc/work/inbox.md`: `sdlc.py ship` deletes those entries with the commit, and `/sdlc:close` records
 each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
 the line comes out, or the fix goes in.
-
-**Issues it closes.** For each issue `preflight`'s `closes` part listed, show its number and title, with a line on
-whether the diff resolves what it asks, and ask, issue by issue, whether this change resolved it.
-Only a confirmed one stays on `closes:`, and `/sdlc:close` closes it when the change lands. One the
-human says this change didn't resolve is never closed and never dropped: propose a new seed for it,
-an `[idea]` or a `[bug]` as the human decides (a bug with its `Severity:`), with an id from the same
-`next-entry` call, its `Issue: #N` line, and a first body line `Split from <NNN-slug>:` saying what
-is left. Show the `closes:` line as it becomes.
 
 **Context update.** Show the context pass's result under the findings: each proposed edit as a
 diff of its doc, or "no update needed" and why. A doc left saying something false is an
@@ -460,19 +396,8 @@ again. The yes approved the fixes described, not whatever they turned into.
 entries there, never into a second file beside it, which would hide every entry the first one
 holds.
 
-First, the undone items, exactly as approved:
-
-- **Carried:** append each seed to the register as `## [<id>] [idea] <its title>`, with the id
-  Step 4 took for it. If it doesn't exist, `Write` it at that path first from
-  `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do and points at
-  `.sdlc/work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
-  `- [x] <text> → seed: <id>`.
-- **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
-
-Then the issues it closes, exactly as approved: take each one this change didn't resolve off the
-intent's `closes:` line, and append its seed to the register with its `Issue: #N` line and its
-`Split from <NNN-slug>:` line. The seed lands with the change; the `sync` below lets the issue go
-from the change's issue, and `/sdlc:close` tells it which seed it stays open as.
+First the undone items (`undone.md`), then the issues it closes (`closes.md`), each exactly as
+approved, when `branches` names its file.
 
 Then the nits and the pre-existing bugs, exactly as approved: append each new entry to the
 register after its last one, and delete each retired nit, heading to the line before the next

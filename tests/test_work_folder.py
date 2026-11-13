@@ -157,8 +157,8 @@ def test_an_id_deleted_before_the_move_is_never_handed_out_after_it(tmp_path: Pa
 
 TEXTS = sorted(
     {
-        *ROOT.glob("skills/*/SKILL.md"),
-        *ROOT.glob("plugins/factory/skills/*/SKILL.md"),
+        *ROOT.glob("skills/*/*.md"),
+        *ROOT.glob("plugins/factory/skills/*/*.md"),
         *ROOT.glob("plugins/factory/agents/*.md"),
         *ROOT.glob("defaults/*.md"),
         *ROOT.glob("templates/*.md"),

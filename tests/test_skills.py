@@ -36,6 +36,17 @@ def _id(skill: Path) -> str:
 BY_ID = {_id(s): s for s in SKILLS}
 
 
+def _side_files(skill: Path) -> list[Path]:
+    """The files beside a skill's `SKILL.md` that it reads when a branch applies."""
+    return sorted(p for p in skill.parent.glob("*.md") if p.name != "SKILL.md")
+
+
+def _skill_text(skill: Path) -> str:
+    """A skill as it runs: its `SKILL.md` and every file beside it, whose commands, rules and
+    script calls are the skill's own."""
+    return "\n".join(p.read_text(encoding="utf-8") for p in [skill, *_side_files(skill)])
+
+
 def _load():
     spec = importlib.util.spec_from_file_location("sdlc_under_test", ROOT / "scripts" / "sdlc.py")
     mod = importlib.util.module_from_spec(spec)
@@ -259,7 +270,7 @@ def test_skills_run_the_script_through_uv(skill: Path) -> None:
     whatever the host has or lacks. A call through a host's interpreter works only in a host that
     happens to have the libraries, which is how the plugin first failed to be portable. Each
     plugin's skills run its own script: the factory's installed copy has no `sdlc.py` beside it."""
-    text = skill.read_text(encoding="utf-8")
+    text = _skill_text(skill)
     script = SCRIPTS[_plugin(skill)]
     calls = [ln for ln in text.splitlines() if f"scripts/{script}" in ln]
     assert calls, f"{_id(skill)}: never runs {script}"
@@ -392,7 +403,7 @@ def test_only_the_named_steps_push() -> None:
     names them, behind the question each already asks. Ship never pushes."""
     for skill in SKILLS:
         rules = [r for r in _bash_rules(skill) if "push" in r]
-        pushes = [c for c in _block_commands(skill.read_text(encoding="utf-8")) if "git push" in c]
+        pushes = [c for c in _block_commands(_skill_text(skill)) if "git push" in c]
         assert not rules and not pushes, f"{_id(skill)} pushes: {rules or pushes}"
     publish = frontmatter.load(ROOT / "skills" / "publish" / "SKILL.md")
     assert "sdlc.py publish" in publish.content
@@ -560,7 +571,7 @@ def test_only_close_and_drop_leave_the_worktree() -> None:
     does, after its one approval."""
     for skill in SKILLS:
         if _id(skill) not in ("sdlc:close", "sdlc:drop"):
-            assert "ExitWorktree" not in skill.read_text(encoding="utf-8"), _id(skill)
+            assert "ExitWorktree" not in _skill_text(skill), _id(skill)
 
 
 def test_drop_writes_the_reason_then_lands_through_the_script() -> None:
@@ -681,7 +692,7 @@ def test_no_skill_grants_all_of_bash(skill: Path) -> None:
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)
 def test_every_command_a_skill_runs_has_a_rule(skill: Path) -> None:
     rules = [_rule_regex(r) for r in _bash_rules(skill)]
-    uncovered = [c for c in _block_commands(skill.read_text(encoding="utf-8"))
+    uncovered = [c for c in _block_commands(_skill_text(skill))
                  if not any(r.match(c) for r in rules)]  # fmt: skip
     assert not uncovered, f"{_id(skill)}: no allowed-tools rule for {uncovered}"
 
@@ -689,10 +700,49 @@ def test_every_command_a_skill_runs_has_a_rule(skill: Path) -> None:
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)
 def test_every_rule_is_for_a_command_the_skill_runs(skill: Path) -> None:
     """No stale grants: each rule matches a command in a block or in the skill's prose."""
-    text = skill.read_text(encoding="utf-8")
+    text = _skill_text(skill)
     used = _block_commands(text) + re.findall(r"`([a-z][^`]*)`", text)
     stale = [r for r in _bash_rules(skill) if not any(_rule_regex(r).match(c) for c in used)]
     assert not stale, f"{_id(skill)}: rules for nothing it runs: {stale}"
+
+
+@pytest.mark.parametrize("skill", SKILLS, ids=_id)
+def test_a_skill_s_side_files_are_named_by_it_and_hold_no_gate(skill: Path) -> None:
+    """A file beside a skill is read only where its `SKILL.md` names it, so one it never names is
+    never read, and one it names must exist. A side file only adds to a step: the skill's gate,
+    its commit and its `ship` stay in `SKILL.md`, where the one-WAIT test reads them."""
+    text = skill.read_text(encoding="utf-8")
+    side = {p.name for p in _side_files(skill)}
+    named = set(re.findall(r"`([a-z][a-z-]*\.md)`", text)) & {
+        p.name for p in skill.parent.iterdir()
+    }
+    pointed = set(re.findall(rf"skills/{skill.parent.name}/([a-z-]+\.md)", text))
+    assert side <= named, f"{_id(skill)} never names {sorted(side - named)}"
+    assert pointed <= side, f"{_id(skill)} points at missing {sorted(pointed - side)}"
+    for path in _side_files(skill):
+        body = path.read_text(encoding="utf-8")
+        assert not body.startswith("---"), f"{path.name} has frontmatter"
+        assert not re.search(r"^#+ .*WAIT", body, re.M), f"{path.name} holds a gate"
+        for cmd in _block_commands(body):
+            assert not cmd.startswith("git commit") and "sdlc.py ship" not in cmd, path.name
+
+
+def test_ship_branches_are_the_files_beside_ship() -> None:
+    """`preflight` names each of ship's branch files from the script's table: a file the table
+    lacks is never read, and an entry with no file is a read that fails."""
+    ship = BY_ID["sdlc:ship"]
+    assert list(sdlc.SHIP_BRANCHES) and set(sdlc.SHIP_BRANCHES) == {
+        p.name for p in _side_files(ship)
+    }
+    text = ship.read_text(encoding="utf-8")
+    assert "${CLAUDE_PLUGIN_ROOT}/skills/ship/<file>" in text
+    assert "whether a branch applies is the script's call" in " ".join(text.split())
+
+
+def test_ship_s_skill_stays_under_its_budget() -> None:
+    """Every ship run reads `SKILL.md` whole: what only some runs need goes in a branch file."""
+    lines = len(BY_ID["sdlc:ship"].read_text(encoding="utf-8").splitlines())
+    assert lines <= 475, f"ship's SKILL.md is {lines} lines"
 
 
 def test_the_rule_matcher_can_fail() -> None:
@@ -785,7 +835,9 @@ def test_sdlc_s_reviewer_reads_and_nothing_more() -> None:
     assert {t.strip() for t in str(post["tools"]).split(",")} == {"Read", "Grep", "Glob"}
     assert "By: fresh" in post.content and "never" in post.content
     ship = frontmatter.load(ROOT / "skills" / "ship" / "SKILL.md")
-    assert "Agent" in ship["allowed-tools"] and '"sdlc:reviewer"' in ship.content
+    fresh = (ROOT / "skills" / "ship" / "fresh.md").read_text(encoding="utf-8")
+    assert "Agent" in ship["allowed-tools"] and '"sdlc:reviewer"' in fresh
+    assert "fresh-context review too,** in `fresh.md`" in ship.content
 
 
 def test_adapted_agents_keep_the_notice() -> None:
@@ -901,15 +953,15 @@ def test_the_eval_and_the_review_write_reports_and_never_the_register() -> None:
 
 def test_ship_reads_the_agents_verdicts() -> None:
     """When a change was built by agents, ship reads their decision and reviews as evidence for its
-    own passes, and shows them; a change without them is reviewed as before."""
-    text = BY_ID["sdlc:ship"].read_text(encoding="utf-8")
-    step0 = text.split("## Step 0")[1].split("## Step 1")[0]
-    assert "decision.md" in step0 and "reviews/round-<N>/" in step0
-    assert "reviews/round-<N>/verified.md" in step0, "what the verifier dropped, and why"
-    assert "`## Evidence`" in step0 and "behaviour.md" in step0, "claims, not runs"
-    step4 = text.split("## Step 4")[1].split("## Step 5")[0]
-    assert "**Agent verdicts.**" in step4 and "ESCALATE" in step4
-    assert "never stands in" in step4
+    own passes, and shows them; a change without them is reviewed as before, reading none of it."""
+    ship, factory = _steps("ship"), _steps("ship", "factory.md")
+    assert "`factory.md` (a change built by agents, with a `decision.md`)" in ship["0"]
+    assert "decision.md" in factory["0"] and "reviews/round-<N>/" in factory["0"]
+    assert "reviews/round-<N>/verified.md" in factory["0"], "what the verifier dropped, and why"
+    assert "`## Evidence`" in factory["0"] and "behaviour.md" in factory["0"], "claims, not runs"
+    assert "**agent verdicts** (`factory.md`)" in ship["4"]
+    assert "**Agent verdicts.**" in factory["4"] and "ESCALATE" in factory["4"]
+    assert "never stands in" in factory["4"]
 
 
 def test_ship_lists_then_runs_the_changes_checks_under_a_prompt() -> None:
@@ -950,7 +1002,7 @@ def test_the_build_session_brings_the_persons_decisions_to_them() -> None:
     assert "AskUserQuestion" in build["allowed-tools"] and "Edit" in build["allowed-tools"]
     assert "**`decide`**" in build.content and "decisions.md" in build.content
     assert "Never answer a decision yourself" in build.content
-    assert "decisions.md" in BY_ID["sdlc:ship"].read_text(encoding="utf-8").split("## Step 1")[0]
+    assert "decisions.md" in _steps("ship", "factory.md")["0"]
     approver = (FACTORY / "agents" / "approver.md").read_text(encoding="utf-8")
     assert "decisions.md" in approver and "still unticked" in approver
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
@@ -994,11 +1046,12 @@ def test_uninstall_plans_before_its_gate_and_removes_after() -> None:
     assert "sdlc.py uninstall\n" in after
 
 
-def _steps(skill: str) -> dict[str, str]:
-    """A skill's `## Step N` sections, by number, whitespace collapsed."""
-    text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+def _steps(skill: str, file: str = "SKILL.md") -> dict[str, str]:
+    """A skill's `## Step N` sections, by number, whitespace collapsed: its `SKILL.md`'s, or a
+    branch file's beside it."""
+    text = (ROOT / "skills" / skill / file).read_text(encoding="utf-8")
     parts = text.split("\n## Step ")[1:]
-    return {p.split(" ", 1)[0]: " ".join(p.split()) for p in parts}
+    return {p.split(None, 1)[0]: " ".join(p.split()) for p in parts}
 
 
 def test_triage_checks_the_repo_and_never_runs_an_issue_s_commands() -> None:
@@ -1028,14 +1081,16 @@ def test_triage_s_one_wait_shows_every_verdict_and_writes_nothing_before() -> No
 
 
 def test_ship_asks_about_each_issue_it_would_close_and_splits_off_the_rest() -> None:
-    steps = _steps("ship")
+    steps, closes = _steps("ship"), _steps("ship", "closes.md")
     assert "sdlc.py preflight <NNN>" in steps["0"] and "**`closes`**" in steps["0"]
-    assert "ask, issue by issue, whether this change resolved it" in steps["4"]
-    assert "never closed and never dropped" in steps["4"]
-    assert "`Split from <NNN-slug>:`" in steps["4"] and "`Issue: #N`" in steps["4"]
+    assert "**issues it closes** (`closes.md`)" in steps["4"]
+    assert "ask, issue by issue, whether this change resolved it" in closes["4"]
+    assert "never closed and never dropped" in closes["4"]
+    assert "`Split from <NNN-slug>:`" in closes["4"] and "`Issue: #N`" in closes["4"]
     assert "closing #N and #M when it lands and splitting #K off as a seed" in steps["5"]
+    assert "the issues it closes (`closes.md`)" in steps["6"]
     took = "take each one this change didn't resolve off the intent's `closes:` line"
-    assert took in steps["6"]
+    assert took in closes["6"]
 
 
 def test_ship_asks_the_question_the_script_words() -> None:
@@ -1056,7 +1111,8 @@ def test_intent_carries_an_entry_s_issues_onto_closes() -> None:
 
 def test_no_shipped_text_names_migrate_inbox() -> None:
     """The 1.4.0 shims are gone, and with them the command that moved a repo off them."""
-    texts = [*SKILLS, *(ROOT / "defaults").rglob("*.md"), *(ROOT / "templates").glob("*.md")]
+    texts = [*SKILLS, *(p for s in SKILLS for p in _side_files(s))]
+    texts += [*(ROOT / "defaults").rglob("*.md"), *(ROOT / "templates").glob("*.md")]
     texts += [
         *(FACTORY / "agents").glob("*.md"),
         ROOT / "README.md",

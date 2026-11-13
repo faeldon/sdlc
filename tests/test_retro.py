@@ -454,6 +454,12 @@ def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path) -> None:
     assert set(prose["skills"]) == {p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")}
     retro = prose["skills"]["retro"]
     assert retro["est_tokens"] == retro["bytes"] // 4 and retro["script_calls"] >= 3
+    # A skill's size is what every run reads; the files beside it are its branches.
+    ship = prose["skills"]["ship"]
+    skill = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+    assert ship["lines"] == len(skill.splitlines())
+    beside = {p.name for p in (ROOT / "skills" / "ship").glob("*.md")} - {"SKILL.md"}
+    assert set(ship["branches"]) == beside and "branches" not in retro
     assert prose["sdlc_py_lines"] > 1000
 
 

@@ -276,7 +276,10 @@ Ship shows any edit with its findings and commits it with the change; close has 
 call, each part (`undone`, `nits`, `closes`, `checks`, `findings`, `context`) built by the same
 `_<part>_report()` its own command prints, and asks the WAIT question `preflight --question`
 words (`ship_question()`), never one worded by hand. A new list ship needs is a new part there,
-not a new command in the skill.
+not a new command in the skill. What only some runs need lives in a file beside `SKILL.md`
+(`skills/ship/undone.md`, …), read only when `preflight`'s `branches` part names it, from
+`SHIP_BRANCHES`: whether a branch applies is the script's call, and the WAIT and every rule that
+binds each run stay in `SKILL.md`.
 
 **Review findings: `findings_entries()`.** Ship writes its review to the change's `findings.md`
 after every run, before its WAIT, by a named exception to confirm-before-writing like `base`'s: it
@@ -350,9 +353,12 @@ Changing a skill or the script usually means satisfying these, so know them befo
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
   `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec`, `build`, `eval` and `review`) have exactly one heading
-  containing `WAIT`, which asks its literal question in an `AskUserQuestion` dialog (2–4
-  answers, publish's `no` first, only a chosen yes approves) and as text where none can be shown
-  (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in a gated span as the gate. Every call to a script is literally
+  containing `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog
+  (2–4 answers, publish's `no` first, only a chosen yes approves) and as text where none can be
+  shown (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in a gated span as the
+  gate. A skill's side files (any other `*.md` in its folder) are part of it: `SKILL.md` names
+  each, none holds frontmatter, a gate, a commit or `sdlc.py ship`, and the rules below cover
+  their commands too. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill
   must run its script's `config` and name the config keys listed in `READS_CONFIG`.
