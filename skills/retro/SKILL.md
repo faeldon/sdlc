@@ -68,7 +68,8 @@ What `retro` gives:
   tied to a change; `rate`, the escapes per closed change in this window and the one before, and
   its `trend` (`up`, `down`, `flat`, or `unknown` when either window is too small to say); and
   `important`, the window's Important findings with their class, beside `important_unknown`,
-  the changes with no `findings.md` to read.
+  the changes with no `findings.md` to read, or one that no longer parses: its review's
+  `problems` say which sections.
 - `unmeasured`: signals history doesn't record.
 - `prose`: each skill's size and estimated tokens (its `SKILL.md`, which every run reads; the files
   read only when a branch applies are its `branches`) and commands, plus the host docs the skills

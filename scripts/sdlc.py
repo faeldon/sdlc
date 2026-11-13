@@ -2201,6 +2201,13 @@ def cmd_sync(root: Path, ident: str | None) -> int:
     report = {"nothing": why} if why else tracker(home, cfg).sync(_tracker_change(home, path))
     if "nothing" in report:
         report = {"nothing to sync": report["nothing"]}
+    elif not report.get("error") and (closes := load_change(path, home).get("closes")):
+        # Each issue the change takes on hears so now, not at the next marking; never fatal.
+        found, _ = _intake_tracker(home, cfg)
+        if found is not None:
+            marked = mark_issues(home, found, set(closes))
+            report.setdefault("done", []).extend(marked["done"])
+            report.setdefault("skipped", []).extend(marked["failed"])
     print(json.dumps({"change": path.name, **report}, indent=2, ensure_ascii=False))
     return 1 if report.get("error") else 0
 
@@ -3185,8 +3192,9 @@ QUIET_HOURS = 24
 
 def last_touched(root: Path, rec: dict, trunk: str | None) -> float | None:
     """When an open change was last worked on, as a POSIX timestamp: the newest of its branch's
-    own last commit and the times the files `git status` lists in its checkout were modified.
-    None when neither says anything. Read-only: one log and one status per change."""
+    own last commit and the times the files `git status` lists in its checkout were modified (in
+    the main checkout, only those under its folder). None when neither says anything.
+    Read-only: one log and one status per change."""
     checkout = checkout_of(Path(root, rec["dir"]))
     branch = f"refs/heads/{rec['id']}-{rec['slug']}"
     span = f"refs/heads/{trunk}..{branch}" if trunk else branch
@@ -3194,7 +3202,12 @@ def last_touched(root: Path, rec: dict, trunk: str | None) -> float | None:
     out = _git(checkout, "log", "-1", "--format=%ct", span)
     if out and out.isdigit():
         times.append(float(out))
-    for rel in _dirty_paths(checkout):
+    dirty = _dirty_paths(checkout)
+    if checkout.resolve() == main_root(root).resolve():
+        # The main checkout's other edits are nobody's change: only the folder's own count.
+        folder = f"{Path(root, rec['dir']).resolve().relative_to(checkout.resolve()).as_posix()}/"
+        dirty = [p for p in dirty if p.startswith(folder)]
+    for rel in dirty:
         with suppress(OSError):
             times.append((checkout / rel).stat().st_mtime)
     return max(times) if times else None
@@ -3786,7 +3799,9 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         at = _config_at(main, start)
     if wipe := _cleanup_plan(at, cfg, branch.split("-")[0]):
         report["cleanup"] = wipe
-    if own and kind == "shipped" and (reaches := _reaches(main, branch)):
+    # A check writes no start ref, so it previews from where the close would write it.
+    preview = tip if check_only and not landed else None
+    if own and kind == "shipped" and (reaches := _reaches(main, branch, preview)):
         report["reaches"] = reaches
     # What the push of the base branch sends, newest first: the Close or Drop commit while this run
     # has yet to write it, the change's own commits not on the base branch yet, then everything the
@@ -3998,12 +4013,13 @@ def landing_reach(paths: list[str]) -> dict:
     return {k: v for k, v in found.items() if v}
 
 
-def _reaches(main: Path, branch: str) -> dict | None:
-    """`landing_reach()` over everything the change's branch touched; None when it touched
+def _reaches(main: Path, branch: str, start: str | None = None) -> dict | None:
+    """`landing_reach()` over everything the change's branch touched, from `start` when given (the
+    base branch's tip, which close's `--check` writes no ref for); None when it touched
     nothing that reaches anyone. Never a refusal: a change whose paths can't be read lands, and
     `unknown` says why, so "nothing to do" is never a guess."""
     try:
-        base = _change_base(main, branch)
+        base = start or _change_base(main, branch)
         if base is None:
             return {"unknown": f"no commit on {branch} holds its intent"}
         names = _git(main, "diff", "--name-only", "--no-renames", base, branch)
@@ -4947,6 +4963,12 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         _put_back(home, report["files"])
         for rel_path in created:
             (home / rel_path).unlink(missing_ok=True)
+        # Putting back leaves a new file after-bump staged untracked, whichever step failed: only
+        # the release's own files are added, never what `prepare` built.
+        if "untracked" in report:
+            now = _untracked(home)
+            left = {p for p in report["files"] if p in now}
+            report["untracked"] = sorted(set(report["untracked"]) | left)
 
     def after_bump() -> str | None:
         # Main had no uncommitted tracked changes (`_release_refusals`), so every tracked file
@@ -5712,18 +5734,28 @@ def _seed_state(entry: dict, open_titles: set[str], building: set[str]) -> str:
 
 
 def _after_loops(waiting: dict[str, list[str]]) -> list[list[str]]:
-    """Each set of waiting seeds that wait on each other, once, in the order first met."""
+    """Each set of waiting seeds that wait on each other, through any of their `After:` titles,
+    once, in the order first met, each set in register order."""
+
+    def reach(start: str) -> set[str]:
+        found: set[str] = set()
+        stack = [start]
+        while stack:
+            for t in waiting[stack.pop()]:
+                if t in waiting and t not in found:
+                    found.add(t)
+                    stack.append(t)
+        return found
+
+    reaches = {t: reach(t) for t in waiting}
     loops: list[list[str]] = []
-    seen: set[str] = set()
-    for start in waiting:
-        path: list[str] = []
-        node = start
-        while node in waiting and node not in path and node not in seen:
-            path.append(node)
-            node = next((t for t in waiting[node] if t in waiting), "")
-        if node in path:
-            loops.append(path[path.index(node) :])
-        seen.update(path)
+    placed: set[str] = set()
+    for t in waiting:
+        if t in placed or t not in reaches[t]:
+            continue
+        loop = [u for u in waiting if u in reaches[t] and t in reaches[u]]
+        loops.append(loop)
+        placed.update(loop)
     return loops
 
 
@@ -5750,6 +5782,14 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     known = {e["title"] for e in ideas}
     milestones = [i for i in doc["items"] if i["kind"] == "milestone" and i["status"] == "open"]
     words = severities(home, cfg)
+    # An `After:` title no seed and no shipped change answers to can never be met: warned about,
+    # and never "next in series". History is read only when one dangles.
+    dangling = {t for e in ideas for t in e["after"] if t not in known}
+    unmet: set[str] = set()
+    if dangling:
+        history = closed_changes(home, None, cfg["git"]["base"])
+        shipped = [c["idea"] for c in history if c.get("idea")]
+        unmet = {t for t in dangling if not any(same_ref(s, t) for s in shipped)}
 
     def seed(rule: str, label: str, e: dict) -> dict:
         return {"rule": rule, "label": label, "title": e["title"], "id": e["id"],
@@ -5792,7 +5832,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
             found = [
                 seed(rule, f'next in series after "{e["after"][-1]}"', e)
                 for e in ready
-                if e["after"] and not any(t in known for t in e["after"])
+                if e["after"] and not any(t in known or t in unmet for t in e["after"])
             ]
         elif rule == "nits":
             themes = nits_summary([n for n in nits if n["cost"] == "S"], today)["themes"]
@@ -5821,15 +5861,12 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
             if rows and all(r["verdict"] in ("closed", "shipped", "vanished") for r in rows):
                 done.append(m_id)
 
-    warnings = []
-    dangling = {t for e in ideas for t in e["after"] if t not in known}
-    if dangling:
-        history = closed_changes(home, None, cfg["git"]["base"])
-        shipped = [c["idea"] for c in history if c.get("idea")]
-        for e in ideas:
-            for t in e["after"]:
-                if t in dangling and not any(same_ref(s, t) for s in shipped):
-                    warnings.append(f'"{e["title"]}" waits on "{t}", which is no seed or change')
+    warnings = [
+        f'"{e["title"]}" waits on "{t}", which is no seed or change'
+        for e in ideas
+        for t in e["after"]
+        if t in unmet
+    ]
     waiting = {e["title"]: e["after"] for e in ideas if states[e["title"]] == "waiting"}
     for loop in _after_loops(waiting):
         names = ", ".join(f'"{t}"' for t in loop)
@@ -6379,7 +6416,7 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
             reviews[name] = (
                 _review_at(home, name, rec["sha"], rec.get("findings"))
                 if rec
-                else {"state": "unknown", "counts": None, "findings": []}
+                else {"state": "unknown", "counts": None, "findings": [], "problems": []}
             )
         return reviews[name]
 
@@ -6451,6 +6488,8 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         if seen["state"] != "file":
             important_unknown += 1
             continue
+        if seen["problems"]:  # what parsed is listed, but the count isn't known
+            important_unknown += 1
         important += [
             {"change": rec["name"], **{k: f[k] for k in ("id", "pass", "title", "class",
                                                          "disposition")}}
@@ -6519,12 +6558,14 @@ def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
     """What a closed change's ship review left, from its own commit: its findings.md (`file`), only
     the `Sdlc-Findings` counts (`trailer`), or neither (`unknown`, never a clean review)."""
     text = _git(home, "show", f"{sha}:{work_rel(home)}/{name}/{FINDINGS}")
-    entries = _findings_from_text(text)[0] if text else []
+    entries, problems = _findings_from_text(text) if text else ([], [])
     keys = ("id", "rank", "pass", "title", "class", "disposition", "by", "evidence")
     return {
         "state": "file" if text else "trailer" if counts else "unknown",
         "counts": counts,
         "findings": [{k: e[k] for k in keys} for e in entries],
+        # A section that no longer parses is said, never quietly one finding fewer.
+        "problems": problems,
     }
 
 
@@ -7260,12 +7301,14 @@ def _closes_report(root: Path, path: Path) -> dict:
     return out
 
 
-def mark_issues(home: Path, found) -> dict:
-    """Bring every open issue the base branch and the open changes record in line with its record
-    on the tracker: its comment once, the `triaged` label, its parent, and closed for a verdict
-    that closes it. Never raises; what failed is listed."""
+def mark_issues(home: Path, found, only: set[int] | None = None) -> dict:
+    """Bring every open issue the base branch and the open changes record (or those of them in
+    `only`) in line with its record on the tracker: its comment once, the `triaged` label, its
+    parent, and closed for a verdict that closes it. Never raises; what failed is listed."""
     report: dict = {"done": [], "failed": []}
     records = recorded_issues(home, committed_only=True)
+    if only is not None:
+        records = {n: r for n, r in records.items() if n in only}
     if not records:
         return report
     try:

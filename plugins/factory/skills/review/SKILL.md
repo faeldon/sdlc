@@ -80,7 +80,9 @@ Paths: <path>
 ```
 
 The `?` is for `/sdlc:bug` to give it an id. Propose the severity from the process doc's words
-(`docs.process` in `.sdlc/config.toml`, its section on bugs), never one of your own. Leave out a
+(`docs.process` in `.sdlc/config.toml`, its section on bugs), never one of your own. When that
+doc has no section on bugs, or no words in it, leave the `Severity:` line out: its words then
+come from `sdlc`'s guide, which this plugin can't read, and `/sdlc:bug` asks for one. Leave out a
 reply's style nits and what it marks as fine.
 
 ## Step 4 — Report and stop

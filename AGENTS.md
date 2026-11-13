@@ -225,7 +225,8 @@ always committed before the issue is told (`inbox-commit --triaged`, then `mark-
 finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
 asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
 `Split from NNN-slug:` line, never left dangling. Close's `remove folder` step reruns the marking
-(`mark_issues()`) once the change's entries are on the base branch, and never refuses on it.
+(`mark_issues()`) once the change's entries are on the base branch, and never refuses on it;
+`sync` runs it too, for the change's own `closes:` alone (`only=`), so intent's yes tells them.
 
 **Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
 `.sdlc/work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and

@@ -783,6 +783,17 @@ def test_a_failed_after_bump_leaves_a_new_file_it_staged_untracked(tmp_path: Pat
     assert '"0.4.2"' in (root / "pkg.json").read_text(encoding="utf-8")
 
 
+def test_a_failed_prepare_names_a_new_file_after_bump_staged(tmp_path: Path, capsys) -> None:
+    """Restore unstages it into an untracked file after after-bump's report was taken."""
+    config = CONFIG + 'after_bump = "touch new.txt; git add new.txt"\nprepare = "exit 1"\n'
+    root = _repo(tmp_path, config=config)
+    _close(root, "002-reopen-drafts", "patch")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 1 and out["refusals"][0].startswith("prepare failed")
+    assert _git(root, "status", "--porcelain", "--untracked-files=no") == ""
+    assert (root / "new.txt").exists() and out["untracked"] == ["new.txt"]
+
+
 def test_a_prepare_that_stages_a_file_is_refused_and_unstaged(tmp_path: Path, capsys) -> None:
     root = _prepared(tmp_path, "echo x >> README.md; git add README.md")
     (root / "README.md").write_text("a repo\n", encoding="utf-8")

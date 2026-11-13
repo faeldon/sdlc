@@ -1535,6 +1535,7 @@ def test_sync_makes_the_change_s_issue_the_parent_of_each_issue_it_closes(
     folder = _open(root)
     _filed(gh, 50, labels=("triaged",), parent=40)
     _filed(gh, 51)
+    _filed(gh, 52, parent=1)  # a sub-issue a person added by hand
     _set(folder, "depends_on:\n", "depends_on:\ncloses: [50, 51]\n")
     code, out = _sync(root, capsys, "001")
     assert code == 0, out
@@ -1544,7 +1545,25 @@ def test_sync_makes_the_change_s_issue_the_parent_of_each_issue_it_closes(
     code, out = _sync(root, capsys, "001")
     assert code == 0, out
     assert _issue(gh, 50)["parent"] is None, "a triaged issue that left the line lets go"
-    assert _issue(gh, 51)["parent"] == 1, "a sub-issue triage didn't record stays"
+    assert _issue(gh, 51)["parent"] is None, "so does one the line had marked"
+    assert _issue(gh, 52)["parent"] == 1, "a sub-issue triage didn't record stays"
+
+
+def test_sync_tells_each_issue_the_change_closes_once(tmp_path, gh, capsys) -> None:
+    """Its filer hears the change took it on at intent's sync, not at the next marking."""
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50)
+    _filed(gh, 60)  # recorded by nothing this change says
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    for _ in range(2):
+        code, out = _sync(root, capsys, "001")
+        assert code == 0, out
+    assert [c["body"] for c in _issue(gh, 50)["comments"]] == [
+        "<!-- sdlc:intake:001-thing -->\nTaken on by #1 (001-thing); follow #1 for progress."
+    ]
+    assert {"name": "triaged"} in _issue(gh, 50)["labels"]
+    assert _issue(gh, 60)["comments"] == []
 
 
 def _shipped_closing(root: Path, closes: str) -> str:
@@ -1938,6 +1957,8 @@ def test_a_first_commit_without_the_folder_reaches_and_counts(
     assert sdlc.cmd_ship(root, folder.name.split("-")[0]) == 0
     _git(tree, "add", "-A")
     _git(tree, "commit", "-q", "-m", f"ship {folder.name}")
+    code, out = _close(root, capsys, "001", check=True)
+    assert code == 0 and out["reaches"] == {"skills": ["sdlc:x"]}, "the preview matches the close"
     code, out = _close(root, capsys, "001")
     assert code == 0 and handoffs == [], out
     assert out["reaches"] == {"skills": ["sdlc:x"]}

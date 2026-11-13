@@ -628,7 +628,7 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
             "tier": 1,
             # Fixed: its title left with the entry, and a trailer from before `paths=`.
             "escaped": [{"id": "2026-10-01-1", "title": None, "severity": "high", "paths": None}],
-            "review": {"state": "unknown", "counts": None, "findings": []},
+            "review": {"state": "unknown", "counts": None, "findings": [], "problems": []},
         }
     ]
     assert out["unattributed"] == 1, "the open bug no one has attributed"
@@ -851,6 +851,25 @@ def test_the_windows_important_findings_are_listed_and_the_unreviewed_counted(
          "class": "a write with no check for the row it replaces", "disposition": "fixed"}
     ]  # fmt: skip
     assert out["important_unknown"] == 1, "a trailer alone holds no classes"
+
+
+def test_a_findings_file_that_no_longer_parses_says_so(tmp_path: Path) -> None:
+    """A section history holds that today's parser can't read is a problem the review carries,
+    and its change's Important count is unknown, never quietly one finding fewer."""
+    root = _repo(tmp_path)
+    broken = FINDINGS + "\n## F3 [important] correctness: An old heading shape\n\nEvidence: x\n"
+    _reviewed(root, "001-start", "src/drafts.py", broken, TRAILER)
+    _inbox(root, _bug("2026-10-10-1", "Two drafts", extra="Paths: src/drafts.py\n"
+                      "Introduced by: 001-start\n"))  # fmt: skip
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File 2026-10-10-1")
+    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    (escape,) = out["escapes"]
+    assert escape["review"]["state"] == "file"
+    assert [f["id"] for f in escape["review"]["findings"]] == ["F1", "F2"]
+    assert len(escape["review"]["problems"]) == 1
+    assert "An old heading shape" in escape["review"]["problems"][0]
+    assert [i["id"] for i in out["important"]] == ["F1"] and out["important_unknown"] == 1
 
 
 def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:

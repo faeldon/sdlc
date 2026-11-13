@@ -245,7 +245,7 @@ the `Close` commit as an `Sdlc-Fixes:` trailer, which is how `/sdlc:retro` count
 If that seed or bug has an `Issue:` line, add the `closes:` line Step 3 showed under
 `depends_on:`, every number on it, so the issues it was filed from close with the change. `/sdlc:ship`
 asks about each one before it does, and the `sync` below makes each a sub-issue of the change's
-issue, so its filer follows the change.
+issue and comments on it that the change took it on, so its filer follows the change from now.
 
 Then mirror the written intent to the change's issue, which until now says only that it was
 opened. With no tracker, or a change that gets its issue at close, it says there is nothing to

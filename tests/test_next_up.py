@@ -184,6 +184,17 @@ def test_a_seed_waits_while_its_after_seed_is_open(tmp_path: Path) -> None:
     assert _next(root)["warnings"] == []
 
 
+def test_a_mistyped_after_title_warns_and_is_never_next_in_series(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", "Reopen drafts")
+    _ideas(root, _seed("2026-10-02", "Share drafts", after='"Reopen draft"'))
+    [item] = _next(root)["items"]
+    assert (item["rule"], item["label"]) == ("idea", "idea")
+    assert _next(root)["warnings"] == [
+        '"Share drafts" waits on "Reopen draft", which is no seed or change'
+    ]
+
+
 def test_a_seed_whose_after_seed_is_being_built_is_ready_but_not_yet_in_series(
     tmp_path: Path,
 ) -> None:
@@ -321,6 +332,22 @@ def test_after_lines_that_can_never_be_met_warn_and_never_fail_check(
     assert sdlc.main() == 0
 
 
+def test_a_loop_through_a_later_after_title_is_warned(tmp_path: Path) -> None:
+    """Sync drafts waits first on Print drafts, which waits on a seed in no loop; the loop runs
+    through its second title."""
+    root = _repo(tmp_path)
+    _ideas(
+        root,
+        _seed("2026-10-01", "Sync drafts", after='"Print drafts", "Merge drafts"'),
+        _seed("2026-10-02", "Print drafts", after='"Plain seed"'),
+        _seed("2026-10-03", "Merge drafts", after='"Sync drafts"'),
+        _seed("2026-10-04", "Plain seed"),
+    )
+    assert _next(root)["warnings"] == [
+        'these seeds wait on each other, so none will come up: "Sync drafts", "Merge drafts"',
+    ]
+
+
 def _entry(day: str, title: str, tag: str = "idea", *lines: str) -> str:
     body = "".join(f"{line}\n" for line in lines)
     return f"## [{day}-1] [{tag}] {title}\n\nWhy it's worth doing.\n{body}\n"
@@ -449,6 +476,21 @@ def test_open_change_shows_when_it_was_last_touched(tmp_path: Path, capsys, monk
     assert line().endswith("· quiet, touched 2d ago")
     (tree / ".sdlc" / "work" / "001-share-drafts" / "notes.md").write_text("x\n", encoding="utf-8")
     assert line().endswith("· touched 0m ago")
+
+
+@pytest.mark.portable
+def test_a_folder_in_the_main_checkout_is_touched_only_by_its_own_files(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    assert sdlc.cmd_new(root, "share-drafts", 1, None) == 0
+    old = sdlc.datetime.now(sdlc.UTC).timestamp() - 2 * 24 * 3600
+    for rel in sdlc._dirty_paths(root):
+        os.utime(root / rel, (old, old))
+    (root / "README.md").write_text("an unrelated edit\n", encoding="utf-8")
+    capsys.readouterr()
+    out = _status(root, capsys, monkeypatch).splitlines()
+    assert next(x for x in out if x.startswith("    001  ")).endswith("· quiet, touched 2d ago")
 
 
 NUDGE = "ideas and bugs have no theme: /sdlc:idea --themes proposes them"

@@ -220,29 +220,6 @@ Cost: S
 Value: low
 Raised by: 009-drift-message (cost)
 
-## [2026-10-25-13] [nit] A mistyped After: title makes a seed "next in series"
-
-`next_up` labels a ready seed `next in series` when none of its `After:` titles is in the
-register, so a title naming nothing gets that label as well as its `⚠` warning. Check it against
-the titles history has shipped too.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 019-status-next-work (correctness)
-
-## [2026-10-25-14] [nit] A loop through a seed's second After: title isn't reported
-
-`_after_loops` follows only each waiting seed's first waiting `After:` title, so seeds that wait
-on each other through a later title are never listed and never warned about.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 019-status-next-work (correctness)
-
 ## [2026-10-25-15] [nit] Status can walk main's history twice
 
 With an open milestone and a dangling `After:` title, `next_up` calls `closed_changes(home, None)`
@@ -254,17 +231,6 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 019-status-next-work (cost)
-
-## [2026-10-25-17] [nit] A failed commit or prepare doesn't list a new file after-bump staged
-
-`restore()` after a later failure unstages it into an untracked file, but `untracked` was taken
-at after-bump, so the report never names it.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 022-robustness-nits (correctness)
 
 ## [2026-10-25-22] [nit] A test that close alone records fixes greps the source
 
@@ -278,17 +244,6 @@ Cost: M
 Value: low
 Raised by: 024-bugs-register (correctness)
 
-## [2026-10-26-1] [nit] An issue intent carries onto closes: hears nothing until the next marking
-
-`/sdlc:intent` copies an entry's `Issue:` numbers onto `closes:`, and its `sync` makes each a
-sub-issue, but the "Taken on by" comment waits for the next `mark-triaged` or the change's close.
-
-Theme: robustness
-Paths: skills/intent/SKILL.md, scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 026-github-intake (correctness)
-
 ## [2026-10-26-2] [nit] mark_issues views every open recorded issue on each run
 
 `mark_issues()` runs one `gh issue view` per open issue the repo records, on every triage and every
@@ -300,16 +255,6 @@ Paths: scripts/sdlc.py, scripts/trackers/github.py
 Cost: S
 Value: low
 Raised by: 026-github-intake (cost)
-
-## [2026-10-26-7] [idea] Pay down the robustness nits
-
-The `robustness` theme holds five open nits, the threshold the process doc sets for one paydown
-change: 2026-10-25-13 and 2026-10-25-14 (status's `After:` handling), 2026-10-25-17 (a file
-after-bump staged, missing from a failed release's report), 2026-10-25-18 (a change sized from an
-intent committed early) and 2026-10-26-1 (an issue that hears nothing until the next marking).
-Fix them in one change, each retired by its ship. Raised by the retrospective of 2026-10-26.
-Theme: robustness
-Priority: high
 
 ## [2026-10-26-8] [idea] Leave each change's measured numbers out of retro's and release's output
 
@@ -375,17 +320,6 @@ Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
 
-## [2026-10-27-4] [nit] close --check previews reaches without the change's start
-
-`--check` writes no ref, so `_change_base` falls back to the intent rule and the preview can
-list fewer skills than the close reports. Pass the base branch's tip as the start under --check.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 029-close-records-base (correctness)
-
 ## [2026-10-27-8] [nit] _inbox_commit takes eleven parameters
 
 `cmd_inbox_commit()` hands its whole state to `_inbox_commit()` to hold the lock around it; a
@@ -427,29 +361,6 @@ Paths: tests/test_skills.py
 Cost: S
 Value: low
 Raised by: 037-escaped-bugs-tune-review (correctness)
-
-## [2026-11-04-2] [nit] A findings.md from history that no longer parses reads as fewer findings
-
-`_review_at` drops `_findings_from_text`'s problems, so an unparseable section vanishes from
-`review.findings` and `important` while `state` says `file`. Carry them as `review.problems`.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 037-escaped-bugs-tune-review (correctness)
-
-## [2026-11-04-5] [nit] The factory's review proposes severities it may not be able to read
-
-`/sdlc-factory:review` proposes each bug's `Severity:` from the process doc's words, but a host
-whose doc has no bugs section takes them from `sdlc`'s guide, which the factory's cached copy
-can't read. Leave `Severity:` for `/sdlc:bug` to ask when the host's doc has no words.
-
-Theme: robustness
-Paths: plugins/factory/skills/review/SKILL.md
-Cost: S
-Value: low
-Raised by: 040-factory-eval-and-review (correctness)
 
 ## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
 
@@ -526,16 +437,6 @@ it a skill of its own. Second, one change should be able to take a whole theme's
 `idea:` names one seed and ship deletes only that one.
 Theme: status
 Raised 2026-11-08.
-
-## [2026-11-08-2] [nit] A change folder in the main checkout reads as in flight from any dirty file
-
-last_touched() reads every dirty path in the checkout; for a folder in the main checkout, keep
-only the paths under the change's own folder.
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 044-status-ranks-the-backlog (correctness)
 
 ## [2026-11-08-3] [idea] Retro re-ranks the inbox
 

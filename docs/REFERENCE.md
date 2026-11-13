@@ -389,7 +389,8 @@ main checkout, tells each open issue the repo records where it stands: one comme
 verdict closed. It reads only what is committed on the base branch and the open changes, so a run
 that stops halfway is finished by the next. `intake` lists as `dangling` an issue labelled
 `triaged` that nothing records anymore, and `/sdlc:close` reruns the marking once the change's
-entries are on the base branch.
+entries are on the base branch. `sdlc.py sync` marks a change's own `closes:` issues as soon as
+its intent names them, so a filer hears the change took the issue on.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A
@@ -685,7 +686,7 @@ paths (null when they weren't recorded), `trailer` when only the `Sdlc-Findings`
 two retrospectives before it, by the bugs' reported dates, with a `trend` of `up`, `down`, `flat`,
 or `unknown` when either window has fewer than five closed changes; and `important`, the window's
 Important findings with their class, beside `important_unknown`, the changes with no
-`findings.md`.
+`findings.md`, or one that no longer parses, whose review's `problems` say which sections.
 
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.

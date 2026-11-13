@@ -77,7 +77,8 @@ change, and gets no line.
 **From a report.** When the argument is a path to a report `/sdlc-factory:review` wrote (under
 `.sdlc/reports/`), `Read` it instead of interviewing: each `## [?] [bug] <title>` block is a
 proposed bug, with what's wrong, a proposed `Severity:` and its `Paths:`. List them, and ask which
-to file: the person picks, and may change a title, a severity or the text; one already listed by
+to file: the person picks, and may change a title, a severity or the text, and gives one to a
+block that has no `Severity:` line, from `severities` like any bug's; one already listed by
 `bugs` is a duplicate, said and left out. Then, for each picked bug, ask `bugs --introduced` about
 its paths and offer its `Introduced by:` as above. Everything from here on covers all of the
 picked bugs at once: one draft, one WAIT, one commit.
