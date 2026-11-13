@@ -302,6 +302,22 @@ and fails one that exits non-zero, times out or leaves the tree changed. `accept
 `ALLOW_RULES` or a skill's `allowed-tools` (`test_no_skill_lets_accept_run_unasked`): ship names it
 in prose, so the harness asks with the commands just shown. They are never rerun by a later change.
 
+**The skills' cases: `evals/`, `run-cases`.** A `claude plugin eval` suite for the core skills, in
+this plugin's repo only (`_cases_report()` is `available: false` anywhere `_own_repo()` isn't): each
+case scaffolds a fixture repo (`evals/scaffold.sh`, `evals/fixtures/`) and grades, from the run's
+trace, that its skill asked `config`, wrote nothing its WAIT approves and ended at its own
+question. No command name holds `eval`, which the harness refuses from a worktree session:
+`cases` reads the suite and a change's scope (the tags of the skills `landing_reach()` says its diff
+touches), `cases compare` scores a run against the last, and `run-cases` runs `claude plugin eval`
+as a subprocess, a change's scope (`--tag`; `--case` takes one glob) or `--full`, granting `Bash`,
+`Write` and `Edit` with one arm and a cost ceiling, into `.sdlc/reports/`. Every run is a paid
+model call, so `run-cases` is never in `ALLOW_RULES`, a skill's `allowed-tools`, `check.sh` or CI
+(`test_no_skill_lets_accept_run_unasked`, `test_the_gate_and_ci_never_run_the_skills_cases`): ship
+names it for a scoped diff, writes `Skill evals: ran|skipped` in `findings.md`'s note and refuses
+without it, as for the fresh review; release offers the full run; status nudges when Claude Code's
+version moved since it. `tests/test_evals.py` builds every fixture and runs `check --strict` on it,
+so a script change that breaks one fails the gate, not a paid run.
+
 **The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
 cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
 `sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. Its

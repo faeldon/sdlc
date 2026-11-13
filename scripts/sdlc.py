@@ -108,6 +108,7 @@ from datetime import time as dtime
 from pathlib import Path
 
 import frontmatter
+import yaml
 
 # Stage 6 is "maintain", which loops back to a new intent rather than being a stage a folder sits
 # in — so it has no entry here. `dropped` is terminal and exempt from artifact checks. `spike` is
@@ -1133,6 +1134,8 @@ DISPOSITIONS = ("open", "fix", *COUNTED)
 FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason", "By", "Fix")
 # A deep diff's findings.md says, in its note, whether the fresh-context review ran.
 FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
+# And, in this plugin's repo, whether a diff that reaches a skill with cases ran them.
+CASES_RE = re.compile(r"^>?\s*Skill evals:\s*(ran|skipped)\b,?\s*(.*)$")
 # Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
 # a deep diff gets (`agents/reviewer.md`).
 FINDING_BY = ("fresh",)
@@ -1144,7 +1147,7 @@ def findings_entries(folder: Path) -> dict:
     one is left out of the entries."""
     path = folder / FINDINGS
     out: dict = {"path": FINDINGS, "exists": path.is_file(), "entries": [], "open": [],
-                 "fix": [], "fresh": None, "problems": []}  # fmt: skip
+                 "fix": [], "fresh": None, "cases": None, "problems": []}  # fmt: skip
     if not out["exists"]:
         return out
     try:
@@ -1159,6 +1162,7 @@ def findings_entries(folder: Path) -> dict:
     out["open"] = [e["id"] for e in out["entries"] if e["disposition"] == "open"]
     out["fix"] = [e["id"] for e in out["entries"] if e["disposition"] == "fix"]
     out["fresh"] = findings_fresh(text)
+    out["cases"] = _note_says(text, CASES_RE)
     return out
 
 
@@ -1171,12 +1175,20 @@ def _finding_number(ident: str) -> int | None:
 def findings_fresh(text: str) -> dict | None:
     """What findings.md's note says of the fresh-context review: `{"ran": True}`, `{"ran": False,
     "why": ...}`, or None when it says neither, as every file from before the line did."""
+    return _note_says(text, FRESH_RE)
+
+
+def _note_says(text: str, line_re: re.Pattern) -> dict | None:
+    """What findings.md's note, before its first finding, says ran: `{"ran": True}`, with what it
+    said after `ran,` as `said` when anything; `{"ran": False, "why": ...}`; or None."""
     for line in text.splitlines():
         if line.startswith("## "):
             break
-        m = FRESH_RE.match(line.strip())
+        m = line_re.match(line.strip())
         if m:
-            return {"ran": True} if m.group(1) == "ran" else {"ran": False, "why": m.group(2)}
+            if m.group(1) == "skipped":
+                return {"ran": False, "why": m.group(2)}
+            return {"ran": True, "said": m.group(2)} if m.group(2) else {"ran": True}
     return None
 
 
@@ -2417,6 +2429,268 @@ def cmd_accept(root: Path, ident: str) -> int:
     return 0 if passed else 1
 
 
+# ---------------------------------------------------------------- the skills' own cases
+#
+# `evals/` holds a `claude plugin eval` suite for the core skills, in this plugin's own repo only.
+# No command here has `eval` in its name: the harness refuses a command line holding the word from
+# a worktree session. `cases` and `cases compare` only read; `run-cases` writes under
+# `.sdlc/reports/` and is never pre-approved, like `accept`: each run is a paid model call.
+CASES_DIR = "evals"
+REPORTS = ".sdlc/reports"
+CASES_RUN = "cases"  # a run's folder: `cases-<date>-<n>`
+# What a run grants: a case's own `allowed_tools` grants none of these.
+CASE_TOOLS = ("Bash", "Write", "Edit")
+CASE_CAP = {"change": ("1", "5"), "full": ("3", "20")}  # runs per case, and the USD ceiling
+UNAVAILABLE = ("currently unavailable", "early access")
+
+
+def case_tags(evals: Path) -> dict[str, list[str]]:
+    """Each case (a folder holding `prompt.md`) and the tags its `case.yaml` gives it."""
+    found = {}
+    for prompt in sorted(evals.glob("*/prompt.md")):
+        try:
+            meta = yaml.safe_load((prompt.parent / "case.yaml").read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            meta = None
+        tags = meta.get("tags") if isinstance(meta, dict) else None
+        found[prompt.parent.name] = [str(t) for t in tags] if isinstance(tags, list) else []
+    return found
+
+
+def cases_scope(paths: list[str], tags: dict[str, list[str]]) -> list[str]:
+    """The cases a diff's paths call for: those tagged with a core skill `landing_reach()` says it
+    touches (`sdlc:ship` is tag `ship`). The factory's skills have no cases here."""
+    skills = {s.removeprefix("sdlc:") for s in landing_reach(paths).get("skills", [])}
+    return sorted(c for c, t in tags.items() if skills & set(t))
+
+
+def compare_runs(prev: dict | None, cur: dict) -> dict:
+    """Two `plugin eval` results' case scores side by side: each case's score now, before and the
+    change, the cases that fell or failed, and `rerun`: a `--case` glob each, one run apiece, since
+    the CLI takes one glob a run. A result that isn't the shape expected gives no cases, never an
+    exception."""
+
+    def scores(result: dict | None) -> dict[str, float]:
+        out = {}
+        for case in (result or {}).get("cases") or []:
+            if isinstance(case, dict) and isinstance(case.get("name"), str):
+                score = (case.get("aggregates") or {}).get("score")
+                if isinstance(score, int | float):
+                    out[case["name"]] = float(score)
+        return out
+
+    now, before = scores(cur), scores(prev)
+    rows = [
+        {"case": c, "score": s, "before": before.get(c),
+         "delta": None if c not in before else round(s - before[c], 3)}
+        for c, s in sorted(now.items())
+    ]  # fmt: skip
+    failed = [r["case"] for r in rows if r["score"] < 1]
+    fell = [r["case"] for r in rows if r["delta"] is not None and r["delta"] < 0]
+    rerun = [["--case", c] for c in failed]
+    return {"cases": rows, "failed": failed, "fell": fell, "rerun": rerun,
+            "passed": bool(rows) and not failed}  # fmt: skip
+
+
+def _claude_version() -> str | None:
+    try:
+        out = subprocess.run(
+            ["claude", "--version"], capture_output=True, encoding="utf-8", errors="replace",
+            timeout=30, stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    words = out.stdout.split()
+    return words[0] if out.returncode == 0 and words else None
+
+
+def _case_runs(home: Path) -> list[Path]:
+    """The runs `run-cases` made, oldest first."""
+    reports = home / REPORTS
+    runs = [p for p in reports.glob(f"{CASES_RUN}-*") if p.is_dir()] if reports.is_dir() else []
+
+    def order(p: Path) -> tuple[str, int]:
+        day, _, n = p.name.removeprefix(f"{CASES_RUN}-").rpartition("-")
+        return day, int(n) if n.isdigit() else 0
+
+    return sorted(runs, key=order)
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _run_summary(run: Path) -> dict:
+    scope = _read_json(run / "scope.json") or {}
+    result = _read_json(run / "result.json")
+    found = compare_runs(None, result or {})
+    return {
+        "run": run.name, "scope": scope.get("scope"), "change": scope.get("change"),
+        "skipped": scope.get("skipped"), "passed": found["passed"] if result else None,
+        "failed": found["failed"], "claude": (result or {}).get("claudeVersion"),
+        "cost_usd": (result or {}).get("costUsd"),
+    }  # fmt: skip
+
+
+def _cases_report(root: Path, path: Path | None) -> dict:
+    """What `cases` prints and `preflight` carries: whether this repo has the suite, its cases,
+    for change `path` the ones its diff calls for, and the last runs. Empty in a host:
+    `available` false, and nothing else is read."""
+    home = main_root(root)
+    evals = root / CASES_DIR
+    if not (_own_repo(home) and evals.is_dir()):
+        return {"available": False}
+    tags = case_tags(evals)
+    out: dict = {"available": True, "cases": tags}
+    if path is not None:
+        trunk = load_config(home)[0]["git"]["base"]
+        found = changed_paths(checkout_of(path), trunk) if trunk else None
+        paths = [p for _, p_, to in (found[1] if found else []) for p in (p_, to) if p]
+        out["scope"] = cases_scope(paths, tags)
+    runs = _case_runs(home)
+    out["last"] = _run_summary(runs[-1]) if runs else None
+    full = [r for r in runs if (_read_json(r / "scope.json") or {}).get("scope") == "full"]
+    out["last_full"] = _run_summary(full[-1]) if full else None
+    return out
+
+
+def cases_nudge(report: dict, current: str | None = None) -> str | None:
+    """Status's line when the last full run of the skills' cases was on another Claude Code
+    version, whose default model may differ: a nudge, never a problem. None in a host, before any
+    full run, or when `claude` can't be asked. `current` is for tests; status asks `claude`."""
+    last = (report.get("last_full") or {}) if report.get("available") else {}
+    if not last.get("claude"):
+        return None
+    now = current or _claude_version()
+    if now is None or now == last["claude"]:
+        return None
+    return (f"the skills' cases last ran in full on Claude Code {last['claude']}; now {now}: "
+            "sdlc.py run-cases --full")  # fmt: skip
+
+
+def cmd_cases(root: Path, ident: str | None) -> int:
+    """The skills' cases, as JSON: for a change, the ones its diff calls for. Writes nothing."""
+    path = _one_change(root, ident) if ident else None
+    if ident and path is None:
+        return 1
+    report = _cases_report(root, path)
+    if report["available"]:
+        report["claude"] = _claude_version()
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_cases_compare(root: Path, run: str) -> int:
+    """A run's scores beside the run before it, as JSON. Writes nothing."""
+    home = main_root(root)
+    folder = Path(run) if Path(run).is_absolute() else root / run
+    result = _read_json(folder / "result.json")
+    if result is None:
+        print(json.dumps({"run": run, "problems": ["no readable result.json in it"]}, indent=2))
+        return 1
+    runs = [r for r in _case_runs(home) if r.resolve() != folder.resolve()]
+    earlier = [r for r in runs if _read_json(r / "result.json")]
+    prev = _read_json(earlier[-1] / "result.json") if earlier else None
+    found = compare_runs(prev, result)
+    out = {"run": folder.name, "against": earlier[-1].name if earlier else None, **found,
+           "claude": result.get("claudeVersion"), "cost_usd": result.get("costUsd")}  # fmt: skip
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0 if found["passed"] else 1
+
+
+def _case_run_dir(home: Path) -> Path:
+    """A fresh `cases-<date>-<n>` under `.sdlc/reports/`, which ignores itself, as `factory.py`'s
+    `cmd_report_dir` makes its own (`test_the_report_folder_matches_the_factorys`)."""
+    reports = home / REPORTS
+    reports.mkdir(parents=True, exist_ok=True)
+    ignore = reports / ".gitignore"
+    if not ignore.is_file():
+        ignore.write_text("*\n", encoding="utf-8", newline="\n")
+    stamp = f"{CASES_RUN}-{date.today().isoformat()}"
+    n = 1 + sum(1 for p in reports.glob(f"{stamp}-*") if p.is_dir())
+    run = reports / f"{stamp}-{n}"
+    run.mkdir()
+    return run
+
+
+def cases_argv(target: Path, run: Path, scope: str, tags: list[str], keep: bool) -> list[str]:
+    """The `claude plugin eval` call for a run: the target first, as the CLI wants it, then, for a
+    change's scope, its skills' tags (`--tag` takes a list; `--case` takes one glob, and a second
+    replaces the first), the grants, and the cost ceiling."""
+    runs, cap = CASE_CAP[scope]
+    argv = ["claude", "plugin", "eval", str(target)]
+    if scope == "change":
+        argv += ["--tag", *tags]
+    argv += ["--scaffold", "--no-publish", "--trust-plugin", "--ablation", "none",
+             "--runs", runs, "--max-cost-usd", cap, "--output-dir", str(run),
+             "--allow-tools", *CASE_TOOLS]  # fmt: skip
+    if keep:
+        argv.append("--keep-temp")
+    return [*argv, "--json", str(run / "result.json")]
+
+
+def cmd_run_cases(root: Path, ident: str | None, keep: bool = False) -> int:
+    """Run the skills' cases through `claude plugin eval`, a change's scope or the full suite, into
+    a fresh folder under `.sdlc/reports/`, and print the scores beside the last run's. Never
+    pre-approved: every run is a paid model call. A missing `claude`, an unavailable eval or a run
+    the cost ceiling stopped is `skipped` with why, and exits 0: it never fails ship or release."""
+    path = _one_change(root, ident) if ident else None
+    if ident and path is None:
+        return 1
+    report = _cases_report(root, path)
+    if not report["available"]:
+        print(json.dumps({"skipped": "this repo has no skill cases"}, indent=2))
+        return 0
+    scope = "change" if path is not None else "full"
+    cases = report.get("scope", []) if path is not None else sorted(report["cases"])
+    if not cases:
+        print(json.dumps({"skipped": "no case covers the skills this diff touches"}, indent=2))
+        return 0
+    home = main_root(root)
+    run = _case_run_dir(home)
+    record = {"scope": scope, "change": path.name if path else None, "cases": cases}
+    tags = sorted({t for c in cases for t in report["cases"][c]})
+    argv = cases_argv(root / CASES_DIR, run, scope, tags, keep)
+    try:
+        done = subprocess.run(
+            argv, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+        said = done.stdout + done.stderr
+        if any(w in said for w in UNAVAILABLE):
+            record["skipped"] = "plugin eval is unavailable: " + said.strip().splitlines()[-1]
+        elif done.returncode == 2:
+            record["skipped"] = "the run stopped early, at its cost ceiling or a refused credential"
+    except OSError as e:
+        record["skipped"] = f"claude didn't run: {e}"
+        said = ""
+    (run / "scope.json").write_text(json.dumps(record, indent=2), encoding="utf-8", newline="\n")
+    rel = run.relative_to(home).as_posix()
+    if record.get("skipped"):
+        print(json.dumps({"run": rel, **record}, indent=2, ensure_ascii=False))
+        return 0
+    result = _read_json(run / "result.json")
+    if result is None:
+        # A case that failed to load, or a run that never started: no run happened, as for an
+        # unavailable eval.
+        last = (said.strip().splitlines() or ["nothing printed"])[-1]
+        record["skipped"] = f"plugin eval wrote no result: {last}"
+        (run / "scope.json").write_text(json.dumps(record, indent=2), encoding="utf-8",
+                                        newline="\n")  # fmt: skip
+        print(json.dumps({"run": rel, **record}, indent=2, ensure_ascii=False))
+        return 0
+    earlier = [r for r in _case_runs(home)[:-1] if _read_json(r / "result.json")]
+    found = compare_runs(_read_json(earlier[-1] / "result.json") if earlier else None, result)
+    out = {"run": rel, **record, **found, "claude": result.get("claudeVersion"),
+           "cost_usd": result.get("costUsd")}  # fmt: skip
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0 if found["passed"] else 1
+
+
 def cmd_ship(
     root: Path,
     ident: str,
@@ -2479,6 +2753,16 @@ def cmd_ship(
         print(
             f"⚠  {path.name} touches a sensitive path, and its {FINDINGS} doesn't say whether the "
             "fresh review ran: add `Fresh review: ran`, or `Fresh review: skipped, <why>`, to its "
+            "note and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    # Nor, in this plugin's repo, does a diff reaching a skill with cases land with them silently
+    # unrun.
+    if _cases_report(root, path).get("scope") and found["cases"] is None:
+        print(
+            f"⚠  {path.name} touches a skill with cases, and its {FINDINGS} doesn't say whether "
+            "they ran: add `Skill evals: ran, <score>`, or `Skill evals: skipped, <why>`, to its "
             "note and re-run. Not stamping.",
             file=sys.stderr,
         )
@@ -3652,7 +3936,7 @@ def _reaches(main: Path, branch: str) -> dict | None:
 # the arguments are parsed, so a flag only the change knows reaches it. The variable stops a second
 # handoff, and set to anything by hand (`off`) skips the first.
 OWN_SCRIPT_ENV = "SDLC_OWN_SCRIPT"
-OWN_SCRIPT_CMDS = ("ship", "drop", "base", "sync", "preflight", "findings")
+OWN_SCRIPT_CMDS = ("ship", "drop", "base", "sync", "preflight", "findings", "run-cases")
 OWN_RAN = "the change's own code"
 
 
@@ -4671,6 +4955,11 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         ("tag", lambda: _git_err(home, "tag", "-a", tag, "-m", tag, "-m", notes)),
         *([("note", note)] if rel["prepare"] else []),
     ]
+    # In this plugin's repo, what release's question says of the skills' cases: advice, never a
+    # refusal.
+    cases = _cases_report(home, None)
+    if cases["available"]:
+        report["cases"] = {"last_full": cases["last_full"], "claude": _claude_version()}
     if check_only:
         report["skipped"] = [f"{name} (--check)" for name, _ in steps]
         return emit(0)
@@ -6677,6 +6966,7 @@ def cmd_preflight(root: Path, ident: str) -> int:
         "findings": _findings_report(path),
         "risk": _risk_report(root, path),
         "context": _context_report(checkout, trunk),
+        "cases": _cases_report(root, path),
     }
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
     for name in ("nits", "checks", "findings"):
@@ -6742,13 +7032,15 @@ def ship_question(
     irreversible: bool = False,
     fresh: dict | None = None,
     findings: list[dict] | None = None,
+    cases: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
     one, so the question never leaves one out. It opens with ship's recommendation from
     `findings` (`_question_head()`). A question that commits has each clause only when its fact
     is: the sensitive paths the diff touches, a fresh review that didn't run (`fresh`, from
-    findings.md's note), how to recover what a revert can't undo, the context update shown, the
+    findings.md's note), skill evals that didn't run (`cases`, from the same note), how to
+    recover what a revert can't undo, the context update shown, the
     nits recorded in `register`, the pre-existing findings filed there as bugs, the issues closed
     and split off, and the issue update unless `archive.target` is `none`."""
     named = set(closes)
@@ -6772,6 +7064,8 @@ def ship_question(
         clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {_and(names)}")
     if fresh and not fresh["ran"]:
         clauses.append(f"without the fresh review ({fresh['why'] or 'no reason given'})")
+    if cases and not cases["ran"]:
+        clauses.append(f"without the skill evals ({cases['why'] or 'no reason given'})")
     if irreversible:
         clauses.append("with how to recover it shown")
     if context:
@@ -6817,6 +7111,7 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
         risk["sensitive"], bool(risk["irreversible"]), found["fresh"], found["entries"],
+        found["cases"],
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -8110,6 +8405,8 @@ def print_status(a: dict) -> None:
         print(f"\n■ Setup: {a['setup']}")
     if up := a.get("unpushed"):
         print(f"\n■ Unpushed: {unpushed_line(up)}  /sdlc:publish")
+    if nudge := a.get("cases_nudge"):
+        print(f"\n■ Skill evals: {nudge}")
     rdue = (rel or {}).get("due")
     if rdue and rdue["due"]:
         print(f"\n■ Release due: {'; '.join(rdue['why'])}  /sdlc:release")
@@ -8258,6 +8555,23 @@ def main() -> int:
         "accept", help="run a change's acceptance checks from its checkout; never pre-approved"
     )
     p_accept.add_argument("id", help="the 3-digit id, e.g. 025")
+
+    p_cases = sub.add_parser(
+        "cases", help="the skills' cases in evals/, and a change's scope of them; writes nothing"
+    )
+    p_cases.add_argument(
+        "id", nargs="?", help="a change's id for its scope, or `compare` to compare a run"
+    )
+    p_cases.add_argument("run", nargs="?", help="with `compare`: the run's folder")
+    p_run_cases = sub.add_parser(
+        "run-cases", help="run the skills' cases through plugin eval; paid, never pre-approved"
+    )
+    run_scope = p_run_cases.add_mutually_exclusive_group(required=True)
+    run_scope.add_argument("id", nargs="?", help="a change's id: the cases its diff calls for")
+    run_scope.add_argument("--full", action="store_true", help="every case")
+    p_run_cases.add_argument(
+        "--keep", action="store_true", help="keep each run's folder and trace, to debug a case"
+    )
 
     p_drop = sub.add_parser(
         "drop", help="stamp the change dropped and commit its folder on its branch, for close"
@@ -8421,6 +8735,14 @@ def main() -> int:
         return cmd_findings(root, args.id)
     if args.cmd == "accept":
         return cmd_accept(root, args.id)
+    if args.cmd == "cases":
+        if args.id == "compare":
+            if not args.run:
+                ap.error("cases compare needs the run's folder")
+            return cmd_cases_compare(root, args.run)
+        return cmd_cases(root, args.id)
+    if args.cmd == "run-cases":
+        return cmd_run_cases(root, None if args.full else args.id, args.keep)
     if args.cmd == "drop":
         return cmd_drop(root, args.id, args.check)
     if args.cmd == "base":
@@ -8474,6 +8796,7 @@ def main() -> int:
     a["release_due_after"] = (rel_cfg["due_after_changes"], rel_cfg["due_after_days"])
     a["retro_due"] = retro_due(home, cfg)
     a["unpushed"] = _nudge(home, cfg)
+    a["cases_nudge"] = cases_nudge(_cases_report(home, None))
     # Here, not in `analyze()`: `check` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
     words = severities(home, cfg)

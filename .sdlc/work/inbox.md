@@ -301,17 +301,6 @@ Cost: S
 Value: low
 Raised by: 026-github-intake (cost)
 
-## [2026-10-26-3] [nit] No adoption test runs a change with closes: through uv run --script
-
-Spec Verification named one; the `closes:` → `Closes #N` path is covered in `test_archive.py`
-through the imported script only.
-
-Theme: tests
-Paths: tests/test_adoption.py
-Cost: S
-Value: low
-Raised by: 026-github-intake (correctness)
-
 ## [2026-10-26-7] [idea] Pay down the robustness nits
 
 The `robustness` theme holds five open nits, the threshold the process doc sets for one paydown
@@ -644,21 +633,13 @@ Any of the three may become a seed of its own when an intent finds it too big.
 Theme: retro
 Raised 2026-11-12.
 
-## [2026-11-12-6] [idea] Behavioural evals for the core skills
+## [2026-11-13-1] [idea] Approve-path cases for the skill evals
 
-pytest covers sdlc.py's mechanism but never runs a model, so a skill regression shows up only as
-rework on a later change. Add a `claude plugin eval` suite for the skills' judgment: what they must
-never do (write before the WAIT, push, put agent attribution in a commit, guess instead of asking
-config, write on the base branch), their judgment calls (intent's tier, ship's question from
-preflight --question, finding dispositions, refusing while a finding is open), and cases seeded
-from skill bugs in the register and Sdlc-Rework history. Each case is a scratch host repo at a
-known stage (reusing test_adoption's builder) with scripted replies, run once to stop at the WAIT
-and once approved through it. Grade by repo state and `sdlc.py check` first, then the transcript's
-tool calls, and use an LLM judge only for prose. Run it by hand behind one approval, never in
-check.sh or CI: at ship, only for the skills a change touches (landing_reach already knows when a
-diff reaches skills/, agents/, guide/ or templates/), the full suite before a release, and when the
-default model changes. Scores go under .sdlc/reports/ and each run compares against the last one.
-Start with about eight cases. To keep cost down: scope runs to the touched skills, prefer
-stop-at-WAIT cases, rerun only failures, and use a cheaper model for cases that test rules.
+053 landed the six stop-at-WAIT cases; the cases approved through a WAIT (its spec's R3, R5 and
+R6: intent and ship continuing a stop case's transcript with `yes`) are left. The native
+transcript is in a run kept with `run-cases --keep`, under its `config/projects/*/<session>.jsonl`,
+and ends at the WAIT as needed, but it carries the machine's absolute paths (the plugin root in
+every command), so it can't be committed or replayed elsewhere. The likely design: histories kept
+out of git, captured per machine before a run, and approve cases skipped while theirs is missing.
+See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
-Raised 2026-11-12.

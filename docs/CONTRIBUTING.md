@@ -71,7 +71,7 @@ uv run --group dev pytest tests/test_sdlc.py::test_name -q   # one test
 uv run --group dev ruff format .              # fix formatting
 ```
 
-It's offline: GitHub is driven through a fake `gh` on `PATH` (`tests/test_archive.py`), and
+It's offline: GitHub is driven through a fake `gh` on `PATH` (`tests/conftest.py`), and
 `tests/test_adoption.py` runs a change from `new` to `close` in a bare scratch repo through
 `uv run --script`, which is the test that the plugin works in a repo that isn't the one it came
 from. A run that collects no tests is a failure. `pyproject.toml` only gives the tests an
@@ -81,6 +81,26 @@ Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all 
 validate`, and on Windows the tests marked `portable` (`uv run --group dev pytest -q -m portable`
 here). It runs on every push, which close, release and `/sdlc:publish` make, or by hand on a branch you pushed:
 `gh workflow run check.yml --ref <branch>`.
+
+## The skills' cases
+
+The gate never runs a model, so it can't see a skill that writes before its WAIT or words a
+question by hand. `evals/` holds a `claude plugin eval` suite for that: each case builds a fixture
+repo and checks, from the run's trace, that its skill wrote nothing before asking and ended at its
+own question. Every run is a paid model call, so nothing runs it unasked:
+
+```bash
+uv run --quiet --script scripts/sdlc.py cases               # the cases and the last runs
+uv run --quiet --script scripts/sdlc.py run-cases 053       # the cases a change's diff calls for (≤ $5)
+uv run --quiet --script scripts/sdlc.py run-cases --full    # every case, three runs each (≤ $20)
+uv run --quiet --script scripts/sdlc.py cases compare .sdlc/reports/cases-<date>-<n>
+```
+
+`/sdlc:ship` offers the scoped run when a change touches a skill with cases, and `/sdlc:release`
+the full one. Results go under `.sdlc/reports/`, never committed. `run-cases --keep` keeps each
+run's folder and trace to debug a case that fails. A case is a folder in `evals/` with
+`prompt.md`, `case.yaml` (its `tags` name the skill it tests) and `graders/`; its scaffold passes
+`--sandbox` so `evals/scaffold.sh` readies uv in the run's home, where the sandbox has no network.
 
 ## How a change is made here
 
@@ -168,8 +188,8 @@ tier, stage and impact) and `fields` (the project doc's fields that are on, with
 values: mirror these exactly, and never touch one that isn't there). A tracker never imports
 `sdlc.py` and never reads `.sdlc/`, the change folder included; it has the standard library and the script's
 PEP 723 dependencies, nothing more. Core never calls `gh`: every call lives in the tracker. Drive
-it in the tests through a fake of its command-line tool on `PATH`, as `tests/test_archive.py` does
-for `gh`.
+it in the tests through a fake of its command-line tool on `PATH`, as the `gh` fixture in
+`tests/conftest.py` does.
 
 ## Releasing
 

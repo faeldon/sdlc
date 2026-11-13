@@ -117,7 +117,7 @@ def test_entries_are_read_in_order_with_their_lines(tmp_path: Path) -> None:
 def test_no_file_is_no_findings_and_no_problem(tmp_path: Path) -> None:
     found = sdlc.findings_entries(tmp_path)
     assert found == {"path": "findings.md", "exists": False, "entries": [], "open": [],
-                     "fix": [], "fresh": None, "problems": []}  # fmt: skip
+                     "fix": [], "fresh": None, "cases": None, "problems": []}  # fmt: skip
 
 
 def test_the_template_is_never_read_as_a_finding() -> None:
@@ -360,6 +360,50 @@ def test_the_trailer_never_counts_a_fix(tmp_path: Path) -> None:
 def test_the_note_says_whether_the_fresh_review_ran(tmp_path, note, fresh) -> None:
     found = sdlc.findings_entries(_write(tmp_path / "c", FINDINGS.replace("> The note.\n", note)))
     assert found["fresh"] == fresh and found["problems"] == []
+
+
+@pytest.mark.parametrize(
+    "note, cases",
+    [
+        ("> The note.\n> Skill evals: ran, 2 of 2\n", {"ran": True, "said": "2 of 2"}),
+        (
+            "> The note.\n> Skill evals: skipped, plugin eval is unavailable\n",
+            {"ran": False, "why": "plugin eval is unavailable"},
+        ),
+        ("> The note.\n> Fresh review: ran\n", None),
+    ],
+    ids=["ran", "skipped", "unsaid"],
+)
+def test_the_note_says_whether_the_skill_evals_ran(tmp_path, note, cases) -> None:
+    found = sdlc.findings_entries(_write(tmp_path / "c", FINDINGS.replace("> The note.\n", note)))
+    assert found["cases"] == cases and found["problems"] == []
+
+
+def test_ship_refuses_a_diff_with_cases_whose_note_says_nothing_of_them(
+    change, capsys, monkeypatch
+) -> None:
+    """R10: in this plugin's repo, a diff that reaches a skill with cases never lands with them
+    silently unrun; anywhere else `_cases_report` is `available: false` and this never fires."""
+    root, folder = change
+    monkeypatch.setattr(sdlc, "_cases_report", lambda r, p: {"available": True, "scope": ["ship"]})
+    _write(folder, FINDINGS)
+    assert sdlc.cmd_ship(root, "001") == 1
+    assert "Skill evals" in capsys.readouterr().err
+    skipped = "> The note.\n> Skill evals: skipped, no claude on PATH\n"
+    _write(folder, FINDINGS.replace("> The note.\n", skipped))
+    assert sdlc.cmd_ship(root, "001") == 0
+
+
+def test_the_question_names_skill_evals_that_didnt_run() -> None:
+    def asked(cases: dict | None) -> str:
+        question, _ = sdlc.ship_question(".sdlc/work/001-x", [], "none", False, False, [], [],
+                                         ".sdlc/work/inbox.md", cases=cases)  # fmt: skip
+        return question
+
+    assert "without the skill evals (no claude on PATH)" in asked(
+        {"ran": False, "why": "no claude on PATH"}
+    )
+    assert "skill evals" not in asked({"ran": True}) and "skill evals" not in asked(None)
 
 
 def test_ship_refuses_a_fix_still_proposed(change, capsys) -> None:

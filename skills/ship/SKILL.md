@@ -118,6 +118,8 @@ Keep its output in view; the steps below read its parts by name, and run none of
   deepens the review, nothing else. The script reads `[review]` from the base branch's checkout,
   so a change can't lighten its own review by editing it.
 - **`context`**: the docs the context pass weighs in Step 3.
+- **`cases`**: in this plugin's own repo, the skills' cases this diff calls for (`scope`), which
+  Step 1 runs; `available: false` everywhere else, and then nothing below mentions them.
 
 Empty is the usual answer for the first three. A non-empty `problems` names the part that has one;
 a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
@@ -157,6 +159,16 @@ prompt it raises. It runs each from the checkout root and must exit 0. A check f
 command exits non-zero, times out, or leaves the working tree changed (`left`). **A failure stops
 here, as a failing gate does:** report each failing check's name, `output` and `left`. A problem in
 `checks.md` itself, which the `checks` part reports, stops here too.
+
+**Then the skills' own cases, in this plugin's repo only:** `preflight`'s `cases` part. With
+`available` false, or an empty `scope`, there is nothing to run: say nothing of it. Otherwise
+the diff reaches a skill whose behaviour the suite in `evals/` checks under a model. Show the
+cases in `scope` and that the run is paid and capped (at most $5), and only then run
+`sdlc.py run-cases <NNN>`, the same way as `accept`: no rule here, so the person answers the
+prompt it raises, and never a command line with `eval` in it, which the harness refuses from a
+worktree. It prints each case's score beside the last run's, and `failed`. A `skipped` run (no
+`claude`, an unavailable eval, the cost ceiling) never stops ship: Step 3's note says why. A failed
+case doesn't stop here either: Step 3 makes it a finding.
 
 ## Step 2 — If the diff calls for it, run the build check
 
@@ -240,6 +252,14 @@ person sees every fresh finding. On a deep diff the file's note always says whic
 `Fresh review: skipped, <why>`, said in Step 4 too. The script reads that line: the question
 names a skip, and `sdlc.py ship` refuses a deep diff whose note says neither, so it never lands
 with its fresh review silently missing.
+
+**With a `cases` scope from Step 0, the note says what the skills' cases did too:** `Skill evals:
+ran, <passed> of <cases>`, or `Skill evals: skipped, <why>` when Step 1's run was skipped or the
+person declined its prompt. Each case in `failed` is an **Important** `[correctness]` finding,
+`open`: its `Evidence:` the run's folder and the case, its `Class:` a skill doing what its text
+forbids. One the person says failed for the model's sake, not the change's, is answered `wrong`
+with why, never left out. As with the fresh review, the question names a skip, and `sdlc.py ship`
+refuses a scoped diff whose note says neither.
 
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or

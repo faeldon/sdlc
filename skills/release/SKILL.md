@@ -76,6 +76,13 @@ that go with them; when it is false, `push.off_because` says why nothing is push
 is non-empty, show them and stop: each says what it needs (the main checkout, on `main`,
 committed; a tag that doesn't exist yet; something with an impact other than `none`).
 
+When `cases` is in the output (only in this plugin's own repo), show when the skills' cases last
+ran in full (`last_full`: its run, whether it `passed`, any `failed`, and the Claude Code version
+it ran on, beside `claude`, the one installed now), or that they never have. It is advice, never a
+refusal: offer the full run before asking, at most $20, and run it only on a yes, as
+`sdlc.py run-cases --full`, named here with no rule so the person answers its prompt. Then run
+Step 1 again, so the question carries the new run.
+
 ## Step 2 — WAIT for explicit approval
 
 Ask literally:
@@ -86,7 +93,9 @@ With `after_bump` set, say it after the files: `…set it in <files>, run <after
 what it changes, commit "Release <next>"…`. With `prepare` set, say it after that: `…, run
 <prepare> to build what publish will upload, commit "Release <next>"…`. With `push.on`, end
 with `…and tag it <tag>, then push <git.base> and <tag> to <remote>?` in place of `Nothing is
-pushed.`: a pushed release reaches whoever installs from the remote.
+pushed.`: a pushed release reaches whoever installs from the remote. With `cases`, say where the
+skills' cases stand before the options: `…with the skills' cases last run in full <date>, <passed
+or the cases that failed>` or `…with the skills' cases never run in full`.
 
 **Do nothing more until the human says yes.** Approval is for this release only. Another version
 is a new plan: run Step 1 again with `--version` and ask again.

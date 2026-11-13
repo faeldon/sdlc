@@ -866,6 +866,18 @@ def test_no_skill_lets_accept_run_unasked(skill: Path) -> None:
     accept = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py accept 005'
     granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(accept)]
     assert not granted, f"{_id(skill)} would run a change's own checks without a prompt"
+    # Nor the skills' cases: each run is a paid model call.
+    for cmd in ("run-cases 053", "run-cases --full"):
+        run = f'uv run --quiet --script "${{CLAUDE_PLUGIN_ROOT}}"/scripts/sdlc.py {cmd}'
+        granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(run)]
+        assert not granted, f"{_id(skill)} would run `{cmd}` without a prompt"
+
+
+def test_the_gate_and_ci_never_run_the_skills_cases() -> None:
+    """R13: the cases run only by hand, behind a prompt; never in check.sh or CI."""
+    for path in [ROOT / "check.sh", *sorted((ROOT / ".github" / "workflows").glob("*.yml"))]:
+        text = path.read_text(encoding="utf-8")
+        assert "run-cases" not in text and "plugin eval" not in text, path.name
 
 
 def test_the_build_session_brings_the_persons_decisions_to_them() -> None:

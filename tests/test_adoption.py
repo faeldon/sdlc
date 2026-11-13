@@ -86,6 +86,56 @@ def _land(root: Path, number: str, slug: str, rel: str) -> None:
     assert closed.returncode == 0, closed.stdout + closed.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the fake gh is a shebang script, as test_archive's")
+def test_a_change_closing_an_issue_lands_with_its_closes_line(tmp_path: Path, gh) -> None:
+    """Nit 2026-10-26-3: a change whose intent closes an issue someone filed, run from `new` to
+    `close` through `uv run --script` against GitHub (the fake `gh` on PATH), lands with that
+    issue's `Closes #N` on the `Close` commit and its own issue labelled `landed`."""
+    state = Path(os.environ["FAKE_GH_STATE"])
+    filed = {
+        "number": 7,
+        "title": "Reopen a draft",
+        "url": "https://github.com/o/r/issues/7",
+        "state": "OPEN",
+        "labels": [],
+        "body": "I can't get a draft back.",
+        "comments": [],
+        "reason": None,
+        "assignees": [],
+        "blockedBy": [],
+        "author": "ana",
+        "parent": None,
+    }
+    state.write_text(json.dumps({"issues": [filed], "calls": []}), encoding="utf-8")
+    root = tmp_path / "tracked"
+    (root / ".sdlc").mkdir(parents=True)
+    # Close's push is on by default with GitHub; off here, so nothing reaches the network.
+    (root / ".sdlc" / "config.toml").write_text(
+        '[archive]\ntarget = "github"\n\n[git]\npush = []\n', encoding="utf-8"
+    )
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    _git(root, "remote", "add", "origin", "https://github.com/o/r.git")
+
+    made = _run(root, "new", "reopen", "--tier", "1", "--title", "Reopen a draft", "--worktree")
+    assert made.returncode == 0, made.stdout + made.stderr
+    tree = root / ".claude" / "worktrees" / "008-reopen"
+    intent = tree / ".sdlc" / "work" / "008-reopen" / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("impact:\n", "impact: none\n", 1)
+    intent.write_text(text.replace("depends_on:\n", "depends_on:\ncloses: [7]\n", 1),
+                      encoding="utf-8")  # fmt: skip
+    assert _run(tree, "ship", "008").returncode == 0
+    _git(tree, "commit", "-q", "-m", "ship 008")
+    closed = _run(root, "close", "008")
+    assert closed.returncode == 0, closed.stdout + closed.stderr
+    body = _git(root, "log", "-1", "--format=%b", "main")
+    assert "\nCloses #8\nCloses #7\n" in body, body
+    own = next(i for i in gh()["issues"] if i["number"] == 8)
+    assert "landed" in {label["name"] for label in own["labels"]}
+
+
 def test_a_repo_moved_off_the_old_folder_numbers_on_from_its_history(tmp_path: Path) -> None:
     """A repo that closed changes under the old `work/` and moved it by hand: the change folder is
     `.sdlc/work/`, and the next change is numbered on from the `Close` history keeps."""
