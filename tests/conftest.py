@@ -127,6 +127,8 @@ if args[:2] == ["issue", "edit"]:
     i = find(args[2])
     if "--body-file" in args:
         i["body"] = sys.stdin.read()
+    if "--title" in args:
+        i["title"] = args[args.index("--title") + 1]
     names = [lb["name"] for lb in i["labels"]]
     names = [x for x in names if x not in every("--remove-label")] + every("--add-label")
     i["labels"] = [{"name": x} for x in names]

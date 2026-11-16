@@ -92,7 +92,8 @@ The placeholders:
 - `archive.command`: `{dir}` is the shipped folder's path, `{id}` and `{slug}` the change's, and
   `{sha}` the commit it landed as. It must exit 0 and print where the change went, or close stops
   before removing the folder.
-- `commands.worktree_setup`: `{worktree}` is the new worktree's path.
+- `commands.worktree_setup`: `{worktree}` is the new worktree's path, and `{main}` the main
+  checkout's, where it runs: a setup that links untracked data into the worktree names both.
 - `commands.close_list`: `{suffix}` is the change's branch name with `-` as `_`.
 - `commands.close_cleanup`: `{id}` is the change's number. A leading `!`, the prompt's prefix for
   a command the human types, is dropped when close runs it, since `sh` would read it as "not".
@@ -528,8 +529,9 @@ nothing needs `gh`. Only Tier 1 and 2 changes reach one: Tier 0 has no folder an
   and, once ship settles it, `impact: <impact>`, and assigned to whoever opened it. The body is
   rendered from `templates/issue.md`: a table of the frontmatter, the intent's Problem and Outcome,
   then each artifact in its own collapsed section. It is rewritten after the approvals of
-  `/sdlc:intent`, `/sdlc:spec` and `/sdlc:ship`, so it shows the change as it is; edit the
-  artifacts, never the issue, which the next sync overwrites. A change listed in the intent's
+  `/sdlc:intent`, `/sdlc:spec` and `/sdlc:ship`, so it shows the change as it is, its title the
+  intent's heading without the number; edit the artifacts, never the issue, which the next sync
+  overwrites. A change listed in the intent's
   `depends_on:` line shows as blocking it. `/sdlc:close` renders it a last time, labels it
   `landed` and reads it back before it removes the folder. The issue stays open until the change is on GitHub: the `Close` commit
   says `Closes #N`, so GitHub closes it when that commit reaches the default branch, by close's

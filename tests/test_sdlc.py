@@ -842,6 +842,14 @@ def test_next_prints_the_id_and_writes_nothing(tmp_path: Path, monkeypatch, caps
     assert sorted(p.name for p in (root / ".sdlc" / "work").iterdir()) == before
 
 
+def test_new_names_the_main_checkout_for_worktree_setup(tmp_path: Path, capsys) -> None:
+    """`worktree_setup`'s `{main}` comes from this line, as `{worktree}` does."""
+    root = _repo(tmp_path)
+    assert sdlc.cmd_new(root, "thing", 1, None, worktree=True) == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if "created  worktree" in x)
+    assert f"main checkout {root}" in line
+
+
 def test_two_changes_opened_one_after_another_get_consecutive_ids(tmp_path: Path) -> None:
     """What two sessions drafting at once do: both were shown the same next id, and whichever
     creates second simply gets the following one."""

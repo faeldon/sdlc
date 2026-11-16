@@ -1311,6 +1311,39 @@ def test_sync_renders_the_issue_and_swaps_only_its_own_labels(tmp_path, gh, caps
     assert issue["state"] == "OPEN"
 
 
+def test_sync_retitles_the_issue_after_the_intent_is_retitled(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    assert gh()["issues"][0]["title"] == "The thing"
+    _set(folder, "# 001 — The thing\n", "# 001 — A better name\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0, out
+    assert gh()["issues"][0]["title"] == "A better name" and "title" in out["done"]
+
+
+def test_sync_leaves_a_matching_title_alone(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _open(root)
+    code, out = _sync(root, capsys, "001")
+    assert code == 0 and "title" not in out["done"], out
+    edits = [c for c in gh()["calls"] if c[:2] == ["issue", "edit"]]
+    assert edits and not [c for c in edits if "--title" in c]
+
+
+def test_a_refused_title_edit_is_an_error_and_keeps_the_body(
+    tmp_path, gh, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _set(folder, "# 001 — The thing\n", "# 001 — A better name\n")
+    monkeypatch.setenv("FAKE_GH_FAIL_FLAG", "--title")
+    code, out = _sync(root, capsys, "001")
+    assert code == 1 and "--title failed" in out["error"], out
+    [issue] = gh()["issues"]
+    assert issue["title"] == "The thing" and "<b>intent.md</b>" in issue["body"]
+    assert out["done"] == ["body"]
+
+
 def test_sync_links_dependencies_and_unlinks_only_changes(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _open(root, "first")

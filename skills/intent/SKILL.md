@@ -216,10 +216,11 @@ lock from the counter, which it then writes as `.sdlc/last-id` in the new worktr
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py new <slug> --tier <N> --title "<title>" --worktree
 ```
 
-It prints the folder's path and the worktree's, and the issue's URL when it opened one. If it
-refuses because GitHub can't be reached, stop and say so: it never falls back to a local number,
-which could later collide with an issue's. If `config` named a `commands.worktree_setup`, run it from the
-**main checkout** next, in a subshell, `(<command>)`, with `{worktree}` replaced by that path — a
+It prints the folder's path, the worktree's and the main checkout's, and the issue's URL when it
+opened one. If it refuses because GitHub can't be reached, stop and say so: it never falls back to
+a local number, which could later collide with an issue's. If `config` named a
+`commands.worktree_setup`, run it from the **main checkout** next, in a subshell, `(<command>)`,
+with `{worktree}` replaced by the worktree's path and `{main}` by the main checkout's — a
 worktree lacks every gitignored thing the repo's tools need, and that command is the repo's own
 account of what those are. The subshell keeps a `cd` in it from moving this session into the
 worktree before `EnterWorktree` does, which would leave close nothing to exit. With none

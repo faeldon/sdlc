@@ -184,7 +184,8 @@ valid. `sdlc.py` loads it by path and calls `make(home, cfg)`, which returns an 
   `(values, None)` or `(None, why)`. Read-only.
 
 `change` is a dict: the change's record (`id`, `slug`, `name`, `title`, `tier`, `stage`, `impact`,
-`depends_on`, `updated`), its `branch` and `sha`, the rendered `marker`, `body` and `comments`, an
+`depends_on`, `updated`), its `branch` and `sha`, the `issue_title` its issue carries (the heading
+without its id, or None when unread), the rendered `marker`, `body` and `comments`, an
 `error` when it couldn't be rendered, `vocabulary` (every
 tier, stage and impact) and `fields` (the project doc's fields that are on, with the intent's
 values: mirror these exactly, and never touch one that isn't there). A tracker never imports

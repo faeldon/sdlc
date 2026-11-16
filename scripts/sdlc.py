@@ -205,7 +205,7 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         "build": None,  # a slower gate /sdlc:ship runs when a changed path matches build_when
         "build_when": None,  # a regex over the changed paths
         "scan": None,  # drift across the whole repo, run by /sdlc:health: findings, not a pass
-        "worktree_setup": None,  # run from the main checkout after `new --worktree`; {worktree}
+        "worktree_setup": None,  # after `new --worktree`, in the main checkout; {worktree}, {main}
         "close_list": None,  # read-only: what a closed change left behind; {suffix}
         # The command that removes it; {id}. Handed to the human, or, with close_cleanup_runs,
         # run by close itself as its last step, behind its question. Never run by a skill.
@@ -2126,7 +2126,8 @@ def cmd_new(
     name = dest.name
     nid = name.split("-", 1)[0]
     if tree:
-        print(f"  created  worktree {tree}  (branch {name}, from {base})")
+        # The main checkout too: `worktree_setup`'s `{main}`, filled by /sdlc:intent from here.
+        print(f"  created  worktree {tree}  (branch {name}, from {base}, main checkout {home})")
 
     # The counter goes where the change will commit it, next to its folder: its worktree, or the
     # checkout `new` ran in.
@@ -4438,6 +4439,8 @@ def _tracker_change(home: Path, folder: Path, sha: str | None = None) -> dict:
         # The branch the change lands on, which a tracker compares with the repo's default.
         "base": cfg["git"]["base"],
         "marker": f"<!-- sdlc:{folder.name} -->",
+        # The title the issue carries: the intent's heading without its id, as `new` opened it.
+        "issue_title": TITLE_ID_RE.sub("", rec["title"]) or None,
         "body": "",
         "comments": [],
         "error": None,

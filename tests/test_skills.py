@@ -352,6 +352,8 @@ def test_intent_moves_the_session_and_close_brings_it_back() -> None:
     step5 = intent.content.split("## Step 5")[1].split("## Step 6")[0]
     assert "subshell, `(<command>)`" in step5
     assert step5.index("worktree_setup") < step5.index("`EnterWorktree` with")
+    # Both placeholders, each filled from `new`'s output: a host linking data needs the main path.
+    assert "`{worktree}` replaced" in step5 and "`{main}` by the main checkout's" in step5
     drop = (ROOT / "skills" / "drop" / "SKILL.md").read_text(encoding="utf-8")
     for text in (close.content, drop):
         assert "No-op: there is no active EnterWorktree session" in " ".join(text.split())

@@ -108,14 +108,6 @@ the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote.
 Theme: release
 Priority: low
 
-## [2026-10-25-8] [idea] Small gaps in sync and worktree setup
-
-`sync` rewrites an issue's body but never its title, so an intent retitled at spec leaves the issue
-on the old one. `commands.worktree_setup` gets `{worktree}` but not `{main}`, so a host linking
-untracked data from the main checkout works the path out from `git rev-parse --git-common-dir`.
-Tier 1 together. Raised 2026-10-25 by a host.
-Theme: robustness
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts

@@ -100,7 +100,9 @@ class Tracker:
             args += ["--description", what]
             self._gh(*args)
 
-    def _view(self, ref: str, fields: str = "number,url,state,body,comments,labels") -> dict | None:
+    def _view(
+        self, ref: str, fields: str = "number,url,state,title,body,comments,labels"
+    ) -> dict | None:
         seen = self._gh("issue", "view", ref, "--json", fields)
         try:
             return json.loads(seen.stdout) if seen.returncode == 0 else None
@@ -589,6 +591,14 @@ class Tracker:
             report["error"] = f"gh issue edit failed on {url}: {edited.stderr.strip()}"
             return report
         report["done"].append("body")
+        # A retitled intent retitles its issue; one that matches costs no call.
+        title = change.get("issue_title")
+        if title and title != issue.get("title"):
+            named = self._gh("issue", "edit", url, "--title", title)
+            if named.returncode != 0:
+                report["error"] = f"gh issue edit --title failed on {url}: {named.stderr.strip()}"
+                return report
+            report["done"].append("title")
         done, skipped, err = self._reconcile(url, change)
         report["done"] += done
         report["skipped"] += skipped
