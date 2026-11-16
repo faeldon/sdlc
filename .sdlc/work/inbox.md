@@ -158,16 +158,6 @@ changes by type, and release can group its notes by it. Tier 2: a new intent key
 Theme: intent
 Priority: low
 
-## [2026-10-24-8] [nit] The `RECORD_CLEARS` tuple-unpacking idiom
-
-The set is built from two unpacked tuples where one set literal reads plainer.
-
-Theme: style
-Paths: tests/test_defaults.py
-Cost: S
-Value: low
-Raised by: 009-drift-message (cost)
-
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
 Setup offers the two issue forms whenever `archive.target` is GitHub, and counts one as the host's
@@ -230,17 +220,6 @@ release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides ho
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
 Theme: refactor
 Priority: low
-
-## [2026-11-04-13] [nit] The CI workflow runs twice on every publish
-
-`on: push` fires for the branch push and again for the tag push `/sdlc:publish` makes. Filter it
-to branches.
-
-Theme: cost
-Paths: .github/workflows/check.yml
-Cost: S
-Value: low
-Raised by: 041-windows-lock (cost)
 
 ## [2026-11-10-1] [idea] Factory gates that pass themselves when nothing is risky
 

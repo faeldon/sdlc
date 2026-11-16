@@ -317,9 +317,9 @@ def test_a_block_the_guide_can_t_place_is_stray() -> None:
 # the config keys and template hashes, and stamps this plugin's version and each doc's path. The
 # rest (everything `breaking`, and an `unknown` key or template) it leaves as it found them.
 RECORD_CLEARS = {
-    *("added", "refreshed", "removed", "conflict", "differs"),
-    *("new", "changed", "moved", "downgrade", "unreadable"),
-}
+    "added", "refreshed", "removed", "conflict", "differs",
+    "new", "changed", "moved", "downgrade", "unreadable",
+}  # fmt: skip
 RECORD = "`uv run --quiet --script scripts/sdlc.py record`"
 
 

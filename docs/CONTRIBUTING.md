@@ -79,7 +79,8 @@ environment; the script declares its own dependencies inline, and the two lists 
 
 Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all but `claude plugin
 validate`, and on Windows the tests marked `portable` (`uv run --group dev pytest -q -m portable`
-here). It runs on every push, which close, release and `/sdlc:publish` make, or by hand on a branch you pushed:
+here). It runs on every branch push, which close, release and `/sdlc:publish` make, not on the tag
+pushed after, or by hand on a branch you pushed:
 `gh workflow run check.yml --ref <branch>`.
 
 ## The skills' cases
