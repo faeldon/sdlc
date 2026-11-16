@@ -27,113 +27,145 @@
 >
 > A struck item stays for one more retrospective, then may go.
 
+
 ## Since the last retrospective
 
-- G2 revised → G5: the median Tier 2 change still stops 9 times against O3's 6, and with every
-  change in the window at Tier 2, the tier rule now costs more than the extra stops; G5 holds both.
-- G3 carried: more changes went through every stage first time (5 of 11 Tier 2 changes, against
-  1 of 12), but rework still counts shared files, not fixes (M5).
-- G4 carried: hosts have had the issue forms since v1.3.0 was published, and the evidence still
-  counts no issue in any release; the local channel is unbuilt.
-- M4 carried: neither seed is started, and a Tier 2 change still meets 3 permission prompts.
-- M5 carried: 2026-10-27-1 shipped as 029 (it reads as vanished only because 029's intent sits at
-  the old `work/` path); 2026-10-25-12 and 2026-10-26-6 are open.
-- M6 carried: 026 shipped and every release since is published; 2026-10-25-9 is open and no report
-  has arrived through an issue.
+- G3 done: rework now counts what a later change says it fixed (060: 3 links this window, each
+  through a bug's `Introduced by:`), ship's first-time rate tells a recommended fix from a loop
+  (049), and the process figures are committed as a report each retrospective (066).
+- G4 revised → G7: one person runs the plugin, and they file what they find as seeds and bugs
+  themselves (5 bugs this window, each fixed within two days), so no issue was going to arrive. The
+  first host besides this repo will be the factory's pilot project, which G7 covers.
+- G5 revised → G8: the median Tier 2 change still stops 8 times against O3's 6 (9 last time), and
+  cost now covers the context a host pays and how long a review takes as well (O5).
+- M4 done: 042 names each permission stop on the `Close` commit and 047 sorts the other stops by
+  kind. 26 changes recorded prompts and none asked, though 21 of them ran in `auto` mode
+  (2026-11-10-2 covers default-mode hosts). Its stops-within-target clause moves to M10.
+- M5 done: 060 and 049 shipped. 2026-10-27-1 shipped as 029 and reads as vanished only because of
+  the old `work/` path.
+- M6 done: hosts have had the issue forms and `/sdlc:triage` since 026, and the evidence counts
+  their reports per release. The local hand-off, 2026-10-25-9, was retired as superseded.
+- M7 done: 043 redrew this repo's always-Tier-2 carve-outs, and the window shows it: 9 of 27
+  changes came in at Tier 1, against 0 of 11.
+- M8 revised → M13: both its seeds shipped by hand (057, 061), so no change has been built through
+  the factory here. The factory's first run moves to a pilot project, under a supervisor agent.
+- M9 revised → M14: its reads shipped (056, 058, 059). Moving retro out of `scripts/sdlc.py`
+  (2026-11-04-10) carries into M14, where review time is the measure.
 
 ## Where we are
 
-Fourteen changes closed since 2026-10-26 (027–040), released and published as v1.4.0, v1.5.0 and
-v1.6.0. They finished the move to `.sdlc/`, put the process guide in the plugin with only a host's
-answers in its repo, made ship's review honest and risk-scaled, and gave the factory a review loop,
-evidence and an eval. Every change was measured, and every one whose intent could be read was
-Tier 2: the median stops its person 9 times against a target of 6, though 5 of 11 now go through
-every stage first time. No bug was filed and no issue arrived in any release, which says more about
-the channel than about the code.
+Twenty-seven changes closed since 2026-11-04 (041–067), released as v1.7.0 and v1.8.0. Every one of
+them was measured.
+- **Delivery:** median cycle is 46 minutes for a Tier 1 change (n=9) and 58.5 for a Tier 2 change
+  (n=18). The agent's share of the clock is 0.18; most of the rest is time away.
+- **Tiers and stops:** a third of the changes now come in at Tier 1. Stops are down a little but
+  still over target, and the cause is now visible. Every change asked at least one question at
+  intent beyond its gate (33 in all), mostly what the change serves and what it moves.
+- **Bugs:** five bugs were reported and fixed, each within two days. Three of them escaped from
+  changes in the window, all in how `scripts/metrics.py` reads transcripts, and the escape rate
+  went from 0 of 14 to 3 of 27.
+- **Code:** `scripts/sdlc.py` grew to 9,481 lines (+1,752), and 22 of the 27 changes touched it.
+- **Users:** one person runs the plugin, here. The factory's pilot will be the first other repo.
 
 ## Goals
 
-- G3. The loop's own numbers can be trusted: rework, size and ship's findings say what happened
-- G4. What a host reports reaches the register without the person carrying it, and the
-  retrospective counts it (O1, O2)
-- G5. A change costs its person what its tier says it should: the stops O3 sets, under a tier rule
-  that fits the changes this repo makes (O3)
-- ~~G2. A change stops its person as often as O3 says it should, with the target and the gates agreeing on what that is (O3)~~ Revised → G5: every change is Tier 2, so the tier rule is part of the cost
+- G6. Ship's review catches the ways this repo's code has already failed, before a host meets them
+  (O2)
+- G7. The factory takes a change from intent to `main` with a supervisor agent deciding what it can
+  and calling the person only for what needs them, with trust kept. Its first evidence comes from
+  a pilot project, the plugin's first host besides this repo (O1, O3, O6)
+- G8. A change costs little: its person's stops within O3's target, its host's context small, and
+  its review quick (O3, O5)
+- ~~G3. The loop's own numbers can be trusted: rework, size and ship's findings say what happened~~ Done: 049, 060, 066
+- ~~G4. What a host reports reaches the register without the person carrying it, and the retrospective counts it (O1, O2)~~ Revised → G7: one person uses the plugin and files their own seeds; the pilot is the first other host
+- ~~G5. A change costs its person what its tier says it should: the stops O3 sets, under a tier rule that fits the changes this repo makes (O3)~~ Revised → G8: cost covers context and review time too
 
 ## Milestones
 
-### M4. Permission stops are named, and the avoidable ones gone
+### M10. A Tier 2 change stops within its target
 
-Close records what each permission stop asked for, every prompt a skill's rules should have covered
-is covered, and the median change stops within its target.
+Intent proposes what a change serves, and what it should move, in the draft its WAIT approves,
+rather than asking first. The next window's median Tier 2 change stops 6 times or fewer.
 
-Groups: 2026-10-26-4, 2026-10-26-5
+Groups: 2026-11-17-1
 
-### M7. The tier rule fits this repo
+### M11. The review knows the window's escapes
 
-This repo's always-Tier-2 carve-outs are re-drawn from what its changes actually risk, the product
-doc's Tier 1 bet says what the next window should show, and that window shows it.
+The review doc names the two classes behind the window's escapes and Important findings, and the
+next window's escape rate is back below 3 of 27.
 
-Groups: 2026-11-04-9
+Groups: 2026-11-17-2
 
-### M9. A run reads what it needs
+### M12. Each rule is said once
 
-Ship and setup read their rare branches only when the script says they apply, retro and release
-print no per-change metrics by default, and the retro section of `scripts/sdlc.py` is its own file.
+`AGENTS.md` keeps the boundaries and the rules that aren't obvious from the code. Each feature's
+detail lives in one place, so a change that loosens a rule edits one sentence, not six.
 
-Groups: 2026-11-04-6, 2026-11-04-7, 2026-10-26-8, 2026-11-04-10
+Groups: 2026-11-17-3
 
-### M5. Rework and first time say what happened
+### M13. The factory builds a change in the pilot project
 
-Retro's rework counts the earlier changes a later one says it fixes, not shared files, and ship's
-first-time rate tells a review that caught something apart from a loop that circled.
+A supervisor agent runs one change in the pilot project from an approved intent to ship's
+question. It hands build, review and verification to the factory's agents and calls the person
+only for a gate, a blocking decision or an ESCALATE. The change's `Close` numbers (stops, time and
+any escape) sit beside this repo's manual medians.
 
-Groups: 2026-10-25-12, 2026-10-26-6, 2026-10-27-1
+Groups: 2026-11-17-5
 
-### M8. The factory has built a change here
+### M14. A review reads only the code it touches
 
-One change, the robustness paydown, is built through `/sdlc-factory:build`, and its `Close`
-commit's numbers sit beside the manual medians, so the factory's bet has evidence for or against it.
-The tests paydown follows by hand.
+Retro's history readers live in their own file, the first boundary out of `scripts/sdlc.py`. The
+next changes to retro are reviewed with fewer tokens read and less agent time in ship than this
+window's medians: 9.6M cache reads and 9 agent minutes for a Tier 2 ship.
 
-Groups: 2026-10-26-7, 2026-11-04-8
+Groups: 2026-11-04-10
 
-### M6. Hosts report through issues
+### M15. Every goal answers to an outcome
 
-Hosts have the issue forms and `/sdlc:triage`. A session in a host on this machine can hand a
-report to the plugin's session. The next retrospective's evidence counts reports that arrived that
-way.
+The retrospective checks its goals and milestones, and the changes that serve `none`, against the
+product doc's outcomes, and proposes an outcome where recurring work has none.
 
-Groups: 026, 2026-10-25-9
+Groups: 2026-11-17-4
+
+### ~~M4. Permission stops are named, and the avoidable ones gone~~ Done: 042, 047; stops within target moves to M10
+
+### ~~M5. Rework and first time say what happened~~ Done: 049, 060
+
+### ~~M6. Hosts report through issues~~ Done: 026; the local hand-off was retired as superseded
+
+### ~~M7. The tier rule fits this repo~~ Done: 043; 9 of 27 changes at Tier 1, against 0 of 11
+
+### ~~M8. The factory has built a change here~~ Revised → M13: the first factory run is in a pilot project, under a supervisor
+
+### ~~M9. A run reads what it needs~~ Revised → M14: the reads shipped (056, 058, 059); the module split carries on
 
 ## Next major release
 
-None planned. 1.5.0 removed the last shim, and nothing in the inbox asks a host to change what it
-does. Moving retro out of `scripts/sdlc.py` (2026-11-04-10) changes nothing a host sees.
+None planned. Nothing open asks a host to change what it does: M10 changes intent's draft, not what
+the person approves, and moving retro's code out of `scripts/sdlc.py` changes nothing a host sees.
+The supervisor (M13) adds to `sdlc-factory` without changing the core loop.
 
 ## Dropped findings
 
-- Rework: the pairs left after `rework_common` are again shared test and guide files. A duplicate
-  of 2026-10-25-12, under M5.
-- Ship went through first time in 6 of 11 Tier 2 changes. A duplicate of 2026-10-26-6, under M5.
-- `retro` printed 112 KB and `release --check` 43 KB, most of it each change's metrics. A duplicate
-  of 2026-10-26-8, under M9.
-- The `robustness` nits stand at 10, past the threshold. A duplicate of 2026-10-26-7, whose list
-  names five of them; its intent takes every open one. Under M8.
-- A Tier 2 change meets 3 permission prompts. A duplicate of 2026-10-26-4 and 2026-10-26-5, under
-  M4.
-- 027, 028 and 029 read with no tier, impact or `serves:`: their commits hold their intents at the
-  old `work/` path, which retro reads nowhere by design, and the next window won't include them.
-- `tests/test_skills.py` (11 of 14 changes) and `.sdlc/setup.json` (6): every skill edit has to pass
-  the first and every defaults edit re-records the second. Sharing them is the design.
-- The fresh reviewer is counted on 5 deep diffs and raised nothing: whether it ran can't be told
-  from a clean run. The nit 2026-11-03-15 covers it.
-- No bug was reported, fixed or escaped, so the escape rate is flat at 0 of 14 against 0 of 20.
-  With `[review] sensitive` set, that is no case for loosening either: no issue has arrived through
-  any release (G4).
-- Two Important findings (035 F1, 038 F1) share no class.
-- The person's response (median 23 minutes for a Tier 2 change, 10 of them in ship) now exceeds
-  the agent's 17: reading the review is the work the gate exists for.
-- Tokens pile up in build (median 11.5M cache reads of a Tier 2 change's 27.7M): that is where the
-  code is written.
-- 3 of 11 readable changes serve no outcome, against 7 of 20: not growing.
+- **Ship's and retro's skills:** they are the largest (about 7,550 and 6,700 tokens). 056 has only
+  just moved ship's rare branches out, and no number yet shows more to cut. O5 will track it.
+- **Changes run in parallel:** the 4 changes that ran beside two or more others took a median 173.5
+  minutes, against 58.5 for the 16 that ran alone. Four changes are anecdote.
+- **Time away:** it is 2,501 of the window's 3,670 clock minutes. That is the person's queue between
+  sessions, not the loop's cost.
+- **Rework questions** (38): the large ones are planned follow-ups, not missed fixes.
+  - 049 extended 047's stop kinds;
+  - 056 moved 053's ship text into branch files;
+  - 061 paid down nits that 041's review raised;
+  - 062 built on 044's ranking.
+
+  The three declared links (050 fixing 015 and 047, 052 fixing 050) are all the window's rework.
+- **The review's noise:** 1 finding was answered `wrong` out of the 27 answered changes' reviews.
+  No pass is noisy.
+- **Nits:** none are open.
+- **Changes that serve no outcome:** 8 of 27 serve `none`, against 3 of 11. Most were cost and
+  cleanup work, which O5 now gives an outcome, and M15 keeps checked.
+- **Making `scripts/metrics.py` sensitive:** the escapes are all low severity, and a review class
+  (2026-11-17-2) is narrower than a deep review on 11 of every 27 changes.
+- **No issues from hosts:** one person uses the plugin and files their own seeds. This is not
+  evidence about O1 or O2 until a second repo runs it (G7).

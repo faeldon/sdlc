@@ -31,6 +31,12 @@ the person running it keeps paying.
 - O4. **Evidence-led direction.** A retrospective sets direction from evidence about the product,
   not only process counts. Measured by: the share of direction goals that cite an outcome and the
   evidence behind it
+- O5. **Light footprint.** The plugin costs a host little: each skill run reads only what it needs,
+  and a change's review reads only the code the change touches. Measured by: each skill's
+  `SKILL.md` tokens, and the median tokens read and agent minutes per stage per change, per release
+- O6. **Trusted autonomy.** A factory-built change stops its person only for what needs them, and
+  escapes no more often than one built by hand. Measured by: stops above target and the escape
+  rate, factory against manual, per window
 
 ## Bets
 

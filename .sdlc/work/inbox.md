@@ -200,7 +200,7 @@ it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history 
 release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
 One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
 Theme: refactor
-Priority: low
+Priority: high
 
 ## [2026-11-10-1] [idea] Factory gates that pass themselves when nothing is risky
 
@@ -272,3 +272,90 @@ out of git, captured per machine before a run, and approve cases skipped while t
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
+
+## [2026-11-17-1] [idea] Intent shows what a change serves in its draft, rather than asking first
+
+Every one of the 27 changes closed since 2026-11-04 asked at least one question at intent beyond
+its gate, 33 in all. Most were the product-doc questions: which outcomes the change serves, and
+what each should move. As a result, the median Tier 2 change stops 8 times against O3's target of
+6, and the median Tier 1 change 6 against 5. Steps 1 and 3 of `skills/intent/SKILL.md` would
+instead draft the `serves:` line and the `**Moves O1:**` lines from the seed and the product doc,
+and show them in the draft, marked as proposed. The WAIT's "edit a section" answer is how the
+person changes them, so the yes stays their decision. The change touches a WAIT, so it is Tier 2,
+and it rewords the skill's "never pick for the human". Raised by the retrospective of 2026-11-17.
+Theme: intent
+Priority: high
+
+## [2026-11-17-2] [idea] Two failure classes for the review doc, from the window's escapes
+
+Three bugs escaped from changes in the window, against none in the 14 before it (rate 0.11
+against 0.0, trend up):
+- 2026-11-12-3 from 015;
+- 2026-11-12-4 from 047, whose review had F1 on the bug's paths and answered it `minor`;
+- 2026-11-12-5 from 050, a Tier 1 change whose review had no finding on its paths.
+
+Two more bugs were tied to no change. The escapes, and the Important findings of 049, 052 and 055,
+all sit in how `scripts/metrics.py` reads transcripts. 041's and 059's Important findings share a
+second class.
+
+Add both to `.sdlc/REVIEW.md`'s "The ways this repo's code fails":
+
+- **A transcript's shape assumed, not read.** An event `scripts/metrics.py` counts from what a
+  spec says the harness writes, not from a recorded transcript: a request counted where its outcome
+  decides, a wait taken from agent time the turn never held, two kinds of reply read as one. A
+  change to how an event is read carries a test built from a real transcript's entries.
+- **A path compared as text between two sources that write it differently.** `str()` of a `Path`
+  against git's POSIX output, or git's quoted path against its `-z` output. Normalise both sides
+  first.
+
+Raised by the retrospective of 2026-11-17.
+Theme: review
+
+## [2026-11-17-3] [idea] Say each rule once in AGENTS.md
+
+`AGENTS.md` was edited by 23 of the 27 changes in the window and is now 447 lines. It changed
+alongside `docs/REFERENCE.md` 17 times and alongside `scripts/sdlc.py` 17 times. Two Important
+findings came from a rule restated in several places and edited in only one:
+- 046's "six lines still said only publish pushes";
+- 049's "the docs that list the extra-stop kinds leave out the new `fix` kind".
+
+Cut the Architecture map down to its boundaries and the rules that aren't obvious from the code,
+and point at `docs/REFERENCE.md` or the docstring for each feature's detail. Ship's context pass
+would then also ask whether a proposed line is already said elsewhere. Raised by the retrospective
+of 2026-11-17.
+Theme: docs
+
+## [2026-11-17-4] [idea] Retro checks its goals and the work against the outcomes
+
+The product pass scores each outcome, but it never asks whether the outcomes still cover the work.
+8 of the window's 27 changes served `none`, most of them cost and cleanup work the person counts as
+important. Last time, M12 was drafted with no goal or outcome behind it. Each retrospective would:
+- name the goals and milestones that cite no outcome;
+- group the changes that serve `none` by theme;
+- where a theme keeps recurring, propose an outcome line (a new `O<n>`) for the person to approve
+  at its WAIT.
+
+The script could list the `none` changes by theme in `product`, so the skill doesn't group them by
+hand. Raised by the retrospective of 2026-11-17.
+Theme: retro
+
+## [2026-11-17-5] [idea] A supervisor agent that runs a factory change and calls the person only when needed
+
+The factory's agents (builder, reviewers, verifier) are each started by a skill the person runs,
+so every handoff is a stop. A supervisor agent would take one approved intent through build,
+review and verification:
+- it hands each part to the right agent and reads their reports;
+- it settles what the plugin's rules and the risk signals let it settle;
+- it calls the person only for a gate, a blocking decision in `decisions.md` or an ESCALATE.
+
+Its first run is in a pilot project, the plugin's first host besides this repo, and that change's
+`Close` numbers are set beside this repo's manual medians (O6).
+
+The spec decides:
+- whether the supervisor is an agent in `plugins/factory/agents/` or a skill;
+- how it keeps no Write of its own, so nothing that judges also edits;
+- how its calls to the person are recorded as stops.
+
+Gates that pass themselves (2026-11-10-1) come after it. Raised by the retrospective of 2026-11-17.
+Theme: factory
+Priority: high
