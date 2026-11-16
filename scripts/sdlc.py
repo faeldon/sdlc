@@ -3845,6 +3845,10 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         at = _config_at(main, start)
     if wipe := _cleanup_plan(at, cfg, branch.split("-")[0]):
         report["cleanup"] = wipe
+    # What the fast-forward deletes from the main checkout, for the question to name: a file the
+    # change stopped tracking goes from disk there too, whatever the ignore rules now say.
+    if kind == "shipped" and not landed:
+        report["deletes"] = _ff_deletions(main, tree, trunk, branch)
     # A check writes no start ref, so it previews from where the close would write it.
     preview = tip if check_only and not landed else None
     if own and kind == "shipped" and (reaches := _reaches(main, branch, preview)):
@@ -4074,6 +4078,37 @@ def _reaches(main: Path, branch: str, start: str | None = None) -> dict | None:
         return landing_reach(names.splitlines()) or None
     except Exception as e:
         return {"unknown": f"reading the change's paths failed: {type(e).__name__}"}
+
+
+def _ff_deletions(main: Path, tree: Path, trunk: str, branch: str) -> dict:
+    """The tracked paths close's fast-forward of `trunk` to `branch` deletes from the main
+    checkout, `ignored` (the branch's ignore rules now cover them, read in its worktree) apart
+    from the `other`, sorted; a rename is a move, never a deletion. Never a refusal: when git
+    can't say, `unknown` says why, and close goes ahead."""
+    try:
+        names = _git(
+            main, "diff", "--name-only", "-z", "--diff-filter=D", "--find-renames", trunk, branch
+        )
+        if names is None:
+            return {"unknown": f"git couldn't diff {branch} against {trunk}"}
+        paths = [p for p in names.split("\0") if p]
+        ignored: set[str] = set()
+        if paths:
+            # Exit 1 is "none of them", which `_git` can't tell from a failure.
+            made = subprocess.run(
+                ["git", "-C", str(tree), "check-ignore", "--no-index", "-z", "--stdin"],
+                input="\0".join(paths), capture_output=True, encoding="utf-8",
+            )  # fmt: skip
+            if made.returncode not in (0, 1):
+                said = made.stderr.strip().splitlines()[-1:] or [f"exited {made.returncode}"]
+                return {"unknown": f"git couldn't read {branch}'s ignore rules: {said[0]}"}
+            ignored = {p for p in made.stdout.split("\0") if p}
+        return {
+            "ignored": sorted(p for p in paths if p in ignored),
+            "other": sorted(p for p in paths if p not in ignored),
+        }
+    except Exception as e:
+        return {"unknown": f"reading the deletions failed: {type(e).__name__}"}
 
 
 # In the plugin's own repo, the commands ship runs from a change's worktree, the ones that write and

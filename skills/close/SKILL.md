@@ -71,11 +71,20 @@ filled in, and `runs`: whether close runs it as its last step, after the push, w
 whatever `close_list` found. `runs` is read from the base branch's config before the merge, so a
 change can't turn on its own; `because` says why it is false when that config can't be read.
 
+The JSON's `deletes`, for a shipped change not yet merged, is what the fast-forward deletes from
+the main checkout's disk: `ignored`, tracked paths the change stopped tracking and its branch now
+ignores (usually data meant to stay local), and `other`, every other tracked path it removes. A
+rename is in neither. History keeps each one, but the file leaves the disk all the same. No
+`deletes` means there is nothing to say; `unknown` says why they couldn't be listed, which never
+stops a close.
+
 ## Step 1 — Show it
 
 Show the human: the change, the worktree and branch that will go, the commit `main` will move to,
 where the change will be mirrored (or why it won't be), what `close_list` found, the command
-`cleanup` will run when `cleanup.runs` is true (or `cleanup.because`), and every refusal. When `push.on` is true, show what the push will send to `push.remote`:
+`cleanup` will run when `cleanup.runs` is true (or `cleanup.because`), and every refusal. When
+`deletes` lists any path, show every one, `ignored` first, saying the merge removes them from the
+main checkout's disk and history keeps them. When `push.on` is true, show what the push will send to `push.remote`:
 `push.unpushed.ahead`, one commit a line, the coming `Close` (or `Drop`) commit first, then the
 change's own, then anything else `main` holds that the remote doesn't (inbox commits, another
 change's close). It is all of it: git pushes the branch, not one change. With
@@ -99,6 +108,11 @@ with `…delete its branch, then push <git.base> to <remote>?`: the yes covers t
 commit shown, and they can't be taken back once pushed. When `cleanup.runs` is true, end with
 `…, then run <cleanup.command>?`, after the push when there is one, the command word for word:
 the yes covers it, for this change only, and what it deletes isn't in git.
+
+When `deletes` lists any path, follow `fast-forward <git.base> to it` with `, deleting from the
+main checkout <ignored paths> (now ignored) and <other paths>`: up to five paths in all,
+`ignored` first, then `and N more` for the rest, leaving out a part that is empty. With `deletes.unknown`, follow it with `, though which files it deletes from the
+main checkout couldn't be listed`. With both lists empty, the question is as above, word for word.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a

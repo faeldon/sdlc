@@ -366,6 +366,9 @@ def test_intent_moves_the_session_and_close_brings_it_back() -> None:
     assert "Never run it from this session" in close.content
     wait = close.content.split("## Step 2", 1)[1].split("## Step 3", 1)[0]
     assert "then run <cleanup.command>?" in wait and "`cleanup.runs` is true" in wait
+    # A file the fast-forward deletes from the main checkout is named in the question, never only
+    # in the JSON.
+    assert "`deletes`" in wait and "(now ignored)" in wait
     ship = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
     assert "/sdlc:close" in ship
 

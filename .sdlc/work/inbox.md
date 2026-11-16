@@ -119,15 +119,6 @@ the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote.
 Theme: release
 Priority: low
 
-## [2026-10-25-7] [idea] Close warns before its merge deletes files in the main checkout
-
-A change that untracks files the main checkout still holds (data kept out of git from then on)
-deletes them there when close fast-forwards `main`. They are in history, but the person isn't
-told. `close --check` could list the tracked paths the merge removes, so the approval names them.
-Not an automatic `after_close` command: `close_cleanup` stays the person's to run. Raised
-2026-10-25 by a host.
-Theme: landing
-
 ## [2026-10-25-8] [idea] Small gaps in sync and worktree setup
 
 `sync` rewrites an issue's body but never its title, so an intent retitled at spec leaves the issue

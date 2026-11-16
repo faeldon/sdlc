@@ -133,7 +133,10 @@ publish pushes it. Last, with `commands.close_cleanup_runs`, `cleanup` runs the 
 before the merge (`_config_at()` on `refs/sdlc/base/<branch>`), so a change can't turn on its own,
 and a failure is `cleanup_failed`, never a failed close; with the worktree gone, no rerun finds
 the change to run it twice. It is the one thing close deletes beyond the change's own folder,
-worktree and branch, and only behind that yes. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
+worktree and branch, and only behind that yes. The fast-forward deletes from the main checkout's
+disk each tracked file the change removed, one it stopped tracking and ignores too:
+`_ff_deletions()` lists them as `deletes`, the ignored ones apart, and the question names them;
+close never restores one. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
 commit's message, so GitHub closes it when the commit reaches the default branch (where that isn't
 `main`, close closes it itself). In the plugin's own repo only, `_handoff()`
 reruns close through `main`'s script when this copy is a stale cache, and through the merged

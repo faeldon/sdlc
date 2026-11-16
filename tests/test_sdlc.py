@@ -917,6 +917,98 @@ def test_close_check_writes_nothing(tmp_path: Path, capsys, monkeypatch) -> None
     assert _git(root, "rev-parse", "main") == before and tree.is_dir()
 
 
+def _with_main_files(root: Path, *names: str) -> None:
+    for name in names:
+        (root / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(root, "add", *names)
+    _git(root, "commit", "-q", "-m", "files main holds")
+
+
+def test_close_check_names_what_the_merge_deletes_from_the_main_checkout(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """A file the change stops tracking and ignores goes from the main checkout's disk at the
+    fast-forward all the same: the question names it, apart from a file simply deleted."""
+    root = _repo(tmp_path)
+    _with_main_files(root, "data.db", "old.txt")
+    tree, branch = _shipped_change(root)
+    _git(tree, "rm", "-q", "--cached", "data.db")
+    with (tree / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+        f.write("data.db\n")
+    _git(tree, "rm", "-q", "old.txt")
+    _git(tree, "add", ".gitignore")
+    _git(tree, "commit", "-q", "-m", "keep the data out of git")
+    before = _git(root, "rev-parse", "main")
+    monkeypatch.chdir(root)
+    code, out = _close(root, "001", capsys, check_only=True)
+    assert code == 0, out
+    assert out["deletes"] == {"ignored": ["data.db"], "other": ["old.txt"]}
+    assert _git(root, "rev-parse", "main") == before and (root / "data.db").is_file()
+    assert _git(root, "status", "--porcelain") == ""
+
+
+def test_close_check_counts_a_rename_as_no_deletion(tmp_path: Path, capsys, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    _with_main_files(root, "notes.txt")
+    tree, _ = _shipped_change(root)
+    _git(tree, "mv", "notes.txt", "renamed.txt")
+    _git(tree, "commit", "-q", "-m", "rename")
+    monkeypatch.chdir(root)
+    code, out = _close(root, "001", capsys, check_only=True)
+    assert code == 0 and out["deletes"] == {"ignored": [], "other": []}, out
+
+
+def test_close_check_says_nothing_deleted_as_empty_lists(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    _shipped_change(root)
+    monkeypatch.chdir(root)
+    code, out = _close(root, "001", capsys, check_only=True)
+    assert code == 0 and out["deletes"] == {"ignored": [], "other": []}, out
+
+
+def test_close_reports_no_deletions_once_merged_or_dropped(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """Neither a rerun after the merge nor a drop's `-s ours` record removes a file."""
+    root = _repo(tmp_path)
+    tree, _ = _shipped_change(root)
+    monkeypatch.chdir(tree)
+    assert _close(tree, None, capsys)[0] == 3
+    monkeypatch.chdir(root)
+    code, out = _close(root, "001", capsys, check_only=True)
+    assert code == 0 and "deletes" not in out, out
+
+    assert sdlc.cmd_new(root, "gone", 1, None, worktree=True) == 0
+    branch = next(b for _, b in sdlc.worktrees(root) if b.endswith("-gone"))
+    dropped = root / ".claude" / "worktrees" / branch
+    intent = dropped / ".sdlc" / "work" / branch / "intent.md"
+    intent.write_text(
+        intent.read_text().replace("stage: plan\n", "stage: dropped\n", 1) + "\n## Dropped\n\nNo.\n"
+    )
+    assert sdlc.cmd_drop(dropped, None) == 0
+    code, out = _close(root, branch[:3], capsys, check_only=True)
+    assert code == 0 and out["kind"] == "dropped" and "deletes" not in out, out
+
+
+def test_close_goes_ahead_when_the_deletions_cant_be_read(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    _shipped_change(root)
+    real = sdlc._git
+
+    def failing(where, *args):
+        return None if "--diff-filter=D" in args else real(where, *args)
+
+    monkeypatch.setattr(sdlc, "_git", failing)
+    monkeypatch.chdir(root)
+    code, out = _close(root, "001", capsys)
+    assert code == 0, out
+    assert "unknown" in out["deletes"] and "remove folder" in out["done"], out
+
+
 def _diverge(root: Path, tree: Path) -> None:
     (root / "other.txt").write_text("x", encoding="utf-8")
     _git(root, "add", "other.txt")
