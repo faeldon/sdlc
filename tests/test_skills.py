@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import frontmatter
@@ -479,9 +480,8 @@ def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
 def test_retro_proposes_review_changes_as_seeds_and_never_writes_them() -> None:
     """An escape's lesson for the review doc or `[review]` reaches them through a change and its
     ship review: retro proposes the exact text as a seed, and its one commit still holds only the
-    direction doc, the register and the product doc."""
-    import inspect
-
+    direction doc, the register and the product doc, which retro-commit's refusal of a review or
+    config edit pins (`tests/test_retro.py::test_it_refuses_before_writing_anything`)."""
     skill = ROOT / "skills" / "retro" / "SKILL.md"
     text = frontmatter.load(skill).content
     out_of_scope = " ".join(text.split("## Out of scope")[1].split())
@@ -499,8 +499,6 @@ def test_retro_proposes_review_changes_as_seeds_and_never_writes_them() -> None:
         'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit *)',
         'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)',
     ]
-    source = inspect.getsource(sdlc.cmd_retro_commit)
-    assert "review" not in source and "config.toml" not in source
 
 
 def test_retro_closes_its_own_loop_and_release_says_when_one_is_due() -> None:
@@ -766,6 +764,19 @@ def test_every_rule_is_for_a_command_the_skill_runs(skill: Path) -> None:
     assert not stale, f"{_id(skill)}: rules for nothing it runs: {stale}"
 
 
+# The tracked `*.md` files' names, from git, so a checkout and CI read the same set.
+_MD_NAMES = {
+    Path(line).name
+    for line in subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "*.md"],
+        capture_output=True, encoding="utf-8", check=True,
+    ).stdout.splitlines()
+}  # fmt: skip
+# The files a skill names that the factory's agents write into a change's folder, with no copy in
+# the repo to find: the run's verdict and the person's calls it raised.
+WRITTEN_ELSEWHERE = {"decision.md", "decisions.md"}
+
+
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)
 def test_a_skill_s_side_files_are_named_by_it_and_hold_no_gate(skill: Path) -> None:
     """A file beside a skill is read only where its `SKILL.md` names it, so one it never names is
@@ -773,12 +784,15 @@ def test_a_skill_s_side_files_are_named_by_it_and_hold_no_gate(skill: Path) -> N
     its commit and its `ship` stay in `SKILL.md`, where the one-WAIT test reads them."""
     text = skill.read_text(encoding="utf-8")
     side = {p.name for p in _side_files(skill)}
-    named = set(re.findall(r"`([a-z][a-z-]*\.md)`", text)) & {
-        p.name for p in skill.parent.iterdir()
-    }
+    bare = set(re.findall(r"`([a-z][a-z-]*\.md)`", text))
+    named = bare & {p.name for p in skill.parent.iterdir()}
     pointed = set(re.findall(rf"skills/{skill.parent.name}/([a-z-]+\.md)", text))
     assert side <= named, f"{_id(skill)} never names {sorted(side - named)}"
     assert pointed <= side, f"{_id(skill)} points at missing {sorted(pointed - side)}"
+    # A bare pointer left naming a side file that was renamed names nothing the repo holds
+    # (nit 2026-11-13-2); every other `x.md` a skill cites is a file somewhere, or one it writes.
+    stale = bare - _MD_NAMES - WRITTEN_ELSEWHERE
+    assert not stale, f"{_id(skill)} names {sorted(stale)}, which no file is"
     for path in _side_files(skill):
         body = path.read_text(encoding="utf-8")
         assert not body.startswith("---"), f"{path.name} has frontmatter"

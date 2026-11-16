@@ -602,13 +602,6 @@ def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> N
     assert parsed["fixes"]["2026-10-01-1"]["paths"] == "src/drafts.py,src/list/"
 
 
-def test_only_a_close_records_fixes_never_a_drop() -> None:
-    import inspect
-
-    assert "fix_trailers(" in inspect.getsource(sdlc.cmd_close)
-    assert "fix_trailers(" not in inspect.getsource(sdlc._drop_record)
-
-
 # What retro counts.
 
 

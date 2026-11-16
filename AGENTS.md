@@ -426,8 +426,9 @@ Changing a skill or the script usually means satisfying these, so know them befo
   (`fcntl`, `msvcrt`) is imported at the top of a script, only inside the function that needs it;
   every text-mode `subprocess.run` names `encoding="utf-8"` (with `errors="replace"` for a host's
   commands), since the default is the locale's code page; never `shell=True`, but `_sh()`, which
-  is `sh -c` everywhere (`trackers/command.py`'s copy is pinned to it); every `write_text` passes
-  `newline="\n"`; a repo path shown or compared with git's output is `as_posix()`. A test that
+  is `sh -c` everywhere (`trackers/command.py`'s copy is pinned to it, as `factory.py`'s
+  `_utf8_streams` is to `sdlc.py`'s); every `write_text`, and every `open()` that writes text,
+  passes `newline="\n"`; a repo path shown or compared with git's output is `as_posix()`. A test that
   must pass on Windows is marked `portable`: CI's Windows job (`.github/workflows/check.yml`)
   runs only those, since the rest lean on shebang fakes Windows can't run.
 - The manifest name must stay `sdlc` (it namespaces every skill), and the license `MIT`,

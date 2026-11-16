@@ -179,16 +179,6 @@ changes by type, and release can group its notes by it. Tier 2: a new intent key
 Theme: intent
 Priority: low
 
-## [2026-10-24-7] [nit] A deprecations status test whose patched half can't fail
-
-The half of the `status` test that runs with a patch applied can't fail, so it proves nothing.
-
-Theme: tests
-Paths: tests/test_deprecations.py
-Cost: S
-Value: low
-Raised by: 003-test-lifetimes (correctness)
-
 ## [2026-10-24-8] [nit] The `RECORD_CLEARS` tuple-unpacking idiom
 
 The set is built from two unpacked tuples where one set literal reads plainer.
@@ -198,18 +188,6 @@ Paths: tests/test_defaults.py
 Cost: S
 Value: low
 Raised by: 009-drift-message (cost)
-
-## [2026-10-25-22] [nit] A test that close alone records fixes greps the source
-
-`test_only_a_close_records_fixes_never_a_drop` checks `inspect.getsource` for `fix_trailers(`, so
-only a rename or a revert fails it. Close a dropped change that has `fixes:` and assert its `Drop`
-commit carries no `Sdlc-Fixes:` line.
-
-Theme: tests
-Paths: tests/test_bugs.py
-Cost: M
-Value: low
-Raised by: 024-bugs-register (correctness)
 
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
@@ -255,17 +233,6 @@ from before has to be carried back. See work/027-work-path/spec.md (Alternatives
 Theme: setup
 Priority: low
 
-## [2026-10-26-14] [nit] No test pins that readiness lost its inbox item
-
-A readiness `inbox` item coming back would pass the suite; assert it is absent from
-`cmd_readiness`'s items.
-
-Theme: tests
-Paths: tests/test_inbox.py
-Cost: S
-Value: low
-Raised by: 028-remove-1-4-shims (correctness)
-
 ## [2026-10-27-10] [idea] Let answers move a filled prompt into its guide slot
 
 `sdlc.py answers` keeps a filled prompt under its old key, so a migrated host's answer to "the
@@ -273,27 +240,6 @@ failure it stops" stays in `## The point of the process` rather than `### The fa
 Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/notes.md.
 Theme: setup
 Priority: low
-
-## [2026-11-04-1] [nit] Retro's never-writes test greps retro-commit's source
-
-`test_retro_proposes_review_changes_as_seeds_and_never_writes_them` asserts `review` and
-`config.toml` are absent from `cmd_retro_commit`'s source, so only a rename fails it. Commit a
-retro whose tree also changes `.sdlc/REVIEW.md` and assert the refusal instead.
-
-Theme: tests
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 037-escaped-bugs-tune-review (correctness)
-
-## [2026-11-04-8] [idea] Pay down the tests nits
-
-The `tests` theme holds five open nits, the threshold the process guide sets for one paydown
-change: 2026-10-24-7 (a half that can't fail), 2026-10-25-22 and 2026-11-04-1 (tests that grep a
-function's source), 2026-10-26-3 (no adoption test runs `closes:`) and 2026-10-26-14 (nothing pins
-that readiness lost its inbox item). Fix them in one change, each retired by its ship. Raised by
-the retrospective of 2026-11-04.
-Theme: tests
 
 ## [2026-11-04-10] [idea] Move retro's history readers out of sdlc.py
 
@@ -306,17 +252,6 @@ One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
 Theme: refactor
 Priority: low
 
-## [2026-11-04-12] [nit] The LF test checks write_text only, not a write-mode open
-
-`test_every_file_written_is_lf` walks `write_text` calls; a later `open(p, "w")` would write CRLF on
-Windows unnoticed. Walk write-mode `open` calls too.
-
-Theme: tests
-Paths: tests/test_windows.py
-Cost: S
-Value: low
-Raised by: 041-windows-lock (correctness)
-
 ## [2026-11-04-13] [nit] The CI workflow runs twice on every publish
 
 `on: push` fires for the branch push and again for the tag push `/sdlc:publish` makes. Filter it
@@ -327,17 +262,6 @@ Paths: .github/workflows/check.yml
 Cost: S
 Value: low
 Raised by: 041-windows-lock (cost)
-
-## [2026-11-04-14] [nit] The factory's `_utf8_streams` copy isn't pinned to sdlc.py's
-
-The repo pins its other copies by test (`risk_paths()`, the regexes, `trackers/command.py`'s
-`_sh`); this one can drift. Pin it the same way.
-
-Theme: tests
-Paths: plugins/factory/scripts/factory.py, tests/test_windows.py
-Cost: S
-Value: low
-Raised by: 041-windows-lock (contract)
 
 ## [2026-11-08-1] [idea] Readiness groups for the backlog, and taking a theme as one change
 
@@ -434,12 +358,3 @@ out of git, captured per machine before a run, and approve cases skipped while t
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
-## [2026-11-13-2] [nit] A bare pointer to a renamed side file passes the side-file test
-
-The side-file test checks a bare `file.md` pointer in SKILL.md only against files that exist, so
-a pointer left naming a renamed branch file isn't caught; full `skills/<name>/<file>` paths are.
-Theme: tests
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 056-ship-reads-rare-branches (correctness)

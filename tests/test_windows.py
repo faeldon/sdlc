@@ -169,9 +169,9 @@ def test_status_prints_utf8_under_a_code_page_without_its_marks(tmp_path: Path) 
     assert "■" in ran.stdout.decode("utf-8")
 
 
-def _calls(path: Path, name: str) -> list[ast.Call]:
-    """Every call in `path` to a function or method named `name`."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _calls(path: Path | str, name: str) -> list[ast.Call]:
+    """Every call in `path` (or in source text) to a function or method named `name`."""
+    tree = ast.parse(path.read_text(encoding="utf-8") if isinstance(path, Path) else path)
     return [
         node
         for node in ast.walk(tree)
@@ -205,11 +205,42 @@ def test_no_shell_true_anywhere(script: Path) -> None:
     assert bad == [], f"{script.name}: shell= at {bad}"
 
 
+def _unlf_writes(source: Path | str) -> list[int]:
+    """The lines of each text write that names no `newline=`: a `write_text`, or an `open` in a
+    text mode that writes (`w`, `a`, `x` or `+`, no `b`), builtin or `Path.open`. `os.open` takes
+    flags, never a mode string, so it is passed over."""
+    bad = [c.lineno for c in _calls(source, "write_text") if "newline" not in _keywords(c)]
+    for c in _calls(source, "open"):
+        # The mode is `open(p, mode)`'s second argument, and `p.open(mode)`'s first.
+        positional = c.args[1:2] if isinstance(c.func, ast.Name) else c.args[:1]
+        given = [k.value for k in c.keywords if k.arg == "mode"] or positional
+        mode = given[0].value if given and isinstance(given[0], ast.Constant) else ""
+        writes = isinstance(mode, str) and set(mode) & set("wax+") and "b" not in mode
+        if writes and "newline" not in _keywords(c):
+            bad.append(c.lineno)
+    return sorted(bad)
+
+
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_every_file_written_is_lf(script: Path) -> None:
     """R8: without `newline=`, a write on Windows turns every `\\n` into `\\r\\n`."""
-    bad = [c.lineno for c in _calls(script, "write_text") if "newline" not in _keywords(c)]
-    assert bad == [], f"{script.name}: write_text without newline= at {bad}"
+    bad = _unlf_writes(script)
+    assert bad == [], f"{script.name}: a text write without newline= at {bad}"
+
+
+def test_a_write_mode_open_without_newline_is_caught() -> None:
+    """Nit 2026-11-04-12: `open(p, "w")` writes CRLF on Windows as `write_text` does."""
+    source = (
+        'open(p, "w")\n'
+        'p.open("a", encoding="utf-8")\n'
+        'open(p, mode="x")\n'
+        'open(p, "w", newline="\\n")\n'
+        'open(p, "rb")\n'
+        "open(p)\n"
+        "os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)\n"
+        'p.write_text("x")\n'
+    )
+    assert _unlf_writes(source) == [1, 2, 3, 8]
 
 
 def test_no_script_imports_a_one_platform_module_at_the_top() -> None:
@@ -245,18 +276,27 @@ def test_evidence_with_no_sh_is_a_row_saying_so(tmp_path: Path, monkeypatch) -> 
     assert rows[0]["exit"] is None and "Git for Windows" in rows[0]["error"]
 
 
+def _function(path: Path, name: str) -> str:
+    """Top-level function `name` in `path`, without its docstring, so each copy of a function can
+    say which one it is."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    (fn,) = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+    if ast.get_docstring(fn) is not None:
+        fn.body = fn.body[1:]
+    return ast.unparse(fn)
+
+
 def test_the_command_tracker_s_shell_is_sdlc_s() -> None:
     """R7: `trackers/command.py` can't import `sdlc.py`, so it keeps a copy, pinned here."""
+    tracker = REPO / "scripts" / "trackers" / "command.py"
+    assert _function(tracker, "_sh") == _function(SDLC_PY, "_sh")
 
-    def source(path: Path) -> str:
-        """The function without its docstring, so each copy can say which one it is."""
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        (fn,) = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_sh"]
-        if ast.get_docstring(fn) is not None:
-            fn.body = fn.body[1:]
-        return ast.unparse(fn)
 
-    assert source(REPO / "scripts" / "trackers" / "command.py") == source(SDLC_PY)
+def test_the_factory_s_streams_are_sdlc_s() -> None:
+    """Nit 2026-11-04-14: the factory's cached copy has no `sdlc.py` to import, so it keeps a copy
+    of `_utf8_streams`, pinned here as the other copies are."""
+    factory = REPO / "plugins" / "factory" / "scripts" / "factory.py"
+    assert _function(factory, "_utf8_streams") == _function(SDLC_PY, "_utf8_streams")
 
 
 def test_paths_shown_are_posix(tmp_path: Path) -> None:

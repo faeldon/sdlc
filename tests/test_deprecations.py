@@ -274,13 +274,17 @@ def test_a_later_shim_does_not_refuse(tmp_path: Path, capsys) -> None:
 
 
 def test_status_is_unchanged_without_a_registry(tmp_path: Path, monkeypatch, capsys) -> None:
+    """A repo with no registry reads exactly as one whose registry lists no shim, and a shim in it
+    shows, so the comparison is one that can fail."""
     root = _repo(tmp_path)
     _close(root)
-    _, before = _main(monkeypatch, capsys, root, "status")
-    monkeypatch.setattr(sdlc, "deprecations", lambda home, cfg: {"shims": [], "problems": []})
     _, without = _main(monkeypatch, capsys, root, "status")
-    assert before == without
-    assert "shim" not in before
+    _registry(root, "# No shims.\n")
+    _, empty = _main(monkeypatch, capsys, root, "status")
+    assert without == empty and "shim" not in without
+    _registry(root, SHIM.format(v="1.0.0"))
+    _, listed = _main(monkeypatch, capsys, root, "status")
+    assert listed != without and "shim old-flag" in listed
 
 
 def test_status_lists_due_and_overdue_shims(tmp_path: Path, monkeypatch, capsys) -> None:

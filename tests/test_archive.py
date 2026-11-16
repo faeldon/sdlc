@@ -978,18 +978,38 @@ def test_only_a_shipped_change_is_closed(tmp_path, gh, capsys) -> None:
 
 
 def _dropped(
-    root: Path, slug: str = "thing", at: str = "build", extra: dict[str, str] | None = None
+    root: Path,
+    slug: str = "thing",
+    at: str = "build",
+    extra: dict[str, str] | None = None,
+    fixes: str = "",
 ) -> str:
     """A change opened, worked to `at`, given its reason and run through `drop` in its worktree,
-    as /sdlc:drop leaves it for close; its name."""
+    as /sdlc:drop leaves it for close; its name. `fixes` is its intent's `fixes:` line."""
     folder = _open(root, slug)
     intent = folder / "intent.md"
     text = intent.read_text().replace("stage: plan\n", f"stage: {at}\n", 1)
+    if fixes:
+        text = text.replace("depends_on:", f"fixes: {fixes}\ndepends_on:", 1)
     intent.write_text(text + "\n## Dropped\n\nThe drafts it reopens are gone.\n\nMore.\n")
     for name, text in (extra or {}).items():
         (folder / name).write_text(text, encoding="utf-8")
     assert sdlc.cmd_drop(sdlc.checkout_of(folder), None) == 0
     return folder.name
+
+
+def test_a_dropped_change_records_no_fixes(tmp_path, gh, capsys) -> None:
+    """Nit 2026-10-25-22: a bug a dropped change meant to fix isn't fixed, so its `Drop` commit
+    names none; retro would count it fixed. A shipped one's `Close` does (test_adoption)."""
+    root = _repo(tmp_path)
+    name = _dropped(root, fixes="[2026-10-01-1]")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    assert out["kind"] == "dropped"
+    intent = _git(root, "show", f"main^2:.sdlc/work/{name}/intent.md")
+    assert "fixes: [2026-10-01-1]" in intent, "the drop carried the line it must not record"
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert body.startswith("Drop ") and "Sdlc-Fixes:" not in body
 
 
 def _parents(root: Path, ref: str) -> list[str]:

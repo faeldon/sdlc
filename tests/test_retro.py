@@ -577,6 +577,18 @@ def _stray(root: Path) -> None:
     (root / "README.md").write_text("edited\n", encoding="utf-8")
 
 
+def _review_too(root: Path) -> None:
+    """A retro's lesson for the review doc goes through a change and its ship review, never its
+    own commit (nit 2026-11-04-1)."""
+    _direction(root)
+    (root / ".sdlc" / "REVIEW.md").write_text("# Review\n\nA new pass.\n", encoding="utf-8")
+
+
+def _config_too(root: Path) -> None:
+    _direction(root)
+    (root / ".sdlc" / "config.toml").write_text('[review]\nsensitive = ["x/"]\n', encoding="utf-8")
+
+
 def _nothing(root: Path) -> None:
     pass
 
@@ -595,6 +607,8 @@ def _off_main(root: Path) -> None:
     "spoil, why",
     [
         (_stray, "also changed: README.md"),
+        (_review_too, "also changed: .sdlc/REVIEW.md"),
+        (_config_too, "also changed: .sdlc/config.toml"),
         (_nothing, "nothing to record"),
         (_today_already, "one a day"),
         (_off_main, "isn't on main"),

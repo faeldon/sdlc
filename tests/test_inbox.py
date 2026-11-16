@@ -217,6 +217,15 @@ def test_a_milestone_puts_forward_its_seed_named_by_id(tmp_path: Path) -> None:
     assert [(i["rule"], i["title"]) for i in items][0] == ("milestone", "Other")
 
 
+def test_readiness_has_no_inbox_item(tmp_path: Path, capsys) -> None:
+    """Nit 2026-10-26-14: the register needs no setup, so readiness lists no `inbox` item; one
+    coming back would have setup draft a file the plugin starts itself."""
+    root = _work(tmp_path, "inbox.md")
+    assert sdlc.cmd_readiness(root) == 0
+    names = [i["name"] for i in json.loads(capsys.readouterr().out)["items"]]
+    assert names and not [n for n in names if "inbox" in n]
+
+
 def test_migrate_inbox_is_no_longer_a_command(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["sdlc.py", "migrate-inbox"])
     with pytest.raises(SystemExit) as exit_:
