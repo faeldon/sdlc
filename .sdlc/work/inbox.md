@@ -136,18 +136,6 @@ untracked data from the main checkout works the path out from `git rev-parse --g
 Tier 1 together. Raised 2026-10-25 by a host.
 Theme: robustness
 
-## [2026-10-25-9] [idea] A local channel for bug reports and feature requests from other sessions
-
-Working locally across several repos, a session in a host that hits a plugin bug or wants a
-feature has no channel but the person: they copy what it wrote into the plugin's session, which
-files it by hand. Give it one: a host session sends a report (what happened, the repro, the
-plugin version, the host's change) to a live session working on the plugin, by cross-session
-message or a drop folder the plugin's session reads, and that session triages it into a seed or a
-bug entry behind one approval. A report never names the host in what lands here (the repo's
-nothing-local rule), so triage rewrites it in neutral terms. The first phase of an intake for bugs
-and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
-Theme: intake
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts
