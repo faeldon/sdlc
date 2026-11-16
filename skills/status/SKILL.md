@@ -53,9 +53,14 @@ register or the direction doc to answer "what's next". The script collects candi
 and orders them by a fixed rule: entries marked `Priority: high` first (`priority high · …`), then
 `bug` entries, then each open milestone's next grouped seed (`M1 (…)`), then the next seed in a
 series (`next in series after "…"`), then cost-`S` nits by theme (`nits`), then every other idea
-(`idea`), and entries marked `Priority: low` last. Ten lines are shown, each with its reason, its
+(`idea`), and entries marked `Priority: low` last. The list comes in two groups: **`Ready to
+build`**, what a person or a review already weighed (marked high, bugs, milestone and series
+seeds, nits), then **`Needs a decision`**, the seeds no one has ranked, its low ones counted
+(`(16 low)`): whether those are worth building at all is the person's call, never yours. Ten
+lines are shown across both, ready first, each with its reason, its
 `[theme]` when it has one, and the command that starts it, `/sdlc:intent <id>` with the entry's id;
-`status --all` lists every candidate, grouped by theme. A seed already being built, or waiting on
+`status --all` lists every candidate, grouped by theme, and under a theme holding two or more ideas
+the command that takes them all as one change (`/sdlc:intent <id> <id>`). A seed already being built, or waiting on
 an earlier seed in its series, is left out; the count of those waiting comes after the list.
 `Themes:` counts the open entries of each theme by kind, best-ranked theme first and `(no theme)`
 last: a theme is work that can be taken on together. With five or more ideas and bugs lacking a
@@ -160,7 +165,8 @@ change in flight (not marked `quiet`) is never picked: say it's in flight in the
 7. `Release due` — `/sdlc:release`, from the main checkout. An `Unreleased` section that says
    `not due` is a batch still filling: mention it only as a runner-up when the person asks.
 8. `Retro due` — `/sdlc:retro`, which also settles a milestone with nothing left in its groups.
-9. The first `Next up` line — its own command. Runners-up come from the lines after it.
+9. The first `Ready to build` line, else the first `Needs a decision` line — its own command.
+   Runners-up come from the lines after it.
 
 With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 

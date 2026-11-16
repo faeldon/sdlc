@@ -198,7 +198,9 @@ read as the register: only readers of history name it (`next_entry_ids()`, `fix_
 register, uncommitted edits included, and every commit that ever held one; they are their own
 space, never a change number. A reference (`idea:`, `fixes:`, `After:`, `Groups:`) is an id,
 bare, or a title, quoted, matched by `ref_matches()`/`same_ref()`; titles are read for good,
-since history's intents name seeds by them. Never match an entry by title alone.
+since history's intents name seeds by them. Never match an entry by title alone. An `idea:` may
+list several, a theme's seeds taken as one change: every reader takes the record's `ideas` (its
+first is `idea`, kept for JSON readers), and ship deletes each.
 
 **Bugs: `bug_entries()`.** `[bug]` entries carry `Severity:`, its words read from the process doc
 by `severities()` (the default doc's when the host's has none), `Paths:` and a confirmed

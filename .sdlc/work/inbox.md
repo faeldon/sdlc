@@ -251,18 +251,6 @@ Cost: S
 Value: low
 Raised by: 041-windows-lock (cost)
 
-## [2026-11-08-1] [idea] Readiness groups for the backlog, and taking a theme as one change
-
-Status now ranks and groups by theme (044), but two things were deferred. First, readiness groups
-(ship today / needs you / blocked) need an effort signal ideas don't carry, and tagging every
-entry by hand is too much work. Infer it from where an entry came from: findings a change's review
-raised versus seeds the person wrote themselves, which go in a group of their own for the person
-to decide whether they're worth building. Keep status short: either make it deterministic or give
-it a skill of its own. Second, one change should be able to take a whole theme's ideas: today
-`idea:` names one seed and ship deletes only that one.
-Theme: status
-Raised 2026-11-08.
-
 ## [2026-11-08-3] [idea] Retro re-ranks the inbox
 
 After its passes, the retrospective proposes Priority: lines for the register's open ideas and bugs:

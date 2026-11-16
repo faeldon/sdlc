@@ -390,6 +390,27 @@ def test_inbox_commit_never_retires_what_an_open_change_builds_or_fixes(
     assert out["refusals"][0] == (
         "from the main checkout it records the whole register: name no entries"
     )
+
+
+def test_inbox_commit_never_retires_a_seed_named_second_on_an_open_change(
+    tmp_path: Path, capsys
+) -> None:
+    """062 R6: a change that takes a theme's seeds holds every one, not just the first."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _idea("2026-10-02-1", "Two"))
+    folder = root / ".sdlc" / "work" / "001-keep-drafts"
+    folder.mkdir()
+    (folder / "intent.md").write_text(
+        FIXING.format(fixes="").replace("idea:\n", "idea: [2026-10-01-1, 2026-10-02-1]\n"),
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "open 001")
+    _inbox(root, _idea("2026-10-01-1", "One"))
+    code, out = _commit(root, capsys, "2026-10-02-1=declined")
+    assert code == 1 and out["refusals"] == [
+        "2026-10-02-1 is being built by 001-keep-drafts: its change removes it at ship, "
+        "or /sdlc:drop says why not",
+    ]
     assert _git(root, "log", "-1", "--format=%s") == "open 001"
 
 

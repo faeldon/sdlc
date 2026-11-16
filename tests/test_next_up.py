@@ -91,13 +91,15 @@ def _status(root: Path, capsys, monkeypatch) -> str:
 
 
 def _close(root: Path, name: str, idea: str) -> None:
-    """A change whose intent names `idea`, shipped and then closed on main."""
+    """A change whose intent names `idea`, shipped and then closed on main: a title, quoted, or a
+    `[list]` of seeds written as is."""
     nid, slug = name.split("-", 1)
+    line = idea if idea.startswith("[") else f'"{idea}"'
     _write(
         root,
         f".sdlc/work/{name}/intent.md",
         f"---\nid: {nid}\nslug: {slug}\ntier: 1\nimpact: patch\nstage: shipped\n"
-        f'created: 2026-10-01\nupdated: 2026-10-01\nidea: "{idea}"\n---\n\n# {nid} — {slug}\n',
+        f"created: 2026-10-01\nupdated: 2026-10-01\nidea: {line}\n---\n\n# {nid} — {slug}\n",
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}")
@@ -288,11 +290,12 @@ def test_status_prints_ten_then_counts_the_rest(tmp_path: Path, capsys, monkeypa
     _ideas(root, *(_seed(f"2026-10-{n:02}", f"Seed number {n}") for n in range(1, 13)))
     out = _status(root, capsys, monkeypatch)
     section = out.split("■ Next up: 12\n", 1)[1].split("\n\n", 1)[0].splitlines()
-    assert section[10] == "    (+2 more: status --all)"
-    assert section[0].startswith("    idea  Seed number 1  (")
-    assert section[0].endswith("→ /sdlc:intent 2026-10-01-1")
-    assert section[11] == "    Themes:"
-    assert section[12].startswith("      (no theme)  12 (12 ideas), oldest ")
+    assert section[:2] == ["    Ready to build: 0", "    Needs a decision: 12"]
+    assert section[2].startswith("      idea  Seed number 1  (")
+    assert section[2].endswith("→ /sdlc:intent 2026-10-01-1")
+    assert section[12] == "    (+2 more: status --all)"
+    assert section[13] == "    Themes:"
+    assert section[14].startswith("      (no theme)  12 (12 ideas), oldest ")
     # Before the nudges and the problems, after everything that was there already.
     assert out.index("■ Next up") < out.index("■ Problems")
 
@@ -422,6 +425,95 @@ def test_priority_high_ranks_first_and_low_last(tmp_path: Path) -> None:
     ]
     assert items[0]["label"] == "priority high · bug low"
     assert items[-1]["label"] == "priority low · idea"
+
+
+def _mixed(root: Path) -> None:
+    """One entry for every rule: high, bug, milestone, series, nits, idea, low."""
+    _ideas(
+        root,
+        _entry("2026-10-01", "Plain seed"),
+        _entry("2026-10-02", "Ignored seed", "idea", "Priority: low"),
+        _entry("2026-10-03", "Grouped seed"),
+        _entry("2026-10-04", "Urgent idea", "idea", "Priority: high"),
+        _entry("2026-10-05", "Drafts lose their title", "bug", "Severity: high"),
+        _entry("2026-10-06", "Follows a shipped one", "idea", 'After: "Reopen drafts"'),
+        _nit("007-1", "style", "2026-10-07"),
+    )
+    _direction(root, _milestone("M1", "Drafts reopen", '"Grouped seed"'))
+    _close(root, "001-reopen-drafts", "Reopen drafts")
+
+
+@pytest.mark.portable
+def test_each_rule_is_ready_or_needs_a_decision(tmp_path: Path) -> None:
+    """R1: what a person or a review already weighed is ready; a seed no one ranked waits on the
+    person, whatever its age."""
+    root = _repo(tmp_path)
+    _mixed(root)
+    got = {i["rule"]: i["group"] for i in _next(root)["items"]}
+    assert got == {
+        "priority": "ready", "bug": "ready", "milestone": "ready", "series": "ready",
+        "nits": "ready", "idea": "decide", "low": "decide",
+    }  # fmt: skip
+
+
+@pytest.mark.portable
+def test_status_splits_next_up_into_ready_then_decide(tmp_path: Path, capsys, monkeypatch) -> None:
+    """R2: ready lines first, then the seeds that need a decision with the low ones counted, under
+    one cap; an empty group still says so."""
+    root = _repo(tmp_path)
+    _mixed(root)
+    out = _status(root, capsys, monkeypatch)
+    section = out.split("■ Next up: 7\n", 1)[1].split("    Themes:", 1)[0].splitlines()
+    heads = [s for s in section if not s.startswith("      ")]
+    assert heads == ["    Ready to build: 5", "    Needs a decision: 2 (1 low)"]
+    assert section.index("    Needs a decision: 2 (1 low)") == 6, "five ready lines come first"
+    assert "Plain seed" in section[7] and "Ignored seed" in section[8]
+    root = _repo(tmp_path / "plain")
+    _ideas(root, _entry("2026-10-01", "Plain seed"))
+    out = _status(root, capsys, monkeypatch)
+    assert "    Ready to build: 0\n    Needs a decision: 1\n      idea  Plain seed" in out
+
+
+@pytest.mark.portable
+def test_status_all_offers_a_theme_s_ideas_as_one_change(tmp_path: Path, capsys, monkeypatch):
+    """R3: a theme holding two or more ideas prints the command that takes them all."""
+    root = _repo(tmp_path)
+    _ideas(
+        root,
+        _entry("2026-10-01", "Share drafts", "idea", "Theme: drafts"),
+        _entry("2026-10-02", "Sync drafts", "idea", "Theme: drafts"),
+        _entry("2026-10-03", "Lint the docs", "idea", "Theme: docs"),
+        _nit("004-1", "docs", "2026-10-04"),
+        _entry("2026-10-05", "Unthemed one"),
+        _entry("2026-10-06", "Unthemed two"),
+    )
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "status", "--all"])
+    sdlc.main()
+    out = capsys.readouterr().out
+    assert "      → /sdlc:intent 2026-10-01-1 2026-10-02-1  (its ideas as one change)" in out
+    docs = out.split("    docs\n", 1)[1].split("\n    ", 1)[0]
+    assert "→ /sdlc:intent 2026-10-03-1 " not in docs, "one idea and a nit are no theme change"
+    assert "2026-10-05-1 2026-10-06-1" not in out, "ideas with no theme share nothing"
+
+
+@pytest.mark.portable
+def test_a_change_taking_two_seeds_leaves_both_out(tmp_path: Path) -> None:
+    """R6: an open change whose `idea:` lists two seeds builds both, so neither comes up."""
+    root = _repo(tmp_path)
+    _ideas(root, _entry("2026-10-01", "Share drafts"), _entry("2026-10-02", "Sync drafts"))
+    building = [{"id": "009", "slug": "drafts", "ideas": ["2026-10-01-1", "2026-10-02-1"]}]
+    assert _next(root, building)["items"] == []
+
+
+@pytest.mark.portable
+def test_a_milestone_seed_shipped_second_on_an_idea_line_is_shipped(tmp_path: Path) -> None:
+    """R6: a closed change that took two seeds shipped both, so the milestone has nothing left."""
+    root = _repo(tmp_path)
+    _ideas(root, _entry("2026-10-03", "Unrelated seed"))
+    _direction(root, _milestone("M1", "Drafts reopen", "2026-10-01-1, 2026-10-02-1"))
+    _close(root, "001-drafts", "[2026-10-01-1, 2026-10-02-1]")
+    assert _next(root)["done_milestones"] == ["M1"]
 
 
 @pytest.mark.portable

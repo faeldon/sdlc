@@ -417,8 +417,14 @@ Candidates come in this order, each once, under the first rule it meets:
 6. every other ready idea, oldest first (`idea`);
 7. ideas and bugs marked `Priority: low`, oldest first (`priority low`).
 
-An entry with no `Priority:` line, or `med`, ranks as it would with none. Ten are shown, each with
-its `[theme]`, then a count, and `status --all` lists every candidate, grouped by theme. Below
+An entry with no `Priority:` line, or `med`, ranks as it would with none. The first five rules are
+**Ready to build**, what a person or a review already weighed, and the last two **Needs a
+decision**, the seeds no one has ranked, with its `Priority: low` ones counted; status prints them
+under those two headers, ready first. Ten are shown across both, each with
+its `[theme]`, then a count, and `status --all` lists every candidate, grouped by theme, with
+`/sdlc:intent <id> <id> …` under a theme holding two or more ideas: one change that takes them all
+writes every id on its `idea:` line, `idea: [2026-10-24-4, 2026-11-12-2]`, and ship deletes each.
+Below
 them, `Themes:` counts each theme's open entries by kind (nits of every cost included), the theme
 with the best-ranked line first and `(no theme)` last, then how many seeds wait on an `After:`.
 With five or more open ideas and bugs lacking a `Theme:`, a line names `/sdlc:idea --themes`, which

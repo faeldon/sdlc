@@ -1920,6 +1920,45 @@ def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path
     assert text.endswith("Two lines.\n") and "Share drafts" not in text
 
 
+@pytest.mark.parametrize(
+    "line, ideas",
+    [
+        ("2026-10-02-1", ["2026-10-02-1"]),
+        ('"Reopen drafts"', ["Reopen drafts"]),
+        ("[2026-10-01-1, 2026-10-03-1]", ["2026-10-01-1", "2026-10-03-1"]),
+        ("\n  - 2026-10-01-1\n  - 2026-10-03-1", ["2026-10-01-1", "2026-10-03-1"]),
+        ("", []),
+    ],
+)
+def test_idea_names_one_seed_or_a_theme_s_several(tmp_path: Path, line: str, ideas) -> None:
+    """R4: `idea:` is read as text, one id or title as before, or a list; `idea` is the first."""
+    folder = _change(tmp_path, "001-x", _fm(idea=line))
+    rec = sdlc.load_change(folder, tmp_path)
+    assert rec["ideas"] == ideas and rec["idea"] == (ideas or [""])[0]
+
+
+def test_ship_deletes_every_seed_a_theme_s_change_took(tmp_path: Path, capsys) -> None:
+    """R5: a change that took two seeds removes both; the one between them stays."""
+    root, _ = _seeded(tmp_path, "[2026-10-01-1, 2026-10-03-1]")
+    assert sdlc.cmd_ship(root, "001") == 0
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+        "# Ideas\n\n> Seeds, not a backlog.\n\n"
+        "## [2026-10-02-1] [building] Reopen drafts\n\nThe one being built.\nTwo lines.\n"
+    )
+    out = capsys.readouterr().out
+    assert "removed seed '2026-10-01-1'" in out and "removed seed '2026-10-03-1'" in out
+
+
+def test_an_ambiguous_second_seed_refuses_before_any_write(tmp_path: Path, capsys) -> None:
+    """R5: every seed is found before any is deleted, so the first isn't lost to the second's
+    refusal."""
+    ideas = IDEAS + "\n## [2026-10-04-1] [seed] Share drafts\n\nA twin.\n"
+    root, d = _seeded(tmp_path, '[2026-10-01-1, "Share drafts"]', ideas)
+    assert sdlc.cmd_ship(root, "001") == 1
+    assert "2 entries named 'Share drafts'" in capsys.readouterr().err
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
+
+
 def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path, capsys) -> None:
     ideas = IDEAS + "\n## [2026-10-04-1] [seed] Reopen drafts\n\nA twin.\n"
     root, d = _seeded(tmp_path, "Reopen drafts", ideas)

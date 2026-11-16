@@ -47,7 +47,9 @@ since Step 2 depends on them: the plugin's guide first (`docs.process.guide`, wh
 one), then the repo's doc, whose blocks stand in for the guide's of the same heading or lead and
 add to the rest. If neither exists, use the tiers in Step 2 as they stand and say so. Skim
 `.sdlc/work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
-argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry. Note
+argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry, and
+several ids name several, a theme's seeds taken as one change (`status --all` prints the command
+for each theme): draft one Problem covering them all. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
 `docs.product` exists, and its `outcomes`: with a product doc, Step 1 asks what the change serves.
@@ -156,7 +158,8 @@ Show the issue fields chosen in Step 1 above it, as the frontmatter lines they b
 `milestone: "Q4 2026"`, `project: [Roadmap]`, `assignees: [ana, bo]`, and the `serves:` line
 with each outcome's `name` in a comment after it: `serves: [O1]  # O1 (Unaided setup)`. The
 comment is for the reader of the draft; the line written in Step 5 is `serves: [O1]` alone.
-Show the `reworks:` line too when Step 1 named an earlier change. When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
+Show the `reworks:` line too when Step 1 named an earlier change, and the `idea:` line when the
+change takes several seeds, `idea: [2026-10-24-4, 2026-11-12-2]`. When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
 number on it, bare: `Issue: #12, #15` becomes `closes: [12, 15]`. Those are the issues people
 filed for it, which the change closes when it lands.
 
@@ -232,9 +235,10 @@ the approved issue fields' lines, the `serves:` line and any `reworks:` line und
 exactly as shown in Step 3.
 
 If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
-id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`):
-`sdlc.py ship` deletes the entry by it. Then `Edit`
-the entry in the worktree's register, the file `config`'s `work.register` names: its heading's
+id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`), or, from
+several, to every id as a list (`idea: [2026-10-24-4, 2026-11-12-2]`): `sdlc.py ship` deletes each
+entry by it. Then `Edit`
+each entry in the worktree's register, the file `config`'s `work.register` names: its heading's
 tag becomes `[building]`, the rest of
 the heading unchanged, and `Building in .sdlc/work/NNN-slug/.` becomes its first body line, so the tag
 lands with the change. Never put the pointer in the heading. Leave the seed's prose alone.
@@ -245,8 +249,8 @@ entry's own description and repro. Leave the entry as it is, tag and all: `statu
 bug an open change fixes, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` records it on
 the `Close` commit as an `Sdlc-Fixes:` trailer, which is how `/sdlc:retro` counts it fixed.
 
-If that seed or bug has an `Issue:` line, add the `closes:` line Step 3 showed under
-`depends_on:`, every number on it, so the issues it was filed from close with the change. `/sdlc:ship`
+If a seed or bug it takes has an `Issue:` line, add the `closes:` line Step 3 showed under
+`depends_on:`, every number of each, so the issues they were filed from close with the change. `/sdlc:ship`
 asks about each one before it does, and the `sync` below makes each a sub-issue of the change's
 issue and comments on it that the change took it on, so its filer follows the change from now.
 

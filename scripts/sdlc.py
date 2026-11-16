@@ -859,6 +859,7 @@ def load_change(
         "updated": "",
         "title": "",
         "idea": "",
+        "ideas": [],
         "impact": "",
         "artifacts": sorted(p.name for p in path.glob("*.md")),
         "open_questions": 0,
@@ -897,7 +898,8 @@ def load_change(
         if not rec[field]:
             rec["errors"].append(f"missing {field}:")
 
-    rec["idea"] = intent_idea(intent.read_text(encoding="utf-8"))
+    rec["ideas"] = intent_ideas(intent.read_text(encoding="utf-8"))
+    rec["idea"] = (rec["ideas"] or [""])[0]
     # Empty until /sdlc:ship settles it.
     rec["impact"] = str(post.get("impact") or "")
     if rec["impact"] and rec["impact"] not in IMPACTS:
@@ -1424,9 +1426,22 @@ def entry_issues(entry: dict) -> list[int] | None:
     return out
 
 
+def intent_ideas(text: str) -> list[str]:
+    """Every seed an intent's `idea:` names, read as text, so an id is never a date: one id or
+    title, or a list of them (`idea: [2026-10-24-4, 2026-11-12-2]`) when a change takes several,
+    a theme's. [] when it names none."""
+    return [v for v in frontmatter_list(text, "idea") or [] if v.strip()]
+
+
 def intent_idea(text: str) -> str:
-    """The `idea:` an intent names, read as text, so an id is never a date; "" when it has none."""
-    return (frontmatter_list(text, "idea") or [""])[0]
+    """The first seed an intent's `idea:` names; "" when it has none."""
+    return (intent_ideas(text) or [""])[0]
+
+
+def ideas_of(rec: dict) -> list[str]:
+    """Every seed a change record names: its `ideas`, or, from a record built before there were
+    several, its one `idea`."""
+    return list(rec.get("ideas") or ([rec["idea"]] if rec.get("idea") else []))
 
 
 def nit_entries(root: Path) -> tuple[list[dict], list[str]]:
@@ -1758,7 +1773,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
     # the whole heading, with the status tag it had at promotion (`[seed]`) while the register moved
     # on to `[building]`, so a title is matched alone. A dropped change is building nothing and
     # can't vouch for a seed.
-    linked = [rec["idea"] for rec in changes if rec["idea"] and rec["stage"] != "dropped"]
+    linked = [i for rec in changes if rec["stage"] != "dropped" for i in ideas_of(rec)]
     for idea in ideas:
         # Substring either way, deliberately loose: a folder slug is usually a shortening of the
         # idea's title, never a copy of it. It errs toward staying quiet rather than nagging about
@@ -2845,9 +2860,9 @@ def cmd_ship(
     # here, with the diff in front of someone, not reconstructed from commit subjects at release.
     try:
         post = frontmatter.load(intent)
-        impact, idea = str(post.get("impact") or ""), intent_idea(intent.read_text("utf-8"))
+        impact, named = str(post.get("impact") or ""), intent_ideas(intent.read_text("utf-8"))
     except Exception:  # malformed YAML: `check` reports it; ship refuses below like any other gap
-        impact, idea = "", ""
+        impact, named = "", []
     if impact not in IMPACTS:
         print(
             f"⚠  {path.name}/intent.md: impact must be one of {'|'.join(IMPACTS)}, got "
@@ -2857,17 +2872,20 @@ def cmd_ship(
         )
         return 1
 
+    # Each seed the change took, a theme's several or the one: every one found before anything
+    # is written, so an ambiguous name refuses with nothing deleted.
     ideas = register_path(path.parent)
-    seeds = _seed_lines(ideas, idea)
-    if len(seeds) > 1:
-        print(
-            f"⚠  {work_rel(root)}/{ideas.name} has {len(seeds)} entries named "
-            f"{entry_ref(idea)[1]!r} (lines "
-            f"{', '.join(str(n + 1) for n in seeds)}): delete the one this change built by hand, "
-            "or retitle one, and re-run. Not stamping.",
-            file=sys.stderr,
-        )
-        return 1
+    seeds: dict[str, list[int]] = {idea: _seed_lines(ideas, idea) for idea in named}
+    for idea, lines in seeds.items():
+        if len(lines) > 1:
+            print(
+                f"⚠  {work_rel(root)}/{ideas.name} has {len(lines)} entries named "
+                f"{entry_ref(idea)[1]!r} (lines "
+                f"{', '.join(str(n + 1) for n in lines)}): delete the one this change built by "
+                "hand, or retitle one, and re-run. Not stamping.",
+                file=sys.stderr,
+            )
+            return 1
     tree = Path(_git(path, "rev-parse", "--show-toplevel") or checkout_of(path))
     staged = (_git(tree, "diff", "--cached", "--name-only", "-z") or "").split("\0")
     dirty = _dirty_paths(tree)
@@ -2903,14 +2921,18 @@ def cmd_ship(
         f"■ shipped {path.name}  (stage: shipped, {stamp}): commit {_shown(path, root)}/ with "
         "the change"
     )
-    if seeds:
-        _drop_seed(ideas, seeds[0])
-        print(f"  removed seed {entry_ref(idea)[1]!r} from {work_rel(root)}/{ideas.name}")
-    elif idea:
-        print(
-            f"  no seed to remove: {work_rel(root)}/{ideas.name} has no entry named "
-            f"{entry_ref(idea)[1]!r}"
-        )
+    # Each entry once, however many values name it, and the last first, so the line each earlier
+    # one starts at still holds.
+    for start in sorted({lines[0] for lines in seeds.values() if lines}, reverse=True):
+        _drop_seed(ideas, start)
+    for idea, lines in seeds.items():
+        if lines:
+            print(f"  removed seed {entry_ref(idea)[1]!r} from {work_rel(root)}/{ideas.name}")
+        else:
+            print(
+                f"  no seed to remove: {work_rel(root)}/{ideas.name} has no entry named "
+                f"{entry_ref(idea)[1]!r}"
+            )
     # Each bug the change fixes leaves with it, found afresh after every deletion.
     for fixed in frontmatter_list(stamped, "fixes") or []:
         lines = _seed_lines(ideas, fixed) if ENTRY_ID_RE.match(fixed) else []
@@ -4614,6 +4636,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     m = DIR_RE.match(name)
     rec: dict = {"id": m.group(1), "slug": m.group(2), "name": name, "title": "", "tier": None}
     rec.update(impact="", created="", idea="", problem="", sha=sha, closed=closed, problems=[])
+    rec["ideas"] = []
     rec.update(serves=None, moves=[], reworks=[])
     if not read:
         return rec
@@ -4627,7 +4650,8 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec["tier"] = post.get("tier")
     rec["impact"] = str(post.get("impact") or "")
     rec["created"] = str(post.get("created") or "")
-    rec["idea"] = intent_idea(text or "")
+    rec["ideas"] = intent_ideas(text or "")
+    rec["idea"] = (rec["ideas"] or [""])[0]
     rec["reworks"] = reworks(text or "")
     for line in (post.content or "").splitlines():
         if line.startswith("# "):
@@ -5646,7 +5670,10 @@ def _milestone_verdicts(
         for seed in item["groups"]["seeds"]:
             # A shipped change's `idea:` and the `Groups:` line each name the seed by id or by
             # title, compared as written: id to id, title to title.
-            shipped = next((c for c in history if c["idea"] and same_ref(c["idea"], seed)), None)
+            shipped = next(
+                (c for c in history if any(same_ref(i, seed) for i in ideas_of(c))),
+                None,
+            )
             if shipped:
                 rows.append({"entry": seed, "kind": "seed", "verdict": "shipped",
                              "change": shipped["name"], "date": shipped["close_date"]})  # fmt: skip
@@ -5751,6 +5778,10 @@ NEXT_RULES = (
     ("idea", "every other ready idea, oldest first"),
     ("low", "ideas and bugs marked Priority: low, oldest first"),
 )
+# What's ready to build: what a person or a review already weighed (marked high, a bug, placed in
+# a milestone or a series, a nit's cost). The other rules' seeds need the person to decide whether
+# they're worth building at all.
+READY_RULES = ("priority", "bug", "milestone", "series", "nits")
 NEXT_SHOWN = 10
 # The theme an entry without a `Theme:` line is counted under, printed last.
 NO_THEME = "(no theme)"
@@ -5803,7 +5834,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     ideas = [e for e in inbox_entries(home) if not is_nit(e)]
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
-    named = [r["idea"] for r in open_changes if r.get("idea")]
+    named = [i for r in open_changes for i in ideas_of(r)]
     named += [f for r in open_changes for f in r.get("fixes") or []]
     building = {e["title"] for e in ideas if any(ref_matches(n, e) for n in named)}
     states = {e["title"]: "building" for e in ideas if is_building(e) or e["title"] in building}
@@ -5832,7 +5863,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
 
     unmet: set[str] = set()
     if dangling:
-        shipped = [c["idea"] for c in history() if c.get("idea")]
+        shipped = [i for c in history() for i in ideas_of(c)]
         unmet = {t for t in dangling if not any(same_ref(s, t) for s in shipped)}
 
     def seed(rule: str, label: str, e: dict) -> dict:
@@ -5891,6 +5922,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
         for item in found:
             if item["rule"] == "nits" or item["title"] not in taken:
                 taken.add(item["title"])
+                item["group"] = "ready" if rule in READY_RULES else "decide"
                 items.append(item)
 
     # Waiting seeds are open too: a theme counts them, though none is a candidate yet.
@@ -5970,7 +6002,11 @@ def _next_themes(
                   "age_days": _age_days({"created": n["raised"]}, today),
                   "command": f"/sdlc:intent pay down the [{n['theme']}] nits"}
                  for n in nits if (n["theme"] or None) == name]  # fmt: skip
-        grouped.append({"theme": t["theme"], "items": rows})
+        # A theme's ideas taken as one change: every id on one `idea:` line. Ideas with no theme
+        # share nothing, so they are never offered together.
+        ids = [r["id"] for r in rows if r["kind"] == "idea" and r["id"]]
+        command = f"/sdlc:intent {' '.join(ids)}" if name and len(ids) > 1 else None
+        grouped.append({"theme": t["theme"], "items": rows, "command": command})
     return themes, grouped
 
 
@@ -6855,7 +6891,7 @@ def _open_claims(home: Path) -> list[tuple[str, str]]:
         rec = load_change(p, home)
         if rec["stage"] in ("shipped", "dropped"):
             continue
-        claims += [(r, p.name) for r in [rec["idea"], *rec["fixes"]] if r]
+        claims += [(r, p.name) for r in [*ideas_of(rec), *rec["fixes"]] if r]
     return claims
 
 
@@ -8654,9 +8690,20 @@ def print_status(a: dict) -> None:
                 print(f"    {group['theme']}")
                 for item in group["items"]:
                     print(line({**item, "theme": None}, "      "))
+                if group.get("command"):
+                    print(f"      → {group['command']}  (its ideas as one change)")
         else:
-            for item in nxt["items"][:NEXT_SHOWN]:
-                print(line(item, "    "))
+            # What's ready to build first, then what needs the person's decision, sharing one cap.
+            ready = [i for i in nxt["items"] if i.get("group") == "ready"]
+            decide = [i for i in nxt["items"] if i.get("group") != "ready"]
+            shown = (ready + decide)[:NEXT_SHOWN]
+            low = sum(1 for i in decide if i["rule"] == "low")
+            print(f"    Ready to build: {len(ready)}")
+            for item in shown[: len(ready)]:
+                print(line(item, "      "))
+            print(f"    Needs a decision: {len(decide)}" + (f" ({low} low)" if low else ""))
+            for item in shown[len(ready) :]:
+                print(line(item, "      "))
             if len(nxt["items"]) > NEXT_SHOWN:
                 print(f"    (+{len(nxt['items']) - NEXT_SHOWN} more: status --all)")
             if nxt["themes"]:

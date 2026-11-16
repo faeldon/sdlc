@@ -444,6 +444,25 @@ def test_release_skill_lines_stay_short() -> None:
     assert long == []
 
 
+def test_intent_takes_a_theme_s_seeds_as_one_change() -> None:
+    """062 R7: several ids name several seeds; the `idea:` line lists them all, and each entry is
+    tagged `[building]`, so ship deletes every one."""
+    text = " ".join((ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "several ids name several, a theme's seeds taken as one change" in text
+    assert "`idea: [2026-10-24-4, 2026-11-12-2]`" in text
+    assert "`sdlc.py ship` deletes each entry by it" in text and "Edit` each entry" in text
+
+
+def test_status_reads_next_up_s_two_groups() -> None:
+    """062 R8: status recommends what's ready before a seed no one ranked, and never decides for
+    the person whether a seed is worth building."""
+    text = " ".join((ROOT / "skills" / "status" / "SKILL.md").read_text(encoding="utf-8").split())
+    assert "**`Ready to build`**" in text and "**`Needs a decision`**" in text
+    assert "the person's call, never yours" in text
+    assert "9. The first `Ready to build` line, else the first `Needs a decision` line" in text
+    assert "(`/sdlc:intent <id> <id>`)" in text
+
+
 def test_intent_asks_what_a_change_reworks_and_writes_it() -> None:
     """R7: rework is what people declare, so intent asks when the problem traces back, inside the
     interview (no new stop), and writes the line with the other frontmatter lines."""
