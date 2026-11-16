@@ -163,3 +163,29 @@ def test_it_runs_nothing_and_never_imports_the_script() -> None:
         elif isinstance(node, ast.ImportFrom):
             names.add((node.module or "").split(".")[0])
     assert not names & {"subprocess", "sdlc", "os"}
+
+
+def test_removed_ranges_read_only_what_a_diff_took_away() -> None:
+    """Appending removes nothing and a new file has no old side; a quoted path reads as itself."""
+    text = (
+        "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+        "@@ -3,2 +3,2 @@\n-x\n-y\n+X\n+Y\n@@ -7 +7 @@\n--- a SQL comment\n+-- kept\n"
+        "@@ -10 +10 @@\n-z\n+Z\n@@ -20,0 +21,4 @@\n+appended\n"
+        "diff --git a/new.py b/new.py\nnew file mode 100644\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1 @@\n+fresh\n"
+        'diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"\n--- "a/caf\\303\\251.py"\n'
+        '+++ "b/caf\\303\\251.py"\n@@ -1 +1 @@\n-old\n+new\n'
+    )
+    assert indicators.removed_ranges(text) == {
+        "src/a.py": [(3, 2), (7, 1), (10, 1)],
+        "café.py": [(1, 1)],
+    }, "a removed `-- comment` line is no file header"
+
+
+def test_blame_commits_take_each_line_s_sha_from_the_porcelain() -> None:
+    a, b = "a" * 40, "b" * 40
+    text = (
+        f"{a} 3 3 2\nauthor x\nsummary first\nfilename src/a.py\n\tx\n"
+        f"{a} 4 4\n\ty\n{b} 10 10 1\nauthor y\nfilename src/a.py\n\tz\n"
+    )
+    assert indicators.blame_commits(text) == [a, a, b]

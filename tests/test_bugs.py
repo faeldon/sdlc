@@ -165,6 +165,22 @@ def test_check_reports_each_malformed_bug(tmp_path: Path) -> None:
     assert "2026-10-02-3: Introduced by '099-gone' names no change" in found
 
 
+def test_check_refuses_a_reworks_id_naming_no_change(tmp_path: Path) -> None:
+    """R2: a change reworks one that closed, one still open or one dropped; an id naming none of
+    them would drop the link from retro without a word."""
+    root = _repo(tmp_path)
+    _close(root, "001-keep-drafts", "src/drafts.py")
+    for name, line in (("002-share-drafts", ""), ("003-fix-drafts", "reworks: [001, 002, 099]\n")):
+        folder = root / ".sdlc" / "work" / name
+        folder.mkdir(parents=True)
+        (folder / "intent.md").write_text(
+            f"---\nid: {name[:3]}\nslug: {name[4:]}\ntier: 1\nstage: plan\n{line}---\n\n# x\n",
+            encoding="utf-8",
+        )
+    found = [p["detail"] for p in sdlc.analyze(root)["problems"] if p["kind"] == "reworks"]
+    assert found == ["reworks: '099' names no change"]
+
+
 def test_an_introducing_change_that_closed_is_no_problem(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _close(root, "001-keep-drafts", "src/drafts.py")

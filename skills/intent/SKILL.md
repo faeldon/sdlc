@@ -85,7 +85,10 @@ The sections are the intent template's (`templates["intent.md"]` in `config`). W
   change from something with none; ask who or what is downstream, because that is what decides the
   tier as often as the size of the diff does. Ask too whether it waits on another open change
   (`status` lists them): each one goes on the frontmatter's `depends_on:` line by id,
-  `depends_on: [003]`, and a tracker that links issues shows it as blocked by that one.
+  `depends_on: [003]`, and a tracker that links issues shows it as blocked by that one. When the
+  problem traces to an earlier change, its code or its design, ask which: each one goes on a
+  `reworks:` line by id, `reworks: [041]`, the rework `/sdlc:retro` counts. A change that only
+  builds on another reworks nothing; ask only when the human's account points back at one.
 - **Constraints** — what must not break. The policy doc's invariants are the first place to look.
 - **Open questions** — what they don't know yet. Record these; do not resolve them here.
 
@@ -153,7 +156,7 @@ Show the issue fields chosen in Step 1 above it, as the frontmatter lines they b
 `milestone: "Q4 2026"`, `project: [Roadmap]`, `assignees: [ana, bo]`, and the `serves:` line
 with each outcome's `name` in a comment after it: `serves: [O1]  # O1 (Unaided setup)`. The
 comment is for the reader of the draft; the line written in Step 5 is `serves: [O1]` alone.
-When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
+Show the `reworks:` line too when Step 1 named an earlier change. When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
 number on it, bare: `Issue: #12, #15` becomes `closes: [12, 15]`. Those are the issues people
 filed for it, which the change closes when it lands.
 
@@ -225,8 +228,8 @@ or refuses, carry on from here and say so in Step 6, which then names the fallba
 
 Then `Edit` the scaffolded `intent.md` at the folder path `new` printed, inside the worktree, to
 replace the template body with the approved draft. Keep the frontmatter the tool stamped, and add
-the approved issue fields' lines and the `serves:` line under `depends_on:`, exactly as shown in
-Step 3.
+the approved issue fields' lines, the `serves:` line and any `reworks:` line under `depends_on:`,
+exactly as shown in Step 3.
 
 If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`):

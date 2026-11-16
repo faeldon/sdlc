@@ -674,7 +674,9 @@ which never migrates) is not a shim and has no entry.
 by default), or after any major release, and never runs it for you. `sdlc.py retro` counts, from
 history, everything since the last `Retrospective YYYY-MM-DD` commit: the changes closed and
 dropped (tier, impact, size, days open, the first paragraph of each problem, what they cost),
-rework (leaving out the files more than a third of them touch, listed apart), open changes and
+rework (each change that fixed an earlier one, as declared on its intent's `reworks: [041]` line
+or by a fixed bug's `Introduced by:`, with `rework_questions` beside it: lines an earlier change
+wrote that a later one replaced, found by blame and asked about, never counted), open changes and
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
 trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
 reason, the issues triage closed without a change by verdict (`triaged`), the days from report

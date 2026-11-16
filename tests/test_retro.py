@@ -88,11 +88,15 @@ def _close(
     later: tuple[str, ...] = (),
     before: tuple[str, ...] = (),
     based: bool = False,
+    reworks: str = "",
+    rewrite: tuple[str, ...] = (),
+    trailers: tuple[str, ...] = (),
 ) -> None:
     """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
     is a second commit on the change, touching those files, before it closes; `before` a first
     one, without its folder. `based` writes where the change started on the `Close`, as close
-    does."""
+    does. Each file gets the change's name appended, but those in `rewrite`, which it replaces
+    whole. `reworks` is the intent's line; `trailers` go on the `Close`."""
     start = _git(root, "rev-parse", "HEAD")
     when = f"{closed}T12:00:00"
     for rel in before:
@@ -110,11 +114,14 @@ def _close(
     )
     if idea:
         text = text.replace("idea:\n", f'idea: "{idea}"\n', 1)
+    if reworks:
+        text = text.replace("idea:", f"reworks: {reworks}\nidea:", 1)
     (folder / "intent.md").write_text(text, encoding="utf-8")
-    for rel in files or (f"{slug}.txt",):
+    for rel in (*(files or (f"{slug}.txt",)), *rewrite):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{path.read_text() if path.exists() else ''}{name}\n", encoding="utf-8")
+        kept = path.read_text() if path.exists() and rel not in rewrite else ""
+        path.write_text(f"{kept}{name}\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}", when=when)
     if later:
@@ -125,7 +132,8 @@ def _close(
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", f"follow up {name}", when=when)
     _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
-    said = ["-m", f"Sdlc-Base: {start}"] if based else []
+    said = ["-m", "\n".join([*([f"Sdlc-Base: {start}"] if based else []), *trailers])]
+    said = said if said[1] else []
     _git(root, "commit", "-q", "-m", f"Close {name}", *said, when=when)
 
 
@@ -154,8 +162,9 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     assert sdlc.cmd_retro(root) == 0
     out = json.loads(capsys.readouterr().out)
     assert set(out) >= {
-        "since", "changes", "dropped", "dropped_at_counts", "problems", "rework", "rework_common",
-        "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose", "architecture",
+        "since", "changes", "dropped", "dropped_at_counts", "problems", "rework",
+        "rework_questions", "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
+        "architecture",
     }  # fmt: skip
     assert _state(root) == before
 
@@ -241,12 +250,17 @@ def test_an_intent_committed_early_never_counts_another_changes_commits(tmp_path
     assert share["files"] == 2, "its intent and share.py, never 001's other.py"
 
 
-def test_rework_sees_a_file_only_an_earlier_commit_touched(tmp_path: Path) -> None:
+def test_a_question_sees_lines_an_earlier_change_s_later_commit_wrote(tmp_path: Path) -> None:
+    """R5: a change is every commit on its branch, so lines its second commit wrote are its own."""
     root = _repo(tmp_path)
     _close(root, "001-reopen-drafts", files=("src/drafts.py",), later=("src/other.py",))
-    _close(root, "002-keep-one-draft", closed="2026-10-04", files=("src/drafts.py",))
-    pairs = [(r["change"], r["reworks"], r["files"]) for r in _retro(root)["rework"]]
-    assert pairs == [("002-keep-one-draft", "001-reopen-drafts", ["src/drafts.py"])]
+    _close(root, "002-keep-one-draft", closed="2026-10-04", rewrite=("src/other.py",))
+    out = _retro(root)
+    assert out["rework"] == []
+    assert out["rework_questions"] == [
+        {"change": "002-keep-one-draft", "touches": "001-reopen-drafts",
+         "files": ["src/other.py"], "lines": 1}
+    ]  # fmt: skip
 
 
 def test_a_change_with_no_start_has_no_size(tmp_path: Path, monkeypatch) -> None:
@@ -262,7 +276,7 @@ def test_a_change_with_no_start_has_no_size(tmp_path: Path, monkeypatch) -> None
         "002-keep-one-draft: no commit holds .sdlc/work/002-keep-one-draft/intent.md, so its "
         "size is unknown",
     ]
-    assert len(out["rework"]) == 1, "the last commit still says what each change touched"
+    assert out["rework_questions"] == [], "with no start, there is nothing to blame against"
 
 
 def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:
@@ -273,14 +287,27 @@ def test_an_unparseable_intent_is_a_problem_not_a_raise(tmp_path: Path) -> None:
     assert "problems" not in out["changes"][0]
 
 
-def test_rework_is_a_later_change_on_the_same_code_within_a_week(tmp_path: Path) -> None:
+def test_rework_is_what_a_later_change_declares_whatever_the_gap(tmp_path: Path) -> None:
+    """R3: a `reworks:` line is the signal; three changes adding to one file are not rework."""
     root = _repo(tmp_path)
     _close(root, "001-reopen-drafts", closed="2026-10-02", files=("src/drafts.py",))
     _close(root, "002-keep-one-draft", closed="2026-10-09", files=("src/drafts.py",))
-    _close(root, "003-draft-titles", closed="2026-10-17", files=("src/drafts.py",))
-    pairs = [(r["change"], r["reworks"], r["days"]) for r in _retro(root)["rework"]]
-    # 7 days apart is rework; 8 apart (002 → 003) and 15 (001 → 003) are not.
-    assert pairs == [("002-keep-one-draft", "001-reopen-drafts", 7)]
+    _close(root, "003-draft-titles", closed="2026-10-22", files=("src/drafts.py",),
+           reworks="[001]")  # fmt: skip
+    out = _retro(root)
+    assert out["rework"] == [
+        {"change": "003-draft-titles", "reworks": "001-reopen-drafts", "via": ["reworks"],
+         "days": 20}
+    ]  # fmt: skip
+    assert out["rework_questions"] == [], "appending to a shared file touches nothing"
+
+
+def test_a_reworks_id_naming_no_change_is_a_problem(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", reworks="[099]")
+    out = _retro(root)
+    assert out["rework"] == []
+    assert "001-reopen-drafts: reworks '099' names no change" in out["problems"]
 
 
 def _drop(
@@ -372,50 +399,55 @@ def test_what_a_dropped_change_cost_is_read_from_its_drop_commit(tmp_path: Path)
     assert out["metrics"]["captured"] == 0, "dropped changes stay out of the closed ones' numbers"
 
 
-def test_a_change_closed_soon_after_a_drop_on_the_same_code_reworks_it(tmp_path: Path) -> None:
+def test_a_change_picking_up_a_dropped_one_says_so(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _drop(root, "001-draft-sync", dropped="2026-10-03", files=("src/drafts.py",))
-    _close(root, "002-keep-one-draft", closed="2026-10-06", files=("src/drafts.py",))
-    [pair] = _retro(root)["rework"]
-    assert pair == {
-        "change": "002-keep-one-draft", "reworks": "001-draft-sync", "days": 3,
-        "files": ["src/drafts.py"], "dropped": True,
-    }  # fmt: skip
+    _close(root, "002-keep-one-draft", closed="2026-10-06", files=("src/drafts.py",),
+           reworks="[001]")  # fmt: skip
+    assert _retro(root)["rework"] == [
+        {"change": "002-keep-one-draft", "reworks": "001-draft-sync", "via": ["reworks"],
+         "days": 3, "dropped": True}
+    ]  # fmt: skip
 
 
-def test_sharing_only_the_docs_every_change_updates_is_not_rework(tmp_path: Path) -> None:
+def test_replacing_an_earlier_change_s_lines_is_a_question_until_declared(tmp_path) -> None:
+    """R5: replacing what an earlier change in the window wrote is asked about, never counted; a
+    `reworks:` line answers it, and the pair is rework instead."""
     root = _repo(tmp_path)
-    _close(root, "001-reopen-drafts", files=("CLAUDE.md", ".sdlc/SDLC.md", "a.py"))
-    _close(root, "002-keep-one-draft", files=("CLAUDE.md", ".sdlc/SDLC.md", "b.py"))
-    assert _retro(root)["rework"] == []
-
-
-def test_a_file_most_of_the_window_touches_is_common_not_rework(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    _drop(root, "001-draft-sync", dropped="2026-10-02", files=("NEWS.md", "src/sync.py"))
-    _close(root, "002-reopen-drafts", closed="2026-10-03", files=("NEWS.md", "src/drafts.py"))
-    _close(root, "003-keep-one-draft", closed="2026-10-04", files=("NEWS.md", "src/drafts.py"))
-    _close(root, "004-draft-titles", closed="2026-10-05", files=("NEWS.md", "src/sync.py"))
-    _close(root, "005-draft-export", closed="2026-10-06", files=("NEWS.md", "src/export.py"))
-    _close(root, "006-draft-search", closed="2026-10-07", files=("src/search.py",))
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",))
+    _close(root, "002-keep-one-draft", closed="2026-10-04", rewrite=("src/drafts.py",))
     out = _retro(root)
-    pairs = [(r["change"], r["reworks"], r["files"]) for r in out["rework"]]
-    # NEWS.md is in five of six, the dropped change counted; code two of them share is rework.
-    assert pairs == [
-        ("003-keep-one-draft", "002-reopen-drafts", ["src/drafts.py"]),
-        ("004-draft-titles", "001-draft-sync", ["src/sync.py"]),
+    assert out["rework"] == [] and [
+        (q["change"], q["touches"], q["files"]) for q in out["rework_questions"]
+    ] == [("002-keep-one-draft", "001-reopen-drafts", ["src/drafts.py"])]
+    (tmp_path / "declared").mkdir()
+    root = _repo(tmp_path / "declared")
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",))
+    _close(root, "002-keep-one-draft", closed="2026-10-04", rewrite=("src/drafts.py",),
+           reworks="[001]")  # fmt: skip
+    out = _retro(root)
+    assert [(r["change"], r["reworks"]) for r in out["rework"]] == [
+        ("002-keep-one-draft", "001-reopen-drafts")
     ]
-    assert out["rework_common"] == [{"file": "NEWS.md", "changes": 5}]
+    assert out["rework_questions"] == []
 
 
-def test_a_window_too_small_to_say_what_is_common_counts_every_shared_file(tmp_path) -> None:
+def test_a_fixed_bug_s_introducer_is_rework_merged_with_a_declared_link(tmp_path) -> None:
+    """R4: the bug a change fixed names the change that let it through; declared both ways, the
+    pair is one entry with both reasons."""
     root = _repo(tmp_path)
-    slugs = ("reopen-drafts", "keep-one-draft", "draft-titles", "draft-export", "draft-search")
-    for n, slug in enumerate(slugs):
-        _close(root, f"00{n + 1}-{slug}", closed=f"2026-10-0{n + 2}", files=("NEWS.md",))
-    out = _retro(root)
-    assert len(out["rework"]) == 10, "five changes on one file make every pair"
-    assert out["rework_common"] == []
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",))
+    _close(root, "002-draft-titles", files=("src/titles.py",))
+    fixes = (
+        "Sdlc-Fixes: 2026-10-05-1 severity=high reported=2026-10-05 introduced_by=001",
+        "Sdlc-Fixes: 2026-10-06-1 severity=low reported=2026-10-06 introduced_by=002-draft-titles",
+    )
+    _close(root, "003-keep-one-draft", closed="2026-10-08", reworks="[001]", trailers=fixes)
+    rows = {r["reworks"]: r["via"] for r in _retro(root)["rework"]}
+    assert rows == {
+        "001-reopen-drafts": ["reworks", "bug 2026-10-05-1"],
+        "002-draft-titles": ["bug 2026-10-06-1"],
+    }
 
 
 def test_counts_tiers_impacts_and_what_history_cannot_measure(tmp_path: Path) -> None:

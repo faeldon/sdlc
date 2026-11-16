@@ -443,6 +443,22 @@ def test_release_skill_lines_stay_short() -> None:
     assert long == []
 
 
+def test_intent_asks_what_a_change_reworks_and_writes_it() -> None:
+    """R7: rework is what people declare, so intent asks when the problem traces back, inside the
+    interview (no new stop), and writes the line with the other frontmatter lines."""
+    steps = _steps("intent")
+    assert "When the problem traces to an earlier change" in steps["1"]
+    assert "`reworks: [041]`" in steps["1"]
+    assert "`reworks:` line" in steps["3"] and "`reworks:` line under `depends_on:`" in steps["5"]
+
+
+@pytest.mark.parametrize("skill", SKILLS, ids=_id)
+def test_no_skill_reads_the_file_pairs_rework_left_behind(skill: Path) -> None:
+    """R8: `rework_common` went with the file pairs; a skill naming it reads a key retro no longer
+    prints."""
+    assert "rework_common" not in _skill_text(skill)
+
+
 def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
     """The retrospective audits prose doing a script's work, so it keeps that rule itself: history
     comes from `sdlc.py retro`, never `git log`, and the one write

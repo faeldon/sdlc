@@ -14,6 +14,8 @@ runs git and hands the text here.
     co_change(lookback, skip)                 -> [row]
     largest(now, then, skip)                  -> [row]
     totals(counts, kind, skip)                -> {kind: {files, lines}}
+    removed_ranges(text)                      -> {path: [(start, count)]}   `git diff -U0`
+    blame_commits(text)                       -> [sha]                      `git blame --porcelain`
 
 A kind is told by path alone, so no language is assumed: a host whose layout the conventions
 misread names its own (`retro.test_paths`, `retro.doc_paths`).
@@ -80,6 +82,52 @@ def numstat_rows(text: str) -> list[Row]:
                  int(deleted) if deleted.isdigit() else None)
             )  # fmt: skip
     return rows
+
+
+def _unquote(path: str) -> str:
+    """A path as git prints it in a diff header, C-quoted when it holds anything unusual, back to
+    the path itself: what `git blame` is handed."""
+    if not (path.startswith('"') and path.endswith('"')):
+        return path
+    raw = path[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape")
+    return raw.encode("latin-1").decode("utf-8", "replace")
+
+
+def removed_ranges(text: str) -> dict[str, list[tuple[int, int]]]:
+    """The old side of `git diff -U0`: each file's runs of lines the diff removed or replaced, as
+    (first line, count). A run that only adds lines removes none, so appending is never here, and a
+    file the diff creates has no old side. A file's header runs from its `diff --git` line to its
+    first `@@`: past that, a removed line reading `-- x` prints as `--- x`, and is no header."""
+    out: dict[str, list[tuple[int, int]]] = {}
+    path = None
+    header = False
+    for line in text.splitlines():
+        if line.startswith("diff --git "):
+            header, path = True, None
+        elif header and line.startswith("--- "):
+            name = _unquote(line[4:])
+            path = None if name == "/dev/null" else name.removeprefix("a/")
+        elif line.startswith("@@ "):
+            header = False
+            if not path:
+                continue
+            old = line.split()[1].removeprefix("-")
+            start, _, count = old.partition(",")
+            n = int(count) if count else 1
+            if n > 0:
+                out.setdefault(path, []).append((int(start), n))
+    return out
+
+
+def blame_commits(text: str) -> list[str]:
+    """The commit each line came from, in order, from `git blame --porcelain`: every line's group
+    opens with its sha (40 hex, or 64 in a SHA-256 repo) and line numbers."""
+    shas = []
+    for line in text.splitlines():
+        head = line.split(" ", 1)[0]
+        if len(head) in (40, 64) and all(c in "0123456789abcdef" for c in head) and " " in line:
+            shas.append(head)
+    return shas
 
 
 def change_size(rows: list[Row], kind: Callable[[str], str]) -> dict:

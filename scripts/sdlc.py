@@ -863,6 +863,7 @@ def load_change(
         "artifacts": sorted(p.name for p in path.glob("*.md")),
         "open_questions": 0,
         "depends_on": [],
+        "reworks": [],
         "fields": {},
         "serves": None,
         "fixes": [],
@@ -915,6 +916,15 @@ def load_change(
             rec["errors"].append("depends_on names this change itself")
         else:
             rec["depends_on"].append(n)
+    # The earlier changes this one fixes, by id: the rework retro counts. Kept as written, since
+    # one may be closed, dropped or open, which `check` settles against history.
+    for ident in reworks(intent.read_text(encoding="utf-8")):
+        if not ident.isdigit():
+            rec["errors"].append(f"reworks: {ident!r} isn't a change id")
+        elif int(ident) == int(m.group(1)):
+            rec["errors"].append("reworks names this change itself")
+        else:
+            rec["reworks"].append(ident)
     # The issue fields the project doc turns on, set here and mirrored by the tracker. Checked
     # offline only: a fixed list can be, a tracker's or a command's can't without the network.
     text = intent.read_text(encoding="utf-8")
@@ -1044,6 +1054,12 @@ def frontmatter_list(text: str, key: str) -> list[str] | None:
 def depends_on(text: str) -> list[str]:
     """The ids on an intent's `depends_on:` line: `[003, 012]`, `003`, or a block list."""
     return frontmatter_list(text, "depends_on") or []
+
+
+def reworks(text: str) -> list[str]:
+    """The ids on an intent's `reworks:` line, the earlier changes it fixes, read as
+    `depends_on:` is."""
+    return frontmatter_list(text, "reworks") or []
 
 
 def open_questions(body: str) -> int:
@@ -1790,10 +1806,18 @@ def analyze(root: Path, today: date | None = None) -> dict:
     for detail in bug_problems:
         problems.append({"dir": register, "kind": "bugs", "detail": detail})
     claimed = [b for b in bugs if b["introduced_by"]]
-    if claimed:
+    reworked = [(rec, ident) for rec in changes for ident in rec.get("reworks") or []]
+    if claimed or reworked:
         trunk = load_config(root)[0]["git"]["base"]
-        names = [c["name"] for c in closed_changes(main_root(root), None, trunk, read=False)]
+        home = main_root(root)
+        names = [c["name"] for c in closed_changes(home, None, trunk, read=False)]
         names += [f"{rec['id']}-{rec['slug']}" for rec in changes]
+        # A change reworks what landed, what is still open, or what was dropped and picked up.
+        dropped = [d["name"] for d in dropped_changes(home, None, trunk)] if reworked else []
+        for rec, ident in reworked:
+            if not any(names_change(n, ident) for n in [*names, *dropped]):
+                problems.append({"dir": f"{rel}/{rec['id']}-{rec['slug']}", "kind": "reworks",
+                                 "detail": f"reworks: {ident!r} names no change"})  # fmt: skip
         for b in claimed:
             if not any(names_change(n, b["introduced_by"]) for n in names):
                 problems.append({"dir": register, "kind": "bugs",
@@ -4590,7 +4614,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     m = DIR_RE.match(name)
     rec: dict = {"id": m.group(1), "slug": m.group(2), "name": name, "title": "", "tier": None}
     rec.update(impact="", created="", idea="", problem="", sha=sha, closed=closed, problems=[])
-    rec.update(serves=None, moves=[])
+    rec.update(serves=None, moves=[], reworks=[])
     if not read:
         return rec
     try:
@@ -4604,6 +4628,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec["impact"] = str(post.get("impact") or "")
     rec["created"] = str(post.get("created") or "")
     rec["idea"] = intent_idea(text or "")
+    rec["reworks"] = reworks(text or "")
     for line in (post.content or "").splitlines():
         if line.startswith("# "):
             rec["title"] = TITLE_ID_RE.sub("", line[2:].strip())
@@ -5306,14 +5331,8 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
 
 RETRO_PREFIX = "Retrospective "
 RETRO_RE = re.compile(r"^Retrospective (\d{4}-\d{2}-\d{2})$")
-# A later change touching an earlier one's files within this many days reads as rework.
-REWORK_DAYS = 7
 # Fewer closed changes than this in either window, and the escape rate's trend is `unknown`.
 RATE_MIN_CHANGES = 5
-# A file touched by more than this share of the window's changes is common to them, not rework:
-# sharing it says nothing. Only once the share holds a pair (six changes, at a third), since in a
-# smaller window the two changes of any pair would already be more than it.
-REWORK_COMMON_SHARE = 1 / 3
 # The closed changes hotspots and co-change read, back past the retrospective's boundary: where
 # changes land is structure, and one window is too few changes to show it.
 ARCH_LOOKBACK = 30
@@ -6206,6 +6225,84 @@ def dropped_cost(dropped: list[dict]) -> dict:
     }
 
 
+def _rework(
+    home: Path, trunk: str | None, changes: list[dict], bases: dict[str, str | None]
+) -> tuple[list[dict], list[dict], list[str]]:
+    """Retro's rework, from what people declared, and the questions blame raises beside it.
+
+    A link is declared on a change's own `reworks:` line, or by a bug it fixed whose
+    `Introduced by:` names a change: `{change, reworks, days, via}`, the earlier change anywhere in
+    history (`dropped` when it never landed), whatever the gap. A question is what blame finds and
+    no link explains: lines an earlier change in the window wrote that a later one removed or
+    replaced, blamed at the later change's start. Appending touches nothing, so it is never one.
+    Questions are never counted: a planned follow-up replacing a first draft isn't a fix. Each id
+    naming no change is a problem."""
+    if not changes:
+        return [], [], []
+    closed = {c["name"]: c["close_date"] for c in closed_changes(home, None, trunk, read=False)}
+    gone = {d["name"]: d["drop_date"] for d in dropped_changes(home, None, trunk)}
+    links: dict[tuple[str, str], dict] = {}
+    problems: list[str] = []
+
+    def link(later: dict, ident: str, why: str) -> bool:
+        name = next((n for n in [*closed, *gone] if names_change(n, ident)), None)
+        if name is None:
+            return False
+        if name != later["name"]:
+            row = links.setdefault((later["name"], name), {
+                "change": later["name"], "reworks": name, "via": [],
+                "days": _days_between(closed.get(name) or gone.get(name) or "",
+                                      later["close_date"]),
+            })  # fmt: skip
+            if name not in closed:
+                row["dropped"] = True
+            if why not in row["via"]:
+                row["via"].append(why)
+        return True
+
+    for rec in changes:
+        for ident in rec.get("reworks") or []:
+            if not link(rec, ident, "reworks"):
+                problems.append(f"{rec['name']}: reworks {ident!r} names no change")
+        for bug_id, fixed in ((rec.get("metrics") or {}).get("fixes") or {}).items():
+            by = str(fixed.get("introduced_by") or "")
+            if by and by != "unknown":
+                link(rec, by, f"bug {bug_id}")
+
+    # Which change wrote each commit in the window: its branch from where it started. A commit two
+    # ranges share is the earlier change's.
+    order = {rec["name"]: i for i, rec in enumerate(changes)}
+    owners: dict[str, str] = {}
+    for rec in changes:
+        if base := bases.get(rec["name"]):
+            for sha in (_git(home, "rev-list", f"{base}..{rec['sha']}") or "").split():
+                owners.setdefault(sha, rec["name"])
+    # The register and setup's record are rewritten by the script, never by one change's hand.
+    written = {f"{work_rel(home)}/{INBOX}", MANIFEST}
+    hits: dict[tuple[str, str], dict] = {}
+    for rec in changes:
+        base = bases.get(rec["name"])
+        if not base:
+            continue
+        diff = _git(home, "diff", "-U0", "--no-renames", base, rec["sha"]) or ""
+        for path, runs in indicators.removed_ranges(diff).items():
+            if path.startswith(CHANGE_FOLDERS) or path in written:
+                continue
+            spans = [arg for start, n in runs for arg in ("-L", f"{start},+{n}")]
+            blame = _git(home, "blame", "--porcelain", *spans, base, "--", path) or ""
+            for sha in indicators.blame_commits(blame):
+                owner = owners.get(sha)
+                if owner and order[owner] < order[rec["name"]]:
+                    hit = hits.setdefault((rec["name"], owner), {
+                        "change": rec["name"], "touches": owner, "files": [], "lines": 0,
+                    })  # fmt: skip
+                    hit["lines"] += 1
+                    if path not in hit["files"]:
+                        hit["files"].append(path)
+    questions = [hit for pair, hit in hits.items() if pair not in links]
+    return list(links.values()), questions, problems
+
+
 def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     """What the retrospective counts: everything since the last one, from history. Read-only."""
     today = today or date.today()
@@ -6214,14 +6311,13 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     changes = closed_changes(home, since["sha"] if since else None, trunk)
     problems: list[str] = [] if trunk else [trunk_refusal(home, trunk)]
     kind = _kind(cfg)
-    touched: dict[str, set[str]] = {}
-    # Ship's context pass edits these on every change by design, so sharing them isn't rework.
-    every_change = {*cfg["docs"]["context"], cfg["docs"]["process"], cfg["docs"]["policy"]}
+    bases: dict[str, str | None] = {}
     for rec in changes:
         problems += rec.pop("problems")
         # A change ships as one commit or several, and its size is all of them: its branch from
         # where it started. Without that start, the last commit still says what it touched.
         base, rows = _change_rows(home, rec)
+        bases[rec["name"]] = base
         if not base:
             name = rec["name"]
             problems.append(
@@ -6229,10 +6325,6 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             )
         files = [path for path, _, _ in rows]
         lines = sum((added or 0) + (deleted or 0) for _, added, deleted in rows)
-        # A change's own folder is its alone; the code and docs around it are what reworks.
-        touched[rec["name"]] = {
-            f for f in files if not f.startswith(CHANGE_FOLDERS) and f not in every_change
-        }
         size = indicators.change_size(rows, kind)
         rec.update(
             files=len(files) if base else None,
@@ -6249,37 +6341,9 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         # What the dropped branch touched: its tip against where it left the base.
         fork = _git(home, "merge-base", f"{rec['drop_sha']}^1", f"{rec['drop_sha']}^2")
         files = (_git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
-        touched[rec["name"]] = {
-            f for f in files if not f.startswith(CHANGE_FOLDERS) and f not in every_change
-        }
         rec["files"] = len(files)
-    counts = Counter(f for files in touched.values() for f in files)
-    window = len(changes) + len(dropped)
-    common = (
-        {f: n for f, n in counts.items() if n > window * REWORK_COMMON_SHARE}
-        if window * REWORK_COMMON_SHARE >= 2
-        else {}
-    )
-    rework = []
-    for i, earlier in enumerate(changes):
-        for later in changes[i + 1 :]:
-            gap = _days_between(earlier["close_date"], later["close_date"])
-            shared = sorted(touched[earlier["name"]] & touched[later["name"]] - common.keys())
-            if gap is not None and gap <= REWORK_DAYS and shared:
-                rework.append(
-                    {"change": later["name"], "reworks": earlier["name"], "days": gap,
-                     "files": shared}
-                )  # fmt: skip
-    # Work picked up again after a drop: a change closed soon after it, on the same code.
-    for gone in dropped:
-        for later in changes:
-            gap = _days_between(gone["drop_date"], later["close_date"])
-            shared = sorted(touched[gone["name"]] & touched[later["name"]] - common.keys())
-            if gap is not None and 0 <= gap <= REWORK_DAYS and shared:
-                rework.append(
-                    {"change": later["name"], "reworks": gone["name"], "days": gap,
-                     "files": shared, "dropped": True}
-                )  # fmt: skip
+    rework, questions, unnamed = _rework(home, trunk, changes, bases)
+    problems += unnamed
     a = analyze(home, today)
     ideas = [i for i in inbox_entries(home) if not (is_building(i) or is_nit(i) or is_bug(i))]
     direction = direction_items(_direction_text(home, cfg))
@@ -6296,10 +6360,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "dropped_cost": dropped_cost(dropped),
         "problems": problems,
         "rework": rework,
-        "rework_common": [
-            {"file": f, "changes": n}
-            for f, n in sorted(common.items(), key=lambda c: (-c[1], c[0]))
-        ],
+        "rework_questions": questions,
         "open": [
             {
                 "name": f"{r['id']}-{r['slug']}",

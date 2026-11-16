@@ -51,9 +51,12 @@ What `retro` gives:
   problem, when its start can't be found), `release` (the first release tag holding it, null
   while none does: its users haven't had it yet), `serves` (the outcomes its intent named, `none`,
   or null for no line) and `moves` (its `**Moves O1:**` lines: what should change if it works).
-- `rework`: later changes that touched an earlier one's code within days, leaving out
-  `rework_common`: the files more than a third of the window's changes touched (once there are
-  six), each with how many, since sharing one of them says nothing.
+- `rework`: each change in the window that fixed an earlier one, as someone declared it: its own
+  `reworks:` line, or a bug it fixed whose `Introduced by:` names a change (`via` says which, both
+  when both did), whatever the gap in `days`; `dropped` when the earlier change never landed.
+  `rework_questions`: lines an earlier change in the window wrote that a later one replaced,
+  found by blame with no declared link (`files`, `lines`): questions for this retrospective, an
+  undeclared fix or a planned follow-up, never counted as rework.
 - `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
 - `nits`: the nits ship left open, `[nit]` entries in `.sdlc/work/inbox.md`, by theme, each theme's
   `count` and its oldest's date and `age_days`.
@@ -157,14 +160,15 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    interface), the same logic in two places. Name the files and say what shape would fix it.
    Each finding cites the `architecture` number behind it: a hotspot, a `co_change` pair, a
    file's `growth`, a kind's `totals` against `then`, a `host` row. A hotspot or growing code file
-   that `rework_common` or a coupled pair backs is weighed for a split; a pair of a code file and
-   its own test or doc is expected, not coupling. A finding with no number behind it says it rests
-   on reading alone. A lock or generated file in `largest` is named and passed over.
-   A code file in `rework_common` is one most changes had to touch: say whether that is a
-   boundary missing.
-3. **Process.** The process doc's signals, computed: change age, `rework` (naming what
-   `rework_common` left out), the tier mix (tier drift: is everything becoming Tier 2?),
-   impacts per release. Say what each one says. Also
+   that a coupled pair backs is weighed for a split; a pair of a code file and its own test or doc
+   is expected, not coupling. A finding with no number behind it says it rests on reading alone.
+   A lock or generated file in `largest` is named and passed over. A code file at the top of
+   `hotspots` is one most changes had to touch: say whether that is a boundary missing.
+3. **Process.** The process doc's signals, computed: change age, `rework` (each link with what it
+   fixed), the tier mix (tier drift: is everything becoming Tier 2?),
+   impacts per release. Ask about each of `rework_questions` that holds more than a line or two:
+   whether the later change fixed the earlier one, and if so, that its `reworks:` line was missed.
+   Say what each one says. Also
    each `unmeasured` signal, and whether it's worth a seed to measure it. From `metrics`:
    - where a change's time goes (agent against the human's response, away and blocked);
    - how far stops are above `required` and `target`;

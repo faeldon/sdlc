@@ -1531,6 +1531,29 @@ def test_depends_on_is_read_as_written_not_as_yaml_octal(tmp_path: Path) -> None
     assert rec["depends_on"] == [3, 12, 10]
 
 
+@pytest.mark.parametrize("line", ["[003, 012]", "\n  - 003\n  - 012"])
+def test_reworks_is_read_as_written_inline_or_as_a_block(line: str, tmp_path: Path) -> None:
+    """R1: the earlier changes a change fixes, kept as written (`012` never becomes 10)."""
+    _change(tmp_path, "020-x", _fm(id="020", reworks=line))
+    [rec] = sdlc.analyze(tmp_path, today=date(2026, 10, 17))["open"]
+    assert rec["reworks"] == ["003", "012"]
+
+
+def test_check_reports_a_rework_that_isnt_a_change_id(tmp_path: Path) -> None:
+    _change(tmp_path, "001-x", _fm(reworks="[abc, 001]"))
+    a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
+    details = " ".join(pr["detail"] for pr in a["problems"])
+    assert "reworks: 'abc' isn't a change id" in details
+    assert "reworks names this change itself" in details
+
+
+def test_stamp_shipped_leaves_a_reworks_line_as_written() -> None:
+    """R10: ship stamps lines in place, so the ids an intent declares reach history untouched."""
+    text = INTENT.replace("idea:\n", "idea:\nreworks: [003, 012]\n", 1)
+    out, _ = sdlc.stamp_shipped(text, "2026-10-17")
+    assert "\nreworks: [003, 012]\n" in out
+
+
 def test_check_reports_a_dependency_that_isnt_a_change(tmp_path: Path) -> None:
     _change(tmp_path, "001-x", _fm(depends_on="[abc, 001]"))
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))

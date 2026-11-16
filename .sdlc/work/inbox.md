@@ -148,27 +148,6 @@ nothing-local rule), so triage rewrites it in neutral terms. The first phase of 
 and requests; the register and the GitHub channel are their own seeds. Raised 2026-10-25.
 Theme: intake
 
-## [2026-10-25-12] [idea] Rework as a declared fix, with surviving lines as the cross-check
-
-Retro pairs any two changes closed within a week that share a file. With the common files left
-out (021), the 17 changes since the last retrospective still hold 42 pairs, nearly all same-week
-changes adding to a shared skill or test file, not one fixing another. Reframe it in two parts:
-- **Declared, the signal.** A later change names the earlier changes it reworks, in a `reworks:`
-  frontmatter line (one or more change ids, read as text like `depends_on:`), which intent asks
-  for when the problem traces to an earlier change. Retro counts these links, whatever the gap in
-  days, and `check` refuses an id that names no change.
-- **Inferred, the cross-check.** Lines an earlier change added that a later one modifies or
-  deletes within the window, found by blaming the earlier change's hunks. Appending to a shared
-  file no longer counts; replacing what the earlier change wrote does. A hit with no `reworks:`
-  link is a question for the retrospective (an undeclared fix, or a planned follow-up), never a
-  count.
-The file pairs, `REWORK_DAYS` as a match rule and `rework_common` go. Close's in-change rework
-(`Sdlc-Rework`) is untouched. Its own key, not `fixes:`, which names the inbox's `[bug]` entries a
-change fixes (024): a change can have both, a bug it fixes and the change that let it through,
-which that bug's `Introduced by:` line already records, so retro can cross-check the two.
-See work/021-rework-shared-files/.
-Theme: retro
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts

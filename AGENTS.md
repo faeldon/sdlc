@@ -176,7 +176,9 @@ migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
 **Retrospectives: `retro()`.** The outermost loop, read-only, bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,
 `.sdlc/work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id). It
-counts closed and dropped changes, rework (later changes sharing code), the skills' size, and,
+counts closed and dropped changes, rework (`_rework()`: what a later change declares it fixed, on
+its `reworks:` line or through a fixed bug's `Introduced by:`; blame's matches are only
+`rework_questions`, never counted), the skills' size, and,
 with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
 they run, `retro.indicators`' too), so `retro` is not in `READ_ONLY`. Its `architecture` block
 (`_architecture()`) is counted by `scripts/indicators.py`, pure functions over git's output text,
