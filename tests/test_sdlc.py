@@ -27,6 +27,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SDLC_PY = REPO / "scripts" / "sdlc.py"
+# The core's code, which the guards that read source scan: retro.py beside the script loading it.
+CORE = [SDLC_PY, REPO / "scripts" / "retro.py"]
 
 
 def _load():
@@ -1511,23 +1513,25 @@ def test_status_counts_open_questions_that_are_not_struck(tmp_path: Path, capsys
 TRACKERS = REPO / "scripts" / "trackers"
 
 
-def test_core_never_calls_gh_itself() -> None:
-    """Every call to GitHub is the GitHub tracker's, so a host without it runs no GitHub code."""
-    core = SDLC_PY.read_text(encoding="utf-8")
+def _gh_calls(core: str) -> list[str]:
     # GitHub's closing keyword too: core writes the line the tracker hands it, never its own.
-    for needle in ('"gh"', "_gh(", "github.com", "Closes #"):
-        assert needle not in core, f"{needle} belongs in scripts/trackers/github.py"
+    return [needle for needle in ('"gh"', "_gh(", "github.com", "Closes #") if needle in core]
+
+
+@pytest.mark.parametrize("script", CORE, ids=lambda p: p.name)
+def test_core_never_calls_gh_itself(script: Path) -> None:
+    """Every call to GitHub is the GitHub tracker's, so a host without it runs no GitHub code."""
+    found = _gh_calls(script.read_text(encoding="utf-8"))
+    assert not found, f"{found} belong in scripts/trackers/github.py"
     github = (TRACKERS / "github.py").read_text(encoding="utf-8")
     assert '"gh"' in github and "github.com" in github and "Closes #" in github
 
 
-def test_no_git_call_names_main_itself() -> None:
-    """Every use of the base branch reads `git.base` as resolved (018): a `main` written into a
-    ref is a host on `master` stuck at that step. `DEFAULT_TRUNK`, which detection tries first,
-    is the one name allowed."""
+def _main_refs(source: str) -> list[str]:
+    """Each string the code runs naming `main` as a ref, docstrings and `DEFAULT_TRUNK` aside."""
     import ast
 
-    tree = ast.parse(SDLC_PY.read_text(encoding="utf-8"))
+    tree = ast.parse(source)
     docstrings, allowed = set(), set()
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
@@ -1539,7 +1543,7 @@ def test_no_git_call_names_main_itself() -> None:
         ):
             allowed.add(id(node.value))
     ref = re.compile(r"^main$|refs/heads/main\b|\.\.main\b|^main[:^~]")
-    found = [
+    return [
         f"line {node.lineno}: {node.value!r}"
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
@@ -1547,7 +1551,23 @@ def test_no_git_call_names_main_itself() -> None:
         and id(node) not in docstrings | allowed
         and ref.search(node.value)
     ]
+
+
+@pytest.mark.parametrize("script", CORE, ids=lambda p: p.name)
+def test_no_git_call_names_main_itself(script: Path) -> None:
+    """Every use of the base branch reads `git.base` as resolved (018): a `main` written into a
+    ref is a host on `master` stuck at that step. `DEFAULT_TRUNK`, which detection tries first,
+    is the one name allowed."""
+    found = _main_refs(script.read_text(encoding="utf-8"))
     assert not found, "read the base branch from git.base:\n  " + "\n  ".join(found)
+
+
+def test_the_source_guards_reach_retro_py() -> None:
+    """The guards above read `retro.py` too: one planted there is found, not passed over."""
+    retro = CORE[1].read_text(encoding="utf-8")
+    assert not _main_refs(retro) and not _gh_calls(retro)
+    assert _main_refs(retro + '\nREF = "refs/heads/main"\n')
+    assert _gh_calls(retro + '\nRUN = ["gh", "issue"]\n')
 
 
 def test_archive_targets_are_the_tracker_modules() -> None:

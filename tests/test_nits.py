@@ -185,10 +185,10 @@ def test_retro_counts_open_nits_by_theme_and_age(tmp_path: Path) -> None:
             "style": {"count": 1, "oldest": "2026-10-20", "age_days": 4},
         },
     }
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 24))
     assert out["nits"] == got
     empty = _repo(tmp_path / "empty")
-    assert sdlc.retro(empty, sdlc.load_config(empty)[0])["nits"] == {"open": 0, "themes": {}}
+    assert sdlc.retro.retro(empty, sdlc.load_config(empty)[0])["nits"] == {"open": 0, "themes": {}}
 
 
 def test_a_malformed_raised_date_is_never_a_themes_oldest() -> None:

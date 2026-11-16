@@ -191,17 +191,6 @@ Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/note
 Theme: setup
 Priority: low
 
-## [2026-11-04-10] [idea] Move retro's history readers out of sdlc.py
-
-`scripts/sdlc.py` is 7,729 lines, up from 7,047 at the last retrospective, and 12 of the window's 14
-changes touched it; that retrospective proposed splitting it as an intent nobody opened. Its retro
-section alone runs about 1,400 lines, read-only and called only by `retro` and `retro-commit`. Move
-it to `scripts/retro.py`, loaded by path like `metrics.py`, leaving the history walks it shares with
-release (`closed_changes()`, `_change_base()`) in `sdlc.py`; the spec decides how they reach it.
-One boundary first, not a rewrite. Raised by the retrospective of 2026-11-04.
-Theme: refactor
-Priority: high
-
 ## [2026-11-10-1] [idea] Factory gates that pass themselves when nothing is risky
 
 The factory is meant to be fully automated development that raises only high-risk decisions to

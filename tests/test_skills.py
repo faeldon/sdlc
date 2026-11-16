@@ -415,7 +415,10 @@ def test_only_the_named_steps_push() -> None:
         assert not rules and not pushes, f"{_id(skill)} pushes: {rules or pushes}"
     publish = frontmatter.load(ROOT / "skills" / "publish" / "SKILL.md")
     assert "sdlc.py publish" in publish.content
-    source = (ROOT / "scripts" / "sdlc.py").read_text(encoding="utf-8")
+    # The core's code, retro's half included, so a push added there counts as one outside.
+    source = "\n".join(
+        (ROOT / "scripts" / name).read_text(encoding="utf-8") for name in ("sdlc.py", "retro.py")
+    )
     body = _function(source, "_push")
     # A git call naming push: `_git(home, "push", …)`, `_git_err(…)`, or a `["git", …]` list.
     git_push = re.compile(r'_git\w*\(\s*\w+,\s*"push"|\["git",[^\]]*"push"')

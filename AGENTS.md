@@ -46,10 +46,10 @@ session with no reinstall. A marketplace registered from GitHub is a copy in
 The docstrings in `scripts/` carry the detail; this is the map, and the rules that aren't
 obvious from any one function.
 
-**Mechanism vs. judgment.** `scripts/sdlc.py` (one file, argparse subcommands) does the
-mechanical half: ids, worktrees, scaffolding `.sdlc/work/NNN-slug/`, auditing artifacts against
-tier and stage, landing and archiving, listing the context docs a diff touches, reporting
-whether a repo is set up. It never writes artifact prose. The skills in `skills/*/SKILL.md` do
+**Mechanism vs. judgment.** `scripts/sdlc.py` (argparse subcommands) does the mechanical half:
+ids, worktrees, scaffolding `.sdlc/work/NNN-slug/`, auditing artifacts against tier and stage,
+landing and archiving, listing the context docs a diff touches, reporting whether a repo is set
+up. The retrospective's readers are `scripts/retro.py` (below). It never writes artifact prose. The skills in `skills/*/SKILL.md` do
 the judgment and call it. Logic a permission rule must cover goes in the script, not in a
 skill's bash.
 
@@ -176,11 +176,18 @@ for status's `Unpushed`. A shim in `sdlc.py` gets an entry in
 path kept for good (the no-manifest drift, and whatever reads what history holds, which never
 migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
 
-**Retrospectives: `retro()`.** The outermost loop, read-only, bounded by the newest
-`Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,
-`.sdlc/work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id, and
-a register entry removed or changed beyond its `Priority:` and `Theme:` lines: `register_drift()`;
-a retrospective appends seeds and re-ranks the open ideas and bugs `retro`'s `entries` lists),
+**Retrospectives: `retro()`.** Its code is `scripts/retro.py`, which `sdlc.py` loads by path as
+`retro` and binds to a live view of its own globals: retro calls every helper it shares
+(`_git`, `load_config`, `closed_changes`, …) as `sdlc.<name>`, read when it runs, so a test's
+stand-in on `sdlc` reaches it, and the tests call retro's own names as `sdlc.retro.<name>`. It is
+not pure like `metrics.py`, and never runs on its own; what status and release call every run
+(`retro_due()`, `next_up()`, the doc readers, the history walks) stays in `sdlc.py`. A default
+argument in `retro.py` can't read `sdlc`, unbound while it loads. Retro is the outermost loop,
+read-only, bounded by the newest `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit`
+writes (the direction doc, `.sdlc/work/inbox.md` and the product doc, nothing else, refusing a
+doc that drops an open id, and a register entry removed or changed beyond its `Priority:` and
+`Theme:` lines: `register_drift()`; a retrospective appends seeds and re-ranks the open ideas and
+bugs `retro`'s `entries` lists),
 plus the one file it writes itself, the report at `.sdlc/retros/<date>.md`: `retro_report()`,
 `process_views()` rendered from `templates/retro.md` with no host command run, the figures
 `retro` prints as `process`. It
@@ -190,8 +197,8 @@ its `reworks:` line or through a fixed bug's `Introduced by:`; blame's matches a
 with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
 they run, `retro.indicators`' too), so `retro` is not in `READ_ONLY`. Its `architecture` block
 (`_architecture()`) is counted by `scripts/indicators.py`, pure functions over git's output text,
-loaded by path like `metrics.py`, with no subprocess and no import of `sdlc.py`: `sdlc.py` runs git
-and hands it the text. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
+loaded by path like `metrics.py`, with no subprocess and no import of `sdlc.py`: `retro.py` runs
+git and hands it the text. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
 and reports format problems rather than raising. The product doc (`docs.product`, off while
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.

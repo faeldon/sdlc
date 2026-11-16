@@ -650,7 +650,7 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
     _git(root, "add", "-A")
     retired = "Sdlc-Retired: 2026-10-02-1 severity=low reported=2026-10-02 reason=duplicate"
     _git(root, "commit", "-q", "-m", "Retire 2026-10-02-1; File 2026-10-03-1", "-m", retired)
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out["reported"] == {"high": 1, "med": 1, "low": 1}
     assert out["fixed"] == {"high": 1}
     assert out["retired"] == {"duplicate": 1}
@@ -673,7 +673,7 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
 
 def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out == {
         "reported": {},
         "fixed": {},
@@ -698,7 +698,7 @@ def test_retro_counts_the_issues_triage_closed_by_verdict(tmp_path: Path, capsys
     triaged = ["12=resolved:019-status-next", "13=wontfix", "14=wontfix"]
     whys = ["13=Out of scope", "14=Out of scope"]
     assert sdlc.cmd_inbox_commit(root, triaged=triaged, whys=whys) == 0
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out["triaged"] == {"resolved": 1, "wontfix": 2}
 
 
@@ -714,7 +714,7 @@ def test_retro_counts_escapes_only_from_its_window(tmp_path: Path) -> None:
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Retrospective 2026-10-01")
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert [(e["change"], e["bugs"], [b["id"] for b in e["escaped"]]) for e in out["escapes"]] == [
         ("001-start", 1, ["2026-10-10-1"])
     ]
@@ -779,7 +779,8 @@ def test_each_escape_carries_the_review_its_change_got(
                       "Introduced by: 001-start\n"))  # fmt: skip
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "File 2026-10-10-1")
-    (escape,) = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["escapes"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))
+    (escape,) = out["bugs"]["escapes"]
     assert escape["escaped"] == [
         {"id": "2026-10-10-1", "title": "Two drafts", "severity": "high",
          "paths": ["src/drafts.py"]}
@@ -806,7 +807,7 @@ def test_each_escape_carries_the_review_its_change_got(
 def test_a_finding_is_on_a_bugs_paths_when_one_holds_the_other(
     evidence: str, paths: list[str] | None, on: bool | None
 ) -> None:
-    assert sdlc._on_paths(evidence, paths) is on
+    assert sdlc.retro._on_paths(evidence, paths) is on
 
 
 def _windows(root: Path, before: int, now: int, prev_bugs: int, now_bugs: int) -> None:
@@ -843,7 +844,7 @@ def test_the_escape_rate_moves_against_the_window_before(
 ) -> None:
     root = _repo(tmp_path)
     _windows(root, before, now, prev_bugs, now_bugs)
-    rate = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
+    rate = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
     assert rate["window"] == {"escapes": now_bugs, "changes": now,
                               "rate": round(now_bugs / now, 2)}  # fmt: skip
     assert rate["previous"] == {"escapes": prev_bugs, "changes": before,
@@ -861,7 +862,7 @@ def test_a_bug_fixed_anywhere_in_history_counts_in_the_window_it_was_reported(
         "paths=src/a.py"
     )
     _git(root, "commit", "-q", "--allow-empty", "-m", "Close 200-fix", "-m", fixes)
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out["rate"]["previous"]["escapes"] == 1
     assert out["rate"]["window"]["escapes"] == 0, "a retired or unattributed bug never counts"
 
@@ -870,7 +871,7 @@ def test_without_two_retrospectives_there_is_no_window_before(tmp_path: Path) ->
     root = _repo(tmp_path)
     _close(root, "001-start", "src/a.py")
     _git(root, "commit", "-q", "--allow-empty", "-m", "Retrospective 2026-10-01")
-    rate = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
+    rate = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
     assert rate["previous"] is None and rate["trend"] == "unknown"
     assert [r["date"] for r in sdlc.retrospectives(root, "main")] == ["2026-10-01"]
 
@@ -881,7 +882,7 @@ def test_the_windows_important_findings_are_listed_and_the_unreviewed_counted(
     root = _repo(tmp_path)
     _reviewed(root, "001-start", "src/drafts.py", FINDINGS, TRAILER)
     _reviewed(root, "002-list", "src/list/view.py", None, TRAILER)
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     assert out["important"] == [
         {"change": "001-start", "id": "F1", "pass": "correctness",
          "title": "A draft saved twice keeps two",
@@ -900,7 +901,7 @@ def test_a_findings_file_that_no_longer_parses_says_so(tmp_path: Path) -> None:
                       "Introduced by: 001-start\n"))  # fmt: skip
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "File 2026-10-10-1")
-    out = sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]
     (escape,) = out["escapes"]
     assert escape["review"]["state"] == "file"
     assert [f["id"] for f in escape["review"]["findings"]] == ["F1", "F2"]

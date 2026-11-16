@@ -23,6 +23,7 @@ REPO = Path(__file__).resolve().parents[1]
 SDLC_PY = REPO / "scripts" / "sdlc.py"
 SCRIPTS = [
     SDLC_PY,
+    REPO / "scripts" / "retro.py",
     REPO / "scripts" / "metrics.py",
     REPO / "scripts" / "indicators.py",
     *sorted((REPO / "scripts" / "trackers").glob("*.py")),
@@ -272,7 +273,7 @@ def test_evidence_with_no_sh_is_a_row_saying_so(tmp_path: Path, monkeypatch) -> 
     """R7: the refusal goes out through the call site's own error path, never a traceback."""
     monkeypatch.setattr(os, "name", "nt")
     monkeypatch.setattr(shutil, "which", lambda name: None)
-    rows = sdlc._evidence(tmp_path, ["echo hi"])
+    rows = sdlc.retro._evidence(tmp_path, ["echo hi"])
     assert rows[0]["exit"] is None and "Git for Windows" in rows[0]["error"]
 
 

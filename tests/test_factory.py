@@ -823,7 +823,7 @@ def test_fixes_lines_are_read_as_sdlc_reads_them(line: str) -> None:
     name, fields = factory._words(line)
     parsed = sdlc.metrics.parse_trailers(f"Sdlc-Fixes: {line}")["fixes"]
     assert {name: fields} == {k: {f: str(v) for f, v in d.items()} for k, d in parsed.items()}
-    assert factory.bug_paths(fields.get("paths")) == sdlc._bug_paths(fields.get("paths"))
+    assert factory.bug_paths(fields.get("paths")) == sdlc.retro._bug_paths(fields.get("paths"))
 
 
 @pytest.mark.parametrize(
@@ -837,7 +837,7 @@ def test_fixes_lines_are_read_as_sdlc_reads_them(line: str) -> None:
     ],
 )
 def test_on_paths_is_sdlc_s_own(evidence: str, paths: list[str] | None) -> None:
-    assert factory.on_paths(evidence, paths) is sdlc._on_paths(evidence, paths)
+    assert factory.on_paths(evidence, paths) is sdlc.retro._on_paths(evidence, paths)
 
 
 # ---------------------------------------------------------------- reports and scores

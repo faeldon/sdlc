@@ -82,11 +82,25 @@ def test_the_shims_commands_are_gone(command: list[str], monkeypatch) -> None:
     assert raised.value.code != 0
 
 
-def test_no_literal_work_path_in_the_script() -> None:
+CORE = [ROOT / "scripts" / "sdlc.py", ROOT / "scripts" / "retro.py"]
+
+
+@pytest.mark.parametrize("script", CORE, ids=lambda p: p.name)
+def test_no_literal_work_path_in_the_script(script: Path) -> None:
     """Every path to the change folder comes from `work_rel()`: a literal `work/` in a string the
     code runs is one a moved repo would read in the wrong place. Docstrings describe, and aren't
     read."""
-    tree = ast.parse((ROOT / "scripts" / "sdlc.py").read_text(encoding="utf-8"))
+    found = _work_paths(script.read_text(encoding="utf-8"))
+    assert found == [], "\n".join(found)
+
+
+def test_the_work_path_guard_reaches_retro_py() -> None:
+    retro = CORE[1].read_text(encoding="utf-8")
+    assert _work_paths(retro + '\nPATH = "work/x"\n')
+
+
+def _work_paths(source: str) -> list[str]:
+    tree = ast.parse(source)
     docstrings = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)) and node.body:
@@ -96,7 +110,7 @@ def test_no_literal_work_path_in_the_script() -> None:
     # Kept for good: what reads history, which never migrates. Uninstall's search for the plugin's
     # mentions in a host's docs, and the pointer older intent headings carry.
     kept = {sdlc.MENTIONS_RE.pattern, " → work/"}
-    found = [
+    return [
         f"line {node.lineno}: {node.value!r}"
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
@@ -105,7 +119,6 @@ def test_no_literal_work_path_in_the_script() -> None:
         and node.value not in kept
         and re.search(r"(?<![\w./])work/", node.value)
     ]
-    assert found == [], "\n".join(found)
 
 
 # R2. A change's checkout is read from its folder's path.

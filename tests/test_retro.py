@@ -138,7 +138,7 @@ def _close(
 
 
 def _retro(root: Path) -> dict:
-    return sdlc.retro(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    return sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 24))
 
 
 def _state(root: Path) -> tuple[str, str]:
@@ -152,6 +152,69 @@ def _record(root: Path, day: str = "2026-10-10") -> None:
     _git(root, "commit", "-q", "-m", f"Retrospective {day}")
 
 
+# ---------------------------------------------------------------- where retro's code lives
+
+# What `scripts/retro.py` holds and `scripts/sdlc.py` no longer does (068).
+MOVED = [
+    "prose_metrics", "_release_of", "_evidence", "_product", "COMPARED", "_stop_target",
+    "metrics_summary", "_prompt_report", "_extra_report", "_no_findings", "_add_findings",
+    "_in_change_summary", "DROPPED_COST", "dropped_cost", "CLOCKS", "process_views", "RETROS",
+    "report_rel", "_hm", "_table", "render_report", "retro_report", "rankable_entries", "_rework",
+    "retro", "_change_rows", "_kind", "_line_counts", "_architecture", "bugs_retro", "_bug_paths",
+    "_on_paths", "_review_at", "cmd_retro", "RERANK_KEYS", "register_drift", "cmd_retro_commit",
+    "RATE_MIN_CHANGES", "ARCH_LOOKBACK", "EVIDENCE_TIMEOUT", "EVIDENCE_LIMIT", "UNMEASURED",
+    "_load_indicators", "indicators",
+]  # fmt: skip
+
+
+def _defined(path: Path) -> set[str]:
+    import ast
+
+    names = set()
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.FunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def test_retro_lives_in_its_own_file() -> None:
+    """Retro's readers are defined in `retro.py` alone, and reached only through `sdlc.retro`: one
+    name each, so a change can't edit one copy and test the other."""
+    in_retro = _defined(ROOT / "scripts" / "retro.py")
+    in_sdlc = _defined(ROOT / "scripts" / "sdlc.py")
+    assert set(MOVED) <= in_retro, set(MOVED) - in_retro
+    assert not set(MOVED) & (in_sdlc - {"retro"}), set(MOVED) & in_sdlc
+    assert sdlc.retro.__file__ == str(ROOT / "scripts" / "retro.py")
+    assert not [n for n in MOVED if n != "retro" and hasattr(sdlc, n)]
+
+
+def test_retro_reads_sdlcs_names_when_it_runs(tmp_path: Path, monkeypatch) -> None:
+    """A stand-in set on the loaded `sdlc` module after it loaded is the one retro calls: retro
+    reads `sdlc.<name>` live, never a copy taken at load."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    seen = []
+    real = sdlc.last_retrospective
+
+    def standing_in(home, trunk):
+        seen.append(home)
+        return real(home, trunk)
+
+    monkeypatch.setattr(sdlc, "last_retrospective", standing_in)
+    _retro(root)
+    assert seen
+
+
+def test_retro_has_no_entry_point_of_its_own() -> None:
+    """Only `sdlc.py` loads `retro.py`, by path: no dependency block of its own, no `__main__`, and
+    no edit to `sys.path`."""
+    text = (ROOT / "scripts" / "retro.py").read_text(encoding="utf-8")
+    for needle in ("# /// script", "__main__", "sys.path"):
+        assert needle not in text, needle
+
+
 # ---------------------------------------------------------------- what retro counts
 
 
@@ -159,7 +222,7 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     root = _repo(tmp_path)
     _close(root, "001-reopen-drafts")
     before = _state(root)
-    assert sdlc.cmd_retro(root) == 0
+    assert sdlc.retro.cmd_retro(root) == 0
     out = json.loads(capsys.readouterr().out)
     assert set(out) >= {
         "since", "changes", "dropped", "dropped_at_counts", "problems", "rework",
@@ -368,9 +431,9 @@ def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, caps
         "Sdlc-Mode: manual",
         "Sdlc-Totals: elapsed=120 agent=40 response=5 away=0 blocked=0 stops=3 required=4",
     ))  # fmt: skip
-    assert sdlc.cmd_retro(root) == 0
+    assert sdlc.retro.cmd_retro(root) == 0
     lean = json.loads(capsys.readouterr().out)
-    assert sdlc.cmd_retro(root, metrics=True) == 0
+    assert sdlc.retro.cmd_retro(root, metrics=True) == 0
     full = json.loads(capsys.readouterr().out)
     assert full["dropped"][0]["metrics"]["mode"] == "manual"
     for key in ("changes", "dropped"):
@@ -472,7 +535,7 @@ def test_releases_are_the_tags_since_the_last_retrospective(tmp_path: Path) -> N
 
 def test_a_repo_with_nothing_still_answers(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path)
-    assert sdlc.cmd_retro(root) == 0
+    assert sdlc.retro.cmd_retro(root) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["since"] is None
     assert out["changes"] == out["rework"] == out["releases"] == out["problems"] == []
@@ -601,7 +664,7 @@ def test_retro_lists_the_entries_it_may_rerank(tmp_path: Path) -> None:
 def test_a_retro_only_reranks_and_appends_to_the_register(edit, problem) -> None:
     """064 R5: a retrospective sets `Priority:` and `Theme:` lines and appends its seeds; an entry
     leaves, or is rewritten, through /sdlc:idea or ship, never through a retro."""
-    got = sdlc.register_drift(REGISTER, edit(REGISTER))
+    got = sdlc.retro.register_drift(REGISTER, edit(REGISTER))
     if problem is None:
         assert got == []
     else:
@@ -615,7 +678,7 @@ def test_retro_commit_refuses_a_register_entry_it_removed(tmp_path: Path, capsys
     _git(root, "commit", "-q", "-m", "seed")
     (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nNew goals.\n", encoding="utf-8")
     (root / ".sdlc" / "work" / "inbox.md").write_text("# Ideas\n", encoding="utf-8")
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 1
     refusals = json.loads(capsys.readouterr().out)["refusals"]
     assert refusals == ["2026-10-24-1 was removed: retire it with /sdlc:idea, not a retro"]
 
@@ -623,7 +686,7 @@ def test_retro_commit_refuses_a_register_entry_it_removed(tmp_path: Path, capsys
 def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, capsys) -> None:
     root = _repo(tmp_path)
     _direction(root)
-    code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
+    code = sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24))
     out = json.loads(capsys.readouterr().out)
     assert code == 0, out["refusals"]
     assert _git(root, "log", "-1", "--format=%s") == "Retrospective 2026-10-24"
@@ -642,8 +705,8 @@ def test_retro_commit_writes_the_report_it_would_print(tmp_path: Path, capsys) -
     root = _repo(tmp_path)
     _close(root, "001-reopen-drafts", trailers=(TOTALS.format(elapsed=90, agent=30),))
     _direction(root)
-    shown = sdlc.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 0
+    shown = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 0
     committed = (root / ".sdlc" / "retros" / "2026-10-24.md").read_text(encoding="utf-8")
     assert committed == shown
     assert "{{" not in committed and "| 1 | 1 | 1h 30m | 1h 30m | 30m |" in committed
@@ -655,7 +718,7 @@ def test_retro_commit_refuses_a_report_already_there(tmp_path: Path, capsys) -> 
     (root / ".sdlc" / "retros").mkdir()
     (root / ".sdlc" / "retros" / "2026-10-24.md").write_text("by hand\n", encoding="utf-8")
     before = _state(root)
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 1
     refusals = json.loads(capsys.readouterr().out)["refusals"]
     assert refusals == [".sdlc/retros/2026-10-24.md already exists: retro-commit writes the "
                         "report itself"]  # fmt: skip
@@ -708,7 +771,7 @@ def test_it_refuses_before_writing_anything(tmp_path: Path, capsys, spoil, why) 
     root = _repo(tmp_path)
     spoil(root)
     before = _state(root)
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 1
     assert any(why in r for r in json.loads(capsys.readouterr().out)["refusals"])
     assert _state(root) == before
 
@@ -719,7 +782,7 @@ def test_it_refuses_from_a_change_worktree(tmp_path: Path, capsys) -> None:
     _git(root, "worktree", "add", "-q", "-b", "001-x", str(tree))
     _direction(tree)
     before = _state(root), _state(tree)
-    assert sdlc.cmd_retro_commit(tree, date(2026, 10, 24)) == 1
+    assert sdlc.retro.cmd_retro_commit(tree, date(2026, 10, 24)) == 1
     assert any("main checkout" in r for r in json.loads(capsys.readouterr().out)["refusals"])
     assert (_state(root), _state(tree)) == before
 
@@ -901,7 +964,7 @@ def test_retro_commit_refuses_a_doc_that_drops_an_open_id(tmp_path, capsys, new,
     _committed_direction(root, "## Goals\n\n- G1. Ship\n- ~~G9. Old~~ Done: long ago\n")
     (root / ".sdlc" / "DIRECTION.md").write_text(new, encoding="utf-8")
     before = _git(root, "rev-parse", "HEAD")
-    code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
+    code = sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24))
     out = json.loads(capsys.readouterr().out)
     if refused:
         assert code == 1 and any(refused in r for r in out["refusals"]), out["refusals"]
@@ -915,7 +978,7 @@ def test_the_first_direction_doc_has_nothing_to_carry(tmp_path: Path, capsys) ->
     root = _repo(tmp_path)
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "DIRECTION.md").write_text("## Goals\n\n- G1. Ship\n", encoding="utf-8")
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 0, capsys.readouterr().out
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 0, capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- when one is due
@@ -1086,10 +1149,11 @@ def test_old_and_new_trailers_read_against_their_own_targets(tmp_path: Path) -> 
     _measured(root, "001-keep-one-draft", agent=10, stops=9)  # old: required=5 target=2
     _measured(root, "002-draft-titles", agent=10, stops=6, targets="target=5 allowance=0")
     changes = sdlc.closed_changes(root, None, "main")
-    group = sdlc.metrics_summary(changes, allowance=1)["groups"]["tier 2, manual"]
+    group = sdlc.retro.metrics_summary(changes, allowance=1)["groups"]["tier 2, manual"]
     assert group["target"] == 5.5, "6 for the old commit, 5 as the new one recorded"
     assert group["median"]["over"] == 2, "9 - 6 and 6 - 5"
-    assert sdlc.metrics_summary(changes, allowance=3)["groups"]["tier 2, manual"]["target"] == 6.5
+    groups = sdlc.retro.metrics_summary(changes, allowance=3)["groups"]
+    assert groups["tier 2, manual"]["target"] == 6.5
 
 
 def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> None:
@@ -1108,7 +1172,7 @@ def test_ship_findings_are_read_from_the_changes_own_commit(tmp_path: Path) -> N
          "Sdlc-Mode: manual\nSdlc-Totals: agent=5 stops=5 required=5 target=2")  # fmt: skip
     [rec] = sdlc.closed_changes(root, None, "main")
     assert rec["findings"] == {"important": 1, "nit": 3, "cost": 2}
-    group = sdlc.metrics_summary([rec])["groups"]["tier 2, manual"]
+    group = sdlc.retro.metrics_summary([rec])["groups"]["tier 2, manual"]
     found = group["findings"]
     assert (found["important"], found["nit"], found["preexisting"]) == (1, 3, 0)
     assert found["passes"]["cost"] == 2
@@ -1142,7 +1206,7 @@ def test_findings_with_dispositions_add_up_beside_an_old_trailer(tmp_path: Path)
         _git(root, "commit", "-q", "-m", f"Close {nid}-{slug}", "-m",
              "Sdlc-Mode: manual\nSdlc-Totals: agent=5 stops=5 required=5 target=2")  # fmt: skip
     recs = sdlc.closed_changes(root, None, "main")
-    found = sdlc.metrics_summary(recs)["groups"]["tier 2, manual"]["findings"]
+    found = sdlc.retro.metrics_summary(recs)["groups"]["tier 2, manual"]["findings"]
     assert (found["important"], found["nit"], found["preexisting"]) == (2, 5, 1)
     assert found["passes"]["correctness"] == 2 and found["passes"]["cost"] == 4
     assert found["answered"] == 1
@@ -1277,9 +1341,9 @@ def test_a_change_carries_the_first_release_that_holds_it(tmp_path: Path) -> Non
 
 
 def test_evidence_is_each_commands_output_and_never_a_raise(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sdlc, "EVIDENCE_LIMIT", 10)
-    monkeypatch.setattr(sdlc, "EVIDENCE_TIMEOUT", 0.5)
-    rows = sdlc._evidence(
+    monkeypatch.setattr(sdlc.retro, "EVIDENCE_LIMIT", 10)
+    monkeypatch.setattr(sdlc.retro, "EVIDENCE_TIMEOUT", 0.5)
+    rows = sdlc.retro._evidence(
         tmp_path,
         [
             "echo 3 signups",
@@ -1416,7 +1480,7 @@ def test_the_architecture_block_stays_small_however_large_the_repo(tmp_path: Pat
         files = tuple(f"src/m{(n * 5 + k) % 200:03d}.py" for k in range(5))
         _close(root, f"{n + 1:03d}-change-{n}", files=files)
     arch = _retro(root)["architecture"]
-    assert arch["lookback"]["changes"] == sdlc.ARCH_LOOKBACK
+    assert arch["lookback"]["changes"] == sdlc.retro.ARCH_LOOKBACK
     assert len(json.dumps(arch)) < 8000
 
 
@@ -1424,7 +1488,7 @@ def test_no_base_branch_means_no_architecture(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     cfg = sdlc.load_config(root)[0]
     cfg["git"]["base"] = None
-    assert sdlc._architecture(root, cfg, None, [], sdlc._kind(cfg)) is None
+    assert sdlc.retro._architecture(root, cfg, None, [], sdlc.retro._kind(cfg)) is None
 
 
 # ---------------------------------------------------------------- retro-commit and outcomes
@@ -1440,7 +1504,7 @@ def test_retro_commit_takes_the_product_doc_too(tmp_path: Path, capsys) -> None:
         "- O1. **Unaided setup.** A new user finishes setup unaided", "- ~~O1. Setup~~ Done: 001"
     )
     (root / ".sdlc" / "PRODUCT.md").write_text(text, encoding="utf-8")
-    code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
+    code = sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24))
     assert code == 0, capsys.readouterr().out
     assert sorted(_git(root, "show", "--name-only", "--format=", "HEAD").splitlines()) == [
         ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", ".sdlc/retros/2026-10-24.md",
@@ -1457,7 +1521,7 @@ def test_retro_commit_refuses_a_product_doc_that_drops_an_open_outcome(tmp_path,
         root, PRODUCT.replace("- O1. **Unaided setup.** A new user finishes setup unaided\n", "")
     )
     before = _git(root, "rev-parse", "HEAD")
-    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 1
     refusals = json.loads(capsys.readouterr().out)["refusals"]
     assert any("O1 was open and the new product doc drops it" in r for r in refusals), refusals
     assert _git(root, "rev-parse", "HEAD") == before
@@ -1546,7 +1610,7 @@ BUGS = {
 def _views(changes: list[dict]) -> dict:
     rework = [{"change": "003-c", "reworks": "001-a", "via": ["reworks"], "days": 1}]
     since = {"sha": "x", "date": "2026-10-01"}
-    return sdlc.process_views(changes, [], rework, [{}, {}], BUGS, since, date(2026, 10, 24))
+    return sdlc.retro.process_views(changes, [], rework, [{}, {}], BUGS, since, date(2026, 10, 24))
 
 
 def test_the_process_views_count_cycle_throughput_time_and_load() -> None:
@@ -1582,7 +1646,8 @@ def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
     out = _views([_rec("001-a", 1, "2026-10-05", None, None)])
     assert out["window"]["measured"] == 0 and out["throughput"][0]["total"] == 1
     assert [out[k] for k in ("cycle", "time", "wip", "capacity")] == [None] * 4
-    text = sdlc.render_report((ROOT / "templates" / "retro.md").read_text(encoding="utf-8"), out)
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    text = sdlc.retro.render_report(template, out)
     assert text.count("Not measured: none of the 1 changes closed has its numbers.") == 3
     assert "0m" not in text
 
@@ -1590,7 +1655,7 @@ def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
 def test_no_figure_folds_speed_and_stability_into_one() -> None:
     """R3: no velocity, no score, in the template or what it renders."""
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
-    text = sdlc.render_report(template, _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)]))
+    text = sdlc.retro.render_report(template, _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)]))
     for word in ("velocity", "score"):
         assert word not in template.lower() and word not in text.lower()
     assert "{{" not in text
@@ -1612,12 +1677,12 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     (root / ".sdlc" / "config.toml").write_text(
         '[retro]\nevidence = ["touch ran"]\nindicators = ["touch ran"]\n', "utf-8"
     )
-    assert sdlc.retro(root, sdlc.load_config(root)[0])["architecture"]["host"], "it would run"
+    assert sdlc.retro.retro(root, sdlc.load_config(root)[0])["architecture"]["host"], "it would run"
     (root / "ran").unlink()
-    text = sdlc.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
     assert not (root / "ran").exists(), "the report runs none of the host's commands"
     assert "| 2 | 1 | 1h 16m | 1h 16m | 40m | 1 |" in text
     assert "1 of them were measured" in text and "1 weren't" in text
-    assert sdlc.cmd_retro(root, report=True) == 0
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
     assert capsys.readouterr().out.startswith("# Retrospective report\n")
     assert not (root / "ran").exists()
