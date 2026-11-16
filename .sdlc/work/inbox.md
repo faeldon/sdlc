@@ -273,19 +273,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
 
-## [2026-11-17-1] [idea] Intent shows what a change serves in its draft, rather than asking first
-
-Every one of the 27 changes closed since 2026-11-04 asked at least one question at intent beyond
-its gate, 33 in all. Most were the product-doc questions: which outcomes the change serves, and
-what each should move. As a result, the median Tier 2 change stops 8 times against O3's target of
-6, and the median Tier 1 change 6 against 5. Steps 1 and 3 of `skills/intent/SKILL.md` would
-instead draft the `serves:` line and the `**Moves O1:**` lines from the seed and the product doc,
-and show them in the draft, marked as proposed. The WAIT's "edit a section" answer is how the
-person changes them, so the yes stays their decision. The change touches a WAIT, so it is Tier 2,
-and it rewords the skill's "never pick for the human". Raised by the retrospective of 2026-11-17.
-Theme: intent
-Priority: high
-
 ## [2026-11-17-2] [idea] Two failure classes for the review doc, from the window's escapes
 
 Three bugs escaped from changes in the window, against none in the 14 before it (rate 0.11
@@ -359,3 +346,14 @@ The spec decides:
 Gates that pass themselves (2026-11-10-1) come after it. Raised by the retrospective of 2026-11-17.
 Theme: factory
 Priority: high
+
+
+## [2026-11-17-6] [nit] No skill case runs intent with a product doc
+
+The `intent` case's fixture has no `.sdlc/PRODUCT.md`, so no paid run shows intent proposing
+`serves:` without asking and naming the outcomes at its gate; only the skill's wording is pinned.
+Theme: tests
+Paths: evals/intent/, evals/fixtures/
+Cost: M
+Value: med
+Raised by: 069-intent-proposes-serves (correctness)

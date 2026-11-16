@@ -1142,11 +1142,19 @@ def test_the_retro_keeps_evidence_and_the_product_docs_prose_out_of_what_it_writ
     assert "the product pass first of all" in text.split("## Step 2")[1].split("## Step 3")[0]
 
 
-def test_intent_never_picks_what_a_change_serves() -> None:
+def test_intent_proposes_what_a_change_serves_and_its_gate_names_it() -> None:
+    """Asking which outcomes a change serves was most of intent's stops beyond its gate, though the
+    seed usually said: intent proposes the line in its draft, and the retrospective still counts
+    it as the person's decision because the gate's question names it."""
     text = BY_ID["sdlc:intent"].read_text(encoding="utf-8")
     step1 = text.split("## Step 1")[1].split("## Step 2")[0]
-    assert "**What it serves**" in step1 and "Never pick for the human" in step1
-    assert "`none`" in step1 and "**Moves O1:**" in step1
+    step3 = text.split("## Step 3")[1].split("## Step 4")[0]
+    assert "**What it serves**" in step1 and "Propose the `serves:` line" in step1
+    assert "`inferred`" in step1 and "`none`" in step1 and "**Moves O1:**" in step1
+    assert "Never pick for the human" not in step1 and "Ask which" not in step1
+    assert "# proposed from" in step3 and "# inferred" in step3
+    wait = " ".join(_wait_section("sdlc:intent").split())
+    assert "serving <O1 (Unaided setup)>" in wait and "`serving no outcome`" in wait
 
 
 def test_setup_checks_and_records_what_it_offered() -> None:

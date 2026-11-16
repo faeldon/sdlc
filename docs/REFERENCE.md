@@ -599,8 +599,9 @@ With a product doc, every open change's intent says what it serves: `serves: [O1
 `serves: none` for a change that serves no outcome on purpose (a refactor, process work).
 `sdlc.py check` reports a missing line and an id the doc doesn't have. Each change is held to the
 product doc on its own branch, so changes opened before the doc landed owe the line only once they
-rebase onto it. `/sdlc:intent` offers only the open outcomes, and each one served gets a line in
-the intent's Outcome saying what should change for users if it works:
+rebase onto it. `/sdlc:intent` proposes the line in its draft, from the open outcomes only, and
+names them in its question, so the yes is the person's choice. Each one served gets a line in the
+intent's Outcome saying what should change for users if it works:
 `- **Moves O1:** setups finished rises above half`.
 
 `retro.evidence` names commands, run from the repo root by `sdlc.py retro` only (never by

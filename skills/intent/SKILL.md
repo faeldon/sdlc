@@ -107,14 +107,15 @@ login from memory is a guess, and the issue would carry it. When a field's `erro
 with the error, and leave that field out.
 
 **What it serves**, only when `docs.product` exists. Read the product doc: its users, problem and
-outcomes say what the work is for. Ask which of `docs.product.outcomes` this change serves, with
-those ids as the only options, each shown with its `name` beside it, `O1 (Unaided setup)`, so
-nobody has to open the doc to know what O1 is, plus `none` for a change that serves no outcome on
-purpose (a refactor, process work). Never pick for the human: the retrospective counts these, and
-a guess would count as their decision. The answer is a `serves:` line, `serves: [O1]` or
-`serves: none`.
-For each outcome served, ask what should change for users if this works, and write it in Outcome
-as `- **Moves O1:** <what should change>`: the retrospective checks it against the evidence.
+outcomes say what the work is for. Propose the `serves:` line yourself, `serves: [O1]` or
+`serves: none` (a refactor, process work), from `docs.product.outcomes`' ids alone: from a brief or
+seed first, then what the human said, then the doc's outcomes read against the Problem. When none
+of those points at an outcome, propose one anyway, `none` included, marked `inferred`. For each
+outcome proposed, draft what should change for users if this works, in Outcome as
+`- **Moves O1:** <what should change>`: the retrospective checks it against the evidence. Ask no
+question about either. The retrospective counts these as the human's decision, so Step 3 shows
+where each came from, Step 4's question names them, and `edit a section` is how the human changes
+them; nothing is written before the yes.
 
 Push back once if the problem statement is a solution in disguise ("add a cache" is a solution;
 "the report page takes forty seconds to load" is a problem). Then take their answer. If the process
@@ -155,9 +156,11 @@ listed is the usual answer, and then there is nothing to say. Never take one in 
 Write the full `intent.md` body — every section filled, no placeholder text left from the template —
 and show it in the conversation. For Tier 1, include the **Approach** section; for Tier 2, delete it.
 Show the issue fields chosen in Step 1 above it, as the frontmatter lines they become:
-`milestone: "Q4 2026"`, `project: [Roadmap]`, `assignees: [ana, bo]`, and the `serves:` line
-with each outcome's `name` in a comment after it: `serves: [O1]  # O1 (Unaided setup)`. The
-comment is for the reader of the draft; the line written in Step 5 is `serves: [O1]` alone.
+`milestone: "Q4 2026"`, `project: [Roadmap]`, `assignees: [ana, bo]`, and the proposed `serves:`
+line with where it came from and each outcome's `name` in a comment after it:
+`serves: [O1]  # proposed from 2026-10-01-2: O1 (Unaided setup)`, `# proposed from your account:
+…` or `# inferred: …`. The comment is for the reader of the draft; the line written in Step 5 is
+`serves: [O1]` alone.
 Show the `reworks:` line too when Step 1 named an earlier change, and the `idea:` line when the
 change takes several seeds, `idea: [2026-10-24-4, 2026-11-12-2]`. When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
 number on it, bare: `Issue: #12, #15` becomes `closes: [12, 15]`. Those are the issues people
@@ -181,11 +184,15 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next
 
 Ask literally, with that number as NNN:
 
-> `Create this as <tier> change NNN-<slug> (NNN if still free when created), in a new worktree and branch NNN-<slug> off <git.base>? (yes / change the tier / edit a section)`
+> `Create this as <tier> change NNN-<slug> (NNN if still free when created), serving <O1 (Unaided setup)>, in a new worktree and branch NNN-<slug> off <git.base>? (yes / change the tier / edit a section)`
+
+The `serving` clause names every outcome Step 1 proposed, each with its `name`, or reads
+`serving no outcome` for `none`, so the yes visibly covers them; it keeps its place in each form
+below, and is left out without a product doc.
 
 With `ids_from: github`, say what else a yes does, since it is visible to everyone with access to
-the repo: `…NNN-<slug> (NNN if still free when created), opening its GitHub issue with this title
-and this intent, in a new worktree…`. The issue shows the intent once Step 5 syncs it, and is
+the repo: `…NNN-<slug> (NNN if still free when created), serving …, opening its GitHub issue
+with this title and this intent, in a new worktree…`. The issue shows the intent once Step 5 syncs it, and is
 updated again at spec and ship; `/sdlc:close` archives it. With issue fields chosen, name them
 too: `…with this title and this intent, in milestone Q4 2026, assigned to ana and bo, in a new
 worktree…`.
