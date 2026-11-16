@@ -58,6 +58,15 @@ What `retro` gives:
   found by blame with no declared link (`files`, `lines`): questions for this retrospective, an
   undeclared fix or a planned follow-up, never counted as rework.
 - `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
+- `process`: the report's figures, aggregates only. `window` (closed by tier, dropped, and how
+  many were `measured`), `cycle` (per tier, median and longest `elapsed`, median `agent` and days
+  open), `throughput` (closed per week by tier), `time` (per tier, the median clocks; over the
+  window, their sums and `agent_share`, agent against agent, response and away), `wip` (each
+  change's span is its `Close` commit's time less its `elapsed`; how many ran at once, median and
+  most), `capacity` (changes by how many ran at once, `1`, `2`, `3+`, each `n` and its medians),
+  `rework` and `escapes`. The four timed views rest on `measured` alone, null with none: never
+  read as zero. `report`: the path `retro-commit` writes them to, rendered from
+  `templates["retro.md"]`; `sdlc.py retro --report` prints it.
 - `entries`: the register's open ideas and bugs this retrospective may re-rank, each with its
   `priority` and `theme` as they stand. Nits (their `Cost:` and `Value:` rank them) and entries
   being built (their change's) are left out.
@@ -191,7 +200,10 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
      review doc. Read it only beside `answered`: a few changes are anecdote, and a trailer from
      before dispositions is unknown there, never a clean review.
 
-   Say how many changes the numbers rest on, and that `uncaptured` ones aren't in them.
+   Cite `process` for time and load: cycle time per tier, `agent_share`, and `capacity` (whether
+   changes that ran alongside others took longer), each with the `n` behind it, so a finding names
+   a figure the committed report holds. Say how many changes the numbers rest on, and that
+   `uncaptured` ones aren't in them.
 
    Then the debt in `nits`: each theme's count and oldest age against the threshold the process
    doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay
@@ -307,7 +319,8 @@ When the product doc's outcome lines change too, name it: `Write <docs.direction
 outcomes in <docs.product> with these <K> status changes…, then commit all three as…`. When the
 re-rank changes any line, add it after the seeds: `…append these <N> seeds to .sdlc/work/inbox.md,
 set these <M> priority and theme lines in .sdlc/work/inbox.md, then commit…`; with none, leave it
-out.
+out. Before `then commit`, always add `, with the report at <report>,` (`report` from Step 0): the
+commit holds it too.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -333,9 +346,10 @@ one holds. Then:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
 ```
 
-It commits exactly those files as `Retrospective <today>`, and refuses (writing nothing) when
+It writes the report at `report` itself, from history, and commits it with exactly those files as
+`Retrospective <today>`: never write or edit the report by hand. It refuses (writing nothing) when
 anything else in the tree is changed, when it isn't the main checkout on `main`, when today
-already has one, or when a new doc drops a goal, milestone or outcome the committed one left open,
+already has one or the report is already there, or when a new doc drops a goal, milestone or outcome the committed one left open,
 or breaks the id format, or when a register entry was removed or changed beyond its `Priority:`
 and `Theme:` lines. A refusal naming an id means the draft lost it: put it back, carried or
 struck with its status (or the entry as it was), show the change and ask again. That commit is the
@@ -343,7 +357,7 @@ next retrospective's boundary.
 
 ## Step 7 — Report and stop
 
-Give the commit, the direction doc's path, the status changes, the seeds added, the priority and
+Give the commit, the direction doc's path, the report's path, the status changes, the seeds added, the priority and
 theme lines set, and the proposed intent titles with `run /sdlc:intent to open it`. Name each
 retire candidate with `/sdlc:idea <id>`, for the person to retire, or not, one at a time. With no product doc, end with: `No product doc,
 so no product pass: run /sdlc:setup product to add one.` Then stop.

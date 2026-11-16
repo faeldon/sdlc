@@ -629,10 +629,37 @@ def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, c
     assert _git(root, "log", "-1", "--format=%s") == "Retrospective 2026-10-24"
     assert _git(root, "show", "--name-only", "--format=", "HEAD").splitlines() == [
         ".sdlc/DIRECTION.md",
+        ".sdlc/retros/2026-10-24.md",
         ".sdlc/work/inbox.md",
     ]
     assert _git(root, "status", "--porcelain") == ""
     assert sdlc.last_retrospective(root, "main")["date"] == "2026-10-24"
+
+
+def test_retro_commit_writes_the_report_it_would_print(tmp_path: Path, capsys) -> None:
+    """R5, R6: the committed report is the one `retro --report` renders for the window the commit
+    closes, figures from history and no placeholder left."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", trailers=(TOTALS.format(elapsed=90, agent=30),))
+    _direction(root)
+    shown = sdlc.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 0
+    committed = (root / ".sdlc" / "retros" / "2026-10-24.md").read_text(encoding="utf-8")
+    assert committed == shown
+    assert "{{" not in committed and "| 1 | 1 | 1h 30m | 1h 30m | 30m |" in committed
+
+
+def test_retro_commit_refuses_a_report_already_there(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _direction(root)
+    (root / ".sdlc" / "retros").mkdir()
+    (root / ".sdlc" / "retros" / "2026-10-24.md").write_text("by hand\n", encoding="utf-8")
+    before = _state(root)
+    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    assert refusals == [".sdlc/retros/2026-10-24.md already exists: retro-commit writes the "
+                        "report itself"]  # fmt: skip
+    assert _state(root) == before
 
 
 def _stray(root: Path) -> None:
@@ -1416,7 +1443,8 @@ def test_retro_commit_takes_the_product_doc_too(tmp_path: Path, capsys) -> None:
     code = sdlc.cmd_retro_commit(root, date(2026, 10, 24))
     assert code == 0, capsys.readouterr().out
     assert sorted(_git(root, "show", "--name-only", "--format=", "HEAD").splitlines()) == [
-        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", ".sdlc/work/inbox.md",
+        ".sdlc/DIRECTION.md", ".sdlc/PRODUCT.md", ".sdlc/retros/2026-10-24.md",
+        ".sdlc/work/inbox.md",
     ]  # fmt: skip
 
 
@@ -1491,3 +1519,105 @@ def test_retro_reads_extra_stop_kinds_only_where_close_classified_them(tmp_path:
         "interrupt": {"count": 0, "changes": 0},
         "fix": {"count": 0, "changes": 0},  # the lines predate `fix`: read as 0
     }
+
+
+# ---------------------------------------------------------------- the process views and report
+
+TOTALS = "Sdlc-Totals: elapsed={elapsed} agent={agent} response=10 away=0 blocked=0 stops=3"
+
+
+def _rec(name: str, tier: int, closed: str, at: str | None, elapsed: int | None) -> dict:
+    """A closed change's record as `closed_changes` gives it, measured when `elapsed` is set."""
+    totals = {"elapsed": elapsed, "agent": (elapsed or 0) // 2, "response": 10, "away": 5,
+              "blocked": 0}  # fmt: skip
+    return {
+        "name": name, "tier": tier, "close_date": closed, "days_open": 0,
+        "close_at": f"{closed}T{at}:00+00:00" if at else "",
+        "metrics": {"totals": totals} if elapsed is not None else None,
+    }  # fmt: skip
+
+
+BUGS = {
+    "reported": {"high": 1}, "fixed": {"high": 1}, "days_to_fix": {"median": 2},
+    "rate": {"window": {"rate": 0.25}, "previous": {"rate": 0.0}, "trend": "up"},
+}  # fmt: skip
+
+
+def _views(changes: list[dict]) -> dict:
+    rework = [{"change": "003-c", "reworks": "001-a", "via": ["reworks"], "days": 1}]
+    since = {"sha": "x", "date": "2026-10-01"}
+    return sdlc.process_views(changes, [], rework, [{}, {}], BUGS, since, date(2026, 10, 24))
+
+
+def test_the_process_views_count_cycle_throughput_time_and_load() -> None:
+    """R1: a and b overlap each other, c runs alone, and d, a week on, is unmeasured."""
+    out = _views([
+        _rec("001-a", 1, "2026-10-05", "12:00", 120),   # 10:00 to 12:00
+        _rec("002-b", 2, "2026-10-05", "11:00", 60),    # 10:00 to 11:00
+        _rec("003-c", 2, "2026-10-07", "12:00", 30),
+        _rec("004-d", 1, "2026-10-13", None, None),
+    ])  # fmt: skip
+    assert out["window"] == {
+        "since": "2026-10-01", "today": "2026-10-24", "closed": 4, "tiers": {"1": 2, "2": 2},
+        "dropped": 0, "measured": 3, "unmeasured": 1,
+    }  # fmt: skip
+    assert out["throughput"] == [
+        {"week": "2026-10-05", "tiers": {"1": 1, "2": 2}, "total": 3},
+        {"week": "2026-10-12", "tiers": {"1": 1}, "total": 1},
+    ]
+    assert out["cycle"]["1"] == {"n": 1, "elapsed": 120, "max": 120, "agent": 60, "days_open": 0}
+    assert out["cycle"]["2"]["n"] == 2 and out["cycle"]["2"]["elapsed"] == 45
+    assert out["time"]["sums"] == {"agent": 105, "response": 30, "away": 15, "blocked": 0}
+    assert out["time"]["agent_share"] == 0.7
+    assert out["wip"] == {"spans": 3, "median": 2, "max": 2}
+    assert {k: r["n"] for k, r in out["capacity"].items()} == {"1": 1, "2": 2, "3+": 0}
+    assert out["capacity"]["2"]["elapsed"] == 90
+    assert out["rework"] == {"links": 1, "reworked": 1, "per_change": 0.25, "questions": 2}
+    assert out["escapes"] == {"reported": 1, "fixed": 1, "days_to_fix": 2, "rate": 0.25,
+                              "previous": 0.0, "trend": "up"}  # fmt: skip
+
+
+def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
+    """R2: unmeasured changes are counted where they can be, never as zeros where they can't."""
+    out = _views([_rec("001-a", 1, "2026-10-05", None, None)])
+    assert out["window"]["measured"] == 0 and out["throughput"][0]["total"] == 1
+    assert [out[k] for k in ("cycle", "time", "wip", "capacity")] == [None] * 4
+    text = sdlc.render_report((ROOT / "templates" / "retro.md").read_text(encoding="utf-8"), out)
+    assert text.count("Not measured: none of the 1 changes closed has its numbers.") == 3
+    assert "0m" not in text
+
+
+def test_no_figure_folds_speed_and_stability_into_one() -> None:
+    """R3: no velocity, no score, in the template or what it renders."""
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    text = sdlc.render_report(template, _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)]))
+    for word in ("velocity", "score"):
+        assert word not in template.lower() and word not in text.lower()
+    assert "{{" not in text
+
+
+def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> None:
+    """R1, R5: `retro`'s `process` and `--report` come from one function over one window, and the
+    report runs none of the host's commands."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", tier=2, trailers=(TOTALS.format(elapsed=76, agent=40),))
+    _close(root, "002-draft-sync", closed="2026-10-03")
+    out = _retro(root)
+    assert out["report"] == ".sdlc/retros/2026-10-24.md"
+    assert out["changes"][0]["close_at"].startswith("2026-10-02T12:00:00")
+    cycle = out["process"]["cycle"]["2"]
+    assert (cycle["elapsed"], cycle["agent"]) == (76, 40)
+    assert out["process"]["window"]["unmeasured"] == 1
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "config.toml").write_text(
+        '[retro]\nevidence = ["touch ran"]\nindicators = ["touch ran"]\n', "utf-8"
+    )
+    assert sdlc.retro(root, sdlc.load_config(root)[0])["architecture"]["host"], "it would run"
+    (root / "ran").unlink()
+    text = sdlc.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert not (root / "ran").exists(), "the report runs none of the host's commands"
+    assert "| 2 | 1 | 1h 16m | 1h 16m | 40m | 1 |" in text
+    assert "1 of them were measured" in text and "1 weren't" in text
+    assert sdlc.cmd_retro(root, report=True) == 0
+    assert capsys.readouterr().out.startswith("# Retrospective report\n")
+    assert not (root / "ran").exists()

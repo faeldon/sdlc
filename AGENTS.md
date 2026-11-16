@@ -180,7 +180,10 @@ migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes (the direction doc,
 `.sdlc/work/inbox.md` and the product doc, nothing else, refusing a doc that drops an open id, and
 a register entry removed or changed beyond its `Priority:` and `Theme:` lines: `register_drift()`;
-a retrospective appends seeds and re-ranks the open ideas and bugs `retro`'s `entries` lists). It
+a retrospective appends seeds and re-ranks the open ideas and bugs `retro`'s `entries` lists),
+plus the one file it writes itself, the report at `.sdlc/retros/<date>.md`: `retro_report()`,
+`process_views()` rendered from `templates/retro.md` with no host command run, the figures
+`retro` prints as `process`. It
 counts closed and dropped changes, rework (`_rework()`: what a later change declares it fixed, on
 its `reworks:` line or through a fixed bug's `Introduced by:`; blame's matches are only
 `rework_questions`, never counted), the skills' size, and,

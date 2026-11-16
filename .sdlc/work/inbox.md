@@ -29,17 +29,6 @@ folders' files, the way the factory it learned from shows a dashboard. Read-only
 Theme: factory
 Priority: low
 
-## [2026-10-24-4] [idea] A retro report and process views from each change's numbers
-
-Close records each change's numbers; render them: a templated report the
-script fills with no model tokens, committed with each retrospective. Then add the process views
-it makes possible: capacity (how many changes one person runs at once before cycle time rises
-and throughput doesn't), changes open at once, the human's wait time against agent time, and
-throughput by tier per week alongside cycle time and rework, roughly DORA's set. Avoid a single
-velocity figure, which invites optimising the number. A dashboard is optional and comes after the
-report: the process doc keeps "no dashboard" for the signals. Raised 2026-10-24.
-Theme: retro
-
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
 Close lands a change by fast-forwarding `main` locally, and only publish pushes. A team that

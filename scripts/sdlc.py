@@ -103,7 +103,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
@@ -336,7 +336,15 @@ SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
 # `work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`.
-DOC_TEMPLATES = ("direction.md", "issue.md", INBOX, "notes.md", "checks.md", "findings.md")
+DOC_TEMPLATES = (
+    "direction.md",
+    "issue.md",
+    INBOX,
+    "notes.md",
+    "checks.md",
+    "findings.md",
+    "retro.md",
+)
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
@@ -4723,11 +4731,11 @@ def closed_changes(
     if not trunk:
         return []
     span = f"{since}..{trunk}" if since else trunk
-    fmt = "--format=%h%x00%p%x00%cs%x00%s"
+    fmt = "--format=%h%x00%p%x00%cs%x00%cI%x00%s"
     log = _git(home, "log", "--first-parent", "--reverse", fmt, span) or ""
     found = []
     for line in log.splitlines():
-        close_sha, parent, close_date, subject = (line.split("\x00") + ["", "", ""])[:4]
+        close_sha, parent, close_date, close_at, subject = (line.split("\x00") + [""] * 4)[:5]
         name = subject[len(CLOSE_PREFIX) :].strip() if subject.startswith(CLOSE_PREFIX) else ""
         if DIR_RE.match(name) and parent:
             at = f"{close_sha}^:{work_rel(home)}/{name}/intent.md"
@@ -4742,7 +4750,9 @@ def closed_changes(
                 )
                 own = metrics.parse_trailers(_git(home, "show", "-s", "--format=%B", parent))
                 rec["findings"] = (own or {}).get("findings")
-            found.append({**rec, "close_sha": close_sha, "close_date": close_date})
+            found.append(
+                {**rec, "close_sha": close_sha, "close_date": close_date, "close_at": close_at}
+            )
     return found
 
 
@@ -6296,6 +6306,221 @@ def dropped_cost(dropped: list[dict]) -> dict:
     }
 
 
+CLOCKS = ("agent", "response", "away", "blocked")
+
+
+def process_views(
+    changes: list[dict], dropped: list[dict], rework: list[dict], questions: list[dict],
+    bugs: dict, since: dict | None, today: date,
+) -> dict:  # fmt: skip
+    """The retrospective's process views, the report's figures: cycle time, throughput, where the
+    time went, how many changes ran at once and what that did to them, rework and escapes. Only
+    changes close measured (`Sdlc-Totals` with `elapsed`) are in the four timed views, which are
+    None with none; the rest count every change. No figure combines them into one."""
+
+    def median(values: list) -> float | None:
+        values = [v for v in values if isinstance(v, int)]
+        return statistics.median(values) if values else None
+
+    def totals(c: dict) -> dict:
+        return (c.get("metrics") or {}).get("totals") or {}
+
+    measured = [c for c in changes if isinstance(totals(c).get("elapsed"), int)]
+    by_tier = lambda rows: {str(t): [c for c in rows if c["tier"] == t]  # noqa: E731
+                            for t in sorted({c["tier"] for c in rows}, key=str)}  # fmt: skip
+    weeks: dict[str, Counter] = {}
+    for c in changes:
+        day = date.fromisoformat(c["close_date"])
+        week = (day - timedelta(days=day.weekday())).isoformat()
+        weeks.setdefault(week, Counter())[str(c["tier"])] += 1
+    out: dict = {
+        "window": {
+            "since": since["date"] if since else None,
+            "today": today.isoformat(),
+            "closed": len(changes),
+            "tiers": dict(sorted(Counter(str(c["tier"]) for c in changes).items())),
+            "dropped": len(dropped),
+            "measured": len(measured),
+            "unmeasured": len(changes) - len(measured),
+        },
+        "throughput": [
+            {"week": w, "tiers": dict(sorted(n.items())), "total": sum(n.values())}
+            for w, n in sorted(weeks.items())
+        ],
+        "rework": {
+            "links": len(rework),
+            "reworked": len({r["reworks"] for r in rework}),
+            "per_change": round(len(rework) / len(changes), 2) if changes else None,
+            "questions": len(questions),
+        },
+        "escapes": {
+            "reported": sum((bugs.get("reported") or {}).values()),
+            "fixed": sum((bugs.get("fixed") or {}).values()),
+            "days_to_fix": (bugs.get("days_to_fix") or {}).get("median"),
+            "rate": ((bugs.get("rate") or {}).get("window") or {}).get("rate"),
+            "previous": ((bugs.get("rate") or {}).get("previous") or {}).get("rate"),
+            "trend": (bugs.get("rate") or {}).get("trend"),
+        },
+        "cycle": None, "time": None, "wip": None, "capacity": None,
+    }  # fmt: skip
+    if not measured:
+        return out
+    out["cycle"] = {
+        tier: {
+            "n": len(rows),
+            "elapsed": median([totals(c)["elapsed"] for c in rows]),
+            "max": max(totals(c)["elapsed"] for c in rows),
+            "agent": median([totals(c).get("agent") for c in rows]),
+            "days_open": median([c.get("days_open") for c in rows]),
+        }
+        for tier, rows in by_tier(measured).items()
+    }
+    sums = {k: sum(v for c in measured if isinstance(v := totals(c).get(k), int)) for k in CLOCKS}
+    spent = sums["agent"] + sums["response"] + sums["away"]
+    out["time"] = {
+        "tiers": {
+            tier: {k: median([totals(c).get(k) for c in rows]) for k in CLOCKS}
+            for tier, rows in by_tier(measured).items()
+        },
+        "sums": sums,
+        "agent_share": round(sums["agent"] / spent, 2) if spent else None,
+    }
+    # A change's span ends at its `Close` commit and starts `elapsed` minutes before it; its
+    # concurrency is the most spans open at once while it was, its own included.
+    spans = []
+    for c in measured:
+        end = datetime.fromisoformat(c["close_at"]) if c.get("close_at") else None
+        if end:
+            spans.append((end - timedelta(minutes=totals(c)["elapsed"]), end, c))
+    at_once = []
+    for start, end, c in spans:
+        points = sorted(s for s, _, _ in spans if start <= s <= end) or [start]
+        most = max(sum(1 for s, e, _ in spans if s <= p <= e) for p in [start, *points])
+        at_once.append((most, c))
+    counts = [n for n, _ in at_once]
+    out["wip"] = {
+        "spans": len(at_once),
+        "median": statistics.median(counts) if counts else None,
+        "max": max(counts, default=None),
+    }
+    rows: dict[str, list[dict]] = {"1": [], "2": [], "3+": []}
+    for n, c in at_once:
+        rows["1" if n == 1 else "2" if n == 2 else "3+"].append(c)
+    out["capacity"] = {
+        key: {"n": len(cs), **{k: median([totals(c).get(k) for c in cs])
+                               for k in ("elapsed", "agent", "response")}}
+        for key, cs in rows.items()
+    }  # fmt: skip
+    return out
+
+
+# Where a retrospective's report is committed, under the host's `.sdlc/`, one a day.
+RETROS = "retros"
+
+
+def report_rel(today: date) -> str:
+    """The report `retro-commit` writes for `today`, as a repo path."""
+    return f"{HOST_DIR}/{RETROS}/{today.isoformat()}.md"
+
+
+def _hm(minutes: float | None) -> str:
+    """Minutes as `1h 16m`, `—` for none."""
+    if minutes is None:
+        return "—"
+    hours, mins = divmod(round(minutes), 60)
+    return f"{hours}h {mins}m" if hours else f"{mins}m"
+
+
+def _table(head: list[str], rows: list[list]) -> str:
+    """A Markdown table, `—` for a missing value."""
+    cell = lambda v: "—" if v is None else str(int(v) if v == int(v) else v) if isinstance(  # noqa: E731
+        v, float) else str(v)  # fmt: skip
+    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    return "\n".join([*lines, *("| " + " | ".join(cell(v) for v in r) + " |" for r in rows)])
+
+
+def render_report(template: str, process: dict) -> str:
+    """The report: `template` with each `{{key}}` replaced by its view as a table, or by
+    "not measured" where close measured none of the window's changes."""
+    w = process["window"]
+    unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
+    tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
+    values = {
+        "since": w["since"] or "the start of history",
+        "today": w["today"],
+        "window": (
+            f"From {w['since'] or 'the start of history'} to {w['today']}: {w['closed']} changes "
+            f"closed ({tiers}), {w['dropped']} dropped. {w['measured']} of them were measured, and "
+            f"the timed views rest on those alone; {w['unmeasured']} weren't."
+        ),
+        "throughput": _table(
+            ["Week of", "Tiers", "Closed"],
+            [[r["week"], ", ".join(f"{t}: {n}" for t, n in r["tiers"].items()), r["total"]]
+             for r in process["throughput"]],
+        ),  # fmt: skip
+        "rework": _table(
+            ["Declared links", "Changes reworked", "Links per closed change", "Questions"],
+            [[process["rework"][k] for k in ("links", "reworked", "per_change", "questions")]],
+        ),
+        "escapes": _table(
+            ["Reported", "Fixed", "Median days to fix", "Rate", "Previous rate", "Trend"],
+            [[process["escapes"][k]
+              for k in ("reported", "fixed", "days_to_fix", "rate", "previous", "trend")]],
+        ),  # fmt: skip
+        "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
+    }  # fmt: skip
+    if process["cycle"]:
+        values["cycle"] = _table(
+            ["Tier", "Changes", "Median elapsed", "Longest", "Median agent", "Median days open"],
+            [[t, r["n"], _hm(r["elapsed"]), _hm(r["max"]), _hm(r["agent"]), r["days_open"]]
+             for t, r in process["cycle"].items()],
+        )  # fmt: skip
+        t = process["time"]
+        values["time"] = _table(
+            ["Tier", *(f"Median {k}" for k in CLOCKS)],
+            [[tier, *(_hm(r[k]) for k in CLOCKS)] for tier, r in t["tiers"].items()],
+        ) + (
+            f"\n\nOver the window: agent {_hm(t['sums']['agent'])}, the person's response "
+            f"{_hm(t['sums']['response'])}, away {_hm(t['sums']['away'])}, blocked "
+            f"{_hm(t['sums']['blocked'])}. Agent share of agent, response and away: "
+            f"{t['agent_share']}."
+        )
+        wip = process["wip"]
+        values["capacity"] = (
+            f"Changes open at once: median {wip['median']}, most {wip['max']}, over "
+            f"{wip['spans']} changes.\n\n"
+            + _table(
+                ["Open at once", "Changes", "Median elapsed", "Median agent", "Median response"],
+                [
+                    [k, r["n"], _hm(r["elapsed"]), _hm(r["agent"]), _hm(r["response"])]
+                    for k, r in process["capacity"].items()
+                ],
+            )  # fmt: skip
+        )
+    for key, value in values.items():
+        template = template.replace("{{" + key + "}}", value)
+    return template
+
+
+def retro_report(home: Path, cfg: dict, today: date) -> str:
+    """The report for the window since the last retrospective, from history alone: the records
+    `retro()` reads for its process views, without the product pass, the architecture, the prose
+    or any host command."""
+    trunk = cfg["git"]["base"]
+    since = last_retrospective(home, trunk)
+    changes = closed_changes(home, since["sha"] if since else None, trunk)
+    bases = {}
+    for rec in changes:
+        bases[rec["name"]] = _change_rows(home, rec)[0]
+        rec["days_open"] = _days_between(rec["created"], rec["close_date"])
+    dropped = dropped_changes(home, since["sha"] if since else None, trunk)
+    rework, questions, _ = _rework(home, trunk, changes, bases)
+    bugs = bugs_retro(home, cfg, since, changes, today)
+    process = process_views(changes, dropped, rework, questions, bugs, since, today)
+    template = template_path(home, "retro.md")[0].read_text(encoding="utf-8")
+    return render_report(template, process)
+
+
 def rankable_entries(home: Path, today: date) -> list[dict]:
     """The register's entries a retrospective may re-rank: open ideas and bugs, each with its
     `Priority:` and `Theme:` as they stand. Nits are ranked by their `Cost:` and `Value:`, and an
@@ -6430,6 +6655,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         rec["files"] = len(files)
     rework, questions, unnamed = _rework(home, trunk, changes, bases)
     problems += unnamed
+    bugs = bugs_retro(home, cfg, since, changes, today)
     a = analyze(home, today)
     ideas = [i for i in inbox_entries(home) if not (is_building(i) or is_nit(i) or is_bug(i))]
     direction = direction_items(_direction_text(home, cfg))
@@ -6463,7 +6689,9 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         },
         "entries": rankable_entries(home, today),
         "nits": nits_summary(nit_entries(home)[0], today),
-        "bugs": bugs_retro(home, cfg, since, changes, today),
+        "bugs": bugs,
+        "process": process_views(changes, dropped, rework, questions, bugs, since, today),
+        "report": report_rel(today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
         "releases": _release_tags(home, cfg, since),
@@ -6749,11 +6977,15 @@ def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
     }
 
 
-def cmd_retro(root: Path, metrics: bool = False) -> int:
+def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
     """The retrospective's counts as JSON, each change's measured numbers only with `metrics`
-    (their medians are always there). Writes nothing, and reads nothing outside the repo."""
+    (their medians are always there), or with `report` the report `retro-commit` would write, as
+    Markdown. Writes nothing, and reads nothing outside the repo."""
     home = main_root(root)
     cfg, _, parsed = load_config(home)
+    if report:
+        print(retro_report(home, cfg, date.today()), end="")
+        return 0 if parsed else 1
     out = retro(home, cfg)
     out["changes"], out["dropped"] = _lean(out["changes"], metrics), _lean(out["dropped"], metrics)
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
@@ -6788,7 +7020,8 @@ def register_drift(old: str, new: str) -> list[str]:
 
 def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     """Record a retrospective: one commit, `Retrospective YYYY-MM-DD`, holding the direction doc,
-    the register and the product doc's outcomes, and nothing else, so main is never left dirty.
+    the register, the product doc's outcomes, and the report it writes itself, and nothing else,
+    so main is never left dirty.
     Every refusal is found before anything is written."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
@@ -6816,7 +7049,13 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         _git(home, "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard") or ""
     )
     changed = sorted({p for p in (*tracked.splitlines(), *untracked.splitlines()) if p})
-    stray = [p for p in changed if p not in allowed]
+    # The report is the script's to write, below, once nothing refuses; one already there was
+    # written by hand, or by a retrospective today.
+    day = today or date.today()
+    report_at = report_rel(day)
+    if (home / report_at).exists():
+        refusals.append(f"{report_at} already exists: retro-commit writes the report itself")
+    stray = [p for p in changed if p not in allowed and p != report_at]
     if stray:
         refusals.append(
             f"only {' and '.join(sorted(allowed))} may be uncommitted; also changed: "
@@ -6855,6 +7094,10 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         )
     if refusals:
         return emit(1)
+    path = home / report_at
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(retro_report(home, cfg, day), encoding="utf-8", newline="\n")
+    changed = sorted({*changed, report_at})
     report["paths"] = changed
     for args in (["add", "--", *changed], ["commit", "-q", "-m", report["commit"], "--", *changed]):
         made = subprocess.run(
@@ -6862,6 +7105,7 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         )
         if made.returncode != 0:
             refusals.append(f"git {args[0]} failed: {made.stderr.strip()}")
+            path.unlink(missing_ok=True)
             return emit(1)
     report["done"].append("commit")
     report["sha"] = _git(home, "rev-parse", "--short", "HEAD")
@@ -9065,8 +9309,12 @@ def main() -> int:
         "retro", help="what the retrospective counts since the last one, as JSON; writes nothing"
     )
     p_retro.add_argument("--metrics", action="store_true", help=metrics_help)
+    p_retro.add_argument(
+        "--report", action="store_true", help="the report retro-commit would write, as Markdown"
+    )
     sub.add_parser(
-        "retro-commit", help="commit the direction doc and the inbox as `Retrospective <date>`"
+        "retro-commit",
+        help="commit the direction doc, the inbox and the report as `Retrospective <date>`",
     )
 
     # Before parsing: the change's own script may take a flag this copy doesn't know.
@@ -9174,7 +9422,7 @@ def main() -> int:
     if args.cmd == "publish":
         return cmd_publish(root, args.check)
     if args.cmd == "retro":
-        return cmd_retro(root, args.metrics)
+        return cmd_retro(root, args.metrics, args.report)
     if args.cmd == "retro-commit":
         return cmd_retro_commit(root)
     if args.cmd == "sync":

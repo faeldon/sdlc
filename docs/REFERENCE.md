@@ -720,7 +720,13 @@ approval sets `Priority: high` or `low`, removes a `Priority:` that no longer ho
 unthemed entry a `Theme:`, on open ideas and bugs only (never a nit, or an entry being built), and
 names the seeds it judges no longer wanted for you to retire with `/sdlc:idea`. `sdlc.py
 retro-commit` commits those files and nothing else, as the next retrospective's boundary, and
-refuses a register entry removed or changed beyond those two lines. It never edits code, skills, the process doc, the review doc or
+refuses a register entry removed or changed beyond those two lines. With them it commits a report
+it writes itself, `.sdlc/retros/<date>.md`, from history alone: the window's cycle time per tier,
+changes closed per week, where the time went (agent against the person's response and away), how
+many changes ran at once and what that did to them, rework and escapes, rendered from
+`templates/retro.md` (override it in `.sdlc/templates/`). Its figures are `sdlc.py retro`'s
+`process` block, which counts changes close couldn't measure but never reads them as zero, and
+`sdlc.py retro --report` prints it without writing anything. It never edits code, skills, the process doc, the review doc or
 `.sdlc/config.toml`: a lesson an escape holds for the review (a failure class for the review doc,
 a path for `[review]`) is a seed with the exact text, made by a change that ship reviews.
 

@@ -497,6 +497,17 @@ def test_retro_reranks_the_register_behind_its_one_approval() -> None:
     assert "retire candidate with `/sdlc:idea <id>`" in steps["7"]
 
 
+def test_retro_cites_the_report_and_lets_the_script_write_it() -> None:
+    """066 R7: the process pass cites `process`, the report's figures, with the changes behind
+    each; the one question names the report; the script writes it, never the skill."""
+    steps = _steps("retro")
+    assert "`process`" in steps["0"] and "never read as zero" in steps["0"]
+    assert "Cite `process` for time and load" in steps["2"] and "`n` behind it" in steps["2"]
+    assert ", with the report at <report>," in steps["5"]
+    assert "never write or edit the report by hand" in steps["6"]
+    assert "the report's path" in steps["7"]
+
+
 def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
     """The retrospective audits prose doing a script's work, so it keeps that rule itself: history
     comes from `sdlc.py retro`, never `git log`, and the one write
