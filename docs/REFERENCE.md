@@ -715,8 +715,12 @@ as `host`.
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there
-is one, and appends the seeds. `sdlc.py retro-commit` commits those files and nothing else, as the
-next retrospective's boundary. It never edits code, skills, the process doc, the review doc or
+is one, and appends the seeds. It also re-ranks the register for the new direction: the same
+approval sets `Priority: high` or `low`, removes a `Priority:` that no longer holds, and gives an
+unthemed entry a `Theme:`, on open ideas and bugs only (never a nit, or an entry being built), and
+names the seeds it judges no longer wanted for you to retire with `/sdlc:idea`. `sdlc.py
+retro-commit` commits those files and nothing else, as the next retrospective's boundary, and
+refuses a register entry removed or changed beyond those two lines. It never edits code, skills, the process doc, the review doc or
 `.sdlc/config.toml`: a lesson an escape holds for the review (a failure class for the review doc,
 a path for `[review]`) is a seed with the exact text, made by a change that ship reviews.
 

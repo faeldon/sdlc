@@ -482,6 +482,21 @@ def test_no_skill_reads_the_file_pairs_rework_left_behind(skill: Path) -> None:
     assert "rework_common" not in _skill_text(skill)
 
 
+def test_retro_reranks_the_register_behind_its_one_approval() -> None:
+    """064 R2–R4: the direction pass proposes the changed `Priority:` and `Theme:` lines, never a
+    nit's or a built entry's, names retire candidates without removing them, asks in its one
+    question, and writes each line in place."""
+    steps = _steps("retro")
+    assert "**re-rank the register**" in steps["2"] and "only the lines that change" in steps["2"]
+    assert "reusing a theme already in use when one fits" in steps["2"]
+    assert "Never a nit or an entry being built" in steps["2"]
+    assert "retire candidate" in steps["2"] and "`/sdlc:idea <id>`" in steps["2"]
+    assert "set these <M> priority and theme lines in .sdlc/work/inbox.md" in steps["5"]
+    assert "set each approved `Priority:` and `Theme:` line in place" in steps["6"]
+    assert "changed beyond its `Priority:` and `Theme:` lines" in steps["6"]
+    assert "retire candidate with `/sdlc:idea <id>`" in steps["7"]
+
+
 def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
     """The retrospective audits prose doing a script's work, so it keeps that rule itself: history
     comes from `sdlc.py retro`, never `git log`, and the one write

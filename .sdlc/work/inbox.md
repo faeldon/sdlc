@@ -242,19 +242,6 @@ Cost: S
 Value: low
 Raised by: 041-windows-lock (cost)
 
-## [2026-11-08-3] [idea] Retro re-ranks the inbox
-
-After its passes, the retrospective proposes Priority: lines for the register's open ideas and bugs:
-high for what the new direction and milestones make urgent, or what a pass found biting now (stops
-measured past their target, a rule a seed says is broken, landed work piling up unpushed); low for
-what the direction puts off; and drops a Priority: line that no longer holds. It proposes a Theme:
-for any entry still without one, the way /sdlc:idea --themes does. One table behind retro's one
-approval, committed with the Retrospective commit, so status's Next up starts each cycle in the
-order the retro decided, without the person ranking it by hand between retros.
-After: 2026-11-08-1
-Theme: retro
-Raised 2026-11-08.
-
 ## [2026-11-10-1] [idea] Factory gates that pass themselves when nothing is risky
 
 The factory is meant to be fully automated development that raises only high-risk decisions to

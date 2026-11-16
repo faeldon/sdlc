@@ -557,6 +557,69 @@ def _direction(root: Path) -> None:
     )
 
 
+REGISTER = (
+    "# Inbox\n\n"
+    "## [2026-10-01-1] [idea] Reopen drafts\n\nWhy it matters.\n\nTheme: drafts\n\n"
+    "## [2026-10-02-1] [bug] Drafts vanish\n\nWhat happens.\n\nSeverity: high\n\n"
+    "## [2026-10-03-1] [nit] A small thing\n\nTheme: style\nPaths: `a.py`\nCost: S\nValue: low\n"
+    "Raised by: 001-x (cost)\n\n"
+    "## [2026-10-04-1] [building] Share drafts\n\nBuilding in .sdlc/work/002-share/.\n\n"
+    "## [2026-10-05-1] [idea] Sync drafts\n\nOne an open change names.\n\nPriority: low\n"
+)
+
+
+def test_retro_lists_the_entries_it_may_rerank(tmp_path: Path) -> None:
+    """064 R1: open ideas and bugs with their rank and theme; never a nit, nor an entry being
+    built, by its tag or by an open change's `idea:`."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work" / "009-sync").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
+    intent = "---\nid: 009\nslug: sync\ntier: 1\nstage: build\nidea: 2026-10-05-1\n---\n\n# Sync\n"
+    (root / ".sdlc" / "work" / "009-sync" / "intent.md").write_text(intent, encoding="utf-8")
+    got = _retro(root)["entries"]
+    assert got == [
+        {"id": "2026-10-01-1", "title": "Reopen drafts", "kind": "idea", "priority": None,
+         "theme": "drafts", "age_days": 23},
+        {"id": "2026-10-02-1", "title": "Drafts vanish", "kind": "bug", "priority": None,
+         "theme": None, "age_days": 22},
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "edit, problem",
+    [
+        (lambda t: t.replace("Why it matters.\n", "Why it matters.\n\nPriority: high\n"), None),
+        (lambda t: t.replace("Theme: drafts", "Theme: editing"), None),
+        (lambda t: t.replace("Priority: low\n", ""), None),
+        (lambda t: t + "\n## [2026-10-24-1] [idea] A new seed\n\nFrom the retro.\n", None),
+        (lambda t: t.split("## [2026-10-05-1]")[0], "2026-10-05-1 was removed"),
+        (lambda t: t.replace("Why it matters.", "Why it matters less."), "2026-10-01-1 changed"),
+        (lambda t: t.replace("Severity: high", "Severity: low"), "2026-10-02-1 changed"),
+        (lambda t: t.replace("[idea] Reopen drafts", "[idea] Reopen saved drafts"), "changed"),
+    ],
+)
+def test_a_retro_only_reranks_and_appends_to_the_register(edit, problem) -> None:
+    """064 R5: a retrospective sets `Priority:` and `Theme:` lines and appends its seeds; an entry
+    leaves, or is rewritten, through /sdlc:idea or ship, never through a retro."""
+    got = sdlc.register_drift(REGISTER, edit(REGISTER))
+    if problem is None:
+        assert got == []
+    else:
+        assert len(got) == 1 and problem in got[0]
+
+
+def test_retro_commit_refuses_a_register_entry_it_removed(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _direction(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "seed")
+    (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nNew goals.\n", encoding="utf-8")
+    (root / ".sdlc" / "work" / "inbox.md").write_text("# Ideas\n", encoding="utf-8")
+    assert sdlc.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    assert refusals == ["2026-10-24-1 was removed: retire it with /sdlc:idea, not a retro"]
+
+
 def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, capsys) -> None:
     root = _repo(tmp_path)
     _direction(root)

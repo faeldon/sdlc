@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Run a retrospective, the outermost loop — look across every change and release since the last one, from counts the script gathers, and make five passes (cost, architecture, process, product, direction). The product pass, when the repo has a product doc, scores its outcomes against the evidence the host's commands print. Each finding becomes a .sdlc/work/inbox.md seed, an intent title, or is dropped with a reason. After one approval, rewrite the direction doc (goals, milestones, the next major release) and the product doc's outcome lines, and commit them with the seeds as "Retrospective YYYY-MM-DD". Use from the main checkout when /sdlc:status says a retrospective is due (after 2 releases, or a major one), or when the direction is unclear. Not for scans or drift (/sdlc:health), not for cutting a release (/sdlc:release), and never for editing code, skills or the process doc.
+description: Run a retrospective, the outermost loop — look across every change and release since the last one, from counts the script gathers, and make five passes (cost, architecture, process, product, direction). The product pass, when the repo has a product doc, scores its outcomes against the evidence the host's commands print. Each finding becomes a .sdlc/work/inbox.md seed, an intent title, or is dropped with a reason. After one approval, rewrite the direction doc (goals, milestones, the next major release) and the product doc's outcome lines, and commit them with the seeds as "Retrospective YYYY-MM-DD", having re-ranked the register's open ideas and bugs (their Priority and Theme lines). Use from the main checkout when /sdlc:status says a retrospective is due (after 2 releases, or a major one), or when the direction is unclear. Not for scans or drift (/sdlc:health), not for cutting a release (/sdlc:release), and never for editing code, skills or the process doc.
 argument-hint: "[an area to focus on]"
 allowed-tools:
   - AskUserQuestion
@@ -58,6 +58,9 @@ What `retro` gives:
   found by blame with no declared link (`files`, `lines`): questions for this retrospective, an
   undeclared fix or a planned follow-up, never counted as rework.
 - `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
+- `entries`: the register's open ideas and bugs this retrospective may re-rank, each with its
+  `priority` and `theme` as they stand. Nits (their `Cost:` and `Value:` rank them) and entries
+  being built (their change's) are left out.
 - `nits`: the nits ship left open, `[nit]` entries in `.sdlc/work/inbox.md`, by theme, each theme's
   `count` and its oldest's date and `age_days`.
 - `bugs`: the `[bug]` entries and their history in the window. `reported`, `fixed` (from each
@@ -244,6 +247,20 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    line naming its changes and seeds, each seed by its id. Then say what the next **major** release would contain (the
    process doc's `impact:` table: users have to change what they do), or that none is planned.
 
+   Last, **re-rank the register** for that direction, from `entries`, so status's Next up starts
+   the next cycle in the order this retrospective decided. Propose only the lines that change,
+   each with one reason:
+   - `Priority: high` for what the new goals and milestones make urgent, or what a pass found
+     biting now (stops past their target, a rule a seed says is broken, landed work unpushed);
+   - `Priority: low` for what the direction puts off;
+   - removing a `Priority:` line that no longer holds;
+   - a `Theme:` for an entry without one, reusing a theme already in use when one fits.
+
+   Never a nit or an entry being built: `entries` leaves both out. A seed you judge no longer
+   wanted is not re-ranked: name it as a retire candidate, for the person to retire with
+   `/sdlc:idea <id>`. A retrospective never removes or rewrites an entry, and `retro-commit`
+   refuses one that does.
+
 ## Step 3 — Give each finding a disposition
 
 Every finding ends in exactly one of these, or it doesn't go in the report:
@@ -276,7 +293,9 @@ struck with its status, new ones numbered from `product.next_ids` with a short b
 (`- O5. **<name>.** …`), and every other line of it
 left exactly as it is. A change to its users, problem, measures or bets is the human's: propose it
 as an intent title. Show each doc's changes, followed by the intent titles, and list the status
-changes first: they are the decisions this approval makes.
+changes first: they are the decisions this approval makes. Then the re-rank, as a table of the
+lines that change (id, title, priority and theme from → to, the reason), and the retire
+candidates, which this approval doesn't touch.
 
 ## Step 5 — WAIT for explicit approval
 
@@ -285,7 +304,10 @@ Ask literally:
 > `Write <docs.direction> with these <K> status changes (done, dropped, revised), append these <N> seeds to .sdlc/work/inbox.md, then commit both as "Retrospective <today>"? (yes / revise / no)`
 
 When the product doc's outcome lines change too, name it: `Write <docs.direction> and the
-outcomes in <docs.product> with these <K> status changes…, then commit all three as…`.
+outcomes in <docs.product> with these <K> status changes…, then commit all three as…`. When the
+re-rank changes any line, add it after the seeds: `…append these <N> seeds to .sdlc/work/inbox.md,
+set these <M> priority and theme lines in .sdlc/work/inbox.md, then commit…`; with none, leave it
+out.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -299,7 +321,9 @@ it again and ask again.
 ## Step 6 — Write and record it
 
 `Write` the direction doc at the `docs.direction` path, `Edit` the product doc's outcome lines as
-approved, and `Edit` the register to append the seeds after its last entry. If it doesn't
+approved, and `Edit` the register: set each approved `Priority:` and `Theme:` line in place in
+its entry's body (added, replaced or removed, nothing else of the entry touched), then append the
+seeds after its last entry. If it doesn't
 exist, `Write` it at that path first from `templates["inbox.md"]` in `config`, as it is, then
 append. **The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`.
 Write entries there, never into a second file beside it, which would hide every entry the first
@@ -312,14 +336,16 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
 It commits exactly those files as `Retrospective <today>`, and refuses (writing nothing) when
 anything else in the tree is changed, when it isn't the main checkout on `main`, when today
 already has one, or when a new doc drops a goal, milestone or outcome the committed one left open,
-or breaks the id format. A refusal naming an id means the draft lost it: put it back, carried or
-struck with its status, show the change and ask again. That commit is the next retrospective's
-boundary.
+or breaks the id format, or when a register entry was removed or changed beyond its `Priority:`
+and `Theme:` lines. A refusal naming an id means the draft lost it: put it back, carried or
+struck with its status (or the entry as it was), show the change and ask again. That commit is the
+next retrospective's boundary.
 
 ## Step 7 — Report and stop
 
-Give the commit, the direction doc's path, the status changes, the seeds added, and the proposed
-intent titles with `run /sdlc:intent to open it`. With no product doc, end with: `No product doc,
+Give the commit, the direction doc's path, the status changes, the seeds added, the priority and
+theme lines set, and the proposed intent titles with `run /sdlc:intent to open it`. Name each
+retire candidate with `/sdlc:idea <id>`, for the person to retire, or not, one at a time. With no product doc, end with: `No product doc,
 so no product pass: run /sdlc:setup product to add one.` Then stop.
 
 ## Out of scope

@@ -6296,6 +6296,21 @@ def dropped_cost(dropped: list[dict]) -> dict:
     }
 
 
+def rankable_entries(home: Path, today: date) -> list[dict]:
+    """The register's entries a retrospective may re-rank: open ideas and bugs, each with its
+    `Priority:` and `Theme:` as they stand. Nits are ranked by their `Cost:` and `Value:`, and an
+    entry being built (tagged, or named by an open change's `idea:` or `fixes:`) is its change's,
+    so neither is listed."""
+    claims = [ref for ref, _ in _open_claims(home)]
+    return [
+        {"id": e["id"], "title": e["title"], "kind": entry_kind(e),
+         "priority": entry_priority(e), "theme": entry_theme(e),
+         "age_days": _age_days({"created": e["date"]}, today)}
+        for e in inbox_entries(home)
+        if not (is_nit(e) or is_building(e) or any(ref_matches(r, e) for r in claims))
+    ]  # fmt: skip
+
+
 def _rework(
     home: Path, trunk: str | None, changes: list[dict], bases: dict[str, str | None]
 ) -> tuple[list[dict], list[dict], list[str]]:
@@ -6446,6 +6461,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             "open": len(ideas),
             "oldest": min((i["date"] for i in ideas), default=None),
         },
+        "entries": rankable_entries(home, today),
         "nits": nits_summary(nit_entries(home)[0], today),
         "bugs": bugs_retro(home, cfg, since, changes, today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
@@ -6744,6 +6760,32 @@ def cmd_retro(root: Path, metrics: bool = False) -> int:
     return 0 if parsed else 1
 
 
+# What a retrospective may change on an entry already in the register: its rank and its theme.
+RERANK_KEYS = ("Priority", "Theme")
+
+
+def register_drift(old: str, new: str) -> list[str]:
+    """What a retrospective did to the register beyond re-ranking: each entry the committed text
+    held that is gone, or changed in more than its `RERANK_KEYS` lines (its heading, tag, prose,
+    or any other key line). Entries added are a retrospective's seeds, and fine."""
+    after = {e["id"]: e for e in parse_entries(new) if e["id"]}
+
+    def kept(e: dict) -> tuple:
+        rest = {k: v for k, v in e["fields"].items() if k not in RERANK_KEYS}
+        return e["status"], e["title"], e["text"], rest
+
+    problems = []
+    for e in parse_entries(old):
+        if not e["id"]:
+            continue
+        if e["id"] not in after:
+            problems.append(f"{e['id']} was removed: retire it with /sdlc:idea, not a retro")
+        elif kept(after[e["id"]]) != kept(e):
+            keys = " and ".join(f"{k}:" for k in RERANK_KEYS)
+            problems.append(f"{e['id']} changed beyond its {keys} lines")
+    return problems
+
+
 def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     """Record a retrospective: one commit, `Retrospective YYYY-MM-DD`, holding the direction doc,
     the register and the product doc's outcomes, and nothing else, so main is never left dirty.
@@ -6802,6 +6844,15 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
                     "it with Done, Dropped or Revised"
                 )
         refusals += [f"{key} doc: {p}" for p in new["problems"]]
+    # The register: a retrospective appends seeds and re-ranks, and nothing else; an entry leaves
+    # through ship, /sdlc:idea or /sdlc:bug, never through a retro.
+    register = f"{work_rel(home)}/{register_path(work_dir(home)).name}"
+    committed = _git(home, "show", f"HEAD:{register}")
+    if committed is not None:
+        path = home / register
+        refusals += register_drift(
+            committed, path.read_text(encoding="utf-8") if path.is_file() else ""
+        )
     if refusals:
         return emit(1)
     report["paths"] = changed
