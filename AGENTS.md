@@ -220,7 +220,10 @@ is evidence, never a guess; it proposes, the review doc and `[review]` stay a ch
 line (`entry_issues()`, the first the parent), a change's `closes:` line, or an `Sdlc-Triaged:`
 trailer on the base branch for a verdict that closed it. `recorded_issues()` is the one reader of
 all three, and decides each issue's comment, marker and parent; the tracker's `mark()`,
-`unmark()` and `needs_info()` only set them, so a tracker still never reads `.sdlc/work/`. The record is
+`unmark()` and `needs_info()` only set them, so a tracker still never reads `.sdlc/work/`.
+On a full pass (close, `mark-triaged`), `mark_issues()` passes over an issue the tracker's one
+listing (`open_marks()`, where it has it) shows marked already, unless its record names a parent
+or a close, which a listing can't confirm; `sync`'s pass over a change's few lists numbers alone. The record is
 always committed before the issue is told (`inbox-commit --triaged`, then `mark-triaged`), so a rerun
 finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
 asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
@@ -242,7 +245,9 @@ not code's. Release, publish and measuring never read the register
 exactly), attributes them to the change by branch, keeps numbers and names only (an artifact
 kind, a role, a prompt's tool and program), and writes them as
 `Sdlc-*` trailers on the `Close` commit: history keeps them. The event list and trailer format
-are a contract: extend them, never redefine. Measuring never refuses: a failure is
+are a contract: extend them, never redefine. `unreleased`, `release` and `retro` print each
+change's parsed numbers only with `--metrics` (`_lean()`): no skill reads them one change at a
+time, and every summary is built from the full records first. Measuring never refuses: a failure is
 `Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,
 `Sdlc-Happy`, `Sdlc-Spike`) is apart from `retro`'s rework, and spikes are never rework.
 `Sdlc-Fixes` and `Sdlc-Retired` are written by `sdlc.py`, not measured, and parsed keyed by id.

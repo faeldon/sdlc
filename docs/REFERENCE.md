@@ -788,6 +788,7 @@ it, so a commit the change made before its folder is counted. A `Close` commit f
 trailer existed is measured from the parent of the commit that first holds the change's intent. A
 dropped change has none.
 
-`sdlc.py retro` reads all of them. Measuring never stops a close: without transcripts,
+`sdlc.py retro` reads all of them, and prints their medians; each change's own numbers it prints
+only with `--metrics`, as do `unreleased` and `release`. Measuring never stops a close: without transcripts,
 `Sdlc-Coverage` says why, and the numbers are what history gives. `git log --format=%B` on a
 `Close` commit shows them.

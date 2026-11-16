@@ -1704,6 +1704,43 @@ def test_mark_triaged_marks_what_main_has_committed_once(tmp_path, gh, capsys) -
     assert loose["comments"] == [] and loose["labels"] == [], "an uncommitted entry waits"
 
 
+def test_marking_again_views_only_what_one_listing_can_t_settle(tmp_path, gh, capsys) -> None:
+    """R8 (nit 2026-10-26-2): a rerun lists the open issues once with their labels and comments,
+    and views none already marked; one with a parent is still viewed, since a listing can't show
+    the parent it must have."""
+    root = _repo(tmp_path)
+    for n in (12, 15, 20, 60):
+        _filed(gh, n)
+    _register(
+        root,
+        "## [2026-10-26-1] [bug] Drafts vanish\n\nx\n\nSeverity: high\nIssue: #12, #15\n\n"
+        "## [2026-10-26-2] [idea] Keep drafts\n\nx\n\nIssue: #20\n",
+    )
+    code, out = _json(capsys, lambda: sdlc.cmd_inbox_commit(root, triaged=["60=wontfix"],
+                                                             whys=["60=Out of scope"]))  # fmt: skip
+    assert code == 0, out
+
+    def views_of_a_run() -> list[str]:
+        before = len(gh()["calls"])
+        code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+        assert code == 0, out
+        return sorted(c[2] for c in gh()["calls"][before:] if c[:2] == ["issue", "view"])
+
+    assert views_of_a_run() == ["12", "15", "20", "60"], "the first run views each issue it marks"
+    # #12 asked for more detail since; #60's close failed, leaving it open with its marks set.
+    state = gh()
+    for i in state["issues"]:
+        if i["number"] == 12:
+            i["labels"].append({"name": "needs-info"})
+        if i["number"] == 60:
+            i["state"], i["reason"] = "OPEN", None
+    Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps(state), encoding="utf-8")
+    assert views_of_a_run() == ["12", "15", "60"], "#20 alone is settled by the listing"
+    assert {"name": "needs-info"} not in _issue(gh, 12)["labels"]
+    assert _issue(gh, 60)["state"] == "CLOSED" and _issue(gh, 15)["parent"] == 12
+    assert views_of_a_run() == ["15"], "#15's parent is the one thing a listing can't confirm"
+
+
 def test_mark_triaged_points_an_attached_issue_at_its_change(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     folder = _open(root)

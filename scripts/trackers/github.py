@@ -313,6 +313,24 @@ class Tracker:
         items, _ = self._issues(fields="number", limit=limit)
         return None if items is None else {i["number"] for i in items if "number" in i}
 
+    def open_marks(self, limit: int = 1000) -> dict[int, dict] | None:
+        """Each open issue's number, whether it is `triaged` and `needs_info`, and its comments'
+        bodies, in one listing, or None when they can't be listed: what `mark()` would view one
+        issue at a time, so core can pass over an issue already marked."""
+        items, _ = self._issues(fields="number,labels,comments", limit=limit)
+        if items is None:
+            return None
+        out = {}
+        for i in items:
+            if "number" in i:
+                names = self._names(i)
+                out[i["number"]] = {
+                    "triaged": TRIAGED in names,
+                    "needs_info": NEEDS_INFO in names,
+                    "comments": [c.get("body") or "" for c in i.get("comments") or []],
+                }
+        return out
+
     def titles(self, numbers: list[int]) -> list[dict]:
         """Each issue's number, title, state and URL, or its `error` when it can't be read."""
         out = []

@@ -6,6 +6,7 @@ for the entries a change's worktree names."""
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -98,6 +99,12 @@ def _process(root: Path, bullet: str) -> None:
 
 
 # Severity.
+
+
+def test_inbox_commit_s_locked_half_takes_its_state_whole() -> None:
+    """R9 (nit 2026-10-27-8): the work done under the lock reads what the command resolved from
+    one dict, not eleven parameters threaded through."""
+    assert len(inspect.signature(sdlc._inbox_commit).parameters) <= 4
 
 
 def test_severity_words_come_from_the_process_doc(tmp_path: Path) -> None:

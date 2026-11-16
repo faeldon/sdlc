@@ -332,6 +332,26 @@ def test_dropped_changes_are_counted_apart_and_by_how_far_they_got(tmp_path: Pat
     assert out["impacts"] == {"patch": 1}
 
 
+def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, capsys) -> None:
+    """R3, R4: the per-change `metrics` of closed and dropped changes are left out of what retro
+    prints, and nothing else moves: every summary is built from the full records first."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    _drop(root, "002-draft-sync", at="build", trailers=(
+        "Sdlc-Mode: manual",
+        "Sdlc-Totals: elapsed=120 agent=40 response=5 away=0 blocked=0 stops=3 required=4",
+    ))  # fmt: skip
+    assert sdlc.cmd_retro(root) == 0
+    lean = json.loads(capsys.readouterr().out)
+    assert sdlc.cmd_retro(root, metrics=True) == 0
+    full = json.loads(capsys.readouterr().out)
+    assert full["dropped"][0]["metrics"]["mode"] == "manual"
+    for key in ("changes", "dropped"):
+        assert all("metrics" not in r for r in lean[key]), key
+        full[key] = [{k: v for k, v in r.items() if k != "metrics"} for r in full[key]]
+    assert full == lean, "the summaries, dropped_cost and bugs are the same either way"
+
+
 def test_what_a_dropped_change_cost_is_read_from_its_drop_commit(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _drop(root, "001-draft-sync", at="build", trailers=(
@@ -1196,6 +1216,16 @@ def test_the_hosts_paths_replace_the_conventions(tmp_path: Path) -> None:
     assert out["architecture"]["kinds"] == {"tests": ["checks/"], "docs": ["*.txt"]}
 
 
+def test_a_non_ascii_hotspot_on_the_base_branch_is_not_gone(tmp_path) -> None:
+    """F1: the hotspots' paths come from numstat, quoted by git's default; the path listing that
+    says `gone` must quote the same way, or a file still there reads as deleted."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/café.py",))
+    _close(root, "002-draft-titles", files=("src/café.py",))
+    hot = _retro(root)["architecture"]["hotspots"]
+    assert hot[0]["changes"] == 2 and hot[0]["gone"] is False, hot[0]
+
+
 def test_hotspots_look_back_past_the_retrospective_while_size_stays_in_it(tmp_path) -> None:
     root = _repo(tmp_path)
     _close(root, "001-reopen-drafts", files=("src/a.py",))
@@ -1207,7 +1237,9 @@ def test_hotspots_look_back_past_the_retrospective_while_size_stays_in_it(tmp_pa
         "first": "001-reopen-drafts",
         "last": "002-draft-titles",
     }
-    assert arch["hotspots"][0] == {"file": "src/a.py", "changes": 2, "lines_changed": 2, "lines": 2}
+    assert arch["hotspots"][0] == {
+        "file": "src/a.py", "changes": 2, "lines_changed": 2, "lines": 2, "gone": False,
+    }  # fmt: skip
     assert not any(h["file"].startswith(".sdlc/work/") for h in arch["hotspots"])
     assert arch["size"]["1"]["changes"] == 1
 

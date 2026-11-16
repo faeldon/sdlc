@@ -311,6 +311,26 @@ def test_a_milestone_with_nothing_left_says_so(tmp_path: Path, capsys, monkeypat
     assert "    M1 has nothing left in its groups: /sdlc:retro decides whether it's done" in out
 
 
+def test_next_up_walks_main_s_history_once(tmp_path: Path, monkeypatch) -> None:
+    """R7 (nit 2026-10-25-15): an open milestone and a dangling `After:` both read the closed
+    changes; one walk serves them, since every closed intent is read on each."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", "Reopen drafts")
+    _ideas(root, _seed("2026-10-02", "Share drafts", after='"No such seed"'))
+    _direction(root, _milestone("M1", "Drafts reopen", '001, "Reopen drafts"'))
+    walks = []
+    real = sdlc.closed_changes
+
+    def counted(*args, **kw):
+        walks.append(args[1:])
+        return real(*args, **kw)
+
+    monkeypatch.setattr(sdlc, "closed_changes", counted)
+    out = _next(root)
+    assert out["done_milestones"] == ["M1"] and out["warnings"], "both readers ran"
+    assert len(walks) == 1, walks
+
+
 def test_after_lines_that_can_never_be_met_warn_and_never_fail_check(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

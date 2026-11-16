@@ -108,6 +108,36 @@ def _state(root: Path) -> tuple[str, str, str]:
 # ---------------------------------------------------------------- the listing
 
 
+def _measured(root: Path, name: str) -> None:
+    """A closed change whose `Close` commit carries close's measured numbers."""
+    _ship(root, name, "minor")
+    _git(root, "rm", "-r", "-q", f".sdlc/work/{name}")
+    trailers = "Sdlc-Mode: manual\nSdlc-Totals: elapsed=30 agent=20 response=10 stops=4 required=4"
+    _git(root, "commit", "-q", "-m", f"Close {name}", "-m", trailers)
+
+
+@pytest.mark.parametrize("cmd", ["unreleased", "release"])
+def test_each_change_s_measured_numbers_print_only_when_asked(
+    cmd: str, tmp_path: Path, capsys
+) -> None:
+    """R1, R2: no skill reads a change's `metrics`, so neither listing prints them unless asked;
+    the full records still build the release, and `--metrics` puts them back."""
+    root = _repo(tmp_path)
+    _measured(root, "002-reopen-drafts")
+    assert _unreleased(root)["changes"][0]["metrics"]["mode"] == "manual", "the records keep it"
+    run = {
+        "unreleased": lambda **kw: sdlc.cmd_unreleased(root, **kw),
+        "release": lambda **kw: sdlc.cmd_release(root, check_only=True, **kw),
+    }[cmd]
+    code, lean = _run(capsys, run)
+    _, full = _run(capsys, lambda: run(metrics=True))
+    assert code == 0 and "metrics" not in lean["changes"][0]
+    assert full["changes"][0]["metrics"]["mode"] == "manual"
+    assert [{k: v for k, v in c.items() if k != "metrics"} for c in full["changes"]] == lean[
+        "changes"
+    ], "nothing but the metrics is left out"
+
+
 def test_it_lists_the_changes_closed_since_the_tag_and_not_before(tmp_path: Path) -> None:
     root = _repo(tmp_path, tag=False)
     _close(root, "001-before-the-release", "major")

@@ -426,6 +426,14 @@ def test_only_the_named_steps_push() -> None:
         assert "_push_plan(" in _function(source, name), f"{name} pushes without git.push"
 
 
+@pytest.mark.parametrize("name", ["sdlc:release", "sdlc:retro"])
+def test_release_and_retro_read_no_change_s_measured_numbers(name: str) -> None:
+    """R6: the scripts leave each change's `metrics` out of what these skills read; retro reads
+    the medians instead. A skill asking for `--metrics` would read them all back."""
+    text = _skill_text(BY_ID[name])
+    assert "--metrics" not in text and "change's `metrics`" not in text
+
+
 def test_release_skill_lines_stay_short() -> None:
     """Nit 2026-10-24-9: past the frontmatter, release's lines fit 100 characters, but the
     question it asks literally."""

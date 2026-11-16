@@ -140,10 +140,16 @@ def _files(rows: list[Row], skip: Callable[[str], bool]) -> set[str]:
 
 
 def hotspots(
-    lookback: list[list[Row]], now: dict[str, int], skip: Callable[[str], bool], top: int = TOP
+    lookback: list[list[Row]],
+    now: dict[str, int],
+    skip: Callable[[str], bool],
+    top: int = TOP,
+    present: set[str] | None = None,
 ) -> list[dict]:
     """The files the most changes touched, ties to the more lines changed. `lines` is the file's
-    size on the base branch now, None once it is gone."""
+    size on the base branch now, None when it has none to count: a binary or empty file, or one
+    that is gone. `gone` says which, from `present` (every path on the base branch), and is None
+    without it."""
     changes: Counter = Counter()
     churn: Counter = Counter()
     for rows in lookback:
@@ -154,7 +160,13 @@ def hotspots(
                 churn[path] += (added or 0) + (deleted or 0)
     ranked = sorted(changes, key=lambda p: (-changes[p], -churn[p], p))[:top]
     return [
-        {"file": p, "changes": changes[p], "lines_changed": churn[p], "lines": now.get(p)}
+        {
+            "file": p,
+            "changes": changes[p],
+            "lines_changed": churn[p],
+            "lines": now.get(p),
+            "gone": None if present is None else p not in present,
+        }
         for p in ranked
     ]
 

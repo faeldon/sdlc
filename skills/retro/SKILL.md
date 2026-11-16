@@ -77,7 +77,8 @@ What `retro` gives:
 - `architecture`: where the code is going, from git. Each change in `changes` carries `added`,
   `deleted` and `by_kind` (`code`, `tests`, `docs`, told apart as `kinds` says: the conventions,
   or the host's `retro.test_paths` and `retro.doc_paths`), and `size` gives each tier's medians
-  over the window. `hotspots` (the files the most changes touched) and `co_change` (pairs three or
+  over the window. `hotspots` (the files the most changes touched; `lines` null with `gone` false
+  is a binary or empty file, with `gone` true a deleted one) and `co_change` (pairs three or
   more changes touched together) read the last 30 closed changes, past `since` (`lookback`).
   `largest` gives the biggest files and `totals` each kind's files and lines, both now and at the
   last retrospective (`then`, `growth`; null on a first one). `host` is a row per

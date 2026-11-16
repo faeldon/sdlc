@@ -220,18 +220,6 @@ Cost: S
 Value: low
 Raised by: 009-drift-message (cost)
 
-## [2026-10-25-15] [nit] Status can walk main's history twice
-
-With an open milestone and a dangling `After:` title, `next_up` calls `closed_changes(home, None)`
-once through `_milestone_verdicts` and once for the shipped titles, reading every closed intent
-both times. Walk it once and pass it in.
-
-Theme: cost
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 019-status-next-work (cost)
-
 ## [2026-10-25-22] [nit] A test that close alone records fixes greps the source
 
 `test_only_a_close_records_fixes_never_a_drop` checks `inspect.getsource` for `fix_trailers(`, so
@@ -243,27 +231,6 @@ Paths: tests/test_bugs.py
 Cost: M
 Value: low
 Raised by: 024-bugs-register (correctness)
-
-## [2026-10-26-2] [nit] mark_issues views every open recorded issue on each run
-
-`mark_issues()` runs one `gh issue view` per open issue the repo records, on every triage and every
-close, idempotent but growing with the open issues. Skip the ones already labelled `triaged` with
-their marker, from one `issue list`.
-
-Theme: cost
-Paths: scripts/sdlc.py, scripts/trackers/github.py
-Cost: S
-Value: low
-Raised by: 026-github-intake (cost)
-
-## [2026-10-26-8] [idea] Leave each change's measured numbers out of retro's and release's output
-
-`sdlc.py retro` and `unreleased` print every change's full `metrics` blob, half of retro's output
-in the last window (about 39 KB of 78 KB compact, twenty changes), and `release --check` prints
-it again. Retro's skill reads only the medians in `metrics`, and release reads none. Leave the
-per-change blob out by default, behind a flag for anyone who wants it, so each retrospective and
-release reads a fraction of the tokens. Raised by the retrospective of 2026-10-26.
-Theme: cost
 
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
@@ -319,17 +286,6 @@ Paths: tests/test_inbox.py
 Cost: S
 Value: low
 Raised by: 028-remove-1-4-shims (correctness)
-
-## [2026-10-27-8] [nit] _inbox_commit takes eleven parameters
-
-`cmd_inbox_commit()` hands its whole state to `_inbox_commit()` to hold the lock around it; a
-nested function, or the lock taken inside, would carry it with no parameter list.
-
-Theme: style
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 031-idea-skill (cost)
 
 ## [2026-10-27-10] [idea] Let answers move a filled prompt into its guide slot
 
@@ -464,17 +420,6 @@ What 2026-10-26-5 first set out to do, left once 047 found no prompt recorded he
 rule its skill lacks, or move its logic into `sdlc.py`. See .sdlc/work/047-cut-extra-stops/notes.md.
 Theme: permissions
 Raised 2026-11-10.
-
-## [2026-11-12-1] [nit] A hotspot's lines: null reads as deleted for a binary or empty file
-
-`hotspots()` takes `lines` from `git grep -I -c ''`, which skips binary and empty files, so a
-much-edited image or empty file shows `lines: null`, which the docstring calls "once it is gone".
-Say which, or count those files' presence from `git ls-tree`.
-Theme: retro
-Paths: scripts/indicators.py, scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 048-architecture-indicators (correctness)
 
 ## [2026-11-12-2] [idea] Verbosity, tool-call and test-pruning indicators for the retro loop
 

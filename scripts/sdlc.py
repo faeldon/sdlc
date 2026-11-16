@@ -4856,15 +4856,27 @@ def _put_back(home: Path, paths: list[str]) -> None:
         _git(home, "checkout", "-q", "--", *known)
 
 
-def cmd_unreleased(root: Path) -> int:
-    """The changes since the last release, as JSON. Writes nothing."""
+def _lean(records: list[dict], metrics: bool) -> list[dict]:
+    """Each change as printed: without the `metrics` its `Close` commit's trailers hold, which no
+    skill reads one change at a time, unless `metrics` asks for them. Only what is printed loses
+    them: every aggregate is built from the full records first."""
+    return records if metrics else [{k: v for k, v in r.items() if k != "metrics"} for r in records]
+
+
+def cmd_unreleased(root: Path, metrics: bool = False) -> int:
+    """The changes since the last release, as JSON, each one's measured numbers only with
+    `metrics`. Writes nothing."""
     home = main_root(root)
     cfg, _, parsed = load_config(home)
-    print(json.dumps(unreleased(home, cfg), indent=2, ensure_ascii=False))
+    out = unreleased(home, cfg)
+    out["changes"] = _lean(out["changes"], metrics)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0 if parsed else 1
 
 
-def cmd_release(root: Path, check_only: bool = False, version: str | None = None) -> int:
+def cmd_release(
+    root: Path, check_only: bool = False, version: str | None = None, metrics: bool = False
+) -> int:
     """Bump the version files, add the changelog section, commit `Release X.Y.Z` and tag it. All
     local: undone with `git tag -d` and `git reset --keep HEAD~1` until publish pushes it. Every
     refusal is found before anything is written."""
@@ -4877,7 +4889,7 @@ def cmd_release(root: Path, check_only: bool = False, version: str | None = None
         "next": None,
         "tag": None,
         "files": [*rel["version_files"], *([rel["changelog"]] if rel["changelog"] else [])],
-        "changes": u["changes"],
+        "changes": _lean(u["changes"], metrics),
         "notes": "",
         "refusals": _release_refusals(root, home, cfg),
         "done": [],
@@ -5584,15 +5596,21 @@ def doc_items(text: str, kinds: str) -> dict:
 
 
 def _milestone_verdicts(
-    home: Path, items: list[dict], open_names: list[str], trunk: str | None
+    home: Path,
+    items: list[dict],
+    open_names: list[str],
+    trunk: str | None,
+    history: list[dict] | None = None,
 ) -> dict:
     """What each open milestone's grouped seeds and changes have become, from history: a change
     closed (with when), still open, or unknown; a seed still in the register, shipped by the change
-    whose `idea:` names it, or vanished with no change behind it."""
+    whose `idea:` names it, or vanished with no change behind it. `history`, every closed change,
+    when the caller has walked it already."""
     wanted = [i for i in items if i["kind"] == "milestone" and i["status"] == "open"]
     if not wanted:
         return {}
-    history = closed_changes(home, None, trunk)
+    if history is None:
+        history = closed_changes(home, None, trunk)
     entries = inbox_entries(home)
     out: dict[str, list[dict]] = {}
     for item in wanted:
@@ -5785,10 +5803,17 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     # An `After:` title no seed and no shipped change answers to can never be met: warned about,
     # and never "next in series". History is read only when one dangles.
     dangling = {t for e in ideas for t in e["after"] if t not in known}
+    walked: list[list[dict]] = []
+
+    def history() -> list[dict]:
+        """Every closed change, walked once however many readers ask."""
+        if not walked:
+            walked.append(closed_changes(home, None, cfg["git"]["base"]))
+        return walked[0]
+
     unmet: set[str] = set()
     if dangling:
-        history = closed_changes(home, None, cfg["git"]["base"])
-        shipped = [c["idea"] for c in history if c.get("idea")]
+        shipped = [c["idea"] for c in history() if c.get("idea")]
         unmet = {t for t in dangling if not any(same_ref(s, t) for s in shipped)}
 
     def seed(rule: str, label: str, e: dict) -> dict:
@@ -5856,7 +5881,9 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     done = []
     if milestones:
         open_names = [f"{r['id']}-{r['slug']}" for r in open_changes]
-        verdicts = _milestone_verdicts(home, doc["items"], open_names, cfg["git"]["base"])
+        verdicts = _milestone_verdicts(
+            home, doc["items"], open_names, cfg["git"]["base"], history()
+        )
         for m_id, rows in verdicts.items():
             if rows and all(r["verdict"] in ("closed", "shipped", "vanished") for r in rows):
                 done.append(m_id)
@@ -6344,6 +6371,11 @@ def _architecture(
     recent = closed_changes(home, None, trunk, read=False)[-ARCH_LOOKBACK:]
     lookback = [_change_rows(home, rec)[1] for rec in recent]
     now = _line_counts(home, trunk)
+    # Every path on the base branch, so a hotspot with no lines to count reads as binary or
+    # empty when it's there, and as gone when it isn't. Quoted as numstat quotes the hotspots'
+    # paths (git's default), so the two compare; a listing that fails leaves `gone` unknown.
+    listed = _git(home, "ls-tree", "-r", "--name-only", trunk)
+    present = None if listed is None else set(listed.splitlines())
     then = _line_counts(home, since["sha"]) if since else None
     tests, docs = cfg["retro"]["test_paths"], cfg["retro"]["doc_paths"]
     return {
@@ -6354,7 +6386,7 @@ def _architecture(
         },
         "kinds": {"tests": tests or "conventions", "docs": docs or "conventions"},
         "size": indicators.size_by_tier(changes),
-        "hotspots": indicators.hotspots(lookback, now, skip),
+        "hotspots": indicators.hotspots(lookback, now, skip, present=present),
         "co_change": indicators.co_change(lookback, skip),
         "largest": indicators.largest(now, then, skip),
         "totals": {
@@ -6569,11 +6601,13 @@ def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
     }
 
 
-def cmd_retro(root: Path) -> int:
-    """The retrospective's counts as JSON. Writes nothing, and reads nothing outside the repo."""
+def cmd_retro(root: Path, metrics: bool = False) -> int:
+    """The retrospective's counts as JSON, each change's measured numbers only with `metrics`
+    (their medians are always there). Writes nothing, and reads nothing outside the repo."""
     home = main_root(root)
     cfg, _, parsed = load_config(home)
     out = retro(home, cfg)
+    out["changes"], out["dropped"] = _lean(out["changes"], metrics), _lean(out["dropped"], metrics)
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 
@@ -6745,9 +6779,10 @@ def cmd_inbox_commit(
         refusals.append("from the main checkout it records the whole register: name no entries")
     if in_tree and triaged:
         refusals.append(f"triage's verdicts are recorded from the main checkout ({home})")
+    state = {"cfg": cfg, "register": register, "rel": rel, "ids": ids, "in_tree": in_tree,
+             "reasons": reasons, "triaged": triaged, "whys": whys}  # fmt: skip
     with _main_lock(home):
-        return emit(_inbox_commit(root, home, cfg, register, rel, ids, in_tree, report, reasons,
-                                  triaged, whys))  # fmt: skip
+        return emit(_inbox_commit(root, home, state, report))
 
 
 def _open_claims(home: Path) -> list[tuple[str, str]]:
@@ -6763,20 +6798,12 @@ def _open_claims(home: Path) -> list[tuple[str, str]]:
     return claims
 
 
-def _inbox_commit(
-    root: Path,
-    home: Path,
-    cfg: dict,
-    register: Path,
-    rel: str,
-    ids: list[str],
-    in_tree: bool,
-    report: dict,
-    reasons: list[str] | None,
-    triaged: list[str] | None,
-    whys: list[str] | None,
-) -> int:
-    """`cmd_inbox_commit()`'s work, under its lock: the exit code, with `report` filled in."""
+def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
+    """`cmd_inbox_commit()`'s work, under its lock: the exit code, with `report` filled in.
+    `state` is what the command resolved before taking the lock."""
+    cfg, register, rel = state["cfg"], state["register"], state["rel"]
+    ids, in_tree = state["ids"], state["in_tree"]
+    reasons, triaged, whys = state["reasons"], state["triaged"], state["whys"]
     refusals = report["refusals"]
     trunk = cfg["git"]["base"]
     if why := trunk_refusal(home, trunk, cfg["git"]["base_source"]):
@@ -7311,16 +7338,34 @@ def mark_issues(home: Path, found, only: set[int] | None = None) -> dict:
         records = {n: r for n, r in records.items() if n in only}
     if not records:
         return report
+    # A full pass (close, mark-triaged) lists each issue's marks once, where the tracker can, so an
+    # issue marked already costs no view of its own. A pass over a change's own few (`only`) lists
+    # the numbers alone: every open issue's comments would cost more than the views they save.
+    # A marks listing that fails falls back to the numbers.
     try:
-        still_open = found.open_numbers()
+        marks = None
+        if only is None and hasattr(found, "open_marks"):
+            marks = found.open_marks()
+        still_open = marks if marks is not None else found.open_numbers()
     except Exception as e:  # a tracker that fails here still lets close land
         report["failed"].append(f"listing open issues: {type(e).__name__}: {e}")
         return report
     if still_open is None:
         report["failed"].append("couldn't list the open issues")
         return report
+    marks = marks or {}
     for n, r in sorted(records.items()):
         if n not in still_open:
+            continue
+        seen = marks.get(n)
+        if (
+            seen
+            and r["parent"] is None
+            and not r["close"]
+            and seen["triaged"]
+            and not seen["needs_info"]
+            and any(r["marker"] in body for body in seen["comments"])
+        ):
             continue
         err = found.mark(n, r["comment"], r["marker"], parent=r["parent"], close=r["close"])
         (report["failed"] if err else report["done"]).append(err or f"#{n}: {r['filed']}")
@@ -8807,21 +8852,25 @@ def main() -> int:
     )
     p_context.add_argument("--base", help="what the diff is taken against (git.base)")
 
-    sub.add_parser(
+    metrics_help = "each change's measured numbers too, from its Close commit's trailers"
+    p_unrel = sub.add_parser(
         "unreleased", help="the changes landed since the last release tag, as JSON; writes nothing"
     )
+    p_unrel.add_argument("--metrics", action="store_true", help=metrics_help)
     p_release = sub.add_parser(
         "release", help="bump the version files, commit `Release X.Y.Z` and tag it, locally"
     )
     p_release.add_argument("--check", action="store_true", help="the plan only, write nothing")
     p_release.add_argument("--version", help="release as X.Y.Z instead of the computed version")
+    p_release.add_argument("--metrics", action="store_true", help=metrics_help)
     p_publish = sub.add_parser(
         "publish", help="push main and the release tag, then run release.publish"
     )
     p_publish.add_argument("--check", action="store_true", help="preconditions only, push nothing")
-    sub.add_parser(
+    p_retro = sub.add_parser(
         "retro", help="what the retrospective counts since the last one, as JSON; writes nothing"
     )
+    p_retro.add_argument("--metrics", action="store_true", help=metrics_help)
     sub.add_parser(
         "retro-commit", help="commit the direction doc and the inbox as `Retrospective <date>`"
     )
@@ -8925,13 +8974,13 @@ def main() -> int:
     if args.cmd == "close":
         return cmd_close(root, args.id, args.check)
     if args.cmd == "unreleased":
-        return cmd_unreleased(root)
+        return cmd_unreleased(root, args.metrics)
     if args.cmd == "release":
-        return cmd_release(root, args.check, args.version)
+        return cmd_release(root, args.check, args.version, args.metrics)
     if args.cmd == "publish":
         return cmd_publish(root, args.check)
     if args.cmd == "retro":
-        return cmd_retro(root)
+        return cmd_retro(root, args.metrics)
     if args.cmd == "retro-commit":
         return cmd_retro_commit(root)
     if args.cmd == "sync":

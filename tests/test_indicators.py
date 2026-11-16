@@ -106,8 +106,17 @@ def test_hotspots_rank_by_changes_then_churn_and_skip_the_change_folders() -> No
     ]
     rows = indicators.hotspots(lookback, {"a.py": 5, "b.py": 80}, lambda p: p.startswith(".sdlc/"))
     assert [r["file"] for r in rows] == ["a.py", "b.py", "gone.py"]
-    assert rows[0] == {"file": "a.py", "changes": 3, "lines_changed": 3, "lines": 5}
+    assert rows[0] == {"file": "a.py", "changes": 3, "lines_changed": 3, "lines": 5, "gone": None}
     assert rows[2]["lines"] is None
+
+
+def test_a_hotspot_with_no_lines_says_whether_it_is_gone() -> None:
+    """R10 (nit 2026-11-12-1): `git grep -I -c` counts no binary or empty file, so `lines: None`
+    alone can't tell one from a deleted file; the base branch's paths can."""
+    lookback = [[("logo.png", 0, 0), ("empty.py", 0, 0), ("gone.py", 0, 7)]]
+    rows = indicators.hotspots(lookback, {}, _none, present={"logo.png", "empty.py", "keep.py"})
+    by = {r["file"]: (r["lines"], r["gone"]) for r in rows}
+    assert by == {"logo.png": (None, False), "empty.py": (None, False), "gone.py": (None, True)}
 
 
 def test_co_change_lists_a_pair_only_from_three_changes_together() -> None:
