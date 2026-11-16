@@ -3,7 +3,8 @@
 What a repo using the plugin can set, and how the plugin behaves in it. The
 [README](../README.md) is the place to start; this is the place to look things up.
 `sdlc.py config` shows every setting as your repo resolves it, and `sdlc.py readiness` whether
-the repo is set up.
+the repo is set up: `complete` when `/sdlc:setup` has nothing to draft, with the commands left
+unset by choice in `unset`.
 
 - [Configuration: `.sdlc/config.toml`](#configuration-sdlcconfigtoml)
 - [The docs](#the-docs)

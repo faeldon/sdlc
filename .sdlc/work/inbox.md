@@ -339,17 +339,6 @@ Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/note
 Theme: setup
 Priority: low
 
-## [2026-11-03-16] [nit] Setup offers risky-path candidates its Step 1 never looks for
-
-Step 1 reads the README, task files, tests and entry points, not CI workflows or release scripts,
-which Step 2's `[review]` question offers as candidates. Name them in Step 1.
-
-Theme: docs
-Paths: skills/setup/SKILL.md
-Cost: S
-Value: low
-Raised by: 036-review-depth-by-risk (correctness)
-
 ## [2026-11-04-1] [nit] Retro's never-writes test greps retro-commit's source
 
 `test_retro_proposes_review_changes_as_seeds_and_never_writes_them` asserts `review` and
@@ -361,17 +350,6 @@ Paths: tests/test_skills.py
 Cost: S
 Value: low
 Raised by: 037-escaped-bugs-tune-review (correctness)
-
-## [2026-11-04-7] [idea] Setup stops on a set-up repo before reading its first-setup steps
-
-Rerunning `/sdlc:setup` on a repo that is set up reads the whole skill (307 lines, about 5,500
-tokens) to reach an answer `readiness` and `drift` already decide: nothing to write. Have
-`readiness` say `complete` when every item is `ok` and `drift` has nothing in `breaking`, `refresh`
-or `report`, and move the first setup's steps (the profile round, the drafts) to a file setup reads
-only when it isn't. Raised by the retrospective of 2026-11-04.
-
-After: 2026-11-04-6
-Theme: cost
 
 ## [2026-11-04-8] [idea] Pay down the tests nits
 

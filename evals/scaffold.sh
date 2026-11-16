@@ -4,7 +4,9 @@
 # is before /sdlc:ship, or committed with the message in its `commit` file. A fixture with a
 # `worktree` file is moved into .claude/worktrees/<branch>, leaving the workspace on main, as
 # /sdlc:close finds it. A fixture with an `extends` file gets that fixture's `change/` first, then
-# its own on top. `fresh` is the base alone. Plain sh and git only: a scaffold runs outside
+# its own on top. A fixture with a `main` file instead is committed on main with that message, then
+# setup's record is written by this plugin's own `record`, so drift never reads it stale. `fresh`
+# is the base alone. Plain sh and git only: a scaffold runs outside
 # the sandbox, with a minimal PATH.
 #
 # With `--sandbox`, which only the cases pass, it also readies uv in the run's temporary home,
@@ -30,6 +32,15 @@ if [ "$2" = --sandbox ]; then
 fi
 [ "$1" = fresh ] && exit 0
 src="$here/fixtures/$1"
+if [ -f "$src/main" ]; then
+  cp -R "$src/change/." .
+  git add -A
+  commit -m "$(cat "$src/main")"
+  uv run --quiet --script "$here/../scripts/sdlc.py" record > /dev/null
+  git add -A
+  commit -m "Record the setup"
+  exit 0
+fi
 [ -f "$src/branch" ] || { echo "no fixture $1" >&2; exit 1; }
 branch="$(cat "$src/branch")"
 git checkout -q -b "$branch"

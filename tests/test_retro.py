@@ -460,6 +460,9 @@ def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path) -> None:
     assert ship["lines"] == len(skill.splitlines())
     beside = {p.name for p in (ROOT / "skills" / "ship").glob("*.md")} - {"SKILL.md"}
     assert set(ship["branches"]) == beside and "branches" not in retro
+    setup = prose["skills"]["setup"]
+    skill = (ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    assert setup["lines"] == len(skill.splitlines()) and set(setup["branches"]) == {"drafts.md"}
     assert prose["sdlc_py_lines"] > 1000
 
 

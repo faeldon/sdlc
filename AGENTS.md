@@ -282,6 +282,15 @@ not a new command in the skill. What only some runs need lives in a file beside 
 `SHIP_BRANCHES`: whether a branch applies is the script's call, and the WAIT and every rule that
 binds each run stay in `SKILL.md`.
 
+**Setup's stop: `readiness`'s `complete`.** A rerun on a set-up repo reads setup's `SKILL.md`
+alone: `cmd_readiness()` says `complete` (every item answered and nothing in `drift()`'s
+`breaking`, `refresh` or `report`; `UNSET_IS_A_CHOICE` and an `archive.target` of `none` are
+answers, not gaps), and only otherwise, or with an argument, does setup read
+`skills/setup/drafts.md`, its Steps 1 to 3. `complete` errs towards false: a wrong true skips a
+host's setup without a word. The `setup` case's fixture (`evals/fixtures/set-up/`, committed on
+`main` by its `main` file, recorded by the scaffold) must stay complete, which
+`test_the_set_up_fixture_is_complete` checks.
+
 **Review findings: `findings_entries()`.** Ship writes its review to the change's `findings.md`
 after every run, before its WAIT, by a named exception to confirm-before-writing like `base`'s: it
 writes only the change's own uncommitted folder, decides nothing (the WAIT approves each

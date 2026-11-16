@@ -624,6 +624,7 @@ def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -
         (["plugins/factory/skills/build/SKILL.md"], {"skills": ["sdlc-factory:build"]}),
         # A branch file beside a skill is the skill's.
         (["skills/ship/undone.md"], {"skills": ["sdlc:ship"]}),
+        (["skills/setup/drafts.md"], {"skills": ["sdlc:setup"]}),
         (["plugins/factory/agents/reviewer-code.md"], {"agents": ["sdlc-factory:reviewer-code"]}),
         (
             ["agents/reviewer.md", "plugins/factory/agents/approver.md"],

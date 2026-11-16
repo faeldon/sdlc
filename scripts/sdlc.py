@@ -7531,11 +7531,19 @@ def detect_candidates(root: Path) -> dict[str, list[dict]]:
     return out
 
 
+# The commands a repo may leave unset by choice: `missing` all the same, but never a gap that keeps
+# setup from being complete.
+UNSET_IS_A_CHOICE = ("commands.build", "commands.scan")
+
+
 def cmd_readiness(root: Path) -> int:
     """Whether this repo is set up for the plugin, item by item, as JSON. Writes nothing.
 
     `required` items stop a skill until fixed; the rest the plugin works without, less well. A
-    re-run on a repo that is set up is how setup says so."""
+    re-run on a repo that is set up is how setup says so: `complete` is true when every item is
+    answered (but the `UNSET_IS_A_CHOICE` ones, listed in `unset`, and an `archive.target` of
+    `none`) and `drift` has nothing in `breaking`, `refresh` or `report`, and setup then stops
+    before its drafts."""
     home = main_root(root)
     cfg, warnings, parsed = load_config(root)
     items: list[dict] = []
@@ -7639,10 +7647,10 @@ def cmd_readiness(root: Path) -> int:
     item(*permissions_status(root))
     name, status, detail, merge = attribution_status(root, cfg)
     item(name, status, detail)
-    if not cfg_file.is_file():
+    found = drift(root) if cfg_file.is_file() else None
+    if found is None:
         item("drift", "n/a", "not set up yet")
     else:
-        found = drift(root)
         changed = len(found["breaking"]) + len(found["refresh"])
         item(
             "drift",
@@ -7653,8 +7661,17 @@ def cmd_readiness(root: Path) -> int:
             else "setup matches this plugin's defaults",
         )
 
+    unset = [i["name"] for i in items if i["name"] in UNSET_IS_A_CHOICE and i["status"] != "ok"]
+    # A repo tracked locally archives nowhere by its own answer: a warning, never a gap.
+    chosen = {*unset, *(["archive"] if cfg["archive"]["target"] == "none" else [])}
     out = {
         "ready": all(i["status"] in ("ok", "n/a") for i in items if i["required"]),
+        # Nothing for setup to draft: every item answered, and nothing the plugin changed under it.
+        "complete": found is not None
+        and all(i["status"] in ("ok", "n/a") or i["name"] in chosen for i in items)
+        and not (found["breaking"] or found["refresh"] or found["report"]),
+        # The commands a repo usually sets, left unset, which a complete run lists.
+        "unset": unset,
         "items": items,
         "candidates": detect_candidates(root),
         "permissions": {

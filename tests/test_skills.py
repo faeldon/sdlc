@@ -286,6 +286,8 @@ def test_skills_read_host_specifics_from_config(name: str) -> None:
     text = BY_ID[name].read_text(encoding="utf-8")
     script = SCRIPTS[name.split(":")[0]]
     assert f"{script} config" in text, f"{name}: run `{script} config` in Step 0"
+    # A key read only in a step a side file holds is read all the same.
+    text = _skill_text(BY_ID[name])
     for key in READS_CONFIG[name]:
         short = key.split(".", 1)[1]
         assert key in text or f"`{short}`" in text, f"{name}: never reads {key}"
@@ -306,7 +308,7 @@ READS_GUIDE = {
 
 @pytest.mark.parametrize("name", sorted(READS_GUIDE))
 def test_readers_of_the_process_read_the_guide_with_it(name: str) -> None:
-    text = BY_ID[name].read_text(encoding="utf-8")
+    text = _skill_text(BY_ID[name])
     assert [key for key in READS_GUIDE[name] if f"`{key}`" not in text] == []
 
 
@@ -606,19 +608,52 @@ def test_no_skill_writes_the_inbox_heading_itself(name: str) -> None:
 @pytest.mark.parametrize("name", ["sdlc:intent", "sdlc:spec", "sdlc:retro", "sdlc:setup"])
 def test_skills_show_an_outcome_by_its_name_beside_its_id(name: str) -> None:
     """An id alone (`O3`) means nothing to someone without the product doc open."""
-    text = BY_ID[name].read_text(encoding="utf-8")
+    text = _skill_text(BY_ID[name])
     assert "`name`" in text and re.search(r"O\d+ \([A-Z][\w ]+\)", text), f"{name}: `O1 (<name>)`"
 
 
 def test_setup_drafts_from_readiness_and_never_commits() -> None:
-    text = (ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
-    assert "sdlc.py readiness" in text.split("## Step 1")[0]
+    skill = ROOT / "skills" / "setup" / "SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    assert "sdlc.py readiness" in text.split("## Step 4")[0]
     assert "git commit" not in text.split("## Step 6")[0], "the commit is handed to the human"
-    assert "never rewrite it" in text, "an existing CLAUDE.md gets a diff, not a new file"
+    assert "git commit" not in (skill.parent / "drafts.md").read_text(encoding="utf-8")
+    assert "never rewrite it" in _skill_text(skill), "an existing CLAUDE.md gets a diff"
+
+
+def test_setup_stops_when_readiness_says_complete() -> None:
+    """R5: a set-up repo with no argument stops in Step 0, before the drafts; anything else reads
+    them first. Whether the repo is complete is the script's call; the argument is the person's."""
+    step0 = _steps("setup")["0"]
+    assert "**With `complete` true and no argument" in step0 and "`unset`" in step0
+    assert "`Read` `${CLAUDE_PLUGIN_ROOT}/skills/setup/drafts.md` now" in step0
+    assert "`product`, `project` or `reset`" in step0
+    drafts = _steps("setup", "drafts.md")
+    assert set(drafts) == {"1", "2", "3"}, "Steps 1 to 3 are the drafts'"
+
+
+def test_setup_s_wait_stays_in_its_skill_and_asks_as_before() -> None:
+    """R6: the drafts moved, the gate didn't: same question, same place, the write after it."""
+    steps = _steps("setup")
+    assert set(steps) == {"0", "4", "5", "6"}
+    assert "Write these files and edits: <paths>? (yes / change one / leave one out)" in steps["4"]
+
+
+def test_setup_s_skill_stays_under_its_budget() -> None:
+    """A rerun on a set-up repo reads `SKILL.md` alone: what only drafting needs is in drafts.md."""
+    lines = len(BY_ID["sdlc:setup"].read_text(encoding="utf-8").splitlines())
+    assert lines <= 150, f"setup's SKILL.md is {lines} lines"
+
+
+def test_setup_learns_where_its_risky_path_candidates_live() -> None:
+    """R8 (nit 2026-11-03-16): Step 2 offers CI workflows and release scripts as risky paths, so
+    Step 1 reads them."""
+    step1 = _steps("setup", "drafts.md")["1"]
+    assert "(`.github/workflows/`)" in step1 and "release or install scripts" in step1
 
 
 def test_setup_offers_the_issue_forms_only_on_github_and_never_over_a_host_s() -> None:
-    step3 = _steps("setup")["3"]
+    step3 = _steps("setup", "drafts.md")["3"]
     assert "**Issue forms**, only when `archive.target` is `github`" in step3
     assert "`issue_forms`" in step3 and "`<severities>`" in step3
     assert "One already `present` is the repo's: never redraft it" in step3
@@ -627,7 +662,7 @@ def test_setup_offers_the_issue_forms_only_on_github_and_never_over_a_host_s() -
 def test_setup_asks_about_attribution_and_ship_honours_the_answer() -> None:
     """Setup asks while the answer is unset, proposing none, and writes the object form; ship's
     commit then carries no agent line when the answer is off."""
-    setup = " ".join((ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8").split())
+    setup = " ".join(_skill_text(ROOT / "skills" / "setup" / "SKILL.md").split())
     assert "Should Claude's attribution appear in this repo's commits and pull requests?" in setup
     assert "Propose no answer" in setup and "`attribution.merge`" in setup
     assert 'never `"attribution": false`' in setup
@@ -646,7 +681,8 @@ def test_setup_neither_moves_the_change_folder_nor_cuts_a_whole_copy() -> None:
 
 def test_setup_asks_what_kind_of_repo_first() -> None:
     skill = ROOT / "skills" / "setup" / "SKILL.md"
-    step2 = skill.read_text(encoding="utf-8").split("## Step 2")[1].split("## Step 3")[0]
+    drafts = (skill.parent / "drafts.md").read_text(encoding="utf-8")
+    step2 = drafts.split("## Step 2")[1].split("## Step 3")[0]
     for question in ("**Kind:**", "**Who runs it:**", "**Where changes are tracked:**"):
         assert question in step2, f"the profile round asks {question}"
     assert 'target = "none"' in step2, "a local repo mirrors nothing"

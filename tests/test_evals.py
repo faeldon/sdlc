@@ -30,10 +30,14 @@ _fspec = importlib.util.spec_from_file_location(
 )
 factory = importlib.util.module_from_spec(_fspec)
 _fspec.loader.exec_module(factory)
-# `fresh` is the base alone; every other fixture names the branch its change is on.
+# `fresh` is the base alone; every other fixture names the branch its change is on, or `main`.
 FIXTURES = [
     "fresh",
-    *sorted(p.name for p in (EVALS / "fixtures").iterdir() if (p / "branch").is_file()),
+    *sorted(
+        p.name
+        for p in (EVALS / "fixtures").iterdir()
+        if (p / "branch").is_file() or (p / "main").is_file()
+    ),
 ]
 
 pytestmark = pytest.mark.portable
@@ -72,6 +76,23 @@ def test_every_fixture_passes_check(fixture: str, tmp_path: Path) -> None:
     assert checked.returncode == 0, checked.stdout + checked.stderr
 
 
+@SCAFFOLDS[0]
+@SCAFFOLDS[1]
+def test_the_set_up_fixture_is_complete(tmp_path: Path) -> None:
+    """The setup case runs on a repo `readiness` calls complete, or the run it grades is a first
+    setup: checked here for free, not found out in a paid run."""
+    repo = tmp_path / "set-up"
+    _scaffold("set-up", repo)
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    ran = subprocess.run(
+        ["uv", "run", "--quiet", "--script", str(SCRIPT), "readiness"],
+        cwd=repo, capture_output=True, encoding="utf-8", env=env, check=True,
+    )  # fmt: skip
+    out = json.loads(ran.stdout)
+    assert out["complete"], [i for i in out["items"] if i["status"] not in ("ok", "n/a")]
+    assert out["unset"] == ["commands.build", "commands.scan"]
+
+
 def test_a_fixture_never_names_a_missing_one() -> None:
     """An `extends` that names no fixture would scaffold a half-built change: refused."""
     for fixture in FIXTURES[1:]:
@@ -103,6 +124,24 @@ def test_a_stop_case_keeps_every_never_write_grader(case: str) -> None:
     assert fixture in FIXTURES and flag == "--sandbox", case
 
 
+def test_the_setup_case_stops_before_its_drafts() -> None:
+    """R10: on a set-up repo, setup asks config, reads none of its drafts, writes, commits or
+    pushes nothing, and ends saying so: it has no question to end at, so no `asks-the-question`."""
+    graders = _graders("setup")
+    prompt = frontmatter.load(EVALS / "setup" / "prompt.md")
+    assert {"Bash", "Write", "Edit"} <= set(prompt["allowed_tools"])
+    assert "AskUserQuestion" not in prompt["allowed_tools"]
+    assert graders["asks-config"]["input_match"].endswith(" config")
+    for never in ("commits", "pushes", "writes", "edits", "reads-drafts"):
+        g = graders[f"never-{never}"]
+        assert (g["min"], g["max"]) == (0, 0), f"never-{never}"
+    assert graders["says-set-up"]["target"] == "last_message"
+    *_, fixture, flag = (EVALS / "setup" / "scaffold.sh").read_text(encoding="utf-8").split()
+    assert (fixture, flag) == ("set-up", "--sandbox") and fixture in FIXTURES
+    assert sdlc.case_tags(EVALS)["setup"] == ["setup"]
+    assert sdlc.cases_scope(["skills/setup/drafts.md"], sdlc.case_tags(EVALS)) == ["setup"]
+
+
 def test_the_never_graders_match_what_they_forbid() -> None:
     """Each never-grader's pattern, read as the eval reads it (a regex over the tool call's JSON
     input), catches the call it forbids and lets the read-only one through."""
@@ -131,6 +170,8 @@ def test_the_never_graders_match_what_they_forbid() -> None:
     assert hits("close", "never-close", {"command": "uv run --script ${S} close 001"})
     assert not hits("close", "never-close", {"command": f"{held} close 001 --check"})
     assert hits("intent", "asks-config", {"command": f"{held} config"})
+    assert hits("setup", "never-reads-drafts", {"file_path": "/plug/skills/setup/drafts.md"})
+    assert not hits("setup", "never-reads-drafts", {"file_path": "/plug/skills/setup/SKILL.md"})
 
 
 def test_a_diff_calls_for_the_cases_of_the_skills_it_touches() -> None:

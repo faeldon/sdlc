@@ -276,3 +276,92 @@ def test_attribution_off_warns_when_local_settings_override_it(tmp_path: Path, c
     _settings(root, "settings.local.json", {"attribution": {"commit": "Mine"}})
     item, _ = _attribution(root, capsys)
     assert item["status"] == "warn" and ".claude/settings.local.json" in item["detail"]
+
+
+SET_UP = ROOT / "evals" / "fixtures" / "set-up" / "change"
+
+
+def _set_up(tmp_path: Path, capsys) -> Path:
+    """A repo set up as the setup eval's fixture is, its record written by this plugin."""
+    root = _repo(tmp_path)
+    shutil.copytree(ROOT / "evals" / "fixtures" / "base", root, dirs_exist_ok=True)
+    shutil.copytree(SET_UP, root, dirs_exist_ok=True)
+    assert sdlc.cmd_record(root, [], False) == 0
+    capsys.readouterr()
+    return root
+
+
+def test_a_set_up_repo_is_complete(tmp_path: Path, capsys) -> None:
+    """R1, R2: build and scan left unset, and tracked locally, are answers: setup stops."""
+    out = _readiness(_set_up(tmp_path, capsys), capsys)
+    assert out["complete"] is True and out["ready"] is True
+    assert out["unset"] == ["commands.build", "commands.scan"]
+    assert _items(out)["archive"] == "warn", "archive.target none still warns, as before"
+
+
+def test_unset_empties_once_both_commands_are_set(tmp_path: Path, capsys) -> None:
+    root = _set_up(tmp_path, capsys)
+    config = root / ".sdlc" / "config.toml"
+    text = config.read_text(encoding="utf-8").replace(
+        "[commands]\n", '[commands]\nbuild = "true"\nscan = "true"\n'
+    )
+    config.write_text(text, encoding="utf-8", newline="\n")
+    out = _readiness(root, capsys)
+    assert out["unset"] == []
+    assert not out["complete"], "a scan wants a health doc, which is now missing"
+
+
+def _drop_policy(root: Path) -> None:
+    (root / "AGENTS.md").unlink()
+
+
+def _unfill_process(root: Path) -> None:
+    doc = root / ".sdlc" / "SDLC.md"
+    text = doc.read_text(encoding="utf-8") + "\n<A prompt.>\n\n<Another.>\n"
+    doc.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _unknown_key(root: Path) -> None:
+    config = root / ".sdlc" / "config.toml"
+    text = config.read_text(encoding="utf-8") + '\n[nowhere]\nkey = "x"\n'
+    config.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _no_config(root: Path) -> None:
+    (root / ".sdlc" / "config.toml").unlink()
+
+
+@pytest.mark.parametrize(
+    "spoil, item, status",
+    [
+        (_drop_policy, "docs.policy", "missing"),
+        (_unfill_process, "docs.process", "warn"),
+        (_unknown_key, "config", "warn"),
+        (_no_config, "drift", "n/a"),
+    ],
+)
+def test_anything_left_to_draft_is_not_complete(
+    spoil, item: str, status: str, tmp_path: Path, capsys
+) -> None:
+    """R1: a missing or warned item, an unknown key, or no config at all keeps setup going."""
+    root = _set_up(tmp_path, capsys)
+    spoil(root)
+    out = _readiness(root, capsys)
+    assert out["complete"] is False and _items(out)[item] == status
+
+
+@pytest.mark.parametrize("found", ["breaking", "refresh", "report"])
+def test_anything_drift_finds_is_not_complete(
+    found: str, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """R1: each of drift's three lists alone keeps setup going, `report` included."""
+    root = _set_up(tmp_path, capsys)
+    real = sdlc.drift
+
+    def drift(at: Path) -> dict:
+        out = real(at)
+        out[found] = [{"what": "x"}]
+        return out
+
+    monkeypatch.setattr(sdlc, "drift", drift)
+    assert _readiness(root, capsys)["complete"] is False
