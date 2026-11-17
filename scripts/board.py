@@ -9,8 +9,11 @@ folders on every request, so the board and the folders can't disagree. A change 
 on (its folder holds `runs/`) adds its rounds, decisions and cost, read from the files the run
 left with copies of `factory.py`'s parsing, each pinned to it by a test: the core never imports or
 runs the factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the
-person, with the record's problems and its way on. Nothing here writes: three GET routes, every
-other method refused, and `/file` serves only a file inside an open change's own folder.
+person, with the record's problems and its way on. Its card's step track is the step the
+supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
+factory runs, read from history once per base-branch tip and kept in memory. Nothing here
+writes: three GET routes, every other method refused, and `/file` serves only a file inside an
+open change's own folder.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import statistics
+import threading
 import urllib.request
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +51,28 @@ STOPPED = Path("runs") / "stopped.md"
 STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+STEP = Path("runs") / "step.md"
+STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
+ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
+LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
+REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
+SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
+SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
+REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
+
+# A factory card's step track: the six positions of a round, and where each step the record names
+# sits on it (`fix` is the gate, fixing). `decide` keeps the position it paused at; `done` is past
+# them all. An estimate never fills its bar past `CAP` while the step runs.
+TRACK = ("build", "gate", "review", "verify", "rework", "approve")
+AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
+CAP = 0.95
+# Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
+# only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
+WINDOW = 20
+MIN_CHANGES = 3
+_HISTORY: dict[tuple[str, str], tuple[str, dict]] = {}
+_HISTORY_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------- the state
@@ -59,9 +86,10 @@ def state(root: Path) -> dict:
     trunk = cfg["git"]["base"]
     issues = _issue_base(home, cfg)
     now = datetime.now(UTC).timestamp()
+    history = typical_times(home, trunk)
     return {
         "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
-        "changes": [_entry(root, home, f, trunk, issues, now) for f in _on_board(root)],
+        "changes": [_entry(root, home, f, trunk, issues, now, history) for f in _on_board(root)],
     }  # fmt: skip
 
 
@@ -86,7 +114,13 @@ def _issue_base(home: Path, cfg: dict) -> str | None:
 
 
 def _entry(
-    root: Path, home: Path, folder: Path, trunk: str | None, issues: str | None, now: float
+    root: Path,
+    home: Path,
+    folder: Path,
+    trunk: str | None,
+    issues: str | None,
+    now: float,
+    history: dict | None = None,
 ) -> dict:
     """One change's card. A file that can't be read is a `problems` line, never a crash."""
     problems: list[str] = []
@@ -137,6 +171,13 @@ def _entry(
             if rec["stage"] == "build"
             else None
         )
+        entry["progress"] = read(
+            "runs/step.md", lambda: _progress(entry, folder, problems, history, now), None
+        )
+        if entry["progress"]:
+            entry["progress"]["plan"] = read(
+                "plan.md", lambda: _plan_hint(entry, folder, home, trunk), None
+            )
     entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
     entry["problems"] = problems
     entry["next"] = next_action(entry)
@@ -161,6 +202,13 @@ def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | Non
     if stage == "build":
         return None
     own = (f"{sdlc.work_rel(home)}/", *(f".sdlc/{name}" for name in sdlc.STATE_FILES))
+    paths = _touched(entry, folder, home, trunk)
+    return "build" if any(not p.startswith(own) for p in paths) else None
+
+
+def _touched(entry: dict, folder: Path, home: Path, trunk: str | None) -> list[str]:
+    """Every path the change has touched: what its branch changed against the base branch, and in
+    a worktree of its own, its uncommitted edits. Nothing from the branch without a base branch."""
     paths = []
     if trunk:
         span = f"refs/heads/{trunk}...refs/heads/{entry['change']}"
@@ -170,7 +218,42 @@ def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | Non
     checkout = sdlc.checkout_of(folder)
     if checkout.resolve() != home.resolve():
         paths += sdlc._dirty_paths(checkout)
-    return "build" if any(p and not p.startswith(own) for p in paths) else None
+    return [p for p in paths if p]
+
+
+def _plan_named(text: str) -> list[str]:
+    """The paths `plan.md`'s `## Files to change` names: each list item's first backtick-quoted
+    span, else its first word, less a trailing `:`, `,` or ` (new)`; only one holding a `/` or a
+    `.` and no `<`, so a prompt, a line of prose or an item's wrapped line names nothing."""
+    named = []
+    for line in sdlc._section(sdlc._body_of(text), "Files to change").splitlines():
+        item = re.match(r"^(?:[-*+]|\d+[.)])\s+", line)
+        if not item:
+            continue
+        line = line[item.end() :].strip()
+        quoted = re.search(r"`([^`]+)`", line)
+        token = quoted.group(1) if quoted else (line.split() or [""])[0]
+        token = token.strip()
+        token = token.removesuffix(" (new)").rstrip(":,").strip()
+        if token and ("/" in token or "." in token) and "<" not in token:
+            named.append(token)
+    return list(dict.fromkeys(named))
+
+
+def _plan_hint(entry: dict, folder: Path, home: Path, trunk: str | None) -> dict | None:
+    """`{"named", "touched"}` for a Tier 2 factory change whose filled `plan.md` names a path:
+    how many of those its branch has touched so far (a named directory, by any path under it)."""
+    path = folder / "plan.md"
+    if entry["tier"] != 2 or not path.is_file() or sdlc.is_unfilled(path):
+        return None
+    named = _plan_named(path.read_text(encoding="utf-8", errors="replace"))
+    if not named:
+        return None
+    paths = set(_touched(entry, folder, home, trunk))
+    hit = [
+        n for n in named if n in paths or n.endswith("/") and any(p.startswith(n) for p in paths)
+    ]
+    return {"named": len(named), "touched": len(hit)}
 
 
 def _files(folder: Path) -> list[str]:
@@ -246,6 +329,207 @@ def _stopped(folder: Path, problems: list[str]) -> dict | None:
         return None
     found = [m.group(1) for m in map(PROBLEM_RE.match, lines) if m]
     return {"way": way.group(1), "next": nxt[0], "problems": found}
+
+
+def read_step(text: str) -> dict | None:
+    """`runs/step.md`'s fields, as `factory.py`'s `read_step()` reads them (a test pins the two),
+    or None when it doesn't open with a `STEP:` line."""
+    lines = text.splitlines()
+    step = STEP_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    rnd, limit, names = field(ROUND_RE), field(LIMIT_RE), field(REVIEWERS_RE)
+    return {
+        "step": step.group(1), "round": int(rnd) if rnd else None,
+        "limit": int(limit) if limit else None,
+        "reviewers": [n.strip() for n in (names or "").split(",") if n.strip()],
+        "since": field(SINCE_RE), "after": field(AFTER_RE),
+    }  # fmt: skip
+
+
+def _since(text: str | None) -> float | None:
+    if not text:
+        return None
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+
+
+def _progress(
+    entry: dict, folder: Path, problems: list[str], history: dict | None, now: float
+) -> dict | None:
+    """A factory card's step track, the current step's time against the typical one, and the plan
+    hint, from the supervisor's last reading (`runs/step.md`) and the run's files: None for a
+    stopped run, a record that won't read, or a run with neither a record nor a first build under
+    way (`runs/builder.sessions`, no builder report yet)."""
+    if entry.get("stopped") or (folder / STOPPED).is_file() and entry["stage"] == "build":
+        return None
+    path = folder / STEP
+    if entry.get("decision"):
+        rec = {"step": "done", "round": None, "limit": None, "reviewers": [], "since": None}
+    elif path.is_file():
+        rec = read_step(path.read_text(encoding="utf-8", errors="replace"))
+        if rec is None:
+            problems.append(f"{STEP.as_posix()} doesn't open with STEP:")
+            return None
+    elif (folder / "runs" / "builder.sessions").is_file() and not entry.get("built"):
+        mtime = (folder / "runs" / "builder.sessions").stat().st_mtime
+        rec = {"step": "build", "round": 1, "limit": None, "reviewers": [], "since": None}
+        rec["at"] = mtime
+    else:
+        return None
+    step = rec["step"]
+    if step == "stop":
+        return None
+    paused = step == "decide"
+    at = AT.get(rec.get("after") or "") if paused else AT.get(step)
+    if step == "done":
+        at = len(TRACK)
+    if at is None:
+        return None
+    rnd = rec["round"] or (max(entry.get("built") or [0]) or None)
+    steps = []
+    for i, name in enumerate(TRACK):
+        state = "done" if i < at else "todo" if i > at else "paused" if paused else "current"
+        label = name
+        if name == "gate" and step == "fix":
+            label = "fixing"
+        if name == "review" and rnd and rec["reviewers"]:
+            label = f"reviews {_reviewed(folder, rnd)}/{len(rec['reviewers'])}"
+        steps.append({"name": name, "state": state, "label": label})
+    running = step in AT
+    start = rec.get("at") or _since(rec["since"])
+    elapsed = max(0, round(now - start)) if running and start is not None else None
+    key = "rework" if step == "fix" else step
+    found = (history or {}).get(f"{key}/{entry['tier']}") if running else None
+    typical = found["seconds"] if found else None
+    fraction = None
+    if typical and elapsed is not None:
+        fraction = round(min(elapsed / typical, CAP), 3)
+    return {
+        "steps": steps, "round": rnd, "limit": rec["limit"], "step": step, "paused": paused,
+        "elapsed": elapsed, "typical": typical if fraction is not None else None,
+        "fraction": fraction, "samples": found["samples"] if fraction is not None else None,
+        "plan": None,
+    }  # fmt: skip
+
+
+def _reviewed(folder: Path, n: int) -> int:
+    """How many replies in `reviews/round-<n>/` open with a `VERDICT:` line, `verified.md` aside."""
+    count = 0
+    for file in (folder / "reviews" / f"round-{n}").glob("*.md"):
+        if file.name == VERIFIED:
+            continue
+        lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
+        count += bool(lines and VERDICT_RE.match(lines[0]))
+    return count
+
+
+def typical_times(home: Path, trunk: str | None) -> dict:
+    """`{"<step>/<tier>": {"seconds", "samples"}}`: the median seconds of each step at each tier
+    over the closed factory changes `history_samples()` reads, where `MIN_CHANGES` or more give a
+    sample. Each call runs one `rev-parse`; history is read again only when the tip has moved.
+    Empty without a base branch, or when git fails: the card then shows elapsed time alone."""
+    if not trunk:
+        return {}
+    tip = sdlc._git(home, "rev-parse", "--verify", "--quiet", f"refs/heads/{trunk}")
+    if not tip:
+        return {}
+    key = (str(home), trunk)
+    with _HISTORY_LOCK:
+        cached = _HISTORY.get(key)
+        if cached and cached[0] == tip:
+            return cached[1]
+        try:
+            samples = history_samples(home, trunk)
+        except Exception:
+            samples = {}
+        table = {}
+        for (step, tier), by in samples.items():
+            if len(by) >= MIN_CHANGES:
+                values = [v for vs in by.values() for v in vs]
+                table[f"{step}/{tier}"] = {
+                    "seconds": round(statistics.median(values)), "samples": len(by),
+                }  # fmt: skip
+        _HISTORY[key] = (tip, table)
+        return table
+
+
+def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, list[float]]]:
+    """Each step's seconds at each tier, by change, from the newest `WINDOW` `Close` commits on the
+    base branch's first-parent line that removed a `runs/costs.jsonl`: the change's own files,
+    read at the `Close` commit's parent, where its folder last stood."""
+    work = sdlc.work_rel(home)
+    out = sdlc._git(
+        home, "log", "--first-parent", "--format=%H%x00%s", f"refs/heads/{trunk}", "--",
+        f"{work}/*/runs/costs.jsonl",
+    ) or ""  # fmt: skip
+    closes = []
+    for line in out.splitlines():
+        sha, _, subject = line.partition("\0")
+        name = subject[len("Close ") :].strip() if subject.startswith("Close ") else ""
+        if sdlc.DIR_RE.match(name):
+            closes.append((sha, name))
+        if len(closes) == WINDOW:
+            break
+    found: dict[tuple[str, int], dict[str, list[float]]] = {}
+    for sha, name in closes:
+        at = f"{sha}^:{work}/{name}"
+        costs = sdlc._git(home, "show", f"{at}/{COSTS.as_posix()}")
+        tier = (sdlc.frontmatter_list(sdlc._git(home, "show", f"{at}/intent.md") or "", "tier")
+                or [""])[0]  # fmt: skip
+        if costs is None or not tier.isdigit():
+            continue
+        gates = []
+        for gate in (sdlc._git(home, "ls-tree", "--name-only", f"{at}/build") or "").splitlines():
+            if gate.startswith("round-") and gate.endswith(".gate.md"):
+                text = sdlc._git(home, "show", f"{at}/build/{gate}") or ""
+                gates += [float(m.group(1)) for m in map(SECONDS_RE.match, text.splitlines()) if m]
+        for step, values in step_samples(costs, gates).items():
+            if values:
+                found.setdefault((step, int(tier)), {})[name] = values
+    return found
+
+
+def step_samples(costs: str, gates: list[float]) -> dict[str, list[float]]:
+    """One run's seconds by step, from its `costs.jsonl` rows in the order its sessions ended: the
+    first builder's is the build, every later one before the approver a rework (a gate fix among
+    them); each run of reviewer rows one review round, as long as its slowest, since they run
+    together; each verifier's a verification; the first approver's the approval. What follows the
+    approver is the landing's, and a row without an integer `duration_ms` is skipped."""
+    out: dict[str, list[float]] = {s: [] for s in TRACK}
+    out["gate"] = list(gates)
+    together: list[float] = []
+    built = False
+    for line in costs.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        ms = row.get("duration_ms") if isinstance(row, dict) else None
+        if not isinstance(ms, int) or isinstance(ms, bool):
+            continue
+        role, seconds = row.get("role"), ms / 1000
+        if role in REVIEWER_ROLES:
+            together.append(seconds)
+            continue
+        if together:
+            out["review"].append(max(together))
+            together = []
+        if role == "builder":
+            out["rework" if built else "build"].append(seconds)
+            built = True
+        elif role == "verifier":
+            out["verify"].append(seconds)
+        elif role == "approver":
+            out["approve"].append(seconds)
+            break
+    if together:
+        out["review"].append(max(together))
+    return out
 
 
 def cost(folder: Path) -> dict | None:

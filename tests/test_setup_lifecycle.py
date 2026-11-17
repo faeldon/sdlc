@@ -325,6 +325,19 @@ def test_override_missing_a_read_is_breaking(repo: Path, plugin: Path) -> None:
     assert "## Open questions" in breaking["detail"]
 
 
+def test_an_override_plan_without_files_to_change_is_reported(repo: Path, plugin: Path) -> None:
+    """088: the board reads `plan.md`'s `## Files to change`, so an override without it breaks."""
+    (repo / ".sdlc" / "templates").mkdir()
+    text = (ROOT / "templates" / "plan.md").read_text(encoding="utf-8")
+    (plugin / "templates" / "plan.md").write_text(text, encoding="utf-8")
+    (repo / ".sdlc" / "templates" / "plan.md").write_text(
+        text.replace("## Files to change", "## Files"), encoding="utf-8"
+    )
+    (breaking,) = sdlc.drift(repo)["breaking"]
+    assert breaking["where"] == ".sdlc/templates/plan.md"
+    assert "## Files to change" in breaking["detail"]
+
+
 def test_changed_template_is_reported(repo: Path, plugin: Path) -> None:
     (repo / ".sdlc" / "templates").mkdir()
     text = (ROOT / "templates" / "intent.md").read_text(encoding="utf-8")

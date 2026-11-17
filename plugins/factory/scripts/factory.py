@@ -30,7 +30,8 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
 `carry` to `notes.md`, `stage` to `intent.md`, `gate` its attempt to `build/round-<N>.gate.md`,
-`verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear),
+`verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear) and the
+step it read, with since when, to `runs/step.md`,
 `agent` the reply an agent session returned, and its id and figures under `runs/`. Nothing is
 written outside the change's folder, and nothing under `.git/`, but by the landing: `land` and
 `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it. A command about
@@ -60,7 +61,7 @@ import time
 import tomllib
 import uuid
 from contextlib import suppress
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -149,6 +150,8 @@ CLONE_MARK = "<path-to-clone>"
 HOME_MARK = "~"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
+# How long an attempt ran, which the board reads from a closed change's history for its estimates.
+SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -962,6 +965,60 @@ def stop_text(change: str, way: str, problems: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _utc_now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def read_step(text: str) -> dict | None:
+    """`runs/step.md`'s fields, or None when it doesn't open with a `STEP:` line."""
+    lines = text.splitlines()
+    step = STEP_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    rnd, limit, names = field(ROUND_RE), field(LIMIT_RE), field(REVIEWERS_RE)
+    return {
+        "step": step.group(1), "round": int(rnd) if rnd else None,
+        "limit": int(limit) if limit else None,
+        "reviewers": [n.strip() for n in (names or "").split(",") if n.strip()],
+        "since": field(SINCE_RE), "after": field(AFTER_RE),
+    }  # fmt: skip
+
+
+def step_text(out: dict, since: str, after: str | None = None) -> str:
+    """`runs/step.md`'s text for one `verdicts` reading: the step, its round, the run's round
+    limit and expected reviewers, since when, and on a `decide` the step it paused at."""
+    rnd = "" if out.get("round") is None else str(out["round"])
+    lines = [
+        f"STEP: {out['next']}", f"ROUND: {rnd}", f"LIMIT: {out.get('limit') or ''}",
+        f"REVIEWERS: {', '.join(out.get('reviewers') or [])}", f"SINCE: {since}",
+    ]  # fmt: skip
+    if after:
+        lines.append(f"AFTER: {after}")
+    return "\n".join(line.rstrip() for line in lines) + "\n"
+
+
+def _record_step(folder: Path, out: dict) -> None:
+    """Write `runs/step.md` for this reading, keeping the record's `SINCE:` while its step and
+    round hold, and on a `decide` the step it paused at."""
+    path = folder / STEP
+    try:
+        old = read_step(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        old = None
+    same = old and old["step"] == out["next"] and old["round"] == out.get("round")
+    since = old["since"] if same and old["since"] else _utc_now()
+    after = None
+    if out["next"] == "decide" and old:
+        after = old["after"] if old["step"] == "decide" else old["step"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(step_text(out, since, after), encoding="utf-8", newline="\n")
+
+
 def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
@@ -990,7 +1047,9 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     Run `decisions` first: this reads the ledger as it stands, and writes nothing, but with
     `--record`, which only the supervisor passes and only with `--head`: then a stop is written to
     `runs/stopped.md` (`stop_text()`) for the board and status, from this same reading, and any
-    other step removes it. Nothing in the loop reads it back.
+    other step removes it; and every reading is written to `runs/step.md` (`step_text()`) for the
+    board's step track, its `SINCE:` kept while the step and round hold. Nothing in the loop reads
+    either back.
 
     Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
     changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
@@ -1012,6 +1071,7 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
             path.write_text(text, encoding="utf-8", newline="\n")
         else:
             path.unlink(missing_ok=True)
+        _record_step(folder, out)
     return emit(out)
 
 
@@ -1388,6 +1448,16 @@ STOPPED = Path("runs") / "stopped.md"
 STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+# The step the supervisor's last reading named, and since when: written on every reading by
+# `verdicts --record`, read by the board (with its own copies of these, pinned by a test), never by
+# the loop. `SINCE:` holds while `STEP:` and `ROUND:` do; `AFTER:` is the step a `decide` paused.
+STEP = Path("runs") / "step.md"
+STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
+ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
+LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
+REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
+SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 # What moves a stopped run on, by its way: the record's `NEXT:` line.
 WAYS = {
     "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",

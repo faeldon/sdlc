@@ -140,6 +140,7 @@ def test_every_open_change_is_on_the_board_with_its_next_step(repo) -> None:
     assert (two["column"], two["next"]) == ("design", "plan mode, then build it")
     assert two["depends_on"] == ["001"] and two["unfilled"] == ["spec.md"] and two["checks"] == 1
     assert "rounds" not in two, "a change built by hand has no factory fields"
+    assert "progress" not in one and "progress" not in two, "nor a step track"
 
 
 @pytest.mark.portable
@@ -453,10 +454,13 @@ def test_file_never_leaves_an_open_change_s_folder(served) -> None:
 @pytest.mark.portable
 def test_the_board_writes_nothing(served) -> None:
     root, url, _ = served
+    _closed(root, "019-draft-closed", 2)
+    _run_at(root, "review", 1)
     _git(root, "add", "-A")
     before = _git(root, "status", "--porcelain", "--ignored")
     for path in ("/", "/state.json", "/file?change=003-draft-export&path=decision.md"):
         _get(url + path)
+    assert json.loads(_get(url + "/state.json")[1])["changes"][-1]["progress"]["step"] == "review"
     _get(url + "/state.json", "POST")
     assert _git(root, "status", "--porcelain", "--ignored") == before
 
@@ -513,3 +517,301 @@ def test_no_column_key_is_a_class_the_page_styles_on_its_own() -> None:
                 if classes & keys and not classes & {"col", "card"}:
                     clashes.append(selector.strip())
     assert not clashes, clashes
+
+
+# ---------------------------------------------------------------- progress (088)
+
+FULL = ["code", "security", "test", "behaviour"]
+
+
+def _run_at(
+    root: Path,
+    step: str | None,
+    rnd: int | None = 1,
+    name: str = "016-draft-tags",
+    tier: int = 2,
+    since: str = "2026-11-17T10:00:00Z",
+    after: str | None = None,
+) -> Path:
+    """A factory run at `stage: build` whose supervisor's last reading named `step`, the record
+    written by `factory.py`'s own writer; `None` leaves no record."""
+    folder = _change(root, name, tier, "build", "Draft tags")
+    _write(folder / "runs" / "builder.sessions", "s-1\n")
+    if step is not None:
+        out = {"next": step, "round": rnd, "limit": 3, "reviewers": FULL}
+        _write(folder / factory.STEP, factory.step_text(out, since, after))
+    return folder
+
+
+def _states(card: dict) -> list[str]:
+    return [s["state"] for s in card["progress"]["steps"]]
+
+
+TRACKS = {
+    "build": ["current", "todo", "todo", "todo", "todo", "todo"],
+    "gate": ["done", "current", "todo", "todo", "todo", "todo"],
+    "fix": ["done", "current", "todo", "todo", "todo", "todo"],
+    "review": ["done", "done", "current", "todo", "todo", "todo"],
+    "verify": ["done", "done", "done", "current", "todo", "todo"],
+    "rework": ["done", "done", "done", "done", "current", "todo"],
+    "approve": ["done", "done", "done", "done", "done", "current"],
+    "decide": ["done", "done", "paused", "todo", "todo", "todo"],
+    "done": ["done"] * 6,
+}
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("step", list(TRACKS))
+def test_a_factory_card_shows_its_step_track(repo, step) -> None:
+    """R4: the record's step is current, those before it done, those after it to do."""
+    _run_at(repo, step, None if step in ("decide", "done") else 1, after="review")
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert [s["name"] for s in progress["steps"]] == list(board.TRACK)
+    assert [s["state"] for s in progress["steps"]] == TRACKS[step]
+    assert progress["step"] == step and progress["limit"] == 3
+    labels = {s["name"]: s["label"] for s in progress["steps"]}
+    assert (labels["gate"] == "fixing") == (step == "fix")
+    if step in ("decide", "done"):
+        assert progress["elapsed"] is None and progress["fraction"] is None, "no bar"
+    else:
+        assert progress["elapsed"] >= 0 and progress["round"] == 1
+
+
+@pytest.mark.portable
+def test_a_decision_or_a_stop_overrides_the_record(repo) -> None:
+    """R4: a valid decision is every step done; a stop shown has no track at all."""
+    folder = _run_at(repo, "review")
+    _write(folder / "decision.md", "DECISION: ESCALATE\n\nAsk them.\n")
+    assert _states(_cards(repo)["016-draft-tags"]) == ["done"] * 6
+    stopped = _run_at(repo, "stop", None, name="017-draft-stop")
+    _write(stopped / factory.STOPPED, factory.stop_text("017-draft-stop", "rerun", ["it broke"]))
+    assert _cards(repo)["017-draft-stop"]["progress"] is None
+    assert _cards(repo)["003-draft-export"]["progress"]["steps"][-1]["state"] == "done", "READY"
+
+
+@pytest.mark.portable
+def test_reviews_count_up_as_they_land(repo) -> None:
+    """R5: `n` is counted on every request from the round's folder; `m` is the record's."""
+    folder = _run_at(repo, "review", 2)
+    review = _cards(repo)["016-draft-tags"]["progress"]["steps"][2]
+    assert review["label"] == "reviews 0/4"
+    _write(folder / "reviews" / "round-2" / "code.md", "VERDICT: PASS\n")
+    _write(folder / "reviews" / "round-2" / "verified.md", "- KEPT: code: a\n")
+    _write(folder / "reviews" / "round-1" / "test.md", "VERDICT: PASS\n")
+    assert _cards(repo)["016-draft-tags"]["progress"]["steps"][2]["label"] == "reviews 1/4"
+    _write(folder / "reviews" / "round-2" / "test.md", "VERDICT: CHANGES\n- CHANGE: a\n")
+    assert _cards(repo)["016-draft-tags"]["progress"]["steps"][2]["label"] == "reviews 2/4"
+
+
+@pytest.mark.portable
+def test_a_first_build_runs_from_its_builder_session(repo) -> None:
+    """R6: no record and no builder report: the build is current since `builder.sessions`."""
+    folder = _run_at(repo, None)
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert _states({"progress": progress}) == TRACKS["build"] and progress["round"] == 1
+    _write(folder / "build" / "round-1.md", "Built.\n")
+    assert _cards(repo)["016-draft-tags"]["progress"] is None, "built, but no record: no track"
+
+
+@pytest.mark.portable
+def test_a_run_without_a_record_has_no_track(repo) -> None:
+    """R6: a Tier 2 whose spec is still being drafted, or a run from before the record."""
+    folder = _change(repo, "018-draft-spec", 2, "plan", "Draft spec")
+    _write(folder / "runs" / "spec-writer.sessions", "s-1\n")
+    cards = _cards(repo)
+    assert cards["018-draft-spec"]["progress"] is None
+    assert cards["001-reopen-drafts"].get("progress", "absent") == "absent", "by hand: no key"
+
+
+@pytest.mark.portable
+def test_a_garbled_step_record_is_a_problem(repo) -> None:
+    folder = _run_at(repo, "review")
+    _write(folder / factory.STEP, "running, probably\n")
+    card = _cards(repo)["016-draft-tags"]
+    assert card["progress"] is None
+    assert any("runs/step.md" in p for p in card["problems"]), card["problems"]
+
+
+@pytest.mark.portable
+def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
+    """R7: the board's copies are `factory.py`'s, and its writer reads back through the board."""
+    for name in ("STEP_RE", "ROUND_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "AFTER_RE",
+                 "SECONDS_RE"):  # fmt: skip
+        assert getattr(board, name).pattern == getattr(factory, name).pattern, name
+    assert board.STEP == factory.STEP and board.REVIEWER_ROLES == factory.REVIEWERS
+    gate = (ROOT / "plugins" / "factory" / "scripts" / "factory.py").read_text(encoding="utf-8")
+    assert "Seconds: {seconds}" in gate and board.SECONDS_RE.match("Seconds: 12.5")
+    for out in (
+        {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"]},
+        {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"]},
+    ):
+        text = factory.step_text(out, "2026-11-17T10:00:00Z", "rework")
+        assert board.read_step(text) == factory.read_step(text)
+        assert board.read_step(text)["reviewers"] == out["reviewers"]
+
+
+def _row(role: str, seconds: float | None) -> tuple[str, dict]:
+    return role, ({} if seconds is None else {"duration_ms": int(seconds * 1000)})
+
+
+# One closed factory run, in the order its sessions ended: a build, two review rounds with a
+# verification and a rework between them, the approver, then the landing's own review.
+RUN = [
+    _row("spec-writer", 300), _row("builder", 100), _row("code", 30), _row("test", 50),
+    _row("verifier", 20), _row("builder", 40), _row("code", 10), _row("builder", None),
+    _row("test", 12), _row("approver", 15), _row("code", 999), _row("builder", 999),
+]  # fmt: skip
+
+
+def _closed(root: Path, name: str, tier: int, rows=RUN, gates=(5.0, 6.0)) -> None:
+    """A factory change closed on `main`: its folder committed with the rows `factory.py`'s own
+    `record_cost()` writes and its gate file, then removed by a `Close` commit."""
+    folder = _change(root, name, tier, "shipped", name.split("-", 1)[1])
+    for i, (role, figures) in enumerate(rows):
+        factory.record_cost(folder, f"s-{i}", role, "opus", figures)
+    attempts = "".join(f"## Attempt {k}\n\nVerdict: PASS\nSeconds: {s}\n\n"
+                       for k, s in enumerate(gates, 1))  # fmt: skip
+    _write(folder / "build" / "round-1.gate.md", f"GATE: PASS\n\n{attempts}")
+    _git(root, "add", "-A", str(folder))
+    _git(root, "commit", "-q", "-m", f"Ship {name}")
+    _git(root, "rm", "-rq", str(folder))
+    _git(root, "commit", "-q", "-m", f"Close {name}")
+
+
+@pytest.mark.portable
+def test_typical_times_come_from_closed_factory_runs(repo) -> None:
+    """R9: each step's samples, split by role and order, at the change's tier."""
+    _closed(repo, "020-draft-a", 2)
+    rows = [_row("builder", 200), _row("code", 70), _row("approver", 25)]
+    _closed(repo, "021-draft-b", 2, rows, gates=(9.0,))
+    _closed(repo, "022-draft-c", 2, rows, gates=())
+    _closed(repo, "023-draft-d", 1, rows)
+    _change(repo, "024-draft-manual", 2, "shipped", "Manual")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Close 024-draft-manual")
+    samples = board.history_samples(repo, "main")
+    assert samples[("build", 2)] == {"020-draft-a": [100], "021-draft-b": [200],
+                                      "022-draft-c": [200]}  # fmt: skip
+    assert samples[("review", 2)]["020-draft-a"] == [50, 12], "the slowest of each round"
+    assert samples[("verify", 2)] == {"020-draft-a": [20]}
+    assert samples[("rework", 2)] == {"020-draft-a": [40]}, "a row with no duration is skipped"
+    assert samples[("approve", 2)]["020-draft-a"] == [15], "the landing's rows are not the run's"
+    assert samples[("gate", 2)] == {"020-draft-a": [5.0, 6.0], "021-draft-b": [9.0]}
+    assert set(samples[("build", 1)]) == {"023-draft-d"}
+    table = board.typical_times(repo, "main")
+    assert table["build/2"] == {"seconds": 200, "samples": 3}
+    assert table["review/2"] == {"seconds": 60, "samples": 3}, "the median of every sample"
+    assert "verify/2" not in table and "build/1" not in table, "fewer than 3 changes: no figure"
+
+
+@pytest.mark.portable
+def test_the_estimate_is_capped_and_absent_without_history(repo) -> None:
+    """R8: the bar never passes 95%, and a tier with 2 sampled changes has no typical time."""
+    rows = [_row("builder", 60), _row("code", 60), _row("approver", 60)]
+    for name in ("030-draft-a", "031-draft-b"):
+        _closed(repo, name, 2, rows)
+    _run_at(repo, "build", since="2000-01-01T00:00:00Z")
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert progress["elapsed"] > 0
+    assert (progress["typical"], progress["fraction"], progress["samples"]) == (None, None, None)
+    _closed(repo, "032-draft-c", 2, rows)
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert (progress["typical"], progress["fraction"], progress["samples"]) == (60, 0.95, 3)
+    fresh = board._progress(
+        {"stage": "build", "tier": 2, "built": [1], "decision": None, "stopped": None},
+        repo / ".sdlc" / "work" / "016-draft-tags",
+        [],
+        {"build/2": {"seconds": 600, "samples": 3}},
+        board._since("2000-01-01T00:00:00Z") + 60,
+    )
+    assert (fresh["elapsed"], fresh["fraction"]) == (60, 0.1)
+
+
+@pytest.mark.portable
+def test_history_is_read_once_per_base_branch_tip(repo, monkeypatch) -> None:
+    """R10: one `rev-parse` a request; the walk again only once the tip moves."""
+    rows = [_row("builder", 60)]
+    for name in ("040-draft-a", "041-draft-b", "042-draft-c"):
+        _closed(repo, name, 2, rows)
+    walks = []
+    real = sdlc._git
+
+    def counting(root, *args):
+        if "log" in args and any("costs.jsonl" in a for a in args):
+            walks.append(args)
+        return real(root, *args)
+
+    monkeypatch.setattr(sdlc, "_git", counting)
+    board.state(repo)
+    board.state(repo)
+    assert len(walks) == 1, walks
+    _closed(repo, "043-draft-d", 2, [_row("builder", 600)])
+    board.state(repo)
+    assert len(walks) == 2
+    assert board.typical_times(repo, "main")["build/2"]["samples"] == 4
+
+
+PLAN = """\
+# 050 — plan
+
+## Files to change
+
+- `src/tags.py`: the tags.
+- `docs/tags.md` (new): what they are.
+- src/other.py: untouched yet, its width read from
+  `progress.fraction` on a wrapped line, which names nothing.
+- tests/: a test each.
+- `<Path + one line on what happens to it.>`
+- The docs, as their own lines.
+
+## Work order
+
+- `src/not-a-file-to-change.py`
+"""
+
+
+@pytest.mark.portable
+def test_the_plan_hint_counts_named_files_the_branch_touched(repo) -> None:
+    """R11: the named paths of `## Files to change` the branch or its worktree has touched."""
+    commit = ["src/tags.py", "tests/test_tags.py"]
+    folder = _worktree(
+        repo, "050-draft-tags", 2, "build", factory=True, commit=commit, dirty=["docs/tags.md"]
+    )
+    _write(folder / "plan.md", PLAN)
+    assert board._plan_named(PLAN) == ["src/tags.py", "docs/tags.md", "src/other.py", "tests/"]
+    assert _cards(repo)["050-draft-tags"]["progress"]["plan"] == {"named": 4, "touched": 3}
+    _write(folder / "plan.md", "# plan\n\n## Files to change\n\n<Path.>\n<More.>\n")
+    assert _cards(repo)["050-draft-tags"]["progress"]["plan"] is None, "an unfilled plan"
+    one = _worktree(repo, "051-draft-pins", 1, "build", factory=True, commit=["src/tags.py"])
+    _write(one / "plan.md", PLAN)
+    assert _cards(repo)["051-draft-pins"]["progress"]["plan"] is None, "a Tier 1 change"
+    _write(folder / "plan.md", "# plan\n\n## Files to change\n\nThe usual ones.\n")
+    assert _cards(repo)["050-draft-tags"]["progress"]["plan"] is None, "no path named"
+
+
+@pytest.mark.portable
+def test_the_bar_is_drawn_from_the_capped_fraction() -> None:
+    """R13: the only width the page sets from data is `progress.fraction`'s, labelled an estimate,
+    and the track's chips use no column key as a class."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+    widths = re.findall(r"width:\s*\$\{([^}]*)\}", script)
+    assert widths and all(re.fullmatch(r"Math\.round\(p\.fraction \* 100\)", w) for w in widths)
+    assert "style" not in re.sub(r'style: `width: \$\{Math\.round\(p\.fraction \* 100\)\}%`', "",
+                                 script), "no other style is set"  # fmt: skip
+    assert "estimate" in script and "typical" in script and "files touched" in script
+    assert "function progressRow(" in script and "progressRow(c.progress)" in script
+
+
+@pytest.mark.portable
+def test_a_step_s_state_is_in_its_text_and_the_bar_is_hidden_from_assistive_tech() -> None:
+    """Round 1's ux changes: a step's state is said in its text, not by colour alone, and the bar,
+    inside the card's button where a role would be dropped, is hidden; its figures are text."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+    words = re.search(r"const STEP_WORDS = \{(.*?)\};", script, re.S)
+    assert words, "each state has its own words"
+    for state in ("done", "current", "paused"):
+        assert re.search(rf'\b{state}: "[^"]+"', words.group(1)), state
+    assert "progressbar" not in script
+    assert re.search(r'class: "bar", "aria-hidden": "true"', script)

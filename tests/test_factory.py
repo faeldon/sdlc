@@ -9,8 +9,10 @@ with its folder, as `/sdlc:intent` leaves one, so nothing here runs an agent.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1935,3 +1937,88 @@ def test_a_ui_review_never_runs_blind(tmp_path, capsys, claude, monkeypatch) -> 
     assert "index-390x844.png" in argv[1] and "web/page.html" in argv[1]
     assert (folder / "reviews" / "round-1" / "ux.md").is_file()
     assert (folder / "runs" / "reviewer-ux.sessions").is_file()
+
+
+# ---------------------------------------------------------------- the step record (088)
+
+
+def _step(root: Path) -> Path:
+    return root / ".sdlc" / "work" / NAME / factory.STEP
+
+
+def _fields(root: Path) -> dict:
+    return factory.read_step(_step(root).read_text(encoding="utf-8"))
+
+
+@pytest.mark.portable
+def test_record_writes_the_step_it_read(tmp_path, capsys) -> None:
+    """R1: every field is `verdicts`' own reading, a stop included."""
+    root = _change(tmp_path)
+    for setup in (lambda: None, lambda: _build_report(root, 1),
+                  lambda: _review(root, 1, "code", "Looks fine to me!")):  # fmt: skip
+        setup()
+        _, out = _record(root, capsys, _head(root))
+        got = _fields(root)
+        assert got["step"] == out["next"]
+        assert got["round"] == out["round"] and got["limit"] == out["limit"]
+        assert got["reviewers"] == out["reviewers"]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", got["since"])
+    assert got["step"] == "stop" and _stopped(root).is_file(), "stopped.md does as it did"
+
+
+@pytest.mark.portable
+def test_the_step_record_keeps_its_since_while_the_step_holds(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """R2: a repeated reading keeps the time; a new step or round sets it anew."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: PASS")
+    times = iter(["2026-11-17T10:00:00Z", "2026-11-17T10:05:00Z", "2026-11-17T10:09:00Z"])
+    monkeypatch.setattr(factory, "_utc_now", lambda: next(times))
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["round"]) == ("review", 1)
+    _review(root, 1, "test", "VERDICT: PASS")
+    _record(root, capsys, _head(root))
+    assert _fields(root)["since"] == "2026-11-17T10:00:00Z", "reviewers still missing: same step"
+    for role in ("security", "behaviour"):
+        _review(root, 1, role, "VERDICT: PASS")
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["since"]) == ("approve", "2026-11-17T10:05:00Z")
+
+
+@pytest.mark.portable
+def test_a_decide_record_keeps_the_step_it_paused_at(tmp_path, capsys) -> None:
+    """R4's paused position: `decide` carries the step the record held before it."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _record(root, capsys, _head(root))
+    assert _fields(root)["step"] == "review"
+    ledger = root / ".sdlc" / "work" / NAME / "decisions.md"
+    ledger.write_text("- [ ] D1 (code round 1, blocking): soft or hard?\n", encoding="utf-8")
+    _record(root, capsys, _head(root))
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["after"]) == ("decide", "review")
+
+
+@pytest.mark.portable
+def test_the_step_record_never_reaches_the_loop(tmp_path, capsys) -> None:
+    """R3: the reading is the same with the record present, absent or garbled, and `verdicts`
+    without `--record` never writes it."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:1: a")
+
+    def reading() -> dict:
+        return _verdicts(root, capsys, _head(root))
+
+    bare = reading()
+    assert not _step(root).exists(), "verdicts alone wrote the step record"
+    _record(root, capsys, _head(root))
+    assert reading() == bare
+    _step(root).write_text("STEP: approve\nROUND: 9\n", encoding="utf-8")
+    assert reading() == bare
+    _step(root).write_text("garbled \x00 text\n", encoding="utf-8")
+    assert reading() == bare
+    source = inspect.getsource(factory.loop_state)
+    assert "STEP" not in source and "read_step" not in source

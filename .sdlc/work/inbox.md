@@ -284,19 +284,6 @@ Raised by: 077-ship-resolves-conflicts (correctness)
 closes the window. See .sdlc/work/082-parallel-gate/notes.md in 082's commit.
 Theme: tests
 
-## [2026-11-17-15] [idea] A progress indicator on the board's cards
-
-Show how far a change has got, so the person can see it from the board rather than asking. For a
-factory run, a step track from what `verdicts` already knows: build, gate, reviews n/m, verify,
-rework, approve. For the step running now, a bar of elapsed time against the typical time for that
-step and tier, read from history: `Close` commits' `Sdlc-Stage … elapsed=` and `runs/costs.jsonl`'s
-`duration_ms` by role. It's labelled an estimate and never passes about 95% until the step ends.
-Under it, a hint of how many of `plan.md`'s named files have been touched so far. Computed on every
-refresh, nothing stored. Build it after 085-factory-stopped-runs lands, since both change the
-factory card.
-Theme: board
-Raised 2026-11-17.
-
 ## [2026-11-17-16] [idea] Resume an escalated factory run
 
 `factory.py start` refuses a change at `stage: test` (`STARTS` has no `test`), and `verdicts` reads

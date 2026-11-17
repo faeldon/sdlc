@@ -223,7 +223,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    Do what its `next` says, and nothing else; `factory.py agent` refuses a step it doesn't name.
    `--record` keeps `.sdlc/work/NNN-slug/runs/stopped.md` in step with that reading: written on a
-   `stop`, removed on any other step.
+   `stop`, removed on any other step. It also writes the step it read, with since when, to
+   `.sdlc/work/NNN-slug/runs/step.md`, which the board's step track reads; leave both to it.
 
    - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
      step 1.

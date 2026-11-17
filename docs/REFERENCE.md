@@ -457,7 +457,13 @@ it has touched: to Build once its branch or worktree changes a path outside `.sd
 once ship's review has written its `findings.md`. Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
-each round's verdicts, the verifier's answers, its decisions and what its agents cost. A click opens
+each round's verdicts, the verifier's answers, its decisions and what its agents cost, and a step
+track of the round under way (build, gate, reviews *n/m*, verify, rework, approve) read from the
+`runs/step.md` its supervisor's `verdicts --record` writes. The current step shows how long it has
+run against the median time that step took at that tier in the last 20 closed factory changes, a
+bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
+them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
+has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A click opens
 any file in the change's folder. It writes nothing, answers only `GET` for the page, `/state.json`
 and `/file` (one file inside the folder of a change it shows), refuses a request naming another host,
 and a second `board` on a port a board holds says so rather than starting again.

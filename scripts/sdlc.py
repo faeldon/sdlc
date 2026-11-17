@@ -7418,6 +7418,8 @@ TEMPLATE_READS: dict[str, dict[str, tuple[str, ...]]] = {
         "headings": ("Problem", "Outcome", "Open questions"),
     },
     "issue.md": {"placeholders": ("{{artifacts}}",)},
+    # The board's plan hint counts the paths this section names.
+    "plan.md": {"headings": ("Files to change",)},
 }
 # Classes a refresh proposes text for; the rest are reported or left alone.
 PROPOSED = ("added", "refreshed", "removed")

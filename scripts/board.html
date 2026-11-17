@@ -83,6 +83,19 @@ main.board {
 .chip.PASS { background: var(--pass-bg); color: var(--pass); }
 .chip.CHANGES { background: var(--changes-bg); color: var(--changes); }
 .chip.missing { color: var(--muted); }
+.progress { margin-top: 6px; display: grid; gap: 4px; }
+.track { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+.track .r { color: var(--muted); font-size: 11px; margin-right: 2px; }
+.step {
+  font-size: 11px; padding: 1px 5px; border-radius: 4px; border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.step.done { background: var(--pass-bg); color: var(--pass); }
+.step.current { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.step.paused { border-color: var(--stop); border-style: dashed; color: var(--stop); }
+.step.todo { background: var(--chip); color: var(--muted); }
+.bar { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+.bar .fill { height: 100%; background: var(--accent); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 3; }
 .drawer {
@@ -187,6 +200,35 @@ function roundRow(r) {
   return h("div", { class: "round" }, chips);
 }
 
+function dur(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// How far a factory run has got: the round's six steps, the current one's time against what it
+// typically takes (an estimate, never drawn past the server's cap), and the plan's files touched.
+// A step's state is said in its text, never by colour alone.
+const STEP_WORDS = { done: "✓ ", current: "now: ", paused: "waiting on you: ", todo: "" };
+
+function progressRow(p) {
+  const round = p.round ? `R${p.round}${p.limit ? ` of ${p.limit}` : ""}` : null;
+  const steps = p.steps.map((s) => h("span", { class: `step ${s.state}` },
+    `${STEP_WORDS[s.state] || ""}${s.label}`));
+  const parts = [h("div", { class: "track" }, round ? h("span", { class: "r" }, round) : null, steps)];
+  if (p.fraction !== null && p.fraction !== undefined) {
+    // Inside the card's button a role would be dropped: the line under it says the same in text.
+    parts.push(h("div", { class: "bar", "aria-hidden": "true" },
+      h("div", { class: "fill", style: `width: ${Math.round(p.fraction * 100)}%` })));
+    parts.push(h("div", { class: "meta" },
+      `${dur(p.elapsed)} · ~${dur(p.typical)} typical · estimate (${p.samples} runs)`));
+  } else if (p.elapsed !== null && p.elapsed !== undefined) {
+    parts.push(h("div", { class: "meta" }, `${dur(p.elapsed)} so far`));
+  }
+  if (p.plan) parts.push(h("div", { class: "meta" }, `plan: ${p.plan.touched} of ${p.plan.named} files touched`));
+  return h("div", { class: "progress" }, parts);
+}
+
 function card(c) {
   const have = c.artifacts.map((a) => a.replace(/\.md$/, "") + (c.unfilled.includes(a) ? "~" : ""));
   const meta = [
@@ -214,6 +256,7 @@ function card(c) {
     h("div", { class: "title" }, c.title.replace(/^\d+\s*—\s*/, "") || c.slug),
     h("div", { class: "meta" }, meta),
     factory && c.rounds.length ? h("div", { class: "rounds" }, c.rounds.map(roundRow)) : null,
+    factory && c.progress ? progressRow(c.progress) : null,
     factory && c.assumed.length ? h("div", { class: "meta" }, `${c.assumed.length} default(s) assumed`) : null,
     factory ? h("div", { class: "meta" }, money(c.cost)) : null,
     flags,

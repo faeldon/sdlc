@@ -221,9 +221,12 @@ open one, and a shipped or dropped one while `ready_to_close()` finds its worktr
 close. It writes nothing, `stage:` included: a change built by hand moves across the columns by what
 its branch and worktree touched outside `.sdlc/work/` and whether ship's review ran (`_seen()`),
 never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
-factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`, `runs/stopped.md`) it reads with
-copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the core still never imports or
-runs the factory. The page builds every node with `textContent`, never from a string of HTML.
+factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`, `runs/stopped.md`,
+`runs/step.md`) it reads with copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the
+core still never imports or runs the factory. A factory card's step track (`_progress()`) is the
+step the supervisor's last reading named, from `runs/step.md`; its estimate is the median time of
+that step at that tier over the newest closed factory runs' `costs.jsonl` and gate files at each
+`Close^` (`typical_times()`), read once per base-branch tip and kept in memory, never on disk. The page builds every node with `textContent`, never from a string of HTML.
 
 **The inbox: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests, each
 entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
@@ -429,7 +432,8 @@ verifier's `verified.md`, and the run's depth comes from the diff against the ba
 `sdlc.py`'s by a test, like its regexes: `verdicts` decides from the rounds alone and never reads a
 state file, so a run that reviewed at the full depth stays full by what its rounds hold. With
 `--record`, which only the supervisor passes, it writes the stop it found to `runs/stopped.md` for
-the board and status, or removes it, and nothing reads that back into the loop. A builder report and a
+the board and status, or removes it, and the step it read, with since when, to `runs/step.md` for
+the board, and nothing reads either back into the loop. A builder report and a
 behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
 checks; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
 under a prompt (`test_no_agent_but_the_builder_runs_checks`).
