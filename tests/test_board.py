@@ -397,3 +397,24 @@ def test_the_page_is_self_contained_and_never_parses_data_as_html() -> None:
     assert "textContent" in page
     for column in ("plan", "design", "build", "test", "ready", "needs-you"):
         assert f'key: "{column}"' in page, column
+
+
+@pytest.mark.portable
+def test_no_column_key_is_a_class_the_page_styles_on_its_own() -> None:
+    # A card carries its column's key as a class (`card close`), so a rule for that class
+    # anywhere but on a `.col` or a `.card` restyles every card in the column.
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    keys = set(re.findall(r'\{ key: "([^"]+)"', page))
+    assert {"ready", "close", "needs-you"} <= keys
+    css = re.search(r"<style>(.*?)</style>", page, re.S).group(1)
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    clashes = []
+    for block in re.findall(r"([^{}]+)\{", css):
+        for selector in block.split(","):
+            if selector.strip().startswith("@"):
+                continue
+            for compound in re.split(r"[\s>+~]+", selector.strip()):
+                classes = set(re.findall(r"\.([A-Za-z_][\w-]*)", compound))
+                if classes & keys and not classes & {"col", "card"}:
+                    clashes.append(selector.strip())
+    assert not clashes, clashes

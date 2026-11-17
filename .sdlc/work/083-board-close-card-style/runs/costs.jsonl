@@ -1,0 +1,5 @@
+{"session": "92166adc-4e21-4df1-bf27-f98311a8001c", "role": "builder", "model": "opus", "cost_usd": 0.3528742, "duration_ms": 470719, "turns": 9, "in": 18, "out": 3235, "cache_create": 29366, "cache_read": 265871}
+{"session": "b3b9b3cd-fb25-4591-8cb1-bb9bb7715328", "role": "ui", "model": "haiku", "cost_usd": 0.008650930000000001, "duration_ms": 16845, "turns": 8, "in": 6, "out": 3222, "cache_create": 32755, "cache_read": 48833}
+{"session": "1e2ae06d-f04e-457e-aaae-06ed4b415841", "role": "ux", "model": "haiku", "cost_usd": 0.01023975, "duration_ms": 22809, "turns": 9, "in": 8, "out": 4294, "cache_create": 36594, "cache_read": 77315}
+{"session": "6a0086a8-f062-4f90-8cfa-85d98a6fa1bc", "role": "code", "model": "haiku", "cost_usd": 0.008167110000000002, "duration_ms": 47728, "turns": 6, "in": 8, "out": 4131, "cache_create": 26512, "cache_read": 79841}
+{"session": "4d4fb427-7008-491e-8aa4-215a5a40fae2", "role": "approver", "model": "opus", "cost_usd": 0.3297506, "duration_ms": 22536, "turns": 12, "in": 10, "out": 2352, "cache_create": 32651, "cache_read": 107313}
