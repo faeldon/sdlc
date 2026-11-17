@@ -231,3 +231,9 @@ pre-existing: scripts/board.html:573-585: `show()` assigns `doc` when its fetch 
 
 Severity: med
 Paths: scripts/board.html
+
+## [2026-11-18-10] [idea] The factory's spec gate asks a question worded by the script
+
+Left undone by 125-build-gate-shows-the-change, carried forward when it landed: `/sdlc-factory:spec`'s WAIT still words its question in the skill (`Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design?`), but its only placeholder is the folder name, so there is nothing a model could get wrong in it; left out of this change, per the intent's scope.
+See .sdlc/work/125-build-gate-shows-the-change/notes.md in its commit.
+Raised 2026-11-18.

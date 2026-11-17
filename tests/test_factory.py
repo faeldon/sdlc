@@ -4082,3 +4082,118 @@ def test_an_upgrade_or_spec_record_keeps_the_step_it_paused_at(tmp_path, capsys)
         2,
         None,
     )
+
+
+# ---------------------------------------------------------------- the build gate's question
+
+TAIL = (
+    "a verifier checks each round's changes, the approver decides, at most 26 agent runs, agents "
+    "in auto, all left uncommitted at stage: test?"
+)
+
+
+def _question(root: Path, capsys) -> str | None:
+    _, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    return out["question"]
+
+
+def test_start_words_the_build_question_without_a_spec(tmp_path, capsys) -> None:
+    """The plain form, word for word as the skill held it: no gate, no sensitive list, no `[ui]`."""
+    root = _change(tmp_path, 1, "plan")
+    assert _question(root, capsys) == (
+        f"Run the factory on {NAME}: the builder plans and builds it, with no gate configured, "
+        "code, security, test and behaviour review it in up to 3 rounds, "
+        + TAIL
+        + " (yes / change the reviewers or rounds / no)"
+    )
+
+
+def test_the_build_question_names_the_base_branch_s_gate_and_light_depth(tmp_path, capsys):
+    """The gate clause and the light parenthesis come from the base branch's config alone."""
+    config = '[commands]\ncheck = "./check.sh"\n\n[review]\nsensitive = ["src/auth/"]\n'
+    root = _change(tmp_path, 1, "plan", config=config)
+    assert _question(root, capsys) == (
+        f"Run the factory on {NAME}: the builder plans and builds it, the base branch's gate "
+        "./check.sh runs on each build before any reviewer (up to 2 fixes a round), code, "
+        "security, test and behaviour review it in up to 3 rounds (or code in up to 2 rounds "
+        "when the diff touches no sensitive path), "
+        + TAIL
+        + " (yes / change the reviewers or rounds / no)"
+    )
+    (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
+    assert "gate ./check.sh runs" in _question(root, capsys), "the change's own copy never counts"
+
+
+UI_TABLE = '[ui]\nserve = "npm run dev"\nshoot = "shot {url} {out}"\npaths = ["web/", "*.css"]\n'
+
+
+@pytest.mark.parametrize("missing", [None, "serve", "shoot", "paths"])
+def test_the_build_question_names_ui_review_only_when_it_can_run(tmp_path, capsys, missing):
+    root = _change(tmp_path, 1, "plan")
+    ui = "\n".join(
+        line for line in UI_TABLE.splitlines() if not missing or not line.startswith(missing)
+    )
+    _git(root, "checkout", "-q", "main")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    _commit_on_main(root, ".sdlc/factory.toml", ui + "\n")
+    _git(root, "checkout", "-q", NAME)
+    clause = (
+        "review it in up to 3 rounds, and, on a diff touching web/, *.css, the ui and ux "
+        "reviewers, which start npm run dev, a verifier"
+    )
+    assert (clause in _question(root, capsys)) is (missing is None)
+
+
+def test_the_build_question_asks_to_write_a_spec_draft(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 2, "plan")
+    assert _question(root, capsys) == (
+        f"Write this spec and run the factory on {NAME}: the builder plans and builds it, with no "
+        "gate configured, code, security, test and behaviour review it in up to 3 rounds, "
+        + TAIL
+        + " (yes / revise a requirement / change the reviewers or rounds / no)"
+    )
+
+
+def test_the_build_question_sends_an_escalated_change_back(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 1, "test")
+    _escalated(root)
+    assert _question(root, capsys) == (
+        f"Send {NAME} back to the factory: decision.md kept as decision-1.md, the builder rebuilds "
+        "from round 4 with the approver's reasons, with no gate configured, code, security, test "
+        "and behaviour review it in up to 3 more rounds, a verifier checks each round's changes, "
+        "the approver decides again, at most 26 agent runs, agents in auto, all left uncommitted "
+        "at stage: test? (yes / change the reviewers or rounds / no)"
+    )
+
+
+def test_the_build_question_carries_on_an_upgraded_run(tmp_path, capsys) -> None:
+    root, folder = _tier1_run(tmp_path, config='[review]\nsensitive = ["src/auth/"]\n')
+    _upgraded(root, folder)
+    assert _question(root, capsys) == (
+        f"Write this spec and carry on {NAME}'s factory run as Tier 2: the builder, resumed, "
+        "rewrites plan.md against it and builds round 2, with no gate configured, code, security, "
+        "test and behaviour review it in up to 3 more rounds (or code and test in up to 2 rounds "
+        "when the diff touches no sensitive path), a verifier checks each round's changes, the "
+        "approver decides, at most 26 more agent runs, agents in auto, all left uncommitted at "
+        "stage: test? (yes / revise a requirement / change the reviewers or rounds / no)"
+    )
+
+
+def test_no_build_question_for_a_refusal_or_a_spec(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 2, "test")
+    assert _question(root, capsys) is None, "a test change with no decision is refused"
+    _, out = _run(capsys, factory.cmd_start, _change(tmp_path / "b", 2, "plan"), "008", "spec")
+    assert out["question"] is None, "the spec skill asks its own"
+    code, out = _run(
+        capsys, factory.cmd_start, _change(tmp_path / "c", branch="main-ish"), "008", "build"
+    )
+    assert code == 1 and out["question"] is None, "no worktree of its own"
+
+
+@pytest.mark.parametrize(
+    "names, said",
+    [([], "no reviewer"), (["code"], "code"), (["code", "test"], "code and test"),
+     (["code", "security", "test"], "code, security and test")],
+)  # fmt: skip
+def test_the_build_question_lists_reviewers_as_a_sentence(names, said) -> None:
+    assert factory._listed(names) == said

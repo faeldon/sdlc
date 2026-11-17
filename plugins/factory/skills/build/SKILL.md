@@ -120,7 +120,9 @@ as is a test change with no decision or one that won't read. **A run upgraded to
 (see `upgrade` in Step 3) is named by `start`'s `upgraded`, its `round` (P, the upgraded run's first),
 the `decision` that upgraded it and the person's `answer`; null otherwise. **If there are refusals,
 show them and stop.** `start` also gives `base`, the branch the change lands on, and `behind`, how many of
-its commits the change lacks.
+its commits the change lacks, and `question`, Step 2's question, worded by the script in the form
+this run takes (a spec draft, none, a `restart` or `upgraded`), with the base branch's gate, its
+`[review] sensitive` list and its `[ui]` already read into it.
 
 With no refusals, bring the change up to date before any agent reads it:
 
@@ -142,6 +144,13 @@ with `/sdlc:ship` from the worktree, or `sdlc.py resolve`, never an agent before
 the `--head` every `verdicts` is given, and a run stops when `HEAD` moves.
 
 ## Step 1 — Show it
+
+**What the person sees first is the change itself, then the run.** Every time this step shows
+the run, open with the change's own words, quoted from its `intent.md`, never summarised or
+shortened: its `# ` title, then its `## Problem` and `## Outcome` sections as written, and for a
+Tier 1 its `## Approach` too, which is the spec its builder builds to. With a `restart` or
+`upgraded`, show the title alone, since the approver's reasons or the spec draft that follow say
+what it is for. The machinery comes after it, so a run is approved for its purpose.
 
 With `spec` true, first draft the spec, in the background:
 
@@ -175,7 +184,7 @@ the approach` section word for word (or that it has none), and the decisions sti
 answer it before the rebuild); then that `decision.md` will be kept as `archive`, and that the
 builder starts afresh at round `round`, told the approver's reasons.
 
-Then show the person, naming the change: the spec draft and its questions, when there is one; the
+Then show the person, naming the change, after its intent as above: the spec draft and its questions, when there is one; the
 change and its tier; how far it was behind `base` (`behind`) and what `fresh` did, its state,
 `from` → `head` and its `undo`, or, when it `held`, that the run resumes `<behind>` commits behind
 `<base>`; the gate command the script will run, from the base branch's
@@ -202,32 +211,22 @@ without running it, which `/sdlc:ship` does under a prompt.
 
 ## Step 2 — WAIT for explicit approval
 
-Ask literally, with a spec draft:
-
-> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
-
-And without one:
+Ask `start`'s `question` literally, as printed; never word your own. The script words it in the
+form this run takes (a spec draft, none, a `restart`, `upgraded`), so what the yes approves is
+what the run does. Its fullest form without a spec draft, each clause there only when the base
+branch's config names what it says (a `[commands] check`, `[review] sensitive` paths, a `[ui]`
+with `serve`, `shoot` and `paths`):
 
 > `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
 
-And with a `restart`:
+With a spec draft, or `upgraded`, it opens by asking to write the spec and offers `revise a
+requirement` too; with a `restart`, it sends the change back and names the archive and the round.
 
-> `Send NNN-<slug> back to the factory: decision.md kept as decision-<n>.md, the builder rebuilds from round <R> with the approver's reasons, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> more rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides again, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
-
-And with `upgraded`, on its spec draft:
-
-> `Write this spec and carry on NNN-<slug>'s factory run as Tier 2: the builder, resumed, rewrites plan.md against it and builds round <P>, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> more rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> more agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
-
-A no leaves the change a Tier 2 at `stage: plan`, which `sdlc.py check` reads as sound; the person
-comes back to it with `/sdlc-factory:build`, `/sdlc-factory:spec` or `/sdlc:spec`.
+On a spec draft, a no leaves the change a Tier 2 at `stage: plan`, which `sdlc.py check` reads as
+sound; the person comes back to it with `/sdlc-factory:build`, `/sdlc-factory:spec` or
+`/sdlc:spec`.
 
 A typed `yes, <words>` to it is a yes with the person's direction for the builder.
-
-Leave out the parenthesis when the base branch's `.sdlc/config.toml` lists no `[review]
-sensitive` paths: every run is then full. When it names no `[commands] check`, the gate clause reads
-`, with no gate configured` instead. Leave out `and, on a diff touching <ui paths>, the ui and ux
-reviewers, which start <serve>,` when `start`'s `ui` lacks `serve`, `shoot` or `paths`: no UI
-review can run.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -248,7 +247,8 @@ person's words, and decides nothing. Then, in the background:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --revise <R1>
 ```
 
-Changing the reviewers or rounds is an edit to `.sdlc/factory.toml` and a new question.
+Changing the reviewers or rounds is an edit to `.sdlc/factory.toml`, and `start` run again for
+its new `question`.
 
 ## Step 3 — Run it
 
@@ -375,8 +375,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    - **`spec`**: an upgraded change owes its spec before round `round` builds. Go back to Step 1:
      `start` reports `upgraded`, and the spec-writer drafts it, told the upgrade, the person's
-     answer and that the build so far is in the worktree; then ask Step 2's question in its
-     upgraded form, and on a yes run Step 3's `write-spec` and stages, only the moves still owed
+     answer and that the build so far is in the worktree; then ask Step 2's question, `start`'s
+     `question` in its upgraded form, and on a yes run Step 3's `write-spec` and stages, only the moves still owed
      when `written` is true. Nothing builds on the spec before that yes. Then come back here:
      `verdicts` names `build` at round `round`.
 

@@ -827,12 +827,80 @@ def behind_base(root: Path) -> dict:
     return {"base": base, "behind": int(count) if count and count.isdigit() else None}
 
 
+def _listed(names: list[str]) -> str:
+    """`a`, `a and b`, `a, b and c`; `no reviewer` for none, which the config allows."""
+    if not names:
+        return "no reviewer"
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def build_question(start: dict, check: str | None, sensitive: list[str]) -> str:
+    """The build gate's question, worded here so the skill never words its own, from `start`'s
+    output and the base branch's `[commands] check` and `[review] sensitive`: the restart form for
+    a `restart`, the upgraded form for an `upgraded` run, the spec-draft form for a `spec`, the
+    plain form otherwise. The gate clause reads `, with no gate configured` with no check; the
+    light parenthesis appears only with a sensitive list, since every run is full without one; the
+    UI clause only when `[ui]` has `serve`, `shoot` and `paths`, since no UI review runs without
+    all three."""
+    change, restart, upgraded = start["change"], start.get("restart"), start.get("upgraded")
+    more = " more" if restart or upgraded else ""
+
+    def rounds(n: int) -> str:
+        return f"{n}{more} round{'s' if n != 1 else ''}"
+
+    gate = (
+        f", the base branch's gate {check} runs on each build before any reviewer "
+        "(up to 2 fixes a round)"
+        if check
+        else ", with no gate configured"
+    )
+    review = f", {_listed(start['reviewers'])} review it in up to {rounds(start['rounds'])}"
+    if sensitive:
+        light = start["light"]
+        n = light["rounds"]
+        review += (
+            f" (or {_listed(light['reviewers'])} in up to {n} round{'s' if n != 1 else ''} "
+            "when the diff touches no sensitive path)"
+        )
+    ui = start["ui"]
+    if ui.get("serve") and ui.get("shoot") and ui.get("paths"):
+        review += (
+            f", and, on a diff touching {', '.join(ui['paths'])}, the ui and ux reviewers, "
+            f"which start {ui['serve']}"
+        )
+    again = " again" if restart else ""
+    runs = f"at most {start['max_runs']}{' more' if upgraded else ''} agent runs"
+    tail = (
+        f", a verifier checks each round's changes, the approver decides{again}, {runs}, agents "
+        f"in {start['mode']}, all left uncommitted at stage: test?"
+    )
+    if restart:
+        archive = restart["archive"]
+        opening = (
+            f"Send {change} back to the factory: decision.md kept as {archive}, the builder "
+            f"rebuilds from round {restart['round']} with the approver's reasons"
+        )
+    elif upgraded:
+        opening = (
+            f"Write this spec and carry on {change}'s factory run as Tier 2: the builder, "
+            f"resumed, rewrites plan.md against it and builds round {upgraded['round']}"
+        )
+    elif start.get("spec"):
+        opening = (
+            f"Write this spec and run the factory on {change}: the builder plans and builds it"
+        )
+    else:
+        opening = f"Run the factory on {change}: the builder plans and builds it"
+    revise = "revise a requirement / " if upgraded or start.get("spec") else ""
+    return f"{opening}{gate}{review}{tail} (yes / {revise}change the reviewers or rounds / no)"
+
+
 def cmd_start(root: Path, ident: str, purpose: str) -> int:
     """Whether a factory step may start on this change now, and what it will run with."""
     cfg, warnings = load_config(root)
     out: dict = {"change": None, "folder": None, "for": purpose, "tier": None, "stage": None}
     out.update(head=_git(root, "rev-parse", "--short", "HEAD"), **cfg, max_runs=max_runs(cfg))
-    out.update(behind_base(root), warnings=warnings, refusals=[])
+    out.update(behind_base(root), warnings=warnings, refusals=[], question=None)
     folder, refusal = find_change(root, ident)
     if refusal:
         out["refusals"].append(refusal)
@@ -868,6 +936,11 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         )
         if purpose == "spec" and tier == 1:
             out["refusals"].append("a Tier 1 change has no spec: its intent's Approach is the spec")
+    # The build gate's question, worded by the script; the spec skill asks its own.
+    if purpose == "build" and not out["refusals"]:
+        base = out["base"]
+        check, sensitive = (_base_check(root, base), _sensitive(root, base)) if base else (None, [])
+        out["question"] = build_question(out, check, sensitive)
     return emit(out, 1 if out["refusals"] else 0)
 
 

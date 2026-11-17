@@ -1139,8 +1139,7 @@ def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
         "<ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each "
         "round's changes, the approver decides, at most <max_runs> agent runs" in question
     )
-    assert "Leave out the parenthesis" in wait
-    assert "Leave out `and, on a diff touching <ui paths>" in wait, "unset [ui] asks as before"
+    assert "Ask `start`'s `question` literally, as printed; never word your own." in question
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
     assert "build/round-N.gate.md" in builder and "## A red gate" in builder
     assert "- KEPT:" in builder and "`- DROPPED:` line is not yours" in builder
@@ -1166,8 +1165,9 @@ def test_the_script_gates_each_build_before_any_reviewer() -> None:
         "the builder plans and builds it, the base branch's gate <command> runs on each build "
         "before any reviewer (up to 2 fixes a round), <reviewers> review it"
     )
-    assert wait.count(clause) == 2, "both questions, with a spec draft and without"
-    assert "`, with no gate configured`" in wait
+    assert clause in wait, "the question's fullest form names the gate"
+    # The script words the question, the no-gate form included (`build_question()`).
+    assert ", with no gate configured" in (FACTORY / "scripts" / "factory.py").read_text("utf-8")
     behaviour = (FACTORY / "agents" / "reviewer-behaviour.md").read_text(encoding="utf-8")
     flat = " ".join(behaviour.split())
     assert "build/round-N.gate.md" in flat and "never run the gate again yourself" in flat
