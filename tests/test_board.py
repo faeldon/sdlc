@@ -813,3 +813,53 @@ def test_a_step_s_state_is_in_its_text_and_the_bar_is_hidden_from_assistive_tech
         assert re.search(rf'\b{state}: "[^"]+"', words.group(1)), state
     assert "progressbar" not in script
     assert re.search(r'class: "bar", "aria-hidden": "true"', script)
+
+
+def _escalated(root: Path, name: str, stage: str, commit=()) -> Path:
+    """A factory change in a worktree of its own, as a run leaves one the approver escalated: a
+    round built and reviewed, `decision.md` saying ESCALATE, and `stage:` at whatever the person's
+    answer moved it to."""
+    folder = _worktree(root, name, 2, stage, commit=commit, factory=True)
+    _write(folder / "build" / "round-1.md", "Built.\n\n## Evidence\n\n$ ./check.sh\nexit: 0\n")
+    _write(folder / "reviews" / "round-1" / "code.md", "VERDICT: PASS\n")
+    _write(folder / "decision.md", "DECISION: ESCALATE\n\nThe spec leaves the retention open.\n")
+    return folder
+
+
+@pytest.mark.portable
+def test_each_factory_signal_counts_only_at_its_stage(repo) -> None:
+    """086: the stage is the only mark of the person's answer, so an escalation, a stop or a
+    pending decision the person has moved past leaves Needs you for the column that answer leads
+    to."""
+    _escalated(repo, "020-esc-shipped", "shipped", commit=["src/a.py"])
+    _escalated(repo, "021-esc-dropped", "dropped")
+    _escalated(repo, "022-esc-by-hand", "test", commit=["src/b.py"])
+    _escalated(repo, "023-esc-back", "build")
+    stopped = _worktree(repo, "024-stop-shipped", 1, "shipped", commit=["src/c.py"], factory=True)
+    _write(stopped / factory.STOPPED, factory.stop_text("024", "rerun", STOP_PROBLEMS))
+    pending = _worktree(repo, "025-pend-shipped", 1, "shipped", commit=["src/d.py"], factory=True)
+    _write(pending / "decisions.md", "- [ ] D1 (code round 1, blocking): purge after 30 days?\n")
+    at_test = _worktree(repo, "027-pend-test", 1, "test", commit=["src/f.py"], factory=True)
+    _write(at_test / "decisions.md", "- [ ] D1 (code round 1, blocking): purge after 30 days?\n")
+    cards = _cards(repo)
+    got = {n: (c["column"], c["next"]) for n, c in cards.items() if n >= "020"}
+    assert got == {
+        "020-esc-shipped": ("close", "/sdlc:close 020"),
+        "021-esc-dropped": ("close", "/sdlc:close 021"),
+        "022-esc-by-hand": ("needs-you", "/sdlc:ship, or /sdlc-factory:land with the others ready"),
+        "023-esc-back": ("build", "the factory is building it: wait for its decision"),
+        "024-stop-shipped": ("close", "/sdlc:close 024"),
+        "025-pend-shipped": ("close", "/sdlc:close 025"),
+        "027-pend-test": ("test", "/sdlc:ship"),
+    }
+    assert all(cards[n]["problems"] == [] for n in got), "every file read"
+
+
+@pytest.mark.portable
+def test_a_file_that_wont_read_needs_the_person_at_any_stage(repo) -> None:
+    """086: a stage never hides a problem."""
+    folder = _escalated(repo, "026-bad-shipped", "shipped", commit=["src/e.py"])
+    _write(folder / "decision.md", "Ship it, I think.\n")
+    card = _cards(repo)["026-bad-shipped"]
+    assert card["column"] == "needs-you"
+    assert any("decision.md" in p for p in card["problems"]), card["problems"]

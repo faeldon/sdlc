@@ -579,7 +579,7 @@ def next_action(entry: dict) -> str:
         return f"/sdlc:close {entry['id']}"
     if entry.get("stopped"):
         return entry["stopped"]["next"]
-    if entry.get("pending"):
+    if entry.get("pending") and stage == "build":
         return "answer its decision in the factory's supervisor"
     if entry.get("decision") and stage == "test":
         return "/sdlc:ship, or /sdlc-factory:land with the others ready"
@@ -595,18 +595,23 @@ def next_action(entry: dict) -> str:
 
 
 def column(entry: dict) -> str:
-    """The board's column: a stop that is the person's first (a problem, a stopped run, a
-    decision), then a factory change ready to ship, then one shipped or dropped and waiting on
-    close, else how far it has got."""
-    if entry["problems"] or entry.get("stopped") or entry.get("pending"):
+    """The board's column: a file that won't read first, at any stage; then a shipped or dropped
+    change, waiting on close whatever the factory's files still say; then a factory signal, each
+    only at the stage it belongs to (a stop or a blocking decision at `build`, the approver's
+    decision at `test`), since the stage is the only mark the person has answered one; else how
+    far it has got."""
+    stage = entry["stage"]
+    if entry["problems"]:
         return "needs-you"
-    if entry.get("decision") == "ESCALATE":
-        return "needs-you"
-    if entry["stage"] == "test" and entry.get("decision") == "READY":
-        return "ready"
-    if entry["stage"] in CLOSED:
+    if stage in CLOSED:
         return "close"
-    return entry.get("seen") or entry["stage"] or "needs-you"
+    if stage == "build" and (entry.get("stopped") or entry.get("pending")):
+        return "needs-you"
+    if stage == "test" and entry.get("decision") == "ESCALATE":
+        return "needs-you"
+    if stage == "test" and entry.get("decision") == "READY":
+        return "ready"
+    return entry.get("seen") or stage or "needs-you"
 
 
 def file_at(root: Path, change: str, rel: str) -> Path | None:

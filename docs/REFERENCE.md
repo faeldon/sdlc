@@ -450,11 +450,14 @@ of `quiet`, with each problem on a `⚠` line and the step that moves it on, shi
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
 the same open changes as a live page on `127.0.0.1` until it is stopped: one column per stage, then
 **Ready to ship** for a factory change the approver called READY, **Ready to close** for a shipped or
-dropped one whose worktree still stands, and **Needs you** for one with a blocking decision, an
-ESCALATE, a file that won't read, or a factory run that stopped, flagged with the stop's problems
-and naming its way on. A change built by hand moves on from its `stage:` line by what
-it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`, to Test
-once ship's review has written its `findings.md`. Each card gives the change's tier,
+dropped one whose worktree still stands, and **Needs you** for one with a file that won't read, at
+any stage, or a factory signal at the stage it belongs to: a run that stopped or a blocking decision
+at `build`, an ESCALATE at `test`, flagged with the stop's problems and naming its way on. The
+stage is the only mark that the person has answered one, so a change they shipped, dropped or put
+back to `build` leaves Needs you for the column that answer leads to, whatever the run's files
+still say. A change built by hand moves on from its `stage:` line by what it has touched: to Build
+once its branch or worktree changes a path outside `.sdlc/work/`, to Test once ship's review has
+written its `findings.md`. Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
 each round's verdicts, the verifier's answers, its decisions and what its agents cost, and a step

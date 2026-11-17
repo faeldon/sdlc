@@ -329,3 +329,43 @@ could take it between; and `sdlc.py board --port 0` serves on the port the OS pi
 reports its port); the second should print the bound port.
 Theme: factory
 Raised 2026-11-17.
+
+## [2026-11-17-22] [nit] The board's step track reads decision.md at any stage
+
+`_progress()` takes any `decision.md` as a finished run, so a change put back to `build` shows
+every step done in the Build column. Gate it by stage, as 086 did for the column and the next
+action.
+Theme: robustness
+Paths: scripts/board.py
+Cost: M
+Value: med
+Raised by: 086-board-signals-by-stage (correctness)
+
+## [2026-11-17-23] [bug] A board card whose file won't read says /sdlc:close at a closed stage
+
+Found by the review of 086-board-signals-by-stage. `next_action()` returns `/sdlc:close NNN`
+before it looks at `problems`, so a card under Needs you names a close (scripts/board.py:574-577).
+Severity: low
+Paths: scripts/board.py
+
+## [2026-11-17-24] [bug] At phone width the board's Needs you column comes last
+
+Found by the review of 086-board-signals-by-stage. Below 760px the columns stack in stage order,
+so the one that waits on the person is under all the others (scripts/board.html:44-46).
+Severity: low
+Paths: scripts/board.html
+
+## [2026-11-17-25] [bug] The board's file drawer has no focus trap
+
+Found by the review of 086-board-signals-by-stage. The drawer is `aria-modal`, but Tab moves into
+the page behind the scrim (scripts/board.html:136).
+Severity: low
+Paths: scripts/board.html
+
+## [2026-11-17-26] [bug] The verifier's chip on a board card explains itself only in a tooltip
+
+Found by the review of 086-board-signals-by-stage. `kept 1 · dropped 2` says whose count it is
+only in its `title`, which keyboard, touch and screen-reader users don't get
+(scripts/board.html:196-198).
+Severity: low
+Paths: scripts/board.html
