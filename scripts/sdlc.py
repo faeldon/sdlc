@@ -3696,6 +3696,25 @@ def _set_pending(tree: Path, branch: str, files: list[str]) -> None:
     _git(tree, "update-ref", _resolve_ref("pending", branch), made.stdout.strip())
 
 
+def _go_on(tree: Path, env: dict) -> subprocess.CompletedProcess:
+    """`git rebase --continue`, and when git won't go on because the step has nothing of its own
+    left (nothing unmerged, the index and the tracked files as `HEAD` holds them: a conflict
+    resolved to what the base already has), `git rebase --skip`, which drops only that empty step.
+    Git's merge backend drops it itself; its apply backend answers "No changes". An empty aside
+    commit is skipped the same way, which leaves what undoing it would: no work to put back."""
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(tree), *args],
+                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+
+    done = git("rebase", "--continue")
+    if done.returncode and _rebasing(tree) and not _unmerged(tree):
+        empty = not git("diff", "--quiet", "HEAD").returncode
+        if empty and not git("diff", "--cached", "--quiet", "HEAD").returncode:
+            return git("rebase", "--skip")
+    return done
+
+
 def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
     """Bring a change's branch up to date with the base branch when `base` refused on a conflict,
     leaving each conflicted file for the agent and doing every git step itself. `start` commits
@@ -3768,8 +3787,7 @@ def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
                 report.update(state="conflict", conflicted=files)
                 return emit(0)
             # Only `.sdlc/last-id` conflicted, and it is settled: go on.
-            done = subprocess.run(["git", "-C", str(tree), "rebase", "--continue"],
-                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+            done = _go_on(tree, env)
             if done.returncode and not _unmerged(tree):
                 return refuse(f"the rebase stopped: {(done.stderr or done.stdout).strip()[-300:]}")
         return finish()
@@ -3789,8 +3807,7 @@ def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
             return refuse(f"conflict markers left in: {', '.join(marked)}")
         for f in files:
             _git(tree, "add", "--", f)
-        done = subprocess.run(["git", "-C", str(tree), "rebase", "--continue"],
-                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+        done = _go_on(tree, env)
         if done.returncode and _rebasing(tree) and not _unmerged(tree):
             return refuse(f"the rebase won't go on: {(done.stderr or done.stdout).strip()[-300:]}")
         return step()
@@ -6695,6 +6712,13 @@ def _open_claims(home: Path) -> list[tuple[str, str]]:
     return claims
 
 
+def _as_written(entry: dict | None) -> dict | None:
+    """An entry as its own lines hold it: without `after`, which `parse_entries()` resolves to the
+    title of an entry still in the file, so a neighbour's removal would read as an edit. The
+    `After:` line as written stays in `fields`."""
+    return entry and {k: v for k, v in entry.items() if k != "after"}
+
+
 def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
     """`cmd_inbox_commit()`'s work, under its lock: the exit code, with `report` filled in.
     `state` is what the command resolved before taking the lock."""
@@ -6748,7 +6772,7 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
         now = {e["id"]: e for e in parse_entries(tree_text)}
         on_main = {e["id"] for e in parse_entries(main_text)}
         for i in ids:
-            if was.get(i) == now.get(i):
+            if _as_written(was.get(i)) == _as_written(now.get(i)):
                 refusals.append(f"{i}: this worktree's {tree_rel} doesn't change it")
             elif i not in was and i in on_main:
                 refusals.append(f"{i} is already in the main checkout's {rel}")
@@ -6764,7 +6788,7 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
     for k in after:
         if k not in before:
             actions["File"].append(k)
-        elif after[k] != before[k]:
+        elif _as_written(after[k]) != _as_written(before[k]):
             actions["Update"].append(k)
     claims: list[tuple[str, str]] | None = None
     for k, e in before.items():

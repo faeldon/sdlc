@@ -433,13 +433,17 @@ the change, which is how `measure` gives the supervisor's dialogs on `main` to t
 (`_supervised()`). `sdlc` only reads the files a run leaves in the change's folder: ship reads its rounds, and the board and status read its stop record. A round's `CHANGE:` lines reach the builder only through the
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
 `[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
-`sdlc.py`'s by a test, like its regexes: `verdicts` decides from the rounds alone and never reads a
-state file, so a run that reviewed at the full depth stays full by what its rounds hold. With
+`sdlc.py`'s by a test, like its regexes: `verdicts` decides from the rounds alone and reads no state
+file but `runs/mended` (below), so a run that reviewed at the full depth stays full by what its rounds hold. With
 `--record`, which only the supervisor passes, it writes the stop it found to `runs/stopped.md` for
 the board and status, or removes it, and the step it read, with since when, to `runs/step.md` for
 the board, and nothing reads either back into the loop. A builder report and a
 behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
-checks; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
+checks. A reply only ever opens with its verdict; one missing its evidence, or holding its verdict
+after a preamble (`preamble()`), is the one kind of stop the run mends, once a round for each role, by asking the
+same agent again (`agent --task mend`), its reply written over the old and the mend recorded in
+`runs/mended` (`mended()`), the one file a run writes that `verdicts` reads back: a role already
+mended that round is a `rerun` stop, and a second mend is refused; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
 under a prompt (`test_no_agent_but_the_builder_runs_checks`).
 The eval and the review read what `sdlc.py` writes (the register's bugs, `Sdlc-Fixes` and
 `Sdlc-Base` on `Close` commits) through copies of its parsing, each pinned by a test, write only

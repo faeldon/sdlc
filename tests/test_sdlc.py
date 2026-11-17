@@ -1285,6 +1285,31 @@ def test_resolve_with_commits_and_uncommitted_work(tmp_path: Path, capsys) -> No
     assert "M README.md" in _git(tree, "status", "--porcelain").splitlines()
 
 
+def test_resolve_skips_a_commit_the_base_already_holds(tmp_path: Path, capsys) -> None:
+    """Nit 2026-11-17-11: a conflict resolved to what the base holds leaves the branch's commit
+    with nothing of its own, which git's apply backend refuses to continue past ("No changes").
+    That commit is skipped; the next is kept, and the aside commit is still undone at the end."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    _git(tree, "config", "rebase.backend", "apply")
+    for name in ("a.txt", "b.txt"):
+        (tree / name).write_text(f"ours {name}\n", encoding="utf-8")
+        _git(tree, "add", name)
+        _git(tree, "commit", "-q", "-m", f"ours {name}")
+    (tree / "README.md").write_text("our readme\n", encoding="utf-8")
+    _commit_on_main(root, "a.txt", "theirs a\n")
+
+    code, out = _resolve(tree, "001", capsys)
+    assert out["conflicted"] == ["a.txt"] and _ref(tree, "aside"), out
+    (tree / "a.txt").write_text("theirs a\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert (code, out["state"], out["resolved"]) == (0, "clean", ["a.txt"]), out
+    log = _git(tree, "log", "--format=%s", "main..HEAD").splitlines()
+    assert log == ["ours b.txt"], "the emptied commit skipped, the aside commit undone"
+    status = _git(tree, "status", "--porcelain").splitlines()
+    assert status == ["M README.md", "?? .sdlc/"], "the work, uncommitted again"
+
+
 def test_resolve_abort_puts_everything_back(tmp_path: Path, capsys) -> None:
     """Mid-rebase or after it finished, abort leaves the worktree as resolve found it, and keeps
     the resolved work under refs/sdlc/end; once the branch moves on, it refuses."""

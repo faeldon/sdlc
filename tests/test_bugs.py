@@ -303,6 +303,23 @@ def test_inbox_commit_retires_with_a_reason_and_a_trailer(tmp_path: Path, capsys
     assert "Sdlc-Retired: 2026-10-02-1 severity=low reported=2026-10-02 reason=duplicate" in body
 
 
+def test_inbox_commit_retires_an_entry_another_waits_on(tmp_path: Path, capsys) -> None:
+    """Bug 2026-11-17-17: an `After:` naming the retired entry reads as its title before and as
+    its id after, but the waiting entry's own lines never changed, so it is no `Update`; an edit
+    to its `After:` line still is one."""
+    waits = "## [2026-10-02-1] [idea] Two\n\nWhat it's for.\n\nAfter: 2026-10-01-1\n\n"
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), waits)
+    _inbox(root, waits)
+    code, out = _commit(root, capsys, "2026-10-01-1=declined")
+    assert code == 0, out
+    assert _git(root, "log", "-1", "--format=%s") == "Retire 2026-10-01-1"
+    assert out["entries"] == [{"action": "Retire", "id": "2026-10-01-1"}]
+
+    _inbox(root, waits.replace("After: 2026-10-01-1", "After: 2026-10-09-1"))
+    code, out = _commit(root, capsys)
+    assert code == 0 and out["commit"] == "Update 2026-10-02-1", out
+
+
 def test_inbox_commit_refuses_before_writing(tmp_path: Path, capsys) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     code, out = _commit(root, capsys)

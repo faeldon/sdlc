@@ -1529,6 +1529,64 @@ def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
     assert (folder / "runs" / "builder.sessions").read_text().split() == session
 
 
+def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """Bug 2026-11-17-18: a reply whose verdict comes after a sentence is a stop the run mends,
+    asking the reviewer that wrote it, in its own session, to reply again with its verdict first,
+    written over the old reply. The first-line rule stands: the reply is never read as it was."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    reply = folder / "reviews" / "round-1" / "code.md"
+    reply.write_text("Both kept changes are in the code.\n\nVERDICT: PASS\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["code"]), out
+    assert out["problems"] == [
+        "reviews/round-1/code.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
+    ]
+
+    (folder / "runs").mkdir()
+    (folder / "runs" / "reviewer-code.sessions").write_text("s-code\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "VERDICT: PASS\n\n## Notes\n\nFine.")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "code", None)
+    assert code == 0 and out["to"] == f".sdlc/work/{NAME}/reviews/round-1/code.md", out
+    argv = claude()[-1]["argv"]
+    assert argv[-2:] == ["--resume", "s-code"] and "sdlc-factory:reviewer-code" in argv
+    assert "VERDICT:" in argv[1] and "first line" in argv[1]
+    assert reply.read_text(encoding="utf-8").startswith("VERDICT: PASS\n"), "written over"
+    assert (folder / "runs" / "reviewer-code.sessions").read_text() == "s-code\n"
+    assert _verdicts(root, capsys)["next"] == "approve"
+
+    # A reviewer whose reply opens with its verdict has nothing to mend.
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "security", None)
+    assert code == 1 and "owe evidence" in out["refusals"][0]
+
+    # Once: a second preamble from the same reviewer in the same round is a stop like any other.
+    reply.write_text("Still fine.\n\nVERDICT: PASS\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "rerun", []), out
+    calls = len(claude())
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "code", None)
+    assert code == 1 and "mended once" in out["refusals"][0] and len(claude()) == calls
+
+
+@pytest.mark.portable
+def test_the_builder_s_evidence_is_mended_once_a_round(tmp_path, capsys, claude, monkeypatch):
+    """The same marker holds the evidence mend to once: a second report without it stops."""
+    root = _change(tmp_path)
+    _report(root, 1, "Built it. The gate passed.\n")
+    (root / ".sdlc" / "work" / NAME / "runs").mkdir()
+    (root / ".sdlc" / "work" / NAME / "runs" / "builder.sessions").write_text("s-b\n")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "Built it again, no evidence.")
+    assert _verdicts(root, capsys)["mend"] == ["builder"]
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 0, out
+    assert _verdicts(root, capsys)["way"] == "rerun"
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 1 and "mended once" in out["refusals"][0]
+
+
 def test_an_agent_out_of_turn_or_failing_files_nothing(tmp_path, capsys, claude, monkeypatch):
     root = _change(tmp_path)
     code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)

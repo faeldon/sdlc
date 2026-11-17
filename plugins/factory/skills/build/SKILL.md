@@ -305,18 +305,24 @@ the next step for that change. A `problem` is a stop, reported for that change a
    - **`stop`**: report its `problems` for the change, and leave it. It stays at `stage: build`,
      and the other changes run on. A reviewer reply that doesn't open with a verdict, a decision
      that doesn't open with one, a third red gate in a round, or `HEAD` moving (an agent
-     committed) is a stop: never patch a verdict in, and never reset a commit. **A missing `## Evidence` is the one stop this run can
-     mend itself,** once: the builder resumed, or a new behaviour check for that round, asked to
-     run what its claims rest on again, its reply written over the old one.
+     committed) is a stop: never patch a verdict in, and never reset a commit. **A stop whose
+     `way` is `mend` is the one kind this run can mend itself,** once for each role its `mend`
+     names: a missing `## Evidence` (the builder resumed, or a new behaviour check for that
+     round, asked to run what its claims rest on again), or a reviewer's verdict written after a
+     preamble (that reviewer resumed, asked to reply again with its `VERDICT:` line first). Each
+     reply is written over the old one.
 
      ```bash
-     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task mend --role <builder or behaviour>
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task mend --role <a role in mend>
      ```
 
-     Never write the evidence yourself. A second reply without it is a stop like any other.
+     Never write the evidence or the verdict yourself, and never move a verdict to the first line.
+     A second reply that still needs a mend is a stop like any other: `agent` records each mend
+     in `runs/mended`, `verdicts` then names that stop `rerun`, and a second mend is refused.
 
      The reading that stopped wrote `runs/stopped.md`: its problems word for word, and the way on
-     (`way`: `ship` after a commit, `mend` for a missing `## Evidence`, `rerun` otherwise) with its
+     (`way`: `ship` after a commit, `mend` for a missing `## Evidence` or a verdict after a
+     preamble, `rerun` otherwise) with its
      sentence, which the board and `/sdlc:status` show the person. Name that sentence in your
      report. Never write, edit or delete `runs/stopped.md` yourself: only a reading that finds the
      cause gone removes it, when the person reruns `/sdlc-factory:build NNN`.

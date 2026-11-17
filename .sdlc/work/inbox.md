@@ -263,37 +263,6 @@ the board's stage-gated columns.
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-17] [bug] inbox-commit labels an entry updated when only an entry it waits on went
-
-Retiring an entry that another entry names on its `After:` line makes `inbox-commit` call the
-second one updated, though its text is unchanged: retiring 2026-11-17-7 committed as "Retire
-2026-11-17-7; Update 2026-11-17-10". `parse_entries()` reads an `After:` id as the title of the
-entry it names while that entry is in the file, and as the bare id once it's gone, and
-`cmd_inbox_commit()` compares the parsed entries, so the waiting entry differs. It should compare
-each entry's own text, or the `After:` refs as written, so only an entry whose lines changed is an
-Update. To see it: retire an entry another's `After:` names, from the main checkout, and read the
-commit's subject.
-
-Severity: low
-Paths: scripts/sdlc.py
-Theme: inbox
-
-## [2026-11-17-18] [bug] A reviewer's preamble before its VERDICT line stops the factory run
-
-A reviewer that writes a sentence before its `VERDICT:` line stops the run, though its verdict is
-clear: on 2026-11-17, 088's round-2 UI review opened "Both kept changes are in the code. …" with
-`VERDICT: PASS` on line 3, and `verdicts` stopped with "reviews/round-2/ui.md doesn't open with
-VERDICT: PASS or VERDICT: CHANGES". `factory.py` reads only a reply's first line
-(`VERDICT_RE.match(lines[0])`) and no stop but a missing `## Evidence` can be mended, so the only
-ways on are deleting the reply by hand and rerunning, or shipping by hand. It should let the run
-ask the same reviewer once to reply again with its verdict first, as `mend` does for evidence, and
-stop only on a second such reply. To see it: a reviewer reply whose verdict isn't on line 1, then
-`factory.py verdicts NNN --head <h>`.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/skills/build/SKILL.md
-Theme: factory
-
 ## [2026-11-17-19] [idea] Port 0 for the factory's UI review server, and the board's printed URL
 
 089 closed the pick-then-bind window in the board's tests by serving on port 0. Two places keep

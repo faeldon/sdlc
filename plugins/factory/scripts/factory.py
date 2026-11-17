@@ -682,10 +682,7 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
             lines = file.read_text(encoding="utf-8").splitlines()
             m = VERDICT_RE.match(lines[0]) if lines else None
             if not m:
-                problems.append(
-                    f"reviews/round-{n}/{role}.md doesn't open with VERDICT: PASS or "
-                    "VERDICT: CHANGES"
-                )
+                problems.append(_no_verdict(n, role))
                 continue
             changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
             if m.group(1) == "CHANGES" and not changes:
@@ -701,6 +698,21 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
         complete = set(reviewers) <= set(reviews)
         found.append({"round": n, "reviews": reviews, "complete": complete, "verified": verified})
     return found, problems
+
+
+def _no_verdict(n: int, role: str) -> str:
+    """The problem a round's reply that doesn't open with its verdict is, word for word as the
+    board and status show it."""
+    return f"reviews/round-{n}/{role}.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
+
+
+def preamble(path: Path) -> bool:
+    """Whether a reply holds its verdict, but not on its first line: something written before it,
+    which the run may mend once by asking again. Never read as a verdict where it stands."""
+    if not path.is_file():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return bool(lines) and not VERDICT_RE.match(lines[0]) and any(map(VERDICT_RE.match, lines))
 
 
 def asked_changes(reviews: dict) -> list[tuple[str, str, str]]:
@@ -1042,7 +1054,9 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     an answer the person gave, so no build reaches the approver unreviewed.
 
     A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
-    missing `## Evidence`, `rerun` otherwise.
+    missing `## Evidence` or a verdict after a preamble in the last round (`preamble()`), with the
+    roles to mend in `mend`, `rerun` otherwise. A role is mended once a round: one `runs/mended`
+    names for that round no longer counts as mendable.
 
     Run `decisions` first: this reads the ledger as it stands, and writes nothing, but with
     `--record`, which only the supervisor passes and only with `--head`: then a stop is written to
@@ -1094,6 +1108,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     moved = bool(head) and now is not None and not now.startswith(head) and not head.startswith(now)
     out: dict = {"change": folder.name, "rounds": rounds, "decision": decision, "head": now}
     out.update(head_moved=moved, problems=problems, warnings=warnings, round=None, missing=[])
+    out["mend"] = []
     out["exhausted"] = False
     out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
     out["limit"] = run["rounds"]
@@ -1121,25 +1136,39 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out["repeats"] = [a for a in asked if a in out["settled"]]
     # With no base branch nothing is known to be touched, so nothing is called untouched.
     out["untouched"] = [a for a in asked if _untouched(root, a.split(": ", 1)[1], run["changed"])]
-    # Kept apart as they're added, so a stop knows whether a mend alone can move it on.
-    evidence: list[str] = []
+    # Kept apart as they're added, so a stop knows whether a mend alone can move it on: a missing
+    # `## Evidence`, or a verdict after a preamble in the last round, each by the role that mends.
+    mendable: dict[str, list[str]] = {}
     if built:
         report = folder / "build" / f"round-{built}.md"
-        evidence += read_evidence(report.read_text(encoding="utf-8"), f"build/round-{built}.md")
+        found = read_evidence(report.read_text(encoding="utf-8"), f"build/round-{built}.md")
+        mendable["builder"] = found
     for r in rounds:
         for role in RUNS_THE_CHANGE:
             reply = folder / "reviews" / f"round-{r['round']}" / f"{role}.md"
             if role in r["reviews"]:
                 where = f"reviews/round-{r['round']}/{role}.md"
-                evidence += read_evidence(reply.read_text(encoding="utf-8"), where)
-    problems += evidence
+                found = read_evidence(reply.read_text(encoding="utf-8"), where)
+                mendable.setdefault(role, []).extend(found)
+    problems += [p for found in mendable.values() for p in found]
+    for role in REVIEWERS if last else ():
+        if preamble(folder / "reviews" / f"round-{last['round']}" / f"{role}.md"):
+            mendable.setdefault(role, []).append(_no_verdict(last["round"], role))
+    # Each role is mended once a round: one already mended (`runs/mended`) is a stop like any other.
+    done = mended(folder)
+    rnd = last["round"] if last else 0
+    for role in [r for r in mendable if (r, built if r == "builder" else rnd) in done]:
+        del mendable[role]
+    every = {p for found in mendable.values() for p in found}
     if moved:
         problems.append(f"HEAD moved from {head} to {now}: no agent may commit")
     if last and last["round"] > built:
         problems.append(f"reviews/round-{last['round']}/ has no build/round-{last['round']}.md")
     if problems:
         out["next"] = "stop"
-        out["way"] = "ship" if moved else "mend" if len(evidence) == len(problems) else "rerun"
+        out["way"] = "ship" if moved else "mend" if set(problems) <= every else "rerun"
+        if out["way"] == "mend":
+            out["mend"] = [role for role, found in mendable.items() if found]
     elif out["pending"]:
         out["next"] = "decide"
     elif decision:
@@ -1462,8 +1491,9 @@ AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 WAYS = {
     "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",
     "mend": (
-        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence;"
-        " if that reply still lacks it, ship it by hand with /sdlc:ship {id}"
+        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence or"
+        " a verdict on the reply's first line; if that reply still lacks it, ship it by hand with"
+        " /sdlc:ship {id}"
     ),
     "rerun": (
         "fix its cause, then /sdlc-factory:build {id}, or ship it by hand with /sdlc:ship {id}"
@@ -1494,6 +1524,12 @@ MEND = (
     "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
     "again and reply with it."
 )
+# The mends `agent` has filed, `<role> <round>` a line: the record that holds each to once a round.
+MENDED = Path("runs") / "mended"
+VERDICT_MEND = (
+    "Your reply didn't open with its verdict. Reply again, the whole reply, with its VERDICT: line "
+    "as the first line and nothing before it."
+)
 # What a spec draft must have before the person sees it; a draft missing one is sent back once.
 RECHECK = (
     "Your draft is missing one of these: every <...> prompt replaced, the requirements numbered "
@@ -1513,6 +1549,33 @@ def read_revision(folder: Path, ident: str) -> str | None:
         if m and m.group(1) == ident:
             return m.group(2)
     return None
+
+
+def mend_round(state: dict, role: str) -> int:
+    """The round a mend for `role` answers for: the builder's report's, or the last review's."""
+    if role == "builder":
+        return state["built"]
+    return state["rounds"][-1]["round"] if state.get("rounds") else 0
+
+
+def mended(folder: Path) -> set[tuple[str, int]]:
+    """(role, round) for each mend `agent` has filed, from `runs/mended`: each role is mended once
+    a round, and a second reply that still needs one is a stop like any other."""
+    path = folder / MENDED
+    found = set()
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        role, _, rnd = line.partition(" ")
+        if rnd.strip().isdigit():
+            found.add((role, int(rnd)))
+    return found
+
+
+def verdict_mend(folder: Path, state: dict, role: str | None) -> bool:
+    """Whether `mend` for `role` is a reviewer's verdict to put first: its reply in the last round
+    holds one after a preamble."""
+    rnd = state["rounds"][-1]["round"] if state.get("rounds") else 0
+    reply = folder / "reviews" / f"round-{rnd}" / f"{role}.md"
+    return bool(rnd) and role in REVIEWERS and preamble(reply)
 
 
 def agent_name(role: str) -> str:
@@ -1714,7 +1777,14 @@ def _task(
             prompt += f" Round {reviewed}'s reviews are in {rel}/reviews/round-{reviewed}/."
         target = folder / "build" / f"round-{reviewed + 1}.md"
         return prompt, target, target.is_file() and state["built"] == reviewed + 1
-    # mend: the one stop a run mends itself, once: the builder resumed, or a new behaviour check.
+    # mend: the stops a run mends itself, once each: a reviewer resumed to put its verdict first,
+    # the builder resumed for its evidence, or a new behaviour check for its own.
+    if verdict_mend(folder, state, role):
+        return (
+            VERDICT_MEND,
+            folder / "reviews" / f"round-{reviewed}" / f"{role}.md",
+            False,
+        )
     if role == "builder":
         return MEND, folder / "build" / f"round-{state['built']}.md", False
     if role in RUNS_THE_CHANGE:
@@ -1801,7 +1871,11 @@ def cmd_agent(
     if task == "review" and role not in REVIEWERS:
         return emit({"refusals": [f"review needs --role, one of {', '.join(REVIEWERS)}"]}, 1)
     if task == "mend" and role is None:
-        return emit({"refusals": ["mend needs --role: builder or behaviour"]}, 1)
+        why = "mend needs --role: builder, behaviour, or the reviewer `verdicts` names in `mend`"
+        return emit({"refusals": [why]}, 1)
+    if task == "mend" and (role, mend_round(state, role)) in mended(folder):
+        why = f"{role} was mended once in round {mend_round(state, role)}: a second is a stop"
+        return emit({"refusals": [why]}, 1)
     if task == "decided" and not decided:
         return emit({"refusals": ["decided needs --decision D<n>"]}, 1)
     if (revise or recheck) and task != "spec":
@@ -1828,10 +1902,11 @@ def cmd_agent(
     resumed = (role == "builder" and task in RESUMES) or bool(
         task == "spec" and (revise or recheck)
     )
+    resumed = resumed or (task == "mend" and verdict_mend(folder, state, role))
     if resumed:
         ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
         if not ids:
-            first = "build" if role == "builder" else "spec"
+            first = {"builder": "build", "spec-writer": "spec"}.get(role, "review")
             return emit({"refusals": [f"no {role} session to resume: run --task {first} first"]}, 1)
         session, how = ids[-1], "--resume"
     else:
@@ -1860,6 +1935,9 @@ def cmd_agent(
         before = target.read_text(encoding="utf-8")
         text = before + ("" if before.endswith("\n") else "\n") + "\n" + text
     target.write_text(text, encoding="utf-8", newline="\n")
+    if task == "mend":
+        with (folder / MENDED).open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"{role} {mend_round(state, role)}\n")
     return emit(out)
 
 
