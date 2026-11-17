@@ -199,9 +199,19 @@ For each change in the batch, one at a time:
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-verify
    ```
 
-   then read it again; `pass` (go to 4); or `stop`, with its `problems`, which stops this change
-   and every one after it: a red gate or check or a kept change is the person's, and `/sdlc:ship` from its worktree
-   takes it. Never patch a verdict, and never write a review an agent didn't.
+   then read it again; `pass` (go to 4); `mend` (a reply its own agent can give again: a behaviour
+   check's missing `## Evidence` or `exit:`, a verdict after a preamble, the verifier's unread
+   answers), for each role in its `mend`, **in one message**, then read it again:
+
+   ```bash
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-mend --role <role>
+   ```
+
+   Each role is mended once a landing round, its new reply written over the old under
+   `reviews/land-<n>/`; one that still needs it is a `stop`. Or `stop`, with its `problems`, which
+   stops this change and every one after it: a red gate or check or a kept change is the
+   person's, and `/sdlc:ship` from its worktree takes it. Never patch a verdict, and never write a
+   review an agent didn't.
 4. **A fix the person asked for**, only for the change `yes, with a fix` named, once, after its
    round in 1 to 3 passed (else go to 5). The script opens a landing round for it, the change's
    own builder makes it, and the script amends it into the change's commit.

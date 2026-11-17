@@ -1682,7 +1682,9 @@ def test_each_agent_run_records_its_figures_and_a_resume_is_not_counted_twice(
     sessions = (folder / "runs" / "builder.sessions").read_text()
     assert sessions == session + "\n", "one id a line, as measuring reads it"
 
-    # The mend resumes the builder, whose total so far is 0.75: 0.25 more, never 1.25.
+    # The mend resumes the builder, whose total so far is 0.75: 0.25 more, never 1.25. It mends
+    # only a report `verdicts` names: here one without its evidence.
+    (folder / "build" / "round-1.md").write_text("Built, no evidence.\n", encoding="utf-8")
     monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.75, tokens_in=20))
     code, out = _run(capsys, factory.cmd_agent, worktree, "008", "mend", "builder", None)
     assert code == 0 and out["session"] == session
@@ -1775,7 +1777,9 @@ def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
     assert pairs["--permission-mode"] == "auto" and pairs["--output-format"] == "json"
     assert pairs["--session-id"] == session[0] == out["session"]
 
-    # A mend resumes the same builder, with its context, and writes over the report it mends.
+    # A mend resumes the same builder, with its context, and writes over the report it mends:
+    # one `verdicts` names, here a report without its evidence.
+    (folder / "build" / "round-1.md").write_text("Built, no evidence.\n", encoding="utf-8")
     code, out = _run(capsys, factory.cmd_agent, worktree, "008", "mend", "builder", None)
     assert code == 0 and claude()[-1]["argv"][-2:] == ["--resume", session[0]]
     assert (folder / "runs" / "builder.sessions").read_text().split() == session
@@ -1812,7 +1816,7 @@ def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
 
     # A reviewer whose reply opens with its verdict has nothing to mend.
     code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "security", None)
-    assert code == 1 and "owe evidence" in out["refusals"][0]
+    assert code == 1 and "not a mend for security" in out["refusals"][0]
 
     # Once: a second preamble from the same reviewer in the same round is a stop like any other.
     reply.write_text("Still fine.\n\nVERDICT: PASS\n", encoding="utf-8")
@@ -1821,6 +1825,86 @@ def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
     calls = len(claude())
     code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "code", None)
     assert code == 1 and "mended once" in out["refusals"][0] and len(claude()) == calls
+
+
+def test_an_approver_s_preamble_is_mended_by_the_approver(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """109 R10: a decision.md holding its DECISION: line after other lines is a stop the run
+    mends once, resuming the approver's own session and writing its whole new reply over the old."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    decision = folder / "decision.md"
+    decision.write_text("I read every round.\n\nDECISION: READY\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["approver"]), out
+    (folder / "runs").mkdir()
+    (folder / "runs" / "approver.sessions").write_text("s-a\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "DECISION: READY\n\nFine.")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "approver", None)
+    assert code == 0 and out["to"] == f".sdlc/work/{NAME}/decision.md", out
+    argv = claude()[-1]["argv"]
+    assert argv[-2:] == ["--resume", "s-a"] and "sdlc-factory:approver" in argv
+    assert "DECISION:" in argv[1] and "first line" in argv[1]
+    assert decision.read_text(encoding="utf-8") == "DECISION: READY\n\nFine.\n"
+    assert _verdicts(root, capsys)["next"] == "done"
+    decision.write_text("Again.\n\nDECISION: READY\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun"), "once a round"
+    # No DECISION: line at all is not a preamble: nothing to put first.
+    decision.write_text("I couldn't decide.\n", encoding="utf-8")
+    (folder / "runs" / "mended").unlink()
+    assert _verdicts(root, capsys)["way"] == "rerun"
+
+
+def test_a_verifier_s_unread_answers_are_mended_once(tmp_path, capsys, claude, monkeypatch):
+    """109 R10: a verified.md whose answers the script can't read (here in another shape) is a
+    stop the run mends once, resuming the verifier, told what the script found; a second is a
+    stop like any other."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1, code="CHANGES")
+    verified = folder / "reviews" / "round-1" / "verified.md"
+    verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["verifier"]), out
+    (folder / "runs").mkdir()
+    (folder / "runs" / "verifier.sessions").write_text("s-v\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "- KEPT: code: C1: code fix 1")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "verifier", None)
+    assert code == 0 and out["to"] == f".sdlc/work/{NAME}/reviews/round-1/verified.md", out
+    argv = claude()[-1]["argv"]
+    assert argv[-2:] == ["--resume", "s-v"] and "sdlc-factory:verifier" in argv
+    assert "code fix 1 0 times, not once" in argv[1] and "- KEPT: <role>: C<n>:" in argv[1]
+    assert verified.read_text(encoding="utf-8") == "- KEPT: code: C1: code fix 1\n"
+    assert _verdicts(root, capsys)["next"] == "rework"
+    verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
+    assert _verdicts(root, capsys)["way"] == "rerun"
+    calls = len(claude())
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "verifier", None)
+    assert code == 1 and "mended once" in out["refusals"][0] and len(claude()) == calls
+
+
+def test_a_build_mend_is_refused_when_verdicts_names_none(tmp_path, capsys, claude) -> None:
+    """109 R5, the 103 case: a change at `stage: test`, its landing round's behaviour check missing
+    an exit. The build loop's `mend` runs only for a role `verdicts` names in a `mend` stop, so
+    nothing runs and nothing appears under `reviews/round-1/`."""
+    root = _change(tmp_path, stage="test")
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    (folder / "decision.md").write_text("DECISION: READY\n\nFine.\n", encoding="utf-8")
+    land = folder / "reviews" / "land-1"
+    land.mkdir(parents=True)
+    (land / "behaviour.md").write_text(
+        "VERDICT: PASS\n\n## Evidence\n\n$ head -5 intent.md\n---\n", encoding="utf-8"
+    )
+    before = _files(folder / "reviews" / "round-1")
+    assert _verdicts(root, capsys)["next"] == "done"
+    for role in ("behaviour", "builder", "code"):
+        code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", role, None)
+        assert code == 1 and out["refusals"] == [f"verdicts says 'done', not a mend for {role}"]
+    assert not claude() and _files(folder / "reviews" / "round-1") == before
 
 
 @pytest.mark.portable

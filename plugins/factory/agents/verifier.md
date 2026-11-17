@@ -48,6 +48,7 @@ own words, short:
 - DROPPED: security: C2: src/drafts.py:10: token logged — the line logs the draft id, not a token
 ```
 
-The id is how `factory.py` knows which change you answered: one it doesn't know, or another
+Write each line as plain text, exactly in that shape: no bold or other emphasis around `KEPT:` or
+`DROPPED:`, which the script can't read. The id is how `factory.py` knows which change you answered: one it doesn't know, or another
 role's, is a stop. A dropped line's reason follows the last ` — `. Then `## Notes`: what you ran,
 and anything you were unsure of and what would settle it.

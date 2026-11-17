@@ -224,9 +224,11 @@ the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its
 dir, never `sdlc.lock`; its gate passes itself only when no change carries a risk signal, recorded as
 `Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.
 `verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder
-report and a behaviour check end with `## Evidence` (`read_evidence()`); a reply missing it, or
-holding its verdict after a preamble (`preamble()`), is the one stop a run mends, once a round
-for each role (`agent --task mend`, recorded in `runs/mended`). No agent but the builder runs
+report and a behaviour check end with `## Evidence` (`read_evidence()`); a reply missing it,
+holding its verdict or decision after a preamble (`preamble()`, `decision_preamble()`), or a
+`verified.md` the script can't read, is the one stop a run mends, once a round for each role, a
+landing round counting as its own (`agent --task mend` or `--task land-mend`, recorded in
+`runs/mended`). No agent but the builder runs
 `checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever
 a run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`) is
 kept as `decision-<n>.md`, never written over, and its new run counts its rounds from the round

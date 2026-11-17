@@ -892,16 +892,19 @@ def _resolve(role: str, text: str, asked: list, n: int) -> tuple[str | None, str
     return None, f"{text}, which no review of round {n} asks for"
 
 
-def read_verified(path: Path, n: int, reviews: dict) -> tuple[dict | None, list[str]]:
+def read_verified(
+    path: Path, n: int, reviews: dict, where: str | None = None
+) -> tuple[dict | None, list[str]]:
     """The verifier's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Each
     answer is resolved to the change it names (`_resolve()`) and carries the reviewer's text, so
     every reader sees the change as it was asked. Every `CHANGE:` the round's `CHANGES` verdicts
     ask for is answered exactly once, and every answer names one: anything else is a problem, so
-    no change is reworked or dropped unread."""
+    no change is reworked or dropped unread. `where` names the file in a problem: a build round's
+    unless a landing round's is given."""
     if not path.is_file():
         return None, []
     asked = asked_changes(reviews)
-    where = f"reviews/round-{n}/{VERIFIED}"
+    where = where or f"reviews/round-{n}/{VERIFIED}"
     kept, dropped, problems = [], [], []
     for line in path.read_text(encoding="utf-8").splitlines():
         if m := KEPT_RE.match(line):
@@ -1014,6 +1017,19 @@ def read_evidence(text: str, where: str) -> list[str]:
     return problems
 
 
+NO_DECISION = "decision.md doesn't open with DECISION: READY or DECISION: ESCALATE"
+
+
+def decision_preamble(folder: Path) -> bool:
+    """Whether `decision.md` holds its `DECISION:` line, but not first: `preamble()`'s rule for the
+    approver's reply, which the run may mend once by asking again."""
+    path = folder / "decision.md"
+    if not path.is_file():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return bool(lines) and not DECISION_RE.match(lines[0]) and any(map(DECISION_RE.match, lines))
+
+
 def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, str | None]:
     """The approver's decision, or what's wrong with it. After a run whose rounds ran out with
     changes still kept, only an ESCALATE that asks the person to reconsider the approach will do."""
@@ -1024,7 +1040,7 @@ def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, st
     lines = text.splitlines()
     m = DECISION_RE.match(lines[0]) if lines else None
     if not m:
-        return None, "decision.md doesn't open with DECISION: READY or DECISION: ESCALATE"
+        return None, NO_DECISION
     if exhausted and (m.group(1) != "ESCALATE" or RECONSIDER not in lines):
         return None, (
             f"the rounds ran out with changes kept, so decision.md must be ESCALATE with a "
@@ -1339,9 +1355,10 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     an answer the person gave, so no build reaches the approver unreviewed.
 
     A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
-    missing `## Evidence` or a verdict after a preamble in the last round (`preamble()`), with the
-    roles to mend in `mend`, `rerun` otherwise. A role is mended once a round: one `runs/mended`
-    names for that round no longer counts as mendable.
+    missing `## Evidence`, a verdict after a preamble in the last round (`preamble()`), the
+    verifier's unread answers in the last round, or a decision after a preamble
+    (`decision_preamble()`), with the roles to mend in `mend`, `rerun` otherwise. A role is mended
+    once a round: one `runs/mended` names for that round no longer counts as mendable.
 
     Run `decisions` first: this reads the ledger as it stands, and writes nothing, but with
     `--record`, which only the supervisor passes and only with `--head`: then a stop is written to
@@ -1443,6 +1460,15 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     for role in REVIEWERS if last else ():
         if preamble(folder / "reviews" / f"round-{last['round']}" / f"{role}.md"):
             mendable.setdefault(role, []).append(_no_verdict(last["round"], role))
+    # The verifier's answers in the last round the script couldn't read, and the approver's
+    # decision after a preamble: each its own agent's to give again.
+    if last:
+        path = folder / "reviews" / f"round-{last['round']}" / VERIFIED
+        _, wrong = read_verified(path, last["round"], last["reviews"])
+        if wrong:
+            mendable["verifier"] = wrong
+    if decision_preamble(folder):
+        mendable["approver"] = [NO_DECISION]
     # Each role is mended once a round: one already mended (`runs/mended`) is a stop like any other.
     done = mended(folder)
     rnd = last["round"] if last else 0
@@ -1946,9 +1972,9 @@ AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 WAYS = {
     "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",
     "mend": (
-        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence or"
-        " a verdict on the reply's first line; if that reply still lacks it, ship it by hand with"
-        " /sdlc:ship {id}"
+        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence,"
+        " or an answer in its shape on the reply's first line; if that reply still lacks it, ship"
+        " it by hand with /sdlc:ship {id}"
     ),
     "rerun": (
         "fix its cause, then /sdlc-factory:build {id}, or ship it by hand with /sdlc:ship {id}"
@@ -1960,7 +1986,7 @@ USAGE_FIELDS = {
     "cache_create": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens",
 }  # fmt: skip
 TASKS = ("spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve",
-         "resolve", "land-fix", "land-review", "land-verify")  # fmt: skip
+         "resolve", "land-fix", "land-review", "land-verify", "land-mend")  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
     "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
@@ -1968,9 +1994,9 @@ TASK_ROLE = {
     "land-fix": "builder", "land-verify": "verifier",
 }  # fmt: skip
 # The landing's tasks: the builder resolving a rebase's conflicts or making a fix the person asked
-# for, and the review of the change as it now stands on the base branch. Never steps of the
-# build's loop, so `verdicts` names none.
-LAND_TASKS = ("resolve", "land-fix", "land-review", "land-verify")
+# for, the review of the change as it now stands on the base branch, and the mend of a landing
+# reply `land-verdicts` names. Never steps of the build's loop, so `verdicts` names none.
+LAND_TASKS = ("resolve", "land-fix", "land-review", "land-verify", "land-mend")
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
 TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
              "rework": "rework", "approve": "approve"}  # fmt: skip
@@ -1985,6 +2011,15 @@ MENDED = Path("runs") / "mended"
 VERDICT_MEND = (
     "Your reply didn't open with its verdict. Reply again, the whole reply, with its VERDICT: line "
     "as the first line and nothing before it."
+)
+DECISION_MEND = (
+    "Your reply didn't open with its decision. Reply again, the whole reply, with its DECISION: "
+    "line as the first line and nothing before it."
+)
+VERIFY_MEND = (
+    "The script couldn't read your answers: {problems}. Reply again, the whole reply, answering "
+    "each change exactly once as plain text with no emphasis, `- KEPT: <role>: C<n>: <why>` or "
+    "`- DROPPED: <role>: C<n>: <the change> — <why>`."
 )
 # What a spec draft must have before the person sees it; a draft missing one is sent back once.
 RECHECK = (
@@ -2069,9 +2104,21 @@ def mended(folder: Path) -> set[tuple[str, int]]:
     return found
 
 
+def land_mended(folder: Path, n: int) -> set[str]:
+    """The roles `agent` has mended in landing round `n`, from the `<role> land-<n>` lines of
+    `runs/mended`: a landing round's allowance, apart from every build round's (`mended()`)."""
+    path = folder / MENDED
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    pairs = (line.partition(" ") for line in lines)
+    return {role for role, _, rnd in pairs if rnd.strip() == f"land-{n}"}
+
+
 def verdict_mend(folder: Path, state: dict, role: str | None) -> bool:
-    """Whether `mend` for `role` is a reviewer's verdict to put first: its reply in the last round
-    holds one after a preamble."""
+    """Whether `mend` for `role` resumes that agent's own session to answer in its shape: a
+    reviewer whose reply in the last round holds its verdict after a preamble, the approver, or
+    the verifier. A behaviour check owing evidence runs afresh instead."""
+    if role in ("approver", "verifier"):
+        return True
     rnd = state["rounds"][-1]["round"] if state.get("rounds") else 0
     reply = folder / "reviews" / f"round-{rnd}" / f"{role}.md"
     return bool(rnd) and role in REVIEWERS and preamble(reply)
@@ -2307,7 +2354,18 @@ def _task(
         target = folder / "build" / f"round-{reviewed + 1}.md"
         return prompt, target, target.is_file() and state["built"] == reviewed + 1
     # mend: the stops a run mends itself, once each: a reviewer resumed to put its verdict first,
-    # the builder resumed for its evidence, or a new behaviour check for its own.
+    # the approver its decision, the verifier resumed to answer in its shape, the builder resumed
+    # for its evidence, or a new behaviour check for its own.
+    if role == "approver":
+        return DECISION_MEND, folder / "decision.md", False
+    if role == "verifier":
+        where = f"reviews/round-{reviewed}/{VERIFIED}"
+        found = [p for p in state["problems"] if p.startswith(where)]
+        return (
+            VERIFY_MEND.format(problems="; ".join(found)),
+            folder / "reviews" / f"round-{reviewed}" / VERIFIED,
+            False,
+        )
     if verdict_mend(folder, state, role):
         return (
             VERDICT_MEND,
@@ -2322,7 +2380,10 @@ def _task(
             (folder / "reviews" / f"round-{reviewed}" / f"{role}.md"),
             False,
         )
-    return f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence"
+    return (
+        f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence; a reviewer, the approver "
+        "and the verifier are mended to answer in their shape"
+    )
 
 
 def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Path, bool] | str:
@@ -2341,11 +2402,23 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
         files = _conflicted(root)
         if not files:
             return "no conflicted file: run resolve first"
-        return (
+        prompt = (
             f"The base branch moved under this change, and rebasing onto it conflicts in: "
             f"{', '.join(files)}. Resolve each, keeping what both sides meant; edit only those "
             "files, run no git command, then report what you kept from each side, ending with "
-            "## Evidence.",
+            "## Evidence."
+        )
+        if INBOX.as_posix() in files:
+            text = (folder / "intent.md").read_text(encoding="utf-8")
+            ids = [*frontmatter_ids(text, "idea"), *frontmatter_ids(text, "fixes")]
+            gone = [*ids, *named_nits(root, folder)]
+            if gone:
+                prompt += (
+                    f" The landing deleted {', '.join(dict.fromkeys(gone))} from "
+                    f"{INBOX.as_posix()}, and they stay deleted: don't keep them."
+                )
+        return (
+            prompt,
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -2360,6 +2433,20 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             folder / "build" / f"land-{n}.md",
             False,
         )
+    if task == "land-mend":
+        cfg, _ = load_config(root)
+        state = land_verdict(root, folder, cfg, n)
+        if state["next"] != "mend" or role not in state.get("mend", []):
+            return f"land-verdicts says {state['next']!r}, not a mend for {role}"
+        if role == "verifier":
+            gone = [p for p in state["problems"] if p.startswith(f"reviews/land-{n}/{VERIFIED}")]
+            return VERIFY_MEND.format(problems="; ".join(gone)), where / VERIFIED, False
+        if preamble(where / f"{role}.md"):
+            return VERDICT_MEND, where / f"{role}.md", False
+        planned = _land_task(root, folder, "land-review", role)
+        if isinstance(planned, str):
+            return planned
+        return planned[0] + " " + MEND, planned[1], False
     if task == "land-review":
         if role not in REVIEWERS:
             return f"land-review needs --role, one of {', '.join(REVIEWERS)}"
@@ -2433,12 +2520,21 @@ def cmd_agent(
     role = role or TASK_ROLE.get(task)
     if task == "review" and role not in REVIEWERS:
         return emit({"refusals": [f"review needs --role, one of {', '.join(REVIEWERS)}"]}, 1)
+    if task == "land-mend" and role is None:
+        why = "land-mend needs --role: one `land-verdicts` names in `mend`"
+        return emit({"refusals": [why]}, 1)
     if task == "mend" and role is None:
-        why = "mend needs --role: builder, behaviour, or the reviewer `verdicts` names in `mend`"
+        why = "mend needs --role: one `verdicts` names in `mend`"
         return emit({"refusals": [why]}, 1)
     if task == "mend" and (role, mend_round(state, role)) in mended(folder):
         why = f"{role} was mended once in round {mend_round(state, role)}: a second is a stop"
         return emit({"refusals": [why]}, 1)
+    # A mend answers the stop `verdicts` names, for a role it names: never a landing round's
+    # reply, which `land-mend` mends under `reviews/land-<n>/`.
+    if task == "mend" and not (
+        state["next"] == "stop" and state.get("way") == "mend" and role in state["mend"]
+    ):
+        return emit({"refusals": [f"verdicts says {state['next']!r}, not a mend for {role}"]}, 1)
     if task == "decided" and not decided:
         return emit({"refusals": ["decided needs --decision D<n>"]}, 1)
     if (revise or recheck) and task != "spec":
@@ -2466,10 +2562,12 @@ def cmd_agent(
         task == "spec" and (revise or recheck)
     )
     resumed = resumed or (task == "mend" and verdict_mend(folder, state, role))
+    resumed = resumed or bool(task == "land-mend" and (role == "verifier" or preamble(target)))
     if resumed:
         ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
         if not ids:
-            first = {"builder": "build", "spec-writer": "spec"}.get(role, "review")
+            first = {"builder": "build", "spec-writer": "spec", "approver": "approve",
+                     "verifier": "verify"}.get(role, "review")  # fmt: skip
             return emit({"refusals": [f"no {role} session to resume: run --task {first} first"]}, 1)
         session, how = ids[-1], "--resume"
     else:
@@ -2498,9 +2596,10 @@ def cmd_agent(
         before = target.read_text(encoding="utf-8")
         text = before + ("" if before.endswith("\n") else "\n") + "\n" + text
     target.write_text(text, encoding="utf-8", newline="\n")
-    if task == "mend":
+    if task in ("mend", "land-mend"):
+        rnd = mend_round(state, role) if task == "mend" else f"land-{land_round(folder)}"
         with (folder / MENDED).open("a", encoding="utf-8", newline="\n") as f:
-            f.write(f"{role} {mend_round(state, role)}\n")
+            f.write(f"{role} {rnd}\n")
     return emit(out)
 
 
@@ -2575,6 +2674,8 @@ FRESH_SKIPPED = "Fresh review: skipped, the factory's rounds stand in"
 UNDONE_RE = re.compile(r"^\s*- UNDONE:\s*(.+?)\s+→\s+(seed|dropped):\s*(.+?)\s*$")
 RECOVER_RE = re.compile(r"^\s*- RECOVER:\s*(.+?):\s+(.+?)\s*$")
 # A notes.md item a landing (or ship) gave its disposition, as `land_message()` reads it back.
+# An unticked note, as `sdlc.py`'s `OPEN_ITEM_RE` reads one.
+OPEN_NOTE_RE = re.compile(r"^\s*[-*] \[ \] (.+?)\s*$")
 TICKED_RE = re.compile(r"^\s*[-*] \[x\] (.+?) → (seed|dropped): (.+?)\s*$")
 # findings.md's note lines ship reads, and the cost ceiling of a change's run of the skills'
 # cases: copies of `sdlc.py`'s `FRESH_RE`, `CASES_RE` and `CASE_CAP["change"]`, pinned by a test.
@@ -2827,16 +2928,49 @@ def unrecovered(paths: list[str], recover: list[tuple[str, str]]) -> list[str]:
     return [p for p in paths if p not in named and not risk_paths([p], named)]
 
 
+def note_items(folder: Path) -> dict[int, str]:
+    """Each `- [ ]` note of `notes.md` by its line number, as `sdlc.py preflight` numbers them, with
+    its whole text: the line's own, then each indented, non-blank line after it, up to the first
+    that isn't, joined with single spaces. A fenced example is never a note."""
+    path = folder / "notes.md"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    found, fenced = {}, False
+    for i, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        m = None if fenced else OPEN_NOTE_RE.match(line)
+        if not m:
+            continue
+        words = [m.group(1)]
+        for more in lines[i + 1 :]:
+            if not more.strip() or not more[:1].isspace() or OPEN_NOTE_RE.match(more):
+                break
+            words.append(more.strip())
+        found[i + 1] = " ".join(" ".join(words).split())
+    return found
+
+
+def first_sentence(text: str) -> str:
+    """`text`'s first sentence, up to a `.`, `!` or `?` and a space; all of it without one."""
+    return re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0] if text else ""
+
+
 def land_parts(folder: Path, pre: dict) -> dict:
     """What the batch's yes approves for change `folder`, each part empty when it has none: its
-    acceptance checks, its skills' cases with the cap, its undone notes with the disposition the
-    approver proposed (a seed titled by the item itself when none was), its assumed decisions, and
+    acceptance checks, its skills' cases with the cap, its undone notes, each with its whole text
+    (`note_items()`) and the disposition the approver proposed for its first line or its whole
+    text (a seed titled by the note's first sentence when none was), its assumed decisions, and
     the `How to recover:` lines its commit will carry."""
     proposed, recover = read_proposals(folder)
+    notes = note_items(folder)
     undone = []
     for item in (pre.get("undone") or {}).get("items") or []:
-        kind, said = proposed.get(item["text"], ("seed", item["text"]))
-        undone.append({"line": item["line"], "text": item["text"],
+        full = notes.get(item["line"], item["text"])
+        kind, said = (
+            proposed.get(full) or proposed.get(item["text"]) or ("seed", first_sentence(full))
+        )
+        undone.append({"line": item["line"], "text": full,
                        ("seed" if kind == "seed" else "dropped"): said})  # fmt: skip
     scope = (pre.get("cases") or {}).get("scope") or []
     return {
@@ -3022,16 +3156,18 @@ def _section(text: str, heading: str) -> str:
     return "\n".join(found)
 
 
-def named_nits(root: Path, folder: Path) -> list[str]:
-    """The open `[nit]` entries of the checkout's register that the change names by id in
-    `NIT_SECTIONS`, in the register's order: each id matched whole, so `2026-11-17-1` is never
-    named by `2026-11-17-11`. Never inferred from the diff."""
+def named_nits(root: Path, folder: Path, text: str | None = None) -> list[str]:
+    """The open `[nit]` entries of the checkout's register (or of the register `text`, as another
+    commit holds it) that the change names by id in `NIT_SECTIONS`, in the register's order: each
+    id matched whole, so `2026-11-17-1` is never named by `2026-11-17-11`. Never inferred from
+    the diff."""
     named = "\n".join(
         _section((folder / f).read_text(encoding="utf-8"), heading)
         for f, heading in NIT_SECTIONS if (folder / f).is_file()
     )  # fmt: skip
     register = root / INBOX
-    text = register.read_text(encoding="utf-8") if register.is_file() else ""
+    if text is None:
+        text = register.read_text(encoding="utf-8") if register.is_file() else ""
     found, fenced = [], False
     for line in text.splitlines():
         if FENCE_RE.match(line):
@@ -3042,19 +3178,49 @@ def named_nits(root: Path, folder: Path) -> list[str]:
 
 
 def retire_nits(root: Path, ids: list[str]) -> None:
-    """Delete each nit `ids` names from the checkout's register, its heading to the line before
-    the next heading, as `/sdlc:ship` does: the change's commit carries the deletion."""
+    """Delete each nit `ids` names from the checkout's register, as `/sdlc:ship` does: the
+    change's commit carries the deletion."""
+    drop_entries(root, ids)
+
+
+# A register entry's heading, `## [<id>] [<tag>] <title>`, by its id; a heading at level one or
+# two ends it, a deeper one is its own.
+ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2}-\d+)\]\s*\[[^\]]+\]")
+ENTRY_END_RE = re.compile(r"^#{1,2}(?!#)")
+ENTRY_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+$")
+
+
+def drop_entries(root: Path, ids: list[str]) -> list[str]:
+    """Delete each entry `ids` names, by id alone, from the checkout's register, its heading up to
+    the next heading outside a fence, every other line left byte for byte. The ids it deleted, in
+    the register's order."""
     register = root / INBOX
-    kept, dropping, fenced = [], False, False
+    if not register.is_file():
+        return []
+    kept, gone, dropping, fenced = [], [], False, False
     for line in register.read_text(encoding="utf-8").splitlines(keepends=True):
         if FENCE_RE.match(line):
             fenced = not fenced
-        elif not fenced and line.startswith("#"):
-            m = NIT_RE.match(line)
+        elif not fenced and ENTRY_END_RE.match(line):
+            m = ENTRY_RE.match(line)
             dropping = bool(m and m.group(1) in ids)
+            if dropping:
+                gone.append(m.group(1))
         if not dropping:
             kept.append(line)
-    register.write_text("".join(kept), encoding="utf-8", newline="\n")
+    if gone:
+        register.write_text("".join(kept), encoding="utf-8", newline="\n")
+    return gone
+
+
+def frontmatter_ids(text: str, key: str) -> list[str]:
+    """The register ids an intent's `key:` names (`idea: 2026-11-17-6`, `fixes: [a, b]`), read as
+    text: a value naming its seed by title is skipped, never matched."""
+    value = frontmatter(text).get(key, "").strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    found = [v.strip().strip("'\"") for v in value.split(",")]
+    return [v for v in found if ENTRY_ID_RE.match(v)]
 
 
 def accept_path(folder: Path) -> Path:
@@ -3208,7 +3374,7 @@ def land_message(
     title = re.sub(r"^#\s+\d{3,}\s+—\s+", "", title).lstrip("# ").strip()
     problem = text.split("## Problem", 1)[1] if "## Problem" in text else ""
     prose = " ".join(problem.split("\n## ", 1)[0].split())
-    first = re.split(r"(?<=[.!?])\s", prose, maxsplit=1)[0] if prose else ""
+    first = first_sentence(prose)
     body = f"{first} See {folder.relative_to(root).as_posix()}/.".strip()
     paragraphs = [title, body]
     notes = folder / "notes.md"
@@ -3365,16 +3531,18 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         if nits:
             retire_nits(root, nits)
             _git(root, "add", "--", INBOX.as_posix())
-        _, cfg_out, _ = _sdlc(["config"], root)
-        refs = ((cfg_out or {}).get("archive") or {}).get("ids_from") == "github"
-        message = land_message(root, folder, by, refs, nits, unreviewed)
-        try:
-            subprocess.run(
-                ["git", "-C", str(root), "commit", "-q", "-F", "-"], input=message,
-                capture_output=True, encoding="utf-8", check=True,
-            )  # fmt: skip
-        except (subprocess.CalledProcessError, OSError) as e:
-            return emit({**out, "refusals": [f"the commit failed: {e}"]}, 1)
+        if why := _land_commit(root, folder, by, nits, unreviewed):
+            return emit({**out, "refusals": [why]}, 1)
+    elif _commit_failed(root, folder):
+        # Shipped, but its commit never made: ship again (a rerun is harmless) and commit what
+        # the first run would have. Its disposals, checks and impact ran before ship stamped it.
+        code, _, said = _sdlc(["ship", folder.name], root)
+        if code:
+            return emit({**out, "refusals": [f"sdlc.py ship refused: {said.strip()[-500:]}"]}, 1)
+        before = _git(root, "show", f"HEAD:{INBOX.as_posix()}")
+        nits = [n for n in named_nits(root, folder, before) if n not in named_nits(root, folder)]
+        if why := _land_commit(root, folder, by, nits, unreviewed):
+            return emit({**out, "refusals": [why]}, 1)
     # Landed before, and the base moved again: the earlier landing's record goes into the
     # change's commit first, or `base` refuses on a branch with a commit and uncommitted work.
     elif why := _amend_record(root, folder):
@@ -3395,6 +3563,37 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
     out["round"] = land_round(folder) or None
     return emit(out)
+
+
+def _land_commit(
+    root: Path, folder: Path, by: str, nits: list[str], unreviewed: list[str] | None
+) -> str | None:
+    """The landing's one commit of what `sdlc.py ship` staged, with `land_message()`: None, or
+    why it failed, in git's own words (the tail of its stderr, else its stdout)."""
+    _, cfg_out, _ = _sdlc(["config"], root)
+    refs = ((cfg_out or {}).get("archive") or {}).get("ids_from") == "github"
+    message = land_message(root, folder, by, refs, nits, unreviewed)
+    try:
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-q", "-F", "-"], input=message,
+            capture_output=True, encoding="utf-8", check=True,
+        )  # fmt: skip
+    except subprocess.CalledProcessError as e:
+        said = (e.stderr or "").strip() or (e.stdout or "").strip() or str(e)
+        return f"the commit failed: {said[-500:]}"
+    except OSError as e:
+        return f"the commit failed: {e}"
+    return None
+
+
+def _commit_failed(root: Path, folder: Path) -> bool:
+    """Whether a landing stopped after `sdlc.py ship` and before its commit: `HEAD`'s message has
+    no `Sdlc-Landed:` line and `HEAD`'s `intent.md` isn't shipped. One a person shipped and
+    committed by hand says `stage: shipped` in `HEAD`, and is never committed again."""
+    if f"\n{LANDED}: " in "\n" + (_git(root, "log", "-1", "--format=%B") or ""):
+        return False
+    rel = (folder / "intent.md").relative_to(root).as_posix()
+    return frontmatter(_git(root, "show", f"HEAD:{rel}") or "").get("stage") != "shipped"
 
 
 def _dirty(root: Path) -> list[str] | None:
@@ -3594,7 +3793,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     lists the conflicted files (or finds none, `clean`, and it is done: `.sdlc/last-id` alone
     settles itself); `--continue` checks no conflict
     marker is left in them, stages them and continues, aborting the rebase on a second conflict.
-    Every git step is this script's: the builder only edits the files it is given. A finished
+    Every git step is this script's: the builder only edits the files it is given. A conflicted
+    register loses, before it is staged, every entry the landing deleted from it, whatever the
+    builder kept: the change's `idea:` and `fixes:` entries and the nits it retired, each by id
+    (`dropped`). A finished
     resolution leaves `runs/land-resolved`: `land-<n>`, the round under way, then the files. It is
     a resolved conflict no reviewer has seen until round `n`'s review passes
     (`resolution_signals()`)."""
@@ -3632,6 +3834,13 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     ]  # fmt: skip
     if marked:
         return emit({"refusals": [f"conflict markers left in: {', '.join(marked)}"]}, 1)
+    # What the landing deleted from the register stays deleted, whatever the builder kept: the
+    # change's own seeds and the bugs it fixes, by id, and the nits it retired (`named_nits()`).
+    dropped: list[str] = []
+    if INBOX.as_posix() in files:
+        text = (folder / "intent.md").read_text(encoding="utf-8")
+        ids = [*frontmatter_ids(text, "idea"), *frontmatter_ids(text, "fixes")]
+        dropped = drop_entries(root, [*ids, *named_nits(root, folder)])
     for f in files:
         _git(root, "add", "--", f)
     # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
@@ -3648,8 +3857,9 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     marker.write_text(
         f"land-{land_round(folder)}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n"
     )
+    head = _git(root, "rev-parse", "--short", "HEAD")
     return emit({"change": folder.name, "resolved": files, "state": "resolved",
-                 "head": _git(root, "rev-parse", "--short", "HEAD")})  # fmt: skip
+                 "dropped": dropped, "head": head})  # fmt: skip
 
 
 def cmd_land_verdicts(root: Path, ident: str) -> int:
@@ -3659,8 +3869,11 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     `factory.py accept`, after the gate),
     `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
     the run's depth after a resolved conflict or a fix the person asked for, `fixed`), `verify`
-    when one asks for changes, `pass` when none is kept, or `stop`, with why: a red gate or check,
-    a kept change, a reply without a verdict, or one without its evidence."""
+    when one asks for changes, `pass` when none is kept, `mend` when every problem is one the
+    agent that wrote it can answer again (a behaviour check's missing `## Evidence` or `exit:`, a
+    verdict after a preamble, the verifier's unread answers), with the roles in `mend`, each once a
+    landing round (`land_mended()`), or `stop`, with why: a red gate or check, a kept change, a
+    reply without a verdict, or a mendable problem beside one of those or after its one mend."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -3681,6 +3894,9 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     rounds, _, run = _rounds_at_depth(root, folder, cfg)
     wanted = list(run["reviewers"]) if resolved or fixed else ["behaviour"]
     reviews, problems = {}, []
+    # Kept apart as they're added, by the role that mends each, as `loop_state()` keeps them: a
+    # missing `## Evidence`, a verdict after a preamble, the verifier's unread answers.
+    mendable: dict[str, list[str]] = {}
     for role in wanted:
         file = path / f"{role}.md"
         if not file.is_file():
@@ -3688,17 +3904,28 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
         lines = file.read_text(encoding="utf-8").splitlines()
         m = VERDICT_RE.match(lines[0]) if lines else None
         if not m:
-            problems.append(f"reviews/land-{n}/{role}.md doesn't open with a VERDICT")
+            problem = f"reviews/land-{n}/{role}.md doesn't open with a VERDICT"
+            problems.append(problem)
+            if preamble(file):
+                mendable.setdefault(role, []).append(problem)
             continue
         reviews[role] = {
             "verdict": m.group(1),
             "changes": [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c],
         }
         if role in RUNS_THE_CHANGE:
-            problems += read_evidence("\n".join(lines), f"reviews/land-{n}/{role}.md")
+            found = read_evidence("\n".join(lines), f"reviews/land-{n}/{role}.md")
+            problems += found
+            mendable.setdefault(role, []).extend(found)
     missing = [r for r in wanted if r not in reviews]
-    verified, wrong = read_verified(path / VERIFIED, n, reviews)
+    verified, wrong = read_verified(path / VERIFIED, n, reviews, f"reviews/land-{n}/{VERIFIED}")
     problems += wrong
+    if wrong:
+        mendable["verifier"] = wrong
+    # Each role is mended once a landing round: one already mended is a stop like any other.
+    for role in land_mended(folder, n) & set(mendable):
+        del mendable[role]
+    every = {p for found in mendable.values() for p in found}
     # The rebased change is gated by the script before any reviewer reads it, as each build was.
     # Red is a stop, never a fix: the landing has no builder round, so the person ships it.
     gate = _land_gate_state(root, folder, n, settled)
@@ -3717,9 +3944,11 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
         )
     out = {"change": folder.name, "round": n, "reviews": reviews, "missing": missing,
            "resolved": resolved, "fixed": fixed, "gate": gate, "accept": accept,
-           "problems": problems}  # fmt: skip
+           "problems": problems, "mend": []}  # fmt: skip
     asks = any(r["verdict"] == "CHANGES" for r in reviews.values())
-    if problems:
+    if problems and set(problems) <= every:
+        out["next"], out["mend"] = "mend", [role for role, found in mendable.items() if found]
+    elif problems:
         out["next"] = "stop"
     elif gate and gate["current"] is None:
         out["next"] = "gate"
@@ -4246,7 +4475,7 @@ def main() -> int:
     p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
     p_agent.add_argument("id")
     p_agent.add_argument("--task", choices=TASKS, required=True)
-    p_agent.add_argument("--role", choices=[*REVIEWERS, "builder"])
+    p_agent.add_argument("--role", choices=[*REVIEWERS, "builder", "approver", "verifier"])
     sub.add_parser("sdlc-path", help="the sdlc.py of this factory's own version, which land runs")
     p_check = sub.add_parser("land-check", help="the batch to land, its signals, and whether clear")
     p_check.add_argument("ids", nargs="*")

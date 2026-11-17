@@ -380,9 +380,11 @@ the next step for that change. A `problem` is a stop, reported for that change a
      committed) is a stop: never patch a verdict in, and never reset a commit. **A stop whose
      `way` is `mend` is the one kind this run can mend itself,** once for each role its `mend`
      names: a missing `## Evidence` (the builder resumed, or a new behaviour check for that
-     round, asked to run what its claims rest on again), or a reviewer's verdict written after a
-     preamble (that reviewer resumed, asked to reply again with its `VERDICT:` line first). Each
-     reply is written over the old one.
+     round, asked to run what its claims rest on again), a reviewer's verdict written after a
+     preamble (that reviewer resumed, asked to reply again with its `VERDICT:` line first), the
+     approver's decision written after one (`approver`, resumed for its `DECISION:` line first),
+     or answers in `verified.md` the script couldn't read (`verifier`, resumed with what the
+     script found). Each reply is written over the old one.
 
      ```bash
      uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task mend --role <a role in mend>
@@ -393,8 +395,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
      in `runs/mended`, `verdicts` then names that stop `rerun`, and a second mend is refused.
 
      The reading that stopped wrote `runs/stopped.md`: its problems word for word, and the way on
-     (`way`: `ship` after a commit, `mend` for a missing `## Evidence` or a verdict after a
-     preamble, `rerun` otherwise) with its
+     (`way`: `ship` after a commit, `mend` for a missing `## Evidence` or an answer not in its
+     shape, `rerun` otherwise) with its
      sentence, which the board and `/sdlc:status` show the person. Name that sentence in your
      report. Never write, edit or delete `runs/stopped.md` yourself: only a reading that finds the
      cause gone removes it, when the person reruns `/sdlc-factory:build NNN`.

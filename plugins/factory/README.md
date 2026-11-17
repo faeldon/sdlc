@@ -75,7 +75,9 @@ reviewing, and deciding whether to escalate.
   `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
   copy). A change the base branch moved under is gated by the script again, as rebased, before
   its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
-  change's own builder, and every reviewer at its depth checks the resolution before it lands.
+  change's own builder, and every reviewer at its depth checks the resolution before it lands;
+  what the landing deleted from the register (the change's own seeds, the bugs it fixes, the nits
+  it retired) stays deleted whatever the resolution kept.
   When the base branch moves again before a change closes, the landing goes back to that change's
   rebase, gates and reviews it as it now stands, and closes it, up to `[land] moves` times. Answer
   `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
@@ -161,9 +163,11 @@ spec.
   run is gated, reviewed and decided like any, its round limit and gate fixes counted from R. A
   READY decision never goes back: it is ship's.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
-  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. `factory.py` stops
-  the run on a reply without it, and the gate itself is the script's, so "the gate passes" is
-  never taken on an agent's word.
+  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. A reply without
+  it, or holding its answer after a preamble (a verdict, the approver's decision, or a verifier's
+  answers the script can't read), goes back to the agent that wrote it once a round, a landing
+  round included, and its new reply is written over the old; a second stops the run. The gate
+  itself is the script's, so "the gate passes" is never taken on an agent's word.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
   one touching any runs the full depth, and a run never lightens. With no list, every run is full.

@@ -49,7 +49,8 @@ why, is part of that story.
 
 ## What you return
 
-The first line is exactly `DECISION: READY` or `DECISION: ESCALATE`. Then:
+The first line is exactly `DECISION: READY` or `DECISION: ESCALATE`, with nothing before it, not
+even a sentence of your own. Then:
 
 - **Why**, in two or three sentences.
 - **Open items**, one line each: every unresolved CHANGE, with the reviewer that raised it.

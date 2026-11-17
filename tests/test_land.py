@@ -517,9 +517,10 @@ def test_a_second_land_after_main_moves_rebases_with_the_first_record_amended_in
 
 
 @needs_uv
-def test_a_record_is_never_amended_into_a_commit_the_landing_didnt_make(tmp_path, capsys) -> None:
-    """A change at `stage: shipped` whose commit a person made, not the landing: its uncommitted
-    folder is refused, never amended into a commit that isn't the landing's."""
+def test_a_hand_shipped_change_is_not_committed_again(tmp_path, capsys) -> None:
+    """109 R9: a change whose commit a person made, `stage: shipped` in it, with no
+    `Sdlc-Landed:` line: its uncommitted folder is refused, never amended into a commit that isn't
+    the landing's, and no landing commit is made over it."""
     root = _repo(tmp_path)
     tree = _ready(root, "handmade", "handmade's one")
     folder = tree / ".sdlc" / "work" / tree.name
@@ -528,14 +529,76 @@ def test_a_record_is_never_amended_into_a_commit_the_landing_didnt_make(tmp_path
         intent.read_text(encoding="utf-8").replace("stage: test", "stage: shipped"),
         encoding="utf-8",
     )
-    _git(tree, "add", "README.md", ".sdlc/last-id")
+    rel = folder.relative_to(tree).as_posix()
+    _git(tree, "add", "README.md", ".sdlc/last-id", f"{rel}/intent.md")
     _git(tree, "commit", "-q", "-m", "by hand")
+    head = _git(tree, "rev-parse", "HEAD")
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert code == 1 and "isn't the landing's commit" in out["refusals"][0], out
+    assert _git(tree, "rev-parse", "HEAD") == head, "nothing committed or amended"
     assert _git(tree, "show", "--name-only", "--format=", "HEAD").splitlines() == [
         ".sdlc/last-id",
+        f"{rel}/intent.md",
         "README.md",
     ], "nothing amended"
+
+
+def _hook(root: Path, says: str | None) -> None:
+    """A `commit-msg` hook in the scratch repo, shared by its worktrees, that prints `says` and
+    refuses every commit; None removes it."""
+    hook = Path(_git(root, "rev-parse", "--git-common-dir"))
+    hook = (hook if hook.is_absolute() else root / hook) / "hooks" / "commit-msg"
+    if says is None:
+        hook.unlink()
+        return
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(f"#!/bin/sh\necho '{says}' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+
+@needs_uv
+def test_a_failed_landing_commit_carries_git_s_error(tmp_path, capsys) -> None:
+    """109 R7: a commit git refuses is reported with git's own words, never only its exit."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "hooked", "hooked's one")
+    _hook(root, "hook says no")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert code == 1 and "the commit failed" in out["refusals"][0], out
+    assert "hook says no" in out["refusals"][0], out
+
+
+@needs_uv
+def test_a_landing_whose_commit_failed_commits_on_rerun(tmp_path, capsys) -> None:
+    """109 R8: a landing that failed after `sdlc.py ship` and before its commit makes the commit
+    when it runs again with the same `--by`: one commit, the message the first run would have
+    written, its retired nit included, and nothing left uncommitted."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a register")
+    tree = _ready(root, "retried", "retried's one")
+    intent = _folder(tree) / "intent.md"
+    intent.write_text(
+        intent.read_text(encoding="utf-8") + "\nTakes in nit 2026-11-17-11.\n", encoding="utf-8"
+    )
+    before = _git(tree, "rev-parse", "HEAD")
+    _hook(root, "hook says no")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert code == 1 and "hook says no" in out["refusals"][0], out
+    assert _git(tree, "rev-parse", "HEAD") == before
+    assert "stage: shipped" in intent.read_text(encoding="utf-8"), "ship ran before the commit"
+    _hook(root, None)
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"], out["retired_nits"]) == (0, "current", ["2026-11-17-11"]), out
+    assert _git(tree, "rev-parse", "HEAD~1") == before, "one new commit"
+    message = _git(tree, "log", "-1", "--format=%B")
+    assert message.splitlines()[-1] == "Sdlc-Landed: by=person", message
+    assert f"Retired nits:\n- 2026-11-17-11: taken in by {tree.name}" in message, message
+    assert _git(tree, "status", "--porcelain") == "", "nothing left uncommitted"
+    shipped = _git(tree, "show", f"HEAD:{intent.relative_to(tree).as_posix()}")
+    assert "stage: shipped" in shipped
+    assert "2026-11-17-11" not in _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
 
 
 REGISTER = """# Ideas
@@ -949,6 +1012,72 @@ def test_a_landing_carries_drops_and_confirms_once(tmp_path, capsys) -> None:
     assert ".sdlc/work/inbox.md" in _git(tree, "show", "--name-only", "--format="), "committed"
 
 
+NOTES = (
+    "# Notes\n\n- [ ] Page the drafts list. Fifty a page would match the\n"
+    "  search results, which page at fifty.\n"
+    "  Nobody asked yet.\n\nAfter the list.\n"
+    "- [ ] Rename the flag\n  to what the docs call it\n"
+    "```\n- [ ] an example, never an item\n```\n"
+)
+CARRIED = (
+    "Page the drafts list. Fifty a page would match the search results, which page at fifty. "
+    "Nobody asked yet."
+)
+
+
+@needs_uv
+def test_a_carried_note_keeps_its_continuation_lines(tmp_path, capsys) -> None:
+    """109 R11: a note's text runs on through its indented lines, joined with single spaces, in
+    what land-check shows and in the seed it is carried as; the tick goes on its `- [ ]` line."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    (folder / "notes.md").write_text(NOTES, encoding="utf-8")
+    (folder / "decision.md").write_text(
+        "DECISION: READY\n\nFine.\n\n- IMPACT: minor — a test change\n"
+        "- UNDONE: Rename the flag → dropped: the docs moved on\n",
+        encoding="utf-8",
+    )
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    undone = batch["batch"][0]["undone"]
+    assert [u["text"] for u in undone] == [CARRIED, "Rename the flag to what the docs call it"]
+    assert "dropped" in undone[1], "a proposal on the note's first line still matches"
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    entry = next(e for e in sdlc.inbox_entries(tree) if e["status"] == "idea")
+    assert CARRIED in " ".join(entry["text"]), entry
+    notes = (folder / "notes.md").read_text(encoding="utf-8")
+    assert f"- [x] Page the drafts list. Fifty a page would match the → seed: {entry['id']}\n" in (
+        notes
+    )
+    assert "  search results, which page at fifty.\n  Nobody asked yet.\n" in notes
+    assert "- [x] Rename the flag → dropped: the docs moved on\n  to what" in notes
+
+
+def test_an_unproposed_seed_is_titled_from_its_first_sentence(tmp_path) -> None:
+    """109 R12: with no proposal, a carried note's seed is titled by its first sentence, split as
+    the landing commit splits a Problem; a note with no sentence end is its own title. A proposal
+    matches a note by its first line or its full text."""
+    assert factory.OPEN_NOTE_RE.pattern == sdlc.OPEN_ITEM_RE.pattern, "read as preflight reads"
+    folder = tmp_path / "001-noted"
+    folder.mkdir()
+    (folder / "notes.md").write_text(NOTES, encoding="utf-8")
+    pre = {"undone": {"items": [
+        {"line": 3, "text": "Page the drafts list. Fifty a page would match the"},
+        {"line": 8, "text": "Rename the flag"},
+    ]}}  # fmt: skip
+    parts = factory.land_parts(folder, pre)["undone"]
+    assert [p.get("seed") for p in parts] == [
+        "Page the drafts list.",
+        "Rename the flag to what the docs call it",
+    ]
+    assert [p["line"] for p in parts] == [3, 8], "ticked on its `- [ ]` line"
+    (folder / "decision.md").write_text(
+        f"DECISION: READY\n\n- UNDONE: {CARRIED} → seed: Page the drafts\n", encoding="utf-8"
+    )
+    assert factory.land_parts(folder, pre)["undone"][0]["seed"] == "Page the drafts"
+
+
 @needs_uv
 def test_the_approver_proposes_dispositions_and_recovery(tmp_path, capsys) -> None:
     """103 R10: the approver is told the irreversible paths the diff touches, from the base
@@ -1091,6 +1220,245 @@ def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_facto
 
 
 # ---------------------------------------------------------------- following main (104)
+
+
+OWN = """# Ideas
+
+> The register.
+
+## [2026-11-17-5] [nit] A nit the change takes in
+
+Paths: README.md
+
+## [2026-11-17-6] [idea] The change's own seed
+
+Raised 2026-11-17.
+
+## [2026-11-17-7] [bug] A bug the change fixes
+
+Severity: minor
+
+## [2026-11-17-8] [nit] A nit no change names
+
+Paths: README.md
+"""
+
+
+def _resolving(tmp_path: Path, capsys, edit: tuple[str, str]) -> tuple[Path, Path]:
+    """A change landed over a register that names its seed, the bug it fixes and a nit it takes
+    in, its rebase left conflicted in the register by the base branch's `edit` to it, and the
+    builder's resolution: the base branch's register, everything the landing deleted kept."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    register = root / ".sdlc" / "work" / "inbox.md"
+    register.write_text(OWN, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a register")
+    tree = _ready(root, "own", "own's one")
+    intent = _folder(tree) / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("idea:", "idea: 2026-11-17-6", 1)
+    text = text.replace("---\n", "---\nfixes: [2026-11-17-7]\n", 1)
+    intent.write_text(text + "\nTakes in nit 2026-11-17-5.\n", encoding="utf-8")
+    assert factory.frontmatter(text).get("idea") == "2026-11-17-6", text
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"]) == (0, "current"), out
+    landed = _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
+    assert "2026-11-17-6" not in landed and "2026-11-17-5" not in landed, landed
+    register.write_text(OWN.replace(*edit), encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "main edits the register")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"]) == (0, "conflict"), out
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False)
+    assert ".sdlc/work/inbox.md" in out["conflicted"], out
+    (tree / ".sdlc" / "work" / "inbox.md").write_text(OWN.replace(*edit), encoding="utf-8")
+    return root, tree
+
+
+@needs_uv
+def test_a_landing_resolution_never_keeps_the_change_s_own_seeds(tmp_path, capsys) -> None:
+    """109 R13, the 104 case: the base branch tagged the change's seed `[building]` while its ship
+    deleted it, and the builder's resolution kept it. `resolve --continue` deletes every entry the
+    change's `idea:` and `fixes:` name, by id, and leaves the rest byte for byte."""
+    edit = ("[2026-11-17-6] [idea]", "[2026-11-17-6] [building]")
+    root, tree = _resolving(tmp_path, capsys, edit)
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert out["dropped"] == ["2026-11-17-5", "2026-11-17-6", "2026-11-17-7"], out
+    landed = _git(tree, "show", "HEAD:.sdlc/work/inbox.md") + "\n"
+    assert (
+        landed == "# Ideas\n\n> The register.\n\n## [2026-11-17-8] [nit] A nit no change "
+        "names\n\nPaths: README.md\n"
+    ), landed
+
+
+@needs_uv
+def test_a_landing_resolution_never_keeps_the_nits_it_retired(tmp_path, capsys) -> None:
+    """109 R13: the base branch edited a nit the landing retired, and the builder kept it; the
+    landed commit doesn't have it, and an open nit the change doesn't name stays."""
+    edit = ("Paths: README.md\n\n## [2026-11-17-6]", "Paths: README.md, docs/\n\n## [2026-11-17-6]")
+    root, tree = _resolving(tmp_path, capsys, edit)
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert "2026-11-17-5" in out["dropped"], out
+    landed = _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
+    assert "2026-11-17-5" not in landed and "docs/" not in landed, landed
+    assert "## [2026-11-17-8] [nit] A nit no change names\n\nPaths: README.md" in landed
+
+
+def test_a_resolution_drops_entries_by_id_alone(tmp_path) -> None:
+    """109 R13: an `idea:` naming its seed by title is skipped, never matched; a fenced example of
+    an id is never an entry."""
+    assert factory.frontmatter_ids("---\nidea: Reopen drafts\n---\n", "idea") == []
+    text = "---\nfixes: [2026-11-17-7, Some bug]\nidea: 2026-11-17-6\n---\n"
+    assert factory.frontmatter_ids(text, "fixes") == ["2026-11-17-7"]
+    assert factory.frontmatter_ids(text, "idea") == ["2026-11-17-6"]
+    (tmp_path / ".sdlc" / "work").mkdir(parents=True)
+    register = tmp_path / ".sdlc" / "work" / "inbox.md"
+    fenced = OWN + "\n```\n## [2026-11-17-6] [idea] an example\n```\n"
+    register.write_text(fenced, encoding="utf-8")
+    assert factory.drop_entries(tmp_path, ["2026-11-17-6"]) == ["2026-11-17-6"]
+    after = register.read_text(encoding="utf-8")
+    assert "## [2026-11-17-6] [idea] an example" in after and "own seed" not in after
+
+
+NO_EXIT = "VERDICT: PASS\n\nIt reopens.\n\n## Evidence\n\n$ head -5 intent.md\n---\nid: 001\n"
+PASSED = "VERDICT: PASS\n\nIt reopens.\n\n## Evidence\n\n$ head -5 intent.md\n---\nexit: 0\n"
+
+
+def _landing(tmp_path: Path, capsys, config: str | None = None) -> tuple[Path, Path]:
+    """A ready change whose landing rebased it onto a base branch that moved: round `land-1`
+    open, its behaviour check to run (and the gate first, when `config` names one)."""
+    root = _repo(tmp_path)
+    if config:
+        _config(root, config)
+    tree = _ready(root, "mended", "mended's one")
+    (root / "elsewhere.txt").write_text("moved on\n", encoding="utf-8")
+    _git(root, "add", "elsewhere.txt")
+    _git(root, "commit", "-q", "-m", "main moves on")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"], out["round"]) == (0, "rebased", 1), out
+    return root, tree
+
+
+def _replies(monkeypatch, reply: str) -> list[list[str]]:
+    """A stand-in for `claude -p` that replies `reply`; the argv of each call, in order."""
+    calls: list[list[str]] = []
+
+    def fake(argv: list[str], cwd: Path):
+        calls.append(argv)
+        return 0, reply, None, None
+
+    monkeypatch.setattr(factory, "_claude", fake)
+    return calls
+
+
+@needs_uv
+def test_a_landing_review_missing_an_exit_is_mended_not_stopped(tmp_path, capsys) -> None:
+    """109 R1: a landing behaviour check whose read has no `exit:` is a mend, not a stop."""
+    root, tree = _landing(tmp_path, capsys)
+    reviews = _folder(tree) / "reviews" / "land-1"
+    (reviews / "behaviour.md").write_text(NO_EXIT, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (out["next"], out["mend"]) == ("mend", ["behaviour"]), out
+    (reviews / "behaviour.md").write_text("VERDICT: PASS\n\nIt reopens.\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (out["next"], out["mend"]) == ("mend", ["behaviour"]), "no section at all"
+
+
+@needs_uv
+def test_a_landing_verdict_after_a_preamble_is_mended(tmp_path, capsys) -> None:
+    """109 R2: a landing reply holding its verdict after other lines is a mend for its role."""
+    root, tree = _landing(tmp_path, capsys)
+    reviews = _folder(tree) / "reviews" / "land-1"
+    (reviews / "behaviour.md").write_text("I ran it.\n\n" + PASSED, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (out["next"], out["mend"]) == ("mend", ["behaviour"]), out
+    (reviews / "behaviour.md").write_text("I couldn't run it.\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "stop", "no verdict anywhere: nothing to put first"
+
+
+@needs_uv
+def test_a_landing_stops_for_cause_even_beside_a_mendable_problem(tmp_path, capsys) -> None:
+    """109 R6: a red landing gate beside a missing exit stops the landing; a mend can't move it."""
+    config = '[commands]\ncheck = "test ! -f broken.txt"\n'
+    root, tree = _landing(tmp_path, capsys, config)
+    (tree / "broken.txt").write_text("", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert (code, out["verdict"]) == (1, "FAIL"), out
+    (_folder(tree) / "reviews" / "land-1" / "behaviour.md").write_text(NO_EXIT, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "stop" and not out.get("mend"), out
+    assert any("ship it by hand" in p for p in out["problems"]), out
+
+
+@needs_uv
+def test_a_landing_mend_writes_into_its_landing_round(tmp_path, capsys, monkeypatch) -> None:
+    """109 R4: `land-mend` runs a new behaviour check, told to run what its claims rest on again,
+    and writes its reply over `reviews/land-1/behaviour.md`, never under `reviews/round-*`."""
+    root, tree = _landing(tmp_path, capsys)
+    folder = _folder(tree)
+    reply = folder / "reviews" / "land-1" / "behaviour.md"
+    reply.write_text(NO_EXIT, encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in (folder / "reviews" / "round-1").iterdir()}
+    calls = _replies(monkeypatch, PASSED)
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "behaviour", None)
+    assert (code, out["to"]) == (0, f".sdlc/work/{tree.name}/reviews/land-1/behaviour.md"), out
+    prompt = calls[0][calls[0].index("-p") + 1]
+    assert "Review landing round 1" in prompt and "## Evidence" in prompt, prompt
+    assert "--session-id" in calls[0], "a new behaviour check"
+    assert reply.read_text(encoding="utf-8") == PASSED
+    after = {p.name: p.read_bytes() for p in (folder / "reviews" / "round-1").iterdir()}
+    assert after == before, "the build round untouched"
+    assert (folder / "runs" / "mended").read_text(encoding="utf-8") == "behaviour land-1\n"
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "pass", out
+
+
+@needs_uv
+def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) -> None:
+    """109 R3, R10: each role is mended once a landing round; a build round's mend and a
+    landing's never use up each other's. A verifier whose answers can't be read is resumed."""
+    root, tree = _landing(tmp_path, capsys)
+    folder = _folder(tree)
+    reviews = folder / "reviews" / "land-1"
+    (reviews / "behaviour.md").write_text("Ran it.\n\n" + PASSED, encoding="utf-8")
+    (folder / "runs").mkdir(exist_ok=True)
+    (folder / "runs" / "mended").write_text("behaviour 1\n", encoding="utf-8")
+    (folder / "runs" / "reviewer-behaviour.sessions").write_text("s-b\n", encoding="utf-8")
+    calls = _replies(monkeypatch, "Ran it again.\n\n" + PASSED)
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "behaviour", None)
+    assert code == 0, "a build round's mend leaves the landing's"
+    assert calls[0][-2:] == ["--resume", "s-b"], "the reviewer resumed to put its verdict first"
+    assert factory.mended(folder) == {("behaviour", 1)}, "and the landing's leaves the build's"
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "stop", "still a preamble after its one mend"
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "behaviour", None)
+    assert code == 1 and "not a mend for behaviour" in out["refusals"][0], out
+    assert len(calls) == 1, "refused before any session"
+
+    (reviews / "behaviour.md").write_text(
+        "VERDICT: CHANGES\n- CHANGE: README.md:1: keep both\n\n## Evidence\n$ true\nexit: 0\n",
+        encoding="utf-8",
+    )
+    (reviews / "verified.md").write_text("- **KEPT:** behaviour: C1: keep both\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (out["next"], out["mend"]) == ("mend", ["verifier"]), out
+    assert "reviews/land-1/verified.md" in out["problems"][0], out
+    (folder / "runs" / "verifier.sessions").write_text("s-v\n", encoding="utf-8")
+    calls = _replies(monkeypatch, "- DROPPED: behaviour: C1: README.md:1: keep both — it does\n")
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "verifier", None)
+    assert (code, out["to"]) == (0, f".sdlc/work/{tree.name}/reviews/land-1/verified.md"), out
+    assert calls[0][-2:] == ["--resume", "s-v"] and "- KEPT: <role>: C<n>:" in calls[0][2]
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "pass", out
+
+
+def test_the_land_skill_names_its_mend() -> None:
+    """109 R14: the land skill runs `land-mend` for each role `land-verdicts` names."""
+    text = (ROOT / "plugins" / "factory" / "skills" / "land" / "SKILL.md").read_text("utf-8")
+    blocks = text.split("```bash")[1:]
+    assert any("--task land-mend --role <role>" in b.split("```")[0] for b in blocks)
 
 
 def _move(root: Path, n: int) -> None:
