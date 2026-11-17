@@ -131,6 +131,14 @@ DROP_WHY = " — "
 ID_RE = re.compile(r"^C(\d+):\s*(.*)$")
 # What an approver must write when the rounds ran out with changes still kept.
 RECONSIDER = "## Reconsider the approach"
+# An escalated change sent back to the factory: its `decision.md` kept as `decision-<n>.md`, and
+# `build/round-<R>.restart.md`, written by `restart` beside the gate files, marking round R as the
+# new run's first. Its first line names the archive; `WORDS:` the person's own words, when they gave
+# any, as a ticked `R<k> (person, restart)` line in `decisions.md`, which the ledger reads past.
+RESTART_RE = re.compile(r"^RESTART: (decision-(\d+)\.md)\s*$")
+WORDS_RE = re.compile(r"^WORDS: (R\d+)\s*$")
+RESTART_WORDS_RE = re.compile(r"^- \[x\] (R\d+) \(person, restart\): (.+?)\s*$")
+ARCHIVE_RE = re.compile(r"^decision-(\d+)\.md$")
 # What a builder report and a behaviour check end with: each command run (`$ <command>`), the tail
 # of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
 EVIDENCE = "## Evidence"
@@ -563,17 +571,23 @@ def risk_paths(paths: list[str], patterns: list[str]) -> list[str]:
     return [p for p in paths if named(p)]
 
 
-def depth(root: Path, cfg: dict, rounds: list[dict]) -> dict:
+def depth(root: Path, cfg: dict, rounds: list[dict], starts: list[int] = ()) -> dict:
     """The depth this run reviews at, from the diff as it stands: `full` with no sensitive list
     (every run, as before there was a choice), when the diff touches a listed path, or once any
-    round ran beyond `[light]` (a run never lightens); `light` otherwise. Writes nothing."""
+    round ran beyond `[light]` (a run never lightens); `light` otherwise. A round's place against
+    `[light]`'s rounds is its place in its own run, counted from the newest restart at or before
+    it (`starts`, the restarts' rounds), so a restart never deepens a light run. Writes nothing."""
+
+    def place(n: int) -> int:
+        return n - max((s for s in starts if s <= n), default=1) + 1
+
     base = _base(root)
     listed = _sensitive(root, base) if base else []
     changed = _changed_paths(root, base) if base else []
     hit = risk_paths(changed, listed)
     light = cfg["light"]
     beyond = any(
-        r["round"] > light["rounds"]
+        place(r["round"]) > light["rounds"]
         or set(r["reviews"]) - set(light["reviewers"]) - set(UI_REVIEWERS)
         for r in rounds
     )
@@ -653,7 +667,14 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         level: {role: model_for(role, cfg, tier, level) for role in ROLES}
         for level in ("light", "full")
     }
-    if (tier, stage) not in STARTS[purpose]:
+    if purpose == "build" and stage == "test" and tier in (1, 2):
+        # An escalated change, sent back: reported here, written only by `restart`, after the yes.
+        restart, why = restart_state(folder)
+        if restart:
+            out["restart"] = restart
+        else:
+            out["refusals"].append(why)
+    elif (tier, stage) not in STARTS[purpose]:
         allowed = " or ".join(f"tier {t} at stage: {s}" for t, s in sorted(STARTS[purpose]))
         out["refusals"].append(
             f"{purpose} starts from {allowed}; {folder.name} is tier {tier} at stage: {stage}"
@@ -809,9 +830,13 @@ def ui_review(cfg: dict, rounds: list[dict], changed: list[str]) -> bool:
 
 def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
     """The rounds, their problems and the run's depth, each round's `complete` judged against the
-    reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`)."""
+    reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`), and
+    the newest restart (`restart`, or None), whose round starts the run."""
     rounds, problems = read_rounds(folder, cfg["reviewers"])
-    run = depth(root, cfg, rounds)
+    restarts, wrong = read_restarts(folder)
+    problems += wrong
+    run = depth(root, cfg, rounds, [r["round"] for r in restarts])
+    run["restart"] = restarts[-1] if restarts else None
     run["ui"] = ui_review(cfg, rounds, run["changed"])
     if run["ui"]:
         run["reviewers"] += [r for r in UI_REVIEWERS if r not in run["reviewers"]]
@@ -896,6 +921,111 @@ def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, st
             f"`{RECONSIDER}` section"
         )
     return m.group(1), None
+
+
+def restart_path(folder: Path, n: int) -> Path:
+    return folder / "build" / f"round-{n}.restart.md"
+
+
+def read_restart_words(folder: Path, ident: str) -> str | None:
+    """The person's words for restart `ident` (`R2`) in `decisions.md`, or None."""
+    path = folder / "decisions.md"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        m = RESTART_WORDS_RE.match(line)
+        if m and m.group(1) == ident:
+            return m.group(2)
+    return None
+
+
+def read_restarts(folder: Path) -> tuple[list[dict], list[str]]:
+    """Every restart record, `build/round-<R>.restart.md`, oldest first, as its round, the archived
+    decision it names, the id of the person's words (or None) and its own path in the folder; and
+    what's wrong with any that won't read: a first line that isn't `RESTART: decision-<n>.md`, an
+    archive that doesn't exist, or a `WORDS:` id no `(person, restart)` line holds."""
+    found, problems = [], []
+    suffix = ".restart.md"
+    paths = [
+        p for p in (folder / "build").glob(f"round-*{suffix}") if p.name[6 : -len(suffix)].isdigit()
+    ]
+    for path in sorted(paths, key=lambda p: int(p.name[6 : -len(suffix)])):
+        where = f"build/{path.name}"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        m = RESTART_RE.match(lines[0]) if lines else None
+        if not m:
+            problems.append(f"{where} doesn't open with RESTART: decision-<n>.md")
+            continue
+        archive = m.group(1)
+        if not (folder / archive).is_file():
+            problems.append(f"{where} names {archive}, which doesn't exist")
+            continue
+        words = next((w.group(1) for w in map(WORDS_RE.match, lines[1:]) if w), None)
+        if words and read_restart_words(folder, words) is None:
+            problems.append(
+                f"{where} names {words}, which no `- [x] {words} (person, restart): …` line in "
+                "decisions.md is"
+            )
+            continue
+        n = int(path.name[6 : -len(suffix)])
+        found.append({"round": n, "archive": archive, "words": words, "record": where})
+    return found, problems
+
+
+def next_archive(folder: Path) -> int:
+    """The number the next archived decision takes: one past the highest `decision-<n>.md`."""
+    names = [ARCHIVE_RE.match(p.name) for p in folder.glob("decision-*.md")]
+    taken = [int(m.group(1)) for m in names if m]
+    return max(taken, default=0) + 1
+
+
+def reconsider_section(text: str) -> str | None:
+    """A decision's `## Reconsider the approach` section, its heading and lines up to the next
+    `## ` heading, word for word; None when it has none."""
+    lines = text.splitlines()
+    if RECONSIDER not in [line.strip() for line in lines]:
+        return None
+    start = [line.strip() for line in lines].index(RECONSIDER)
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[start:end]).rstrip()
+
+
+def restart_state(folder: Path) -> tuple[dict | None, str | None]:
+    """Whether a change at `stage: test` can go back to the factory, and how, or why not: the one
+    reading `start` reports and `restart` acts on. An ESCALATE in `decision.md` goes back as
+    `decision-<n>.md`, its new run starting at round R, one past the newest round built or
+    reviewed. With no `decision.md`, a restart record for a round not yet built, whose archive
+    exists, is a restart cut short, to finish. A READY, a decision that won't read, or neither,
+    is refused. Writes nothing."""
+    path = folder / "decision.md"
+    reviewed = [
+        int(p.name[6:]) for p in (folder / "reviews").glob("round-*")
+        if p.is_dir() and p.name[6:].isdigit()
+    ]  # fmt: skip
+    newest = max([build_round(folder), *reviewed])
+    if path.is_file():
+        decision, problem = read_decision(folder)
+        if problem:
+            return None, problem
+        if decision == "READY":
+            return None, (
+                f"{folder.name}'s decision is READY: ship it with /sdlc:ship, or land it with "
+                "/sdlc-factory:land; only an ESCALATE goes back to the factory"
+            )
+        archive, rnd, under_way = f"decision-{next_archive(folder)}.md", newest + 1, False
+    else:
+        restarts, _ = read_restarts(folder)
+        last = restarts[-1] if restarts else None
+        if not last or last["round"] <= newest:
+            return None, (
+                f"{folder.name} is at stage: test with no decision.md: there is no ESCALATE to "
+                "send back"
+            )
+        archive, rnd, under_way = last["archive"], last["round"], True
+    text = (folder / ("decision.md" if not under_way else archive)).read_text(encoding="utf-8")
+    record = restart_path(folder, rnd).relative_to(folder).as_posix()
+    return {
+        "archive": archive, "round": rnd, "reconsider": reconsider_section(text) is not None,
+        "reasons": text, "record": record, "under_way": under_way,
+    }, None  # fmt: skip
 
 
 def read_ledger(folder: Path) -> list[dict]:
@@ -1100,8 +1230,11 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     last = rounds[-1] if rounds else None
     changes = last and any(v["verdict"] == "CHANGES" for v in last["reviews"].values())
     kept = bool(last and last["verified"] and last["verified"]["kept"])
+    # A restarted run's rounds count from its restart: round R is its first.
+    restart = run["restart"]
+    first = restart["round"] if restart else 1
     exhausted = bool(last and last["complete"] and changes and kept)
-    exhausted = exhausted and last["round"] >= run["rounds"]
+    exhausted = exhausted and last["round"] - first + 1 >= run["rounds"]
     decision, problem = read_decision(folder, exhausted)
     problems += [problem] if problem else []
     now = _git(root, "rev-parse", "--short", "HEAD")
@@ -1111,7 +1244,8 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out["mend"] = []
     out["exhausted"] = False
     out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
-    out["limit"] = run["rounds"]
+    out["limit"] = first - 1 + run["rounds"]
+    out["restart"] = restart
     ledger = read_ledger(folder)
     out["pending"] = [d["id"] for d in ledger if d["kind"] == "blocking" and not d["decided"]]
     out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
@@ -1173,6 +1307,8 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["next"] = "decide"
     elif decision:
         out["next"] = "done"
+    elif restart and restart["round"] > built:
+        out["next"], out["round"] = "build", restart["round"]
     elif built == 0:
         out["next"], out["round"] = "build", 1
     elif unreviewed and gate and gate["current"] is None:
@@ -1186,7 +1322,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["missing"] = [r for r in run["reviewers"] if r not in last["reviews"]]
     elif changes and last["verified"] is None:
         out["next"], out["round"] = "verify", last["round"]
-    elif kept and last["round"] < run["rounds"]:
+    elif kept and last["round"] - first + 1 < run["rounds"]:
         out["next"], out["round"] = "rework", last["round"]
     else:
         out["next"], out["round"], out["exhausted"] = "approve", last["round"], exhausted
@@ -1460,6 +1596,47 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     return emit(out)
 
 
+def cmd_restart(root: Path, ident: str, words: str | None) -> int:
+    """Send an escalated change back to the factory, once the person said yes: the checks `start`
+    made (`restart_state()`), then `build/round-<R>.restart.md`, then `decision.md` renamed to
+    `decision-<n>.md`, byte for byte, then `stage: build`. With `words`, the id of the person's
+    `(person, restart)` line in `decisions.md`, named in the record. Writes only the change's
+    folder, commits nothing, never writes over an archive; a rerun finishes a restart cut short."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    intent = folder / "intent.md"
+    meta = frontmatter(intent.read_text(encoding="utf-8"))
+    tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
+    stage = meta.get("stage") or None
+    if stage != "test" or tier not in (1, 2):
+        why = f"restart takes a tier 1 or 2 change at stage: test; {folder.name} is tier {tier} "
+        return emit({"refusals": [why + f"at stage: {stage}"]}, 1)
+    restart, why = restart_state(folder)
+    if why:
+        return emit({"refusals": [why]}, 1)
+    if words and read_restart_words(folder, words) is None:
+        why = f"{words} isn't a `- [x] {words} (person, restart): …` line in decisions.md"
+        return emit({"refusals": [why]}, 1)
+    today = date.today().isoformat()
+    text, unplaced = set_stage(intent.read_text(encoding="utf-8"), "build", today)
+    if unplaced:
+        return emit({"refusals": [f"intent.md has no {', '.join(unplaced)} line"]}, 1)
+    archive = folder / restart["archive"]
+    if not restart["under_way"]:
+        if archive.exists():
+            why = f"{restart['archive']} exists already: an archived decision is never written over"
+            return emit({"refusals": [why]}, 1)
+        record = folder / restart["record"]
+        record.parent.mkdir(parents=True, exist_ok=True)
+        body = f"RESTART: {restart['archive']}\n" + (f"WORDS: {words}\n" if words else "")
+        record.write_text(body, encoding="utf-8", newline="\n")
+        (folder / "decision.md").rename(archive)
+    intent.write_text(text, encoding="utf-8", newline="\n")
+    out = {"change": folder.name, "archive": restart["archive"], "round": restart["round"]}
+    return emit(out | {"record": restart["record"], "words": words, "stage": "build"})
+
+
 # ---------------------------------------------------------------- the agents, as sessions
 #
 # The supervisor starts each agent as a headless session of its own in the change's worktree, in
@@ -1708,6 +1885,21 @@ def _task(
         return RECHECK, None, False
     if task == "spec":
         return head + "Draft spec.md for this change.", None, False
+    restart = state.get("restart")
+    if task == "build" and restart and rnd == restart["round"]:
+        # A fresh builder, told why the approver escalated: never resumed on the old approach.
+        text = (folder / restart["archive"]).read_text(encoding="utf-8")
+        prompt = head + (
+            f"The approver escalated this change after round {rnd - 1}, and the person sent it "
+            f"back for another build: read {rel}/{restart['archive']} and build round {rnd} to "
+            "answer it, plan.md first where the approach changes, then the code, test first."
+        )
+        section = reconsider_section(text)
+        if section:
+            prompt += "\n\n" + section
+        if restart["words"]:
+            prompt += f"\n\nThe person adds: {read_restart_words(folder, restart['words'])}"
+        return prompt, folder / "build" / f"round-{rnd}.md", False
     if task == "build":
         return (
             head + "Build it: plan.md first (Tier 2), then the code, test first.",
@@ -2867,6 +3059,9 @@ def main() -> int:
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
+    p_restart = sub.add_parser("restart", help="send an escalated change back for another build")
+    p_restart.add_argument("id")
+    p_restart.add_argument("--words", help="the person's words in decisions.md (R1), if any")
     p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
     p_agent.add_argument("id")
     p_agent.add_argument("--task", choices=TASKS, required=True)
@@ -2936,6 +3131,8 @@ def main() -> int:
         return cmd_gate(root, args.id, args.land)
     if args.cmd == "shots":
         return cmd_shots(root, args.id, args.round)
+    if args.cmd == "restart":
+        return cmd_restart(root, args.id, args.words)
     if args.cmd == "escapes":
         return cmd_escapes(root, args.limit)
     if args.cmd == "report-dir":

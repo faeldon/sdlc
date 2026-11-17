@@ -127,6 +127,12 @@ spec.
   touch as `- PREEXISTING:`, carried to `notes.md` for ship, never reworked here.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
+- **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`
+  asks once more, and on your yes (`yes, <words>` adds your own direction) `factory.py restart`
+  keeps the old `decision.md` as `decision-<n>.md`, writes `build/round-<R>.restart.md` and sets
+  `stage: build`. A fresh builder rebuilds from round R told the approver's reasons, and the new
+  run is gated, reviewed and decided like any, its round limit and gate fixes counted from R. A
+  READY decision never goes back: it is ship's.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
   each command run as `$ <command>`, the tail of its output, and `exit: <n>`. `factory.py` stops
   the run on a reply without it, and the gate itself is the script's, so "the gate passes" is
@@ -186,6 +192,9 @@ page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for, by its id
   decisions.md                  the ledger of the calls that are yours
   decision.md                   opens DECISION: READY or DECISION: ESCALATE
+  decision-<n>.md               an escalated run's decision, kept as it was when it was sent back
+  build/round-<N>.restart.md    RESTART: decision-<n>.md, and WORDS: R<k> with your words: round N
+                                starts the run again
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
   runs/<agent>.sessions         each agent session's id, one a line, which close's measuring reads
   runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role

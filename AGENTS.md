@@ -224,8 +224,11 @@ the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its
 report and a behaviour check end with `## Evidence` (`read_evidence()`); a reply missing it, or
 holding its verdict after a preamble (`preamble()`), is the one stop a run mends, once a round
 for each role (`agent --task mend`, recorded in `runs/mended`). No agent but the builder runs
-`checks.md` (`test_no_agent_but_the_builder_runs_checks`). The eval and the
-review write only under `.sdlc/reports/`, and never the register.
+`checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever
+a run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`) is
+kept as `decision-<n>.md`, never written over, and its new run counts its rounds from the round
+its `build/round-<R>.restart.md` names. The eval and the review write only under
+`.sdlc/reports/`, and never the register.
 
 ## Invariants the tests enforce
 

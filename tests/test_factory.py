@@ -2080,3 +2080,323 @@ def test_the_step_record_never_reaches_the_loop(tmp_path, capsys) -> None:
     assert reading() == bare
     source = inspect.getsource(factory.loop_state)
     assert "STEP" not in source and "read_step" not in source
+
+
+# ---------------------------------------------------------------- an escalated change sent back
+
+RECONSIDERED = (
+    "DECISION: ESCALATE\n\nThe export kept failing review.\n\n"
+    "## Reconsider the approach\n\nSplit the writer from the format.\nThen build the CSV first.\n\n"
+    "## Notes\n\nNothing else.\n"
+)
+
+
+def _escalated(root: Path, rounds: int = 3, decision: str = RECONSIDERED) -> Path:
+    """A run whose rounds ran out with a change kept every round, escalated by the approver."""
+    for n in range(1, rounds + 1):
+        _round(root, n, code="CHANGES")
+        _verified(root, n, kept=[f"code: code fix {n}"])
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "decision.md").write_text(decision, encoding="utf-8")
+    return folder
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and ".git" not in p.relative_to(root).parts
+    }
+
+
+def _restart(root, capsys, words: str | None = None) -> tuple[int, dict]:
+    return _run(capsys, factory.cmd_restart, root, "008", words)
+
+
+def _stage_of(root: Path) -> str:
+    text = (root / ".sdlc" / "work" / NAME / "intent.md").read_text(encoding="utf-8")
+    return factory.frontmatter(text)["stage"]
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+def test_start_takes_back_an_escalated_change(tmp_path, capsys, tier) -> None:
+    """R1: read-only, with what the restart will do."""
+    root = _change(tmp_path, tier, "test")
+    _escalated(root)
+    before = _tree(root)
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0 and out["refusals"] == [], out["refusals"]
+    restart = out["restart"]
+    shown = (restart["archive"], restart["round"], restart["reconsider"])
+    assert shown == ("decision-1.md", 4, True)
+    assert restart["reasons"] == RECONSIDERED and out["spec"] is False
+    assert _tree(root) == before, "start writes nothing"
+
+
+def test_start_refuses_a_ready_or_unreadable_test_change(tmp_path, capsys) -> None:
+    """R2: only an ESCALATE is taken back; a READY is ship's, and no decision is no restart."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    decision = folder / "decision.md"
+    decision.write_text("DECISION: READY\n\nFine.\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 1 and "restart" not in out
+    assert any("/sdlc:ship" in r and "/sdlc-factory:land" in r for r in out["refusals"])
+    decision.write_text("I think it's fine.\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 1 and any("doesn't open with DECISION" in r for r in out["refusals"])
+    decision.unlink()
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 1 and any("no decision.md" in r for r in out["refusals"])
+    decision.write_text(RECONSIDERED, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "spec")
+    assert code == 1 and "restart" not in out, "a spec never restarts"
+
+
+def test_restart_keeps_the_decision_as_history(tmp_path, capsys) -> None:
+    """R3: the record, the archive byte for byte, then the stage, edited in place."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    before = (folder / "decision.md").read_bytes()
+    code, out = _restart(root, capsys)
+    assert code == 0, out
+    assert (out["archive"], out["round"], out["stage"]) == ("decision-1.md", 4, "build")
+    assert (folder / "decision-1.md").read_bytes() == before
+    assert not (folder / "decision.md").exists()
+    record = (folder / "build" / "round-4.restart.md").read_text(encoding="utf-8")
+    assert record == "RESTART: decision-1.md\n"
+    assert _stage_of(root) == "build"
+    assert "id: 008" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+def test_restart_numbers_archives_from_one_and_never_overwrites(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    _restart(root, capsys)
+    first = (folder / "decision-1.md").read_bytes()
+    # The second run: round 4 built and reviewed, escalated again.
+    _round(root, 4)
+    (folder / "decision.md").write_text("DECISION: ESCALATE\n\nAgain.\n", encoding="utf-8")
+    _run(capsys, factory.cmd_stage, root, "008", "test")  # the hand-back
+    code, out = _restart(root, capsys)
+    assert code == 0 and (out["archive"], out["round"]) == ("decision-2.md", 5)
+    assert (folder / "decision-1.md").read_bytes() == first
+    assert (folder / "decision-2.md").read_text() == "DECISION: ESCALATE\n\nAgain.\n"
+    # An archive already there under the next number is never written over.
+    (folder / "decision.md").write_text("DECISION: ESCALATE\n\nThird.\n", encoding="utf-8")
+    _run(capsys, factory.cmd_stage, root, "008", "test")
+    (folder / "decision-9.md").write_text("kept\n", encoding="utf-8")
+    code, out = _restart(root, capsys)
+    assert code == 0 and out["archive"] == "decision-10.md", "one past the highest"
+    assert (folder / "decision-9.md").read_text() == "kept\n"
+
+
+def test_restart_refuses_to_overwrite_an_archive(tmp_path, capsys, monkeypatch) -> None:
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    (folder / "decision-1.md").write_text("kept\n", encoding="utf-8")
+    monkeypatch.setattr(factory, "next_archive", lambda folder: 1)
+    code, out = _restart(root, capsys)
+    assert code == 1 and "decision-1.md" in out["refusals"][0]
+    assert (folder / "decision-1.md").read_text() == "kept\n"
+    assert (folder / "decision.md").exists() and _stage_of(root) == "test"
+
+
+def test_restart_moves_no_head(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 2, "test")
+    _escalated(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "the run so far")
+    head = _head(root)
+    code, _ = _restart(root, capsys)
+    assert code == 0 and _head(root) == head
+    changed = _git(root, "status", "--porcelain").splitlines()
+    assert changed and all(f".sdlc/work/{NAME}/" in line for line in changed), changed
+
+
+def test_restart_refuses_what_start_refuses(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 2, "build")
+    _build_report(root, 1)
+    code, out = _restart(root, capsys)
+    assert code == 1 and "stage: test" in out["refusals"][0]
+    root = _change(tmp_path / "b", 2, "test")
+    folder = _escalated(root)
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    code, out = _restart(root, capsys)
+    assert code == 1 and "/sdlc:ship" in out["refusals"][0]
+    assert not (folder / "build" / "round-4.restart.md").exists()
+
+
+def test_a_restart_cut_short_finishes_on_rerun(tmp_path, capsys) -> None:
+    """R4: the archive made and the record written, the stage still `test`."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    (folder / "decision.md").rename(folder / "decision-1.md")
+    (folder / "build" / "round-4.restart.md").write_text("RESTART: decision-1.md\n")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0, out["refusals"]
+    assert out["restart"]["record"] == "build/round-4.restart.md"
+    assert (out["restart"]["archive"], out["restart"]["round"]) == ("decision-1.md", 4)
+    code, out = _restart(root, capsys)
+    assert code == 0 and out["stage"] == "build"
+    assert sorted(p.name for p in folder.glob("decision*.md")) == ["decision-1.md"]
+    assert _stage_of(root) == "build"
+
+
+def test_restart_then_verdicts_builds_round_r(tmp_path, capsys, claude) -> None:
+    """R5: a builder step at round R, then the gate and the review, as for any round."""
+    root = _change(tmp_path, 2, "test")
+    _escalated(root)
+    _gate_config(root, "true")
+    assert _verdicts(root, capsys)["next"] == "done", "escalated: the run is over"
+    _restart(root, capsys)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["decision"]) == ("build", 4, None)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0 and out["to"].endswith("build/round-4.md"), out
+    assert (_verdicts(root, capsys)["next"], _verdicts(root, capsys)["round"]) == ("gate", 4)
+    _gate(root, capsys)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["missing"]) == ("review", 4, FULL)
+
+
+def test_the_restart_prompt_carries_the_escalation(tmp_path, capsys, claude) -> None:
+    """R6: a fresh builder, told the archive and its Reconsider section word for word."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    _restart(root, capsys)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    argv = claude()[-1]["argv"]
+    prompt = argv[1]
+    assert f".sdlc/work/{NAME}/decision-1.md" in prompt and "round 4" in prompt
+    assert (
+        "## Reconsider the approach\n\nSplit the writer from the format.\nThen build the CSV first."
+        in prompt
+    )
+    assert "## Notes" not in prompt and "Nothing else." not in prompt
+    assert argv[-2] == "--session-id" and argv[-1] == out["session"]
+    assert (folder / "build" / "round-4.md").read_text().startswith("the report")
+
+    # An ESCALATE with no Reconsider section: the prompt has no such heading.
+    root = _change(tmp_path / "b", 2, "test")
+    _round(root, 1)
+    plain = "DECISION: ESCALATE\n\nD2 is still assumed.\n"
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text(plain, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0 and out["restart"]["reconsider"] is False and out["restart"]["round"] == 2
+    _restart(root, capsys)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    prompt = claude()[-1]["argv"][1]
+    assert code == 0 and "decision-1.md" in prompt and "Reconsider" not in prompt
+
+
+def test_the_restart_prompt_carries_the_persons_words(tmp_path, capsys, claude) -> None:
+    """R6, R12: the person's words reach the builder through the ledger, by id alone."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    code, out = _restart(root, capsys, "R1")
+    assert code == 1 and "R1" in out["refusals"][0], "no such line yet"
+    assert (folder / "decision.md").exists(), "a refused restart writes nothing"
+    words = 'keep the CSV writer; "split" it & $(nothing) runs'
+    (folder / "decisions.md").write_text(
+        f"# Decisions\n\n- [x] R1 (person, restart): {words}\n", encoding="utf-8"
+    )
+    code, out = _restart(root, capsys, "R1")
+    assert code == 0, out
+    record = (folder / "build" / "round-4.restart.md").read_text(encoding="utf-8")
+    assert record == "RESTART: decision-1.md\nWORDS: R1\n"
+    assert factory.read_ledger(folder) == [], "a restart's words are no decision the loop waits on"
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0 and claude()[-1]["argv"][1].endswith(f"The person adds: {words}")
+
+
+def test_the_round_limit_counts_from_the_restart(tmp_path, capsys) -> None:
+    """R7: escalated at round 3 of 3, restarted, round 4 with a kept change is a rework."""
+    root = _change(tmp_path, 2, "test")
+    _escalated(root)
+    _restart(root, capsys)
+    _round(root, 4, code="CHANGES")
+    _verified(root, 4, kept=["code: code fix 4"])
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["limit"]) == ("rework", 4, 6)
+    for n in (5, 6):
+        _round(root, n, code="CHANGES")
+        _verified(root, n, kept=[f"code: code fix {n}"])
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["exhausted"]) == ("approve", True), "and it can run out again"
+
+
+def test_a_restarted_light_run_stays_light_and_a_full_one_stays_full(tmp_path, capsys) -> None:
+    """R8: a round's place in its own run, not its number, says whether it ran beyond light."""
+    root = _change(tmp_path, 2, "test", config=LISTED)
+    _touch(root, "src/a.py")
+    folder = root / ".sdlc" / "work" / NAME
+    for n in (1, 2):
+        _build_report(root, n)
+        _review(root, n, "code", "VERDICT: CHANGES", f"src/a.py:{n}: move it")
+        _verified(root, n, kept=[f"code: src/a.py:{n}: move it"])
+    (folder / "decision.md").write_text(RECONSIDERED, encoding="utf-8")
+    _restart(root, capsys)
+    _build_report(root, 3)
+    _review(root, 3, "code", "VERDICT: CHANGES", "src/a.py:3: move it")
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["limit"]) == ("light", 4), out["why"]
+
+    root = _change(tmp_path / "b", 2, "test", config=LISTED)
+    _touch(root, "src/a.py")
+    _round(root, 1)
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text("DECISION: ESCALATE\n\nNo.\n")
+    _restart(root, capsys)
+    _build_report(root, 2)
+    out = _verdicts(root, capsys)
+    assert out["depth"] == "full" and "never lightens" in out["why"]
+
+
+def test_a_restart_round_gets_its_own_gate_fixes(tmp_path, capsys) -> None:
+    """R9: round N's red gates never count against round R."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    attempt = "## Attempt {k}\n\nVerdict: FAIL\nBuild: 0\nExit: 3\n\n"
+    text = "GATE: FAIL\n\n" + attempt.format(k=1) + attempt.format(k=2)
+    (folder / "build" / "round-3.gate.md").write_text(text, encoding="utf-8")
+    _gate_config(root, "exit 3")
+    _restart(root, capsys)
+    _build_report(root, 4)
+    _gate(root, capsys)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["gate"]["fails"]) == ("fix", 4, 1)
+
+
+@pytest.mark.parametrize(
+    "record, problem",
+    [
+        ("Restarted from the first decision.\n", "doesn't open with RESTART"),
+        ("RESTART: decision-7.md\n", "decision-7.md, which doesn't exist"),
+        ("RESTART: decision-1.md\nWORDS: R3\n", "R3"),
+    ],
+)
+def test_a_bad_restart_record_stops_the_run(tmp_path, capsys, record, problem) -> None:
+    """R10."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    _restart(root, capsys)
+    (folder / "build" / "round-4.restart.md").write_text(record, encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun")
+    assert any(problem in p for p in out["problems"]), out["problems"]
+
+
+def test_a_restarted_change_is_not_ready(tmp_path, capsys) -> None:
+    """R11: only the current decision.md makes a change ready; an archive never does."""
+    root = _change(tmp_path, 2, "test")
+    folder = _escalated(root)
+    assert [r["change"] for r in _run(capsys, factory.cmd_ready, root)[1]["ready"]] == [NAME]
+    _restart(root, capsys)
+    assert _run(capsys, factory.cmd_ready, root)[1]["ready"] == []
+    assert factory.read_decision(folder) == (None, None)
+    _round(root, 4)
+    (folder / "decision.md").write_text("DECISION: READY\n\nDone now.\n", encoding="utf-8")
+    _run(capsys, factory.cmd_stage, root, "008", "test")
+    ready = _run(capsys, factory.cmd_ready, root)[1]["ready"]
+    assert [(r["change"], r["decision"]) for r in ready] == [(NAME, "READY")]

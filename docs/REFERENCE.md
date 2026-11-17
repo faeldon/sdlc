@@ -470,13 +470,15 @@ the same open changes as a live page on `127.0.0.1` until it is stopped: one col
 **Ready to ship** for a factory change the approver called READY, **Ready to close** for a shipped or
 dropped one whose worktree still stands, and **Needs you** for one with a file that won't read, at
 any stage, or a factory signal at the stage it belongs to: a run that stopped or a blocking decision
-at `build`, an ESCALATE at `test`, flagged with the stop's problems and naming its way on. The
-stage is the only mark that the person has answered one, so a change they shipped, dropped or put
-back to `build` leaves Needs you for the column that answer leads to, whatever the run's files
-still say. A change built by hand moves on from its `stage:` line by what it has touched: to Build
-once its branch or worktree changes a path outside `.sdlc/work/`, to Test once ship's review has
-written its `findings.md` or its gate run by hand is green on the build as it stands (below), with
-a `gate green` or `gate red` badge while that record is current. Each card gives the change's tier,
+at `build`, an ESCALATE in its `decision.md` at `test`, flagged with the stop's problems and naming
+its way on. The stage is the only mark that the person has answered one, so a change they shipped,
+dropped or put back to `build` leaves Needs you for the column that answer leads to, whatever the
+run's files still say; one sent back to the factory keeps its old decision as `decision-<n>.md`, a
+file of its folder, and is in Build again. A change built by hand moves on from its `stage:` line
+by what it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`,
+to Test once ship's review has written its `findings.md` or its gate run by hand is green on the
+build as it stands (below), with a `gate green` or `gate red` badge while that record is current.
+Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
 each round's verdicts, the verifier's answers, its decisions and what its agents cost, and a step

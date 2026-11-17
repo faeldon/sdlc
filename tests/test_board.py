@@ -927,3 +927,22 @@ def test_a_file_that_wont_read_needs_the_person_at_any_stage(repo) -> None:
     card = _cards(repo)["026-bad-shipped"]
     assert card["column"] == "needs-you"
     assert any("decision.md" in p for p in card["problems"]), card["problems"]
+
+
+@pytest.mark.portable
+def test_a_restarted_factory_card_is_in_build_with_its_old_decision_as_a_file(served) -> None:
+    """095 R11: a change the factory took back has no decision of its own run yet; its old one is
+    a file in its folder, never the card's decision."""
+    root, url, _ = served
+    folder = _change(root, "016-draft-restart", 2, "build", "Draft restart")
+    _write(folder / "runs" / "builder.sessions", "s-1\ns-2\n")
+    _write(folder / "build" / "round-1.md", "Built.\n")
+    _write(folder / "reviews" / "round-1" / "code.md", "VERDICT: PASS\n")
+    _write(folder / "decision-1.md", "DECISION: ESCALATE\n\nD1 is still assumed.\n")
+    _write(folder / "build" / "round-2.restart.md", "RESTART: decision-1.md\n")
+    card = _cards(root)["016-draft-restart"]
+    assert (card["column"], card["decision"], card["problems"]) == ("build", None, [])
+    assert card["built"] == [1], "the restart record is no builder report"
+    assert {"decision-1.md", "build/round-2.restart.md"} <= set(card["files"])
+    code, body, _ = _get(f"{url}/file?change=016-draft-restart&path=decision-1.md")
+    assert code == 200 and body.startswith(b"DECISION: ESCALATE")

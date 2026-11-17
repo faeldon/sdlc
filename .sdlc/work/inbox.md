@@ -227,17 +227,6 @@ from a subprocess. See .sdlc/work/072-factory-land/notes.md in 072's commit.
 After: 2026-11-17-7
 Theme: factory
 
-## [2026-11-17-16] [idea] Resume an escalated factory run
-
-`factory.py start` refuses a change at `stage: test` (`STARTS` has no `test`), and `verdicts` reads
-the old `decision.md` as `done`, so an ESCALATE can only be shipped by hand or dropped. `start`
-should accept a `test` change whose decision is ESCALATE, move it back to `build`, keep the old
-decision as `decision-<n>.md`, and give the next round's builder the escalation's reasons. It
-touches what `start` accepts and what a run leaves in its folder, so likely Tier 2. Build it after
-the board's stage-gated columns.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-19] [idea] Port 0 for the factory's UI review server, and the board's printed URL
 
 089 closed the pick-then-bind window in the board's tests by serving on port 0. Two places keep

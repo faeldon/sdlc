@@ -16,6 +16,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready *)'
   - 'Bash(git diff *)'
 disable-model-invocation: true
@@ -100,8 +101,16 @@ build is gated). `start` also gives `head`, the commit
 the run starts from, `spec`, true for a Tier 2 at `stage: plan`, whose spec the spec-writer drafts
 before the gate, and every refusal: no worktree for the change, or a stage this can't start from
 (Tier 2 needs `stage: plan` or `design`; Tier 1, `stage: plan`). A run that stopped part way left
-the change at `stage: build`, and starts again from where its files say. **If there are refusals,
-show them and stop.** Keep `head`.
+the change at `stage: build`, and starts again from where its files say.
+
+**An escalated change can go back to the factory.** At `stage: test` with a `decision.md` that
+opens `DECISION: ESCALATE`, `start` gives a `restart` object instead of a refusal: `archive`, the
+name the old decision will be kept under (`decision-<n>.md`, never written over), `round`, the
+round the new build will be (the new run's first, so its round limit and the gate's fixes count
+from there), `reconsider`, whether the decision has a `## Reconsider the approach` section, and
+`reasons`, its text. Nothing is written yet. A READY decision is refused (it is ship's or land's),
+as is a test change with no decision or one that won't read. **If there are refusals, show them
+and stop.** Keep `head`.
 
 ## Step 1 — Show it
 
@@ -124,6 +133,12 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 
 Nothing is written yet: the draft is only in the command's output.
 
+With a `restart`, show first, naming the change: the decision's first reason, its `## Reconsider
+the approach` section word for word (or that it has none), and the decisions still assumed in its
+`decisions.md` (an unconfirmed default is a common reason to escalate, and the person may want to
+answer it before the rebuild); then that `decision.md` will be kept as `archive`, and that the
+builder starts afresh at round `round`, told the approver's reasons.
+
 Then show the person, naming the change: the spec draft and its questions, when there is one; the
 change and its tier; the gate command the script will run, from the base branch's
 `.sdlc/config.toml`, or that there is none; the agents that will run (builder, each reviewer at
@@ -138,7 +153,7 @@ each attempt of the gate on that round's build; `runs/<agent>.sessions`, each se
 measuring; `runs/costs.jsonl`, each run's reported cost and tokens; `runs/stopped.md`, while the
 run is stopped, its problems and the way on, for the board and `/sdlc:status`; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
-resolve. Say that the run will ask them about any blocking decision, and that every builder report
+resolve; with a `restart`, `decision-<n>.md` and `build/round-<R>.restart.md` by `restart`. Say that the run will ask them about any blocking decision, and that every builder report
 and behaviour check must end with its `## Evidence` (each command run, its output, its exit), or
 the change stops: the behaviour check runs the spec's end-to-end path, and reads `checks.md`
 without running it, which `/sdlc:ship` does under a prompt.
@@ -152,6 +167,12 @@ Ask literally, with a spec draft:
 And without one:
 
 > `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+
+And with a `restart`:
+
+> `Send NNN-<slug> back to the factory: decision.md kept as decision-<n>.md, the builder rebuilds from round <R> with the approver's reasons, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> more rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides again, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+
+A typed `yes, <words>` to it is a yes with the person's direction for the builder.
 
 Leave out the parenthesis when the base branch's `.sdlc/config.toml` lists no `[review]
 sensitive` paths: every run is then full. When it names no `[commands] check`, the gate clause reads
@@ -190,7 +211,19 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> d
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> build
 ```
 
-The first only with a spec draft. Every `factory.py agent` call below runs with
+The first only with a spec draft. With a `restart`, run `restart` in place of both: it writes
+`build/round-<R>.restart.md`, renames `decision.md` to `decision-<n>.md` and sets `stage: build`,
+in that order, and a rerun finishes one cut short. When the yes came with words, first write them
+at the end of `decisions.md` (`Write` it with a `# Decisions` heading first when it doesn't exist)
+as `- [x] R<n> (person, restart): <their words, as they gave them>`, `<n>` one past the highest
+`R` there, and pass `--words R<n>`; without words, leave `--words` out. The words never go on the
+command line, only their id.
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart <NNN> --words <R1>
+```
+
+Then go to step 2: `verdicts` names `build` at round `<R>`. Every `factory.py agent` call below runs with
 `run_in_background`; when it exits, read its JSON (`to`, the file it wrote, or `problem`) and take
 the next step for that change. A `problem` is a stop, reported for that change alone.
 
@@ -226,8 +259,11 @@ the next step for that change. A `problem` is a stop, reported for that change a
    `stop`, removed on any other step. It also writes the step it read, with since when, to
    `.sdlc/work/NNN-slug/runs/step.md`, which the board's step track reads; leave both to it.
 
-   - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
-     step 1.
+   - **`build`**: no builder report exists yet (a run that stopped before the first), or a
+     restart's round has none: go back to step 1. At a restart's round the builder is a fresh
+     session, told `decision-<n>.md` and its `## Reconsider the approach` section (and the
+     person's words, with `--words`), and its report is `build/round-<R>.md`, gated and reviewed
+     like any round.
    - **`gate`**: the round's build hasn't been gated as it stands. The script runs the base
      branch's check on it, adding the attempt to `.sdlc/work/NNN-slug/build/round-<round>.gate.md`;
      start no reviewer until `verdicts` says `review`.
