@@ -440,11 +440,13 @@ Theme: board
 ## [2026-11-17-51] [bug] A resolve refuses its own source as a conflict marker
 
 `factory.py resolve --continue` (and `sdlc.py resolve`) refuse "conflict markers left in" any
-conflicted file that holds the string `<<<<<<<` anywhere, and both scripts hold it in their own
-marker check (`factory.py`'s and `sdlc.py`'s `if "<<<<<<<" in …`). So whenever `factory.py` or
-`sdlc.py` is itself one of the conflicted files, the resolution is refused though nothing is left:
-103's landing on 2026-11-17 stopped on it, and its rebase was finished by hand. Match a marker only
-at the start of a line (`^<<<<<<< `, `^=======$`, `^>>>>>>> `).
+conflicted file that holds a run of seven less-than signs anywhere, and both scripts hold one in
+their own marker check. So whenever `factory.py` or `sdlc.py` is itself one of the conflicted files,
+the resolution is refused though nothing is left: 103's landing on 2026-11-17 stopped on it, and its
+rebase was finished by hand. Any text quoting that run does the same, this entry's first wording
+included, which stopped 098's landing on `.sdlc/work/inbox.md`. Match a marker only as a whole line
+start: seven less-than signs and a space, seven equals signs alone, or seven greater-than signs and
+a space.
 
 Severity: med
 Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
