@@ -500,3 +500,16 @@ supervisor's alone, its agents' in `runs/costs.jsonl`), and the bugs with `Intro
 escape rate O6 measures). After the 1.9.0 release.
 Theme: review
 Raised 2026-11-17.
+
+## [2026-11-17-50] [bug] A board poll rebuilds every card, dropping keyboard focus
+
+Found by the review of 099-board-page-fixes. The page's render key holds each change's
+`touched_ago` in whole seconds (`scripts/board.py`, `round(now - touched)`), so it changes on every
+2-second poll and `replaceChildren` rebuilds every card: a keyboard user Tabbed onto a card loses
+focus to `body` before Enter can open it. `#board` is `aria-live="polite"`, so a screen reader is
+handed the whole board again each poll. Rebuild only when what a person sees changes (the
+rendered text, or `ago()`'s minute-level string), and move `aria-live` to the status line.
+
+Severity: med
+Paths: scripts/board.html, scripts/board.py
+Theme: board
