@@ -237,7 +237,7 @@ out the intake methods core calls when a tracker has them: `mark()`, `unmark()`,
 Theme: docs
 Raised 2026-11-17.
 
-## [2026-11-17-37] [building] The landing follows main when it moves before the close
+## [2026-11-17-37] [idea] The landing follows main when it moves before the close
 
 Building in .sdlc/work/104-landing-follows-main/.
 When another session lands a change between a landing's review and its close, `land --close`
@@ -247,7 +247,7 @@ on 2026-11-17.
 Theme: landing
 Raised 2026-11-17.
 
-## [2026-11-17-38] [building] A fix made at landing goes back through review
+## [2026-11-17-38] [idea] A fix made at landing goes back through review
 
 Building in .sdlc/work/104-landing-follows-main/.
 When the person asks for a fix after the approver (088's plan hint, 094's AGENTS.md line on
