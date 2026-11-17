@@ -466,3 +466,16 @@ rendered text, or `ago()`'s minute-level string), and move `aria-live` to the st
 Severity: med
 Paths: scripts/board.html, scripts/board.py
 Theme: board
+
+## [2026-11-17-51] [bug] A resolve refuses its own source as a conflict marker
+
+`factory.py resolve --continue` (and `sdlc.py resolve`) refuse "conflict markers left in" any
+conflicted file that holds the string `<<<<<<<` anywhere, and both scripts hold it in their own
+marker check (`factory.py`'s and `sdlc.py`'s `if "<<<<<<<" in …`). So whenever `factory.py` or
+`sdlc.py` is itself one of the conflicted files, the resolution is refused though nothing is left:
+103's landing on 2026-11-17 stopped on it, and its rebase was finished by hand. Match a marker only
+at the start of a line (`^<<<<<<< `, `^=======$`, `^>>>>>>> `).
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
+Theme: landing
