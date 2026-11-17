@@ -3531,13 +3531,17 @@ def cmd_base(root: Path, ident: str | None) -> int:
     or refuse, as JSON. /sdlc:ship runs it at Step 0, so the gate and the review see what close
     will fast-forward.
 
-    The one write a skill makes before its WAIT, by a named exception (004's spec): it moves only
-    the change's own local branch onto the base, only when nothing conflicts, and prints the
+    One of the writes a skill makes before its WAIT, by a named exception (004's spec): it moves
+    only the change's own local branch onto the base, only when nothing conflicts, and prints the
     command that undoes it. A branch with no commits of its own, the usual case at ship and always
     after a factory run, fast-forwards, and git carries the uncommitted work or refuses to
     overwrite it. One with commits rebases, from a clean tree only, and a conflict is aborted.
     Never a stash: the stack is shared with every worktree. Never a merge of the base into the
-    branch: close would put it on the base's first-parent line, which `closed_changes()` walks."""
+    branch: close would put it on the base's first-parent line, which `closed_changes()` walks.
+
+    A conflict it refuses is `resolvable` when `resolve` can take it on: ship then resolves it
+    (`cmd_resolve()`) rather than stopping. The factory's landing reads the same refusal and
+    resolves with its own `factory.py resolve`, so `base` never resolves anything itself."""
     trees = [(t, b) for t, b in worktrees(root) if DIR_RE.match(b)]
     if ident is None:
         here = _git(root, "branch", "--show-current") or ""
@@ -3618,7 +3622,8 @@ def cmd_base(root: Path, ident: str | None) -> int:
 # What a resolution keeps, each under the change's branch name, in refs every worktree shares:
 # `start`, the branch before; `aside`, the uncommitted work as a commit, when there was any; `end`,
 # the branch once resolved (or, after an abort, the resolved work); `pending`, a blob listing the
-# files resolved so far, only while one is under way. Close deletes them with the branch.
+# files resolved so far, only while one is under way. Refs, never a file in the tree, which the
+# rebase would trip on. Close deletes them with the branch.
 RESOLVE_REFS = ("start", "aside", "end", "pending")
 ASIDE_MESSAGE = "sdlc: set aside for resolve"
 CONFLICTS = "conflicts.md"
@@ -3724,7 +3729,8 @@ def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
     commit is undone (a mixed reset), so the work is uncommitted on the new base, and the change's
     `conflicts.md` gets a section naming the files resolved. `abort` puts the worktree back where
     `start` found it, at any point before ship commits, keeping the resolved work under
-    `refs/sdlc/end/<branch>`. `.sdlc/last-id` is settled by the script, never the agent. Never a
+    `refs/sdlc/end/<branch>` (`RESOLVE_REFS`). Ship's side file for it is
+    `skills/ship/conflict.md`. `.sdlc/last-id` is settled by the script, never the agent. Never a
     stash, a merge of the base, `--force` or `--hard`; only the change's own branch moves."""
     trees = _change_trees(root)
     if ident is None:
@@ -4321,6 +4327,14 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     """Land a shipped change, mirror it, remove its folder, its worktree and its branch; or, for
     a dropped one, mirror it, record it on main in a `Drop` commit, and remove its worktree and
     branch.
+
+    The steps, in order: `merge` (`--ff-only`), `verify`, `measure`, `archive` (the tracker's
+    `archive()`, read back), `remove folder` (`_close_commit()`), `remove worktree`, `delete
+    branch`; then `push` when `git.push` names close (`_push_plan()`), a refusal of which is
+    `push_failed`, never a failed close, and last `cleanup`. A dropped change's `record`
+    (`_drop_record()`) stands in for the merge and the folder's removal. The fast-forward
+    deletes from the main checkout's disk each tracked file the change removed
+    (`_ff_deletions()`), which close's question names; close never restores one.
 
     Every git step is one git refuses when something would be lost: `merge --ff-only`,
     `worktree remove` without --force, `branch -d`. The folder is removed only once the change's
@@ -6909,7 +6923,11 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
     `comment`, `marker`, `parent`, and `close` reason when a verdict closed it, and `filed` (the
     entry id, change name or verdict that records it). A verdict outranks a change, and a change
     an entry: the newest decision about an issue is the one its filer follows. From the base
-    branch's committed register when `committed_only`, else from every checkout's too."""
+    branch's committed register when `committed_only`, else from every checkout's too.
+
+    The one reader of all three records (an entry's `Issue:` line, a change's `closes:`, an
+    `Sdlc-Triaged:` trailer), and the one that decides: the tracker's `mark()`, `unmark()` and
+    `needs_info()` only set what this says, so a tracker still never reads `.sdlc/work/`."""
     home = main_root(home)
     cfg = load_config(home)[0]
     trunk = cfg["git"]["base"]

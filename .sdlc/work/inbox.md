@@ -217,20 +217,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
 
-## [2026-11-17-3] [idea] Say each rule once in AGENTS.md
-
-`AGENTS.md` was edited by 23 of the 27 changes in the window and is now 447 lines. It changed
-alongside `docs/REFERENCE.md` 17 times and alongside `scripts/sdlc.py` 17 times. Two Important
-findings came from a rule restated in several places and edited in only one:
-- 046's "six lines still said only publish pushes";
-- 049's "the docs that list the extra-stop kinds leave out the new `fix` kind".
-
-Cut the Architecture map down to its boundaries and the rules that aren't obvious from the code,
-and point at `docs/REFERENCE.md` or the docstring for each feature's detail. Ship's context pass
-would then also ask whether a proposed line is already said elsewhere. Raised by the retrospective
-of 2026-11-17.
-Theme: docs
-
 ## [2026-11-17-10] [idea] Try the landing on a real factory batch
 
 `/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two
@@ -240,17 +226,6 @@ resolving a real conflict and the reviewers checking it in headless sessions, an
 from a subprocess. See .sdlc/work/072-factory-land/notes.md in 072's commit.
 After: 2026-11-17-7
 Theme: factory
-
-## [2026-11-17-11] [nit] resolve stops when a merge empties one of the branch's commits
-
-`git rebase --continue` refuses with "No changes" when merging a conflict leaves a commit with
-nothing of its own, and `resolve --continue` reports "the rebase won't go on", so ship aborts and
-stops. Nothing is lost. The fix is `git rebase --skip` on that answer, minding the aside commit.
-Theme: landing
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 077-ship-resolves-conflicts (correctness)
 
 ## [2026-11-17-16] [idea] Resume an escalated factory run
 
@@ -313,3 +288,32 @@ only in its `title`, which keyboard, touch and screen-reader users don't get
 (scripts/board.html:196-198).
 Severity: low
 Paths: scripts/board.html
+
+## [2026-11-17-27] [idea] Bring sdlc.py's docstrings up to date: the .sdlc/work/ name and the subcommand list
+
+AGENTS.md now points at docstrings for detail, and some are stale: `sdlc.py`'s module docstring,
+`change_dirs()`, `next_id()`, `claim()` and `cmd_uninstall()` still name the change folder `work/`
+(its pre-1.4.0 name), and the module docstring lists about half the subcommands (no `base`,
+`resolve`, `preflight`, `findings`, `checks`, `accept`, `board`, `record`, `drift`, …): complete
+it, or cut it to the module's purpose. See .sdlc/work/090-agents-rules-once/notes.md in 090's
+commit.
+Theme: docs
+Raised 2026-11-17.
+
+## [2026-11-17-28] [idea] CONTRIBUTING's Writing a tracker lists the intake methods
+
+AGENTS.md points at CONTRIBUTING.md's *Writing a tracker* for the tracker interface, which leaves
+out the intake methods core calls when a tracker has them: `mark()`, `unmark()`, `needs_info()`,
+`open_marks()`, `open_numbers()`, `closed_by()`. See .sdlc/work/090-agents-rules-once/notes.md in
+090's commit.
+Theme: docs
+Raised 2026-11-17.
+
+## [2026-11-17-29] [bug] _drop_record()'s docstring breaks off mid-sentence
+
+Found by the review of 090-agents-rules-once.
+Its docstring ends "Why not, or" (scripts/sdlc.py:4186), so a reader following AGENTS.md's
+pointers into close's docstrings meets half a rule.
+
+Severity: low
+Paths: scripts/sdlc.py

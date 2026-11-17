@@ -2,8 +2,9 @@
 
 How to work on the plugin itself: run it from a clone, keep the gate green, and make a change the
 way this repo makes every change, through its own pipeline. [`AGENTS.md`](../AGENTS.md) is the
-same ground written for a coding agent, with the architecture function by function and every
-invariant the tests enforce; read it before changing `scripts/sdlc.py` or a skill.
+same ground written for a coding agent: a map of the architecture, its boundaries and the rules
+no one function shows, pointing at where each rule's detail lives, and every invariant the tests
+enforce; read it before changing `scripts/sdlc.py` or a skill.
 
 ## Working from a clone
 

@@ -202,15 +202,15 @@ guide stands alone, which is worth saying. Do not skim the diff; read it.
    each listed doc, then ask of it:
 
    - Does it now say something false? Every `stale` line is a yes until shown otherwise.
-   - Does the diff add something a future session needs and couldn't find quickly by reading the
-     code: a command, a convention, an invariant a test now enforces, a part of the architecture
-     that takes several files to see?
+   - Does the diff add something a future session needs and couldn't find quickly in the code: a
+     command, a convention, an invariant a test now enforces, architecture only several files show?
+   - Is it already said in another context doc, or in the docstring of the code it is about? Then
+     propose a pointer there, never the line: a rule said twice goes wrong where it isn't edited.
 
    The bar is high on purpose. Not a list of files, not a generic practice, not a restatement of
    what the code plainly says: a context doc that grows with every change stops being read. The
-   result is either a **proposed edit**, shown as a diff of the doc, or **"no update needed"** with
-   one sentence on why. A repo with no context doc at all gets a proposal for one only when the
-   diff adds something that meets the bar.
+   result is a **proposed edit**, shown as a diff of the doc, or **"no update needed"** with one
+   sentence on why. A repo with no context doc gets one proposed only when the diff meets the bar.
 
 Rank findings **Important**, **Nit** or **Pre-existing**, tag each with its pass, cite its
 `path:line` and name its class, as the guide's reporting rules say, and **cap nits at 5** — more

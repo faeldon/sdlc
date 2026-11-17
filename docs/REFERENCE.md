@@ -247,9 +247,10 @@ same guide, keep it in `AGENTS.md` and make `CLAUDE.md` one line, `@AGENTS.md`; 
 `.claude/CLAUDE.md` and `AGENTS.md`. `/sdlc:ship` runs a review pass of its own over them, and
 over any `CLAUDE.md` or `AGENTS.md` above a changed path, whatever review the repo has: does the
 diff make one say something false, or add something a future session needs and couldn't find
-quickly? A proposed edit is shown with the findings, approved with the commit, and lands in it.
-`sdlc.py context` does the listing, and flags their lines naming a path the diff deletes or
-renames.
+quickly? And is that already said in another context doc or a docstring? Then it proposes a
+pointer there, not the line again. A proposed edit is shown with the findings, approved with the
+commit, and lands in it. `sdlc.py context` does the listing, and flags their lines naming a path
+the diff deletes or renames.
 
 ## Templates: `.sdlc/templates/`
 

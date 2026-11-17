@@ -43,30 +43,32 @@ session with no reinstall. A marketplace registered from GitHub is a copy in
 
 ## Architecture
 
-The docstrings in `scripts/` carry the detail; this is the map, and the rules that aren't
-obvious from any one function.
+This is the map: the boundaries, and the rules no one function shows. Each rule's detail is said
+once, where the pointer leads: `docs/REFERENCE.md` for what a host sees, `docs/CONTRIBUTING.md`
+for working on the plugin, `plugins/factory/README.md` for the factory, and a named function's
+docstring for the rest. Change a rule there; change this map only when it stops being true.
 
 **Mechanism vs. judgment.** `scripts/sdlc.py` (argparse subcommands) does the mechanical half:
 ids, worktrees, scaffolding `.sdlc/work/NNN-slug/`, auditing artifacts against tier and stage,
 landing and archiving, listing the context docs a diff touches, reporting whether a repo is set
-up. The retrospective's readers are `scripts/retro.py` (below). It never writes artifact prose. The skills in `skills/*/SKILL.md` do
-the judgment and call it. Logic a permission rule must cover goes in the script, not in a
-skill's bash.
+up. It never writes artifact prose. The skills in `skills/*/SKILL.md` do the judgment and call
+it. Logic a permission rule must cover goes in the script, not in a skill's bash.
 
 **Mechanism vs. policy.** The plugin knows nothing about what a host builds. Everything
 host-specific comes from `.sdlc/config.toml`, read only by `sdlc.py config`, which
 `load_config()` resolves once (every doc path included), so no reader has its own. Skills ask
-`config` rather than guessing. `guide/` holds the process and review guides, the plugin's, read in
-place and never copied (`config`'s `docs.process.guide`, `docs.review.guide`); `defaults/` the docs
-`/sdlc:setup` copies into a host once, after which the host owns them (`HEALTH.md` is one, and
-`SDLC.md` and `REVIEW.md` are only a host's answers to the guides: each `doc_units()` block of
-theirs stands in for the guide's of the same key when it holds text, or is read after its
-parent's); `templates/` the shape of each file the plugin writes itself, every time
-(`direction.md`, `inbox.md`, `notes.md`, the artifacts, the issue), overridable in
-`.sdlc/templates/`. A missing review doc leaves the review guide alone; other missing docs are
-reported, never replaced. A host's process and review docs are always answers (`layout:
-answers`), whatever their text: a whole copy from before 1.5.0 is read after the guide like any
-answers, and `/sdlc:setup reset` is how such a host gets back to answers alone.
+`config` rather than guessing. `guide/` is read in place and never copied, `defaults/` is copied
+into a host once and is the host's after, and `templates/` is the shape of each file the plugin
+writes itself, overridable in `.sdlc/templates/`. A host's process and review docs are always its
+answers to the guides, read block by block (`doc_units()`). REFERENCE.md, *The docs* and
+*Templates*.
+
+**Modules loaded by path.** `retro.py`, `board.py`, `metrics.py`, `indicators.py` and the
+trackers are loaded by path, never imported: `uv run --script` and the tests put different
+directories on `sys.path`. `retro.py` and `board.py` are bound to a live view of `sdlc.py`'s
+globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them; `board.py`
+loads only when `board` runs. `metrics.py` and `indicators.py` are pure: no subprocess and no
+import of `sdlc.py`. Each module's docstring is its contract.
 
 **The base branch: `git.base`.** `main` in this file means the base branch a host names in
 `[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
@@ -80,375 +82,150 @@ what `check` requires. A file with two or more lines starting with `<` is an unf
 Frontmatter values (`id`, `depends_on:`, issue fields) are read as text (`frontmatter_list()`),
 never through YAML, which reads `012` as octal 10 and `1.10` as 1.1.
 
-**`.sdlc/work/` is committed, one folder per branch.** A change's folder lives on its branch, in its
-worktree at `.claude/worktrees/NNN-slug`, from `new` until close removes it from `main` in a
+**`.sdlc/work/` is committed, one folder per branch.** A change's folder lives on its branch, in
+its worktree at `.claude/worktrees/NNN-slug`, from `new` until close removes it from `main` in a
 `Close NNN-slug` commit: history is the copy. Only `/sdlc:close` and `/sdlc:drop` leave the
-worktree. `change_dirs()` finds folders (the checkout's `.sdlc/work/`, the main checkout's, and each
-change worktree's own `.sdlc/work/<branch>/`, never the copies a worktree inherits); `main_root()` is
-for state, the lock and the worktree list. An ignored `.sdlc/work/` is refused by `new`.
+worktree. `change_dirs()` finds folders, never the copies a worktree inherits; `main_root()` is
+for state, the lock and the worktree list. Every path to the folder, on disk and in git, is built
+from `work_rel()`, never a literal (`test_no_literal_work_path_in_the_script`). The old `work/`
+is `HISTORY_WORK`, named only where history is read, for good: `CHANGE_FOLDERS`,
+`next_entry_ids()` and `checkout_of()`. REFERENCE.md, *`.sdlc/work/` and worktrees*.
 
-**The change folder's path: `work_rel()`.** Every path to it, on disk and in git, is built from
-`work_rel()`, never a literal (`test_no_literal_work_path_in_the_script`): `WORK`, `.sdlc/work`,
-always. The old `work` (before 1.4.0) is `HISTORY_WORK`, named only where history is read, for
-good: `CHANGE_FOLDERS` (a diff's change folders), `next_entry_ids()` (the register at both names)
-and `checkout_of(folder)`, which reads a change's checkout from its path. A repo still on `work/`
-moves it by hand (`git mv work .sdlc/work`); release and retro read only where the folder is now.
+**Numbering: `ids_mode()`.** It follows the tracker, and never falls back from one scheme to the
+other: two schemes hand out a number twice. A local number is claimed under `_main_lock()`, on a
+lock in the git common dir that every worktree shares, never in a tree, and `new` writes
+`.sdlc/last-id` in the change's worktree, so the main checkout is never dirty (`claim()`,
+`next_id()`, REFERENCE.md *Numbering*). IDs are at least three digits: match them with
+`names_change()`, never by prefix or `[:3]`.
 
-**Numbering: `ids_mode()`.** It follows the tracker: `github` when `archive.target` is a tracker
-that numbers changes (its `claim()` opens the issue and the folder takes its number), else
-`local`, and the target defaults to `none`. Never fall back from one to the other: two schemes
-hand out a number twice. Locally, `claim()` takes `_main_lock()`, on `sdlc.lock` in the git common
-dir (shared by every worktree, never in a tree: `flock`, or `msvcrt` on Windows), and
-`new` writes `.sdlc/last-id` in the change's worktree, so the bump lands with the change and the
-main checkout is never dirty. `next_id()` is one past the highest of that counter, the folders
-and the open worktrees (`_worktree_highest()`), seeding a missing counter from the `Close` and
-`Drop` subjects in history. IDs are at least three digits: match them with `names_change()`,
-never by prefix or `[:3]`.
+**Trackers: `tracker()`.** Each is `scripts/trackers/<name>.py`, loaded only when
+`archive.target` names it. Core renders the issue (`render_issue()`) and hands the tracker a dict;
+a tracker never reads `.sdlc/` (the change folder included), and core never calls `gh`. `sync`
+mirrors an open change and never creates an issue. The interface: CONTRIBUTING.md, *Writing a
+tracker*; what a host sees: REFERENCE.md, *Trackers* and *The project doc*.
 
-**Trackers: `tracker()`.** Each is `scripts/trackers/<name>.py`, loaded by path (never imported:
-`uv run --script` and the tests put different directories on `sys.path`) only when
-`archive.target` names it. Core renders the issue (`render_issue()`, `_tracker_change()`) and
-hands the tracker a dict; a tracker never reads `.sdlc/` (the change folder included), and core never calls `gh`.
-`sync` mirrors an open change and never creates an issue; the intent, spec and ship skills run
-it after their WAIT. The project doc (`docs.project`, off while absent) turns on `milestone`,
-`project` and `assignees`, each mirrored exactly, each in its own `gh issue edit` so a refusal is
-skipped, never fatal.
+**Writes before a WAIT.** Three, each a named exception to confirm-before-writing: ship's `base`
+and `resolve`, which move only the change's own branch and print the undo, and ship's
+`findings.md`, which decides nothing. Never a stash (the stack is shared across worktrees), and
+never a merge of `main` into the branch, which close would put on `main`'s first-parent line,
+where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 
-**Bringing a branch up to date: `cmd_base()`.** Ship's Step 0 runs it before the gate, since
-close only fast-forwards: the branch fast-forwards to `main` when it has no commits of its own
-(git carries the uncommitted work or refuses), rebases from a clean tree when it has, and any
-conflict is aborted and refused, `resolvable: true` when `cmd_resolve()` can take it on. Then ship
-resolves it rather than stopping (`skills/ship/conflict.md`): `resolve` commits the uncommitted
-work as a temporary commit, rebases and stops at each conflict, the agent only edits the files it
-names, and `--continue` undoes the temporary commit once the rebase is done and records the files
-in the change's `conflicts.md`, which `ship_question()` names; `--abort` puts the worktree back
-any time before ship commits. Its state is refs, never a file in the tree, which a rebase would
-trip on: `refs/sdlc/{start,aside,end,pending}/<branch>`, the work recoverable from `aside`, all
-deleted by close with the branch. `base` and `resolve` are two of three writes a skill makes
-before its WAIT, by a named exception to confirm-before-writing: each moves only the change's own
-branch and prints the undo. The third is ship's `findings.md` (below). 072's landing reads
-`base`'s refusal and resolves with its own `factory.py resolve`, so `base` never resolves itself.
-Never a stash (the stack is shared across worktrees), and never a merge of `main` into the
-branch, which close would put on `main`'s first-parent line, where `closed_changes()` walks.
+**Closing: `cmd_close()`.** Every git step is one git refuses when something would be lost, and
+a rerun resumes where a failed step stopped. A refused push is `push_failed` and a failed cleanup
+`cleanup_failed`, never a failed close: the change has landed. The host's `close_cleanup` is read
+from the base branch's config as it was before the merge (`_config_at()`), so a change can't turn
+on its own, and it is the one thing close deletes beyond the change's own folder, worktree and
+branch, only behind the question's yes. In this repo, close hands itself to `main`'s script and
+then to the merged one (`_handoff()`), and the commands ship runs from a change's worktree to the
+change's own script (`_own_script()`): CONTRIBUTING.md, *When a change lands*.
 
-**Closing: `cmd_close()`.** Steps in order: `merge --ff-only`, `verify`, `measure`, `archive`
-(the tracker's `archive()`, read back), `remove folder` (`_close_commit()`), `remove worktree`,
-`delete branch`, then `push` when `git.push` names `close` (`_push_plan()`; unset, it does where
-`archive.target` is `github`). A failed step stops there and a rerun resumes, skipping what is
-done, but a refused push is `push_failed`, never a failed close: the change has landed, and
-publish pushes it. Last, with `commands.close_cleanup_runs`, `cleanup` runs the host's
-`close_cleanup` (`_cleanup_plan()`), which the question named: read from the base branch's config
-before the merge (`_config_at()` on `refs/sdlc/base/<branch>`), so a change can't turn on its own,
-and a failure is `cleanup_failed`, never a failed close; with the worktree gone, no rerun finds
-the change to run it twice. It is the one thing close deletes beyond the change's own folder,
-worktree and branch, and only behind that yes. The fast-forward deletes from the main checkout's
-disk each tracked file the change removed, one it stopped tracking and ignores too:
-`_ff_deletions()` lists them as `deletes`, the ignored ones apart, and the question names them;
-close never restores one. A shipped change's issue is labelled `landed`, and `Closes #N` ends the `Close`
-commit's message, so GitHub closes it when the commit reaches the default branch (where that isn't
-`main`, close closes it itself). In the plugin's own repo only, `_handoff()`
-reruns close through `main`'s script when this copy is a stale cache, and through the merged
-script after a merge that brought `scripts/`, so a change closes on its own code;
-`SDLC_CLOSE_RAN` stops a loop. There too, `reaches` (`landing_reach()`, over the change's whole
-diff) tells the person what the landed change asks of the sessions and hosts running the plugin
-from a clone: scripts live at once, skills and the factory's agents at `/reload-plugins`,
-`.claude/settings.json` at `/reload-plugins` or a new session, setup's files at `/sdlc:setup`,
-or `unknown` and why. The commands ship runs from a change's
-worktree (`OWN_SCRIPT_CMDS`: those that write, and `preflight` and `findings`, whose reading the
-change may have changed) have a handoff of their own, apart from close's: `_own_script()` runs
-the change's `scripts/sdlc.py` once the change edits `scripts/`, before `main()` parses anything,
-so a flag only the change knows reaches it, and a crash there falls back to the running copy
-rather than refusing, since each of them is safe to rerun.
+**Dropping.** `/sdlc:drop` writes the reason; `sdlc.py drop` stamps `stage: dropped` and commits
+the folder on its branch (`cmd_drop()`); close records it on `main` as a `Drop NNN-slug` merge
+that keeps `main`'s tree (`_drop_record()`). `closed_changes()`, and so release, never sees a
+dropped change; `dropped_changes()` gives them to `retro`.
 
-**Dropping.** `/sdlc:drop` writes the reason as the intent's `## Dropped` section; `sdlc.py drop`
-stamps `stage: dropped` and commits the folder on its branch. Close then records it on `main` as
-a `Drop NNN-slug` merge with `-s ours`: `main`'s tree is kept, the branch stays reachable, the
-counter comes along, and the issue closes as not planned. `closed_changes()`, and so release,
-never sees a dropped change; `dropped_changes()` gives them to `retro`.
+**Releasing: `unreleased()`.** `closed_changes()` is the one walk over landed changes, each
+`Close` commit on `main`'s first-parent line. `cmd_release` takes every tracked file it changed
+into the release commit, which is safe only because `_release_refusals()` refuses a main checkout
+with uncommitted tracked changes: loosen that and the release commit sweeps up unrelated work. A
+shim in `sdlc.py`, a `RETIRED_KEYS` entry included, gets an entry in `.sdlc/deprecations.toml`; a
+path kept for good (whatever reads what history holds) is not a shim. REFERENCE.md, *Releases*.
 
-**Releasing: `unreleased()`.** From the main checkout, after a batch of closes. The boundary is
-the tag for the version `release.version_files` hold now; a missing tag is reported with the
-`git tag -a` command, never guessed. `closed_changes(home, base)` is the one walk over landed
-changes: each `Close` commit on `main`'s first-parent line names a change, and its intent is read
-from that commit's parent. `cmd_release` edits the version lines in place, runs the host's
-`release.after_bump` and takes every tracked file it changed into the commit, then tags, locally.
-Then `release.prepare`, which must change no tracked file (one it changes is put back and refused),
-and whose output's tail is noted on the tag under `refs/notes/sdlc-prepared` for publish's approval:
-its own notes ref, since `cmd_publish` reads the `sdlc` ref for the word `published`.
-That is safe only because `_release_refusals()` refuses a main checkout with uncommitted tracked
-changes: loosen that and the release commit sweeps up unrelated work. `_push()` is the only
-code that pushes, called by `cmd_publish` and by `cmd_close` and `cmd_release` when `git.push`
-names them; once the tag is on the remote, publish pushes `main` alone, the retry for a push
-they couldn't make. `_unpushed()` reads what `main` holds past its remote-tracking ref, locally,
-for status's `Unpushed`. A shim in `sdlc.py` gets an entry in
-`.sdlc/deprecations.toml`, and `cmd_release` refuses a version that would still carry it. A
-path kept for good (the no-manifest drift, and whatever reads what history holds, which never
-migrates) is not a shim and has none. A `RETIRED_KEYS` entry is one.
+**Retrospectives: `retro()`.** Read-only but for its report, and bounded by the newest
+`Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes, holding the direction
+doc, the register, the product doc and the report, nothing else. It runs the host's
+`retro.evidence` and `retro.indicators` (`_evidence()`, the only place they run), so `retro` is
+not in `READ_ONLY`. Rework across changes is only what a change declares (`_rework()`); blame's
+matches are questions, never counted. `scripts/retro.py`'s docstring; REFERENCE.md,
+*Retrospectives* and *The product doc*.
 
-**Retrospectives: `retro()`.** Its code is `scripts/retro.py`, which `sdlc.py` loads by path as
-`retro` and binds to a live view of its own globals: retro calls every helper it shares
-(`_git`, `load_config`, `closed_changes`, …) as `sdlc.<name>`, read when it runs, so a test's
-stand-in on `sdlc` reaches it, and the tests call retro's own names as `sdlc.retro.<name>`. It is
-not pure like `metrics.py`, and never runs on its own; what status and release call every run
-(`retro_due()`, `next_up()`, the doc readers, the history walks) stays in `sdlc.py`. A default
-argument in `retro.py` can't read `sdlc`, unbound while it loads. Retro is the outermost loop,
-read-only, bounded by the newest `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit`
-writes (the direction doc, `.sdlc/work/inbox.md` and the product doc, nothing else, refusing a
-doc that drops an open id, and a register entry removed or changed beyond its `Priority:` and
-`Theme:` lines: `register_drift()`; a retrospective appends seeds and re-ranks the open ideas and
-bugs `retro`'s `entries` lists),
-plus the one file it writes itself, the report at `.sdlc/retros/<date>.md`: `retro_report()`,
-`process_views()` rendered from `templates/retro.md` with no host command run, the figures
-`retro` prints as `process`. It
-counts closed and dropped changes, rework (`_rework()`: what a later change declares it fixed, on
-its `reworks:` line or through a fixed bug's `Introduced by:`; blame's matches are only
-`rework_questions`, never counted), the skills' size, and,
-with a product doc, runs the host's `retro.evidence` commands (`_evidence()`, the only place
-they run, `retro.indicators`' too), so `retro` is not in `READ_ONLY`. Its `architecture` block
-(`_architecture()`) is counted by `scripts/indicators.py`, pure functions over git's output text,
-loaded by path like `metrics.py`, with no subprocess and no import of `sdlc.py`: `retro.py` runs
-git and hands it the text. `doc_items()` reads the docs' ids (`G1`, `M1`, `O1`)
-and reports format problems rather than raising. The product doc (`docs.product`, off while
-absent) makes every open change carry `serves:`, checked against the doc on the change's own
-branch.
+**The board: `scripts/board.py`.** It writes nothing, `stage:` included, serves `127.0.0.1`
+alone, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A change
+built by hand moves across its columns by what it touched, whether ship's review ran, and whether
+`sdlc.py gate` left a green record on the build as it stands (`_seen()`, `hand_gate()`;
+`cmd_gate()` writes `build/gate.md` in `factory.py`'s record shape, its copies pinned by
+`tests/test_hand_gate.py`), never by a stage the board stamps. It
+reads a factory run's files with copies of `factory.py`'s parsing, pinned by
+`tests/test_board.py`, and the page builds every node with `textContent`, never from a string of
+HTML. Its docstring; REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).
 
-**The board: `scripts/board.py`.** `/sdlc:dashboard` runs `sdlc.py board`, whose code `sdlc.py`
-loads by path and binds as it does `retro.py`, but only in `board`'s dispatch (`_load_board()`), so
-no other command pays for it. It serves `scripts/board.html` and a `/state.json` rebuilt each
-request from `status`'s own readers, on `127.0.0.1` only: three GETs, every other method a 405, a
-request naming another host a 404, and `/file` only inside the folder of a change it shows: every
-open one, and a shipped or dropped one while `ready_to_close()` finds its worktree, under Ready to
-close. It writes nothing, `stage:` included: a change built by hand moves across the columns by what
-its branch and worktree touched outside `.sdlc/work/`, whether ship's review ran, and whether
-`sdlc.py gate` left a green record on the build as it stands (`_seen()`, `hand_gate()`: `cmd_gate()`
-writes `build/gate.md` in `factory.py`'s record shape, its copies pinned by
-`tests/test_hand_gate.py`), never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
-factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`, `runs/stopped.md`,
-`runs/step.md`) it reads with copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the
-core still never imports or runs the factory. A factory card's step track (`_progress()`) is the
-step the supervisor's last reading named, from `runs/step.md`; its estimate is the median time of
-that step at that tier over the newest closed factory runs' `costs.jsonl` and gate files at each
-`Close^` (`typical_times()`), read once per base-branch tip and kept in memory, never on disk. The page builds every node with `textContent`, never from a string of HTML.
+**The register: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change
+requests. Every entry is a seed, and its tag is its kind (`[idea]`, `[bug]` or `[nit]`), so say
+"seed" for any entry and "idea" for the kind. Ids come from `next_entry_ids()`, a space of their
+own, never a change number. A reference is an id, bare, or a title, quoted (`ref_matches()`,
+`same_ref()`); titles are read for good, but never match an entry by title alone.
+`inbox-commit` (`cmd_inbox_commit()`) is the only code that commits the register on its own,
+always on the base branch in the main checkout, so an entry never rides on a change's branch,
+where a drop would lose it. `sdlc.py` only reads nits, and the skills write them. Release,
+publish and measuring never read the register
+(`test_release_publish_and_measuring_never_read_the_register`). Entries, bugs, nits and their
+ranking: REFERENCE.md, *`.sdlc/work/` and worktrees*.
 
-**The inbox: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests, each
-entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
-(`BODY_KEYS`). Every entry is a seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]`. Any
-other tag reads as an idea, `[seed]` (the old idea tag) for good, so say "seed" for any entry and
-"idea" for the kind. A heading without its id is not an entry, and the old `ideas.md` is never
-read as the register: only readers of history name it (`next_entry_ids()`, `fix_trailers()`), and
-`_seed_title()` still strips a bare-date heading from an old intent's `idea:`. Ids come from `next_entry_ids()`, which counts every checkout's
-register, uncommitted edits included, and every commit that ever held one; they are their own
-space, never a change number. A reference (`idea:`, `fixes:`, `After:`, `Groups:`) is an id,
-bare, or a title, quoted, matched by `ref_matches()`/`same_ref()`; titles are read for good,
-since history's intents name seeds by them. Never match an entry by title alone. An `idea:` may
-list several, a theme's seeds taken as one change: every reader takes the record's `ideas` (its
-first is `idea`, kept for JSON readers), and ship deletes each.
+**Intake: `recorded_issues()`.** Each issue the repo records has exactly one record (an entry's
+`Issue:` line, a change's `closes:` line, or an `Sdlc-Triaged:` trailer), and `recorded_issues()`
+is the one reader of all three and decides what each issue shows; the tracker only sets it. The
+record is always committed before the issue is told, so a rerun finishes a run that stopped and
+nothing is filed twice. REFERENCE.md, *`.sdlc/work/` and worktrees* (Issues people file).
 
-**Bugs: `bug_entries()`.** `[bug]` entries carry `Severity:`, its words read from the process doc
-by `severities()` (the default doc's when the host's has none), `Paths:` and a confirmed
-`Introduced by:`. `inbox-commit` (`cmd_inbox_commit()`) is the only code that commits the inbox
-on its own, always on the base branch in the main checkout, for `/sdlc:idea`, `/sdlc:bug` and
-`/sdlc:triage`. From a change's worktree it files only the entries it names, splicing them
-into the main checkout's register (which must be clean) and back out of the worktree's under
-`_main_lock()`, the lock `claim()` takes, so an entry never rides on a change's branch, where a
-drop would lose it. A removed entry needs a reason of its kind (`RETIRE_REASONS`), and a nit, or
-an entry an open change's `idea:` or `fixes:` names (`_open_claims()`: the `[building]` tag rides
-on the change's branch), is never removed there. Ship deletes a change's `fixes:` entries, and close's
-`fix_trailers()` writes their `Sdlc-Fixes:` lines, paths included, since the entry is gone by
-then. Retro's `bugs_retro()` counts them from the register and those trailers, and pairs each
-escape with the review its introducing change got (`_review_at()`: its `findings.md` from that
-change's own commit, parsed by `findings_entries()`'s `_findings_from_text()`), so a missed class
-is evidence, never a guess; it proposes, the review doc and `[review]` stay a change's to edit.
-`Sdlc-Retired:` is written for bugs alone.
+**Metrics: `scripts/metrics.py`.** Close's `measure` step writes a change's numbers as `Sdlc-*`
+trailers on its `Close` commit: numbers and names only. The event list and trailer format are a
+contract (the module's docstring): extend them, never redefine. Measuring never refuses: a
+failure is `Sdlc-Coverage: none: <reason>`. A change's own numbers are printed only with
+`--metrics` (`_lean()`), and every summary is built from the full records first. REFERENCE.md,
+*Metrics*.
 
-**Intake: `recorded_issues()`.** Issues people file on GitHub reach the repo through
-`/sdlc:triage`, and each one the repo records has exactly one record: an entry's `Issue: #12, #15`
-line (`entry_issues()`, the first the parent), a change's `closes:` line, or an `Sdlc-Triaged:`
-trailer on the base branch for a verdict that closed it. `recorded_issues()` is the one reader of
-all three, and decides each issue's comment, marker and parent; the tracker's `mark()`,
-`unmark()` and `needs_info()` only set them, so a tracker still never reads `.sdlc/work/`.
-On a full pass (close, `mark-triaged`), `mark_issues()` passes over an issue the tracker's one
-listing (`open_marks()`, where it has it) shows marked already, unless its record names a parent
-or a close, which a listing can't confirm; `sync`'s pass over a change's few lists numbers alone. The record is
-always committed before the issue is told (`inbox-commit --triaged`, then `mark-triaged`), so a rerun
-finishes a run that stopped, and nothing is filed twice. Close reads only `closes:`, which ship
-asks about one issue at a time; an issue the change didn't resolve becomes a seed with a
-`Split from NNN-slug:` line, never left dangling. Close's `remove folder` step reruns the marking
-(`mark_issues()`) once the change's entries are on the base branch, and never refuses on it;
-`sync` runs it too, for the change's own `closes:` alone (`only=`), so intent's yes tells them.
+**Setup: `drift()` and `readiness`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup
+writes, and `drift` compares three ways (the default now, the recorded hash, the host's text), so
+a block the host changed is never proposed. `breaking` is only what the plugin would now misread:
+rename or drop a config key, or make the script read a new template heading, and `RETIRED_KEYS`
+or `TEMPLATE_READS` gets the entry in the same change. `git.attribution` has no default on
+purpose: unset is a question setup asks. `readiness`'s `complete` lets a rerun read setup's
+`SKILL.md` alone, and errs towards false: a wrong true skips a host's setup without a word. The
+`setup` case's fixture must stay complete (`test_the_set_up_fixture_is_complete`). A nudge in
+`status` is never a problem: `check --strict` is a gate. REFERENCE.md, *After an update*;
+`cmd_record()`, `cmd_readiness()`.
 
-**Nits: `nit_entries()`.** The findings ship approved unfixed are `[nit]` entries in
-`.sdlc/work/inbox.md`, each with an id like any entry and `Theme:`, `Paths:`, `Cost:`, `Value:` and
-`Raised by: NNN-slug (pass)` lines, the last keeping the raising change's number. `sdlc.py` only
-reads them (`nits`, `check`, retro's `nits`), as text, and never puts one forward as a seed; the
-skills write them: ship adds and retires entries behind its one WAIT, intent and spec offer the
-ones a change touches, retro proposes one paydown seed per theme. The rubric is the process doc's,
-not code's. Release, publish and measuring never read the register
-(`test_release_publish_and_measuring_never_read_the_register`).
+**Ship.** Context docs are checked at ship, not close: `sdlc.py context` lists them, and ship
+shows an edit with its findings and commits it with the change; close has no `Edit`. Ship reads a
+change through one read-only `preflight` call and asks the question `preflight --question` words
+(`ship_question()`), never one worded by hand. A new list ship needs is a new part of
+`cmd_preflight()`, not a new command in the skill; what only some runs need is a side file
+`preflight`'s `branches` names (`SHIP_BRANCHES`), while the WAIT and every rule that binds each
+run stay in `SKILL.md`. Ship writes `findings.md` and the script only reads it
+(`findings_entries()`); `fix` never reaches a commit. `[review] sensitive` and `irreversible` are
+matched by the script (`risk_paths()`), never judged by a skill, and read from the base branch's
+config, so a change can't lighten its own review; risk never changes a tier. The fresh review is
+`agents/reviewer.md` (`sdlc:reviewer`), the core plugin's one agent, with `Read`, `Grep` and
+`Glob` and nothing that writes. Acceptance checks (`acceptance()`) run only through `accept`,
+and are never rerun by a later change. REFERENCE.md, *`.sdlc/work/` and worktrees* and *Risky
+paths*.
 
-**Metrics: `scripts/metrics.py`.** Pure functions, loaded by path, no import of `sdlc.py`. Close's
-`measure` step reads this repo's Claude Code transcripts (`_project_dirs()`, its own folders
-exactly), attributes them to the change by branch, keeps numbers and names only (an artifact
-kind, a role, a prompt's tool and program), and writes them as
-`Sdlc-*` trailers on the `Close` commit: history keeps them. The event list and trailer format
-are a contract: extend them, never redefine. `unreleased`, `release` and `retro` print each
-change's parsed numbers only with `--metrics` (`_lean()`): no skill reads them one change at a
-time, and every summary is built from the full records first. Measuring never refuses: a failure is
-`Sdlc-Coverage: none: <reason>`. Rework within a change (`Sdlc-Rework`, `Sdlc-Review`,
-`Sdlc-Happy`, `Sdlc-Spike`) is apart from `retro`'s rework, and spikes are never rework.
-`Sdlc-Fixes` and `Sdlc-Retired` are written by `sdlc.py`, not measured, and parsed keyed by id.
-`Sdlc-Base`, where a change started, is too: `_change_base()` reads it from the `Close` commit,
-then from `refs/sdlc/base/<branch>`, which close writes before its merge and deletes with the
-branch, and only then falls back to the parent of the first commit holding the intent, which
-misses a commit the change made before its folder.
+**The skills' cases: `evals/`.** A `claude plugin eval` suite, in this plugin's repo only
+(`_cases_report()`). No command name holds `eval`, which the harness refuses from a worktree
+session. Every run is a paid model call, so `run-cases` is never in `ALLOW_RULES`, a skill's
+`allowed-tools`, `check.sh` or CI. `tests/test_evals.py` builds every fixture and runs `check
+--strict` on it, so a script change that breaks one fails the gate, not a paid run.
+CONTRIBUTING.md, *The skills' cases*.
 
-**Setup's record: `drift()`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup writes:
-the plugin version, its config keys, and a hash of each block (`doc_units()`: a section or a
-`- **lead**` bullet) of each default behind a host doc. `drift` compares three ways (the default
-now, that hash, the host's text), so a block the plugin changed and the host never touched is
-proposed (the whole doc, as `proposed`, every other block as the host wrote it), and one the host
-changed never is. The process and review docs, always answers, have no blocks of the guide's to
-refresh: their record holds the guide's hash, and `drift` says only `guide-changed`, a note to
-read, and `unknown` for a block no guide heading places.
-`breaking` is only what the plugin would now misread: a key in `RETIRED_KEYS`,
-an override lacking what `TEMPLATE_READS` names. Rename or drop a config key, or make the script
-read a new template heading, and that table gets the entry in the same change. `uninstall`
-removes only setup's (git's files in `.sdlc/`, the plugin's allow rules, the ignore line when
-recorded, the `attribution` object when recorded and unchanged) and refuses while any change is
-live. `git.attribution` has no default on purpose: unset is a question setup asks, `false` has
-setup merge `ATTRIBUTION_OFF` (an object, never a bare `false`) into the shared settings, which
-`attribution_status()` checks, and record notes as setup's. The nudge in `status` is never a problem:
-`check --strict` is a gate.
-
-**Context docs are checked at ship, not close.** `sdlc.py context` lists `docs.context` and each
-`CLAUDE.md` or `AGENTS.md` above a changed path, with the lines naming a deleted or renamed path.
-Ship shows any edit with its findings and commits it with the change; close has no `Edit`.
-
-**Ship's lookups: `cmd_preflight()`.** Ship reads a change through one read-only `preflight`
-call, each part (`undone`, `nits`, `closes`, `checks`, `findings`, `context`) built by the same
-`_<part>_report()` its own command prints, and asks the WAIT question `preflight --question`
-words (`ship_question()`), never one worded by hand. A new list ship needs is a new part there,
-not a new command in the skill. What only some runs need lives in a file beside `SKILL.md`
-(`skills/ship/undone.md`, …), read only when `preflight`'s `branches` part names it, from
-`SHIP_BRANCHES`: whether a branch applies is the script's call, and the WAIT and every rule that
-binds each run stay in `SKILL.md`.
-
-**Setup's stop: `readiness`'s `complete`.** A rerun on a set-up repo reads setup's `SKILL.md`
-alone: `cmd_readiness()` says `complete` (every item answered and nothing in `drift()`'s
-`breaking`, `refresh` or `report`; `UNSET_IS_A_CHOICE` and an `archive.target` of `none` are
-answers, not gaps), and only otherwise, or with an argument, does setup read
-`skills/setup/drafts.md`, its Steps 1 to 3. `complete` errs towards false: a wrong true skips a
-host's setup without a word. The `setup` case's fixture (`evals/fixtures/set-up/`, committed on
-`main` by its `main` file, recorded by the scaffold) must stay complete, which
-`test_the_set_up_fixture_is_complete` checks.
-
-**Review findings: `findings_entries()`.** Ship writes its review to the change's `findings.md`
-after every run, before its WAIT, by a named exception to confirm-before-writing like `base`'s: it
-writes only the change's own uncommitted folder, decides nothing (the WAIT approves each
-disposition), and the next run rewrites it, keeping each `F<n>` id, so a finding fixed between
-runs is counted. The script only reads it: `findings` prints the `Sdlc-Findings` line
-(`findings_trailer()`, never counted by hand), `check` reports a malformed file, and `ship`
-refuses while one is `open` or `fix`. `fix` is ship's recommendation, with a `Fix:` line saying the
-change: `ship_question()` leads with it, so `yes` takes it, and `ship --fixed/--through` is the
-clean-rerun check after the fixes, by the script; `fix` never reaches a commit, so the trailer
-counts only `COUNTED`. The note's `Fresh review: ran|skipped, <why>` line (`findings_fresh()`) is
-the one record of the fresh review; a deep diff without it is refused. A Pre-existing finding
-never blocks; ship files it as a `[bug]`. The trailer's dispositions are new keys beside the old
-ones, so `metrics_summary()` reads a trailer without them as unanswered (`answered`), never as a
-clean review.
-
-**Risk: `_risk_report()`.** `[review] sensitive` and `irreversible` are matched against the
-change's diff by the script (`risk_paths()`), never judged by a skill, and read from the base
-branch's config, so a change can't lighten its own review. A sensitive hit makes the diff deep:
-ship runs the build check, spawns `agents/reviewer.md` (`sdlc:reviewer`, the core plugin's one
-agent: `Read`, `Grep`, `Glob`, nothing that writes) for a fresh-context review whose findings carry
-`By: fresh`, and `cmd_ship_question()` names the paths itself. An irreversible hit adds `How to
-recover:` to the commit and its clause to the question. Risk never changes a tier.
-
-**Acceptance checks: `acceptance()`.** A change's `checks.md`, one `## ` section and one `sh` block
-per check. `checks` lists them (read-only, allowed); `accept` runs them from the change's checkout
-and fails one that exits non-zero, times out or leaves the tree changed. `accept` is never in
-`ALLOW_RULES` or a skill's `allowed-tools` (`test_no_skill_lets_accept_run_unasked`): ship names it
-in prose, so the harness asks with the commands just shown. They are never rerun by a later change.
-
-**The skills' cases: `evals/`, `run-cases`.** A `claude plugin eval` suite for the core skills, in
-this plugin's repo only (`_cases_report()` is `available: false` anywhere `_own_repo()` isn't): each
-case scaffolds a fixture repo (`evals/scaffold.sh`, `evals/fixtures/`) and grades, from the run's
-trace, that its skill asked `config`, wrote nothing its WAIT approves and ended at its own
-question. No command name holds `eval`, which the harness refuses from a worktree session:
-`cases` reads the suite and a change's scope (the tags of the skills `landing_reach()` says its diff
-touches), `cases compare` scores a run against the last, and `run-cases` runs `claude plugin eval`
-as a subprocess, a change's scope (`--tag`; `--case` takes one glob) or `--full`, granting `Bash`,
-`Write` and `Edit` with one arm and a cost ceiling, into `.sdlc/reports/`. Every run is a paid
-model call, so `run-cases` is never in `ALLOW_RULES`, a skill's `allowed-tools`, `check.sh` or CI
-(`test_no_skill_lets_accept_run_unasked`, `test_the_gate_and_ci_never_run_the_skills_cases`): ship
-names it for a scoped diff, writes `Skill evals: ran|skipped` in `findings.md`'s note and refuses
-without it, as for the fresh review; release offers the full run; status nudges when Claude Code's
-version moved since it. `tests/test_evals.py` builds every fixture and runs `check --strict` on it,
-so a script change that breaks one fails the gate, not a paid run.
-
-**The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
-cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
-`sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. The core
-knows only whether it is enabled, from Claude Code's settings files (`factory_enabled()`, printed
-as `config`'s `factory`, nothing run), for intent's `yes, for the factory`. Its
-mechanism is `factory.py`, which never imports `sdlc.py`: each plugin is cached on its own. Agents
-that judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`,
-read-only), and no agent commits. `/sdlc-factory:build` is the **supervisor**: the person's own session, usually
-long-running in the main checkout, taking one change per invocation, whose commands find each
-change's worktree themselves (`change_root()`). It never waits on an agent: each runs as a
-headless session of its own in the change's worktree, started in the background by
-`factory.py agent`, the one place the factory runs `claude`, which composes the prompt from
-`verdicts`' state (`loop_state()`), refuses a step `verdicts` didn't name, picks the model
-(`model_for()`: `factory.models`, else opus for what builds, decides or hunts exploits, the other
-reviewers sonnet for a Tier 2 or a full-depth run, haiku otherwise) and the permission mode (`mode`,
-from the base branch's `factory.toml`), files the reply, and records the session's id in
-`runs/<agent>.sessions`, which `measure` reads (`_agent_sessions()`), since no transcript names its
-`--agent`. The gate is the script's: before any reviewer reads a build, `verdicts` names `gate`, and
-`factory.py gate` runs the base branch's `[commands] check` (never the checkout's) in the change's
-worktree, recording each attempt in `build/round-<N>.gate.md`, which `_factory_files()` counts as
-`gate_fail`; a red one is the builder's `fix`, `GATE_FIXES` a round, then a stop, and a reviewed
-round is never gated again. With the base branch's `[ui]` complete, the `ui` and `ux` reviewers
-join a round whose diff touches its `paths` (`ui_review()`), never a run's depth; they have no
-shell, and judge the screenshots `agent` has `shots` take first, from `[ui]`'s own commands,
-stopping only the process group it started. A change ends at "ready to ship"; `factory.py ready`
-orders them, and the person lands
-them: one at a time with `/sdlc:ship`, or as a batch with `/sdlc-factory:land`, from a session of
-its own. **Land is the one place the factory commits, and it does so through `sdlc`'s own code:**
-`factory.py` runs the `sdlc.py` of its own version, beside it (`sdlc_path()`: the clone's, or the
-marketplace cache's; another version is refused), for `ship`, `base` and `close`, with
-`SDLC_CLOSE_RAN`, `SDLC_OWN_SCRIPT` and `VIRTUAL_ENV` unset, close from the main checkout. Its one
-gate per batch **passes itself** when `land-check` finds no risk signal (a sensitive or irreversible
-path, `impact: major` or none proposed by the approver's `- IMPACT:`, an ESCALATE, an open
-decision, a `closes:` issue, a resolved conflict, `land.auto` off on the base branch): a standing
-approval, recorded on the change's commit as `Sdlc-Landed: by=auto` (never a bare word, which
-`parse_trailers` drops), counted as `auto=` beside `stops`, never as the person's. The factory's
-rounds stand in for ship's review, so a landed commit has no `Sdlc-Findings`. A change with
-undone notes, `checks.md` or skills' cases in scope is left out, for `/sdlc:ship`. A rebase that
-conflicts is the change's builder's to resolve (`resolve`, with `.sdlc/last-id` settled to the
-higher number), reviewed again before close. A rebased change is gated by the script first
-(`gate --land`, into `build/land-<n>.gate.md`, never under `reviews/land-<n>/`, which the landing
-reads as reviews); red there is a stop, never a fix. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
-the change, which is how `measure` gives the supervisor's dialogs on `main` to their change
-(`_supervised()`). `sdlc` only reads the files a run leaves in the change's folder: ship reads its rounds, and the board and status read its stop record. A round's `CHANGE:` lines reach the builder only through the
-verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
-`[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
-`sdlc.py`'s by a test, like its regexes: `verdicts` decides from the rounds alone and reads no state
-file but `runs/mended` (below), so a run that reviewed at the full depth stays full by what its rounds hold. With
-`--record`, which only the supervisor passes, it writes the stop it found to `runs/stopped.md` for
-the board and status, or removes it, and the step it read, with since when, to `runs/step.md` for
-the board, and nothing reads either back into the loop. A builder report and a
-behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
-checks. A reply only ever opens with its verdict; one missing its evidence, or holding its verdict
-after a preamble (`preamble()`), is the one kind of stop the run mends, once a round for each role, by asking the
-same agent again (`agent --task mend`), its reply written over the old and the mend recorded in
-`runs/mended` (`mended()`), the one file a run writes that `verdicts` reads back: a role already
-mended that round is a `rerun` stop, and a second mend is refused; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
-under a prompt (`test_no_agent_but_the_builder_runs_checks`).
-The eval and the review read what `sdlc.py` writes (the register's bugs, `Sdlc-Fixes` and
-`Sdlc-Base` on `Close` commits) through copies of its parsing, each pinned by a test, write only
-under `.sdlc/reports/`, a folder that ignores itself, and never write the register: a review's
-bugs reach it through `/sdlc:bug` and `inbox-commit` alone.
+**The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not; its
+README and `factory.py`'s docstring describe it. `sdlc`'s cached copy carries the folder but never
+loads it (`test_sdlc_loads_nothing_from_plugins`), and knows only whether it is enabled, from
+Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing run), for intent's
+`yes, for the factory`. `factory.py` never imports `sdlc.py`, and
+`sdlc` only reads the files a run leaves in a change's folder: each reads the other's files with
+copies of its parsing (`risk_paths()` and the regexes included), pinned by tests. Agents that
+judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`), and no
+agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
+gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
+the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its own version
+(`sdlc_path()`); its gate passes itself only when no change carries a risk signal, recorded as
+`Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.
+`verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder
+report and a behaviour check end with `## Evidence` (`read_evidence()`); a reply missing it, or
+holding its verdict after a preamble (`preamble()`), is the one stop a run mends, once a round
+for each role (`agent --task mend`, recorded in `runs/mended`). No agent but the builder runs
+`checks.md` (`test_no_agent_but_the_builder_runs_checks`). The eval and the
+review write only under `.sdlc/reports/`, and never the register.
 
 ## Invariants the tests enforce
 

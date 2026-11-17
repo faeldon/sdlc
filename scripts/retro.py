@@ -5,7 +5,11 @@ its own names right after: every helper this code shares with the rest of the pr
 `load_config`, `closed_changes`, `inbox_entries` …) is read as `sdlc.<name>` when it runs, so a
 test's stand-in on the loaded `sdlc` module reaches it. Unlike `metrics.py` and `indicators.py` it
 is not pure, and it is never run on its own: `sdlc.py retro` and `sdlc.py retro-commit` are its
-commands.
+commands. The tests call this file's own names as `sdlc.retro.<name>`.
+
+`sdlc` is unbound while this file loads, so a default argument here can't read it. What `status`
+and release call on every run (`retro_due()`, `next_up()`, the doc readers, the history walks)
+stays in `sdlc.py`.
 """
 
 from __future__ import annotations
