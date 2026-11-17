@@ -277,13 +277,6 @@ Cost: S
 Value: low
 Raised by: 077-ship-resolves-conflicts (correctness)
 
-## [2026-11-17-14] [idea] Board tests serve on port 0 rather than a port picked free beforehand
-
-`tests/test_board.py`'s `_free_port()` releases the port before `board.serve()` binds it, so under
-`-n auto` another worker could take it between. Serving on port 0 and reading the bound port back
-closes the window. See .sdlc/work/082-parallel-gate/notes.md in 082's commit.
-Theme: tests
-
 ## [2026-11-17-16] [idea] Resume an escalated factory run
 
 `factory.py start` refuses a change at `stage: test` (`STARTS` has no `test`), and `verdicts` reads

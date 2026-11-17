@@ -9,7 +9,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
-import socket
 import subprocess
 import threading
 import urllib.error
@@ -386,16 +385,11 @@ def test_status_never_loads_the_board() -> None:
 # ---------------------------------------------------------------- the server
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 @pytest.fixture
 def served(repo):
-    port = _free_port()
-    server = board.serve(repo, port)
+    # Port 0 binds at once, so no other worker can take the port between choosing and binding it.
+    server = board.serve(repo, 0)
+    port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield repo, f"http://127.0.0.1:{port}", port
@@ -427,6 +421,10 @@ def test_the_board_answers_three_gets_and_nothing_else(served) -> None:
         assert _get(url + "/state.json", method)[0] == 405, method
     assert _get(url + "/anything")[0] == 404
     assert _get(url + "/state.json", headers={"Host": "evil.example:80"})[0] == 404, "rebinding"
+    for host in ("127.0.0.1:0", "localhost:0", "127.0.0.1"):
+        assert _get(url + "/state.json", headers={"Host": host})[0] == 404, host
+    port = int(url.rsplit(":", 1)[1])
+    assert _get(url + "/state.json", headers={"Host": f"localhost:{port}"})[0] == 200
 
 
 @pytest.mark.portable

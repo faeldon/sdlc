@@ -684,9 +684,12 @@ def _handler(root: Path, port: int) -> type[BaseHTTPRequestHandler]:
 
 
 def serve(root: Path, port: int) -> ThreadingHTTPServer:
-    """The board's server on 127.0.0.1:`port`, bound but not yet serving. Raises OSError when the
-    port is taken."""
-    return _Server((HOST, port), _handler(root, port))
+    """The board's server on 127.0.0.1:`port`, bound but not yet serving, answering only to the
+    port it bound: port 0 takes one the OS picks, read back from `server_address`. Raises OSError
+    when the port is taken."""
+    server = _Server((HOST, port), BaseHTTPRequestHandler)
+    server.RequestHandlerClass = _handler(root, server.server_address[1])
+    return server
 
 
 def _is_board(port: int) -> bool:
