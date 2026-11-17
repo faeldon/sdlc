@@ -3319,6 +3319,20 @@ def test_a_server_that_answered_and_closed_first_has_not_lost_its_port(tmp_path)
     assert lost is False, why
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows binds a held port with SO_REUSEADDR")
+def test_a_port_a_wildcard_listener_holds_is_lost() -> None:
+    """111 ship F1: a server holding its port on every address (`0.0.0.0`) holds it for
+    `127.0.0.1` too, so the port reads as held and a server that lost it is retried."""
+    import socket
+
+    with socket.socket() as held:
+        held.bind(("0.0.0.0", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        assert factory._binds("127.0.0.1", port) is False
+        assert factory._lost("127.0.0.1", port) is True
+
+
 def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -> None:
     """111 C1: a serve that exits before answering on a port that still binds failed on its own,
     not to another process: one start, no retry, and its exit is the problem."""

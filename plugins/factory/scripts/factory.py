@@ -4226,15 +4226,18 @@ def _binds(host: str, port: int) -> bool:
     """Whether `host`:`port` binds now, the socket closed straight after: a port that won't is held
     by another process. `SO_REUSEADDR` lets a port whose last connection is in TIME_WAIT bind, as
     a server restarting on it would, while one another socket holds, listening or bound, still
-    won't; on Windows it would let a held port bind too, and TIME_WAIT never blocks a bind there."""
-    try:
-        with socket.socket() as s:
-            if os.name != "nt":
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((host, port))
-        return True
-    except OSError:
-        return False
+    won't; on Windows it would let a held port bind too, and TIME_WAIT never blocks a bind there.
+    The wildcard address is probed too: on macOS a port a server holds on `0.0.0.0` still lets
+    `host` bind beside it."""
+    for address in dict.fromkeys((host, "0.0.0.0")):
+        try:
+            with socket.socket() as s:
+                if os.name != "nt":
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((address, port))
+        except OSError:
+            return False
+    return True
 
 
 def _lost(host: str, port: int) -> bool:
