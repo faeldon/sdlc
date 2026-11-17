@@ -98,6 +98,12 @@ What `retro` gives:
   `largest` gives the biggest files and `totals` each kind's files and lines, both now and at the
   last retrospective (`then`, `growth`; null on a first one). `host` is a row per
   `retro.indicators` command, as `evidence` is: what it means is the host's.
+- `spend`: what each change spent beside its size. `tiers` gives per tier the median comment
+  share, agent `out` tokens per added code line and tool calls per added code line (null under
+  three changes); `outliers` names each change over twice its tier's median, with the `measure`
+  and how many `times`; `tools` lists the names `most_called` and with `most_errors`, each with
+  its `error_share` and `changes`. `recorded` changes carry tool calls and words; `unrecorded`
+  ones (`why` says why) are in no call or word figure, never zero.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
   `done`, `dropped` or `revised`, with `serves`: the outcomes a goal's line ends with, `(O1, O3)`,
   or the goals and outcomes a milestone's `Serves:` line names), its format `problems`, the `next_ids` to give new ones, and
@@ -198,6 +204,10 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
      `revise` and `unprompted` are the person's own conversation, worth naming, not cutting;
      `fix` is the review working, not a cost to cut;
    - which stage or role the tokens pile up in;
+   - from `spend`, each outlier: a change that commented, talked or called tools far more than
+     its tier's size needed. Say which measure and by how much, and whether its size explains it.
+     A tool high in `most_errors` with a high `error_share` across changes is spent calls: a
+     seed naming what keeps failing. Read it beside `recorded`: a few changes are anecdote;
    - from `in_change`, which stage most often misses first time and which rework count drives it
      (a spec edited after design is a Stage 2 problem; failed gate runs a build one), and whether
      spikes are buying fewer misses later;

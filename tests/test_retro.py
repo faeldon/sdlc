@@ -91,12 +91,14 @@ def _close(
     reworks: str = "",
     rewrite: tuple[str, ...] = (),
     trailers: tuple[str, ...] = (),
+    texts: dict[str, str] | None = None,
 ) -> None:
     """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
     is a second commit on the change, touching those files, before it closes; `before` a first
     one, without its folder. `based` writes where the change started on the `Close`, as close
     does. Each file gets the change's name appended, but those in `rewrite`, which it replaces
-    whole. `reworks` is the intent's line; `trailers` go on the `Close`."""
+    whole. `reworks` is the intent's line; `trailers` go on the `Close`; `texts` are files the
+    change's own commit writes whole, beside the rest."""
     start = _git(root, "rev-parse", "HEAD")
     when = f"{closed}T12:00:00"
     for rel in before:
@@ -122,6 +124,10 @@ def _close(
         path.parent.mkdir(parents=True, exist_ok=True)
         kept = path.read_text() if path.exists() and rel not in rewrite else ""
         path.write_text(f"{kept}{name}\n", encoding="utf-8")
+    for rel, body in (texts or {}).items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"ship {name}", when=when)
     if later:
@@ -439,6 +445,7 @@ def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, caps
     for key in ("changes", "dropped"):
         assert all("metrics" not in r for r in lean[key]), key
         full[key] = [{k: v for k, v in r.items() if k != "metrics"} for r in full[key]]
+    assert "changes" not in lean["spend"] and full["spend"].pop("changes")
     assert full == lean, "the summaries, dropped_cost and bugs are the same either way"
 
 
@@ -1883,3 +1890,75 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     assert sdlc.retro.cmd_retro(root, report=True) == 0
     assert capsys.readouterr().out.startswith("# Retrospective report\n")
     assert not (root / "ran").exists()
+
+
+# ---------------------------------------------------------------- spend (118)
+
+SPENT = (
+    "Sdlc-Mode: manual",
+    "Sdlc-Totals: elapsed=10 out=500 words=12 tools=7",
+    "Sdlc-Stage: build words=9 out=400",
+    "Sdlc-Stage: ship words=3 out=100",
+    "Sdlc-Tool: Read calls=5 errors=0 build=5",
+    "Sdlc-Tool: Bash:make calls=2 errors=1 build=1 ship=1",
+)
+
+
+def _spent(root: Path) -> None:
+    _close(root, "001-reopen-drafts", trailers=SPENT, texts={
+        "src/a.py": "# why\nx = 1\n# and why\ny = 2\n",
+        "tests/test_a.py": "# a test's comment is not the code's\n",
+        "docs/a.md": "# a heading\n",
+    })  # fmt: skip
+    _close(root, "002-draft-titles", closed="2026-10-03", texts={"src/b.py": "z = 3\n"},
+           trailers=("Sdlc-Coverage: none: metrics.transcripts is off",
+                     "Sdlc-Totals: elapsed=10"))  # fmt: skip
+    _close(root, "003-keep-one-draft", closed="2026-10-04", texts={"src/c.ts": "// c\n"})
+
+
+def test_spend_lists_each_change_and_says_what_is_unrecorded(tmp_path: Path, capsys) -> None:
+    """R5, R8: each change's code and comment lines from its diff, its tokens, words and calls
+    from its `Close` commit; one without `tools=` and `words=` is `recorded: false`, says why, and
+    is in no token or call figure. Its rows print only with `--metrics`."""
+    root = _repo(tmp_path)
+    _spent(root)
+    spend = _retro(root)["spend"]
+    first, second, third = spend["changes"]
+    assert first == {
+        "change": "001-reopen-drafts", "tier": 1, "code_added": 4, "comment_lines": 2,
+        "comment_base": 4, "out": 500, "words": {"build": 9, "ship": 3}, "tools": 7, "errors": 1,
+        "by_tool": {"Read": {"calls": 5, "errors": 0}, "Bash:make": {"calls": 2, "errors": 1}},
+        "recorded": True, "why": None,
+    }  # fmt: skip
+    assert (second["recorded"], second["tools"], second["words"]) == (False, None, None)
+    assert second["why"] == "metrics.transcripts is off"
+    assert (third["comment_lines"], third["why"]) == (1, "not measured at close")
+    assert (spend["recorded"], spend["unrecorded"]) == (1, 2)
+    assert spend["why"] == {"metrics.transcripts is off": 1, "not measured at close": 1}
+    assert spend["tools"]["most_called"][0] == {
+        "name": "Read", "calls": 5, "errors": 0, "error_share": 0.0, "changes": 1,
+    }  # fmt: skip
+    assert spend["tiers"]["1"]["changes"] == 3
+    assert sdlc.retro.cmd_retro(root) == 0
+    lean = json.loads(capsys.readouterr().out)["spend"]
+    assert "changes" not in lean and lean["recorded"] == 1
+    assert sdlc.retro.cmd_retro(root, metrics=True) == 0
+    assert len(json.loads(capsys.readouterr().out)["spend"]["changes"]) == 3
+
+
+def test_the_report_renders_spend(tmp_path: Path) -> None:
+    """R9: `## Spend` in the report: what was left out and why, outliers, the top tools."""
+    root = _repo(tmp_path)
+    _spent(root)
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "## Spend" in text and "{{spend}}" not in text
+    assert "1 of the 3 changes closed recorded" in text
+    assert "metrics.transcripts is off: 1" in text
+    assert "| Read | 5 | 0 | 0 | 1 |" in text
+    assert "No change is over twice its tier's median" in text
+    # A host's override from before is reported as breaking, the section and its placeholder.
+    old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Spend")[0]
+    assert sdlc._template_misses("retro.md", old) == [
+        "the `## Spend` heading",
+        "the `{{spend}}` placeholder",
+    ]

@@ -868,6 +868,22 @@ times the gate: a host that wants it, or complexity or dependency cycles, names 
 `retro.indicators`, run as `retro.evidence` is (with or without a product doc) and passed through
 as `host`.
 
+Its `spend` sets what each closed change in the window spent beside its size. Each change's row
+(printed only with `--metrics`) holds its tier, its added code lines, how many of them are line
+comments, its agent `out` tokens, the person's `words` per stage, and its tool calls and their
+errors. A comment is told by line alone: an added line in a code file whose text starts with its
+suffix's marker (`#` for `.py .sh .toml .yaml .yml .rb`, `//` for `.js .ts .go .rs .java .c .h
+.cpp .swift .kt`, `--` for `.sql .lua`, `<!--` for `.html`), never parsed, so a docstring is code
+and a `#` line inside a string is a comment; prose is never counted, and a suffix with no marker
+is counted as `unknown_lines`. `tiers` gives each tier's median comment share, `out` tokens per
+added code line and tool calls per added code line, over the changes that have each, and none
+for a tier with fewer than three; `outliers` names each change more than twice its tier's median
+on any of them, with by how much. `tools` ranks the window's tool names by calls and by errors,
+each with its error share and the changes it was called in. A change whose `Close` commit carries
+no `tools=` or `words=` (closed before they were counted, or measured from history alone, with
+`metrics.transcripts` off) is `recorded: false`, counted in `unrecorded` with its reason in `why`,
+and is in no call figure: its comment lines still count, since git gives them.
+
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there
@@ -879,9 +895,10 @@ retro-commit` commits those files and nothing else, as the next retrospective's 
 refuses a register entry removed or changed beyond those two lines. With them it commits a report
 it writes itself, `.sdlc/retros/<date>.md`, from history alone: the window's cycle time per tier,
 changes closed per week, where the time went (agent against the person's response and away), how
-many changes ran at once and what that did to them, rework and escapes, rendered from
-`templates/retro.md` (override it in `.sdlc/templates/`). Its figures are `sdlc.py retro`'s
-`process` block, which counts changes close couldn't measure but never reads them as zero, and
+many changes ran at once and what that did to them, rework, escapes and spend, rendered from
+`templates/retro.md` (override it in `.sdlc/templates/`; an override without its `## Spend`
+section and `{{spend}}` is reported as breaking after an update). Its figures are `sdlc.py retro`'s
+`process` and `spend` blocks, which counts changes close couldn't measure but never reads them as zero, and
 `sdlc.py retro --report` prints it without writing anything. It never edits code, skills, the process doc, the review doc or
 `.sdlc/config.toml`: a lesson an escape holds for the review (a failure class for the review doc,
 a path for `[review]`) is a seed with the exact text, made by a change that ship reviews.
@@ -950,7 +967,15 @@ path: one `Sdlc-Prompt: <name> asked=<n> rejected=<n>` line each, `prompts=` on 
 each `Sdlc-Stage`, and `prompt_modes=` on `Sdlc-Totals`, the permission modes the change ran in
 (`auto` asks no one, so its zero says nothing about a skill's rules). An older `Close` commit
 carries `permission=` instead, which counted questions and plan approvals, not prompts:
-`/sdlc:retro` reads it as unrecorded. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
+`/sdlc:retro` reads it as unrecorded.
+
+It also counts every tool call, prompted or not, named the same way: one `Sdlc-Tool: <name>
+calls=<n> errors=<n> <stage>=<n> …` line a name, with `tools=` on `Sdlc-Totals` for all of them.
+An error is a call whose result the transcript marks as one, a rejected prompt included; a call
+with no result is no error. A sub-agent's calls, and a factory agent's, count with the change.
+And it counts the words the person typed (a slash command's name and arguments, a reply's text,
+never the text itself) as `words=` on each `Sdlc-Stage` and on `Sdlc-Totals`. A `Close` commit
+without `tools=` or `words=` is read as unrecorded, never as none. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
 commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
 each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
 then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of

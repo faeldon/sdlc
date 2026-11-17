@@ -441,7 +441,9 @@ def test_no_text_leaves_a_human_event(tmp_path: Path) -> None:
     for e in events:
         if e["kind"] in ("human", "harness"):
             rest = {k: v for k, v in e.items() if k not in ("ts", "kind")}
-            assert all(isinstance(v, bool) for k, v in rest.items() if k != "reply"), e
+            flags = {k: v for k, v in rest.items() if k not in ("reply", "words")}
+            assert all(isinstance(v, bool) for v in flags.values()), e
+            assert isinstance(rest.get("words", 0), int) and not isinstance(rest.get("words"), bool)
             assert rest.get("reply") in (None, "approve", "revise", "other")
 
 
@@ -1234,3 +1236,88 @@ def test_both_intent_yes_answers_read_as_approval() -> None:
     """093 R9: intent's two yes answers, by hand and for the factory, are both the gate's yes."""
     assert metrics._reply("yes, by hand") == "approve"
     assert metrics._reply("yes, for the factory") == "approve"
+
+
+# ---------------------------------------------------------------- words and tool calls (118)
+
+
+def test_words_are_counted_and_no_text_leaves(tmp_path: Path) -> None:
+    """R1: a typed reply's words, a command's name and arguments; never the text itself."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec", "12 reopen"), turn(1, 1), user(2, f"yes {SENTINEL}"),
+        cmd(10, "sdlc:ship"), turn(11, 1), user(12, "fix all please"),
+    ])  # fmt: skip
+    humans = [e["words"] for e in events if e["kind"] == "human"]
+    assert humans == [3, 1 + len(SENTINEL.split()), 1, 3]
+    s = _summary(events)
+    assert (s["stages"]["design"]["words"], s["stages"]["ship"]["words"]) == (9, 4)
+    assert s["totals"]["words"] == 13
+    lines = metrics.trailers(s)
+    body = "\n".join(lines)
+    assert SENTINEL not in json.dumps(events, default=str) and SENTINEL not in body
+    back = metrics.parse_trailers(body)
+    assert back["stages"]["design"]["words"] == 9 and back["totals"]["words"] == 13
+
+
+def test_every_tool_call_is_counted_with_its_error(tmp_path: Path) -> None:
+    """R2: each `tool_use`, named as a prompt is, with its result's `is_error`; one with no
+    result has no error. A factory agent's session counts its calls with its role."""
+    folder = tmp_path / "projects" / "-made-up-repo"
+    _write(folder, "s0", [
+        cmd(0, "sdlc:ship"),
+        asst(1, "m1", [tool("Bash", "b1", command="git -C /x push origin main"),
+                       tool("Read", "r1", file_path="/x/secret.py")]),
+        result(2, "b1", error=True),
+        result(2, "r1"),
+        asst(3, "m2", [tool("Bash", "b2", command="git status")]),  # interrupted: no result
+    ])  # fmt: skip
+    _write(folder, "builder", [
+        user(4, "build it"),
+        asst(5, "m3", [tool("Edit", "e1", file_path="/x/a.py", new_string="x")]),
+        result(6, "e1"),
+    ])  # fmt: skip
+    events = metrics.read_events([folder], BRANCH, "012", None, {"builder": "builder"})
+    calls = [(e["name"], e["error"], e.get("role")) for e in events if e["kind"] == "tool"]
+    assert calls == [
+        ("Bash:git:push", True, None), ("Read", False, None), ("Bash:git:status", None, None),
+        ("Edit", False, "builder"),
+    ]  # fmt: skip
+    assert "/x/" not in json.dumps(events, default=str)
+    s = _summary(events)
+    assert s["tools"]["Bash:git:push"] == {"calls": 1, "errors": 1, "ship": 1}
+    assert s["tools"]["Edit"] == {"calls": 1, "errors": 0, "ship": 1}
+    assert s["totals"]["tools"] == 4
+    assert s["stages"]["ship"]["tools"]["Read"] == 1
+
+
+def test_tool_lines_round_trip(tmp_path: Path) -> None:
+    """R3: one `Sdlc-Tool` line a name, `tools=` on the totals, read back as written."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"),
+        asst(1, "m1", [tool("Grep", "g1", pattern="x")]),
+        result(2, "g1"),
+        cmd(3, "sdlc:ship"),
+        asst(4, "m2", [tool("Grep", "g2", pattern="y"), tool("Bash", "b1", command="make")]),
+        result(5, "g2", error=True),
+        result(5, "b1"),
+    ])  # fmt: skip
+    lines = metrics.trailers(_summary(events))
+    assert "Sdlc-Tool: Grep calls=2 errors=1 design=1 ship=1" in lines
+    assert "Sdlc-Tool: Bash:make calls=1 errors=0 ship=1" in lines
+    back = metrics.parse_trailers("\n".join(lines))
+    assert back["tools"] == {
+        "Bash:make": {"calls": 1, "errors": 0, "ship": 1},
+        "Grep": {"calls": 2, "errors": 1, "design": 1, "ship": 1},
+    }
+    assert back["totals"]["tools"] == 3
+
+
+def test_a_close_from_before_tool_lines_is_unrecorded() -> None:
+    """R3, R8: no `tools=` is unrecorded, never no calls; history alone writes none either."""
+    old = "Sdlc-Mode: manual\nSdlc-Totals: elapsed=10 agent=5 prompts=0 out=7"
+    back = metrics.parse_trailers(old)
+    assert "tools" not in back["totals"] and "words" not in back["totals"]
+    assert "tools" not in back
+    s = metrics.history_summary(600, "manual", 1, CFG, "metrics.transcripts is off")
+    lines = metrics.trailers(s)
+    assert not any(line.startswith("Sdlc-Tool:") or "tools=" in line for line in lines)

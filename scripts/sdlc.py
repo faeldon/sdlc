@@ -8041,6 +8041,8 @@ TEMPLATE_READS: dict[str, dict[str, tuple[str, ...]]] = {
     "changelog.md": {"placeholders": ("{{version}}", "{{notes}}")},
     # The board's plan hint counts the paths this section names.
     "plan.md": {"headings": ("Files to change",)},
+    # The report's spend view (`retro.render_report()`).
+    "retro.md": {"headings": ("Spend",), "placeholders": ("{{spend}}",)},
 }
 # Classes a refresh proposes text for; the rest are reported or left alone.
 PROPOSED = ("added", "refreshed", "removed")

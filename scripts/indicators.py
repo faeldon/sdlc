@@ -16,9 +16,17 @@ runs git and hands the text here.
     totals(counts, kind, skip)                -> {kind: {files, lines}}
     removed_ranges(text)                      -> {path: [(start, count)]}   `git diff -U0`
     blame_commits(text)                       -> [sha]                      `git blame --porcelain`
+    comment_lines(text, include)              -> {added, comment_lines, unknown_lines}  `-U0`
+    spend(rows)                               -> {tiers, outliers, tools, recorded, unrecorded}
 
 A kind is told by path alone, so no language is assumed: a host whose layout the conventions
 misread names its own (`retro.test_paths`, `retro.doc_paths`).
+
+A comment is told by line alone, the same for every host: an added line whose stripped text starts
+with its file's line-comment marker (`COMMENT_MARKERS`, by suffix). No parser: a docstring or block
+comment is code here, and a line inside a string that starts with the marker is a comment. Prose
+(`PROSE_SUFFIXES`) is never counted, and a suffix with no marker is counted as `unknown_lines`,
+never guessed at.
 """
 
 from __future__ import annotations
@@ -45,6 +53,23 @@ PAIR_LEAST = 3
 PAIR_FILES_MAX = 50
 
 Row = tuple[str, int | None, int | None]
+
+# Each suffix's line-comment marker, for `comment_lines()`.
+COMMENT_MARKERS = {
+    **dict.fromkeys((".py", ".sh", ".toml", ".yaml", ".yml", ".rb"), "#"),
+    **dict.fromkeys(
+        (".js", ".ts", ".go", ".rs", ".java", ".c", ".h", ".cpp", ".swift", ".kt"), "//"
+    ),
+    **dict.fromkeys((".sql", ".lua"), "--"),
+    ".html": "<!--",
+}
+# Prose, whose lines are never comments, nor code a comment could sit in.
+PROSE_SUFFIXES = (*DOC_SUFFIXES, ".markdown")
+# Fewer changes than this in a tier with a measure, and the tier gives no median for it.
+SPEND_LEAST = 3
+# How far over its tier's median a change is named.
+SPEND_OVER = 2
+SPEND_MEASURES = ("comment_share", "out_per_line", "tools_per_line")
 
 
 def is_test(path: str) -> bool:
@@ -270,3 +295,101 @@ def totals(counts: dict[str, int], kind: Callable[[str], str], skip: Callable[[s
             k["files"] += 1
             k["lines"] += n
     return out
+
+
+def comment_lines(text: str, include: Callable[[str], bool] | None = None) -> dict:
+    """The added lines of `git diff -U0` in files a marker can be read in (`added`), those that are
+    line comments (`comment_lines`), and the added lines of files whose suffix has no marker
+    (`unknown_lines`). Prose is in none. `include`, when given, keeps only the paths it says."""
+    out = {"added": 0, "comment_lines": 0, "unknown_lines": 0}
+    path: str | None = None
+    header = False
+    for line in text.splitlines():
+        if line.startswith("diff --git "):
+            header, path = True, None
+        elif header and line.startswith("+++ "):
+            name = _unquote(line[4:])
+            path = None if name == "/dev/null" else name.removeprefix("b/")
+        elif line.startswith("@@ "):
+            header = False
+        elif not header and path and line.startswith("+"):
+            suffix = PurePosixPath(path).suffix.lower()
+            if suffix in PROSE_SUFFIXES or (include is not None and not include(path)):
+                continue
+            marker = COMMENT_MARKERS.get(suffix)
+            if marker is None:
+                out["unknown_lines"] += 1
+                continue
+            out["added"] += 1
+            out["comment_lines"] += 1 if line[1:].strip().startswith(marker) else 0
+    return out
+
+
+def _measures(row: dict) -> dict:
+    """A change's three spend measures, None where a count is missing or it added no code."""
+    code = row.get("code_added")
+    base = row.get("comment_base", code)
+    per_line = lambda n: n / code if isinstance(n, int) and code else None  # noqa: E731
+    comments = row.get("comment_lines")
+    return {
+        "comment_share": comments / base if isinstance(comments, int) and base else None,
+        "out_per_line": per_line(row.get("out")),
+        "tools_per_line": per_line(row.get("tools")),
+    }
+
+
+def spend(rows: list[dict]) -> dict:
+    """What each change spent beside its size. `rows` are the window's changes, each with `change`,
+    `tier`, `code_added`, `comment_lines` (and `comment_base`, the lines a marker could be read
+    in, when it isn't `code_added`), `out`, `tools` and `by_tool` (`{name: {calls, errors}}`), and
+    `recorded`. Per tier, the median of each measure over the changes that have it, None under
+    `SPEND_LEAST`; each change more than `SPEND_OVER` times its tier's median on any measure; and
+    across the recorded changes, the tools most called and with the most errors. A missing count
+    is left out of a median, never read as zero."""
+    measured = [(r, _measures(r)) for r in rows]
+    tiers: dict[str, dict] = {}
+    for tier in sorted({str(r["tier"]) for r in rows}):
+        mine = [m for r, m in measured if str(r["tier"]) == tier]
+        row: dict = {"changes": len(mine)}
+        for k in SPEND_MEASURES:
+            values = [m[k] for m in mine if m[k] is not None]
+            row[k] = round(median(values), 3) if len(values) >= SPEND_LEAST else None
+        tiers[tier] = row
+    outliers = []
+    for r, m in measured:
+        for k in SPEND_MEASURES:
+            mid = tiers[str(r["tier"])][k]
+            if m[k] is not None and mid and m[k] > SPEND_OVER * mid:
+                outliers.append(
+                    {"change": r["change"], "tier": r["tier"], "measure": k,
+                     "value": round(m[k], 3), "median": mid, "times": round(m[k] / mid, 1)}
+                )  # fmt: skip
+    names: dict[str, dict] = {}
+    for r in rows:
+        if not r.get("recorded"):
+            continue
+        for name, t in (r.get("by_tool") or {}).items():
+            row = names.setdefault(name, {"name": name, "calls": 0, "errors": 0, "changes": 0})
+            row["calls"] += t.get("calls") or 0
+            row["errors"] += t.get("errors") or 0
+            row["changes"] += 1
+    for row in names.values():
+        row["error_share"] = round(row["errors"] / row["calls"], 2) if row["calls"] else None
+    ranked = [
+        {k: row[k] for k in ("name", "calls", "errors", "error_share", "changes")}
+        for row in names.values()
+    ]
+    recorded = sum(1 for r in rows if r.get("recorded"))
+    return {
+        "recorded": recorded,
+        "unrecorded": len(rows) - recorded,
+        "tiers": tiers,
+        "outliers": outliers,
+        "tools": {
+            "most_called": sorted(ranked, key=lambda t: (-t["calls"], t["name"]))[:TOP],
+            "most_errors": sorted(
+                (t for t in ranked if t["errors"]),
+                key=lambda t: (-t["errors"], -(t["error_share"] or 0), t["name"]),
+            )[:TOP],
+        },
+    }

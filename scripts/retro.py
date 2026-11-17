@@ -615,9 +615,62 @@ def _table(head: list[str], rows: list[list]) -> str:
     return "\n".join([*lines, *("| " + " | ".join(cell(v) for v in r) + " |" for r in rows)])
 
 
-def render_report(template: str, process: dict) -> str:
+# The spend measures as the report names them.
+SPEND_NAMES = {
+    "comment_share": "comment share",
+    "out_per_line": "out tokens per code line",
+    "tools_per_line": "tool calls per code line",
+}
+
+
+def _spend_text(spend: dict | None, closed: int) -> str:
+    """`## Spend`: how many changes the token and call figures rest on and why the rest don't,
+    each tier's medians, the changes over twice theirs, and the tools most called and failed."""
+    if spend is None:
+        return "Not counted."
+    left = "; ".join(f"{why}: {n}" for why, n in sorted(spend.get("why", {}).items()))
+    head = (
+        f"{spend['recorded']} of the {closed} changes closed recorded their tool calls and words; "
+        "the token and call figures rest on those alone, and comment lines come from every "
+        "change's diff." + (f" Left out of them: {left}." if left else "")
+    )
+    tiers = _table(
+        ["Tier", "Changes", *(f"Median {n}" for n in SPEND_NAMES.values())],
+        [[t, r["changes"], *(r[k] for k in SPEND_NAMES)] for t, r in spend["tiers"].items()],
+    )
+    outliers = (
+        _table(
+            ["Change", "Tier", "Measure", "Value", "Tier median", "Times"],
+            [
+                [
+                    o["change"],
+                    o["tier"],
+                    SPEND_NAMES[o["measure"]],
+                    o["value"],
+                    o["median"],
+                    o["times"],
+                ]
+                for o in spend["outliers"]
+            ],
+        )  # fmt: skip
+        if spend["outliers"]
+        else "No change is over twice its tier's median on any measure."
+    )
+    head_tools = ["Tool", "Calls", "Errors", "Error share", "Changes"]
+    rows = lambda ts: [[t[k] for k in ("name", "calls", "errors", "error_share", "changes")]  # noqa: E731
+                       for t in ts]  # fmt: skip
+    called, failed = spend["tools"]["most_called"], spend["tools"]["most_errors"]
+    return "\n\n".join([
+        head, tiers, outliers,
+        "Most called:\n\n" + (_table(head_tools, rows(called)) if called else "No calls recorded."),
+        "Most errors:\n\n" + (_table(head_tools, rows(failed)) if failed else "No call failed."),
+    ])  # fmt: skip
+
+
+def render_report(template: str, process: dict, spend: dict | None = None) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
-    "not measured" where close measured none of the window's changes."""
+    "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
+    block, "not counted" without it."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -644,6 +697,7 @@ def render_report(template: str, process: dict) -> str:
               for k in ("reported", "fixed", "days_to_fix", "rate", "previous", "trend")]],
         ),  # fmt: skip
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
+        "spend": _spend_text(spend, w["closed"]),
     }  # fmt: skip
     if process["cycle"]:
         values["cycle"] = _table(
@@ -680,8 +734,8 @@ def render_report(template: str, process: dict) -> str:
 
 def retro_report(home: Path, cfg: dict, today: date) -> str:
     """The report for the window since the last retrospective, from history alone: the records
-    `retro()` reads for its process views, without the product pass, the architecture, the prose
-    or any host command."""
+    `retro()` reads for its process views and its spend, without the product pass, the
+    architecture, the prose or any host command."""
     trunk = cfg["git"]["base"]
     since = sdlc.last_retrospective(home, trunk)
     changes = sdlc.closed_changes(home, since["sha"] if since else None, trunk)
@@ -694,7 +748,7 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     bugs = bugs_retro(home, cfg, since, changes, today)
     process = process_views(changes, dropped, rework, questions, bugs, since, today)
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
-    return render_report(template, process)
+    return render_report(template, process, _spend(home, cfg, changes, bases))
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -888,6 +942,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "product": product,
         "prose": prose_metrics(home, cfg),
         "architecture": _architecture(home, cfg, since, changes, kind),
+        "spend": _spend(home, cfg, changes, bases),
     }
 
 
@@ -902,6 +957,72 @@ def _change_rows(home: Path, rec: dict) -> tuple[str | None, list]:
             sdlc._git(home, "diff-tree", "--no-commit-id", "--numstat", "-r", rec["sha"]) or ""
         )
     return base, indicators.numstat_rows(numstat)
+
+
+def _added_diff(home: Path, rec: dict, base: str | None) -> str:
+    """A closed change's `git diff -U0`, on the same base as `_change_rows()`: its whole branch
+    from where it started, or its last commit alone without a start."""
+    if base:
+        return sdlc._git(home, "diff", "-U0", "--no-renames", base, rec["sha"]) or ""
+    return sdlc._git(home, "diff-tree", "-U0", "-p", "--no-commit-id", "-r", rec["sha"]) or ""
+
+
+def _unrecorded(m: dict | None) -> str | None:
+    """Why a change's `Close` commit carries no tool calls or words, None when it does."""
+    totals = (m or {}).get("totals") or {}
+    if isinstance(totals.get("tools"), int) and isinstance(totals.get("words"), int):
+        return None
+    if not totals:
+        return "not measured at close"
+    coverage = str((m or {}).get("coverage") or "")
+    if coverage.startswith("none:"):
+        return coverage.removeprefix("none:").strip()
+    return "closed before tool calls and words were counted"
+
+
+def _spend(home: Path, cfg: dict, changes: list[dict], bases: dict[str, str | None]) -> dict:
+    """What each change in the window spent beside its size: its added code lines and their line
+    comments (`indicators.comment_lines()`, code alone as `_kind()` tells it), its agent `out`
+    tokens, the person's words per stage and its tool calls from its `Close` commit, then
+    `indicators.spend()`'s medians, outliers and tool ranking over them. A change whose commit has
+    no `tools=` or `words=` is `recorded: false` with `why`, and its missing counts stay None.
+    `changes` holds a change's own numbers: `cmd_retro()` prints them only with `--metrics`."""
+    kind = _kind(cfg)
+    register = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
+
+    def code(path: str) -> bool:
+        return (
+            not path.startswith(sdlc.CHANGE_FOLDERS) and path != register and kind(path) == "code"
+        )
+
+    rows = []
+    for rec in changes:
+        m = rec.get("metrics") or {}
+        totals = m.get("totals") or {}
+        why = _unrecorded(m)
+        counted = indicators.comment_lines(_added_diff(home, rec, bases.get(rec["name"])), code)
+        tools = m.get("tools") or {}
+        rows.append({
+            "change": rec["name"], "tier": rec["tier"],
+            "code_added": counted["added"] + counted["unknown_lines"],
+            "comment_lines": counted["comment_lines"], "comment_base": counted["added"],
+            "out": totals.get("out") if isinstance(totals.get("out"), int) else None,
+            "words": None if why else {
+                s: v.get("words") for s, v in (m.get("stages") or {}).items()
+                if isinstance(v.get("words"), int)
+            },
+            "tools": None if why else totals["tools"],
+            "errors": None if why else sum(t.get("errors") or 0 for t in tools.values()),
+            "by_tool": {} if why else {
+                n: {"calls": t.get("calls") or 0, "errors": t.get("errors") or 0}
+                for n, t in tools.items()
+            },
+            "recorded": why is None, "why": why,
+        })  # fmt: skip
+    out = indicators.spend(rows)
+    out["why"] = dict(Counter(r["why"] for r in rows if r["why"]))
+    out["changes"] = rows
+    return out
 
 
 def _kind(cfg: dict):
@@ -1180,6 +1301,8 @@ def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
         sdlc._lean(out["changes"], metrics),
         sdlc._lean(out["dropped"], metrics),
     )
+    if not metrics:  # each change's own spend, as its `metrics` are: the summary stays
+        out["spend"] = {k: v for k, v in out["spend"].items() if k != "changes"}
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 

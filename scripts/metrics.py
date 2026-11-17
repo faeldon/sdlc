@@ -20,11 +20,22 @@ Rework within a change, read from the same events and summary, written on lines 
 
 An event is a dict with `ts` (an aware datetime) and `kind`:
 
-    skill{name}  turn{ms}  human{reply, command, plugin, asked, interrupt}  harness
+    skill{name}  turn{ms}  human{reply, command, plugin, asked, interrupt, words}  harness
     tokens{in, cache_create, cache_read, out}
     edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  answer{reply, waited}
-    check{ok}  permission{name, rejected}  mode{modes}
+    check{ok}  permission{name, rejected}  mode{modes}  tool{name, error, role?}
     subagent{role, ms, in, cache_create, cache_read, out}
+
+A `human` event's `words` is how many whitespace-separated words the person typed (`_words()`): a
+slash command's name and arguments, a reply's text, never what the harness wraps around it. It is
+summed per stage and written as `words=` on `Sdlc-Stage` and `Sdlc-Totals`.
+
+A `tool` is one tool call, any tool: named as a prompt is (`_prompt_name()`), with `error` its
+result's `is_error`, None when it had no result (an interrupted turn). A sub-agent's calls and a
+factory agent's session's carry its `role`, as its edits do. They are written one `Sdlc-Tool` line
+a name, `Sdlc-Tool: <name> calls=<n> errors=<n> <stage>=<n> …`, with `tools=` (all calls) on
+`Sdlc-Totals`. A `Close` commit without `tools=` or `words=` was closed before they were counted,
+or measured from history alone: unrecorded, never none.
 
 A `question` is an `AskUserQuestion` call and its `answer` what the person chose, as a class like
 a typed reply, with the seconds the dialog waited: theirs, never the agent's. Every gate asks in a
@@ -423,11 +434,13 @@ def _run(entries: list[dict], role: str, branch: str) -> dict | None:
     edits = []
     seen: set[str] = set()
     uses: dict[str, tuple[str, dict]] = {}
+    calls: dict[str, dict] = {}
     agents: set[str] = set()
     for e in entries:
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
         if e.get("type") == "user" and _ts(e):
             edits.extend({"ts": _ts(e), **p} for p in _prompts(e, msg.get("content"), uses))
+            _answered(msg.get("content"), calls)
         if e.get("type") != "assistant":
             continue
         if isinstance(msg.get("usage"), dict) and msg.get("id") not in seen:
@@ -439,6 +452,10 @@ def _run(entries: list[dict], role: str, branch: str) -> dict | None:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 uses[str(block.get("id"))] = (str(block.get("name")), inp)
+                if _ts(e):
+                    call = _call(_ts(e), str(block.get("name") or ""), inp, role)
+                    calls[str(block.get("id"))] = call
+                    edits.append(call)
                 if block.get("name") == "Agent":
                     agents.add(str(block.get("id")))
             if isinstance(block, dict) and block.get("name") in EDIT_TOOLS and _ts(e):
@@ -564,6 +581,33 @@ def _started(
     events.append({"ts": ts, "kind": "skill", "name": skill})
 
 
+def _words(text: str, command: bool) -> int:
+    """How many words the person typed: a slash command's name and its arguments, else the text
+    without the harness's tagged blocks around it. A count, never the words."""
+    if command:
+        args = ARGS_RE.search(text)
+        return 1 + (len(args.group(1).split()) if args else 0)
+    return len(re.sub(r"<[^>]+>.*?</[^>]+>", " ", text, flags=re.S).split())
+
+
+def _call(ts: datetime, tool: str, inp: dict, role: str | None = None) -> dict:
+    """One tool call as a `tool` event: its name as a prompt's is, its error unknown until its
+    result is read."""
+    call = {"ts": ts, "kind": "tool", "name": _prompt_name(tool, inp), "error": None}
+    if role:
+        call["role"] = role
+    return call
+
+
+def _answered(content: object, calls: dict[str, dict]) -> None:
+    """Each tool result in a user entry sets its call's `error`."""
+    for block in content if isinstance(content, list) else []:
+        if isinstance(block, dict) and block.get("type") == "tool_result":
+            call = calls.get(str(block.get("tool_use_id")))
+            if call is not None:
+                call["error"] = bool(block.get("is_error"))
+
+
 def read_events(
     dirs: list[Path],
     branch: str,
@@ -600,6 +644,7 @@ def read_events(
             agents: set[str] = set()
             seen: set[str] = set()
             uses: dict[str, tuple[str, dict]] = {}
+            calls: dict[str, dict] = {}  # each tool call's event, by its id, for its result
             modes: set[str] = set()
             last: datetime | None = None
             asked = False  # whether the agent's last text ended with a question
@@ -627,6 +672,7 @@ def read_events(
                     if isinstance(mode, str) and mode != "plan":
                         modes.add(mode)
                     events.extend({"ts": ts, **p} for p in _prompts(entry, content, uses))
+                    _answered(content, calls)
                     if isinstance(content, list):
                         for block in content:
                             if not isinstance(block, dict) or block.get("type") != "tool_result":
@@ -658,10 +704,13 @@ def read_events(
                     if m:
                         events.append({"ts": ts, "kind": "skill", "name": m.group(1)})
                     if text.strip():
+                        command = bool(m or COMMAND_RE.match(text))
+                        interrupt = bool(INTERRUPT_RE.match(text))
                         human = {
                             "ts": ts, "kind": "human", "reply": _reply(text),
-                            "command": bool(m or COMMAND_RE.match(text)), "plugin": bool(m),
-                            "asked": asked, "interrupt": bool(INTERRUPT_RE.match(text)),
+                            "command": command, "plugin": bool(m),
+                            "asked": asked, "interrupt": interrupt,
+                            "words": 0 if interrupt else _words(text, command),
                         }  # fmt: skip
                         events.append(human)
                         last_human = (human, text, m.group(1) if m else None)
@@ -683,6 +732,8 @@ def read_events(
                         name = block.get("name")
                         inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                         uses[str(block.get("id"))] = (str(name), inp)
+                        calls[str(block.get("id"))] = _call(ts, str(name or ""), inp)
+                        events.append(calls[str(block.get("id"))])
                         if name in EDIT_TOOLS:
                             target = str(inp.get("file_path") or inp.get("notebook_path") or "")
                             added, removed = _changed_lines(name, inp)
@@ -748,6 +799,8 @@ def _blank_stage() -> dict:
         "checks": 0,
         "checks_failed": 0,
         "edits": {},
+        "words": 0,
+        "tools": {},
         **dict.fromkeys(TOKEN_KEYS.values(), 0),
     }
 
@@ -756,11 +809,12 @@ def _active(stage: dict) -> bool:
     """Whether anything was counted in a stage, seen as a segment or not."""
     counted = (
         "agent", "away", "blocked", "gate", "question", "extra", "harness", "command", "prompts",
-        "checks",
+        "checks", "words",
     )  # fmt: skip
     return bool(
         stage["response"]
         or stage["edits"]
+        or stage["tools"]
         or any(stage[k] for k in counted)
         or any(stage[k] for k in TOKEN_KEYS.values())
     )
@@ -791,6 +845,7 @@ def summarize(
     stages = {s: _blank_stage() for s in STAGES}
     roles: dict[str, dict] = {}
     by_prompt: dict[str, dict] = {}
+    by_tool: dict[str, dict] = {}
     prompt_modes: set[str] = set()
     blocked_by = dict.fromkeys(dep_closes, 0.0)
     stops: list[dict] = []
@@ -876,6 +931,7 @@ def summarize(
         elif kind == "harness":  # the harness spoke, not the person: no wait ends, no stop
             here["harness"] += 1
         elif kind == "human":
+            here["words"] += event.get("words") or 0
             if turn_end is not None:
                 wait(turn_stage, turn_end, event["ts"])
                 if event["command"] and not event.get("plugin", True):
@@ -915,6 +971,12 @@ def summarize(
             asked = by_prompt.setdefault(event["name"], {"asked": 0, "rejected": 0})
             asked["asked"] += 1
             asked["rejected"] += 1 if event["rejected"] else 0
+        elif kind == "tool":
+            name = event["name"]
+            here["tools"][name] = here["tools"].get(name, 0) + 1
+            row = by_tool.setdefault(name, {"calls": 0, "errors": 0})
+            row["calls"] += 1
+            row["errors"] += 1 if event["error"] else 0
         elif kind == "check":
             here["checks"] += 1
             here["checks_failed"] += 0 if event["ok"] else 1
@@ -967,6 +1029,8 @@ def summarize(
     if landed:
         required = [g for g in required if g not in ("ship", "close")] + ["land"]
     seen = [s for s in STAGES if stages[s]["segments"]]
+    for name, row in by_tool.items():
+        row.update({s: v["tools"][name] for s, v in stages.items() if v["tools"].get(name)})
     totals = {
         "elapsed": sum(s["elapsed"] for s in stages.values()),
         "agent": sum(s["agent"] for s in stages.values()) + sum(r["agent"] for r in roles.values()),
@@ -990,6 +1054,9 @@ def summarize(
         # A gate that passed itself: beside `stops`, never in it.
         "auto": 1 if landed == "auto" else 0,
         "reenter": reenter,
+        # What the person typed, and every tool call: their presence says this commit counted them.
+        "words": sum(s["words"] for s in stages.values()),
+        "tools": sum(sum(s["tools"].values()) for s in stages.values()),
     }
     for k in TOKEN_KEYS.values():
         totals[k] = sum(s[k] for s in stages.values()) + sum(r[k] for r in roles.values())
@@ -1003,6 +1070,7 @@ def summarize(
         "stages": {s: v for s, v in stages.items() if v["segments"] or _active(v)},
         "roles": roles,
         "prompts": by_prompt,
+        "tools": by_tool,
         "blocked": blocked_by,
         "stops": stops,
         "segments": segments,
@@ -1027,6 +1095,7 @@ def history_summary(elapsed_seconds: float, way: str, tier: int, cfg: dict, reas
         "stages": {},
         "roles": {},
         "prompts": {},
+        "tools": {},
         "blocked": {},
         "stops": [],
         "segments": [],
@@ -1262,6 +1331,7 @@ def trailers(summary: dict) -> list[str]:
             "checks": s["checks"],
             "checks_failed": s["checks_failed"],
             "edits": ",".join(f"{k}:{v}" for k, v in sorted(s["edits"].items())) or "-",
+            "words": s["words"],
             **{k: s[k] for k in TOKEN_KEYS.values()},
         }
         lines.append(f"Sdlc-Stage: {name} {_pairs(fields)}")
@@ -1271,6 +1341,8 @@ def trailers(summary: dict) -> list[str]:
         lines.append(f"Sdlc-Role: {_word(role)} {_pairs(fields)}")
     for name, p in sorted((summary.get("prompts") or {}).items()):
         lines.append(f"Sdlc-Prompt: {_word(name)} {_pairs(p)}")
+    for name, t in sorted((summary.get("tools") or {}).items()):
+        lines.append(f"Sdlc-Tool: {_word(name)} {_pairs(t)}")
     for name, s in summary["stages"].items():
         fields = {**s["kinds"], "harness": s["harness"], "command": s["command"]}
         if any(fields.values()):
@@ -1347,6 +1419,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out["roles"][name] = fields
         elif key == "prompt" and name:
             out.setdefault("prompts", {})[name] = fields
+        elif key == "tool" and name:
+            out.setdefault("tools", {})[name] = fields
         elif key == "extra" and name:
             out.setdefault("extra", {})[name] = fields
         elif key == "blocked" and name:

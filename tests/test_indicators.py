@@ -189,3 +189,132 @@ def test_blame_commits_take_each_line_s_sha_from_the_porcelain() -> None:
         f"{a} 4 4\n\ty\n{b} 10 10 1\nauthor y\nfilename src/a.py\n\tz\n"
     )
     assert indicators.blame_commits(text) == [a, a, b]
+
+
+# ---------------------------------------------------------------- spend (118)
+
+DIFF_U0 = """\
+diff --git a/src/a.py b/src/a.py
+--- a/src/a.py
++++ b/src/a.py
+@@ -1,0 +2,4 @@
++# a comment
++x = 1  # trailing, not a comment line
++    # indented comment
++print(x)
+diff --git a/src/b.py b/src/b.py
+--- a/src/b.py
++++ b/src/b.py
+@@ -3,0 +4,3 @@
++DOC = \"\"\"
++# a heading in a string, counted by design
++\"\"\"
+diff --git a/web/c.ts b/web/c.ts
+new file mode 100644
+--- /dev/null
++++ b/web/c.ts
+@@ -0,0 +1,2 @@
++// says what
++const c = 1;
+diff --git a/db/q.sql b/db/q.sql
+--- a/db/q.sql
++++ b/db/q.sql
+@@ -1 +1,2 @@
+-select 1;
++-- why
++++ select 2;
+diff --git a/page.HTML b/page.HTML
+--- a/page.HTML
++++ b/page.HTML
+@@ -1,0 +1 @@
++<!-- a note -->
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,0 +1,2 @@
++# A heading, not a comment
++text
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -1,0 +1,2 @@
++# can't tell
++all:
+diff --git a/old.py b/old.py
+deleted file mode 100644
+--- a/old.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-# gone
+-y = 2
+"""
+
+
+def test_comment_lines_by_suffix() -> None:
+    """R4: a line comment by its file's suffix, per line, not parsed: the `#` line inside a
+    Python string counts by design. Prose is never comments; an unknown suffix is never guessed."""
+    out = indicators.comment_lines(DIFF_U0)
+    # `added` is the lines a marker could be read in; README's are counted nowhere.
+    assert out == {"added": 4 + 3 + 2 + 2 + 1, "comment_lines": 6, "unknown_lines": 2}
+    only_a = indicators.comment_lines(DIFF_U0, include=lambda p: p == "src/a.py")
+    assert only_a == {"added": 4, "comment_lines": 2, "unknown_lines": 0}
+    assert indicators.COMMENT_MARKERS[".py"] == "#"
+
+
+def _row(name, tier, code, comments, out, tools, recorded=True, errors=0):
+    return {
+        "change": name, "tier": tier, "code_added": code, "comment_lines": comments,
+        "out": out if recorded else None, "words": 5 if recorded else None,
+        "tools": tools if recorded else None, "errors": errors if recorded else None,
+        "by_tool": {} if not recorded else {"Read": {"calls": tools, "errors": errors}},
+        "recorded": recorded,
+    }  # fmt: skip
+
+
+def test_spend_names_a_change_twice_its_tier_median() -> None:
+    """R6: per tier the median comment share, out tokens and calls per added code line, and each
+    change over twice its tier's median on any, with by how much."""
+    rows = [
+        _row("001-a", 2, 100, 10, 1000, 50),
+        _row("002-b", 2, 100, 10, 1000, 50),
+        _row("003-c", 2, 100, 30, 1000, 120),  # comments 3x, calls 2.4x
+        _row("004-d", 2, 100, 10, 2000, 50),  # tokens exactly 2x: not more than twice
+    ]
+    out = indicators.spend(rows)
+    assert out["tiers"]["2"] == {
+        "changes": 4, "comment_share": 0.1, "out_per_line": 10.0, "tools_per_line": 0.5,
+    }  # fmt: skip
+    assert out["outliers"] == [
+        {"change": "003-c", "tier": 2, "measure": "comment_share", "value": 0.3, "median": 0.1,
+         "times": 3.0},
+        {"change": "003-c", "tier": 2, "measure": "tools_per_line", "value": 1.2, "median": 0.5,
+         "times": 2.4},
+    ]  # fmt: skip
+
+
+def test_a_tier_with_two_changes_names_no_outlier() -> None:
+    """R6, R8: under 3 changes a tier gives no median; an unrecorded change is in the comment
+    median alone (git says it), and in neither token nor call median."""
+    rows = [_row("001-a", 1, 10, 0, 100, 5), _row("002-b", 1, 10, 9, 9000, 90)]
+    out = indicators.spend(rows)
+    assert out["tiers"]["1"] == {
+        "changes": 2, "comment_share": None, "out_per_line": None, "tools_per_line": None,
+    }  # fmt: skip
+    assert out["outliers"] == []
+    rows += [_row("003-c", 1, 10, 1, None, None, recorded=False)]
+    tier = indicators.spend(rows)["tiers"]["1"]
+    assert tier["comment_share"] == 0.1 and tier["out_per_line"] is None
+    assert indicators.spend(rows)["recorded"] == 2
+
+
+def test_spend_ranks_the_tools() -> None:
+    """R7: across the window, each name's calls, errors, error share and changes."""
+    rows = [_row("001-a", 1, 10, 0, 1, 0), _row("002-b", 1, 10, 0, 1, 0)]
+    rows[0]["by_tool"] = {"Bash:make": {"calls": 4, "errors": 3}, "Read": {"calls": 9, "errors": 0}}
+    rows[1]["by_tool"] = {"Bash:make": {"calls": 2, "errors": 0}}
+    tools = indicators.spend(rows)["tools"]
+    assert tools["most_called"] == [
+        {"name": "Read", "calls": 9, "errors": 0, "error_share": 0.0, "changes": 1},
+        {"name": "Bash:make", "calls": 6, "errors": 3, "error_share": 0.5, "changes": 2},
+    ]
+    assert [t["name"] for t in tools["most_errors"]] == ["Bash:make"]

@@ -148,29 +148,6 @@ rule its skill lacks, or move its logic into `sdlc.py`. See .sdlc/work/047-cut-e
 Theme: permissions
 Raised 2026-11-10.
 
-## [2026-11-12-2] [idea] Verbosity, tool-call and test-pruning indicators for the retro loop
-
-The parts of 2026-10-24-5 that 048-architecture-indicators left out of scope, to build on the
-`architecture` block it added to `sdlc.py retro`:
-- verbosity against complexity: how much a change's code comments say, and how much the human and
-  the agent said in its conversation, set beside how complex the change is (its diff, its tier,
-  and the host's complexity measure where there is one, now `retro.indicators`), so a change that
-  commented or talked far more than its size needed stands out. Close already records the
-  conversation's tokens and turns per stage (`Sdlc-Totals`, `Sdlc-Stage`); comments come from the
-  diff;
-- tool calls: how often each tool is called in a change, by stage (by program for a shell call),
-  set beside what the calls led to (an edit kept, a check run, a finding), to show which calls are
-  most useful and which are spent. Close already names each tool prompt on the `Close` commit;
-  this counts every call, prompted or not;
-- a pruning pass for the suite: the process guide sets each test's lifetime when it is written,
-  and ship flags a test that can't fail or that only a revert could fail, but only in the diff it
-  reviews. Nothing looks at the tests already in the suite again: one whose code was rewritten,
-  one that repeats a newer test, one that now passes for the wrong reason, the slowest. Retro
-  proposes the candidates as a `tests` paydown seed, and the person decides which go.
-Any of the three may become a seed of its own when an intent finds it too big.
-Theme: retro
-Raised 2026-11-12.
-
 ## [2026-11-13-1] [idea] Approve-path cases for the skill evals
 
 053 landed the six stop-at-WAIT cases; the cases approved through a WAIT (its spec's R3, R5 and
@@ -334,3 +311,15 @@ the diff from the rebase's base (the merge base, or the head the round's gate re
 Severity: med
 Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-code.md
 Theme: factory
+
+## [2026-11-17-87] [idea] Retro proposes a pruning pass over the test suite
+
+Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, at ship: file the suite-pruning pass as a seed through `/sdlc:idea` (`inbox-commit`, on the base branch, never this branch), carrying 2026-11-12-2's third bullet: nothing looks at the tests already in the suite again (one whose code was rewritten, one a newer test repeats, one that passes for the wrong reason, the slowest). Needs per-test run times and a test-to-code map no host records today (spec, *Alternatives rejected*).
+See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-88] [idea] Share one -U0 diff per change between retro's rework and spend
+
+Left undone by 118-retro-spend-indicators, carried forward when it landed: `retro()` and `retro_report()` each call `_change_rows()` per change, and `_spend()` now adds one `git diff -U0` per change on top; `_rework()` runs the same `-U0` diff. One diff per change shared between `_rework()` and `_spend()` would halve those calls. Not this change.
+See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
+Raised 2026-11-17.
