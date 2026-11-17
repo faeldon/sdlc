@@ -41,7 +41,8 @@ Nothing is written outside the change's folder, and nothing under `.git/`, but b
 `fresh`: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands
 it; `fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
 `resolve`, and commits nothing that stays. `gate` also holds a lock on a slot file,
-`sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written. A command about
+`sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written; `sdlc.py gate`,
+the gate run by hand, takes the same lock files while this plugin is enabled. A command about
 one change runs in its worktree, found from the main checkout when the supervisor runs there
 (`change_root()`).
 
@@ -1681,7 +1682,8 @@ def _placeholders(text: str, root: Path) -> str:
 # Each of `gate_jobs` slots is a lock on a file of its own in the git common dir, which every
 # worktree shares and no `git status` shows; never `sdlc.py`'s `sdlc.lock`, which `new` claims
 # numbers under. A lock held on an open descriptor, never a file whose existence is the lock, so
-# the OS frees it when its gate ends, however it ends. The files stay.
+# the OS frees it when its gate ends, however it ends. The files stay. `sdlc.py gate`, the gate
+# run by hand, takes the same slots through copies of these, pinned by `tests/test_hand_gate.py`.
 SLOT_NAME = "sdlc-factory-gate-{}.lock"
 SLOT_POLL = 0.25
 

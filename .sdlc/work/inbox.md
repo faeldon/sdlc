@@ -188,12 +188,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-63] [idea] The hand gate shares the factory's gate_jobs slots
-
-Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by 101's spec's boundary: sharing the slots would make the lock files' names a contract between sdlc and sdlc-factory.
-See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
 
 097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at

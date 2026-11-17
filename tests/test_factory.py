@@ -3258,6 +3258,49 @@ def test_a_killed_gate_frees_its_slot(tmp_path) -> None:
     assert lock.is_file(), "the file stays; only the lock goes"
 
 
+# A child that holds slot 0 through `sdlc.py`'s `_hand_slot()`, the hand gate's, until killed.
+HOLD_HAND = """\
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("sdlc_child", sys.argv[1])
+sdlc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sdlc)
+with sdlc._hand_slot(Path(sys.argv[2]), 1, "009-other", 60) as (slot, waited):
+    print(f"held {slot}", flush=True)
+    time.sleep(60)
+"""
+
+
+def test_a_factory_gate_waits_for_a_hand_gates_slot(tmp_path) -> None:
+    """113 R2: a slot `sdlc.py gate` holds is one the factory's gate waits for, and takes once
+    the hand gate ends."""
+    import time
+
+    root = _change(tmp_path)
+    _gate_config(root, "true")
+    _build_report(root, 1)
+    child = subprocess.Popen(
+        [sys.executable, "-c", HOLD_HAND, str(ROOT / "scripts" / "sdlc.py"), str(root)],
+        stdout=subprocess.PIPE, encoding="utf-8",
+    )  # fmt: skip
+    try:
+        assert child.stdout.readline().strip() == "held 0"
+        gate = subprocess.Popen(
+            [sys.executable, str(FACTORY_PY), "gate", "008"], cwd=root,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+        )  # fmt: skip
+        line = gate.stderr.readline()
+        assert f"{NAME}: waiting for a gate slot (1 of 1 in use)" in line, line
+        time.sleep(0.6)
+    finally:
+        child.kill()
+        child.wait()
+    out, err = gate.communicate(timeout=60)
+    assert gate.returncode == 0, (out, err)
+    got = json.loads(out)
+    assert got["waited"] >= 0.5 and got["slot"] == 0, got
+
+
 def test_a_landing_verifiers_answer_names_its_landing_round(tmp_path) -> None:
     """111: a problem in a landing round's `verified.md` names the round `land-<n>`, as its file
     does, and a build round's names it `round <n>`."""

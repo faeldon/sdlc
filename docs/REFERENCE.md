@@ -555,7 +555,13 @@ factory run (its folder holds `runs/`; `factory.py gate` gates it), a checkout n
 branch, and a base branch with no check. It is the person's step after building, never
 pre-approved, since it runs a command: no skill runs it, and ship's own gate is unchanged. The board
 and `/sdlc:status` read the record (`· gate green` or `· gate red` on the change's line) only while
-it is current, and ship commits it with the change's folder.
+it is current, and ship commits it with the change's folder. While `sdlc-factory` is enabled,
+the hand gate shares the factory's gate slots (`gate_jobs`, read from the base branch's
+`.sdlc/factory.toml`, 1 by default), so a hand gate and the factory's gates never run more checks
+at once than that. A hand gate that finds every slot taken prints `NNN-slug: waiting for a gate
+slot (1 of 1 in use), up to 30 minutes`, and its wait is not in its `Seconds:`; when no slot comes
+free in 30 minutes it refuses with `no gate slot came free in 30 minutes (…): nothing was judged,
+run it again`, exits 1, and leaves the record as it was. Without the factory it takes no slot.
 
 A change may keep its **acceptance checks** in `.sdlc/work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one

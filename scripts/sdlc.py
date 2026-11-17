@@ -60,7 +60,7 @@ import tomllib
 import unicodedata
 from collections import Counter
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import UTC, date, datetime
 from datetime import time as dtime
 from pathlib import Path
@@ -2723,6 +2723,101 @@ def _hand_placeholders(text: str, root: Path) -> str:
     return text
 
 
+# The factory's gate slots, which a hand gate shares while `sdlc-factory` is enabled, so the two
+# never run more gates at once than the base branch's `gate_jobs`: a lock on each of
+# `sdlc-factory-gate-<k>.lock` in the git common dir, never `sdlc.lock`. Copies of `factory.py`'s
+# (`SLOT_NAME`, `SLOT_POLL`, `CONFIG_FILE`, `DEFAULTS["gate_jobs"]`, `_try_lock()`, `_gate_jobs()`,
+# `gate_slot()`), pinned to it by `tests/test_hand_gate.py`, the lock functions by behaviour. The
+# wait's limit is the hand gate's own: the factory waits for as long as it takes.
+SLOT_NAME = "sdlc-factory-gate-{}.lock"
+SLOT_POLL = 0.25
+FACTORY_CONFIG = Path(HOST_DIR) / "factory.toml"
+GATE_JOBS_DEFAULT = 1
+SLOT_WAIT = GATE_TIMEOUT
+
+
+class SlotTimeout(Exception):
+    """No gate slot came free within the hand gate's wait."""
+
+
+def _gate_jobs_at(home: Path, trunk: str) -> int:
+    """`gate_jobs` as the base branch's `factory.toml` holds it, never the checkout's: a change
+    can't give its own gate more room. Anything the factory would refuse, a missing file or one
+    that won't parse is `GATE_JOBS_DEFAULT`; `factory.py config` is what warns of a bad value."""
+    text = _git(home, "show", f"refs/heads/{trunk}:{FACTORY_CONFIG.as_posix()}") or ""
+    try:
+        jobs = tomllib.loads(text).get("gate_jobs", GATE_JOBS_DEFAULT)
+    except tomllib.TOMLDecodeError:
+        return GATE_JOBS_DEFAULT
+    if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
+        return GATE_JOBS_DEFAULT
+    return jobs
+
+
+def _try_lock(fd: int) -> bool:
+    """`_lock()` without waiting: True when taken, False when another holds it."""
+    if os.name == "nt":
+        import errno
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError as e:
+            if e.errno in (errno.EACCES, getattr(errno, "EDEADLOCK", 36)):
+                return False
+            raise
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _wait_text(seconds: float) -> str:
+    return f"{seconds / 60:g} minutes" if seconds >= 60 else f"{seconds:g} seconds"
+
+
+@contextmanager
+def _hand_slot(
+    home: Path, jobs: int, change: str, wait: float
+) -> Iterator[tuple[int | None, float]]:
+    """Hold one of `jobs` gate slots for the `with` block, as `factory.py`'s `gate_slot()` does,
+    and yield which (`k`) and the seconds waited (0.0 for none). A wait says so once on stderr,
+    naming its limit; past `wait` with no slot, `SlotTimeout`, every descriptor closed. Outside
+    a git repo there are no slots: `(None, 0.0)`."""
+    common = _git(home, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        yield None, 0.0
+        return
+    start, fds, held = time.monotonic(), [], None
+    try:
+        for k in range(jobs):
+            fds.append(os.open(Path(common) / SLOT_NAME.format(k), os.O_RDWR | os.O_CREAT, 0o644))
+        said = False
+        while held is None:
+            held = next((k for k, fd in enumerate(fds) if _try_lock(fd)), None)
+            if held is None:
+                if time.monotonic() - start >= wait:
+                    raise SlotTimeout
+                if not said:
+                    print(f"{change}: waiting for a gate slot ({jobs} of {jobs} in use), up to "
+                          f"{_wait_text(wait)}", file=sys.stderr, flush=True)  # fmt: skip
+                    said = True
+                time.sleep(SLOT_POLL)
+        waited = round(time.monotonic() - start, 1) if said else 0.0
+        try:
+            yield held, waited
+        finally:
+            _unlock(fds[held])
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 def _refused(why: str) -> int:
     print(json.dumps({"refusals": [why]}, indent=2, ensure_ascii=False))
     return 1
@@ -2757,26 +2852,37 @@ def cmd_gate(root: Path, ident: str) -> int:
             f"{_shown(checkout, home)} is on {branch or '?'!r}, not {folder.name}: the record "
             "must judge the change's own branch"
         )
-    fork, paths = _hand_paths(checkout, trunk)
-    before = _hand_digests(checkout, paths)
-    build = _hand_hash(fork, before)
-    start = time.monotonic()
+    # With the factory, the hand gate takes one of its slots; without it, none, as before 113.
+    jobs = _gate_jobs_at(home, trunk) if factory_enabled(home)[0] else None
+    slot = _hand_slot(home, jobs, folder.name, SLOT_WAIT) if jobs else nullcontext((None, 0.0))
     try:
-        done = subprocess.run(
-            _sh(command), cwd=checkout, capture_output=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
-        )  # fmt: skip
-        code, output, exit_text = done.returncode, done.stdout + done.stderr, str(done.returncode)
-    except subprocess.TimeoutExpired as e:
-        # A timeout's partial output is bytes even in text mode.
-        partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
-                   (e.stdout, e.stderr)]  # fmt: skip
-        code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
-        exit_text = "timeout"
-    except OSError as e:
-        code, output, exit_text = None, f"didn't run: {e}", "didn't run"
-    seconds = round(time.monotonic() - start, 1)
-    after = _hand_digests(checkout, _hand_paths(checkout, trunk)[1])
+        with slot as (held, waited):
+            fork, paths = _hand_paths(checkout, trunk)
+            before = _hand_digests(checkout, paths)
+            build = _hand_hash(fork, before)
+            start = time.monotonic()
+            try:
+                done = subprocess.run(
+                    _sh(command), cwd=checkout, capture_output=True, encoding="utf-8",
+                    errors="replace", stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
+                )  # fmt: skip
+                code, output = done.returncode, done.stdout + done.stderr
+                exit_text = str(code)
+            except subprocess.TimeoutExpired as e:
+                # A timeout's partial output is bytes even in text mode.
+                partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or ""
+                           for o in (e.stdout, e.stderr)]  # fmt: skip
+                code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
+                exit_text = "timeout"
+            except OSError as e:
+                code, output, exit_text = None, f"didn't run: {e}", "didn't run"
+            seconds = round(time.monotonic() - start, 1)
+            after = _hand_digests(checkout, _hand_paths(checkout, trunk)[1])
+    except SlotTimeout:
+        return _refused(
+            f"no gate slot came free in {_wait_text(SLOT_WAIT)} ({jobs} of {jobs} in use): "
+            "nothing was judged, run it again"
+        )
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
     path = folder / HAND_GATE
@@ -2796,7 +2902,8 @@ def cmd_gate(root: Path, ident: str) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
     out = {"change": folder.name, "attempt": attempt, "verdict": verdict, "exit": exit_text}
-    out.update(seconds=seconds, tree=tree, to=path.relative_to(checkout).as_posix())
+    out.update(seconds=seconds, waited=waited, slot=held, tree=tree)
+    out["to"] = path.relative_to(checkout).as_posix()
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0 if verdict == "PASS" else 1
 

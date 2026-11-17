@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -403,3 +405,231 @@ def test_a_hand_gate_is_no_factory_file(repo, capsys) -> None:
     _git(repo, "commit", "-q", "-m", "built, gate red")
     assert _git(repo, "show", f"{NAME}:.sdlc/work/{NAME}/build/gate.md").startswith("GATE: FAIL")
     assert sdlc._factory_files(repo, NAME) is None
+
+
+# ---------------------------------------------------------------- the shared gate slots (113)
+#
+# A hand gate takes one of the factory's `gate_jobs` slots when `sdlc-factory` is enabled. Each
+# test below holds a slot with one script's code and gates with the other's, so the lock files'
+# names and the byte they lock are pinned by behaviour as well as by the copies.
+
+SLOT_FILES = "sdlc-factory-gate-*.lock"
+# A child that holds slot 0 through `factory.gate_slot()`, says so, holds it `argv[3]` seconds,
+# stamps when it lets go into `argv[4]`, and exits.
+HOLD_FACTORY = """\
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("factory_child", sys.argv[1])
+factory = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(factory)
+with factory.gate_slot(Path(sys.argv[2]), 1, "009-other") as (slot, waited):
+    print(f"held {slot}", flush=True)
+    time.sleep(float(sys.argv[3]))
+    Path(sys.argv[4]).write_text(repr(time.time()), encoding="utf-8")
+"""
+# The same through `sdlc._hand_slot()`, holding slot 0 for 60 seconds.
+HOLD_HAND = """\
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("sdlc_child", sys.argv[1])
+sdlc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sdlc)
+with sdlc._hand_slot(Path(sys.argv[2]), 1, "008-reopen-drafts", 60) as (slot, waited):
+    print(f"held {slot}", flush=True)
+    time.sleep(60)
+"""
+FACTORY_PY = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+SDLC_PY = ROOT / "scripts" / "sdlc.py"
+
+
+@pytest.fixture(autouse=True)
+def _no_factory(monkeypatch) -> None:
+    """The developer's own settings never decide a result: the factory is off unless a test
+    turns it on."""
+    monkeypatch.setattr(sdlc, "factory_enabled", lambda home: (False, None))
+
+
+def _factory_on(monkeypatch) -> None:
+    monkeypatch.setattr(sdlc, "factory_enabled", lambda home: (True, "user"))
+
+
+def _on_main(root: Path, factory_toml: str | None) -> None:
+    """Commit `factory_toml` as the base branch's `.sdlc/factory.toml` (None: remove it)."""
+    _git(root, "checkout", "-q", "main")
+    path = root / ".sdlc" / "factory.toml"
+    if factory_toml is None:
+        _git(root, "rm", "-q", "--ignore-unmatch", ".sdlc/factory.toml")
+    else:
+        _write(path, factory_toml)
+        _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "factory")
+    _git(root, "checkout", "-q", NAME)
+
+
+def _common(root: Path) -> Path:
+    return Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+
+
+def _hold(script: str, *args: str) -> subprocess.Popen:
+    child = subprocess.Popen(
+        [sys.executable, "-c", script, *args], stdout=subprocess.PIPE, encoding="utf-8"
+    )
+    assert child.stdout.readline().strip() == "held 0"
+    return child
+
+
+def _stamp_check(root: Path, log: Path) -> None:
+    """A check that writes when it started, as a float, to `log`."""
+    py = Path(sys.executable).as_posix()
+    stamp = f"import time, pathlib; pathlib.Path(r'{log.as_posix()}').write_text(repr(time.time()))"
+    _base_check(root, f'"{py}" -c "{stamp}"')
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_a_hand_gate_waits_for_a_factory_gates_slot(repo, capsys, monkeypatch, tmp_path, jobs):
+    """R1, R3, R6: with one slot, held by a factory gate, the hand gate says it waits, runs only
+    once the slot frees, and times the check alone; with two, it runs at once on the other."""
+    _factory_on(monkeypatch)
+    _on_main(repo, f"gate_jobs = {jobs}\n")
+    started, released = tmp_path / "started", tmp_path / "released"
+    _stamp_check(repo, started)
+    capsys.readouterr()
+    child = _hold(HOLD_FACTORY, str(FACTORY_PY), str(repo), "2.0", str(released))
+    try:
+        code = sdlc.cmd_gate(repo, "008")
+        got = capsys.readouterr()
+    finally:
+        child.wait(timeout=30)
+    out = json.loads(got.out)
+    assert code == 0 and out["verdict"] == "PASS", got
+    start, end = float(started.read_text()), float(released.read_text())
+    waiting = f"{NAME}: waiting for a gate slot (1 of 1 in use), up to 30 minutes"
+    if jobs == 1:
+        assert start >= end, "the two gates overlapped"
+        assert got.err.count(waiting) == 1, got.err
+        assert out["waited"] >= 0.5 and out["seconds"] < out["waited"] and out["slot"] == 0, out
+    else:
+        assert start < end, "a free slot was left idle"
+        assert "waiting" not in got.err and out["waited"] == 0.0 and out["slot"] == 1, out
+    assert _masked(_record(repo))[2:4] == ["## Attempt 1", ""], "the record's shape is the same"
+
+
+@pytest.mark.portable
+def test_the_slot_copies_are_the_factorys() -> None:
+    """R8: the lock files' name, the poll, where `gate_jobs` lives and its default."""
+    assert sdlc.SLOT_NAME == factory.SLOT_NAME
+    assert sdlc.SLOT_POLL == factory.SLOT_POLL
+    assert sdlc.FACTORY_CONFIG == factory.CONFIG_FILE
+    assert factory.DEFAULTS["gate_jobs"] == sdlc.GATE_JOBS_DEFAULT
+    assert sdlc.SLOT_WAIT == sdlc.GATE_TIMEOUT
+
+
+def test_the_hand_gate_reads_gate_jobs_as_the_factory_does(repo) -> None:
+    """R3: from the base branch, never the checkout, a value the factory refuses giving 1."""
+    seen = []
+    for text in [None, "gate_jobs = 3\n", "gate_jobs = 0\n", "gate_jobs = -1\n",
+                 'gate_jobs = "2"\n', "gate_jobs = true\n", "gate_jobs = 2.5\n",
+                 'mode = "auto"\n', "gate_jobs = [\n"]:  # fmt: skip
+        (repo / ".sdlc" / "factory.toml").unlink(missing_ok=True)
+        _on_main(repo, text)
+        _write(repo / ".sdlc" / "factory.toml", "gate_jobs = 8\n")
+        ours = sdlc._gate_jobs_at(repo, "main")
+        assert ours == factory._gate_jobs(repo)[0], text
+        seen.append(ours)
+    assert seen == [1, 3, 1, 1, 1, 1, 1, 1, 1]
+
+
+def test_a_hand_gate_gives_up_after_its_wait_and_records_nothing(
+    repo, capsys, monkeypatch, tmp_path
+) -> None:
+    """R4: no slot within `SLOT_WAIT`: a refusal naming the limit, exit 1, the record as it was."""
+    _factory_on(monkeypatch)
+    _gate(repo, capsys)
+    before = (_folder(repo) / sdlc.HAND_GATE).read_bytes()
+    monkeypatch.setattr(sdlc, "SLOT_WAIT", 0.5)
+    child = _hold(HOLD_FACTORY, str(FACTORY_PY), str(repo), "60", str(tmp_path / "released"))
+    try:
+        code = sdlc.cmd_gate(repo, "008")
+        got = capsys.readouterr()
+    finally:
+        child.kill()
+        child.wait()
+    assert code == 1
+    assert json.loads(got.out)["refusals"] == [
+        "no gate slot came free in 0.5 seconds (1 of 1 in use): nothing was judged, run it again"
+    ]
+    assert "up to 0.5 seconds" in got.err
+    assert (_folder(repo) / sdlc.HAND_GATE).read_bytes() == before
+    assert sdlc._wait_text(sdlc.GATE_TIMEOUT) == "30 minutes"
+
+
+def test_without_the_factory_the_hand_gate_takes_no_slot(repo, capsys, tmp_path) -> None:
+    """R5: no wait, no waiting line, no lock file, even while slot 0 is held."""
+    _on_main(repo, "gate_jobs = 2\n")
+    child = _hold(HOLD_FACTORY, str(FACTORY_PY), str(repo), "60", str(tmp_path / "released"))
+    try:
+        files = sorted(_common(repo).glob(SLOT_FILES))
+        code = sdlc.cmd_gate(repo, "008")
+        got = capsys.readouterr()
+        assert sorted(_common(repo).glob(SLOT_FILES)) == files
+    finally:
+        child.kill()
+        child.wait()
+    out = json.loads(got.out)
+    assert code == 0 and "waiting" not in got.err
+    assert (out["waited"], out["slot"]) == (0.0, None)
+
+
+@pytest.mark.portable
+def test_a_killed_hand_gate_frees_its_slot(repo) -> None:
+    """R7: the slot is a lock on an open descriptor, freed however its gate ends."""
+    import time
+
+    child = _hold(HOLD_HAND, str(SDLC_PY), str(repo))
+    lock = _common(repo) / "sdlc-factory-gate-0.lock"
+    try:
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            assert not factory._try_lock(fd), "held while its gate runs"
+        finally:
+            os.close(fd)
+    finally:
+        child.kill()
+        child.wait()
+    start = time.monotonic()
+    with factory.gate_slot(repo, 1, NAME) as (slot, _):
+        assert slot == 0
+    assert time.monotonic() - start < 2, "the slot outlived its gate"
+    assert lock.is_file()
+
+
+def test_new_claims_a_number_while_a_hand_gate_waits(repo, tmp_path) -> None:
+    """R9: a waiting hand gate holds neither `_main_lock` nor `sdlc.lock`."""
+    import threading
+
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "built")
+    home = tmp_path / "home"
+    _write(home / ".claude" / "settings.json", '{"enabledPlugins": {"sdlc-factory@x": true}}\n')
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"} | {"HOME": str(home)}
+    child = _hold(HOLD_FACTORY, str(FACTORY_PY), str(repo), "60", str(tmp_path / "released"))
+    gate = subprocess.Popen(
+        [sys.executable, str(SDLC_PY), "gate", "008"], cwd=repo, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+    )  # fmt: skip
+    try:
+        line = gate.stderr.readline()
+        assert "waiting for a gate slot" in line, line
+        took = threading.Event()
+
+        def claim() -> None:
+            with sdlc._main_lock(repo):
+                took.set()
+
+        threading.Thread(target=claim, daemon=True).start()
+        assert took.wait(2), "a waiting hand gate blocked `new`"
+    finally:
+        child.kill()
+        child.wait()
+        out, err = gate.communicate(timeout=30)
+    assert gate.returncode == 0 and json.loads(out)["slot"] == 0, (out, err)

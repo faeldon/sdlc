@@ -212,8 +212,9 @@ CONTRIBUTING.md, *The skills' cases*.
 README and `factory.py`'s docstring describe it. `sdlc`'s cached copy carries the folder but never
 loads it (`test_sdlc_loads_nothing_from_plugins`), and knows only whether it is enabled, from
 Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing run), for intent's
-`yes, for the factory`. `factory.py` never imports `sdlc.py`, and
-`sdlc` only reads the files a run leaves in a change's folder: each reads the other's files with
+`yes, for the factory` and the hand gate. `factory.py` never imports `sdlc.py`, and
+`sdlc` only reads the files a run leaves in a change's folder, and the base branch's `gate_jobs`
+and the gate slots' lock files, for the hand gate (`_hand_slot()`): each reads the other's files with
 copies of its parsing (`risk_paths()` and the regexes included), pinned by tests. Agents that
 judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`), and no
 agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py

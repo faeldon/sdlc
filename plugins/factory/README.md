@@ -146,7 +146,8 @@ spec.
 - **One gate at a time, by default.** Gates from every worktree of the repo share `gate_jobs`
   slots (1 unless the base branch's `factory.toml` says more), so parallel runs' checks don't
   fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1 of 1 in
-  use)`, and its wait is not in its `Seconds:`.
+  use)`, and its wait is not in its `Seconds:`. A gate run by hand (`sdlc.py gate`) shares the
+  same slots, waiting at most 30 minutes for one.
 - **Verified before reworked.** After each round with a `CHANGES` verdict, the `verifier` checks
   every `- CHANGE:` against the code and keeps or drops it, with why. The builder reworks only what
   it keeps; `/sdlc:ship` shows what it dropped.
@@ -328,7 +329,8 @@ answers, the ledger, the depth the diff calls for, and which step the loop takes
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); the gate
 itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
 one place it runs a host's command), each holding one of `gate_jobs` slots, an OS lock on
-`sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends; the
+`sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends, and
+that `sdlc.py gate`, the gate run by hand, takes too, through pinned copies; the
 change brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`);
 each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
