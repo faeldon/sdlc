@@ -160,7 +160,18 @@ Only the builder edits. The others return text, and the skill writes it to the c
   decisions.md                  the ledger of the calls that are yours
   decision.md                   opens DECISION: READY or DECISION: ESCALATE
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
+  runs/<agent>.sessions         each agent session's id, one a line, which close's measuring reads
+  runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role
+                                and model
 ```
+
+**What a run cost, while it runs.** Every agent run's result reports its cost and tokens, and
+`factory.py agent` keeps those figures in `runs/costs.jsonl`: numbers and names only, never a
+prompt or a reply. The hand-back to `stage: test` and `factory.py ready` give each change's total,
+split by role and by model, so you can see where the spend goes before you ship and tune
+`[models]` or `rounds` from it. It is the API-equivalent figure Claude Code reports; on a
+subscription it shows where the spend went, not a bill. A resumed builder's session reports its
+total so far, so a session counts once, at its last figure.
 
 All of it is committed with the change, at `/sdlc-factory:land` or `/sdlc:ship`, so history keeps
 how the change was made.

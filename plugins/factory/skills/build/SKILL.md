@@ -114,7 +114,8 @@ permission mode; and `max_runs`, the factory's own runs, not the builder's sub-a
 is in front of them before they agree to it. Name the files the run will write, all by `factory.py`
 in the change's folder: code and `plan.md` by the builder; `build/round-<N>.md`,
 `reviews/round-<N>/<role>.md`, `reviews/round-<N>/verified.md` and `decision.md`, the agents'
-replies; `runs/<agent>.sessions`, each session's id, for measuring; `build/round-<N>.files` by
+replies; `runs/<agent>.sessions`, each session's id, for measuring; `runs/costs.jsonl`, each
+run's reported cost and tokens; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
 resolve. Say that the run will ask them about any blocking decision, and that every builder report
 and behaviour check must end with its `## Evidence` (each command run, its output, its exit), or
@@ -280,8 +281,11 @@ Say `NNN-slug is ready to ship (READY|ESCALATE)`, leading with ESCALATE when tha
 and report: the depth it ran at and why, the rounds it took, each round's verdicts by reviewer and
 how many changes the verifier kept and dropped, the decision and its first reason, the decisions
 the person made during the run and those still assumed (by id, with the default the build rests
-on), what `carry` added to `notes.md`, and the files changed (`git diff --stat` in its worktree).
-Say plainly that nothing is committed. Then go on with the other changes: this stops nothing.
+on), what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
+what the run cost: the `cost` that `stage <NNN> test` printed, its `usd` total and the split
+`by_role` and `by_model`, called the API-equivalent cost Claude Code reported (on a subscription,
+where the spend went, not a bill), with `unknown` runs said when there are any. Say plainly that
+nothing is committed. Then go on with the other changes: this stops nothing.
 
 When the person asks what's ready, read it:
 
@@ -289,11 +293,12 @@ When the person asks what's ready, read it:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready
 ```
 
-Show each change in its order, a change after what it `depends_on`, with its decision and the
-others it `overlaps` (changes touching the same paths, which ship more easily one after the
-other), and how to land them: `/sdlc-factory:land`, from a session of its own in the main
-checkout, takes them as one batch in this order, or `cd <worktree> && claude`, then
-`/sdlc:ship NNN`, one at a time. Never start either yourself.
+Show each change in its order, a change after what it `depends_on`, with its decision, its
+`cost`'s `usd` (the same API-equivalent figure) and the others it `overlaps` (changes touching
+the same paths, which ship more easily one after the other), and how to land them:
+`/sdlc-factory:land`, from a session of its own in the main checkout, takes them as one batch in
+this order, or `cd <worktree> && claude`, then `/sdlc:ship NNN`, one at a time. Never start either
+yourself.
 
 ## Out of scope
 

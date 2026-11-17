@@ -1021,7 +1021,8 @@ with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
 code = int(os.environ.get("FAKE_CLAUDE_EXIT", "0"))
 print(json.dumps({"type": "result", "is_error": code != 0,
-                  "result": os.environ.get("FAKE_CLAUDE_REPLY", "")}))
+                  "result": os.environ.get("FAKE_CLAUDE_REPLY", ""),
+                  **json.loads(os.environ.get("FAKE_CLAUDE_FIGURES", "{}"))}))
 sys.exit(code)
 """
 
@@ -1038,7 +1039,110 @@ def claude(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
     monkeypatch.setenv("FAKE_CLAUDE_REPLY", "the report\n\n## Evidence\n$ ./check.sh\nok\nexit: 0")
     monkeypatch.delenv("FAKE_CLAUDE_EXIT", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_FIGURES", raising=False)
     return lambda: [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
+
+
+def _figures(cost: float | None, tokens_in: int = 10, tokens_out: int = 5) -> str:
+    """A result's figures as Claude Code reports them: on a resume, `total_cost_usd` is the
+    session's total so far, and `usage` the run's own."""
+    usage = {"input_tokens": tokens_in, "output_tokens": tokens_out,
+             "cache_creation_input_tokens": 100, "cache_read_input_tokens": 1000}  # fmt: skip
+    figures = {"duration_ms": 1200, "num_turns": 3, "usage": usage}
+    return json.dumps(figures if cost is None else {**figures, "total_cost_usd": cost})
+
+
+def test_each_agent_run_records_its_figures_and_a_resume_is_not_counted_twice(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    root, tree = _from_main(tmp_path)
+    worktree = factory.change_root(root, "008")
+    folder = tree / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.5))
+    code, out = _run(capsys, factory.cmd_agent, worktree, "008", "build", None, None)
+    assert code == 0, out
+    session = out["session"]
+    rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
+    assert rows == [{
+        "session": session, "role": "builder", "model": "opus", "cost_usd": 0.5,
+        "duration_ms": 1200, "turns": 3, "in": 10, "out": 5, "cache_create": 100,
+        "cache_read": 1000,
+    }]  # fmt: skip
+    sessions = (folder / "runs" / "builder.sessions").read_text()
+    assert sessions == session + "\n", "one id a line, as measuring reads it"
+
+    # The mend resumes the builder, whose total so far is 0.75: 0.25 more, never 1.25.
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.75, tokens_in=20))
+    code, out = _run(capsys, factory.cmd_agent, worktree, "008", "mend", "builder", None)
+    assert code == 0 and out["session"] == session
+    cost = factory.run_cost(folder)
+    assert cost["usd"] == 0.75 and cost["by_role"] == {"builder": 0.75}
+    assert cost["by_model"] == {"opus": 0.75} and cost["runs"] == 2 and cost["unknown"] == 0
+    assert cost["tokens"] == {"in": 30, "out": 10, "cache_create": 200, "cache_read": 2000}
+
+
+def test_a_run_reporting_no_cost_or_failing_still_counts(tmp_path, capsys, claude, monkeypatch):
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(None))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0 and (folder / "build" / "round-1.md").exists(), "a missing cost stops nothing"
+    cost = factory.run_cost(folder)
+    assert cost["usd"] == 0.0 and cost["unknown"] == 1 and cost["tokens"]["in"] == 10
+
+    # A failed session files no reply, but what it spent is still recorded.
+    (folder / "build" / "round-1.md").unlink()
+    monkeypatch.setenv("FAKE_CLAUDE_EXIT", "1")
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.2))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 1 and not (folder / "build" / "round-1.md").exists()
+    assert factory.run_cost(folder)["usd"] == 0.2
+
+    # A line that doesn't parse is skipped and counted, never raised.
+    with (folder / "runs" / "costs.jsonl").open("a", encoding="utf-8") as f:
+        f.write("not json\n")
+    assert factory.run_cost(folder)["unknown"] == 2
+
+
+def test_a_cost_line_written_mid_rebase_goes_into_the_resolved_commit(tmp_path, capsys) -> None:
+    """The builder's resolve run appends to the change's committed `runs/costs.jsonl` while the
+    landing's rebase is stopped: `resolve --continue` stages it, or git refuses to continue."""
+    root, tree = _from_main(tmp_path)
+    costs = tree / ".sdlc" / "work" / NAME / "runs" / "costs.jsonl"
+    costs.parent.mkdir()
+    costs.write_text('{"session": "s-1", "cost_usd": 0.5}\n', encoding="utf-8")
+    (tree / "README.md").write_text("the change's line\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "the change")
+    (root / "README.md").write_text("main's line\n", encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "main moves")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "008", False)
+    assert out["conflicted"] == ["README.md"], out
+    with costs.open("a", encoding="utf-8", newline="\n") as f:
+        f.write('{"session": "s-2", "role": "builder", "cost_usd": 0.25}\n')
+    (tree / "README.md").write_text("main's line, and the change's\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "008", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert "s-2" in _git(tree, "show", f"HEAD:.sdlc/work/{NAME}/runs/costs.jsonl")
+
+
+def test_the_hand_back_says_what_the_run_cost(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "runs").mkdir()
+    rows = [
+        {"session": "s-1", "role": "builder", "model": "opus", "cost_usd": 1.0},
+        {"session": "s-2", "role": "code", "model": "sonnet", "cost_usd": 0.25},
+        {"session": "s-3", "role": "verifier", "model": "sonnet", "cost_usd": 0.125},
+    ]
+    text = "".join(json.dumps(r) + "\n" for r in rows)
+    (folder / "runs" / "costs.jsonl").write_text(text, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_stage, root, "008", "test")
+    assert code == 0 and out["cost"]["usd"] == 1.375
+    assert out["cost"]["by_role"] == {"builder": 1.0, "code": 0.25, "verifier": 0.125}
+    assert out["cost"]["by_model"] == {"opus": 1.0, "sonnet": 0.375}
+    code, out = _run(capsys, factory.cmd_stage, root, "008", "build")
+    assert "cost" not in out, "only the hand-back reports it"
 
 
 def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
@@ -1149,3 +1253,4 @@ def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> 
     assert [r["change"] for r in out["ready"]] == ["008-first", "009-second"], "010 isn't ready"
     first, second = out["ready"]
     assert second["depends_on"] == ["008"] and first["overlaps"] == ["009-second"]
+    assert first["cost"]["usd"] == 0.0 and first["cost"]["runs"] == 0, "no runs recorded yet"

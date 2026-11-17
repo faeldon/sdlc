@@ -332,21 +332,6 @@ the spec's end-to-end path and stops running the gate. A gate failure counts aga
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-9] [idea] What a factory run cost, by role and model, while it runs
-
-The run's gate shows `max_runs`, a count of agent runs, and what a change cost is known only at
-close, from transcripts. The factory it learned from shows each job's cost by model as it goes.
-
-Every agent is a `claude -p --output-format json` session started by `factory.py agent`, so each
-run's result already carries its cost, duration and token counts: keep them beside the session id
-in the change's `runs/`, with the role and model, numbers only. `ready` and the "ready to ship"
-line then give each change's total and its split by role and model, with no transcript parsing and
-no price table in the plugin. It is the API-equivalent figure, so on a subscription it shows where
-the spend goes, not a bill. Close's measuring stays the record history keeps.
-Theme: factory
-Raised 2026-11-17.
-
-
 ## [2026-11-17-10] [idea] Try the landing on a real factory batch
 
 `/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two

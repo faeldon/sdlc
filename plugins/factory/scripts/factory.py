@@ -28,11 +28,11 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
     uv run --script factory.py land 008 --by auto
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
-`carry` to `notes.md`, `stage` to `intent.md`, `agent` the reply an agent session returned and its
-id under `runs/`. Nothing is written outside the change's folder, and nothing under `.git/`, but by
-the landing: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close`
-lands it. A command about one change runs in its worktree, found from the main checkout when the
-supervisor runs there (`change_root()`).
+`carry` to `notes.md`, `stage` to `intent.md`, `agent` the reply an agent session returned, and
+its id and figures under `runs/`. Nothing is written outside the change's folder, and nothing
+under `.git/`, but by the landing: `land` and `resolve` commit and rebase the change's own branch,
+and `sdlc.py close` lands it. A command about one change runs in its worktree, found from the main
+checkout when the supervisor runs there (`change_root()`).
 
 **Decisions that are a person's.** An agent that reaches a call it shouldn't make (a trade-off, a
 policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] ...` line in its
@@ -964,7 +964,10 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     if unplaced:
         return emit({"refusals": [f"intent.md has no {', '.join(unplaced)} line"]}, 1)
     intent.write_text(text, encoding="utf-8", newline="\n")
-    return emit({"change": folder.name, "stage": stage})
+    out = {"change": folder.name, "stage": stage}
+    if stage == "test":
+        out["cost"] = run_cost(folder)
+    return emit(out)
 
 
 # ---------------------------------------------------------------- the agents, as sessions
@@ -976,6 +979,13 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
 # `runs/<agent>.sessions`, which is how measuring tells an agent's session from the person's.
 
 AGENT_TIMEOUT = 3 * 3600
+# Each agent run's figures, one JSON object a line, beside the `.sessions` files measuring reads.
+COSTS = Path("runs") / "costs.jsonl"
+# The run's own token counts, as `runs/costs.jsonl` names them, from the result's `usage`.
+USAGE_FIELDS = {
+    "in": "input_tokens", "out": "output_tokens",
+    "cache_create": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens",
+}  # fmt: skip
 TASKS = ("spec", "build", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
          "land-review", "land-verify")  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
@@ -1019,28 +1029,97 @@ def agent_name(role: str) -> str:
     return f"reviewer-{role}" if role in REVIEWERS else role
 
 
-def _claude(argv: list[str], cwd: Path) -> tuple[int, str, str | None]:
-    """Run one headless agent session and return its exit, its reply (the JSON's `result`) and
-    what went wrong. Text mode in UTF-8 whatever the locale, no shell, nothing read from stdin."""
+def _figures(data: dict) -> dict | None:
+    """A run's figures from its `--output-format json` result, numbers only, or None when it
+    holds none. `usage` and `duration_ms` are the run's own; `total_cost_usd` is the session's
+    total so far, which on a `--resume` includes the runs before it, so `run_cost()` takes a
+    session's last one. A field missing or not a number is None."""
+
+    def num(value: object) -> int | float | None:
+        return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    figures = {
+        "cost_usd": num(data.get("total_cost_usd")),
+        "duration_ms": num(data.get("duration_ms")),
+        "turns": num(data.get("num_turns")),
+        **{key: num(usage.get(field)) for key, field in USAGE_FIELDS.items()},
+    }
+    return figures if any(v is not None for v in figures.values()) else None
+
+
+def _claude(argv: list[str], cwd: Path) -> tuple[int, str, str | None, dict | None]:
+    """Run one headless agent session and return its exit, its reply (the JSON's `result`), what
+    went wrong, and its figures (`_figures()`), a failed session's included. Text mode in UTF-8
+    whatever the locale, no shell, nothing read from stdin."""
     try:
         done = subprocess.run(
             argv, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace",
             stdin=subprocess.DEVNULL, timeout=AGENT_TIMEOUT,
         )  # fmt: skip
     except subprocess.TimeoutExpired:
-        return 124, "", f"the agent ran past {AGENT_TIMEOUT // 60} minutes"
+        return 124, "", f"the agent ran past {AGENT_TIMEOUT // 60} minutes", None
     except OSError as e:
-        return 127, "", f"claude couldn't be run: {e}"
+        return 127, "", f"claude couldn't be run: {e}", None
     try:
         data = json.loads(done.stdout)
     except ValueError:
         data = {}
     data = data if isinstance(data, dict) else {}
+    figures = _figures(data)
     reply = data.get("result") if isinstance(data.get("result"), str) else ""
     if done.returncode or data.get("is_error") or not reply.strip():
         tail = (done.stderr or done.stdout or "").strip()[-500:]
-        return done.returncode or 1, "", f"the agent session failed: {tail or 'no reply'}"
-    return 0, reply, None
+        return done.returncode or 1, "", f"the agent session failed: {tail or 'no reply'}", figures
+    return 0, reply, None, figures
+
+
+def record_cost(folder: Path, session: str, role: str, model: str, figures: dict) -> None:
+    """Add one run's figures to the change's `runs/costs.jsonl`, with its session, role and
+    model: numbers and names only, never a prompt or a reply."""
+    path = folder / COSTS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({"session": session, "role": role, "model": model, **figures})
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        f.write(line + "\n")
+
+
+def run_cost(folder: Path) -> dict:
+    """What the change's agent runs cost so far, from `runs/costs.jsonl`: `usd`, each session's
+    last reported total summed (Claude Code's API-equivalent figure, not a bill), split `by_role`
+    and `by_model`; `tokens`, every run's own usage summed; `runs`, the lines read; and `unknown`,
+    the sessions that reported no cost and the lines that don't parse, which are skipped."""
+    path = folder / COSTS
+    last: dict[str, dict] = {}
+    tokens = dict.fromkeys(USAGE_FIELDS, 0)
+    runs = unknown = 0
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        if not isinstance(row, dict) or not isinstance(row.get("session"), str):
+            unknown += 1 if line.strip() else 0
+            continue
+        runs += 1
+        for key in tokens:
+            tokens[key] += row.get(key) if isinstance(row.get(key), int) else 0
+        if isinstance(row.get("cost_usd"), int | float) or row["session"] not in last:
+            last[row["session"]] = row
+    usd, by_role, by_model = 0.0, {}, {}
+    for row in last.values():
+        cost = row.get("cost_usd")
+        if not isinstance(cost, int | float):
+            unknown += 1
+            continue
+        usd += cost
+        for split, key in ((by_role, "role"), (by_model, "model")):
+            name = str(row.get(key) or "unknown")
+            split[name] = round(split.get(name, 0.0) + cost, 4)
+    return {
+        "usd": round(usd, 4), "by_role": by_role, "by_model": by_model,
+        "runs": runs, "unknown": unknown, "tokens": tokens,
+    }  # fmt: skip
 
 
 def _task(
@@ -1209,8 +1288,9 @@ def cmd_agent(
     """Run one agent for one step of the change's loop, as a session of its own in the change's
     worktree, and file its reply: the builder resumed with its context for a rework, an answer or
     a mend, the spec-writer for a revision or a recheck of its draft, every other agent a fresh
-    session. Writes only in the change's folder: the reply and `runs/<agent>.sessions`. A failed
-    session files nothing, and is reported, never retried."""
+    session. Writes only in the change's folder: the reply, `runs/<agent>.sessions`, and the run's
+    figures in `runs/costs.jsonl`. A failed session files no reply, only its figures when it
+    reported any, and is reported, never retried."""
     state, refusal = loop_state(root, ident, None)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1250,7 +1330,9 @@ def cmd_agent(
     argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{agent_name(role)}"]
     argv += ["--model", model, "--permission-mode", cfg["mode"], "--output-format", "json"]
     argv += [how, session]
-    code, reply, problem = _claude(argv, root)
+    code, reply, problem, figures = _claude(argv, root)
+    if figures:
+        record_cost(folder, session, role, model, figures)
     out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
     out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
     if problem:
@@ -1274,9 +1356,10 @@ def _waits(change: dict, names: list[str]) -> bool:
 
 def cmd_ready(root: Path) -> int:
     """The changes ready to ship: each open worktree's change at `stage: test` with a decision,
-    its `depends_on:`, and the other ready changes its diff shares a path with, ordered so a change
-    comes after what it depends on. Read-only: the person ships, each from its own worktree, or
-    `/sdlc-factory:land` lands them as a batch, in this order."""
+    its `depends_on:`, what its agent runs cost (`run_cost()`), and the other ready changes its
+    diff shares a path with, ordered so a change comes after what it depends on. Read-only: the
+    person ships, each from its own worktree, or `/sdlc-factory:land` lands them as a batch, in
+    this order."""
     return emit({"ready": [{k: v for k, v in r.items() if k != "paths"} for r in ready(root)]})
 
 
@@ -1296,6 +1379,7 @@ def ready(root: Path) -> list[dict]:
         ready.append({
             "change": branch, "worktree": str(path), "decision": decision,
             "depends_on": re.findall(r"\d{3,}", meta.get("depends_on", "")),
+            "cost": run_cost(folder),
             "paths": set(_changed_paths(path, base)) if base else set(),
         })  # fmt: skip
     for r in ready:
@@ -1643,6 +1727,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         return emit({"refusals": [f"conflict markers left in: {', '.join(marked)}"]}, 1)
     for f in files:
         _git(root, "add", "--", f)
+    # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
+    # own record, so it goes into the rebased commit, or `--continue` refuses on it.
+    if (folder / COSTS).is_file():
+        _git(root, "add", "--", (folder / COSTS).relative_to(root).as_posix())
     done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
                           encoding="utf-8", env=env)  # fmt: skip
     if done.returncode:
