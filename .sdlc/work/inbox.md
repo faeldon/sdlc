@@ -256,16 +256,6 @@ Value: med
 Raised by: 069-intent-proposes-serves (correctness)
 
 
-## [2026-11-17-7] [idea] Try the supervisor on a real factory run
-
-The supervisor shipped tested only against a fake `claude`. A paid run from the main checkout,
-`/sdlc-factory:build` on a scratch Tier 2 at `plan` and a second change before the first's draft
-lands, is the only check that a headless `claude -p --agent sdlc-factory:<role>` session loads the
-plugin's agent, holds the builder to `Agent(Explore, Plan)`, runs in `factory.mode`, and leaves
-transcripts where `measure` reads them. See .sdlc/work/070-factory-supervisor/notes.md in 070's
-commit.
-Theme: factory
-
 ## [2026-11-17-10] [idea] Try the landing on a real factory batch
 
 `/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two
