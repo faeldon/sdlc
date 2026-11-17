@@ -26,8 +26,8 @@ repo owner's, under git's configured user, and the only trailers it carries are 
 ## Commands
 
 ```bash
-./check.sh                                   # the full gate: ruff check, ruff format --check, pytest, claude plugin validate --strict
-uv run --group dev pytest -q                 # tests only
+./check.sh                                   # the full gate: ruff check, ruff format --check, pytest -n auto, claude plugin validate --strict
+uv run --group dev pytest -q -n auto         # tests only, across the machine's cores (pytest-xdist)
 uv run --group dev pytest -q -m portable     # what CI's Windows job runs
 uv run --group dev pytest tests/test_sdlc.py::test_name -q   # one test
 uv run --group dev ruff format .             # fix formatting

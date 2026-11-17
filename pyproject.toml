@@ -8,9 +8,11 @@ requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
-# The same two libraries the script declares, so the tests import exactly what it runs with.
+# The same two libraries the script declares, so the tests import exactly what it runs with, and
+# pytest-xdist, which runs the suite across the cores (`-n auto`): a test dependency only.
 dev = [
   "pytest>=8",
+  "pytest-xdist>=3",
   "ruff>=0.6",
   "python-frontmatter>=1.1",
   "PyYAML>=6.0",

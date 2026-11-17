@@ -69,8 +69,8 @@ half-built script never blocks a stage; one that runs but is wrong is skipped wi
 ## The gate
 
 ```bash
-./check.sh                                    # ruff, the formatter check, pytest, claude plugin validate --strict
-uv run --group dev pytest -q                  # tests only
+./check.sh                                    # ruff, the formatter check, pytest -n auto, claude plugin validate --strict
+uv run --group dev pytest -q -n auto          # tests only, across the machine's cores
 uv run --group dev pytest tests/test_sdlc.py::test_name -q   # one test
 uv run --group dev ruff format .              # fix formatting
 ```
@@ -78,7 +78,8 @@ uv run --group dev ruff format .              # fix formatting
 It's offline: GitHub is driven through a fake `gh` on `PATH` (`tests/conftest.py`), and
 `tests/test_adoption.py` runs a change from `new` to `close` in a bare scratch repo through
 `uv run --script`, which is the test that the plugin works in a repo that isn't the one it came
-from. A run that collects no tests is a failure. `pyproject.toml` only gives the tests an
+from. A run that collects no tests is a failure. The tests run in parallel (`pytest-xdist`), so
+none may depend on running alone or in order. `pyproject.toml` only gives the tests an
 environment; the script declares its own dependencies inline, and the two lists are kept in step.
 
 Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all but `claude plugin

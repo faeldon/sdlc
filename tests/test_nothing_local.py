@@ -32,7 +32,6 @@ PATTERNS = [
 ]
 LOCAL = Path(".sdlc", "terms.local")
 SUFFIXES = {".md", ".py", ".json", ".toml", ".sh"}
-SKIP_DIRS = {".git", ".venv", ".pytest_cache", ".ruff_cache", "__pycache__"}
 # A change's worktree is a second copy of the repo: scanned from the main checkout, it would report
 # every line twice, and a change's work in progress as though it had landed.
 WORKTREES = (".claude", "worktrees")
@@ -63,17 +62,25 @@ def local_patterns(path: Path) -> list[str]:
 
 
 def scanned(root: Path) -> list[Path]:
-    """Every file the scan reads: docs, scripts, tests and the committed work/, but not this one
-    or the local file, which hold the patterns, and not the change worktrees."""
+    """Every file the scan reads: what could reach GitHub, tracked or untracked and not ignored,
+    so a new file is read before its first commit and local output git ignores (`run-cases`'
+    results in `.sdlc/reports/`) never is. Not this file or the local one, which hold the
+    patterns, and not the change worktrees."""
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
     return [
-        p
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-        and p.suffix in SUFFIXES
-        and not SKIP_DIRS & set(p.relative_to(root).parts)
-        and p.relative_to(root).parts[:2] != WORKTREES
-        and p.relative_to(root) != LOCAL
-        and p.name != Path(__file__).name
+        root / rel
+        for rel in sorted(set(listed) - {""})
+        if Path(rel).suffix in SUFFIXES
+        and (root / rel).is_file()
+        and Path(rel).parts[:2] != WORKTREES
+        and Path(rel) != LOCAL
+        and Path(rel).name != Path(__file__).name
     ]
 
 
@@ -89,6 +96,12 @@ def forbidden(root: Path, local: Path | None = None) -> list[str]:
     return found
 
 
+def _repo(root: Path) -> Path:
+    """A folder the scan can read: it lists files through git, so a test's folder is a repo."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    return root
+
+
 def test_the_scan_reads_the_plugin() -> None:
     """A walk over nothing finds nothing, and would pass."""
     names = {p.relative_to(ROOT).as_posix() for p in scanned(ROOT)}
@@ -100,6 +113,7 @@ def test_nothing_in_the_repo_is_forbidden() -> None:
 
 
 def test_a_citation_in_a_change_worktree_is_not_read_but_one_in_work_is(tmp_path: Path) -> None:
+    _repo(tmp_path)
     copy = tmp_path / ".claude" / "worktrees" / "001-x" / "README.md"
     copy.parent.mkdir(parents=True)
     copy.write_text("Moved here by work/046.\n", encoding="utf-8")
@@ -109,11 +123,13 @@ def test_a_citation_in_a_change_worktree_is_not_read_but_one_in_work_is(tmp_path
 
 
 def test_a_planted_citation_is_caught(tmp_path: Path) -> None:
+    _repo(tmp_path)
     (tmp_path / "README.md").write_text("Moved here by work/046.\nSee work/001-x/.\n")
     assert forbidden(tmp_path) == ["README.md:1: Moved here by work/046."]
 
 
 def test_a_planted_home_path_is_caught_but_not_claude_s_own(tmp_path: Path) -> None:
+    _repo(tmp_path)
     (tmp_path / "README.md").write_text(
         "Cloned to /Users/someone/code/x.\n"
         "Cloned to /home/someone/code/x.\n"
@@ -129,6 +145,7 @@ def test_a_planted_home_path_is_caught_but_not_claude_s_own(tmp_path: Path) -> N
 
 
 def test_a_term_in_the_local_file_is_caught_and_the_file_is_not_read(tmp_path: Path) -> None:
+    _repo(tmp_path)
     (tmp_path / LOCAL).parent.mkdir()
     (tmp_path / LOCAL).write_text("# terms kept out of the repo\n\n\\breopen drafts\\b\n")
     (tmp_path / "README.md").write_text("It began with reopen drafts.\nIt began.\n")
@@ -136,6 +153,19 @@ def test_a_term_in_the_local_file_is_caught_and_the_file_is_not_read(tmp_path: P
 
 
 def test_without_the_local_file_only_the_shapes_apply(tmp_path: Path) -> None:
+    _repo(tmp_path)
     (tmp_path / "README.md").write_text("It began with reopen drafts.\nCloned to ~/code/x.\n")
     assert local_patterns(tmp_path / LOCAL) == []
     assert forbidden(tmp_path) == ["README.md:2: Cloned to ~/code/x."]
+
+
+def test_an_ignored_file_is_not_read_but_an_untracked_one_is(tmp_path: Path) -> None:
+    """What could reach GitHub is scanned, a new file before its first commit included; what git
+    ignores, like `run-cases`' results in `.sdlc/reports/`, never is."""
+    _repo(tmp_path)
+    reports = tmp_path / ".sdlc" / "reports"
+    reports.mkdir(parents=True)
+    (reports / ".gitignore").write_text("*\n", encoding="utf-8")
+    (reports / "result.json").write_text('{"cwd": "/Users/someone/x"}\n', encoding="utf-8")
+    (tmp_path / "new.md").write_text("Cloned to /Users/someone/x.\n", encoding="utf-8")
+    assert forbidden(tmp_path) == ["new.md:1: Cloned to /Users/someone/x."]

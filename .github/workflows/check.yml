@@ -19,7 +19,7 @@ jobs:
       - run: git config --global user.name ci && git config --global user.email ci@example.com
       - run: uv run --group dev ruff check .
       - run: uv run --group dev ruff format --check .
-      - run: uv run --group dev pytest -q
+      - run: uv run --group dev pytest -q -n auto
 
   windows:
     runs-on: windows-latest
