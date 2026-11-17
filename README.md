@@ -168,6 +168,22 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   and tells you each one's ready to ship; you land them, one at a time with `/sdlc:ship` or as a
   batch with `/sdlc-factory:land`, and nothing an agent does is committed. See
   [`plugins/factory/README.md`](plugins/factory/README.md).
+- **Factory and manual, change by change.** Installing the factory changes nothing for the
+  changes you build by hand: every change starts with `/sdlc:intent`, and the command you run
+  next decides how it's built. You can mix them in one project, and switch partway through:
+
+  | Step | By hand | With the factory |
+  |---|---|---|
+  | Spec (Tier 2) | `/sdlc:spec` | drafted inside `/sdlc-factory:build`, approved at its gate |
+  | Plan and build | plan mode, then you | `/sdlc-factory:build` |
+  | Ship and close | `/sdlc:ship`, `/sdlc:close` | `/sdlc-factory:land`, or `/sdlc:ship` and `/sdlc:close` |
+
+  Write the spec yourself and hand the build to the factory (it starts from `stage: design`), or
+  have the factory build a change and ship it yourself (`/sdlc:ship` shows the agents' verdicts
+  beside its own review). Each change keeps its own worktree, so factory and hand-built changes
+  run side by side, numbered from the same sequence (the tracker's issues, or the local counter).
+  Each is measured by how it was actually built (`Sdlc-Mode: factory` or `manual` on its `Close`
+  commit), so retrospectives can set the two ways side by side.
 
 ## Updating
 
