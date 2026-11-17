@@ -4203,6 +4203,8 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         except Exception:
             summary["coverage"] += " rework=failed"
             extra = []
+        # What changed after the landed change's last review, carried from its tip to the totals.
+        metrics.landed_unreviewed(summary, tip)
         return summary, metrics.trailers(summary) + extra
 
     def from_history(reason: str) -> tuple[dict, list[str]]:

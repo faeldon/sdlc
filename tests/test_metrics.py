@@ -955,6 +955,26 @@ def test_a_landed_change_owes_one_gate_for_ship_and_close_and_an_auto_pass_is_ap
     assert (first["ship"], first["close"]) == (("auto", "auto") if by == "auto" else ("yes", "yes"))
 
 
+@pytest.mark.parametrize("unreviewed", [2, "unknown"])
+def test_a_landing_with_unreviewed_paths_carries_them_to_totals(unreviewed) -> None:
+    """104 R15: `unreviewed=` on a landed change's `Sdlc-Landed` is carried to `Sdlc-Totals`,
+    beside `auto=`, and reads back. It appears only on a landed change whose tip has the field."""
+    tip = metrics.parse_trailers(f"Sdlc-Landed: by=person unreviewed={unreviewed}")
+    s = metrics.summarize([*LANDED, say(9, "approve")], {}, CFG, "factory", 1, "person")
+    metrics.landed_unreviewed(s, tip)
+    back = metrics.parse_trailers("\n".join(metrics.trailers(s)))
+    assert back["totals"]["unreviewed"] == unreviewed and back["totals"]["auto"] == 0
+    bare = metrics.summarize(LANDED, {}, CFG, "factory", 1, "auto")
+    metrics.landed_unreviewed(bare, metrics.parse_trailers("Sdlc-Landed: by=auto"))
+    assert "unreviewed" not in bare["totals"], "a landing with nothing unreviewed"
+    unlanded = metrics.summarize(LANDED, {}, CFG, "factory", 1)
+    metrics.landed_unreviewed(unlanded, None)
+    assert "unreviewed" not in unlanded["totals"], "never on a change no landing made"
+    odd = metrics.summarize(LANDED, {}, CFG, "factory", 1, "person")
+    metrics.landed_unreviewed(odd, metrics.parse_trailers("Sdlc-Landed: by=person unreviewed=x"))
+    assert "unreviewed" not in odd["totals"], "an unreadable value is left out"
+
+
 def test_a_land_typed_on_main_names_each_change_it_lands(tmp_path) -> None:
     """The supervisor's `/sdlc-factory:land 012 013` opens each change's span, so a dialog naming
     one change counts on it alone."""

@@ -75,18 +75,26 @@ reviewing, and deciding whether to escalate.
   `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
   copy). A change the base branch moved under is gated by the script again, as rebased, before
   its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
-  change's own builder, and every reviewer at its depth checks the resolution before it lands. One approval covers the batch, and it **passes itself
-  when no change in it carries a risk signal** (a sensitive or irreversible path, `impact: major`,
-  an ESCALATE, an open or assumed decision, an issue someone filed, a resolved conflict no
-  reviewer has seen, acceptance checks, skills' cases in scope, undone notes), recorded as
-  `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise its one
-  question shows what your yes approves, for each change: each acceptance check's name and command
-  and the skills' cases with their cost cap, each run then through `factory.py accept` and `cases`
-  behind the harness's own prompt (a failure stops that change and those after it, and a rebased
-  change runs its checks again); each undone note carried to the register as a seed or dropped,
-  as its approver proposed; each assumed decision confirmed; and the `How to recover:` its commit
-  carries for an irreversible path. A change touching an irreversible path its approver proposed
-  no way back for is left for `/sdlc:ship`, which also stays the way to land a change by hand.
+  change's own builder, and every reviewer at its depth checks the resolution before it lands.
+  When the base branch moves again before a change closes, the landing goes back to that change's
+  rebase, gates and reviews it as it now stands, and closes it, up to `[land] moves` times. Answer
+  `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
+  reviewer at its depth reads it before it lands. Your words for it go into the change's
+  `decisions.md` as a ticked `(person, fix)` line, never on a command line. A path changed after
+  the last review round any other way is a signal, and the commit says so (`unreviewed=<n>`).
+  One approval covers the batch, and it **passes itself when no change in it carries a risk
+  signal** (a sensitive or irreversible path, `impact: major`, an ESCALATE, an open or assumed
+  decision, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
+  read, a fix made while landing, acceptance checks, skills' cases in scope, undone notes),
+  recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
+  its one question shows what your yes approves, for each change: each acceptance check's name
+  and command and the skills' cases with their cost cap, each run then through `factory.py
+  accept` and `cases` behind the harness's own prompt (a failure stops that change and those
+  after it, and a rebased change runs its checks again); each undone note carried to the
+  register as a seed or dropped, as its approver proposed; each assumed decision confirmed; and
+  the `How to recover:` its commit carries for an irreversible path. A change touching an
+  irreversible path its approver proposed no way back for is left for `/sdlc:ship`, which also
+  stays the way to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 
@@ -266,6 +274,7 @@ gate_jobs = 1                              # the most gates running at once acro
 [land]                                     # /sdlc-factory:land, read from the base branch
 auto = true                                # a batch with no risk signal lands without asking
 batch = 5                                  # the most changes one landing takes
+moves = 3                                  # the most times a landing follows the base branch
 
 [ui]                                       # a front end, read from the base branch; unset, no
                                            # UI review runs
@@ -309,7 +318,8 @@ the one place it runs `claude`); an approved spec draft copied into `spec.md` by
 (`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
 batch, its signals and its question (`land-check`), each change's landing (`land`, `resolve`,
-`land-verdicts`), its acceptance checks and skills' cases (`accept`, `cases`, never pre-approved);
+`land-fix`, `land-verdicts`), its acceptance checks and skills' cases (`accept`, `cases`, never
+pre-approved);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads

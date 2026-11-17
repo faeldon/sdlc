@@ -63,6 +63,10 @@ written as `Sdlc-Extra` lines, with `harness=` and `command=` on `Sdlc-Totals`: 
 without those counted harness entries and other commands as `extra`, and is read as
 unclassified, never as none.
 
+A change `/sdlc-factory:land` landed may say on its `Sdlc-Landed` how many paths changed after its
+last review (`unreviewed=<n>`, or `unknown` with no snapshot to compare). `landed_unreviewed()`
+carries it to `Sdlc-Totals` as `unreviewed=`, beside `auto=`; a change without it has none.
+
 Read stops as upper bounds and token spans as lower: a harness entry of a shape not named above
 still looks like something the person typed.
 """
@@ -1274,6 +1278,18 @@ def trailers(summary: dict) -> list[str]:
     for dep, seconds in sorted(summary["blocked"].items()):
         lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(seconds)}")
     return lines
+
+
+def landed_unreviewed(summary: dict, tip: dict | None) -> None:
+    """`unreviewed=` from the branch tip's `Sdlc-Landed` set on `summary`'s totals, as a count or
+    `unknown`: only for a change a landing made, whose tip has the field. Anything else is left
+    out, never guessed: measuring never refuses."""
+    landed = (tip or {}).get("landed")
+    if not isinstance(landed, dict) or landed.get("by") not in ("auto", "person"):
+        return
+    value = landed.get("unreviewed")
+    if (isinstance(value, int) and value >= 0) or value == "unknown":
+        summary["totals"]["unreviewed"] = value
 
 
 def in_change_trailers(done: dict, first_time: dict, spiked: dict | None) -> list[str]:

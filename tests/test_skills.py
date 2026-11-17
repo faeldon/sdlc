@@ -186,7 +186,7 @@ READS_CONFIG = {
     ],
     "sdlc-factory:eval": ["factory.reviewers", "factory.models"],
     "sdlc-factory:review": ["factory.models"],
-    "sdlc-factory:land": ["factory.land"],
+    "sdlc-factory:land": ["factory.land", "factory.land.moves"],
 }
 
 
@@ -1268,6 +1268,19 @@ def test_the_gate_and_ci_never_run_the_skills_cases() -> None:
     for path in [ROOT / "check.sh", *sorted((ROOT / ".github" / "workflows").glob("*.yml"))]:
         text = path.read_text(encoding="utf-8")
         assert "run-cases" not in text and "plugin eval" not in text, path.name
+
+
+def test_the_land_skill_passes_a_fixs_id_never_its_words() -> None:
+    """A person's words never go in a command line, where a quote or `$(` breaks the command or
+    runs: a fix asked at landing is a ticked `(person, fix)` line the skill writes in the change's
+    `decisions.md`, after the yes, and `land-fix --ask` takes its id, as build's `--revise` and
+    `--words` do."""
+    land = frontmatter.load(BY_ID["sdlc-factory:land"])
+    assert "Write" in land["allowed-tools"] and "Edit" in land["allowed-tools"]
+    assert "land-fix <NNN> --ask <R1>" in land.content and '--ask "' not in land.content
+    flat = " ".join(land.content.split())
+    assert "- [x] R<n> (person, fix): <their words, as they gave them>" in flat
+    assert "The words never go on the command line, only their id" in flat
 
 
 def test_the_build_session_brings_the_persons_decisions_to_them() -> None:

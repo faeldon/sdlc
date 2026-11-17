@@ -143,7 +143,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "light": {"reviewers": ["code"], "rounds": 2},
         "models": {},
         "mode": "auto",
-        "land": {"auto": True, "batch": 5},
+        "land": {"auto": True, "batch": 5, "moves": 3},
         "ui": factory.DEFAULTS["ui"],
         "gate_jobs": 1,
     }

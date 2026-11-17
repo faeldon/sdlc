@@ -861,7 +861,12 @@ landed owes `land` in place of `ship` and `close`: one gate per batch, which pas
 batch with no risk signal (`[land] auto` in `.sdlc/factory.toml`, read from the base branch, default
 on; `[land] batch`, default 5). Its commit says who passed it, `Sdlc-Landed: by=person|auto`; a pass
 nobody gave is `auto=1` on `Sdlc-Totals`, never a stop, and its ship and close read `auto` on
-`Sdlc-Happy`, which no first-time rate counts.
+`Sdlc-Happy`, which no first-time rate counts. A change landed with paths that changed after its
+last review round (a hand edit after the approver) says how many on the same line,
+`Sdlc-Landed: by=person unreviewed=<n>`, or `unreviewed=unknown` when the run left no snapshot to
+compare, with the paths in the commit's body, never in a trailer. Close carries it to
+`Sdlc-Totals` as `unreviewed=`, beside `auto=`, on a landed change whose commit has it; no other
+change has the field.
 
 A stop is the person: an entry the harness sent (a background task's notice, a compaction summary)
 is counted as `harness=`, and a slash command other than the plugins' skills (`/reload-plugins`)

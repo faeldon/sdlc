@@ -4,6 +4,8 @@ description: Land a batch of factory changes that are ready to ship — each one
 argument-hint: "[NNN… — the ready changes to land; every one when none is named]"
 allowed-tools:
   - Read
+  - Write
+  - Edit
   - AskUserQuestion
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py sdlc-path *)'
@@ -13,6 +15,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix *)'
 disable-model-invocation: true
 ---
 
@@ -45,7 +48,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-check <N
 ```
 
 `config` gives `land` as the base branch holds it: `auto`, whether a batch with no risk signal
-lands without asking, and `batch`, the most changes one landing takes. `sdlc-path` is the `sdlc.py`
+lands without asking, `batch`, the most changes one landing takes, and `land.moves`, the most times
+a landing follows the base branch moving under a change before it closes. `sdlc-path` is the `sdlc.py`
 the landing runs; a refusal there (no `sdlc` installed, or another version) is a stop: say it,
 and stop. `land-check` lists the changes `ready` would, in its order (a change after what it
 depends on), or those named: `batch`, each with its decision, the impact its approver proposed,
@@ -73,11 +77,13 @@ With an empty batch, say why and stop.
 asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's rules don't let it
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
 decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
-reviewer has seen, acceptance checks, skills' cases in scope, undone notes, or `land.auto` off. A
-conflict resolved while landing is seen once every reviewer at the run's depth passed its landing
-round; one `sdlc.py resolve` recorded in `conflicts.md`, once the newest complete build round's
-reviewers read its files as they now stand. The script decides both; report them as it words
-them.
+reviewer has seen, a path changed since the last review round's snapshot (or no snapshot), a fix
+made while landing, acceptance checks, skills' cases in scope, undone notes, or `land.auto` off. A
+change landed with paths no review read says so on its commit (`Sdlc-Landed: by=person
+unreviewed=<n>`). A conflict resolved while landing is seen once every reviewer at the run's depth
+passed its landing round; one `sdlc.py resolve` recorded in `conflicts.md`, once the newest
+complete build round's reviewers read its files as they now stand. The script decides both;
+report them as it words them.
 
 ## Step 2 — WAIT for explicit approval
 
@@ -85,7 +91,9 @@ Only when the batch isn't clear. Ask `land-check`'s `question` literally, as pri
 your own. Its fullest form, each clause there only when some change in the batch has what it
 names:
 
-> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, with how to recover shown, committed, brought up to date with <base> (a conflict resolved by its builder and reviewed again) and closed, pushed as git.push says? (yes / leave one out / no)`
+> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, with how to recover shown, committed, brought up to date with <base> as often as it moves while landing, up to <moves> times (a conflict resolved by its builder and reviewed again), and closed, pushed as git.push says? (yes / yes, with a fix / leave one out / no)`
+
+`<moves>` is `config`'s `land.moves`.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -95,8 +103,10 @@ parentheses, and stop.
 
 **Do nothing until the person says yes.** Approval is for this batch only. `leave one out` is
 the person naming which: run Step 0 again with the rest, and ask again. To change a proposed
-disposition, leave that change out and ship it with `/sdlc:ship`. Then Step 3, with
-`--by person`.
+disposition, leave that change out and ship it with `/sdlc:ship`. `yes, with a fix` approves the
+batch too, and asks for a fix to one change in it before it closes: take the change and the
+person's words for the fix from what they typed in Other, or else ask for both as plain text. That
+is not a second gate, and nothing is written until Step 3. Then Step 3, with `--by person`.
 
 ## Step 3 — Land each change, in order
 
@@ -129,7 +139,8 @@ For each change in the batch, one at a time:
    ship's), and runs `sdlc.py base`. Landed before, it adds the earlier landing's record to its
    commit first, so it rebases again when the base moved since. Its
    `state`: `current` (go to 4), `rebased` (the base moved: 2), `conflict` (3), or a refusal,
-   which stops this change and every one after it.
+   which stops this change and every one after it. Every rule of this step applies to each
+   round the landing opens, a round sent back by `moved` (5) included.
 2. **`rebased`: run the gate and the spec's path again**, on the change as it now stands. The gate
    is the script's: the base branch's `[commands] check`, recorded in
    `.sdlc/work/NNN-slug/build/land-<n>.gate.md`, before any reviewer reads the change (when the
@@ -191,15 +202,40 @@ For each change in the batch, one at a time:
    then read it again; `pass` (go to 4); or `stop`, with its `problems`, which stops this change
    and every one after it: a red gate or check or a kept change is the person's, and `/sdlc:ship` from its worktree
    takes it. Never patch a verdict, and never write a review an agent didn't.
-4. **Close it**, from the main checkout, which merges, archives, removes its folder, worktree and
+4. **A fix the person asked for**, only for the change `yes, with a fix` named, once, after its
+   round in 1 to 3 passed (else go to 5). The script opens a landing round for it, the change's
+   own builder makes it, and the script amends it into the change's commit.
+
+   The person's words never go in a command line: write them at the end of the change's
+   `decisions.md`, in its folder in the worktree `land-check` named (`Write` it with a
+   `# Decisions` heading first when it doesn't exist), as a ticked line,
+   `- [x] R<n> (person, fix): <their words, as they gave them>`, `<n>` one past the highest `R`
+   there, and pass `--ask R<n>`. The words never go on the command line, only their id:
+
+   ```bash
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix <NNN> --ask <R1> && \
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-fix && \
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix <NNN> --commit
+   ```
+
+   A refusal stops this change and every one after it. Then the landing's verdicts, as after 3:
+   the gate on the fixed change, then every reviewer at the run's depth (`fixed: true`), in one
+   message, and `pass` goes to 5. A fix made while landing stays a signal for the change, so a
+   later landing never passes it by itself.
+5. **Close it**, from the main checkout, which merges, archives, removes its folder, worktree and
    branch, and pushes as `git.push` says; the landing's own record is added to its commit first:
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land <NNN> --close
    ```
 
-   A refusal stops this change and every one after it. A refused push is `push_failed`, never a
-   failed close: the change has landed, and `/sdlc:publish` pushes it.
+   Its `state` is `moved` when the base branch moved since the change was gated, before the close
+   or racing it: nothing was closed, the move is recorded, and the change goes back to 1, the
+   same change with the same `--by`, gated and reviewed as that round's rebase calls for. In a
+   batch that passed itself, it closes without asking once that review passes, as at 1. The
+   script stops following after `land.moves` moves, with a refusal. A refusal stops this change
+   and every one after it. A refused push is `push_failed`, never a failed close: the change has
+   landed, and `/sdlc:publish` pushes it.
 
 ## Step 4 — Report and stop
 
