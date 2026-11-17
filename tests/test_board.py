@@ -884,6 +884,68 @@ def test_a_step_s_state_is_in_its_text_and_the_bar_is_hidden_from_assistive_tech
     assert re.search(r'class: "bar", "aria-hidden": "true"', script)
 
 
+def _page_parts() -> tuple[str, str]:
+    """The served page's stylesheet, comments dropped, and its script."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    css = re.search(r"<style>(.*?)</style>", page, re.S).group(1)
+    script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S), script
+
+
+@pytest.mark.portable
+def test_needs_you_comes_first_at_phone_width_and_nowhere_else() -> None:
+    """099 (2026-11-17-24): below 760px the columns stack, and the one waiting on the person
+    leads them in the DOM, so Tab and a screen reader meet it first, as the eye does; the desktop
+    grid keeps stage order, and no CSS `order` sets a look the DOM doesn't follow."""
+    css, script = _page_parts()
+    assert re.search(r"@media \(max-width: 760px\) \{\s*main\.board \{[^}]*1fr", css)
+    assert 'window.matchMedia("(max-width: 760px)")' in script, "the same width as the CSS"
+    order = re.search(r"function columnOrder\(\) \{(.*?)\n\}", script, re.S)
+    assert order, "one place says the order"
+    body = order.group(1)
+    assert re.search(r"NARROW\.matches\s*\?\s*\[", body), "reordered only when narrow"
+    assert re.search(r":\s*COLUMNS;", body), "stage order otherwise"
+    assert body.index('=== "needs-you"') < body.index('!== "needs-you"'), "Needs you first"
+    assert "columnOrder().map(" in script and "COLUMNS.map(" not in script
+    assert re.search(r"JSON\.stringify\(\[NARROW\.matches, st\.changes\]\)", script), (
+        "a width change is a change to render"
+    )
+    assert re.search(r'NARROW\.addEventListener\("change", [^\n]*render\(', script)
+    assert not re.search(r"(?<![\w-])order:", css), "the DOM is the order"
+
+
+@pytest.mark.portable
+def test_the_open_drawer_keeps_tab_inside_it() -> None:
+    """099 (2026-11-17-25): the drawer is aria-modal, so Tab and Shift-Tab cycle its focusable
+    nodes, focus outside it is pulled back in, and Escape still closes it and returns focus."""
+    _, script = _page_parts()
+    trap = re.search(r"function trapTab\(e\) \{(.*?)\n\}", script, re.S)
+    assert trap, "the trap's handler"
+    body = trap.group(1)
+    assert "querySelectorAll(FOCUSABLE)" in body and "e.preventDefault()" in body
+    assert "e.shiftKey" in body and ".contains(document.activeElement)" in body
+    handler = r'document\.addEventListener\("keydown", \(e\) => \{(.*?)\n\}\);'
+    keys = re.search(handler, script, re.S)
+    assert keys and "if (!open) return;" in keys.group(1)
+    assert 'e.key === "Escape"' in keys.group(1) and 'e.key === "Tab"' in keys.group(1)
+    assert "trapTab(e)" in keys.group(1)
+    assert "back.focus()" in script, "focus returns to the card that opened it"
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert re.search(r'<div class="doc" tabindex="0"[^>]*aria-label="[^"]+"', page), (
+        "the scrolling pane is a stop of the trap's, not a way out"
+    )
+
+
+@pytest.mark.portable
+def test_the_verifier_chip_says_whose_count_it_is_in_its_text() -> None:
+    """099 (2026-11-17-26): the count names the verifier in the text every user gets, not only in
+    a tooltip."""
+    _, script = _page_parts()
+    chip = re.search(r"if \(r\.verified\) \{(.*?)\n  \}", script, re.S)
+    assert chip
+    assert re.search(r"`verifier: kept \$\{r\.verified\.kept\} · dropped", chip.group(1))
+
+
 def _escalated(root: Path, name: str, stage: str, commit=()) -> Path:
     """A factory change in a worktree of its own, as a run leaves one the approver escalated: a
     round built and reviewed, `decision.md` saying ESCALATE, and `stage:` at whatever the person's

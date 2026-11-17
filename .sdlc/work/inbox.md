@@ -228,28 +228,6 @@ fixes of 2026-11-17-30.
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-24] [bug] At phone width the board's Needs you column comes last
-
-Found by the review of 086-board-signals-by-stage. Below 760px the columns stack in stage order,
-so the one that waits on the person is under all the others (scripts/board.html:44-46).
-Severity: low
-Paths: scripts/board.html
-
-## [2026-11-17-25] [bug] The board's file drawer has no focus trap
-
-Found by the review of 086-board-signals-by-stage. The drawer is `aria-modal`, but Tab moves into
-the page behind the scrim (scripts/board.html:136).
-Severity: low
-Paths: scripts/board.html
-
-## [2026-11-17-26] [bug] The verifier's chip on a board card explains itself only in a tooltip
-
-Found by the review of 086-board-signals-by-stage. `kept 1 · dropped 2` says whose count it is
-only in its `title`, which keyboard, touch and screen-reader users don't get
-(scripts/board.html:196-198).
-Severity: low
-Paths: scripts/board.html
-
 ## [2026-11-17-27] [idea] Bring sdlc.py's docstrings up to date: the .sdlc/work/ name and the subcommand list
 
 AGENTS.md now points at docstrings for detail, and some are stale: `sdlc.py`'s module docstring,
@@ -455,4 +433,22 @@ Raised 2026-11-17.
 
 Left undone by 098-board-fixes, carried forward when it landed: code (round 2 note): the rebasing card's `--abort` wording doesn't say `resolve --abort` keeps the resolved work under `refs/sdlc/end/<branch>`.
 See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-59] [idea] The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
+
+Left undone by 099-board-page-fixes, carried forward when it landed: The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
+See .sdlc/work/099-board-page-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-61] [idea] pre-existing: scripts/board.html:50-55: the column headers are not aligned. Labels such as "READY TO SHIP" and "NEEDS YOU" wrap onto two or three lines beside the "who" text, so at 1280px the first card and the empty "—" marker sit at different heights across columns (about y 96, 131, 149 in the desktop shot).
+
+Left undone by 099-board-page-fixes, carried forward when it landed: pre-existing: scripts/board.html:50-55: the column headers are not aligned. Labels such as "READY TO SHIP" and "NEEDS YOU" wrap onto two or three lines beside the "who" text, so at 1280px the first card and the empty "—" marker sit at different heights across columns (about y 96, 131, 149 in the desktop shot).
+See .sdlc/work/099-board-page-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-62] [idea] pre-existing: scripts/board.html:-- (empty columns): an empty column shows only a bare "—" (for example Design, Test, Ready to ship in the desktop shot). Nothing says there is nothing there yet or what puts a change in the column. This is not this change's flow to rework, but a one-line empty-state label would help.
+
+Left undone by 099-board-page-fixes, carried forward when it landed: pre-existing: scripts/board.html:-- (empty columns): an empty column shows only a bare "—" (for example Design, Test, Ready to ship in the desktop shot). Nothing says there is nothing there yet or what puts a change in the column. This is not this change's flow to rework, but a one-line empty-state label would help.
+See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.

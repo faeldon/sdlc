@@ -120,6 +120,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 }
 .files button[aria-current="true"] { background: var(--chip); color: var(--accent); }
 .doc { flex: 1; overflow: auto; padding: 12px 16px; margin: 0; }
+.doc:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .doc pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
 @media (max-width: 760px) {
   .d-body { flex-direction: column; }
@@ -144,7 +145,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   </div>
   <div class="d-body">
     <nav class="files" id="d-files" aria-label="Files"></nav>
-    <div class="doc"><pre id="d-doc"></pre></div>
+    <div class="doc" tabindex="0" role="region" aria-label="File contents"><pre id="d-doc"></pre></div>
   </div>
 </aside>
 <script>
@@ -160,6 +161,16 @@ const COLUMNS = [
   { key: "needs-you", label: "Needs you", who: "a decision, a problem or a stopped run" },
 ];
 const $ = (id) => document.getElementById(id);
+// The width the CSS stacks the columns at.
+const NARROW = window.matchMedia("(max-width: 760px)");
+
+// Stacked, the column that waits on the person leads, in the DOM as on screen, so Tab and a
+// screen reader meet it first too; the desktop grid keeps stage order.
+function columnOrder() {
+  return NARROW.matches
+    ? [...COLUMNS.filter((c) => c.key === "needs-you"), ...COLUMNS.filter((c) => c.key !== "needs-you")]
+    : COLUMNS;
+}
 
 // Every node is made here, its text set with textContent: nothing from the state is parsed as HTML.
 function h(tag, attrs, ...children) {
@@ -198,7 +209,7 @@ function roundRow(r) {
   }
   if (r.verified) {
     chips.push(h("span", { class: "chip", title: "the verifier kept / dropped" },
-      `kept ${r.verified.kept} · dropped ${r.verified.dropped}`));
+      `verifier: kept ${r.verified.kept} · dropped ${r.verified.dropped}`));
   }
   return h("div", { class: "round" }, chips);
 }
@@ -276,14 +287,16 @@ function card(c) {
 
 let last = "";
 let changes = [];
+let shown = null;
 function render(st) {
+  shown = st;
   $("repo").textContent = `${st.repo} — open changes`;
   document.title = `${st.repo} · board`;
-  const key = JSON.stringify(st.changes);
+  const key = JSON.stringify([NARROW.matches, st.changes]);
   if (key === last) return;
   last = key;
   changes = st.changes;
-  const cols = COLUMNS.map((col) => {
+  const cols = columnOrder().map((col) => {
     const cards = st.changes.filter((c) => c.column === col.key);
     return h("section", { class: `col ${col.key}`, "aria-label": col.label },
       h("div", { class: "col-head" }, h("h2", {}, col.label), h("span", { class: "who" }, col.who),
@@ -359,7 +372,22 @@ $("d-files").addEventListener("click", (e) => {
 });
 $("d-close").addEventListener("click", closeDrawer);
 $("scrim").addEventListener("click", closeDrawer);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && open) closeDrawer(); });
+// The drawer is aria-modal: while it is open, Tab and Shift-Tab cycle its own focusable nodes.
+const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function trapTab(e) {
+  const nodes = [...$("drawer").querySelectorAll(FOCUSABLE)];
+  if (!nodes.length) return;
+  const first = nodes[0], end = nodes[nodes.length - 1], at = document.activeElement;
+  if (!$("drawer").contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? end : first).focus(); }
+  else if (e.shiftKey && at === first) { e.preventDefault(); end.focus(); }
+  else if (!e.shiftKey && at === end) { e.preventDefault(); first.focus(); }
+}
+document.addEventListener("keydown", (e) => {
+  if (!open) return;
+  if (e.key === "Escape") closeDrawer();
+  else if (e.key === "Tab") trapTab(e);
+});
+NARROW.addEventListener("change", () => { if (shown) render(shown); });
 poll();
 </script>
 </body>
