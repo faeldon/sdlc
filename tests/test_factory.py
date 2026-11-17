@@ -1334,6 +1334,11 @@ READS = [
     "awk -F, -v n=2 '{print $n}' f",
     "cat a 2>&1",
     "rg -n x src",
+    "file x",
+    "file -b -m magic x",
+    "git diff",
+    "git diff --text --no-ext-diff --no-textconv",
+    "git log -p --exit-code",
 ]
 NON_READS = [
     "./check.sh",
@@ -1361,6 +1366,16 @@ NON_READS = [
     "rg --pre ./x y",
     "rg --pre=./x y",
     "rg --pre-glob '*.gz' --pre ./x y",
+    "file -C -m magic",
+    "file -bC -m magic",
+    "file --compile -m magic",
+    "file --comp -m magic",
+    "git diff --ext-diff",
+    "git log -p --ext",
+    "git show --textconv HEAD:a",
+    "git -C . blame --textc a",
+    "git cat-file --textconv HEAD:a",
+    "git -c diff.external=./x diff",
 ]
 
 

@@ -191,7 +191,7 @@ EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
 # program under its own condition; anything else, or anything it can't see into, is not a read.
 READS = frozenset(
     {"cat", "head", "tail", "grep", "egrep", "fgrep", "ls", "wc", "cmp", "diff", "nl", "cut"}
-    | {"tr", "stat", "file", "pwd", "cd", "echo", "true", "test", "[", "jq"}
+    | {"tr", "stat", "pwd", "cd", "echo", "true", "test", "[", "jq"}
 )
 SEPARATORS = frozenset({"|", "||", "&&", ";"})
 REDIRECTS = frozenset({"<", ">", ">>", ">&", "&>"})
@@ -205,6 +205,9 @@ GIT_READS = frozenset(
     {"show", "diff", "log", "status", "rev-parse", "ls-files", "ls-tree", "cat-file", "grep"}
     | {"blame", "merge-base", "shortlog", "describe"}
 )
+# git's options that run an external program from a read (`git diff --ext-diff`), each with the
+# length of its shortest abbreviation git takes: `--text` is a read, `--textc` is `--textconv`.
+GIT_RUNS = (("--ext-diff", len("--ext")), ("--textconv", len("--textc")))
 FIND_REFUSED = ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fls")
 # The reviewers whose replies owe evidence too: the ones that run the change.
 RUNS_THE_CHANGE = ("behaviour",)
@@ -1173,6 +1176,8 @@ def _git_reads(args: list[str]) -> bool:
         name = arg.split("=", 1)[0]
         if name in ("--output", "--open-files-in-pager") or arg.startswith("-O"):
             return False
+        if any(len(name) >= n and option.startswith(name) for option, n in GIT_RUNS):
+            return False
     return True
 
 
@@ -1193,6 +1198,11 @@ def _simple_read(words: list[str]) -> bool:
         return not any(
             a.startswith(("--o", "--compress"))
             or (a.startswith("-") and not a.startswith("--") and "o" in a)
+            for a in args
+        )
+    if name == "file":  # `-C` (`--compile`) writes `<magic>.mgc`
+        return not any(
+            a.startswith("--co") or (a.startswith("-") and not a.startswith("--") and "C" in a)
             for a in args
         )
     if name == "rg":

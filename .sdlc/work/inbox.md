@@ -177,12 +177,6 @@ Left undone by 116-register-and-docs, carried forward when it landed: A full mar
 See .sdlc/work/116-register-and-docs/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-18-1] [idea] `is_read()` refuses `file -C`, and git's `--ext-diff`/`--textconv`
-
-Left undone by 123-evidence-reads, carried forward when it landed: `file` is on R1's plain-read list, but `file -C -m <magic>` compiles a magic file and writes `<magic>.mgc`. A later change could give `file` its own condition (no `-C`) the way `sort` has one; left as the spec lists it here.
-See .sdlc/work/123-evidence-reads/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-2] [idea] Ship's security pass at the factory's depth
 
 Left undone by 114-one-review, carried forward when it shipped: gap: security: ship checks only secrets, plus the fresh reviewer on a sensitive path; it has no security pass at the depth of the factory's `reviewer-security`.
