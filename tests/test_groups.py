@@ -275,3 +275,12 @@ def test_groups_writes_nothing_and_needs_no_prompt(tmp_path: Path, capsys) -> No
     )
     assert status.stdout == ""
     assert "groups" in sdlc.READ_ONLY
+
+
+def test_an_untagged_seed_an_open_change_names_is_taken(tmp_path: Path, capsys) -> None:
+    """100 R5: nothing tags a seed now; the open change's `idea:` alone holds it, and `groups`
+    names that change."""
+    root = _repo(tmp_path)
+    _open(root, "008", "keep", idea="2026-11-01-1")
+    code, out = _groups(root, capsys, "2026-11-01-1 as again tier 1")
+    assert code == 1 and out["refusals"] == ["again: 2026-11-01-1 is taken by 008-keep"]

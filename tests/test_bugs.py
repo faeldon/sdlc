@@ -381,8 +381,8 @@ def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> Non
 def test_inbox_commit_never_retires_what_an_open_change_builds_or_fixes(
     tmp_path: Path, capsys
 ) -> None:
-    """The `[building]` tag rides on the change's branch, so main's register still reads `[idea]`:
-    an open change's `idea:` and `fixes:` lines are what say an entry is taken. Ids given from the
+    """Nothing tags a taken entry, so main's register still reads `[idea]`: an open change's
+    `idea:` and `fixes:` lines are what say an entry is taken. Ids given from the
     main checkout are refused, since it records the whole register."""
     root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
     folder = root / ".sdlc" / "work" / "001-keep-drafts"
@@ -935,3 +935,69 @@ def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
     assert sdlc.cmd_ship(root, "001") == 0
     assert "no bug to remove" in capsys.readouterr().out
     assert "2026-10-01-1" in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+
+
+def test_bugs_names_the_change_that_fixes_each(tmp_path: Path, capsys) -> None:
+    """100 R4: a bug an open change's `fixes:` names carries that change as `building`, with no
+    tag on the entry; any other bug carries null."""
+    root = _repo(tmp_path, _bug("2026-10-01-1", "Being fixed"), _bug("2026-10-02-1", "Open"))
+    _fixing(root, "2026-10-01-1")
+    assert sdlc.cmd_bugs(root, None, None) == 0
+    bugs = json.loads(capsys.readouterr().out)["bugs"]
+    assert [(b["id"], b["building"]) for b in bugs] == [
+        ("2026-10-01-1", "001-keep-drafts"),
+        ("2026-10-02-1", None),
+    ]
+
+
+@pytest.mark.parametrize("ref", ["2026-10-01-1", '"One"'], ids=["id", "title"])
+def test_ship_deletes_an_untagged_seed_its_idea_line_names(tmp_path: Path, capsys, ref) -> None:
+    """100 R6: nothing tags a seed now, so ship deletes the one `idea:` names whatever its tag,
+    by id or by a quoted title, and leaves the rest."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _idea("2026-10-02-1", "Two"))
+    folder = _fixing(root, "")
+    intent = folder / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("idea:\n", f"idea: {ref}\n")
+    intent.write_text(text, encoding="utf-8")
+    assert sdlc.cmd_ship(root, "001") == 0, capsys.readouterr().out
+    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert inbox == "# Inbox\n\n" + _idea("2026-10-02-1", "Two"), "every other entry as it was"
+
+
+def test_check_is_quiet_on_an_untagged_seed_a_change_names(tmp_path: Path) -> None:
+    """100 R8: an untagged entry an open change's `idea:` or `fixes:` names is no problem to
+    `check`; only a legacy `[building]` tag with nothing behind it is."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
+    folder = _fixing(root, "2026-10-02-1")
+    intent = folder / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("idea:\n", "idea: 2026-10-01-1\n")
+    intent.write_text(text, encoding="utf-8")
+    a = sdlc.analyze(root)
+    assert a["problems"] == [] and a["open"][0]["errors"] == []
+
+
+def test_a_dropped_change_gives_its_seed_back(tmp_path: Path, capsys) -> None:
+    """100 R7: drop edits no register; once the change is stamped `stage: dropped` it claims
+    nothing, so its seed is a candidate again, a batch may take it, and it may be retired."""
+    root = _repo(tmp_path, _idea("2026-10-01-1", "One"))
+    folder = _fixing(root, "")
+    intent = folder / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("idea:\n", "idea: 2026-10-01-1\n")
+    intent.write_text(text, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "open 001")
+
+    def state() -> tuple[list[str], list[str], int]:
+        nxt = sdlc.next_up(root, sdlc.load_config(root)[0], sdlc.analyze(root)["open"],
+                           date(2026, 10, 25))  # fmt: skip
+        code = sdlc.cmd_groups(root, ["2026-10-01-1 as again tier 1"])
+        capsys.readouterr()
+        return [i["id"] for i in nxt["items"]], [b["id"] for b in nxt["building"]], code
+
+    assert state() == ([], ["2026-10-01-1"], 1)
+    intent.write_text(text.replace("stage: build", "stage: dropped"), encoding="utf-8")
+    _git(root, "commit", "-qam", "drop 001")
+    assert state() == (["2026-10-01-1"], [], 0)
+    _inbox(root)
+    code, out = _commit(root, capsys, "2026-10-01-1=declined")
+    assert code == 0, out

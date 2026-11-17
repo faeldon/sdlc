@@ -61,8 +61,10 @@ kind, which says where it came from:
 | `[bug]` | something already shipped that is broken | `/sdlc:bug` |
 | `[nit]` | a finding `/sdlc:ship` approved unfixed | `/sdlc:ship` |
 
-`[building]` marks an idea a change is building. A `[seed]` tag, from before ideas had their own,
-reads as `[idea]`.
+An open change's `idea:` line marks the seed it builds as taken, and its `fixes:` line each bug it
+fixes; nothing edits the register for it. `[building]` is the tag older versions wrote on an idea
+a change was building, still read as being built. A `[seed]` tag, from before ideas had their
+own, reads as `[idea]`.
 
 #### Change types
 
@@ -231,7 +233,8 @@ says what here, and what that command does about it.
 
 Interviews you, assigns a tier, drafts `intent.md`, gates, then opens the change (its GitHub issue
 first, when that's how changes are numbered) and **stops**. If the change came from a
-`.sdlc/work/inbox.md` seed, it sets the `idea:` backlink and marks the idea `[building]`.
+`.sdlc/work/inbox.md` seed, it sets the `idea:` backlink, which marks the seed taken, and no longer
+tags the entry.
 
 #### Push-backs at Stage 1
 

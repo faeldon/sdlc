@@ -518,12 +518,23 @@ def test_release_skill_lines_stay_short() -> None:
 
 
 def test_intent_takes_a_theme_s_seeds_as_one_change() -> None:
-    """062 R7: several ids name several seeds; the `idea:` line lists them all, and each entry is
-    tagged `[building]`, so ship deletes every one."""
+    """062 R7: several ids name several seeds; the `idea:` line lists them all, so ship deletes
+    every one."""
     text = " ".join((ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8").split())
     assert "several ids name several, a theme's seeds taken as one change" in text
     assert "`idea: [2026-10-24-4, 2026-11-12-2]`" in text
-    assert "`sdlc.py ship` deletes each entry by it" in text and "Edit` each entry" in text
+    assert "`sdlc.py ship` deletes each entry by it" in text
+
+
+def test_intent_never_edits_the_register() -> None:
+    """100 R1: an open change's `idea:` line alone marks its seed taken, so intent never edits the
+    register on the change's branch, where every inbox commit on the base branch would conflict
+    with it at rebase."""
+    for name in ("SKILL.md", "batch.md"):
+        text = " ".join((ROOT / "skills" / "intent" / name).read_text(encoding="utf-8").split())
+        for said in ("becomes `[building]`", "Building in .sdlc/work/", "Edit` each entry",
+                     "`[building]` tags"):  # fmt: skip
+            assert said not in text, f"{name} still says {said!r}"
 
 
 def test_status_reads_next_up_s_two_groups() -> None:

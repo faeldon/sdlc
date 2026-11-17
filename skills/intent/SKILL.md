@@ -47,7 +47,7 @@ process if it isn't already in context — specifically its tier table and its a
 since Step 2 depends on them: the plugin's guide first (`docs.process.guide`, when `config` gives
 one), then the repo's doc, whose blocks stand in for the guide's of the same heading or lead and
 add to the rest. If neither exists, use the tiers in Step 2 as they stand and say so. Skim
-`.sdlc/work/inbox.md`, if there is one, for a seed that matches what the human is describing; an
+the register, the file `config`'s `work.register` names, if there is one, for a seed that matches what the human is describing; an
 argument that is an entry's id (`2026-10-01-2`, as `/sdlc:status` prints it) names that entry, and
 several ids name several, a theme's seeds taken as one change (`status --all` prints the command
 for each theme): draft one Problem covering them all. Note
@@ -269,8 +269,7 @@ configured, skip it and say so.
 Then move **this session** into the worktree, so the human never has to start another. Unless the
 answer was `yes, for the factory`: then the session stays in the checkout it started in, where
 the factory's supervisor runs, and every step below writes to the paths `new` printed, as it
-always does, the register included: the `inbox.md` beside the change's folder in the worktree,
-never the one `config` named from here. Otherwise, `EnterWorktree` with `path` set to the worktree path `new` printed. If
+always does, never to a path `config` named from here. Otherwise, `EnterWorktree` with `path` set to the worktree path `new` printed. If
 the tool isn't available or refuses, carry on from here and say so in Step 6, which then names
 the fallback.
 
@@ -282,11 +281,9 @@ exactly as shown in Step 3.
 If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`), or, from
 several, to every id as a list (`idea: [2026-10-24-4, 2026-11-12-2]`): `sdlc.py ship` deletes each
-entry by it. Then `Edit`
-each entry in the worktree's register, the file `config`'s `work.register` names: its heading's
-tag becomes `[building]`, the rest of
-the heading unchanged, and `Building in .sdlc/work/NNN-slug/.` becomes its first body line, so the tag
-lands with the change. Never put the pointer in the heading. Leave the seed's prose alone.
+entry by it. That line is all that marks a seed taken: `status`, `bugs`, `nits` and `groups` read
+it from the open change. Leave the register itself alone, the entry's tag and prose included: an
+edit to it on the change's branch would conflict with every inbox commit on the base branch.
 
 If the change fixes a `[bug]` entry, the one its argument named or any the human says it fixes:
 add `fixes: [<id>, <id>]` under `depends_on:`, each bug's id, and draft the Problem from the

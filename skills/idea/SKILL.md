@@ -69,10 +69,10 @@ When the argument is an entry's id, or the human wants one changed or gone:
 - **Edit** an idea's title or prose in place. Its id stays the same, so whatever names it still
   does.
 - **Retire** an idea nobody will build: the reason is one of `duplicate`, `superseded` or
-  `declined`, said with a line on why. An idea an open change builds (its `idea:` line, or the
-  `[building]` tag) is never retired here: its change removes it at ship, or `/sdlc:drop` says why
-  not. A `[bug]` is `/sdlc:bug`'s to retire, and a
-  `[nit]` is ship's.
+  `declined`, said with a line on why. An idea an open change builds (its `idea:` line names it,
+  or, in an older register, the `[building]` tag) is never retired here: its change removes it at
+  ship, or `/sdlc:drop` says why not. A `[bug]` is `/sdlc:bug`'s to retire, and a `[nit]` is
+  ship's.
 
 **Themes for what has none**, when the argument is `--themes` (status says `N ideas and bugs have
 no theme`). Only from the main checkout: when `work.dir` is inside `.claude/worktrees/`, say that

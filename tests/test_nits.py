@@ -213,3 +213,20 @@ def test_release_publish_and_measuring_never_read_the_register() -> None:
         source = inspect.getsource(fn)
         for word in ("nits", "nit_", "inbox", "INBOX", "register_path"):
             assert word not in source, (fn.__name__, word)
+
+
+def test_nits_names_the_change_that_takes_each(tmp_path: Path, capsys) -> None:
+    """100 R4: a nit an open change names carries that change as `building`; the rest null."""
+    root = _repo(tmp_path, GOOD)
+    folder = root / ".sdlc" / "work" / "001-reopen-drafts"
+    folder.mkdir()
+    (folder / "intent.md").write_text(
+        INTENT.replace("idea:\n", "idea: 2026-10-10-1\n"), encoding="utf-8"
+    )
+    code, out = _nits(root, capsys)
+    assert code == 0, out
+    assert [(n["id"], n["building"]) for n in out["nits"]] == [
+        ("2026-10-04-1", None),
+        ("2026-10-10-1", "001-reopen-drafts"),
+        ("2026-10-20-1", None),
+    ]

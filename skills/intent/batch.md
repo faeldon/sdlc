@@ -63,8 +63,8 @@ for one with `drafted` false skipping only 2, `new`, at the paths of the change 
    number `new` gave the change it waits on. Write that number, and never one from `next` or from
    memory. A null `depends_on` means the change it waits on wasn't made: stop.
 2. Create it with `new`, as a single run does, and run `worktree_setup` for it.
-3. Write its intent, its frontmatter lines and its seeds' `[building]` tags at the paths `new`
-   printed, in its own worktree, as a single run answered `yes, for the factory` writes them.
+3. Write its intent and its frontmatter lines at the paths `new` printed, in its own worktree,
+   as a single run answered `yes, for the factory` writes them. The register is never edited.
 4. `sync` it.
 
 Never `EnterWorktree`. **A refusal from `new` stops the run there:** the changes made so far are

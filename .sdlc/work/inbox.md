@@ -255,15 +255,6 @@ or at least record on the commit that a hand fix landed unreviewed.
 Theme: landing
 Raised 2026-11-17.
 
-## [2026-11-17-41] [idea] Open changes mark their seeds without editing the register
-
-Intent tags a change's seed `[building]` by editing the register on the change's branch, so every
-inbox commit on `main` while the change is open conflicts with it at rebase: 089, 090, 092, 094
-and 095 all did on 2026-11-17. Status and the board could derive "being built" from open changes'
-`idea:` lines instead, leaving the register untouched until ship deletes the seed.
-Theme: inbox
-Raised 2026-11-17.
-
 ## [2026-11-17-45] [idea] A Tier 2 at the light depth gets the test reviewer too
 
 At the light depth only the code reviewer runs, so 092's and 095's tests were never read
@@ -407,4 +398,13 @@ Raised 2026-11-17.
 
 Left undone by 102-sdlc-docstrings, carried forward when it landed: Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
 See .sdlc/work/102-sdlc-docstrings/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-66] [idea] /sdlc:idea --themes skips seeds an open change names
+
+`/sdlc:idea --themes` leaves out entries tagged `[building]` but not those an open change's
+`idea:` names, so it may propose a `Theme:` for a seed being built: harmless (an update, which
+`inbox-commit` allows), but it could read `status`'s `building` list to match. See
+.sdlc/work/100-seeds-marked-by-changes/notes.md in its commit.
+Theme: inbox
 Raised 2026-11-17.

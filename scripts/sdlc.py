@@ -101,8 +101,9 @@ PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
 # work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title", its id
 # (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its kind:
-# `[idea]`, `[bug]` or `[nit]`, with `[building]` an idea a change is building. Any other tag reads
-# as an idea, `[seed]` (what ideas were tagged before) for good.
+# `[idea]`, `[bug]` or `[nit]`, with `[building]` the tag older versions wrote on an idea a change
+# was building (an open change's `idea:` line marks it now). Any other tag reads as an idea,
+# `[seed]` (what ideas were tagged before) for good.
 ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})-(\d+)\]\s*\[([^\]]+)\]\s*(.+)$")
 # A heading from before ids, `[2026-10-17]` with no count, read for good where history is: an
 # older intent's `idea:` may hold a whole heading (`_seed_title`). Never an entry.
@@ -1525,7 +1526,8 @@ def nits_summary(nits: list[dict], today: date) -> dict:
 
 
 def is_building(idea: dict) -> bool:
-    """Work has started: the idea is tagged `[building]`."""
+    """The idea is tagged `[building]`, which older versions of intent wrote and nothing writes
+    now: read for good, alongside the open changes' claims (`_open_claims()`)."""
     return "building" in idea["status"].lower()
 
 
@@ -2371,8 +2373,10 @@ def _nits_report(root: Path, path: Path | None, touching: list[str] | None) -> d
     if path is not None or touching is not None:
         nits = [n for n in nits if nit_touches(n, paths)]
     today = date.today()
+    claims = _open_claims(main_root(root))
     for n in nits:
         n["age_days"] = _age_days({"created": n["raised"] or ""}, today)
+        n["building"] = _claimed_by(n, claims)
     return {"path": _shown(register_path(work_dir(root)), root), "nits": nits, "problems": problems}
 
 
@@ -2525,8 +2529,10 @@ def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | Non
     if touching is not None:
         bugs = [b for b in bugs if nit_touches(b, touching)]
     today = date.today()
+    claims = _open_claims(main_root(root))
     for b in bugs:
         b["age_days"] = _age_days({"created": b["reported"]}, today)
+        b["building"] = _claimed_by(b, claims)
     out: dict = {"path": _shown(register_path(work_dir(root)), root), "severities": words,
                  "bugs": bugs, "problems": problems}  # fmt: skip
     if introduced is not None:
@@ -6517,9 +6523,13 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     ideas = [e for e in inbox_entries(home) if not is_nit(e)]
     nits = nit_entries(home)[0]
     doc = direction_items(_direction_text(home, cfg))
-    named = [i for r in open_changes for i in ideas_of(r)]
-    named += [f for r in open_changes for f in r.get("fixes") or []]
-    building = {e["title"] for e in ideas if any(ref_matches(n, e) for n in named)}
+    named = [
+        (ref, f"{r['id']}-{r['slug']}")
+        for r in open_changes
+        for ref in [*ideas_of(r), *(r.get("fixes") or [])]
+    ]
+    holder = {e["title"]: next((c for ref, c in named if ref_matches(ref, e)), None) for e in ideas}
+    building = {t for t, c in holder.items() if c}
     states = {e["title"]: "building" for e in ideas if is_building(e) or e["title"] in building}
     open_titles = {e["title"] for e in ideas if e["title"] not in states}
     for e in ideas:
@@ -6635,8 +6645,16 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
     themeless = sum(
         1 for e in ideas if states[e["title"]] in ("ready", "waiting") and not entry_theme(e)
     )
+    # What open changes build, by their `idea:` and `fixes:` lines, and what a legacy `[building]`
+    # tag alone says is (`change` None): counted in status, listed under `--all`.
+    being_built = [
+        {"id": e["id"], "title": e["title"], "kind": entry_kind(e), "change": holder[e["title"]]}
+        for e in ideas
+        if states[e["title"]] == "building"
+    ]
     return {"items": items, "done_milestones": done, "warnings": warnings, "themes": themes,
-            "waiting": len(waiting), "themeless": themeless, "all": grouped}  # fmt: skip
+            "waiting": len(waiting), "building": being_built, "themeless": themeless,
+            "all": grouped}  # fmt: skip
 
 
 def _next_themes(
@@ -6827,8 +6845,9 @@ def cmd_inbox_commit(
 
 def _open_claims(home: Path) -> list[tuple[str, str]]:
     """(reference, change) for each entry an open change builds or fixes, from its `idea:` and
-    `fixes:` lines: the `[building]` tag lives on the change's branch until ship, so the base
-    branch's register still shows such an entry as it was filed."""
+    `fixes:` lines, which are all that mark an entry taken: nothing edits the register for it, so
+    the base branch's register shows such an entry as it was filed. A dropped change claims
+    nothing, so its seed is open again with no edit."""
     claims = []
     for p in change_dirs(home):
         rec = load_change(p, home)
@@ -6836,6 +6855,12 @@ def _open_claims(home: Path) -> list[tuple[str, str]]:
             continue
         claims += [(r, p.name) for r in [*ideas_of(rec), *rec["fixes"]] if r]
     return claims
+
+
+def _claimed_by(entry: dict, claims: list[tuple[str, str]]) -> str | None:
+    """The first open change `claims` (`_open_claims()`) says builds or fixes this entry, by its
+    folder name; None when none does."""
+    return next((name for ref, name in claims if ref_matches(ref, entry)), None)
 
 
 def _as_written(entry: dict | None) -> dict | None:
@@ -6925,7 +6950,7 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
         allowed = RETIRE_REASONS[kind]
         if claims is None:
             claims = _open_claims(home)
-        by = next((name for ref, name in claims if ref_matches(ref, e)), None)
+        by = _claimed_by(e, claims)
         if kind == "nit":
             refusals.append(f"{k} is a nit: ship retires nits, with the change that fixes one")
         elif by or is_building(e):
@@ -8703,6 +8728,12 @@ def print_status(a: dict) -> None:
                 print(f"      {t['theme']}  {total} ({kinds}){age}")
         if nxt["waiting"]:
             print(f"    {nxt['waiting']} waiting on earlier seeds")
+        if nxt["building"]:
+            print(f"    {len(nxt['building'])} being built")
+        if a.get("all"):
+            for b in nxt["building"]:
+                by = b["change"] or "tagged [building]"
+                print(f"      {b['id']} {b['title']} — {by}")
         if nxt["themeless"] >= THEMELESS_NUDGE:
             n = nxt["themeless"]
             print(f"    {n} ideas and bugs have no theme: /sdlc:idea --themes proposes them")

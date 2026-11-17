@@ -124,3 +124,47 @@ def test_a_conflict_with_the_base_is_resolved_shipped_and_closed(tmp_path: Path)
     assert "Main's idea" in register and "The change's idea" in register
     refs = _git(root, "for-each-ref", "--format=%(refname)", "refs/sdlc/")
     assert "001-thing" not in refs, refs
+
+
+def test_an_inbox_commit_on_the_base_never_stops_an_open_change_s_rebase(tmp_path: Path) -> None:
+    """100 R2: intent edits no register, so an entry filed on the base branch while a change is
+    open, right after the change's own seed, brings the change up to date with no conflict. The
+    control is the tag edit intent used to make, which stops `base` on that same commit."""
+    root = tmp_path / "host"
+    seed = "\n## [2026-11-02-1] [idea] The change's seed\n\nWhy it's worth doing.\n"
+    _write(root / ".gitignore", ".claude/worktrees/\n")
+    _write(root / ".sdlc" / "work" / "inbox.md", INBOX + seed)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+
+    trees = {}
+    for n, slug in (("001", "seeded"), ("002", "tagged")):
+        made = _run(root, "new", slug, "--tier", "1", "--worktree")
+        assert made.returncode == 0, made.stdout + made.stderr
+        tree = root / ".claude" / "worktrees" / f"{n}-{slug}"
+        intent = tree / ".sdlc" / "work" / f"{n}-{slug}" / "intent.md"
+        text = intent.read_text(encoding="utf-8").replace("idea:\n", "idea: 2026-11-02-1\n")
+        _write(intent, text)
+        trees[n] = tree
+    # The control: what intent wrote before 100, on the change's branch.
+    tagged = seed.replace("[idea]", "[building]").replace(
+        "\n\nWhy", "\n\nBuilding in .sdlc/work/002-tagged/.\nWhy"
+    )
+    _write(trees["002"] / ".sdlc" / "work" / "inbox.md", INBOX + tagged)
+
+    _write(root / ".sdlc" / "work" / "inbox.md",
+           INBOX + seed + "\n## [2026-11-03-1] [idea] Filed later\n\nOn main.\n")  # fmt: skip
+    filed = _run(root, "inbox-commit")
+    assert filed.returncode == 0, filed.stdout + filed.stderr
+    assert _git(root, "log", "-1", "--format=%s") == "File 2026-11-03-1"
+
+    based = _run(trees["001"], "base", "001")
+    assert based.returncode == 0, based.stdout
+    assert _json(based)["action"] != "refused"
+    on_main = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert (trees["001"] / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == on_main
+    assert _git(trees["001"], "rev-parse", "HEAD") == _git(root, "rev-parse", "main")
+
+    control = _run(trees["002"], "base", "002")
+    assert control.returncode == 1 and _json(control)["resolvable"] is True, control.stdout

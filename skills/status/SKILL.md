@@ -63,7 +63,8 @@ lines are shown across both, ready first, each with its reason, its
 `[theme]` when it has one, and the command that starts it, `/sdlc:intent <id>` with the entry's id;
 `status --all` lists every candidate, grouped by theme, and under a theme holding two or more ideas
 the command that takes them all as one change (`/sdlc:intent <id> <id>`). A seed already being built, or waiting on
-an earlier seed in its series, is left out; the count of those waiting comes after the list.
+an earlier seed in its series, is left out; the counts of those waiting and of those being built
+come after the list, and `status --all` lists each one being built with the change that builds it.
 `Themes:` counts the open entries of each theme by kind, best-ranked theme first and `(no theme)`
 last: a theme is work that can be taken on together. With five or more ideas and bugs lacking a
 theme, a line says so and names `/sdlc:idea --themes`, which proposes them all behind one approval:

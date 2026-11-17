@@ -430,7 +430,12 @@ intents in history name seeds by them; `check` reports an id used twice. Two opt
 register and not being built. An idea or a bug may also carry a `Theme:` line, as every nit
 does, and a `Priority: high|med|low` line (`check` reports any other word, and a `Priority:` on a
 nit, whose `Cost:` and `Value:` rank it). Each line's command is `/sdlc:intent <id>`. A seed
-being built (tagged `[building]`, or named by an open change's `idea:`) is never listed.
+being built is never listed: one an open change names on its `idea:` or `fixes:` line, which is
+all intent writes for it (the register is never edited on the change's branch, so an inbox commit
+on the base branch never conflicts with it), or one carrying the `[building]` tag older versions
+wrote. `status` counts them, `status --all` lists each with its change (or `tagged [building]`),
+and `sdlc.py bugs` and `sdlc.py nits` give each entry a `building` key, the open change's folder
+name or null.
 Candidates come in this order, each once, under the first rule it meets:
 
 1. ideas and bugs marked `Priority: high`, bugs most severe first, then oldest (`priority high`);

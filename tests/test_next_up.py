@@ -127,7 +127,7 @@ def test_next_up_is_empty_without_registers(tmp_path: Path, capsys, monkeypatch)
     root = _repo(tmp_path)
     assert _next(root) == {
         "items": [], "done_milestones": [], "warnings": [], "themes": [], "waiting": 0,
-        "themeless": 0, "all": [],
+        "building": [], "themeless": 0, "all": [],
     }  # fmt: skip
     assert "Next up" not in _status(root, capsys, monkeypatch)
 
@@ -148,8 +148,8 @@ def test_each_register_alone_is_enough(tmp_path: Path) -> None:
 
 
 def test_next_up_skips_a_seed_an_open_change_builds(tmp_path: Path) -> None:
-    """Tagged `[building]`, or named by a change open in a worktree while main still says
-    `[seed]`: the branch tags its seed, main's register hasn't heard yet."""
+    """Tagged `[building]` (older registers), or named by a change open in a worktree while main
+    still says `[seed]`: the change's `idea:` line alone marks it taken."""
     root = _repo(tmp_path)
     _ideas(
         root,
@@ -720,3 +720,53 @@ def test_inbox_commit_records_a_themes_pass_as_one_update(tmp_path: Path, capsys
         "+Theme: drafts"
     ] * 3
     assert _git(root, "status", "--short") == ""
+
+
+@pytest.mark.portable
+def test_next_up_lists_what_open_changes_build(tmp_path: Path) -> None:
+    """100 R3: an open change's `idea:` or `fixes:` line marks its entry taken, with no tag on it,
+    and `building` names the change; a legacy `[building]` tag nobody names counts with none."""
+    root = _repo(tmp_path)
+    _ideas(
+        root,
+        _entry("2026-10-01", "Share drafts"),
+        _entry("2026-10-02", "Sync drafts"),
+        _entry("2026-10-03", "Saving twice", "bug", "Severity: high"),
+        _entry("2026-10-04", "Rename drafts", "building"),
+    )
+    building = [
+        {"id": "009", "slug": "share", "ideas": ["2026-10-01-1"]},
+        {"id": "010", "slug": "fix-save", "fixes": ["2026-10-03-1"]},
+    ]
+    nxt = _next(root, building)
+    assert [i["title"] for i in nxt["items"]] == ["Sync drafts"]
+    assert nxt["building"] == [
+        {"id": "2026-10-01-1", "title": "Share drafts", "kind": "idea", "change": "009-share"},
+        {"id": "2026-10-03-1", "title": "Saving twice", "kind": "bug", "change": "010-fix-save"},
+        {"id": "2026-10-04-1", "title": "Rename drafts", "kind": "idea", "change": None},
+    ]
+
+
+def test_status_counts_and_lists_what_is_being_built(tmp_path: Path, capsys, monkeypatch) -> None:
+    """100 R3: plain `status` counts the seeds being built, `--all` lists each with its change, or
+    as tagged when only a legacy tag says so."""
+    root = _repo(tmp_path)
+    _ideas(
+        root,
+        _entry("2026-10-01", "Share drafts"),
+        _entry("2026-10-02", "Sync drafts"),
+        _entry("2026-10-04", "Rename drafts", "building"),
+    )
+    _write(
+        root,
+        ".sdlc/work/009-share/intent.md",
+        "---\nid: 009\nslug: share\ntier: 1\nstage: build\ncreated: 2026-10-20\n"
+        "updated: 2026-10-20\nidea: 2026-10-01-1\n---\n\n# 009 — share\n",
+    )
+    out = _status(root, capsys, monkeypatch)
+    assert "    2 being built\n" in out
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "status", "--all"])
+    sdlc.main()
+    out = capsys.readouterr().out
+    assert "      2026-10-01-1 Share drafts — 009-share\n" in out
+    assert "      2026-10-04-1 Rename drafts — tagged [building]\n" in out
