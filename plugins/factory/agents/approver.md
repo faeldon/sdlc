@@ -59,3 +59,14 @@ The first line is exactly `DECISION: READY` or `DECISION: ESCALATE`. Then:
   do (`minor`), merely gets better (`patch`), or `none` when nothing anyone receives changed.
   `/sdlc-factory:land` sets it on the change; a missing line, or `major`, keeps its gate the
   person's.
+- **Each undone item's disposition**, one line per unticked `- [ ]` item in `notes.md`, its text
+  exactly as written there: `- UNDONE: <item text> → seed: <title>` to carry it forward as a new
+  seed in the register, or `- UNDONE: <item text> → dropped: <reason>` when it is done after all,
+  superseded or not worth doing. `/sdlc-factory:land` shows them in its question and writes them
+  on the person's yes; an item with no line is carried as a seed titled by its own text, never
+  dropped.
+- **How to recover**, when the prompt names irreversible paths the diff touches: one line per path
+  or group, `- RECOVER: <path or glob>: <the way back>`, the command that reverses it or
+  `fix forward:` and what the follow-up change would do. Start from `plan.md`'s Rollback, checked
+  against the paths actually touched. It goes into the commit as `How to recover:`; a path with no
+  line keeps the change out of the landing, for `/sdlc:ship`.

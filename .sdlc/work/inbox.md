@@ -308,28 +308,6 @@ Severity: med
 Paths: scripts/board.py, scripts/sdlc.py
 Theme: board
 
-## [2026-11-17-35] [idea] The landing runs acceptance checks and the skills' cases behind its own yes
-
-`land-check` leaves out a change with `checks.md` or skills' cases in scope, because only a person
-may run them, so on 2026-11-17 four of ten changes (086, 089, 090, 093) were shipped and closed by
-hand. The landing already asks a question when its batch has a signal: it could show each check's
-command and the cases' scope and cost in it, and run `accept` and `run-cases` on the yes, as ship
-does, so every factory change lands one way.
-Theme: landing
-Priority: high
-Raised 2026-11-17.
-
-## [2026-11-17-36] [idea] The landing settles undone notes and assumed decisions in its question
-
-A change with undone `notes.md` items is left out of a landing, and one with assumed decisions
-lands only after someone ticks them by hand. The landing's question could propose each item's
-disposition (a seed or dropped) and each decision's confirmation, as ship's does, and write them on
-the yes. With 2026-11-17-35, no factory change would need `/sdlc:ship`.
-After: 2026-11-17-35
-Theme: landing
-Priority: high
-Raised 2026-11-17.
-
 ## [2026-11-17-37] [idea] The landing follows main when it moves before the close
 
 When another session lands a change between a landing's review and its close, `land --close`
@@ -345,14 +323,6 @@ When the person asks for a fix after the approver (088's plan hint, 094's AGENTS
 2026-11-17), the supervisor makes it by hand and the change lands `by=person` with no reviewer
 having read the fix. The landing could hand such a fix to the change's builder and its reviewers,
 or at least record on the commit that a hand fix landed unreviewed.
-Theme: landing
-Raised 2026-11-17.
-
-## [2026-11-17-39] [idea] The landing writes How to recover for an irreversible path
-
-`/sdlc:ship` adds `How to recover:` to a commit that touches `[review] irreversible`, but a factory
-landing never runs ship's recovery step, so 092's `templates/direction.md` landed without one. The
-landing should compose it, or leave such a change to ship.
 Theme: landing
 Raised 2026-11-17.
 

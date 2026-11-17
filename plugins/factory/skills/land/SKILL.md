@@ -1,6 +1,6 @@
 ---
 name: land
-description: Land a batch of factory changes that are ready to ship — each one shipped with the impact its approver proposed, committed, brought up to date with the base branch (a conflict resolved by its own builder and reviewed again), and closed, archived and pushed as git.push says — through sdlc's own ship, base and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from a session of its own in the main checkout once the supervisor says changes are ready. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one with acceptance checks or undone notes (ship those by hand too), and never with --force.
+description: Land a batch of factory changes that are ready to ship — each one shipped with the impact its approver proposed, its acceptance checks and skills' cases run, its undone notes carried or dropped, its assumed decisions confirmed and How to recover in its commit, as ship does, then committed, brought up to date with the base branch (a conflict resolved by its own builder and reviewed again), and closed, archived and pushed as git.push says — through sdlc's own ship, base and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from a session of its own in the main checkout once the supervisor says changes are ready. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one touching an irreversible path its approver proposed no way back for (ship that by hand), and never with --force.
 argument-hint: "[NNN… — the ready changes to land; every one when none is named]"
 allowed-tools:
   - Read
@@ -28,7 +28,10 @@ clone's, or the marketplace cache's), for `ship`, `base` and `close`: the stamp,
 rebase, the merge, the archive, the push, each one the code `/sdlc:ship` and `/sdlc:close` run. It
 never copies them. Each change's commit carries `Sdlc-Landed: by=person`, or `by=auto` when the
 gate passed itself, and no `Sdlc-Findings`, so the retrospective never reads a factory review as
-the person's.
+the person's. What ship asks a person for beyond its review (the acceptance checks, the skills'
+cases, each undone note's disposition, each assumed decision, `How to recover:`) the landing's
+question shows and its yes approves: the approver proposed the dispositions and the recovery, and
+`factory.py` writes only what was approved.
 
 **Run it from a session of its own in the main checkout.** Landing takes this session while it
 runs; the supervisor's stays free for the next change.
@@ -46,31 +49,43 @@ lands without asking, and `batch`, the most changes one landing takes. `sdlc-pat
 the landing runs; a refusal there (no `sdlc` installed, or another version) is a stop: say it,
 and stop. `land-check` lists the changes `ready` would, in its order (a change after what it
 depends on), or those named: `batch`, each with its decision, the impact its approver proposed,
-the others it `overlaps`, and its `signals`; `excluded`, the changes only a person can ship, and
-why (undone notes, acceptance checks, skills' cases in scope); `over_limit`, those past `batch`;
-and `clear`, true when no change in the batch has a signal.
+the others it `overlaps`, its `signals`, and what the yes approves for it: `checks` (each
+acceptance check's `name` and `command`), `cases` (the skills' cases in `scope`, with `cap_usd`,
+the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title or the
+`dropped` reason its approver proposed), `assumed` (each assumed decision, by `id`) and `recover`
+(the `How to recover:` lines its commit will carry), each empty when it has none; `excluded`, the
+changes only `/sdlc:ship` can land, and why (an irreversible path with no `- RECOVER:` line in
+`decision.md`); `over_limit`, those past `batch`; `question`, the batch's question, worded by the
+script; and `clear`, true when no change in the batch has a signal.
 
 ## Step 1 — Show it
 
 Show the batch in its order: each change, its decision, its impact, the changes it overlaps (where
-a rebase may conflict), and each signal. Then the changes `excluded`, each with why and that
-`/sdlc:ship` from its worktree lands it, and any `over_limit`, which the next landing takes. With
-an empty batch, say why and stop.
+a rebase may conflict), and each signal. Under each change, what the yes approves for it, each
+part only when it has one: each acceptance check's name and its command, as written; the skills'
+cases in scope and their cap (`at most $<cap_usd>`, a paid run); each undone item and its
+disposition (`→ seed: <title>`, or `→ dropped: <reason>`); each assumed decision by id, with what
+the build assumed; and the `How to recover:` lines. Then the changes `excluded`, each with why and
+that `/sdlc:ship` from its worktree lands it, and any `over_limit`, which the next landing takes.
+With an empty batch, say why and stop.
 
 **With `clear` true, the gate passes itself.** Say so, `the batch is clear: landing without
 asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's rules don't let it
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
 decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
-reviewer has seen, or `land.auto` off. A conflict resolved while landing is seen once every
-reviewer at the run's depth passed its landing round; one `sdlc.py resolve` recorded in
-`conflicts.md`, once the newest complete build round's reviewers read its files as they now
-stand. The script decides both; report them as it words them.
+reviewer has seen, acceptance checks, skills' cases in scope, undone notes, or `land.auto` off. A
+conflict resolved while landing is seen once every reviewer at the run's depth passed its landing
+round; one `sdlc.py resolve` recorded in `conflicts.md`, once the newest complete build round's
+reviewers read its files as they now stand. The script decides both; report them as it words
+them.
 
 ## Step 2 — WAIT for explicit approval
 
-Only when the batch isn't clear. Ask literally:
+Only when the batch isn't clear. Ask `land-check`'s `question` literally, as printed; never word
+your own. Its fullest form, each clause there only when some change in the batch has what it
+names:
 
-> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, committed, brought up to date with <base> (a conflict resolved by its builder and reviewed again) and closed, pushed as git.push says? (yes / leave one out / no)`
+> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, with how to recover shown, committed, brought up to date with <base> (a conflict resolved by its builder and reviewed again) and closed, pushed as git.push says? (yes / leave one out / no)`
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -79,24 +94,40 @@ refused is a no. If the tool is unavailable or refused, ask the same text, answe
 parentheses, and stop.
 
 **Do nothing until the person says yes.** Approval is for this batch only. `leave one out` is
-the person naming which: run Step 0 again with the rest, and ask again. Then Step 3, with
+the person naming which: run Step 0 again with the rest, and ask again. To change a proposed
+disposition, leave that change out and ship it with `/sdlc:ship`. Then Step 3, with
 `--by person`.
 
 ## Step 3 — Land each change, in order
 
 For each change in the batch, one at a time:
 
+0. **Run what the yes approved running**, from the main checkout, each command named here and
+   never in a rule this skill holds, so the harness asks before each run:
+   - with `checks`, `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py accept
+     <NNN>`, which runs them through `sdlc.py accept` and records the attempt in
+     `.sdlc/work/NNN-slug/build/land-accept.md`;
+   - with `cases`, `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases
+     <NNN>`, which runs `sdlc.py run-cases <NNN>` under its own cap and writes the `Skill evals:`
+     line ship reads (a skipped run says why, and is no stop).
+
+   A failure, or a prompt the person declines, stops this change and every one after it: nothing
+   of it has been written, and `/sdlc:ship` from its worktree lands it.
 1. **Ship, commit, bring it up to date:**
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land <NNN> --by <auto or person>
    ```
 
-   It sets the approver's impact, runs `sdlc.py ship` (stamped shipped, its seed dropped, every
-   path staged), deletes from the register each open nit its intent or spec names by id (its
-   `retired_nits`, on a `Retired nits:` paragraph of the message, as `/sdlc:ship` does), commits
-   with the change's composed message, and runs `sdlc.py base`. Landed before, it adds the earlier
-   landing's record to its commit first, so it rebases again when the base moved since. Its
+   It refuses, before writing anything, a change whose checks haven't passed on it as it stands
+   or whose cases haven't run. On `--by person` it writes each disposition (a carried item's seed
+   in the register, ticked `→ seed: <id>`; a dropped one ticked `→ dropped: <reason>`) and ticks
+   each assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
+   (stamped shipped, its seed dropped, every path staged), deletes from the register each open
+   nit its intent or spec names by id (its `retired_nits`), commits with the change's composed
+   message (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as
+   ship's), and runs `sdlc.py base`. Landed before, it adds the earlier landing's record to its
+   commit first, so it rebases again when the base moved since. Its
    `state`: `current` (go to 4), `rebased` (the base moved: 2), `conflict` (3), or a refusal,
    which stops this change and every one after it.
 2. **`rebased`: run the gate and the spec's path again**, on the change as it now stands. The gate
@@ -111,12 +142,21 @@ For each change in the batch, one at a time:
    ```
 
    A red gate stops the second command and this change: `land-verdicts` says `stop`, and the
-   person ships it by hand. Then the landing's verdicts, below.
+   person ships it by hand. A change with acceptance checks runs them again, on its commit as
+   rebased, when `land-verdicts` says `accept` (after the gate, before the review): the cases are
+   never run again, since each run is paid. Then the landing's verdicts, below.
 3. **`conflict`: the builder resolves it.** The rebase is started and left for it; `.sdlc/last-id`
-   settles itself (the higher number).
+   settles itself (the higher number):
 
    ```bash
-   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve <NNN> && \
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve <NNN>
+   ```
+
+   Its `state`: `clean` when nothing but the counter conflicted, so the rebase went on by itself:
+   go on as for `rebased`, in 2. Otherwise `conflict`, with the `conflicted` files, for the
+   builder:
+
+   ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task resolve && \
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve <NNN> --continue
    ```
@@ -140,14 +180,16 @@ For each change in the batch, one at a time:
    ```
 
    Its `next`: `gate` (the change as it now stands hasn't been gated: `factory.py gate <NNN>
-   --land`), `review` (start each `missing` reviewer), `verify` (a reviewer asked for changes):
+   --land`), `accept` (its acceptance checks haven't run on it as it now stands: `factory.py
+   accept <NNN>`, as in 0, behind the harness's prompt), `review` (start each `missing` reviewer),
+   `verify` (a reviewer asked for changes):
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-verify
    ```
 
    then read it again; `pass` (go to 4); or `stop`, with its `problems`, which stops this change
-   and every one after it: a red gate or a kept change is the person's, and `/sdlc:ship` from its worktree
+   and every one after it: a red gate or check or a kept change is the person's, and `/sdlc:ship` from its worktree
    takes it. Never patch a verdict, and never write a review an agent didn't.
 4. **Close it**, from the main checkout, which merges, archives, removes its folder, worktree and
    branch, and pushes as `git.push` says; the landing's own record is added to its commit first:
@@ -163,13 +205,19 @@ For each change in the batch, one at a time:
 
 Say whether the gate passed itself or the person approved it. Then each change: landed (its
 `Close` commit and where it was archived), stopped (at which step, and why: what the person does
-next, usually `/sdlc:ship NNN` from its worktree), excluded, or not reached. Say what was pushed,
+next, usually `/sdlc:ship NNN` from its worktree), excluded, or not reached. For a landed change,
+each acceptance check and its result (and again after a rebase), the cases' score or why they
+were skipped (run before any rebase), each undone item's disposition and where it went (the
+seed's id in the register), and each decision confirmed. Say what was pushed,
 or that nothing was, and that nothing was tagged.
 
 ## Out of scope
 
 - A change built by hand: `/sdlc:ship` and `/sdlc:close`.
-- Running `accept` or the skills' cases: a change that needs them is excluded, and shipped by hand.
+- Running a check or a case from this skill's own rules, or by `sdlc.py` directly: only through
+  `factory.py accept` and `cases`, behind the harness's prompt.
+- Wording a disposition, a confirmation or `How to recover:` the approver didn't propose: a change
+  that needs another goes to `/sdlc:ship`.
 - `--force`, a merge that isn't a fast-forward, or resolving a conflict any way but by the
   change's own builder, reviewed again.
 - Writing or editing a review, a verification or a decision an agent didn't return.

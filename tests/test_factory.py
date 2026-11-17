@@ -995,6 +995,14 @@ def test_the_risk_matcher_is_sdlc_s_own(patterns: list[str]) -> None:
     assert factory.risk_paths(paths, patterns) == sdlc.risk_paths(paths, patterns)
 
 
+def test_the_factorys_copies_of_ships_notes_and_cap_match_sdlcs() -> None:
+    """103: the landing writes the `Skill evals:` and `Fresh review:` lines ship reads, and names
+    the cases' cost cap, each from a copy, since the factory's cached copy has no `sdlc.py`."""
+    assert factory.CASES_RE.pattern == sdlc.CASES_RE.pattern
+    assert factory.FRESH_RE.pattern == sdlc.FRESH_RE.pattern
+    assert str(factory.CASE_CAP_USD) == sdlc.CASE_CAP["change"][1]
+
+
 # ---------------------------------------------------------------- the eval: what escaped
 
 REGISTER = """\

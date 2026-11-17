@@ -1226,6 +1226,11 @@ def test_no_skill_lets_accept_run_unasked(skill: Path) -> None:
         run = f'uv run --quiet --script "${{CLAUDE_PLUGIN_ROOT}}"/scripts/sdlc.py {cmd}'
         granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(run)]
         assert not granted, f"{_id(skill)} would run `{cmd}` without a prompt"
+    # 103 R6: nor the factory's pass-throughs to them, which the landing runs behind its yes.
+    for cmd in ("accept 005", "cases 005"):
+        run = f'uv run --quiet --script "${{CLAUDE_PLUGIN_ROOT}}"/scripts/factory.py {cmd}'
+        granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(run)]
+        assert not granted, f"{_id(skill)} would run factory.py `{cmd}` without a prompt"
 
 
 def test_the_gate_and_ci_never_run_the_skills_cases() -> None:

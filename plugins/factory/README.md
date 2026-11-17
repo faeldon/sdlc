@@ -77,10 +77,16 @@ reviewing, and deciding whether to escalate.
   its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
   change's own builder, and every reviewer at its depth checks the resolution before it lands. One approval covers the batch, and it **passes itself
   when no change in it carries a risk signal** (a sensitive or irreversible path, `impact: major`,
-  an ESCALATE, an open decision, an issue someone filed, a resolved conflict no reviewer has
-  seen), recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. A
-  change with acceptance checks or undone notes is left for `/sdlc:ship`, one at a time, which
-  also stays the way to land a change by hand.
+  an ESCALATE, an open or assumed decision, an issue someone filed, a resolved conflict no
+  reviewer has seen, acceptance checks, skills' cases in scope, undone notes), recorded as
+  `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise its one
+  question shows what your yes approves, for each change: each acceptance check's name and command
+  and the skills' cases with their cost cap, each run then through `factory.py accept` and `cases`
+  behind the harness's own prompt (a failure stops that change and those after it, and a rebased
+  change runs its checks again); each undone note carried to the register as a seed or dropped,
+  as its approver proposed; each assumed decision confirmed; and the `How to recover:` its commit
+  carries for an irreversible path. A change touching an irreversible path its approver proposed
+  no way back for is left for `/sdlc:ship`, which also stays the way to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 
@@ -280,7 +286,8 @@ one place it runs a host's command); each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
 the one place it runs `claude`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
-batch and its signals (`land-check`), each change's landing (`land`, `resolve`, `land-verdicts`);
+batch, its signals and its question (`land-check`), each change's landing (`land`, `resolve`,
+`land-verdicts`), its acceptance checks and skills' cases (`accept`, `cases`, never pre-approved);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads

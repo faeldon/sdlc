@@ -523,16 +523,24 @@ def _base(root: Path) -> str | None:
     return None
 
 
-def _sensitive(root: Path, base: str) -> list[str]:
-    """`[review] sensitive` as the base branch holds it, never this checkout's: a change can't
-    lighten its own review by editing the list."""
+def _review_list(root: Path, base: str, key: str) -> list[str]:
+    """`[review] <key>` as the base branch holds it, never this checkout's: a change can't lighten
+    its own review by editing the list."""
     try:
         data = tomllib.loads(_git(root, "show", f"{base}:{SDLC_CONFIG.as_posix()}") or "")
     except tomllib.TOMLDecodeError:
         return []
     review = data.get("review")
-    listed = review.get("sensitive") if isinstance(review, dict) else None
+    listed = review.get(key) if isinstance(review, dict) else None
     return [p for p in listed if isinstance(p, str)] if isinstance(listed, list) else []
+
+
+def _sensitive(root: Path, base: str) -> list[str]:
+    return _review_list(root, base, "sensitive")
+
+
+def _irreversible(root: Path, base: str) -> list[str]:
+    return _review_list(root, base, "irreversible")
 
 
 def _base_check(root: Path, base: str) -> str | None:
@@ -1960,6 +1968,20 @@ def _task(
                 " The rounds ran out with changes still kept: say whether the approach should "
                 "be reconsidered."
             )
+        prompt += (
+            " For each unticked `- [ ]` item in notes.md, propose its disposition at landing: "
+            "`- UNDONE: <the item's text, exactly> → seed: <a short title>` or `→ dropped: "
+            "<why>`."
+        )
+        base = _base(root)
+        touched = risk_paths(_changed_paths(root, base), _irreversible(root, base)) if base else []
+        if touched:
+            prompt += (
+                f" The diff touches irreversible paths ([review] irreversible on {base}): "
+                f"{', '.join(touched)}. A revert won't undo what they reach: for each, or each "
+                "group, one `- RECOVER: <path or glob>: <the way back>` line, its command or "
+                "`fix forward:` and what the follow-up would do."
+            )
         return prompt, folder / "decision.md", False
     reviewed = state["rounds"][-1]["round"] if state["rounds"] else 0
     if task == "decided":
@@ -2201,6 +2223,18 @@ IMPACT_RE = re.compile(r"^\s*- IMPACT:\s*(major|minor|patch|none)\b")
 # Who passed the batch's gate, on each landed change's commit: the person, or no one (`auto`).
 LANDED = "Sdlc-Landed"
 FRESH_SKIPPED = "Fresh review: skipped, the factory's rounds stand in"
+# What the approver proposes for each undone notes.md item, and for each irreversible path the
+# diff touches: read by land-check, which shows them, and by land, which writes them.
+UNDONE_RE = re.compile(r"^\s*- UNDONE:\s*(.+?)\s+→\s+(seed|dropped):\s*(.+?)\s*$")
+RECOVER_RE = re.compile(r"^\s*- RECOVER:\s*(.+?):\s+(.+?)\s*$")
+# A notes.md item a landing (or ship) gave its disposition, as `land_message()` reads it back.
+TICKED_RE = re.compile(r"^\s*[-*] \[x\] (.+?) → (seed|dropped): (.+?)\s*$")
+# findings.md's note lines ship reads, and the cost ceiling of a change's run of the skills'
+# cases: copies of `sdlc.py`'s `FRESH_RE`, `CASES_RE` and `CASE_CAP["change"]`, pinned by a test.
+FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
+CASES_RE = re.compile(r"^>?\s*Skill evals:\s*(ran|skipped)\b,?\s*(.*)$")
+CASE_CAP_USD = 5
+CONFIRMED = "the assumed default, confirmed when landing"
 
 
 def _plugin(root: Path) -> dict:
@@ -2317,20 +2351,80 @@ def resolution_signals(root: Path, folder: Path, cfg: dict) -> list[str]:
     return signals
 
 
-def land_signals(folder: Path, worktree: Path, decision: str, cfg: dict) -> tuple[list, list]:
+def _preflight(folder: Path, worktree: Path) -> tuple[dict | None, str]:
+    """`sdlc.py preflight` on the change, from its worktree: its JSON, or None and what it said."""
+    _, pre, out = _sdlc(["preflight", folder.name], worktree)
+    return pre, out
+
+
+def read_proposals(folder: Path) -> tuple[dict[str, tuple[str, str]], list[tuple[str, str]]]:
+    """What the approver proposed in `decision.md`: each undone item's disposition by its exact
+    text, as (`seed`, title) or (`dropped`, reason), and each `- RECOVER:` line as (the path or
+    group it covers, the way back)."""
+    path = folder / "decision.md"
+    undone, recover = {}, []
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if m := UNDONE_RE.match(line):
+            undone.setdefault(m.group(1), (m.group(2), m.group(3)))
+        elif m := RECOVER_RE.match(line):
+            recover.append((m.group(1), m.group(2)))
+    return undone, recover
+
+
+def unrecovered(paths: list[str], recover: list[tuple[str, str]]) -> list[str]:
+    """The irreversible `paths` no `- RECOVER:` line covers: one names it, or a pattern of it (a
+    directory ending in `/`, or a glob), alone or in a comma-separated list."""
+    named = [s.strip().strip("`") for subject, _ in recover for s in subject.split(",")]
+    return [p for p in paths if p not in named and not risk_paths([p], named)]
+
+
+def land_parts(folder: Path, pre: dict) -> dict:
+    """What the batch's yes approves for change `folder`, each part empty when it has none: its
+    acceptance checks, its skills' cases with the cap, its undone notes with the disposition the
+    approver proposed (a seed titled by the item itself when none was), its assumed decisions, and
+    the `How to recover:` lines its commit will carry."""
+    proposed, recover = read_proposals(folder)
+    undone = []
+    for item in (pre.get("undone") or {}).get("items") or []:
+        kind, said = proposed.get(item["text"], ("seed", item["text"]))
+        undone.append({"line": item["line"], "text": item["text"],
+                       ("seed" if kind == "seed" else "dropped"): said})  # fmt: skip
+    scope = (pre.get("cases") or {}).get("scope") or []
+    return {
+        "checks": [{"name": c["name"], "command": c["command"]}
+                   for c in (pre.get("checks") or {}).get("checks") or []],
+        "cases": {"scope": scope, "cap_usd": CASE_CAP_USD} if scope else {},
+        "undone": undone,
+        "assumed": [{"id": d["id"], "text": d["text"]} for d in read_ledger(folder)
+                    if not d["decided"] and d["kind"] == "default"],
+        "recover": [f"{subject}: {way}" for subject, way in recover],
+    }  # fmt: skip
+
+
+def land_signals(
+    folder: Path, worktree: Path, decision: str, cfg: dict, pre: dict | None = None
+) -> tuple[list, list]:
     """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
     in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
     notes, its checks, its skills' cases and its issues, and what the run left in its folder,
-    a resolved conflict no reviewer has seen among it (`resolution_signals()`)."""
+    a resolved conflict no reviewer has seen among it (`resolution_signals()`). The one exclusion
+    is an irreversible path the approver proposed no way back for."""
     signals, excluded = [], []
-    code, pre, out = _sdlc(["preflight", folder.name], worktree)
     if pre is None:
-        return [f"preflight couldn't be read: {out.strip()[-300:]}"], []
+        pre, out = _preflight(folder, worktree)
+        if pre is None:
+            return [f"preflight couldn't be read: {out.strip()[-300:]}"], []
     risk = pre.get("risk") or {}
     if risk.get("sensitive"):
         signals.append(f"touches sensitive paths: {', '.join(risk['sensitive'][:5])}")
     if risk.get("irreversible"):
         signals.append(f"touches irreversible paths: {', '.join(risk['irreversible'][:5])}")
+        missing = unrecovered(risk["irreversible"], read_proposals(folder)[1])
+        if missing:
+            excluded.append(
+                f"decision.md proposes no How to recover for {', '.join(missing[:5])}: "
+                "ship it by hand"
+            )
     if (pre.get("closes") or {}).get("closes"):
         signals.append("came from a public issue (closes:)")
     impact = read_impact(folder)
@@ -2343,22 +2437,57 @@ def land_signals(folder: Path, worktree: Path, decision: str, cfg: dict) -> tupl
     ledger = read_ledger(folder)
     if [d for d in ledger if not d["decided"]]:
         signals.append("decisions still open or assumed in decisions.md")
+    assumed = [d["id"] for d in ledger if not d["decided"] and d["kind"] == "default"]
+    if assumed:
+        signals.append(f"assumed decisions to confirm: {', '.join(assumed)}")
     signals += resolution_signals(worktree, folder, cfg)
     if not cfg["land"]["auto"]:
         signals.append("land.auto is off on the base branch")
-    if (pre.get("undone") or {}).get("items"):
-        excluded.append("notes.md has undone items, which only a person gives a disposition")
-    if (pre.get("checks") or {}).get("checks"):
-        excluded.append("checks.md has acceptance checks, which run only under a prompt")
-    if (pre.get("cases") or {}).get("scope"):
-        excluded.append("its skills' cases are in scope, a paid run that is the person's call")
+    if n := len((pre.get("undone") or {}).get("items") or []):
+        signals.append(f"undone notes to dispose of: {n}")
+    if n := len((pre.get("checks") or {}).get("checks") or []):
+        signals.append(f"acceptance checks to run: {n}")
+    if n := len((pre.get("cases") or {}).get("scope") or []):
+        signals.append(f"skills' cases in scope: {n}")
     return signals, excluded
+
+
+def land_question(batch: list[dict], base: str) -> str:
+    """The batch's question, worded here so the skill never words its own: a clause for the checks
+    and cases, for the dispositions and confirmations, and for `How to recover:`, each only when
+    some change in the batch has one, and the cases' total ceiling, the cap per change with any."""
+    n = len(batch)
+    names = ", ".join(c["change"] for c in batch)
+    parts = ["each shipped with its approver's impact"]
+    checks = any(c["checks"] for c in batch)
+    with_cases = sum(1 for c in batch if c["cases"])
+    runs = [w for w, has in (("acceptance checks", checks), ("skills' cases", with_cases)) if has]
+    if runs:
+        ceiling = f" (at most ${CASE_CAP_USD * with_cases})" if with_cases else ""
+        parts.append(f"its {' and '.join(runs)} run as shown{ceiling}")
+    undone = any(c["undone"] for c in batch)
+    assumed = any(c["assumed"] for c in batch)
+    if undone and assumed:
+        parts.append("its undone notes carried or dropped and its assumed decisions confirmed "
+                     "as shown")  # fmt: skip
+    elif undone:
+        parts.append("its undone notes carried or dropped as shown")
+    elif assumed:
+        parts.append("its assumed decisions confirmed as shown")
+    if any(c["recover"] for c in batch):
+        parts.append("with how to recover shown")
+    return (
+        f"Land {n} change{'s' if n != 1 else ''} in this order, {names}, {', '.join(parts)}, "
+        f"committed, brought up to date with {base} (a conflict resolved by its builder and "
+        "reviewed again) and closed, pushed as git.push says? (yes / leave one out / no)"
+    )
 
 
 def cmd_land_check(root: Path, idents: list[str]) -> int:
     """The batch: the ready changes in `ready`'s order (or those named), at most `land.batch`, each
-    with its signals and why any is left out, and `clear`: true when no change in it has a signal,
-    so the gate passes itself. Read-only."""
+    with its signals, what the yes approves for it (`land_parts()`) and why any is left out, the
+    question to ask (`land_question()`), and `clear`: true when no change in it has a signal, so
+    the gate passes itself. Read-only."""
     cfg, warnings = load_config(root)
     picked = [
         r for r in ready(root) if not idents or any(names_change(r["change"], i) for i in idents)
@@ -2367,10 +2496,14 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
     for r in picked:
         worktree = Path(r["worktree"])
         folder = worktree / work_rel(worktree) / r["change"]
-        signals, excluded = land_signals(folder, worktree, r["decision"], cfg)
+        pre, said = _preflight(folder, worktree)
+        signals, excluded = land_signals(folder, worktree, r["decision"], cfg, pre or {})
+        if pre is None:
+            signals = [f"preflight couldn't be read: {said.strip()[-300:]}"]
         entry = {
             "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
             "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
+            **land_parts(folder, pre or {}),
         }  # fmt: skip
         if excluded:
             left_out.append({**entry, "excluded": excluded})
@@ -2379,9 +2512,11 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         else:
             batch.append(entry)
     clear = bool(batch) and not any(c["signals"] for c in batch)
+    question = land_question(batch, _base(root) or "the base branch") if batch else None
     return emit({
         "batch": batch, "excluded": left_out, "over_limit": over, "clear": clear,
-        "auto": cfg["land"]["auto"], "limit": cfg["land"]["batch"], "warnings": warnings,
+        "question": question, "auto": cfg["land"]["auto"], "limit": cfg["land"]["batch"],
+        "warnings": warnings,
     })  # fmt: skip
 
 
@@ -2436,11 +2571,136 @@ def retire_nits(root: Path, ids: list[str]) -> None:
     register.write_text("".join(kept), encoding="utf-8", newline="\n")
 
 
+def accept_path(folder: Path) -> Path:
+    """The change's acceptance checks as the landing ran them: beside the landing's gate files."""
+    return folder / "build" / "land-accept.md"
+
+
+def accept_build(root: Path, folder: Path) -> str:
+    """The build an accept attempt ran on: before the landing commits the change (`stage: test`),
+    a digest of every path it touches outside its folder and of its `checks.md`, so the record,
+    in the folder, never changes the identity it records; after, its commit (`landed_build()`)."""
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    if meta.get("stage") != "test":
+        return landed_build(root)
+    base = _base(root)
+    digest = hashlib.sha256()
+    for p, h in sorted((_tree_hashes(root, base) if base else {}).items()):
+        digest.update(f"{h}  {p}\n".encode())
+    checks = folder / "checks.md"
+    digest.update(checks.read_bytes() if checks.is_file() else b"")
+    return digest.hexdigest()[:16]
+
+
+def _accept_state(root: Path, folder: Path, settled: bool = False) -> str | None:
+    """The latest accept attempt's verdict when it ran on the build as it stands, else None.
+    `settled` reads a landing round already reviewed, as `_land_gate_state()` does: its verdict
+    stands whatever `HEAD` is now, which the landing's own record and later rebases move."""
+    record = read_gate_file(accept_path(folder)) or {"attempts": []}
+    last = record["attempts"][-1] if record["attempts"] else None
+    ran_on = last and (settled or last["build"] == accept_build(root, folder))
+    return last["verdict"] if ran_on else None
+
+
+def cmd_accept(root: Path, ident: str) -> int:
+    """Run change `ident`'s acceptance checks through `sdlc.py accept`, in its worktree, and add
+    the attempt to `build/land-accept.md`, in the gate file's shape: never reading or running
+    `checks.md` itself. No skill's rule grants it, so the harness asks before every run."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    build = accept_build(root, folder)
+    code, found, said = _sdlc(["accept", folder.name], root)
+    if found is None:
+        why = f"sdlc.py accept: {said.strip()[-500:]}"
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    verdict = "PASS" if code == 0 and found.get("passed") else "FAIL"
+    path = accept_path(folder)
+    attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
+    lines = []
+    for check in found.get("checks") or []:
+        mark = "passed" if check.get("passed") else "failed"
+        left = f", left {', '.join(check['left'])}" if check.get("left") else ""
+        lines.append(f"- {check.get('name')}: exit {check.get('exit')}, {mark}{left}\n")
+        output = _placeholders(str(check.get("output") or ""), root).rstrip().splitlines()
+        lines += [f"    {line}\n" for line in output[-GATE_TAIL:]] or ["    (no output)\n"]
+    lines += [f"- problem: {_placeholders(str(w), root)}\n" for w in found.get("problems") or []]
+    section = f"## Attempt {attempt}\n\nVerdict: {verdict}\nBuild: {build}\n\n" + (
+        "".join(lines) or "- no checks\n"
+    )
+    # The first line is the latest verdict; the attempts before it stay as they were.
+    earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
+    earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"ACCEPT: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    out = {**found, "verdict": verdict, "attempt": attempt, "to": path.relative_to(root).as_posix()}
+    return emit(out, 0 if verdict == "PASS" else 1)
+
+
+def _note_says(folder: Path, line_re: re.Pattern) -> bool:
+    """Whether `findings.md`'s note, before its first finding, holds a line `line_re` reads."""
+    path = folder / "findings.md"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if line.startswith("## "):
+            break
+        if line_re.match(line.strip()):
+            return True
+    return False
+
+
+def _note_line(folder: Path, line_re: re.Pattern, line: str) -> None:
+    """Set `line` in `findings.md`'s note, by line: in place of the one `line_re` reads, else after
+    the note's last line, before the first finding. A missing file is created as just the note."""
+    path = folder / "findings.md"
+    if not path.is_file():
+        path.write_text(f"# Findings\n\n{line}\n", encoding="utf-8", newline="\n")
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    end = next((i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines))
+    at = next((i for i in range(end) if line_re.match(lines[i].strip())), None)
+    if at is not None:
+        lines[at] = line
+    else:
+        at = end
+        while at > 0 and not lines[at - 1].strip():
+            at -= 1
+        lines[at:at] = ["", line] if at and lines[at - 1].startswith("# ") else [line]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def cmd_cases(root: Path, ident: str) -> int:
+    """Run the skills' cases change `ident`'s diff calls for through `sdlc.py run-cases`, under its
+    own cost cap, and write what ship reads into `findings.md`'s note: `Skill evals: ran, <passed>
+    of <cases>`, or `skipped, <why>`. A failed case writes nothing and exits 1. Never `eval` in its
+    name, and no skill's rule grants it: each run is paid, so the harness asks first."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    code, found, said = _sdlc(["run-cases", folder.name], root)
+    if found is None:
+        why = f"sdlc.py run-cases: {said.strip()[-500:]}"
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    out = {**found, "change": folder.name}
+    if code:
+        return emit({**out, "note": None}, 1)
+    if found.get("skipped"):
+        note = f"Skill evals: skipped, {found['skipped']}"
+    else:
+        rows = [r for r in found.get("cases") or [] if isinstance(r, dict)]
+        passed = sum(1 for r in rows if isinstance(r.get("score"), int | float) and r["score"] >= 1)
+        note = f"Skill evals: ran, {passed} of {len(rows)}"
+    _note_line(folder, CASES_RE, note)
+    return emit({**out, "note": note})
+
+
 def land_message(root: Path, folder: Path, by: str, refs: bool, nits: list[str] = ()) -> str:
     """The landed change's commit message: its title, its Problem's first sentence and its folder,
-    a `Retired nits:` paragraph naming each nit it took in, as `/sdlc:ship` writes one, `Refs #N`
-    when its number is its issue's, and who passed the gate. No `Sdlc-Findings`: the factory's
-    rounds stood in for ship's review, and retro reads a missing line as unanswered."""
+    a `Retired nits:` paragraph naming each nit it took in, ship's `Carried forward:`, `Dropped:`
+    and `How to recover:` paragraphs, each when it holds anything (read from `notes.md`'s ticks
+    and `decision.md`'s `- RECOVER:` lines, so a rerun's message is the same), as `/sdlc:ship`
+    writes them, `Refs #N` when its number is its issue's, and who passed the gate. No
+    `Sdlc-Findings`: the factory's rounds stood in for ship's review, and retro reads a missing
+    line as unanswered."""
     text = (folder / "intent.md").read_text(encoding="utf-8")
     title = next((ln for ln in text.splitlines() if ln.startswith("# ")), f"# {folder.name}")
     title = re.sub(r"^#\s+\d{3,}\s+—\s+", "", title).lstrip("# ").strip()
@@ -2448,13 +2708,21 @@ def land_message(root: Path, folder: Path, by: str, refs: bool, nits: list[str] 
     prose = " ".join(problem.split("\n## ", 1)[0].split())
     first = re.split(r"(?<=[.!?])\s", prose, maxsplit=1)[0] if prose else ""
     body = f"{first} See {folder.relative_to(root).as_posix()}/.".strip()
-    if nits:
-        body += "\n\nRetired nits:\n" + "".join(
-            f"- {n}: taken in by {folder.name}\n" for n in nits
-        ).rstrip("\n")
+    paragraphs = [title, body]
+    notes = folder / "notes.md"
+    ticked = [m for line in (notes.read_text(encoding="utf-8").splitlines() if notes.is_file()
+                             else []) if (m := TICKED_RE.match(line))]  # fmt: skip
+    carried = [f"- {m.group(1)} → {m.group(3)}" for m in ticked if m.group(2) == "seed"]
+    dropped = [f"- {m.group(1)}: {m.group(3)}" for m in ticked if m.group(2) == "dropped"]
+    recover = [f"- {subject}: {way}" for subject, way in read_proposals(folder)[1]]
+    retired = [f"- {n}: taken in by {folder.name}" for n in nits]
+    for head, lines in (("Retired nits:", retired), ("Carried forward:", carried),
+                        ("Dropped:", dropped), ("How to recover:", recover)):  # fmt: skip
+        if lines:
+            paragraphs.append("\n".join([head, *lines]))
     tail = [f"Refs #{int(folder.name.split('-')[0])}"] if refs else []
     tail.append(f"{LANDED}: by={by}")
-    return f"{title}\n\n{body}\n\n" + "\n".join(tail) + "\n"
+    return "\n\n".join([*paragraphs, "\n".join(tail)]) + "\n"
 
 
 def _set_impact(intent: Path, impact: str) -> bool:
@@ -2474,6 +2742,59 @@ def land_round(folder: Path) -> int:
     """The landing review round under way: `reviews/land-<n>/`, the highest, 0 before any."""
     found = [p.name[5:] for p in (folder / "reviews").glob("land-*") if p.is_dir()]
     return max((int(n) for n in found if n.isdigit()), default=0)
+
+
+def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
+    """What the person's yes approved for change `folder`'s undone notes and assumed decisions,
+    written in its worktree before `sdlc.py ship`, every edit by line: each carried item appended
+    to the register as an `[idea]` seed (ids from one `next-entry` call; the register created from
+    its template when missing) and ticked `→ seed: <id>`, each dropped one ticked `→ dropped:
+    <reason>`, and each assumed decision ticked as confirmed. What a rerun finds ticked it never
+    writes again. None, or why nothing was written."""
+    parts = land_parts(folder, pre)
+    seeds = [u for u in parts["undone"] if "seed" in u]
+    notes, ids = folder / "notes.md", []
+    if seeds:
+        _, config, said = _sdlc(["config"], root)
+        register = ((config or {}).get("work") or {}).get("register")
+        template = (((config or {}).get("templates") or {}).get("inbox.md") or {}).get("path")
+        if not register:
+            return f"sdlc.py config names no register: {said.strip()[-300:]}"
+        register = Path(register)
+        if not register.is_file() and not (template and Path(template).is_file()):
+            return f"no register at {register.name}, and no template to start one from"
+        code, _, said = _sdlc(["next-entry", "--count", str(len(seeds))], root)
+        ids = [w for w in said.split() if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d+", w)]
+        if code or len(ids) != len(seeds):
+            return f"sdlc.py next-entry gave no ids: {said.strip()[-300:]}"
+        text = (register.read_text(encoding="utf-8") if register.is_file()
+                else Path(template).read_text(encoding="utf-8"))  # fmt: skip
+        rel = folder.relative_to(root).as_posix()
+        for entry_id, item in zip(ids, seeds, strict=True):
+            text = text.rstrip("\n") + (
+                f"\n\n## [{entry_id}] [idea] {item['seed']}\n\nLeft undone by {folder.name}, "
+                f"carried forward when it landed: {item['text']}\nSee {rel}/notes.md in its "
+                f"commit.\nRaised {entry_id[:10]}.\n"
+            )
+        register.parent.mkdir(parents=True, exist_ok=True)
+        register.write_text(text, encoding="utf-8", newline="\n")
+    if parts["undone"]:
+        lines = notes.read_text(encoding="utf-8").splitlines()
+        given = iter(ids)
+        for item in parts["undone"]:
+            said = f"seed: {next(given)}" if "seed" in item else f"dropped: {item['dropped']}"
+            at = item["line"] - 1
+            lines[at] = lines[at].replace("[ ]", "[x]", 1).rstrip() + f" → {said}"
+        notes.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    if parts["assumed"]:
+        ledger = folder / "decisions.md"
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            m = LEDGER_RE.match(line)
+            if m and m.group(1) == " " and m.group(4) == "default":
+                lines[i] = "- [x]" + line.rstrip()[5:] + DECIDED + CONFIRMED
+        ledger.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return None
 
 
 def cmd_land(root: Path, ident: str, by: str) -> int:
@@ -2498,18 +2819,33 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     # The gate's rule is the script's, never only the skill's: a change only a person can ship is
     # refused whoever passed the gate, and `auto` is refused while any risk signal stands.
     cfg, _ = load_config(root)
-    signals, excluded = land_signals(folder, root, decision, cfg)
+    pre, said = _preflight(folder, root)
+    if pre is None:
+        return emit({**out, "refusals": [f"preflight couldn't be read: {said.strip()[-300:]}"]}, 1)
+    signals, excluded = land_signals(folder, root, decision, cfg, pre)
     if excluded:
         return emit({**out, "refusals": [f"ship it by hand: {'; '.join(excluded)}"]}, 1)
     if by == "auto" and signals:
         return emit({**out, "refusals": [f"the gate is the person's: {'; '.join(signals)}"]}, 1)
     if meta.get("stage") == "test":
-        if impact is None or not _set_impact(folder / "intent.md", impact):
+        # Every refusal before the first write: what the person's yes approved running has run,
+        # on the change as it stands.
+        if impact is None:
             return emit({**out, "refusals": ["no impact to set: decision.md has no - IMPACT:"]}, 1)
-        code, pre, _ = _sdlc(["preflight", folder.name], root)
-        findings = folder / "findings.md"
-        if pre and (pre.get("risk") or {}).get("deep") and not findings.is_file():
-            findings.write_text(f"# Findings\n\n{FRESH_SKIPPED}\n", encoding="utf-8", newline="\n")
+        num = folder.name.split("-")[0]
+        if (pre.get("checks") or {}).get("checks") and _accept_state(root, folder) != "PASS":
+            why = (f"its acceptance checks haven't passed on the change as it stands: run "
+                   f"factory.py accept {num}")  # fmt: skip
+            return emit({**out, "refusals": [why]}, 1)
+        if (pre.get("cases") or {}).get("scope") and not _note_says(folder, CASES_RE):
+            why = f"its skills' cases haven't run: run factory.py cases {num}"
+            return emit({**out, "refusals": [why]}, 1)
+        if not _set_impact(folder / "intent.md", impact):
+            return emit({**out, "refusals": ["no impact to set: intent.md has no impact: line"]}, 1)
+        if by == "person" and (refused := _dispose(root, folder, pre)):
+            return emit({**out, "refusals": [refused]}, 1)
+        if (pre.get("risk") or {}).get("deep") and not _note_says(folder, FRESH_RE):
+            _note_line(folder, FRESH_RE, FRESH_SKIPPED)
         nits = named_nits(root, folder)
         code, _, said = _sdlc(["ship", folder.name], root)
         if code:
@@ -2624,6 +2960,8 @@ def _conflicted(root: Path) -> list[str]:
 
 
 COUNTER = ".sdlc/last-id"
+# The most commits `resolve` carries past a conflict in the counter alone, so it never spins.
+RESOLVE_STEPS = 20
 
 
 def _settle_counter(root: Path) -> None:
@@ -2642,7 +2980,8 @@ def _settle_counter(root: Path) -> None:
 
 def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     """A rebase onto the base branch that conflicts, left for the builder: `resolve` starts it and
-    lists the conflicted files (or finds none, and it is done); `--continue` checks no conflict
+    lists the conflicted files (or finds none, `clean`, and it is done: `.sdlc/last-id` alone
+    settles itself); `--continue` checks no conflict
     marker is left in them, stages them and continues, aborting the rebase on a second conflict.
     Every git step is this script's: the builder only edits the files it is given. A finished
     resolution leaves `runs/land-resolved`: `land-<n>`, the round under way, then the files. It is
@@ -2660,6 +2999,16 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
                               encoding="utf-8", env=env)  # fmt: skip
         _settle_counter(root)
         files = _conflicted(root)
+        # Only the counter conflicted, and it settled itself: nothing is left for the builder,
+        # so the rebase goes on, a commit at a time, as long as that is all a commit conflicts on.
+        for _ in range(RESOLVE_STEPS):
+            stopped = _git(root, "rev-parse", "-q", "--verify", "REBASE_HEAD")
+            if not (done.returncode and not files and stopped):
+                break
+            done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
+                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+            _settle_counter(root)
+            files = _conflicted(root)
         if done.returncode and not files:
             return emit({"refusals": [f"git rebase failed: {done.stderr.strip()[-300:]}"]}, 1)
         return emit(
@@ -2694,10 +3043,12 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
 def cmd_land_verdicts(root: Path, ident: str) -> int:
     """The landing review of round `land-<n>`, and the step it takes next: `gate` (the script's
     gate on the change as rebased, before any reviewer, while the base branch names one),
+    `accept` (a change with acceptance checks runs them again on its commit as rebased, through
+    `factory.py accept`, after the gate),
     `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
     the run's depth after a resolved conflict), `verify` when one asks for changes, `pass` when
-    none is kept, or `stop`, with why: a red gate, a kept change, a reply without a verdict, or
-    one without its evidence."""
+    none is kept, or `stop`, with why: a red gate or check, a kept change, a reply without a
+    verdict, or one without its evidence."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -2743,13 +3094,23 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
             f"the gate failed on the change as rebased (exit {gate['exit']}), in "
             f"build/land-{n}.gate.md: ship it by hand"
         )
+    # So are its acceptance checks, on its commit as rebased, after the gate and before review.
+    has_checks = (folder / "checks.md").is_file()
+    accept = _accept_state(root, folder, settled) if has_checks else "PASS"
+    if accept == "FAIL":
+        problems.append(
+            f"its acceptance checks failed on the change as rebased, in "
+            f"{accept_path(folder).relative_to(folder).as_posix()}: ship it by hand"
+        )
     out = {"change": folder.name, "round": n, "reviews": reviews, "missing": missing,
-           "resolved": resolved, "gate": gate, "problems": problems}  # fmt: skip
+           "resolved": resolved, "gate": gate, "accept": accept, "problems": problems}  # fmt: skip
     asks = any(r["verdict"] == "CHANGES" for r in reviews.values())
     if problems:
         out["next"] = "stop"
     elif gate and gate["current"] is None:
         out["next"] = "gate"
+    elif accept is None:
+        out["next"] = "accept"
     elif missing:
         out["next"] = "review"
     elif asks and verified is None:
@@ -3249,6 +3610,14 @@ def main() -> int:
     p_resolve.add_argument("--continue", dest="cont", action="store_true")
     p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
     p_lv.add_argument("id")
+    p_accept = sub.add_parser(
+        "accept", help="run a change's acceptance checks through sdlc.py accept; never pre-approved"
+    )
+    p_accept.add_argument("id")
+    p_cases = sub.add_parser(
+        "cases", help="run a change's skills' cases through sdlc.py run-cases; paid, never allowed"
+    )
+    p_cases.add_argument("id")
     p_agent.add_argument("--decision", help="the decided ledger id, for --task decided")
     p_agent.add_argument("--revise", help="the person's revision in decisions.md (R1), for spec")
     p_agent.add_argument("--recheck", action="store_true", help="send a spec draft back once")
@@ -3280,6 +3649,10 @@ def main() -> int:
         return cmd_resolve(root, args.id, args.cont)
     if args.cmd == "land-verdicts":
         return cmd_land_verdicts(root, args.id)
+    if args.cmd == "accept":
+        return cmd_accept(root, args.id)
+    if args.cmd == "cases":
+        return cmd_cases(root, args.id)
     if args.cmd == "agent":
         return cmd_agent(
             root, args.id, args.task, args.role, args.decision, args.revise, args.recheck
