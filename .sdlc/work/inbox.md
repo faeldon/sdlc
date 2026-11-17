@@ -228,24 +228,6 @@ fixes of 2026-11-17-30.
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-22] [nit] The board's step track reads decision.md at any stage
-
-`_progress()` takes any `decision.md` as a finished run, so a change put back to `build` shows
-every step done in the Build column. Gate it by stage, as 086 did for the column and the next
-action.
-Theme: robustness
-Paths: scripts/board.py
-Cost: M
-Value: med
-Raised by: 086-board-signals-by-stage (correctness)
-
-## [2026-11-17-23] [bug] A board card whose file won't read says /sdlc:close at a closed stage
-
-Found by the review of 086-board-signals-by-stage. `next_action()` returns `/sdlc:close NNN`
-before it looks at `problems`, so a card under Needs you names a close (scripts/board.py:574-577).
-Severity: low
-Paths: scripts/board.py
-
 ## [2026-11-17-24] [bug] At phone width the board's Needs you column comes last
 
 Found by the review of 086-board-signals-by-stage. Below 760px the columns stack in stage order,
@@ -296,17 +278,6 @@ pointers into close's docstrings meets half a rule.
 
 Severity: low
 Paths: scripts/sdlc.py
-
-## [2026-11-17-30] [bug] The board drops a change while its branch is being rebased
-
-While `resolve` or a landing rebases a change, git lists its worktree as a detached `HEAD`, so the
-board can't match the worktree to its branch and the card vanishes until the rebase ends. Seen on
-2026-11-17 for 091, 090 and 095 during their landings. It should find the branch from the
-rebase's own state (`rebase-merge/head-name`) and keep the card, marked as rebasing.
-
-Severity: med
-Paths: scripts/board.py, scripts/sdlc.py
-Theme: board
 
 ## [2026-11-17-37] [idea] The landing follows main when it moves before the close
 
@@ -385,14 +356,6 @@ reviewers judged them from code alone. `[ui]` could name fixture data the server
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-47] [idea] The board serves the code it was built from
-
-`sdlc.py board` loads `board.py` once, so after a change to it lands the running server shows the
-old behaviour (091 sat under Needs you until a restart picked up 086). It could reload the module
-when the file changes, or say on the page that it's stale.
-Theme: board
-Raised 2026-11-17.
-
 ## [2026-11-17-48] [idea] check --strict stays quiet about a plan a running build is writing
 
 `check --strict` reports "plan.md is still the template at stage: build" for a factory change
@@ -451,3 +414,45 @@ a space.
 Severity: med
 Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
 Theme: landing
+
+## [2026-11-17-52] [idea] pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.
+
+Left undone by 098-board-fixes, carried forward when it landed: pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-53] [idea] pre-existing: board.html:146: the drawer has `aria-modal` but no focus trap, so Tab can leave it while it is open. Filed for later.
+
+Left undone by 098-board-fixes, carried forward when it landed: pre-existing: board.html:146: the drawer has `aria-modal` but no focus trap, so Tab can leave it while it is open. Filed for later.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-54] [idea] pre-existing: at 390px the columns stack in board order, so Needs you sits below every Plan and Build card and is off-screen on a phone. This change doesn't alter it; filed for later.
+
+Left undone by 098-board-fixes, carried forward when it landed: pre-existing: at 390px the columns stack in board order, so Needs you sits below every Plan and Build card and is off-screen on a phone. This change doesn't alter it; filed for later.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-55] [idea] pre-existing: at 390 wide the columns stack in order, so Needs you (the column a person must act on) sits below Plan, Design and Build, about five cards down. A phone user has to scroll past all of it to find the card that needs them. Filed for later, not this change's rework.
+
+Left undone by 098-board-fixes, carried forward when it landed: pre-existing: at 390 wide the columns stack in order, so Needs you (the column a person must act on) sits below Plan, Design and Build, about five cards down. A phone user has to scroll past all of it to find the card that needs them. Filed for later, not this change's rework.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-56] [idea] pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
+
+Left undone by 098-board-fixes, carried forward when it landed: pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-57] [idea] code (round 2 note): a card with a problem and a pending decision at `build` names only "fix what its problems name", by the precedence in `plan.md`; it no longer says a decision is waiting too. The card's other lines still show `pending`; whether its next step should name both is for ship.
+
+Left undone by 098-board-fixes, carried forward when it landed: code (round 2 note): a card with a problem and a pending decision at `build` names only "fix what its problems name", by the precedence in `plan.md`; it no longer says a decision is waiting too. The card's other lines still show `pending`; whether its next step should name both is for ship.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-58] [idea] code (round 2 note): the rebasing card's `--abort` wording doesn't say `resolve --abort` keeps the resolved work under `refs/sdlc/end/<branch>`.
+
+Left undone by 098-board-fixes, carried forward when it landed: code (round 2 note): the rebasing card's `--abort` wording doesn't say `resolve --abort` keeps the resolved work under `refs/sdlc/end/<branch>`.
+See .sdlc/work/098-board-fixes/notes.md in its commit.
+Raised 2026-11-17.

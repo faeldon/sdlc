@@ -487,6 +487,10 @@ file of its folder, and is in Build again. A change built by hand moves on from 
 by what it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`,
 to Test once ship's review has written its `findings.md` or its gate run by hand is green on the
 build as it stands (below), with a `gate green` or `gate red` badge while that record is current.
+A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, with a
+`rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
+`--continue` or `--abort` as its next step. A card with a file that won't read names that as its
+next step, at any stage.
 Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
@@ -499,7 +503,10 @@ them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change
 has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A click opens
 any file in the change's folder. It writes nothing, answers only `GET` for the page, `/state.json`
 and `/file` (one file inside the folder of a change it shows), refuses a request naming another host,
-and a second `board` on a port a board holds says so rather than starting again.
+and a second `board` on a port a board holds says so rather than starting again. `--port 0` takes
+a port the OS picks, and prints it. A running board serves `board.py` as it is on disk, loading it
+afresh when it changes, so a change to the board that lands needs no restart; a file that won't
+load leaves it serving the code it had, and the page says it is stale.
 
 **The gate, run by hand.** `sdlc.py gate NNN` runs the base branch's `[commands] check` (never the
 checkout's, so a change can't edit the gate that judges it) from the change's checkout, for up to

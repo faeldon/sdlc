@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import threading
@@ -163,7 +164,7 @@ def test_a_blocking_decision_or_an_unreadable_reply_needs_the_person(repo) -> No
     assert four["column"] == "needs-you"
     assert [d["text"] for d in four["pending"]] == ["purge after 30 or 90 days?"]
     assert any("round-1/code.md" in p for p in four["problems"])
-    assert four["next"] == "answer its decision in the factory's supervisor"
+    assert four["next"] == "fix what its problems name", "the problem first, as its column (098)"
 
 
 def _worktree(
@@ -641,9 +642,13 @@ def test_a_factory_card_shows_its_step_track(repo, step) -> None:
 
 @pytest.mark.portable
 def test_a_decision_or_a_stop_overrides_the_record(repo) -> None:
-    """R4: a valid decision is every step done; a stop shown has no track at all."""
+    """R4: a valid decision is every step done, at the stage it belongs to (098); a stop shown
+    has no track at all."""
     folder = _run_at(repo, "review")
     _write(folder / "decision.md", "DECISION: ESCALATE\n\nAsk them.\n")
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text(encoding="utf-8").replace("stage: build", "stage: test"),
+                      encoding="utf-8", newline="\n")  # fmt: skip
     assert _states(_cards(repo)["016-draft-tags"]) == ["done"] * 6
     stopped = _run_at(repo, "stop", None, name="017-draft-stop")
     _write(stopped / factory.STOPPED, factory.stop_text("017-draft-stop", "rerun", ["it broke"]))
@@ -946,3 +951,193 @@ def test_a_restarted_factory_card_is_in_build_with_its_old_decision_as_a_file(se
     assert {"decision-1.md", "build/round-2.restart.md"} <= set(card["files"])
     code, body, _ = _get(f"{url}/file?change=016-draft-restart&path=decision-1.md")
     assert code == 200 and body.startswith(b"DECISION: ESCALATE")
+
+
+# ---------------------------------------------------------------- the board as it is (098)
+
+
+@pytest.mark.portable
+def test_a_card_with_a_problem_never_names_close(repo) -> None:
+    """2026-11-17-23: a card with a file that won't read is under Needs you at any stage, and its
+    next step is the problem, never `/sdlc:close`, `/sdlc:ship` or the stage's own step."""
+    named = {"026-bad-shipped": "shipped", "028-bad-dropped": "dropped",
+             "030-bad-build": "build", "031-bad-test": "test", "032-bad-plan": "plan"}  # fmt: skip
+    for name, stage in named.items():
+        folder = _escalated(repo, name, stage, commit=[f"src/{name}.py"])
+        _write(folder / "decision.md", "Ship it, I think.\n")
+    cards = _cards(repo)
+    for name in named:
+        card = cards[name]
+        assert card["column"] == "needs-you" and card["problems"], card
+        assert "/sdlc:close" not in card["next"], card["next"]
+        assert card["next"] == "fix what its problems name"
+
+
+# `next_action()`'s precedence, highest first: each state's fields, and the step it names when
+# it is the highest a card holds. A card in two states names the higher one's step, whatever
+# else it holds; two states that set `stage` to different values can't overlap.
+PRECEDENCE = [
+    ("rebasing", {"rebasing": True},
+     "a rebase is stopped in its worktree: resolve its conflicts, then "
+     "sdlc.py resolve 016 --continue, or sdlc.py resolve 016 --abort"),
+    ("stage missing", {"stage": None, "problems": ["intent.md couldn't be read: conflict"]},
+     "fix intent.md's frontmatter"),
+    ("problems", {"problems": ["findings.md couldn't be read: conflict"]},
+     "fix what its problems name"),
+    ("closed", {"stage": "shipped"}, "/sdlc:close 016"),
+    ("stopped", {"stopped": {"next": "read runs/step.md, then rerun the build"}},
+     "read runs/step.md, then rerun the build"),
+    ("decision pending", {"stage": "build", "pending": ["D1"]},
+     "answer its decision in the factory's supervisor"),
+    ("approver decided", {"stage": "test", "decision": "READY"},
+     "/sdlc:ship, or /sdlc-factory:land with the others ready"),
+    ("factory building", {"stage": "build", "mode": "factory", "built": [1]},
+     "the factory is building it: wait for its decision"),
+    ("red gate", {"gate": {"current": True, "verdict": "FAIL"}},
+     "the gate is red: read build/gate.md, fix it, then sdlc.py gate 016"),
+    ("its stage's step", {}, "plan mode, then build it"),
+]  # fmt: skip
+
+
+def _in_states(*states: dict) -> dict | None:
+    """A card holding every state in `states`, or None when two set different stages."""
+    entry = {"id": "016", "tier": 1, "stage": "plan", "mode": "manual", "problems": []}
+    stages = {fields["stage"] for fields in states if "stage" in fields}
+    if len(stages) > 1:
+        return None
+    for fields in states:
+        for key, value in fields.items():
+            entry[key] = entry[key] + value if key == "problems" else value
+    return entry
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "high, low",
+    [(PRECEDENCE[i], PRECEDENCE[j]) for i in range(len(PRECEDENCE))
+     for j in range(i, len(PRECEDENCE))],
+    ids=lambda s: s[0],
+)  # fmt: skip
+def test_a_card_in_two_states_names_the_higher_ones_step(high, low) -> None:
+    """Rounds 1 and 2 of 098 each found one more pair of states `next_action()` put in the
+    wrong order: every pair that can overlap is pinned here, by the full text of its step."""
+    entry = _in_states(high[1], low[1])
+    if entry is None:
+        pytest.skip(f"{high[0]} and {low[0]} set different stages")
+    assert board.next_action(entry) == high[2]
+
+
+@pytest.mark.portable
+def test_a_decision_counts_on_the_track_only_at_its_stage(repo) -> None:
+    """Nit 2026-11-17-22: a change put back to `build` with its `decision.md` still there shows
+    the step its record names, not every step done; at `test` the decision is the run's end."""
+    folder = _run_at(repo, "review")
+    _write(folder / "decision.md", "DECISION: ESCALATE\n\nAsk them.\n")
+    assert _states(_cards(repo)["016-draft-tags"]) == TRACKS["review"]
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text(encoding="utf-8").replace("stage: build", "stage: test"),
+                      encoding="utf-8", newline="\n")  # fmt: skip
+    assert _states(_cards(repo)["016-draft-tags"]) == ["done"] * 6
+
+
+@pytest.mark.portable
+def test_board_on_port_0_prints_the_port_it_bound(repo, capsys, monkeypatch) -> None:
+    """The board half of 2026-11-17-19: the URL names the port the OS picked, never `:0`."""
+
+    def stop(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(board._Server, "serve_forever", stop)
+    assert board.cmd_board(repo, 0) == 0
+    url = json.loads(capsys.readouterr().out)["url"]
+    port = int(url.rstrip("/").rsplit(":", 1)[1])
+    assert port > 0 and url == f"http://127.0.0.1:{port}/"
+
+
+def test_a_change_being_rebased_keeps_its_card(repo) -> None:
+    """2026-11-17-30: while a rebase stops in a change's worktree its HEAD is detached; the card
+    stays, marked rebasing, its branch read from the rebase's own record, and reading it changes
+    nothing in git."""
+    name = "029-draft-rebase"
+    folder = _worktree(repo, name, 1, "plan", commit=["src/rebase.py"])
+    tree = sdlc.checkout_of(folder)
+    _write(repo / "src" / "rebase.py", "main's own\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "main moves")
+    stopped = subprocess.run(["git", "-C", str(tree), "rebase", "main"], capture_output=True,
+                             encoding="utf-8")  # fmt: skip
+    assert stopped.returncode != 0 and _git(tree, "branch", "--show-current") == ""
+    before = (_git(tree, "status", "--porcelain"), _git(tree, "rev-parse", "HEAD"))
+    card = _cards(repo)[name]
+    assert card["rebasing"] is True and card["problems"] == [], card
+    assert card["next"] == (
+        "a rebase is stopped in its worktree: resolve its conflicts, then "
+        "sdlc.py resolve 029 --continue, or sdlc.py resolve 029 --abort"
+    ), "never ship or build mid-rebase"
+    assert _cards(repo)["001-reopen-drafts"]["rebasing"] is False
+    assert name in [p.name for p in sdlc.change_dirs(repo)], "status finds it too"
+    assert (_git(tree, "status", "--porcelain"), _git(tree, "rev-parse", "HEAD")) == before
+    assert _git(tree, "branch", "--show-current") == "", "the rebase is still under way"
+    _git(tree, "rebase", "--abort")
+    assert _cards(repo)[name]["rebasing"] is False
+
+
+@pytest.mark.portable
+def test_the_rebasing_badge_is_built_as_text() -> None:
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert re.search(
+        r'c\.rebasing\s*\?\s*h\("span", \{ class: "badge rebasing" \}, "rebasing"\)', page
+    )
+
+
+def _touch_later(path: Path, text: str) -> None:
+    """Write `path` and move its mtime on, so a filesystem with coarse times still sees a change."""
+    before = path.stat().st_mtime_ns
+    path.write_text(text, encoding="utf-8", newline="\n")
+    later = max(before, path.stat().st_mtime_ns) + 2_000_000_000
+    os.utime(path, ns=(later, later))
+
+
+@pytest.mark.portable
+def test_the_running_board_serves_board_py_as_it_is_on_disk(repo, tmp_path) -> None:
+    """2026-11-17-47: a change to `board.py` reaches a board already running, with no restart;
+    a `board.py` that won't load keeps the code it had, and the state says so."""
+    scripts = tmp_path / "plugin" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("board.py", "board.html"):
+        (scripts / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    source = scripts / "board.py"
+    original = source.read_text(encoding="utf-8")
+    copy = board._load(source)
+    server = copy.serve(repo, 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/state.json"
+    try:
+        st = json.loads(_get(url)[1])
+        assert "patched" not in st and "reload_error" not in st
+        patch = (
+            "\n_unpatched = state\n\n\n"
+            "def state(root):\n    return _unpatched(root) | {'patched': True}\n"
+        )
+        _touch_later(source, original + patch)
+        st = json.loads(_get(url)[1])
+        assert st["patched"] is True and len(st["changes"]) == 4, "the edit is served"
+        _touch_later(source, original[: len(original) // 2])
+        code, body, _ = _get(url)
+        st = json.loads(body)
+        assert code == 200 and st["patched"] is True, "half a file: the old code serves on"
+        assert "board.py" in st["reload_error"]
+        assert "restart" not in st["reload_error"], "the next edit that loads is served"
+        _touch_later(source, original)
+        st = json.loads(_get(url)[1])
+        assert "patched" not in st and "reload_error" not in st
+        assert _get(url.replace("/state.json", "/"))[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.portable
+def test_a_board_that_wont_reload_says_so_on_the_page() -> None:
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert re.search(r"st\.reload_error\s*\?", page)

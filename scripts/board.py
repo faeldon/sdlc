@@ -14,10 +14,17 @@ supervisor's last reading named (`runs/step.md`), timed against the median of th
 factory runs, read from history once per base-branch tip and kept in memory. Nothing here
 writes: three GET routes, every other method refused, and `/file` serves only a file inside an
 open change's own folder.
+
+A running board serves this file as it is on disk: each request compares its mtime, and a change
+loads it afresh by path (`_Live`) and routes with the new `route()`. A file that won't load (half
+written, or broken) keeps the code the board had, and `/state.json`'s `reload_error` says so. The
+handler that checks the Host header and sends is the first one's, so `route(root, path, notice)`
+is the contract between a running server and a reloaded module.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -31,7 +38,8 @@ from urllib.parse import parse_qs, urlparse
 
 sdlc = None  # sdlc.py's own names, bound by sdlc.py right after it loads this file
 
-PAGE = Path(__file__).with_name("board.html")
+SOURCE = Path(__file__)
+PAGE = SOURCE.with_name("board.html")
 HOST = "127.0.0.1"
 # What `/state.json` carries so a second `board` knows the port is already a board's.
 MARKER = "sdlc"
@@ -87,9 +95,14 @@ def state(root: Path) -> dict:
     issues = _issue_base(home, cfg)
     now = datetime.now(UTC).timestamp()
     history = typical_times(home, trunk)
+    # A rebase detaches its worktree's HEAD; `_change_trees()` reads the branch from its record.
+    rebasing = {b for _, b in sdlc._change_trees(home)} - {b for _, b in sdlc.worktrees(home)}
     return {
         "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
-        "changes": [_entry(root, home, f, trunk, issues, now, history) for f in _on_board(root)],
+        "changes": [
+            _entry(root, home, f, trunk, issues, now, history, rebasing=f.name in rebasing)
+            for f in _on_board(root)
+        ],
     }  # fmt: skip
 
 
@@ -121,6 +134,7 @@ def _entry(
     issues: str | None,
     now: float,
     history: dict | None = None,
+    rebasing: bool = False,
 ) -> dict:
     """One change's card. A file that can't be read is a `problems` line, never a crash."""
     problems: list[str] = []
@@ -162,6 +176,7 @@ def _entry(
         "issue": f"{issues}{int(rec['id'])}" if issues else None,
         "files": read("the folder", lambda: _files(folder), []),
         "mode": "factory" if (folder / "runs").is_dir() else "manual",
+        "rebasing": rebasing,
     }  # fmt: skip
     if entry["mode"] == "manual":
         # The record a gate run by hand left (`sdlc.py gate`); a factory run's gate is its own.
@@ -376,7 +391,9 @@ def _progress(
     if entry.get("stopped") or (folder / STOPPED).is_file() and entry["stage"] == "build":
         return None
     path = folder / STEP
-    if entry.get("decision"):
+    # The approver's decision is the run's end only at the stages it belongs to, as in `column()`:
+    # a change put back to `build` is building again, whatever `decision.md` still says.
+    if entry.get("decision") and entry["stage"] in ("test", *CLOSED):
         rec = {"step": "done", "round": None, "limit": None, "reviewers": [], "since": None}
     elif path.is_file():
         rec = read_step(path.read_text(encoding="utf-8", errors="replace"))
@@ -579,10 +596,24 @@ def cost(folder: Path) -> dict | None:
 
 def next_action(entry: dict) -> str:
     """What a person runs next on the change, from its stage and tier, and for a factory run its
-    decision and ledger: the step `status` and each skill's report name."""
+    decision and ledger: the step `status` and each skill's report name. The first state a card
+    holds names it, highest first: a stopped rebase, a missing stage, any other problem, shipped
+    or dropped, a factory stop, a pending decision, the approver's decision, a factory build, a red
+    gate, then the stage's own step (`PRECEDENCE` in `tests/test_board.py` pins every pair)."""
     stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
+    # A stopped rebase comes first: until it ends, no step of the stage's applies, and its
+    # conflicted files may be what won't read. `sdlc.py resolve` finishes or undoes it.
+    if entry.get("rebasing"):
+        ident = entry["id"]
+        return (
+            "a rebase is stopped in its worktree: resolve its conflicts, then "
+            f"sdlc.py resolve {ident} --continue, or sdlc.py resolve {ident} --abort"
+        )
     if entry["problems"] and stage is None:
         return "fix intent.md's frontmatter"
+    # A problem is the card's column at any stage (`column()`), so it is the next step too.
+    if entry["problems"]:
+        return "fix what its problems name"
     if stage in CLOSED:
         return f"/sdlc:close {entry['id']}"
     if entry.get("stopped"):
@@ -643,6 +674,65 @@ def file_at(root: Path, change: str, rel: str) -> Path | None:
 # ---------------------------------------------------------------- the server
 
 
+def route(root: Path, path: str, notice: str | None = None) -> tuple[int, bytes, str]:
+    """The answer to a GET of `path`, a Host already checked: (status, body, content type).
+    `notice` is the server's word that this file changed and wouldn't load."""
+    url = urlparse(path)
+    if url.path == "/":
+        return 200, PAGE.read_bytes(), "text/html"
+    if url.path == "/state.json":
+        st = state(root) | ({"reload_error": notice} if notice else {})
+        return 200, json.dumps(st, ensure_ascii=False).encode("utf-8"), "application/json"
+    if url.path == "/file":
+        q = parse_qs(url.query)
+        found = file_at(root, q.get("change", [""])[0], q.get("path", [""])[0])
+        if found is not None:
+            return 200, found.read_bytes(), "text/plain"
+    return 404, b"not found\n", "text/plain"
+
+
+def _load(path: Path):
+    """`path` loaded as a fresh module, bound to this one's `sdlc`, as `sdlc.py` binds it."""
+    spec = importlib.util.spec_from_file_location("sdlc_board", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if not callable(getattr(mod, "route", None)):
+        raise ImportError("it defines no route()")
+    mod.sdlc = sdlc
+    return mod
+
+
+def _mtime() -> int | None:
+    try:
+        return SOURCE.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+class _Live:
+    """The `route()` a request is answered with: this module's, until `board.py` changes on disk,
+    then the changed file's, once it loads. One that won't keeps the last that did, and says why
+    until the file changes again."""
+
+    def __init__(self) -> None:
+        self.route, self.error, self.mtime = route, None, _mtime()
+        self.lock = threading.Lock()
+
+    def current(self) -> tuple:
+        with self.lock:
+            now = _mtime()
+            if now != self.mtime:
+                self.mtime = now
+                try:
+                    self.route, self.error = _load(SOURCE).route, None
+                except Exception as e:
+                    self.error = (
+                        f"{SOURCE.name} changed but won't load ({type(e).__name__}: {e}): "
+                        "the board serves the code it had until the file loads"
+                    )
+            return self.route, self.error
+
+
 class _Server(ThreadingHTTPServer):
     # Windows lets a second socket take a port another one holds when this is on; elsewhere it
     # only lets a restart take a port its last run left in TIME_WAIT.
@@ -652,24 +742,15 @@ class _Server(ThreadingHTTPServer):
 
 def _handler(root: Path, port: int) -> type[BaseHTTPRequestHandler]:
     hosts = {f"{HOST}:{port}", f"localhost:{port}"}
+    live = _Live()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            url = urlparse(self.path)
             # A page elsewhere that points its own name at 127.0.0.1 reads nothing here.
             if self.headers.get("Host") not in hosts:
                 return self._send(404, b"not found\n", "text/plain")
-            if url.path == "/":
-                return self._send(200, PAGE.read_bytes(), "text/html")
-            if url.path == "/state.json":
-                body = json.dumps(state(root), ensure_ascii=False).encode("utf-8")
-                return self._send(200, body, "application/json")
-            if url.path == "/file":
-                q = parse_qs(url.query)
-                found = file_at(root, q.get("change", [""])[0], q.get("path", [""])[0])
-                if found is not None:
-                    return self._send(200, found.read_bytes(), "text/plain")
-            return self._send(404, b"not found\n", "text/plain")
+            answer, notice = live.current()
+            return self._send(*answer(root, self.path, notice))
 
         def _refuse(self) -> None:
             self._send(405, b"the board only reads\n", "text/plain", {"Allow": "GET"})
@@ -722,6 +803,7 @@ def cmd_board(root: Path, port: int) -> int:
     url = f"http://{HOST}:{port}/"
     try:
         server = serve(root, port)
+        url = f"http://{HOST}:{server.server_address[1]}/"  # port 0's is the one the OS picked
     except OSError:
         if _is_board(port):
             print(json.dumps({"url": url, "serving": "already"}, indent=2))

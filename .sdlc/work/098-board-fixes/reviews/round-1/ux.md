@@ -1,0 +1,15 @@
+VERDICT: CHANGES
+
+- CHANGE: scripts/board.py:603: the comment says a problem is the next step "at any stage", but the code only does that for a missing stage (line 601) and a closed one (line 604). A card under Needs you with a problem at intent, spec, build or test still reads "next: /sdlc:spec", "build it, then /sdlc:ship" or "/sdlc:ship", directly under the red problem line. Make every card with `problems` say "fix what its problems name" (or the specific fix), as the comment already claims.
+- CHANGE: scripts/board.py:619-625: a card marked `rebasing` falls through to the stage's normal next step, such as "build it, then /sdlc:ship" or "/sdlc:ship", while its rebase is stopped. The person is told to ship or build in the middle of a rebase. Give a rebasing card a next line that says the rebase is stopped and what finishes it (resolve, or abort and redo), using the command the skills already name.
+
+## Notes
+
+- **Read:** both screenshots (1280x800 and 390x844, the default state only: no rebase, no problems, no stale board), `intent.md` (Tier 1, so its Approach is the spec; there is no `spec.md`), `scripts/board.html` in full, `scripts/board.py` at `next_action()`, `column()`, `route()`, `_load`/`_Live.current()`, and the `_progress()` gate at 394–396, plus `serve()` and `cmd_board()`. From `sdlc.py` and `tests/test_board.py` I read only the grep hits (`_change_trees`, `_rebase_branch`, the rebasing test). `docs/REFERENCE.md` lines 477–524 cover the board. No shell was available, so I could not run `git diff`, the tests or a server; the rebase and stale states are judged from the code and not seen on screen.
+- **States not seen:** rebasing, stale (`reload_error`), a card with problems, an empty board, and the poll-failure line. Judged from code: the rebasing badge is built as text ("rebasing"), and the stale state is text in the header plus the `down` class, so it is not colour alone. Empty columns show "—", which is a weak empty state but is pre-existing.
+- **Smaller findings:**
+  - scripts/board.py:718–721: the stale message puts a Python exception name and a restart instruction in the header. Reword it for the person as "board.py won't load (…): the board shows the code it had until the file is fixed", and drop "restart it".
+  - PREEXISTING: board.html:146: the drawer has `aria-modal` but no focus trap, so Tab can leave it while it is open. Filed for later.
+  - PREEXISTING: at 390px the columns stack in board order, so Needs you sits below every Plan and Build card and is off-screen on a phone. This change doesn't alter it; filed for later.
+  - Fine as it is: `--port 0` now prints the bound port (board.py:795); each card's flags are text, so the stage check that hides a stop or decision outside build reads the same on any colour scheme.
+- **Done well:** the board builds every new node with `textContent` and says every state in words. The rebasing card keeps its place and its id, so the person sees the change they were looking at, not a card that vanishes.

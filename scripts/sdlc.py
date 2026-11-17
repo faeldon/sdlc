@@ -853,16 +853,17 @@ def last_id_path(home: Path) -> Path:
 
 def change_dirs(root: Path) -> list[Path]:
     """Every change folder this checkout can see: its own `work/`, the main checkout's, and each
-    change worktree's own folder, `work/<branch>/`. Only that one from a worktree: it also holds
-    whatever `main` had when it was made, and those copies would read as the same change twice. A
-    name found twice counts once, the copy on its own branch winning. Skips non-conforming names."""
+    change worktree's own folder, `work/<branch>/`, one stopped mid-rebase included
+    (`_change_trees()`). Only that one from a worktree: it also holds whatever `main` had when it
+    was made, and those copies would read as the same change twice. A name found twice counts
+    once, the copy on its own branch winning. Skips non-conforming names."""
     found: dict[str, Path] = {}
     for base in (work_dir(main_root(root)), work_dir(root)):
         if base.is_dir():
             found |= {p.name: p for p in base.iterdir() if p.is_dir() and DIR_RE.match(p.name)}
-    for tree, branch in worktrees(root):
+    for tree, branch in _change_trees(root):
         own = work_dir(tree) / branch
-        if DIR_RE.match(branch) and own.is_dir():
+        if own.is_dir():
             found[branch] = own
     # By number, not by name: "1203-x" sorts before "142-y" as text.
     return sorted(found.values(), key=lambda p: (_number(p.name), p.name))

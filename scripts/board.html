@@ -70,6 +70,7 @@ main.board {
 .badge.factory { color: var(--accent); }
 .badge.gate-green { color: var(--accent); }
 .badge.gate-red { color: var(--stop); }
+.badge.rebasing { color: var(--changes); }
 .title { margin: 4px 0 6px; overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .next { margin-top: 6px; font-size: 12px; }
@@ -261,6 +262,7 @@ function card(c) {
       h("span", { class: `badge ${c.mode}` }, factory ? "factory" : "by hand"),
       c.gate && c.gate.current ? h("span", { class: c.gate.verdict === "PASS" ? "badge gate-green" : "badge gate-red" },
         c.gate.verdict === "PASS" ? "gate green" : "gate red") : null,
+      c.rebasing ? h("span", { class: "badge rebasing" }, "rebasing") : null,
       chip ? h("span", { class: "badge" }, chip) : null),
     h("div", { class: "title" }, c.title.replace(/^\d+\s*—\s*/, "") || c.slug),
     h("div", { class: "meta" }, meta),
@@ -300,9 +302,12 @@ async function poll() {
   try {
     const res = await fetch("/state.json", { cache: "no-store" });
     if (!res.ok) throw new Error(res.status);
-    render(await res.json());
-    $("status").textContent = `live · ${new Date().toLocaleTimeString()}`;
-    $("status").className = "status";
+    const st = await res.json();
+    render(st);
+    // board.py changed under the server and wouldn't load: what shows is the code it had.
+    $("status").textContent = st.reload_error ? `stale · ${st.reload_error}`
+      : `live · ${new Date().toLocaleTimeString()}`;
+    $("status").className = st.reload_error ? "status down" : "status";
   } catch (e) {
     $("status").textContent = "the board isn't answering: is `sdlc.py board` still running?";
     $("status").className = "status down";
