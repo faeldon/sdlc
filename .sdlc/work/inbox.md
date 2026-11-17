@@ -306,3 +306,184 @@ pointers into close's docstrings meets half a rule.
 
 Severity: low
 Paths: scripts/sdlc.py
+
+## [2026-11-17-30] [bug] The board drops a change while its branch is being rebased
+
+While `resolve` or a landing rebases a change, git lists its worktree as a detached `HEAD`, so the
+board can't match the worktree to its branch and the card vanishes until the rebase ends. Seen on
+2026-11-17 for 091, 090 and 095 during their landings. It should find the branch from the
+rebase's own state (`rebase-merge/head-name`) and keep the card, marked as rebasing.
+
+Severity: med
+Paths: scripts/board.py, scripts/sdlc.py
+Theme: board
+
+## [2026-11-17-31] [bug] land --close reads a modified file in the change's own folder as stray
+
+`cmd_land_close()` reads `git status --porcelain` through `_git()`, which strips its output, so
+the first line loses its leading space: ` M .sdlc/work/NNN-slug/runs/costs.jsonl` is read as
+`sdlc/work/…`, outside the change's folder, and the close is refused. It happens whenever the
+first dirty path is modified rather than new (after a landing's behaviour check appends to
+`costs.jsonl`); on 2026-11-17 it was worked around four times by staging the folder first. Parse
+with `-z`, or without stripping.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-32] [bug] A factory landing never retires the nits its change took in
+
+`/sdlc:ship` retires a nit the diff fixed, but `factory.py land` runs `sdlc.py ship` without the
+skill's nit step, and `inbox-commit` refuses to remove a nit at all (`RETIRE_REASONS["nit"]` is
+empty). So 094, which took in nit 2026-11-17-11, landed and left the nit open; it went only when
+090 shipped by hand. A landing should retire the nits the change's intent or spec names by id.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
+Theme: landing
+
+## [2026-11-17-33] [bug] land refuses a second rebase while the landing's record is uncommitted
+
+A landing writes its record (`build/land-<n>.gate.md`, `reviews/land-<n>/`, `runs/land-resolved`)
+into the change's folder uncommitted, and only `land --close` amends it into the change's commit.
+When `main` moves before the close, `land` again is refused: "has commits of its own and
+uncommitted work, so it can't rebase". On 2026-11-17 095's second landing needed the record
+amended by hand first. `land` should amend the record itself before it rebases.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-34] [bug] land-check reads a conflict resolved before the build as no landing signal, inconsistently
+
+095's branch had an inbox conflict resolved by `sdlc.py resolve` before its build
+(`conflicts.md`), and its first landing batch passed itself; the resolution its builder made while
+landing then made the next batch ask. Decide which resolutions are a signal and make `land-check`
+say so: a resolution the reviewers never saw should count, one they reviewed need not.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-35] [idea] The landing runs acceptance checks and the skills' cases behind its own yes
+
+`land-check` leaves out a change with `checks.md` or skills' cases in scope, because only a person
+may run them, so on 2026-11-17 four of ten changes (086, 089, 090, 093) were shipped and closed by
+hand. The landing already asks a question when its batch has a signal: it could show each check's
+command and the cases' scope and cost in it, and run `accept` and `run-cases` on the yes, as ship
+does, so every factory change lands one way.
+Theme: landing
+Priority: high
+Raised 2026-11-17.
+
+## [2026-11-17-36] [idea] The landing settles undone notes and assumed decisions in its question
+
+A change with undone `notes.md` items is left out of a landing, and one with assumed decisions
+lands only after someone ticks them by hand. The landing's question could propose each item's
+disposition (a seed or dropped) and each decision's confirmation, as ship's does, and write them on
+the yes. With 2026-11-17-35, no factory change would need `/sdlc:ship`.
+After: 2026-11-17-35
+Theme: landing
+Priority: high
+Raised 2026-11-17.
+
+## [2026-11-17-37] [idea] The landing follows main when it moves before the close
+
+When another session lands a change between a landing's review and its close, `land --close`
+refuses (close only fast-forwards) and someone runs `base` by hand, then gates again. The landing
+could loop back to its own rebase step and regate, stopping only on a conflict. Hit by 094 and 095
+on 2026-11-17.
+Theme: landing
+Raised 2026-11-17.
+
+## [2026-11-17-38] [idea] A fix made at landing goes back through review
+
+When the person asks for a fix after the approver (088's plan hint, 094's AGENTS.md line on
+2026-11-17), the supervisor makes it by hand and the change lands `by=person` with no reviewer
+having read the fix. The landing could hand such a fix to the change's builder and its reviewers,
+or at least record on the commit that a hand fix landed unreviewed.
+Theme: landing
+Raised 2026-11-17.
+
+## [2026-11-17-39] [idea] The landing writes How to recover for an irreversible path
+
+`/sdlc:ship` adds `How to recover:` to a commit that touches `[review] irreversible`, but a factory
+landing never runs ship's recovery step, so 092's `templates/direction.md` landed without one. The
+landing should compose it, or leave such a change to ship.
+Theme: landing
+Raised 2026-11-17.
+
+## [2026-11-17-40] [idea] factory.py start brings the change's branch up to date first
+
+Every run on 2026-11-17 started from a worktree branched hours earlier, so the supervisor ran
+`sdlc.py base` (or `resolve`) by hand on each before building, or the builder would have built on
+old code. `start` could report how far behind the change is and the build skill run `base` before
+the first agent.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-41] [idea] Open changes mark their seeds without editing the register
+
+Intent tags a change's seed `[building]` by editing the register on the change's branch, so every
+inbox commit on `main` while the change is open conflicts with it at rebase: 089, 090, 092, 094
+and 095 all did on 2026-11-17. Status and the board could derive "being built" from open changes'
+`idea:` lines instead, leaving the register untouched until ship deletes the seed.
+Theme: inbox
+Raised 2026-11-17.
+
+## [2026-11-17-42] [idea] The spec-writer's draft is written to a file
+
+`factory.py agent --task spec` returns the draft only in its reply, so the supervisor cuts
+`spec.md` out of the text; a draft holding its own code fences was cut short twice on 2026-11-17.
+The command could write the draft to the change's folder (say `runs/spec-draft.md`), which Step 3
+copies after the yes.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-43] [idea] Limit how many factory gates run at once
+
+With five runs in parallel on 2026-11-17, a gate that takes 40 s alone took up to 200 s, each
+`pytest -n auto` fighting the others for every core. A small `factory.gate_jobs` limit, or a lock
+the gate waits on, would keep each one near its usual time.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-44] [idea] decisions flags a default that contradicts an earlier one
+
+086's D2 (no badge on a shipped escalated card) and D4 (keep `was ESCALATE`) contradicted each
+other, and only the approver noticed. `factory.py decisions` could ask a later default whether it
+replaces an earlier one, and mark the earlier one superseded in the ledger.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-45] [idea] A Tier 2 at the light depth gets the test reviewer too
+
+At the light depth only the code reviewer runs, so 092's and 095's tests were never read
+requirement by requirement, and both approvers said so. A Tier 2's spec names a test per
+requirement; the test reviewer could join its light rounds.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-46] [idea] The UI reviewers see the cards a change adds
+
+No screenshot on 2026-11-17 showed 088's step track, 086's `was ESCALATE` or 091's gate badge: the
+dev server served this repo's board, whose changes had none of those states, so the ui and ux
+reviewers judged them from code alone. `[ui]` could name fixture data the server starts with.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-47] [idea] The board serves the code it was built from
+
+`sdlc.py board` loads `board.py` once, so after a change to it lands the running server shows the
+old behaviour (091 sat under Needs you until a restart picked up 086). It could reload the module
+when the file changes, or say on the page that it's stale.
+Theme: board
+Raised 2026-11-17.
+
+## [2026-11-17-48] [idea] check --strict stays quiet about a plan a running build is writing
+
+`check --strict` reports "plan.md is still the template at stage: build" for a factory change
+whose builder is writing that plan right now. It could leave out a change with a live run
+(`runs/step.md` naming `build` for round 1).
+Theme: factory
+Raised 2026-11-17.
