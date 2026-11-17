@@ -408,6 +408,49 @@ def test_an_unreadable_stop_record_is_a_stop_as_in_status(repo) -> None:
 
 
 @pytest.mark.portable
+def test_the_stop_record_says_why_and_reads_as_before(tmp_path) -> None:
+    """120 (2026-11-17-82): the record's body holds the longer sentence, for the drawer, and the
+    fields `status` and the card read are the short `NEXT:` and the problems, as before."""
+    for way in factory.WAYS:
+        text = factory.stop_text("013-draft-escapes", way, ["it broke"])
+        why = factory.WAYS_WHY[way].format(id="013")
+        assert why in text.splitlines(), way
+        for regex in (factory.STOPPED_RE, factory.NEXT_RE, factory.PROBLEM_RE):
+            assert not regex.match(why), (way, regex.pattern)
+        _write(tmp_path / factory.STOPPED, text)
+        assert sdlc.factory_stop(tmp_path) == {
+            "way": way, "next": factory.WAYS[way].format(id="013"), "problems": ["it broke"]
+        }  # fmt: skip
+
+
+@pytest.mark.portable
+def test_a_long_next_step_wraps_inside_its_card() -> None:
+    """120 (2026-11-17-81): a long unbroken token in `next:` breaks inside the card at any width,
+    as the title, the needs line and the flags already do."""
+    css, _ = _page_parts()
+    rule = re.search(r"\.next code \{([^}]*)\}", css)
+    assert rule and "overflow-wrap: anywhere" in rule.group(1), rule
+
+
+@pytest.mark.portable
+def test_a_stop_hides_the_step_track_as_it_always_has(repo) -> None:
+    """120 (2026-11-17-83): `_progress()`'s stop test, parenthesised, reads as before: a stop
+    `status` read hides the track at any stage, a record on disk only at `build`."""
+    folder = _run_at(repo, "build")
+
+    def track(stage: str, stopped: dict | None) -> dict | None:
+        entry = {"stage": stage, "tier": 2, "built": [], "decision": None, "stopped": stopped}
+        return board._progress(entry, folder, [], {}, board._since("2026-11-17T10:00:00Z") + 60)
+
+    assert track("build", None) is not None
+    assert track("build", {"way": "rerun"}) is None
+    assert track("test", {"way": "rerun"}) is None
+    _write(folder / factory.STOPPED, factory.stop_text(folder.name, "rerun", ["it broke"]))
+    assert track("build", None) is None
+    assert track("test", None) is not None, "a record left at another stage is no stop"
+
+
+@pytest.mark.portable
 def test_a_stop_record_counts_only_at_build(repo) -> None:
     """R8: a run shipped by hand keeps its record in history, and the board reads past it."""
     _stopped_run(repo, "013-draft-escapes", "design")
@@ -1288,6 +1331,20 @@ def test_a_board_that_wont_reload_says_so_on_the_page() -> None:
 FIXTURE = ROOT / "tests" / "fixtures" / "board"
 
 
+@pytest.mark.portable
+def test_the_board_fixture_stops_as_the_factory_writes() -> None:
+    """120 (decision-1): the shots are rendered from the fixture, so each stop record in it is
+    exactly what `stop_text()` writes now for its way and problems, never an older wording."""
+    records = sorted((FIXTURE / "changes").glob(f"*/{factory.STOPPED}"))
+    assert records, "the fixture holds a stopped run"
+    for record in records:
+        folder = record.parent.parent
+        stop = sdlc.factory_stop(folder)
+        assert stop, record
+        want = factory.stop_text(folder.name, stop["way"], stop["problems"])
+        assert record.read_text(encoding="utf-8") == want, folder.name
+
+
 @pytest.mark.skipif(
     not all(shutil.which(tool) for tool in ("sh", "git", "uv")), reason="needs sh, git and uv"
 )
@@ -1430,7 +1487,7 @@ def test_status_ends_with_what_needs_me(repo, monkeypatch, capsys) -> None:
     tail = out.split("■ What needs me\n", 1)[1].splitlines()
     assert tail == [
         "    004  decide D1",
-        "    013  stopped: rerun",
+        "    013  stopped: fix its cause and rerun",
         "    041  decide D3, confirm 2 defaults",
     ], tail
     assert "  · stopped, touched" in out and "→ " in out, "the stop's own lines stay"

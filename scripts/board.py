@@ -392,7 +392,7 @@ def _progress(
     hint, from the supervisor's last reading (`runs/step.md`) and the run's files: None for a
     stopped run, a record that won't read, or a run with neither a record nor a first build under
     way (`runs/builder.sessions`, no builder report yet)."""
-    if entry.get("stopped") or (folder / STOPPED).is_file() and entry["stage"] == "build":
+    if entry.get("stopped") or ((folder / STOPPED).is_file() and entry["stage"] == "build"):
         return None
     path = folder / STEP
     # The approver's decision is the run's end only at the stages it belongs to, as in `column()`:

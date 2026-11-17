@@ -448,6 +448,22 @@ def test_a_problem_spanning_lines_is_one_line_of_the_record() -> None:
 
 
 @pytest.mark.portable
+def test_each_way_on_fits_two_lines_at_phone_width() -> None:
+    """120 (2026-11-17-82): a stop's `NEXT:` is the command and a few words, two lines at most of
+    a 390px card's 12px monospace, and still names the command that moves the run on; the longer
+    sentence is `WAYS_WHY`'s, in the record's body."""
+    assert set(factory.WAYS) == set(factory.WAYS_WHY) == {"ship", "mend", "rerun"}
+    for way, text in factory.WAYS.items():
+        line = text.format(id="008")
+        assert len(line) <= 90, (way, len(line))
+        assert "/sdlc:ship 008" in line, way
+        assert way == "ship" or "/sdlc-factory:build 008" in line, way
+        assert len(line) < len(factory.WAYS_WHY[way].format(id="008")), way
+        # Round 1's ux: the person reads both, so neither says the factory's word for asking again.
+        assert "mend" not in line and "mend" not in factory.WAYS_WHY[way], way
+
+
+@pytest.mark.portable
 def test_verdicts_alone_writes_nothing(tmp_path, capsys) -> None:
     """R3: without the flag the folder is left byte for byte, a record in it included."""
     root = _change(tmp_path)

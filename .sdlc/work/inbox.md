@@ -188,30 +188,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-81] [idea] Wrap long tokens in a card's next step
-
-Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: `scripts/board.html:82`: `.next code` has no `overflow-wrap`, so a long unbroken token in a next step could push past a narrow card. None appears in these shots, so this is for later, not a change.
-See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-82] [idea] Shorten the factory's stop NEXT: wording for phone-width cards
-
-Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: `scripts/board.html:292`: a stop's `next:` is a long run-on command in monospace (006's "rerun /sdlc-factory:build 006, whose one mend asks again…"), and it wraps badly at 390px. The text comes from the factory's stop record, which this change doesn't touch.
-See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-83] [idea] Parenthesise the stop test in board.py's _progress()
-
-Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: scripts/board.py:393: `if entry.get("stopped") or (folder / STOPPED).is_file() and entry["stage"] == "build":` mixes `or` and `and` with no parentheses. The `and` binds first, so it reads as intended, but it is easy to misread. This line is in `_progress()`, which this change doesn't touch. Parenthesise it when someone next edits `_progress()`.
-See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-84] [idea] Say "stopped: mend" in plain words on the needs-you line
-
-Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: scripts/sdlc.py:4108: a stop waiting on the person reads `needs you: stopped: mend`, and `mend` is the factory's word for a re-run of the reviewer, not something a person knows. The card's `next:` line spells out the step, so the person can still act, but the label is not plain.
-See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-87] [idea] Retro proposes a pruning pass over the test suite
 
 Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, at ship: file the suite-pruning pass as a seed through `/sdlc:idea` (`inbox-commit`, on the base branch, never this branch), carrying 2026-11-12-2's third bullet: nothing looks at the tests already in the suite again (one whose code was rewritten, one a newer test repeats, one that passes for the wrong reason, the slowest). Needs per-test run times and a test-to-code map no host records today (spec, *Alternatives rejected*).

@@ -493,8 +493,9 @@ of `quiet`, with each problem on a `⚠` line and the step that moves it on, shi
 
 `status` ends with `■ What needs me`: one line per open change waiting on the person, saying what
 it waits for, or `nothing`. The texts are the board's (below), read by the same rules: `fix:` and
-each problem, at any stage; at `build`, `stopped: <way>` (`rerun`, `mend`, `ship`, or `read
-runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
+each problem, at any stage; at `build`, a stop's way on in plain words (`stopped: fix its cause and
+rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's commit`, or `stopped:
+read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
 decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
 approach` (its `decision.md` holds that section) and, with no decision line at all in its ledger,
 `read the escalation`; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written

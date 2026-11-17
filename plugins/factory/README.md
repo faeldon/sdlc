@@ -256,8 +256,9 @@ its own folder, fixture copy and server, so a round's two start together.
   runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role
                                 and model
   runs/stopped.md               while the run is stopped: STOPPED: ship, mend or rerun, the NEXT:
-                                step, and each - PROBLEM: as verdicts worded it; removed by the
-                                first reading that finds the cause gone
+                                step in a few words, a longer sentence saying why, and each
+                                - PROBLEM: as verdicts worded it; removed by the first reading
+                                that finds the cause gone
 ```
 
 **What a run cost, while it runs.** Every agent run's result reports its cost and tokens, and

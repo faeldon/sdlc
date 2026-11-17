@@ -2641,8 +2641,12 @@ def test_needs_of_reads_nothing() -> None:
 def test_a_stop_needs_its_way_on() -> None:
     """R2: at `build` a stop needs its way on; a record that won't read, to be read; elsewhere
     nothing."""
-    for way in ("rerun", "mend", "ship"):
-        assert sdlc.needs_of(_rec(stopped={"way": way, "next": "x"})) == [f"stopped: {way}"]
+    for way, need in (
+        ("rerun", "stopped: fix its cause and rerun"),
+        ("mend", "stopped: rerun to ask an agent again"),
+        ("ship", "stopped: review an agent's commit"),
+    ):
+        assert sdlc.needs_of(_rec(stopped={"way": way, "next": "x"})) == [need]
     assert sdlc.needs_of(_rec(stopped={"way": None, "next": "x"})) == [
         "stopped: read runs/stopped.md"
     ]
@@ -2651,10 +2655,20 @@ def test_a_stop_needs_its_way_on() -> None:
 
 
 @pytest.mark.portable
+def test_a_stop_s_need_is_in_plain_words() -> None:
+    """120 (2026-11-17-84): a stop's need never says the factory's own word for a way, and holds
+    no comma, since `status` joins a change's needs with one."""
+    for way in ("rerun", "mend", "ship"):
+        [need] = sdlc.needs_of(_rec(stopped={"way": way, "next": "x"}))
+        assert need.startswith("stopped: ") and "," not in need, need
+        assert "mend" not in need, need
+
+
+@pytest.mark.portable
 def test_a_blocking_decision_needs_its_id() -> None:
     """R3: one `decide D<n>` per unticked blocking decision, in ledger order, after the stop."""
     rec = _rec(stopped={"way": "rerun"}, pending=_d("D3", "D1"), assumed=_d("D2"))
-    assert sdlc.needs_of(rec) == ["stopped: rerun", "decide D3", "decide D1"]
+    assert sdlc.needs_of(rec) == ["stopped: fix its cause and rerun", "decide D3", "decide D1"]
     assert sdlc.needs_of(_rec(stage="test", pending=_d("D1"))) == [], "no ESCALATE: nothing"
     assert sdlc.needs_of(_rec(stage="test", decision="READY", pending=_d("D1"))) == []
 

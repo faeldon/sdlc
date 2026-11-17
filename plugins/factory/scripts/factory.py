@@ -1354,9 +1354,11 @@ def cmd_decisions(root: Path, ident: str) -> int:
 
 
 def stop_text(change: str, way: str, problems: list[str]) -> str:
-    """`runs/stopped.md`'s text: the way on, its sentence, and each problem on a line of its own."""
+    """`runs/stopped.md`'s text: the way on, its short sentence, the longer one (`WAYS_WHY`), and
+    each problem on a line of its own."""
     ident = change.split("-", 1)[0]
     lines = [f"STOPPED: {way}", f"NEXT: {WAYS[way].format(id=ident)}", ""]
+    lines += [WAYS_WHY[way].format(id=ident), ""]
     lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
     return "\n".join(lines) + "\n"
 
@@ -2108,16 +2110,26 @@ AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
 # decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
 PAUSES = ("decide", "upgrade", "spec")
-# What moves a stopped run on, by its way: the record's `NEXT:` line.
+# What moves a stopped run on, by its way: the record's `NEXT:` line, the command and a few words,
+# so it reads in two lines of a card at phone width (the board's `next:`, `status`'s `→` line).
 WAYS = {
-    "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",
+    "ship": "read the commit, then /sdlc:ship {id}",
+    "mend": "rerun /sdlc-factory:build {id}, or /sdlc:ship {id}",
+    "rerun": "fix its cause, then /sdlc-factory:build {id}, or /sdlc:ship {id}",
+}
+# The longer sentence under it, in the record's body, which the board's drawer shows. No reader
+# parses it: it matches none of `STOPPED_RE`, `NEXT_RE` or `PROBLEM_RE`.
+WAYS_WHY = {
+    "ship": "An agent committed, which no agent may: read the commit, then ship it by hand with"
+    " /sdlc:ship {id}.",
     "mend": (
-        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence,"
-        " or an answer in its shape on the reply's first line; if that reply still lacks it, ship"
-        " it by hand with /sdlc:ship {id}"
+        "A reply lacked its ## Evidence, or held its answer after a preamble. Rerunning"
+        " /sdlc-factory:build {id} asks an agent again, once, for the reply in its shape; if that"
+        " reply still lacks it, ship it by hand with /sdlc:ship {id}."
     ),
     "rerun": (
-        "fix its cause, then /sdlc-factory:build {id}, or ship it by hand with /sdlc:ship {id}"
+        "Fix the cause the problems below name, then rerun /sdlc-factory:build {id}, or ship it by"
+        " hand with /sdlc:ship {id}."
     ),
 }
 # The run's own token counts, as `runs/costs.jsonl` names them, from the result's `usage`.

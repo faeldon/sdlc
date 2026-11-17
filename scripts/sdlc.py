@@ -4206,6 +4206,13 @@ FACTORY_STOPPED = Path("runs") / "stopped.md"
 FACTORY_STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
 FACTORY_NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 FACTORY_PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+# What a stop needs from the person, by its way, in their words, not the factory's: an imperative
+# like every other need, with no comma, since `status` joins a change's needs with one.
+FACTORY_STOP_NEEDS = {
+    "ship": "review an agent's commit",
+    "mend": "rerun to ask an agent again",
+    "rerun": "fix its cause and rerun",
+}
 # The step a run's last `verdicts --record` read, and the longest an agent session can run: what
 # `factory_first_build()` reads to tell a builder writing `plan.md` right now from a stale run.
 FACTORY_STEP = Path("runs") / "step.md"
@@ -4342,8 +4349,8 @@ def needs_of(rec: dict) -> list[str]:
     pending = [f"decide {d['id']}" for d in rec.get("pending") or []]
     if stage == "build":
         if stop := rec.get("stopped"):
-            way = stop.get("way") or f"read {FACTORY_STOPPED.as_posix()}"
-            needs.append(f"stopped: {way}")
+            way = FACTORY_STOP_NEEDS.get(stop.get("way") or "")
+            needs.append(f"stopped: {way or f'read {FACTORY_STOPPED.as_posix()}'}")
         needs += pending
     elif stage == "test" and rec.get("decision") == "ESCALATE":
         needs += pending
