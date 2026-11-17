@@ -1515,10 +1515,19 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     out["change"] = folder.name
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     impact = read_impact(folder)
-    if meta.get("stage") not in ("test", "shipped") or read_decision(folder)[0] is None:
+    decision = read_decision(folder)[0]
+    if meta.get("stage") not in ("test", "shipped") or decision is None:
         return emit(
             {**out, "refusals": [f"{folder.name} isn't ready: stage test with a decision"]}, 1
         )
+    # The gate's rule is the script's, never only the skill's: a change only a person can ship is
+    # refused whoever passed the gate, and `auto` is refused while any risk signal stands.
+    cfg, _ = load_config(root)
+    signals, excluded = land_signals(folder, root, decision, cfg)
+    if excluded:
+        return emit({**out, "refusals": [f"ship it by hand: {'; '.join(excluded)}"]}, 1)
+    if by == "auto" and signals:
+        return emit({**out, "refusals": [f"the gate is the person's: {'; '.join(signals)}"]}, 1)
     if meta.get("stage") == "test":
         if impact is None or not _set_impact(folder / "intent.md", impact):
             return emit({**out, "refusals": ["no impact to set: decision.md has no - IMPACT:"]}, 1)

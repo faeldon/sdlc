@@ -4,7 +4,8 @@ A companion to the `sdlc` plugin. `sdlc` on its own is **manual mode**: a person
 stage of a change. The factory doesn't replace that process; it runs on it. Manual mode is its
 deterministic spine, and the factory hands the judgment in it (a change's **spec, plan, build and
 review**) to agents, while every stage and check around them stays the code a person runs by hand,
-and ship and close stay the person's. Install it in the repos where you want that; leave it out
+and ship and close stay `sdlc`'s own code, run by the person or, for a batch, by
+`/sdlc-factory:land`. Install it in the repos where you want that; leave it out
 where you don't. A repo without it runs `sdlc` exactly as before, and a repo with it can still
 build any change by hand.
 
@@ -14,7 +15,7 @@ claude plugin install sdlc-factory@sdlc      # needs sdlc, which it depends on
 
 ## Where it sits
 
-Inside the change loop, between a person's intent and a person's ship. Nothing before or after
+Inside the change loop, between a person's intent and the change's landing. Nothing before or after
 changes, and the release and retrospective loops never see the difference: a change the agents
 built is a change.
 
@@ -29,7 +30,9 @@ What stays deterministic, and the person's, is manual mode's:
 - **The gates.** The supervisor starts nothing before its one WAIT (the spec and the run, or
   `/sdlc-factory:spec`'s for a spec alone), and the run leaves everything uncommitted.
   `/sdlc:ship` reviews it as it would any change, with its own checks, its WAIT and its one
-  commit, and `/sdlc:close` lands it.
+  commit, and `/sdlc:close` lands it. Or `/sdlc-factory:land` runs ship's and close's own code for
+  a batch of ready changes, behind one gate that passes itself only when no change in it carries
+  a risk signal, the factory's rounds standing in for ship's review.
 - **The measuring.** Close counts a factory change's rework from the same trailers as one built
   by hand.
 

@@ -198,35 +198,6 @@ Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/note
 Theme: setup
 Priority: low
 
-## [2026-11-10-1] [building] Factory gates that pass themselves when nothing is risky
-
-Building in .sdlc/work/072-factory-land/.
-
-The factory is meant to be fully automated development that raises only high-risk decisions to
-the person. Build already runs that way (one WAIT, then unattended, with blocking decisions and
-ESCALATE raised), but intent, spec, ship and close still stop for a yes every time, and skills
-carry `disable-model-invocation: true`, so only something like `factory.py` could run the loop.
-
-Let a gate pass itself only when every risk signal the script already reads is clear: no
-`[review] sensitive` or `irreversible` path in the diff, impact below `major`, no contract
-touched, no open blocking decision, no ESCALATE, no Important finding from the fresh reviewer, the
-gate green. Any signal stops it, with the reason. Staged:
-
-1. After M8: one factory-built change closed here, its numbers beside the manual medians.
-2. Ship passes itself on a clear diff. The reply is recorded as its own kind (`reply=auto`), never
-   as the person's approve, so retro's stops and review counts stay true (G3). `checks.md` still
-   needs a person for `accept`, or a factory change carries none.
-3. Close stays the person's, or at least its push: in factory mode `push = []`, and changes wait
-   for one `/sdlc:publish` the person approves as a batch.
-4. Intent stays the person's: a queue (2026-10-24-2) takes only seeds the person marked ready.
-
-Risks it has to answer: agents reviewing agents (the fresh reviewer's blind spots match the
-builder's); close's push is the least reversible step; issue text filed from the public reaching
-an unattended build that lands and pushes (prompt injection); unattended token spend, capped per
-run today, not per queue.
-Theme: factory
-Raised 2026-11-10.
-
 ## [2026-11-10-2] [idea] Cover the tool prompts a default-mode host's skills meet
 
 What 2026-10-26-5 first set out to do, left once 047 found no prompt recorded here
@@ -374,3 +345,14 @@ no price table in the plugin. It is the API-equivalent figure, so on a subscript
 the spend goes, not a bill. Close's measuring stays the record history keeps.
 Theme: factory
 Raised 2026-11-17.
+
+
+## [2026-11-17-10] [idea] Try the landing on a real factory batch
+
+`/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two
+ready changes from a real supervised run (seed 2026-11-17-7) landed from a fresh session in the
+main checkout, is the only check of the marketplace cache lookup of sdlc's script, of the builder
+resolving a real conflict and the reviewers checking it in headless sessions, and of close's push
+from a subprocess. See .sdlc/work/072-factory-land/notes.md in 072's commit.
+After: 2026-11-17-7
+Theme: factory

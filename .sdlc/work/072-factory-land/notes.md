@@ -31,8 +31,8 @@
 
 ## Not verified yet
 
-- [ ] A real landing (paid): two ready factory changes from a real supervised run (seed
+- [x] A real landing (paid): two ready factory changes from a real supervised run (seed
   2026-11-17-7), `/sdlc-factory:land` from a fresh session in the main checkout. It is the only
   check of the cache lookup (`<cache>/<marketplace>/sdlc/<version>/`, inferred from the clone-read
   layout the docs describe), of the builder resolving a real conflict and the reviewers checking
-  it in headless sessions, and of `close`'s push from a subprocess.
+  it in headless sessions, and of `close`'s push from a subprocess. → seed: 2026-11-17-10

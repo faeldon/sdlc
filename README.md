@@ -165,8 +165,8 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   spine: it hands a change's spec, build and review to agents working in rounds, while the stages,
   checks, review depth, ship and close stay the ones a change built by hand meets. One approval per
   change starts a run, under a supervisor (your own session) that takes several changes at once
-  and tells you each one's ready to ship; you ship them, in your order, and nothing an agent does
-  is committed. See
+  and tells you each one's ready to ship; you land them, one at a time with `/sdlc:ship` or as a
+  batch with `/sdlc-factory:land`, and nothing an agent does is committed. See
   [`plugins/factory/README.md`](plugins/factory/README.md).
 
 ## Updating

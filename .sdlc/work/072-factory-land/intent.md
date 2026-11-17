@@ -2,10 +2,11 @@
 id: 072
 slug: factory-land
 tier: 2
-impact:
-stage: build
+impact: minor
+stage: shipped
 created: 2026-11-17
 updated: 2026-11-17
+shipped: 2026-11-17
 idea: 2026-11-10-1
 depends_on:
 serves: [O6, O3]

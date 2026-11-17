@@ -219,3 +219,25 @@ def test_a_change_with_acceptance_checks_or_undone_items_is_shipped_by_hand(
     assert batch["batch"] == [] and batch["clear"] is False
     why = batch["excluded"][0]["excluded"]
     assert any("undone" in w for w in why) and any("acceptance checks" in w for w in why)
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert code == 1 and out["refusals"][0].startswith("ship it by hand"), "whoever passed the gate"
+    assert "stage: test" in (folder / "intent.md").read_text(encoding="utf-8")
+
+
+@needs_uv
+def test_a_risky_change_is_never_landed_by_auto_whatever_the_skill_says(tmp_path, capsys) -> None:
+    """The gate's rule is the script's: `land --by auto` on a change with a risk signal (here the
+    approver escalated) is refused before anything is written, and the person's yes lands it."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "risky", "risky's one")
+    folder = tree / ".sdlc" / "work" / tree.name
+    (folder / "decision.md").write_text(
+        "DECISION: ESCALATE\n\nA call for the person.\n\n- IMPACT: minor — a test change\n",
+        encoding="utf-8",
+    )
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert code == 1 and "the approver escalated" in out["refusals"][0]
+    assert _git(tree, "log", "-1", "--format=%s") == "init", "nothing committed"
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    assert "Sdlc-Landed: by=person" in _git(tree, "log", "-1", "--format=%B")
