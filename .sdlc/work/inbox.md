@@ -325,3 +325,14 @@ stop only on a second such reply. To see it: a reviewer reply whose verdict isn'
 Severity: med
 Paths: plugins/factory/scripts/factory.py, plugins/factory/skills/build/SKILL.md
 Theme: factory
+
+## [2026-11-17-19] [idea] Port 0 for the factory's UI review server, and the board's printed URL
+
+089 closed the pick-then-bind window in the board's tests by serving on port 0. Two places keep
+a cousin of it: `factory.py`'s `_free_port()` (about line 2497) picks a port for the UI review's
+dev server and releases it before the outside `[ui] serve` command binds it, so a parallel run
+could take it between; and `sdlc.py board --port 0` serves on the port the OS picks but prints
+`http://127.0.0.1:0/`. The first needs a design of its own (a retry, or a serve command that
+reports its port); the second should print the bound port.
+Theme: factory
+Raised 2026-11-17.
