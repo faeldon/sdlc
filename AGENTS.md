@@ -215,8 +215,11 @@ branch.
 loads by path and binds as it does `retro.py`, but only in `board`'s dispatch (`_load_board()`), so
 no other command pays for it. It serves `scripts/board.html` and a `/state.json` rebuilt each
 request from `status`'s own readers, on `127.0.0.1` only: three GETs, every other method a 405, a
-request naming another host a 404, and `/file` only inside an open change's own folder. It writes
-nothing, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
+request naming another host a 404, and `/file` only inside the folder of a change it shows: every
+open one, and a shipped or dropped one while `ready_to_close()` finds its worktree, under Ready to
+close. It writes nothing, `stage:` included: a change built by hand moves across the columns by what
+its branch and worktree touched outside `.sdlc/work/` and whether ship's review ran (`_seen()`),
+never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
 factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`) it reads with
 copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the core still never imports or
 runs the factory. The page builds every node with `textContent`, never from a string of HTML.

@@ -166,6 +166,77 @@ def test_a_blocking_decision_or_an_unreadable_reply_needs_the_person(repo) -> No
     assert four["next"] == "answer its decision in the factory's supervisor"
 
 
+def _worktree(
+    root: Path, name: str, tier: int, stage: str, commit=(), dirty=(), factory=False
+) -> Path:
+    """A change in a worktree of its own, as `new --worktree` makes one, its intent committed on
+    its branch, then a commit holding `commit` and uncommitted `dirty` paths."""
+    tree = root / ".claude" / "worktrees" / name
+    _git(root, "worktree", "add", "-q", "-b", name, str(tree), "main")
+    folder = _change(tree, name, tier, stage, name.split("-", 1)[1])
+    if factory:
+        _write(folder / "runs" / "builder.sessions", "s-9\n")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", f"wip {name[:3]}")
+    for rel in commit:
+        _write(tree / rel, "changed\n")
+    if commit:
+        _git(tree, "add", "-A")
+        _git(tree, "commit", "-q", "-m", "build")
+    for rel in dirty:
+        _write(tree / rel, "edited\n")
+    return folder
+
+
+@pytest.mark.portable
+def test_a_change_built_by_hand_moves_on_as_its_branch_and_review_do(repo) -> None:
+    """Nothing moves `stage:` on a change built by hand between `plan` and `shipped` (080), so the
+    board reads how far it has got from what it touched and whether ship's review has run."""
+    _worktree(repo, "006-draft-tags", 1, "plan", commit=["src/tags.py"])
+    _worktree(repo, "007-draft-notes", 1, "plan", commit=[".sdlc/work/inbox.md", ".sdlc/last-id"])
+    _worktree(repo, "008-draft-sort", 1, "plan", dirty=["src/sort.py"])
+    folder = _worktree(repo, "009-draft-share", 1, "plan", commit=["src/share.py"])
+    _write(folder / "findings.md", "# Findings\n")
+    _worktree(repo, "010-draft-sync", 2, "plan", commit=["src/sync.py"])
+    _worktree(repo, "011-draft-lock", 1, "build", commit=["src/lock.py"], factory=True)
+    cards = _cards(repo)
+    seen = {n: (c["column"], c["seen"]) for n, c in cards.items() if n >= "006"}
+    assert seen == {
+        "006-draft-tags": ("build", "build"),
+        "007-draft-notes": ("plan", None),  # only its folder, the register and the counter
+        "008-draft-sort": ("build", "build"),  # uncommitted, in its own worktree
+        "009-draft-share": ("test", "test"),
+        "010-draft-sync": ("plan", None),  # a Tier 2 with no spec yet
+        "011-draft-lock": ("build", None),  # the factory moves its own stage line
+    }
+    assert cards["006-draft-tags"]["next"] == "build it, then /sdlc:ship"
+    assert cards["009-draft-share"]["next"] == "/sdlc:ship"
+    assert cards["001-reopen-drafts"]["column"] == "plan", "no branch: nothing to read"
+    assert cards["006-draft-tags"]["stage"] == "plan", (
+        "the board reads its stage line, never writes it"
+    )
+
+
+@pytest.mark.portable
+def test_a_shipped_change_waits_on_close_until_its_worktree_goes(served) -> None:
+    root, url, _ = served
+    _worktree(root, "012-draft-pins", 1, "shipped", commit=["src/pins.py"])
+    card = _cards(root)["012-draft-pins"]
+    assert (card["column"], card["next"]) == ("close", "/sdlc:close 012")
+    assert "005-old-thing" not in _cards(root), "shipped with no worktree: closed already"
+    query = urllib.parse.urlencode({"change": "012-draft-pins", "path": "intent.md"})
+    assert _get(f"{url}/file?{query}")[0] == 200
+    _git(
+        root,
+        "worktree",
+        "remove",
+        "--force",
+        str(root / ".claude" / "worktrees" / "012-draft-pins"),
+    )
+    assert "012-draft-pins" not in _cards(root)
+    assert _get(f"{url}/file?{query}")[0] == 404
+
+
 @pytest.mark.portable
 def test_the_cost_is_summed_as_the_factory_sums_it(repo) -> None:
     folder = repo / ".sdlc" / "work" / "003-draft-export"

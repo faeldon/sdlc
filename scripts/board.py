@@ -47,17 +47,24 @@ COSTS = Path("runs") / "costs.jsonl"
 
 
 def state(root: Path) -> dict:
-    """Every open change this checkout can see, as `status` finds them, each a card's worth."""
+    """Every open change this checkout can see, as `status` finds them, each a card's worth, and
+    each shipped or dropped one still waiting on `/sdlc:close`."""
     home = sdlc.main_root(root)
     cfg = sdlc.load_config(home)[0]
     trunk = cfg["git"]["base"]
     issues = _issue_base(home, cfg)
     now = datetime.now(UTC).timestamp()
-    changes = [_entry(root, home, f, trunk, issues, now) for f in sdlc.change_dirs(root)]
     return {
         "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
-        "changes": [c for c in changes if c["stage"] not in CLOSED],
+        "changes": [_entry(root, home, f, trunk, issues, now) for f in _on_board(root)],
     }  # fmt: skip
+
+
+def _on_board(root: Path) -> list[Path]:
+    """The folders the board shows: every open change's, and a shipped or dropped one's while its
+    worktree stands, which is what `status` lists as ready to close."""
+    closing = {r["branch"] for r in sdlc.ready_to_close(root)}
+    return [f for f in sdlc.change_dirs(root) if sdlc._stage(f) not in CLOSED or f.name in closing]
 
 
 def _issue_base(home: Path, cfg: dict) -> str | None:
@@ -119,10 +126,40 @@ def _entry(
     }  # fmt: skip
     if entry["mode"] == "factory":
         entry.update(_factory(folder, problems))
+    entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
     entry["problems"] = problems
     entry["next"] = next_action(entry)
     entry["column"] = column(entry)
     return entry
+
+
+def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | None:
+    """How far a change built by hand has got, past what its `stage:` says: nothing moves that line
+    between `plan` (or a Tier 2's `design`) and `shipped`, so the board reads what `status` does.
+    `test` once ship's review has written `findings.md`, `build` once the change touches a path
+    outside the change folders and the plugin's own state, in its branch's commits or, in a
+    worktree of its own, its uncommitted edits. None when neither says more, and always for a
+    factory run, whose stage line the factory moves itself."""
+    stage = entry["stage"]
+    # A Tier 2 at `plan` has no spec yet: what it touches isn't its build.
+    moving = ("plan", "design", "build") if entry["tier"] == 1 else ("design", "build")
+    if entry["mode"] != "manual" or stage not in moving:
+        return None
+    if (folder / "findings.md").is_file():
+        return "test"
+    if stage == "build":
+        return None
+    own = (f"{sdlc.work_rel(home)}/", *(f".sdlc/{name}" for name in sdlc.STATE_FILES))
+    paths = []
+    if trunk:
+        span = f"refs/heads/{trunk}...refs/heads/{entry['change']}"
+        # `-z`, as `_dirty_paths()` reads them: unquoted, so both compare as the same text.
+        out = sdlc._git(home, "diff", "-z", "--name-only", "--no-renames", span) or ""
+        paths += out.split("\0")
+    checkout = sdlc.checkout_of(folder)
+    if checkout.resolve() != home.resolve():
+        paths += sdlc._dirty_paths(checkout)
+    return "build" if any(p and not p.startswith(own) for p in paths) else None
 
 
 def _files(folder: Path) -> list[str]:
@@ -223,9 +260,11 @@ def cost(folder: Path) -> dict | None:
 def next_action(entry: dict) -> str:
     """What a person runs next on the change, from its stage and tier, and for a factory run its
     decision and ledger: the step `status` and each skill's report name."""
-    stage, tier = entry["stage"], entry["tier"]
+    stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
     if entry["problems"] and stage is None:
         return "fix intent.md's frontmatter"
+    if stage in CLOSED:
+        return f"/sdlc:close {entry['id']}"
     if entry.get("pending"):
         return "answer its decision in the factory's supervisor"
     if entry.get("decision") and stage == "test":
@@ -243,20 +282,22 @@ def next_action(entry: dict) -> str:
 
 def column(entry: dict) -> str:
     """The board's column: a stop that is the person's first, then a factory change ready to ship,
-    else its stage."""
+    then one shipped or dropped and waiting on close, else how far it has got."""
     if entry["problems"] or entry.get("pending") or entry.get("decision") == "ESCALATE":
         return "needs-you"
     if entry["stage"] == "test" and entry.get("decision") == "READY":
         return "ready"
-    return entry["stage"] or "needs-you"
+    if entry["stage"] in CLOSED:
+        return "close"
+    return entry.get("seen") or entry["stage"] or "needs-you"
 
 
 def file_at(root: Path, change: str, rel: str) -> Path | None:
-    """The file `rel` of open change `change`'s own folder, or None: a path that leaves the
-    folder, by `..`, by being absolute or through a link, is never served."""
+    """The file `rel` of the folder of change `change`, one the board shows, or None: a path that
+    leaves the folder, by `..`, by being absolute or through a link, is never served."""
     if not change or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
         return None
-    folders = {f.name: f for f in sdlc.change_dirs(root) if sdlc._stage(f) not in CLOSED}
+    folders = {f.name: f for f in _on_board(root)}
     folder = folders.get(change)
     if folder is None:
         return None

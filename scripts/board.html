@@ -38,7 +38,7 @@ h1 { margin: 0; font-size: 17px; }
 .status { color: var(--muted); font-size: 13px; }
 .status.down { color: var(--stop); }
 main.board {
-  display: grid; grid-template-columns: repeat(6, minmax(168px, 1fr)); gap: 12px;
+  display: grid; grid-template-columns: repeat(7, minmax(168px, 1fr)); gap: 12px;
   padding: 16px; overflow-x: auto; align-items: start;
 }
 @media (max-width: 760px) {
@@ -52,7 +52,7 @@ main.board {
 .col-head .who { color: var(--muted); font-size: 12px; }
 .col-head .count { margin-left: auto; color: var(--muted); font-size: 12px; }
 .col.needs-you .col-head h2 { color: var(--stop); }
-.col.ready .col-head h2 { color: var(--accent); }
+.col.ready .col-head h2, .col.close .col-head h2 { color: var(--accent); }
 .empty { color: var(--muted); padding: 8px 2px; }
 .card {
   display: block; width: 100%; text-align: left; font: inherit; color: inherit;
@@ -140,6 +140,7 @@ const COLUMNS = [
   { key: "build", label: "Build", who: "plan and code" },
   { key: "test", label: "Test", who: "the gate and the review" },
   { key: "ready", label: "Ready to ship", who: "factory: READY" },
+  { key: "close", label: "Ready to close", who: "/sdlc:close" },
   { key: "needs-you", label: "Needs you", who: "a decision or a problem" },
 ];
 const $ = (id) => document.getElementById(id);
@@ -237,7 +238,8 @@ function render(st) {
   $("board").replaceChildren(...cols);
   const factory = st.changes.filter((c) => c.mode === "factory");
   const usd = factory.reduce((s, c) => s + (c.cost ? c.cost.usd : 0), 0);
-  $("totals").textContent = `${st.changes.length} open · ${factory.length} by the factory` +
+  const open = st.changes.filter((c) => c.column !== "close").length;
+  $("totals").textContent = `${open} open · ${factory.length} by the factory` +
     (factory.length ? ` · $${usd.toFixed(2)} API-equivalent` : "");
 }
 
