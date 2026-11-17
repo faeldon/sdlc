@@ -14,11 +14,11 @@ commit, push, merge, switch branch or edit a file, and you run nothing that writ
 
 ## What you're given
 
-The change folder and round in the prompt, with the round's `- CHANGE:` lines, and from the
-factory's script: `untouched` (changes on a path this change doesn't touch), `repeats` (changes an
-earlier round already answered) and `settled` (what those answers were). Read `intent.md`,
-`spec.md` (Tier 2) and `plan.md`, then the code each change names, and the diff (`git diff`,
-`git status`: the work is uncommitted by design).
+The change folder and round in the prompt, with the round's `- CHANGE:` lines, each numbered with
+its role (`- C1: code: …`), and from the factory's script: `untouched` (changes on a path this
+change doesn't touch), `repeats` (changes an earlier round already answered) and `settled` (what
+those answers were). Read `intent.md`, `spec.md` (Tier 2) and `plan.md`, then the code each change
+names, and the diff (`git diff`, `git status`: the work is uncommitted by design).
 
 ## How to judge each change
 
@@ -40,12 +40,14 @@ that wasn't, since `/sdlc:ship` reviews the diff again either way.
 
 ## What you return
 
-One line per change, every change exactly once, in the reviewer's own words after its role:
+One line per change, every change exactly once: its role, then its id, then the change in your
+own words, short:
 
 ```
-- KEPT: code: src/drafts.py:42: the save writes twice; check the row first
-- DROPPED: security: src/drafts.py:10: token logged — the line logs the draft id, not a token
+- KEPT: code: C1: src/drafts.py:42: the save writes twice
+- DROPPED: security: C2: src/drafts.py:10: token logged — the line logs the draft id, not a token
 ```
 
-A dropped line's reason follows the last ` — `. Then `## Notes`: what you ran, and anything you
-were unsure of and what would settle it.
+The id is how `factory.py` knows which change you answered: one it doesn't know, or another
+role's, is a stop. A dropped line's reason follows the last ` — `. Then `## Notes`: what you ran,
+and anything you were unsure of and what would settle it.

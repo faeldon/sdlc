@@ -480,6 +480,127 @@ def test_every_change_is_answered_exactly_once(tmp_path, capsys, kept, dropped, 
     assert out["next"] == "stop" and any(problem in p for p in out["problems"]), out["problems"]
 
 
+def test_the_verify_prompt_numbers_each_change_once(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(root, 1, "test", "VERDICT: CHANGES", "src/a.py:1: test it", "src/a.py:1: test it")
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:2: name it", "src/b.py:3: split it")
+    _review(root, 1, "security", "VERDICT: PASS")
+    _review(root, 1, "behaviour", "VERDICT: PASS", "src/c.py:4: not asked, the verdict passed")
+    folder = root / ".sdlc" / "work" / NAME
+    state, _ = factory.loop_state(root, "008", None)
+    prompt, target, _ = factory._task(root, folder, state, "verify", "verifier", None)
+    listed = [line for line in prompt.splitlines() if line.startswith("- ")]
+    assert listed == [
+        "- C1: code: src/a.py:2: name it",
+        "- C2: code: src/b.py:3: split it",
+        "- C3: test: src/a.py:1: test it",
+    ]
+    assert target.name == "verified.md"
+
+
+def test_the_landings_verify_prompt_numbers_as_its_read_does(tmp_path) -> None:
+    """The landing's prompt and `land-verdicts`' read number one set of changes: the `CHANGES`
+    verdicts' lines, in `REVIEWERS` order, whatever order the files are found in."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    land = folder / "reviews" / "land-1"
+    land.mkdir(parents=True)
+    texts = {
+        "test": "VERDICT: CHANGES\n- CHANGE: src/a.py:1: test it\n",
+        "behaviour": "VERDICT: PASS\n- CHANGE: src/c.py:4: not asked\n",
+        "code": "VERDICT: CHANGES\n- CHANGE: src/a.py:2: name it\n",
+    }
+    for role, text in texts.items():
+        (land / f"{role}.md").write_text(text, encoding="utf-8")
+    prompt, _, _ = factory._land_task(root, folder, "land-verify", "verifier")
+    listed = [line for line in prompt.splitlines() if line.startswith("- ")]
+    assert listed == ["- C1: code: src/a.py:2: name it", "- C2: test: src/a.py:1: test it"]
+    (land / "verified.md").write_text("- KEPT: code: C1: x\n- DROPPED: test: C2: y — z\n")
+    reviews = {
+        role: {"verdict": t.split()[1], "changes": [t.split("CHANGE: ")[1].strip()]}
+        for role, t in texts.items()
+    }
+    verified, problems = factory.read_verified(land / "verified.md", 1, reviews)
+    assert problems == [] and verified["kept"] == [
+        {"role": "code", "change": "src/a.py:2: name it"}
+    ]
+
+
+def test_an_answer_by_id_takes_the_reviewers_text(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:2: name it", "src/b.py:3: split it")
+    for role in ("security", "test", "behaviour"):
+        _review(root, 1, role, "VERDICT: PASS")
+    folder = root / ".sdlc" / "work" / NAME / "reviews" / "round-1"
+    (folder / "verified.md").write_text(
+        "- KEPT: code: C2: the function does two things\n"
+        "- DROPPED: code: C1: a rename — the name is the module's own\n",
+        encoding="utf-8",
+    )
+    out = _verdicts(root, capsys)
+    assert out["problems"] == [] and (out["next"], out["round"]) == ("rework", 1)
+    verified = out["rounds"][0]["verified"]
+    assert verified["kept"] == [{"role": "code", "change": "src/b.py:3: split it"}]
+    assert verified["dropped"] == [
+        {"role": "code", "change": "src/a.py:2: name it", "why": "the name is the module's own"}
+    ]
+    _, carried = _run(capsys, factory.cmd_carry, root, "008")
+    assert carried["added"] == ["code: src/b.py:3: split it"]
+    state, _ = factory.loop_state(root, "008", None)
+    prompt, _, _ = factory._task(
+        root, root / ".sdlc" / "work" / NAME, state, "rework", "builder", None
+    )
+    assert "- code: src/b.py:3: split it" in prompt, "the builder gets the reviewer's words"
+    assert "two things" not in prompt and "name it" not in prompt
+
+
+def test_an_answer_in_its_own_words_resolves_by_its_lead(tmp_path, capsys) -> None:
+    """A round as the factory's first real run wrote it: one change, dropped, the verifier's
+    summary of it in place of the reviewer's two sentences. Its files, as they are."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    for role in ("security", "test", "behaviour"):
+        _review(root, 1, role, "VERDICT: PASS")
+    folder = root / ".sdlc" / "work" / NAME / "reviews" / "round-1"
+    for name in ("code.md", "verified.md"):
+        text = (ROOT / "tests" / "fixtures" / "verified-in-own-words" / name).read_text()
+        (folder / name).write_text(text, encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert out["problems"] == [] and out["next"] == "approve", out["problems"]
+    verified = out["rounds"][0]["verified"]
+    asked = out["rounds"][0]["reviews"]["code"]["changes"]
+    assert verified["kept"] == [] and [d["change"] for d in verified["dropped"]] == asked
+    assert verified["dropped"][0]["why"].startswith("The attribution matches the history.")
+
+
+@pytest.mark.parametrize(
+    "answers, problem",
+    [
+        (["KEPT: code: C9: made up"], "answers code: C9, which no change of round 1 is"),
+        (["KEPT: test: C1: wrong role"], "answers test: C1, which is code's change, not test's"),
+        (["KEPT: code: src/a.py:9: reworded"], "src/a.py:9: reworded, which no review of round 1"),
+        (["KEPT: code: src/b.py:3: reworded"], "whose lead src/b.py:3 2 of code's changes"),
+        (["KEPT: code: C1: once", "DROPPED: code: src/a.py:2: name it — no"], "name it 2 times"),
+    ],
+)
+def test_an_answer_that_names_no_one_change_is_a_stop(tmp_path, capsys, answers, problem) -> None:
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(
+        root, 1, "code", "VERDICT: CHANGES",
+        "src/a.py:2: name it", "src/b.py:3: split it", "src/b.py:3: and test it",
+    )  # fmt: skip
+    for role in ("security", "test", "behaviour"):
+        _review(root, 1, role, "VERDICT: PASS")
+    folder = root / ".sdlc" / "work" / NAME / "reviews" / "round-1"
+    (folder / "verified.md").write_text("".join(f"- {a}\n" for a in answers), encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert out["next"] == "stop" and any(problem in p for p in out["problems"]), out["problems"]
+    assert any("0 times, not once" in p for p in out["problems"]), "the rest go unanswered"
+
+
 def test_carry_takes_the_kept_changes_and_the_pre_existing_problems(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     _round(root, 1, code="CHANGES", security="CHANGES")

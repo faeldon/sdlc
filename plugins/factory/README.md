@@ -177,7 +177,7 @@ page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N
   build/round-<N>.files         what each round's build left, hashed by path
   build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
-  reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for
+  reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for, by its id
   decisions.md                  the ledger of the calls that are yours
   decision.md                   opens DECISION: READY or DECISION: ESCALATE
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones

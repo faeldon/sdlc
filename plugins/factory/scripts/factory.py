@@ -124,6 +124,9 @@ VERIFIED = "verified.md"
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 DROP_WHY = " — "
+# An answer may open with its change's id, `C<n>`, as the verify prompt numbers them
+# (`asked_changes()`), then say the change in its own words.
+ID_RE = re.compile(r"^C(\d+):\s*(.*)$")
 # What an approver must write when the rounds ran out with changes still kept.
 RECONSIDER = "## Reconsider the approach"
 # What a builder report and a behaviour check end with: each command run (`$ <command>`), the tail
@@ -692,35 +695,85 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
     return found, problems
 
 
+def asked_changes(reviews: dict) -> list[tuple[str, str, str]]:
+    """The changes a round's `CHANGES` verdicts ask for, as `(id, role, text)`: each `(role,
+    text)` once, numbered `C1`… in `REVIEWERS` order (any other role after, by name), then each
+    file's line order. The verify prompt and `read_verified()` both number from here, so an id
+    means the same change to the verifier and to the script."""
+    roles = [r for r in REVIEWERS if r in reviews] + sorted(set(reviews) - set(REVIEWERS))
+    asked = dict.fromkeys(
+        (role, c)
+        for role in roles
+        if reviews[role]["verdict"] == "CHANGES"
+        for c in reviews[role]["changes"]
+    )
+    return [(f"C{i}", role, c) for i, (role, c) in enumerate(asked, 1)]
+
+
+def _change_lead(change: str) -> str | None:
+    """A `CHANGE:`'s `path:line` lead, `src/a.py:42: what` → `src/a.py:42`, or None without one."""
+    parts = change.split(":", 2)
+    if len(parts) < 3 or not parts[1].strip().isdigit():
+        return None
+    return f"{_change_path(change)}:{parts[1].strip()}"
+
+
+def _resolve(role: str, text: str, asked: list, n: int) -> tuple[str | None, str]:
+    """The asked change an answer in round `n` names, by its id, else its exact text, else a
+    `path:line` lead only one of its role's changes has: the reviewer's text, or None and why it
+    names none."""
+    if m := ID_RE.match(text):
+        ident = f"C{m.group(1)}"
+        match = next((a for a in asked if a[0] == ident), None)
+        if not match:
+            return None, f"{ident}, which no change of round {n} is"
+        if match[1] != role:
+            return None, f"{ident}, which is {match[1]}'s change, not {role}'s"
+        return match[2], ""
+    if any(a[1:] == (role, text) for a in asked):
+        return text, ""
+    lead = _change_lead(text)
+    leads = [a[2] for a in asked if a[1] == role and lead and _change_lead(a[2]) == lead]
+    if len(leads) == 1:
+        return leads[0], ""
+    if len(leads) > 1:
+        return None, f"{text}, whose lead {lead} {len(leads)} of {role}'s changes open with"
+    return None, f"{text}, which no review of round {n} asks for"
+
+
 def read_verified(path: Path, n: int, reviews: dict) -> tuple[dict | None, list[str]]:
-    """The verifier's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Every
-    `CHANGE:` the round's `CHANGES` verdicts ask for is answered exactly once, and every answer
-    names one: anything else is a problem, so no change is reworked or dropped unread."""
+    """The verifier's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Each
+    answer is resolved to the change it names (`_resolve()`) and carries the reviewer's text, so
+    every reader sees the change as it was asked. Every `CHANGE:` the round's `CHANGES` verdicts
+    ask for is answered exactly once, and every answer names one: anything else is a problem, so
+    no change is reworked or dropped unread."""
     if not path.is_file():
         return None, []
-    kept, dropped = [], []
+    asked = asked_changes(reviews)
+    where = f"reviews/round-{n}/{VERIFIED}"
+    kept, dropped, problems = [], [], []
     for line in path.read_text(encoding="utf-8").splitlines():
         if m := KEPT_RE.match(line):
-            kept.append({"role": m.group(1), "change": m.group(2)})
+            role, text, why = m.group(1), m.group(2), None
         elif m := DROPPED_RE.match(line):
             change, sep, why = m.group(2).rpartition(DROP_WHY)
-            text = change if sep else m.group(2)
-            dropped.append({"role": m.group(1), "change": text.strip(), "why": why.strip()})
-    asked = [
-        (role, c) for role, r in reviews.items() if r["verdict"] == "CHANGES" for c in r["changes"]
-    ]
+            role, text, why = m.group(1), (change if sep else m.group(2)).strip(), why.strip()
+        else:
+            continue
+        change, wrong = _resolve(role, text, asked, n)
+        if change is None:
+            problems.append(f"{where} answers {role}: {wrong}")
+            continue
+        if why is None:
+            kept.append({"role": role, "change": change})
+        else:
+            dropped.append({"role": role, "change": change, "why": why})
     answered = [(a["role"], a["change"]) for a in kept + dropped]
-    where = f"reviews/round-{n}/{VERIFIED}"
     problems = [
         f"{where} answers {role}: {c} {answered.count((role, c))} times, not once"
-        for role, c in dict.fromkeys(asked)
+        for _, role, c in asked
         if answered.count((role, c)) != 1
-    ]
-    problems += [
-        f"{where} answers {role}: {c}, which no review of round {n} asks for"
-        for role, c in dict.fromkeys(answered)
-        if (role, c) not in asked
-    ]
+    ] + problems
     return {"kept": kept, "dropped": dropped}, problems
 
 
@@ -1479,12 +1532,7 @@ def _task(
         return prompt, reviews_dir / f"{role}.md", False
     if task == "verify":
         current = next(r for r in state["rounds"] if r["round"] == rnd)
-        asked = [
-            f"- {name}: {c}"
-            for name, r in current["reviews"].items()
-            if r["verdict"] == "CHANGES"
-            for c in r["changes"]
-        ]
+        asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(current["reviews"])]
         return (
             head + f"Verify round {rnd}.\n" + "\n".join(asked) + "\n"
             f"Untouched: {'; '.join(state['untouched']) or 'none'}. "
@@ -1494,9 +1542,14 @@ def _task(
             False,
         )
     if task == "rework":
+        # Each kept change in the reviewer's own words, as `read_verified()` resolved it: the
+        # verifier's line is its own summary, by id.
+        current = next(r for r in state["rounds"] if r["round"] == rnd)
+        kept = (current["verified"] or {"kept": []})["kept"]
         return (
             f"Round {rnd}'s changes are verified in {rel}/reviews/round-{rnd}/{VERIFIED}. Address "
-            "every KEPT line, then report.",
+            "every KEPT line, then report. The kept changes, in the reviewers' words:\n"
+            + "\n".join(f"- {k['role']}: {k['change']}" for k in kept),
             folder / "build" / f"round-{rnd + 1}.md",
             False,
         )
@@ -1571,9 +1624,11 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     reviews = {}
     for file in where.glob("*.md"):
         lines = file.read_text(encoding="utf-8").splitlines()
-        if file.name != VERIFIED and lines and VERDICT_RE.match(lines[0]):
-            reviews[file.stem] = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
-    asked = [f"- {name}: {c}" for name, changes in sorted(reviews.items()) for c in changes]
+        m = VERDICT_RE.match(lines[0]) if file.name != VERIFIED and lines else None
+        if m:
+            changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
+            reviews[file.stem] = {"verdict": m.group(1), "changes": changes}
+    asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(reviews)]
     if not asked:
         return f"landing round {n} asks for no change: there is nothing to verify"
     return (head + f"Verify landing round {n}.\n" + "\n".join(asked), where / VERIFIED, False)
