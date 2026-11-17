@@ -323,12 +323,6 @@ Left undone by 106-factory-reviewer-coverage, carried forward when it landed: Th
 See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-68] [idea] `tests/test_board.py::test_the_board_fixture_shows_every_card_state` takes about 30s on a cold `uv` cache (two `sdlc.py gate` runs); a `--no-gate` path in `build.sh` isn't worth it yet.
-
-Left undone by 106-factory-reviewer-coverage, carried forward when it landed: `tests/test_board.py::test_the_board_fixture_shows_every_card_state` takes about 30s on a cold `uv` cache (two `sdlc.py gate` runs); a `--no-gate` path in `build.sh` isn't worth it yet.
-See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-69] [idea] Make the board and status read an unreadable stop record the same way
 
 Left undone by 107-board-needs-you, carried forward when it landed: A stop record that won't read reads differently in the two places: the board makes it a problem (`fix: runs/stopped.md doesn't open …`, card `stopped: None`, as 086 pinned), while `status`'s `factory_stop()` keeps it a stop (`stopped: read runs/stopped.md`). Both put it in front of the person; aligning them means changing one of the two pinned behaviours.
