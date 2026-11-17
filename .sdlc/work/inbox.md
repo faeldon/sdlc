@@ -301,24 +301,6 @@ Left undone by 098-board-fixes, carried forward when it landed: pre-existing: sc
 See .sdlc/work/098-board-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-53] [idea] pre-existing: board.html:146: the drawer has `aria-modal` but no focus trap, so Tab can leave it while it is open. Filed for later.
-
-Left undone by 098-board-fixes, carried forward when it landed: pre-existing: board.html:146: the drawer has `aria-modal` but no focus trap, so Tab can leave it while it is open. Filed for later.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-54] [idea] pre-existing: at 390px the columns stack in board order, so Needs you sits below every Plan and Build card and is off-screen on a phone. This change doesn't alter it; filed for later.
-
-Left undone by 098-board-fixes, carried forward when it landed: pre-existing: at 390px the columns stack in board order, so Needs you sits below every Plan and Build card and is off-screen on a phone. This change doesn't alter it; filed for later.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-55] [idea] pre-existing: at 390 wide the columns stack in order, so Needs you (the column a person must act on) sits below Plan, Design and Build, about five cards down. A phone user has to scroll past all of it to find the card that needs them. Filed for later, not this change's rework.
-
-Left undone by 098-board-fixes, carried forward when it landed: pre-existing: at 390 wide the columns stack in order, so Needs you (the column a person must act on) sits below Plan, Design and Build, about five cards down. A phone user has to scroll past all of it to find the card that needs them. Filed for later, not this change's rework.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-56] [idea] pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
 
 Left undone by 098-board-fixes, carried forward when it landed: pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
@@ -343,27 +325,15 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-61] [idea] pre-existing: scripts/board.html:50-55: the column headers are not aligned. Labels such as "READY TO SHIP" and "NEEDS YOU" wrap onto two or three lines beside the "who" text, so at 1280px the first card and the empty "—" marker sit at different heights across columns (about y 96, 131, 149 in the desktop shot).
+## [2026-11-17-63] [idea] The hand gate shares the factory's gate_jobs slots
 
-Left undone by 099-board-page-fixes, carried forward when it landed: pre-existing: scripts/board.html:50-55: the column headers are not aligned. Labels such as "READY TO SHIP" and "NEEDS YOU" wrap onto two or three lines beside the "who" text, so at 1280px the first card and the empty "—" marker sit at different heights across columns (about y 96, 131, 149 in the desktop shot).
-See .sdlc/work/099-board-page-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-62] [idea] pre-existing: scripts/board.html:-- (empty columns): an empty column shows only a bare "—" (for example Design, Test, Ready to ship in the desktop shot). Nothing says there is nothing there yet or what puts a change in the column. This is not this change's flow to rework, but a one-line empty-state label would help.
-
-Left undone by 099-board-page-fixes, carried forward when it landed: pre-existing: scripts/board.html:-- (empty columns): an empty column shows only a bare "—" (for example Design, Test, Ready to ship in the desktop shot). Nothing says there is nothing there yet or what puts a change in the column. This is not this change's flow to rework, but a one-line empty-state label would help.
-See .sdlc/work/099-board-page-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-63] [idea] `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by the spec's boundary: sharing
-
-Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by the spec's boundary: sharing
+Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by 101's spec's boundary: sharing the slots would make the lock files' names a contract between sdlc and sdlc-factory.
 See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-64] [idea] `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and
+## [2026-11-17-64] [idea] /sdlc-factory:spec shows how far behind the change is and brings it up to date
 
-Left undone by 101-factory-start-fresh, carried forward when it landed: `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and
+Left undone by 101-factory-start-fresh, carried forward when it landed: `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and doesn't run `fresh`, so a spec can be drafted on a stale branch.
 See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
 Raised 2026-11-17.
 
