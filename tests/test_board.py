@@ -159,6 +159,18 @@ def test_a_factory_run_shows_its_rounds_decision_and_ledger(repo) -> None:
 
 
 @pytest.mark.portable
+def test_a_superseded_default_is_not_assumed_on_the_board(repo) -> None:
+    """105 R8: `decisions` ticks a superseded default, so the board's copy of the ledger pattern,
+    unedited, shows only the default that replaced it as assumed."""
+    _write(repo / ".sdlc" / "work" / "003-draft-export" / "decisions.md", "# Decisions\n\n"
+           "- [x] D1 (code round 1, default): CSV or JSON → decided: CSV\n"
+           "- [x] D2 (builder round 1, default): no badge on a card → superseded by D3\n"
+           "- [ ] D3 (builder round 2, default): keep was ESCALATE on a card\n")  # fmt: skip
+    three = _cards(repo)["003-draft-export"]
+    assert [d["id"] for d in three["assumed"]] == ["D3"] and three["pending"] == []
+
+
+@pytest.mark.portable
 def test_a_blocking_decision_or_an_unreadable_reply_needs_the_person(repo) -> None:
     four = _cards(repo)["004-draft-purge"]
     assert four["column"] == "needs-you"

@@ -5,10 +5,12 @@ argument-hint: "[NNN — the change; this worktree's]"
 allowed-tools:
   - AskUserQuestion
   - Read
+  - Write
   - Edit
-  - Agent
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
 disable-model-invocation: true
 ---
@@ -19,7 +21,9 @@ Stage 2 of the change loop, with the drafting handed to the factory's `spec-writ
 person still decides: nothing is written until they have read the draft and said yes, exactly as
 at `/sdlc:spec`. What changes is who writes the first draft.
 
-The agent writes no file. It returns the spec's text; this skill shows it, waits, and writes it.
+The agent writes no file. It returns the spec's text, which `factory.py agent` files whole in the
+change's `runs/`, never in `spec.md`; this skill shows it, waits, and has `factory.py write-spec`
+copy it into `spec.md` after the yes, byte for byte, so a long draft is never typed out twice.
 
 ## Step 0 — The change (mechanical, no confirmation needed)
 
@@ -36,16 +40,24 @@ them and stop.** For a Tier 1 change, say its intent's Approach stands in for a 
 
 ## Step 1 — Draft it
 
-Spawn the agent with the `Agent` tool, `subagent_type: "sdlc-factory:spec-writer"`, its model
-from `factory.models` if `config` set one, and this prompt:
+Start the spec-writer as a session of its own in the change's worktree, with `run_in_background`:
 
-> `Change folder: <folder>. Worktree: <the worktree root>. Draft spec.md for this change.`
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec
+```
 
-It returns the complete `spec.md` (frontmatter as scaffolded) and, after a `---` line, the open
-questions it resolved and those it left. Read the draft yourself against `intent.md` before showing
-it: every `<...>` prompt replaced, requirements numbered and each checkable, a **Contracts
-touched** line for each invariant the change comes near. Send it back to the agent once if one of
-those is missing; say so if the second draft still lacks it.
+Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its JSON: `to`, the
+draft, `.sdlc/work/NNN-slug/runs/spec-draft.md`; `questions`, the open questions it resolved and
+left, `.sdlc/work/NNN-slug/runs/spec-questions.md` (null when it gave none); `preamble`, anything
+it wrote before the draft, which is no part of it; or `problem`, a stop to report. Read both files.
+Check the draft against `intent.md` before showing it: every `<...>` prompt replaced, requirements
+numbered and each checkable, a **Contracts touched** line for each invariant the change comes near.
+If one of those is missing, send it back once, to the same spec-writer, which keeps its draft in
+context, and say so if the second draft still lacks it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --recheck
+```
 
 Show the person the draft, and the questions the agent resolved and left. A question left for the
 person is theirs to answer now, or to leave open in the intent.
@@ -62,18 +74,33 @@ chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empt
 refused is a no. If the tool is unavailable or refused, ask the same text, answers in
 parentheses, and stop.
 
-**Do not write until the person says yes.** Approval is per-invocation, never standing. A revision
-is a new draft: send it back to the agent with the person's words, show it, and ask again.
+**Do not write `spec.md` until the person says yes.** Approval is per-invocation, never standing.
+`revise a requirement` is a new draft: the person's words go to the same spec-writer, and the
+question is asked again on what it returns. Words never go in a command line: write them at the
+end of the change's `decisions.md` (`Write` it with a `# Decisions` heading first when it doesn't
+exist) as a ticked line, `- [x] R<n> (person, revise): <their words, as they gave them>`, `<n>`
+one past the highest `R` there. It is the one write before this gate, by a named exception to
+confirm-before-writing, as ship's `findings.md` is: it writes only the change's own uncommitted
+folder, holds only the person's words, and decides nothing. Then, in the background, and back to
+Step 1's reading when it exits:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --revise <R1>
+```
 
 ## Step 3 — Write it
 
-`Edit` the scaffolded `.sdlc/work/NNN-slug/spec.md` with the approved draft, exactly as shown. Strike
-the open questions the spec resolved in `intent.md` (`- ~~Question?~~ Resolved: ...`), as
-`/sdlc:spec` does. Then:
+Copy the approved draft into `spec.md` and advance the change:
 
 ```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec <NNN> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> design
 ```
+
+`write-spec` copies `runs/spec-draft.md` exactly as shown, and refuses, writing nothing, when there
+is no draft, the change isn't a Tier 2 at `stage: plan`, or `spec.md` is no longer its scaffold.
+**If it refuses, show why and stop.** Then strike the open questions the spec resolved in
+`intent.md` with `Edit` (`- ~~Question?~~ Resolved: ...`), as `/sdlc:spec` does.
 
 ## Step 4 — Report and stop
 

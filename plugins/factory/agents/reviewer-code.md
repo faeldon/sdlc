@@ -69,7 +69,7 @@ A finding that is really a question for the person (the spec is silent or contra
 the fix is a trade-off only they can make) is not a CHANGE. Raise it instead, as
 `- DECISION: [blocking] <question>, options, your recommendation` when the change can't be judged
 without the answer, or `[default]` with the default you'd assume. Read `decisions.md` first: an
-answered decision is settled, so review against its answer.
+answered decision is settled, so review against its answer. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Then `## Notes`: Optional findings and Nits (at most five), what is done well (at least one), and
 which tests and commands you ran. Say when you're unsure, and what would settle it, rather than

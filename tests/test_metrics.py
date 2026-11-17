@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1165,9 +1166,47 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     sdlc = load(ROOT / "scripts" / "sdlc.py", "sdlc_for_patterns")
     factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_patterns")
     names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "KEPT_RE", "DROPPED_RE")
-    for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
+    for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE", "STEP_RE", "ROUND_RE"):
         assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
     assert sdlc.FACTORY_STOPPED == factory.STOPPED
+    assert sdlc.FACTORY_STEP == factory.STEP
+    assert sdlc.FACTORY_AGENT_TIMEOUT == factory.AGENT_TIMEOUT
+
+
+SUPERSEDED_LEDGER = """\
+# Decisions
+
+- [ ] D1 (builder round 1, blocking): Keep drafts 30 days or forever?
+- [x] D2 (builder round 1, default): No badge on a shipped card. → superseded by D4
+- [x] D3 (code round 1, default): Log the draft id? → decided: no
+- [ ] D4 (builder round 2, default): Keep `was ESCALATE` on a card.
+"""
+
+
+def test_a_superseded_default_is_counted_but_not_open(tmp_path: Path) -> None:
+    """105 R8: `_factory_files()` reads a superseded line, ticked by `decisions`, as no open
+    default, with no edit to its copy of the ledger's pattern; `defaults` still counts it."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    spec = importlib.util.spec_from_file_location("sdlc_superseded", ROOT / "scripts" / "sdlc.py")
+    sdlc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sdlc)
+    name = "008-reopen-drafts"
+    git("init", "-q", "-b", "main")
+    (tmp_path / "README.md").write_text("a repo\n", encoding="utf-8")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+    git("checkout", "-q", "-b", name)
+    folder = tmp_path / ".sdlc" / "work" / name
+    folder.mkdir(parents=True)
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    (folder / "decisions.md").write_text(SUPERSEDED_LEDGER, encoding="utf-8", newline="\n")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
+    found = sdlc._factory_files(tmp_path, name)
+    assert (found["blocking"], found["defaults"], found["defaults_open"]) == (1, 3, 1)
 
 
 def test_both_intent_yes_answers_read_as_approval() -> None:

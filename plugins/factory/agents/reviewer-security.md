@@ -69,7 +69,7 @@ Then, for each Critical or High finding, one line:
 A risk that is the person's to accept or refuse (a control that costs a feature, a dependency only
 they can approve) is not a CHANGE: raise it as `- DECISION: [blocking] ...` or
 `- DECISION: [default] ...`, with the options and your recommendation. Read `decisions.md` first:
-an answered decision is settled.
+an answered decision is settled. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Then `## Notes`: Medium, Low and Info findings with their fixes, what is done well, and what you
 checked and ran.

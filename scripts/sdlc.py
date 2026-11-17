@@ -1743,7 +1743,11 @@ def analyze(root: Path, today: date | None = None) -> dict:
                         "detail": f"tier 2 at stage: {stage} has no {name}",
                     }
                 )
-            elif is_unfilled(folder / name):
+            elif is_unfilled(folder / name) and not (
+                # The factory's builder writes plan.md as its first step: a live first build's
+                # scaffold is the plan being written, not one left behind.
+                name == "plan.md" and stage == "build" and factory_first_build(folder)
+            ):
                 problems.append(
                     {
                         "dir": where,
@@ -3987,6 +3991,12 @@ FACTORY_STOPPED = Path("runs") / "stopped.md"
 FACTORY_STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
 FACTORY_NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 FACTORY_PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+# The step a run's last `verdicts --record` read, and the longest an agent session can run: what
+# `factory_first_build()` reads to tell a builder writing `plan.md` right now from a stale run.
+FACTORY_STEP = Path("runs") / "step.md"
+FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
+FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
+FACTORY_AGENT_TIMEOUT = 3 * 3600
 
 
 def factory_stop(folder: Path) -> dict | None:
@@ -4009,6 +4019,29 @@ def factory_stop(folder: Path) -> dict | None:
         return {"way": None, "next": f"read {FACTORY_STOPPED.as_posix()}", "problems": [why]}
     found = [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m]
     return {"way": way.group(1), "next": nxt[0], "problems": found}
+
+
+def factory_first_build(folder: Path) -> bool:
+    """Whether a factory run's first build is under way in `folder`, so its builder is writing
+    `plan.md` now: a builder session started less than `FACTORY_AGENT_TIMEOUT` ago (no session
+    outlives it), no builder report yet, no stop recorded, and `runs/step.md` absent (a fresh run
+    builds before its first `verdicts --record`) or naming `build` at round 1. Never raises: a file
+    that won't read is no live build, so `check` reports as it would without the factory."""
+    try:
+        started = (folder / "runs" / "builder.sessions").stat().st_mtime
+        if time.time() - started >= FACTORY_AGENT_TIMEOUT:
+            return False
+        if any((folder / "build").glob("round-*.md")) or (folder / FACTORY_STOPPED).exists():
+            return False
+        step = folder / FACTORY_STEP
+        if not step.exists():
+            return True
+        lines = step.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    first = FACTORY_STEP_RE.match(lines[0]) if lines else None
+    rounds = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
+    return bool(first) and first.group(1) == "build" and (rounds or [""])[0] in ("", "1")
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:

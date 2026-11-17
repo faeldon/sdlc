@@ -608,6 +608,123 @@ def test_a_default_decision_lets_the_run_go_on_as_assumed(tmp_path, capsys) -> N
     assert (out["next"], out["assumed"]) == ("approve", ["D1"])
 
 
+def _ledger(root: Path) -> list[str]:
+    return (
+        (root / ".sdlc" / "work" / NAME / "decisions.md").read_text(encoding="utf-8").splitlines()
+    )
+
+
+def test_a_default_supersedes_an_earlier_one_once(tmp_path, capsys) -> None:
+    """105 R5: a later default naming the one it replaces ticks that line, and only that line, as
+    superseded; the new line keeps its own words; a rerun changes nothing."""
+    root = _change(tmp_path)
+    _build_report(root, 1, "- DECISION: [blocking] Keep drafts 30 days or forever?\n",
+                  "- DECISION: [default] No badge on a shipped escalated card.\n")  # fmt: skip
+    _review(root, 1, "code", "VERDICT: PASS")
+    code_md = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "code.md"
+    code_md.write_text(code_md.read_text() + "- DECISION: [default] Log the draft id? No.\n")
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D1", "D2", "D3"]
+    before = _ledger(root)
+    _build_report(root, 2, "- DECISION: [default] (supersedes D2) Keep `was ESCALATE` on a card.\n")
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["added"] == ["D4"] and out["superseded"] == ["D2"], out
+    assert out["unmarked"] == [] and out["assumed"] == ["D3", "D4"], out
+    after = _ledger(root)
+    assert after[:-1] == [
+        line + " → superseded by D4" if " D2 " in line else line for line in
+        [ln.replace("- [ ] D2", "- [x] D2") for ln in before]
+    ], "only D2's line changes"  # fmt: skip
+    assert after[-1] == "- [ ] D4 (builder round 2, default): Keep `was ESCALATE` on a card."
+    d2 = next(d for d in factory.read_ledger(root / ".sdlc" / "work" / NAME) if d["id"] == "D2")
+    assert (d2["superseded_by"], d2["decided"], d2["open"], d2["answer"]) == (
+        "D4",
+        False,
+        False,
+        None,
+    )
+    assert d2["text"] == "No badge on a shipped escalated card."
+    _run(capsys, factory.cmd_decisions, root, "008")
+    assert _ledger(root) == after, "a rerun marks nothing twice"
+
+
+def test_a_default_can_supersede_one_raised_in_the_same_pass(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    _build_report(root, 1, "- DECISION: [default] Page at 50.\n",
+                  "- DECISION: [default] (supersedes D1) Page at 100.\n")  # fmt: skip
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert (out["added"], out["superseded"], out["assumed"]) == (["D1", "D2"], ["D1"], ["D2"])
+    assert _ledger(root)[-2:] == [
+        "- [x] D1 (builder round 1, default): Page at 50. → superseded by D2",
+        "- [ ] D2 (builder round 1, default): Page at 100.",
+    ]
+
+
+@pytest.mark.parametrize(
+    "case, earlier, target, why",
+    [
+        ("missing", [], "D9", "no D9"),
+        ("blocking", ["- DECISION: [blocking] Keep 30 days?\n"], "D1", "not a default"),
+        ("decided", ["- DECISION: [default] Page at 50.\n"], "D1", "decided"),
+        (
+            "superseded",
+            [
+                "- DECISION: [default] Page at 50.\n",
+                "- DECISION: [default] (supersedes D1) Page at 100.\n",
+            ],
+            "D1",
+            "already superseded",
+        ),  # fmt: skip
+        ("itself", ["- DECISION: [default] Page at 50.\n"], "D2", "itself"),
+    ],
+)
+def test_a_supersede_that_can_t_apply_marks_nothing(tmp_path, capsys, case, earlier, target, why):
+    """105 R6: the new default is added, unmarked and listed with why; no line is marked."""
+    root = _change(tmp_path)
+    _build_report(root, 1, *earlier)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    if case == "decided":
+        path = root / ".sdlc" / "work" / NAME / "decisions.md"
+        text = path.read_text().replace("- [ ] D1", "- [x] D1").replace("50.", "50. → decided: 50")
+        path.write_text(text)
+    before = _ledger(root) if earlier else []
+    new_id = f"D{len(earlier) + 1}"
+    _build_report(root, 2, f"- DECISION: [default] ({'supersedes'} {target}) Page at 25.\n")
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["added"] == [new_id] and out["superseded"] == [], out
+    [unmarked] = out["unmarked"]
+    assert (unmarked["id"], unmarked["supersedes"]) == (new_id, target)
+    assert why in unmarked["why"], unmarked
+    after = _ledger(root)
+    assert after[: len(before)] == before, "no line is marked"
+    assert after[-1] == f"- [ ] {new_id} (builder round 2, default): Page at 25."
+
+
+def test_a_superseded_default_is_neither_assumed_nor_a_signal_nor_a_decision(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """105 R7: only the default that replaced it is assumed; the landing sees no open decision once
+    that one is decided, and `--decision` refuses the superseded id."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1, "- DECISION: [default] Page at 50.\n",
+                  "- DECISION: [default] (supersedes D1) Page at 100.\n")  # fmt: skip
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _round(root, 1)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["assumed"], out["pending"]) == ("approve", ["D2"], [])
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "decided", None, "D1")
+    assert code == 1 and "D1 isn't a decided line" in out["refusals"][0], out
+
+    monkeypatch.setattr(factory, "_sdlc", lambda args, cwd: (0, {}, ""))
+    cfg = factory.load_config(root)[0]
+    open_signal = "decisions still open or assumed in decisions.md"
+    assert open_signal in factory.land_signals(folder, root, "READY", cfg)[0], "D2 is assumed"
+    path = folder / "decisions.md"
+    path.write_text(path.read_text().replace("- [ ] D2", "- [x] D2").replace(
+        "Page at 100.", "Page at 100. → decided: 100"))  # fmt: skip
+    assert open_signal not in factory.land_signals(folder, root, "READY", cfg)[0], "D1 isn't open"
+
+
 # ---------------------------------------------------------------- sdlc reads it like any other
 
 
@@ -1657,12 +1774,156 @@ def test_an_agent_out_of_turn_or_failing_files_nothing(tmp_path, capsys, claude,
     assert not (folder / "build" / "round-1.md").exists()
 
 
-def test_the_spec_draft_stays_out_of_the_repo_until_the_yes(tmp_path, capsys, claude) -> None:
+# A spec-writer's reply as it comes: a sentence before the draft, the draft's frontmatter, a body
+# holding a fenced block with its own `---` line and a longer fence nesting a shorter one, then the
+# separator and the questions.
+FENCED_DRAFT = """\
+---
+id: 008
+kind: spec
+---
+
+# 008 — Reopen saved drafts · spec
+
+## Requirements
+
+R1. The config reads as:
+
+```yaml
+---
+drafts: 30
+---
+```
+
+````markdown
+```sh
+echo inside
+```
+---
+````
+
+~~~
+---
+~~~
+
+R2. Nothing else.
+
+"""
+FENCED_REPLY = "Here is the draft.\n\n" + FENCED_DRAFT + "---\n\n- Resolved: none.\n- Left: none.\n"
+
+
+@pytest.mark.portable
+def test_split_draft_cuts_at_the_last_separator_outside_a_fence() -> None:
+    """105 R2: the draft runs from the frontmatter to the last bare `---` outside a fence, whole."""
+    preamble, draft, questions = factory.split_draft(FENCED_REPLY)
+    assert draft == FENCED_DRAFT, "cut at a fence, or a line lost"
+    assert questions == "\n- Resolved: none.\n- Left: none.\n"
+    assert preamble == "Here is the draft."
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        (FENCED_DRAFT, (None, FENCED_DRAFT, None)),
+        ("no frontmatter at all\n", (None, "no frontmatter at all\n", None)),
+        ("---\nid: 008\n---\n\nbody\n", (None, "---\nid: 008\n---\n\nbody\n", None)),
+        ("---\nid: 008\n", (None, "---\nid: 008\n", None)),
+        ("Hi.\n---\nid: 008\n---\nbody\n---\nq\n", ("Hi.", "---\nid: 008\n---\nbody\n", "q\n")),
+        ("---\nid: 1\n---\n```\n---\n", (None, "---\nid: 1\n---\n```\n---\n", None)),
+    ],
+    ids=["no-separator", "no-frontmatter", "body-only", "unclosed", "preamble", "open-fence"],
+)
+def test_split_draft_without_a_separator_keeps_the_whole_draft(reply, expected) -> None:
+    assert factory.split_draft(reply) == expected
+
+
+def test_the_spec_draft_is_written_whole_to_runs(tmp_path, capsys, claude, monkeypatch) -> None:
+    """105 R1: the draft and its questions go to `runs/`, byte for byte; spec.md is untouched and
+    the JSON names the files, never carrying the draft itself."""
     root = _change(tmp_path, tier=2, stage="plan")
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", FENCED_REPLY)
     code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
-    assert code == 0 and out["to"] is None and out["reply"].startswith("the report")
+    assert code == 0, out
     assert claude()[-1]["argv"][3] == "sdlc-factory:spec-writer"
-    assert "Written." in (root / ".sdlc" / "work" / NAME / "spec.md").read_text(), "untouched"
+    assert out["to"] == f".sdlc/work/{NAME}/runs/spec-draft.md"
+    assert out["questions"] == f".sdlc/work/{NAME}/runs/spec-questions.md"
+    assert out["preamble"] == "Here is the draft." and "reply" not in out
+    assert (folder / "runs" / "spec-draft.md").read_bytes() == FENCED_DRAFT.encode()
+    questions = (folder / "runs" / "spec-questions.md").read_text(encoding="utf-8")
+    assert questions == "\n- Resolved: none.\n- Left: none.\n"
+    assert (folder / "spec.md").read_text() == "# 008 — spec.md\n\nWritten.\n", "untouched"
+
+    # A recheck writes over both; one with no separator leaves no stale questions behind.
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "---\nid: 008\n---\n\nSecond draft.\n")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, None, True)
+    assert code == 0 and out["questions"] is None and out["preamble"] is None, out
+    draft = (folder / "runs" / "spec-draft.md").read_text(encoding="utf-8")
+    assert draft == "---\nid: 008\n---\n\nSecond draft.\n"
+    assert not (folder / "runs" / "spec-questions.md").exists()
+
+
+SCAFFOLD = "---\nid: 008\nkind: spec\n---\n\n# 008 — spec\n\n<requirements>\n\n<design>\n"
+
+
+def _drafted(tmp_path: Path, tier: int = 2, stage: str = "plan") -> Path:
+    """A change whose spec.md is the scaffold and whose spec-writer left a fenced draft."""
+    root = _change(tmp_path, tier=tier, stage=stage)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "spec.md").write_text(SCAFFOLD, encoding="utf-8", newline="\n")
+    (folder / "runs").mkdir()
+    (folder / "runs" / "spec-draft.md").write_bytes(FENCED_DRAFT.encode())
+    return root
+
+
+@pytest.mark.portable
+def test_write_spec_copies_the_draft_byte_for_byte(tmp_path, capsys) -> None:
+    """105 R3: spec.md becomes the draft exactly, and nothing else is written."""
+    root = _drafted(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file() and p.name != "spec.md"}
+    code, out = _run(capsys, factory.cmd_write_spec, root, "008")
+    assert code == 0 and out["to"] == f".sdlc/work/{NAME}/spec.md", out
+    assert (folder / "spec.md").read_bytes() == FENCED_DRAFT.encode()
+    after = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file() and p.name != "spec.md"}
+    assert after == before, "writes nothing else"
+    # A rerun is refused: spec.md is no longer the scaffold.
+    code, out = _run(capsys, factory.cmd_write_spec, root, "008")
+    assert code == 1 and "scaffold" in out["refusals"][0]
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "case, why",
+    [
+        ("no-draft", "no runs/spec-draft.md"),
+        ("tier-1", "Tier 2"),
+        ("past-plan", "stage: plan"),
+        ("written", "scaffold"),
+    ],
+)
+def test_write_spec_refuses_and_writes_nothing(tmp_path, capsys, case, why) -> None:
+    root = _drafted(tmp_path, tier=1 if case == "tier-1" else 2,
+                    stage="design" if case == "past-plan" else "plan")  # fmt: skip
+    folder = root / ".sdlc" / "work" / NAME
+    if case == "no-draft":
+        (folder / "runs" / "spec-draft.md").unlink()
+    if case == "written":
+        (folder / "spec.md").write_text("# 008 — spec\n\nA person's words.\n", encoding="utf-8")
+    before = (folder / "spec.md").read_bytes()
+    code, out = _run(capsys, factory.cmd_write_spec, root, "008")
+    assert code == 1 and why in out["refusals"][0], out
+    assert (folder / "spec.md").read_bytes() == before
+
+
+@pytest.mark.portable
+def test_the_scaffold_rule_is_sdlc_s_own() -> None:
+    """`write-spec` never writes over a person's text: its copy of `is_unfilled()`'s rule."""
+    assert factory.PROMPT_RE.pattern == sdlc.PROMPT_RE.pattern
+    assert factory.UNFILLED_THRESHOLD == sdlc.UNFILLED_THRESHOLD
+    for text in (SCAFFOLD, "<one>\n", "plain\n", "<a>\n<b>\n<c>\n"):
+        assert factory._scaffold(text) == (len(sdlc.PROMPT_RE.findall(text)) >= 2), text
 
 
 def test_a_revision_reaches_the_same_spec_writer_through_the_ledger(tmp_path, capsys, claude):
@@ -1682,6 +1943,8 @@ def test_a_revision_reaches_the_same_spec_writer_through_the_ledger(tmp_path, ca
     code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, "R1")
     argv = claude()[-1]["argv"]
     assert code == 0 and argv[1].endswith(words) and argv[-2:] == ["--resume", session[0]]
+    draft = (folder / "runs" / "spec-draft.md").read_text(encoding="utf-8")
+    assert draft.startswith("the report"), "a revision writes over the draft"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, None, True)
     assert code == 0 and claude()[-1]["argv"][1] == factory.RECHECK
     assert factory.read_ledger(folder) == [], "a revision is no decision the loop waits on"

@@ -172,13 +172,15 @@ options and its recommendation. They're gathered into the change's ledger,
   resumed with it.
 - **Default**: the run goes on with the agent's stated default, marked as assumed. The approver
   escalates while any is unconfirmed, and `/sdlc:ship` shows every one, so your approval there
-  confirms it or sends the change back.
+  confirms it or sends the change back. A later default that replaces one names it,
+  `- DECISION: [default] (supersedes D2) ...`, and the ledger ticks D2 `→ superseded by D4`: no
+  longer assumed, shown beside the default that replaced it. A decided line can't be superseded.
 
 ## The agents
 
 | agent | does | can change files |
 |---|---|---|
-| `spec-writer` | drafts `spec.md`, returned for you to approve | no |
+| `spec-writer` | drafts `spec.md`, filed in `runs/` for you to approve, copied after your yes | no |
 | `builder` | writes `plan.md` and the code, test first, in slices; reworks | yes |
 | `reviewer-code` | correctness against the spec, contract, readability, cost | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
@@ -215,6 +217,9 @@ page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N
   build/round-<N>.restart.md    RESTART: decision-<n>.md, and WORDS: R<k> with your words: round N
                                 starts the run again
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
+  runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
+                                spec.md after your yes
+  runs/spec-questions.md        the open questions it resolved and left, after the draft's ---
   runs/<agent>.sessions         each agent session's id, one a line, which close's measuring reads
   runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role
                                 and model
@@ -300,7 +305,8 @@ one place it runs a host's command), each holding one of `gate_jobs` slots, an O
 change brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`);
 each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
-the one place it runs `claude`); the screenshots a UI review reads, from `[ui]`'s own commands
+the one place it runs `claude`); an approved spec draft copied into `spec.md` byte for byte
+(`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
 batch, its signals and its question (`land-check`), each change's landing (`land`, `resolve`,
 `land-verdicts`), its acceptance checks and skills' cases (`accept`, `cases`, never pre-approved);

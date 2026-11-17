@@ -25,19 +25,21 @@ implementation.
     uv run --script factory.py gate 008
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
+    uv run --script factory.py write-spec 008
     uv run --script factory.py agent 008 --task review --role code
     uv run --script factory.py ready
     uv run --script factory.py land-check
     uv run --script factory.py land 008 --by auto
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
-`carry` to `notes.md`, `stage` to `intent.md`, `gate` its attempt to `build/round-<N>.gate.md`,
-`verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear) and the
-step it read, with since when, to `runs/step.md`,
-`agent` the reply an agent session returned, and its id and figures under `runs/`. Nothing is
-written outside the change's folder, and nothing under `.git/`, but by the landing and `fresh`:
-`land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it;
-`fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
+`carry` to `notes.md`, `stage` to `intent.md`, `write-spec` the approved draft to `spec.md`,
+`gate` its attempt to `build/round-<N>.gate.md`, `verdicts --record` a stop to `runs/stopped.md`
+(or removes it once the run is clear) and the step it read, with since when, to `runs/step.md`,
+`agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
+questions to `runs/spec-questions.md`, never to `spec.md`), and its id and figures under `runs/`.
+Nothing is written outside the change's folder, and nothing under `.git/`, but by the landing and
+`fresh`: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands
+it; `fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
 `resolve`, and commits nothing that stays. `gate` also holds a lock on a slot file,
 `sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written. A command about
 one change runs in its worktree, found from the main checkout when the supervisor runs there
@@ -175,6 +177,10 @@ RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
 # The ledger, `decisions.md`: one line each, ticked once a person has decided it.
 LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
 DECIDED = " → decided: "
+# A later default naming the one it replaces, `- DECISION: [default] (supersedes D2) …`; `decisions`
+# ticks the named line with SUPERSEDED, which every reader of an unticked line then passes over.
+SUPERSEDES_RE = re.compile(r"^\(supersedes (D\d+)\)\s*(.+)$")
+SUPERSEDED = " → superseded by "
 # How `carry` starts a `notes.md` the change doesn't have yet: a copy of `sdlc`'s
 # `templates/notes.md`, which this plugin's cached copy can't read. A test keeps the two the same.
 NOTES_HEAD = """\
@@ -1072,7 +1078,9 @@ def restart_state(folder: Path) -> tuple[dict | None, str | None]:
 
 def read_ledger(folder: Path) -> list[dict]:
     """`decisions.md` as records: id, who raised it and when, blocking or default, the question,
-    and the person's answer once the line is ticked."""
+    the person's answer once the line is ticked, and `superseded_by`, the default that replaced
+    it. `decided` is a ticked line the person answered, `open` an unticked one: a superseded line
+    is neither, so no reader counts it as assumed or as the person's word."""
     path = folder / "decisions.md"
     if not path.is_file():
         return []
@@ -1081,9 +1089,16 @@ def read_ledger(folder: Path) -> list[dict]:
         m = LEDGER_RE.match(line)
         if m:
             text, _, answer = m.group(5).partition(DECIDED)
+            text, _, by = text.partition(SUPERSEDED)
+            ticked, by = m.group(1) == "x", by.strip() or None
             found.append(
                 {"id": m.group(2), "source": m.group(3), "kind": m.group(4), "text": text.strip()}
-                | {"decided": m.group(1) == "x", "answer": answer.strip() or None}
+                | {
+                    "decided": ticked and not by,
+                    "open": not ticked,
+                    "answer": answer.strip() or None,
+                }
+                | {"superseded_by": by}
             )
     return found
 
@@ -1108,36 +1123,72 @@ def raised_decisions(folder: Path) -> list[tuple[str, str, str]]:
     return found
 
 
+def _supersede_refusal(ledger: list[dict], target: str, new: str) -> str | None:
+    """Why default `new` can't supersede `target`, or None when it can."""
+    entry = next((d for d in ledger if d["id"] == target), None)
+    if target == new:
+        return f"{new} names itself"
+    if entry is None:
+        return f"there is no {target} in decisions.md"
+    if entry["kind"] != "default":
+        return f"{target} is not a default: a blocking decision is the person's to answer"
+    if entry["superseded_by"]:
+        return f"{target} is already superseded by {entry['superseded_by']}"
+    if entry["decided"]:
+        return f"{target} is decided by the person: raise a blocking decision instead"
+    return None
+
+
 def cmd_decisions(root: Path, ident: str) -> int:
     """Bring every decision the agents raised into `decisions.md`, once each, with a stable id,
     and say which blocking ones are still waiting for the person. The ledger is the one place a
-    person answers: ticking a line with ` → decided: <answer>` is the answer."""
+    person answers: ticking a line with ` → decided: <answer>` is the answer. A default raised as
+    `(supersedes D<n>)` ticks D<n>'s line with ` → superseded by D<m>`, that line alone, and only
+    when D<n> is a default still open (`unmarked` says why not); the prefix stays out of the new
+    line's text, which is what keeps it from being added twice."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     ledger = read_ledger(folder)
     known = {d["text"] for d in ledger}
-    added = []
-    new_lines = []
-    for source, kind, text in raised_decisions(folder):
-        if text not in known:
-            known.add(text)
-            added.append(f"D{len(ledger) + 1}")
-            ledger.append(
-                {"id": added[-1], "source": source, "kind": kind, "text": text}
-                | {"decided": False, "answer": None}
-            )
-            new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
+    added, new_lines, marks, unmarked = [], [], {}, []
+    for source, kind, raised in raised_decisions(folder):
+        named = SUPERSEDES_RE.match(raised) if kind == "default" else None
+        text = named.group(2) if named else raised
+        if text in known:
+            continue
+        known.add(text)
+        added.append(f"D{len(ledger) + 1}")
+        ledger.append(
+            {"id": added[-1], "source": source, "kind": kind, "text": text}
+            | {"decided": False, "open": True, "answer": None, "superseded_by": None}
+        )
+        new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
+        if named:
+            why = _supersede_refusal(ledger, named.group(1), added[-1])
+            if why:
+                unmarked.append({"id": added[-1], "supersedes": named.group(1), "why": why})
+                continue
+            entry = next(d for d in ledger if d["id"] == named.group(1))
+            entry.update(superseded_by=added[-1], open=False)
+            marks[entry["id"]] = added[-1]
     if new_lines:
         path = folder / "decisions.md"
         body = path.read_text(encoding="utf-8") if path.is_file() else "# Decisions\n\n"
         body += "" if body.endswith("\n") else "\n"
-        path.write_text(body + "".join(new_lines), encoding="utf-8", newline="\n")
-    pending = [d["id"] for d in ledger if d["kind"] == "blocking" and not d["decided"]]
-    assumed = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
+        lines = (body + "".join(new_lines)).splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            m = LEDGER_RE.match(line)
+            if m and m.group(1) == " " and m.group(2) in marks:
+                end = "\n" if line.endswith("\n") else ""
+                ticked = "- [x]" + line.rstrip("\r\n")[len("- [ ]") :]
+                lines[i] = f"{ticked}{SUPERSEDED}{marks[m.group(2)]}{end}"
+        path.write_text("".join(lines), encoding="utf-8", newline="\n")
+    pending = [d["id"] for d in ledger if d["kind"] == "blocking" and d["open"]]
+    assumed = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
     return emit(
         {"change": folder.name, "decisions": ledger, "added": added}
-        | {"pending": pending, "assumed": assumed}
+        | {"pending": pending, "assumed": assumed, "superseded": list(marks), "unmarked": unmarked}
     )
 
 
@@ -1289,8 +1340,8 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out["limit"] = first - 1 + run["rounds"]
     out["restart"] = restart
     ledger = read_ledger(folder)
-    out["pending"] = [d["id"] for d in ledger if d["kind"] == "blocking" and not d["decided"]]
-    out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
+    out["pending"] = [d["id"] for d in ledger if d["kind"] == "blocking" and d["open"]]
+    out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
     built = build_round(folder)
     out["built"] = built
     # A build no review round has read yet is gated first; a reviewed one never is again.
@@ -1721,6 +1772,46 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     return emit(out)
 
 
+# `sdlc.py`'s scaffold rule, copied (never imported) and pinned by `tests/test_factory.py`: a file
+# with this many lines opening a `<…>` prompt is still the template it was scaffolded from.
+PROMPT_RE = re.compile(r"^<[^>]", re.M)
+UNFILLED_THRESHOLD = 2
+
+
+def _scaffold(text: str) -> bool:
+    """Whether `text` is still a scaffold, as `sdlc.py`'s `is_unfilled()` reads one."""
+    return len(PROMPT_RE.findall(text)) >= UNFILLED_THRESHOLD
+
+
+def cmd_write_spec(root: Path, ident: str) -> int:
+    """Copy `runs/spec-draft.md` into `spec.md`, byte for byte, once the person said yes. Refused,
+    writing nothing, with no draft, for a change that isn't a Tier 2 at `stage: plan`, or once
+    `spec.md` is no longer its scaffold, so a person's text is never written over."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    draft, spec = folder / SPEC_DRAFT, folder / "spec.md"
+    refusals = []
+    if not draft.is_file():
+        refusals.append(f"no {SPEC_DRAFT.as_posix()}: run agent --task spec first")
+    if meta.get("tier") != "2" or meta.get("stage") != "plan":
+        refusals.append(
+            f"write-spec is for a Tier 2 change at stage: plan, not tier {meta.get('tier')} at "
+            f"stage: {meta.get('stage')}"
+        )
+    try:
+        written = not _scaffold(spec.read_text(encoding="utf-8"))
+    except OSError:
+        written = True
+    if written:
+        refusals.append("spec.md is no longer the scaffold: a person's text is never written over")
+    if refusals:
+        return emit({"change": folder.name, "refusals": refusals}, 1)
+    shutil.copyfile(draft, spec)
+    return emit({"change": folder.name, "to": spec.relative_to(root).as_posix()})
+
+
 def cmd_restart(root: Path, ident: str, words: str | None) -> int:
     """Send an escalated change back to the factory, once the person said yes: the checks `start`
     made (`restart_state()`), then `build/round-<R>.restart.md`, then `decision.md` renamed to
@@ -1851,6 +1942,49 @@ def read_revision(folder: Path, ident: str) -> str | None:
         if m and m.group(1) == ident:
             return m.group(2)
     return None
+
+
+# Where a spec-writer's reply is filed: the draft, cut from its questions, each whole.
+SPEC_DRAFT = Path("runs") / "spec-draft.md"
+SPEC_QUESTIONS = Path("runs") / "spec-questions.md"
+# A fence's opening or closing line, as CommonMark reads one: its character and its length.
+FENCE_MARK_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def split_draft(reply: str) -> tuple[str | None, str, str | None]:
+    """A spec-writer's reply as (preamble, draft, questions). The draft runs from the first bare
+    `---` line, its frontmatter's opening, up to the last bare `---` after the frontmatter's
+    closing that sits outside a fenced block; the questions are what follows that line. A fence
+    closes only on its own character, at least as long, so a `---` inside one is the draft's text.
+    With no such line the draft runs to the end and there are no questions; with no frontmatter
+    at all, the whole reply is the draft. Text before the frontmatter is the preamble, never the
+    draft's. Nothing is re-joined: the draft is the reply's own characters."""
+    lines = reply.splitlines(keepends=True)
+    bare = [i for i, line in enumerate(lines) if line.rstrip("\r\n") == "---"]
+    if not bare:
+        return None, reply, None
+    start = bare[0]
+    preamble = "".join(lines[:start]).strip() or None
+    closing = next((i for i in bare if i > start), None)
+    cut, fence = None, None
+    for i in range(closing + 1 if closing is not None else len(lines), len(lines)):
+        text = lines[i].rstrip("\r\n")
+        m = FENCE_MARK_RE.match(text)
+        if fence:
+            if (
+                m
+                and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence)
+                and not m.group(2).strip()
+            ):
+                fence = None
+        elif m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+        elif text == "---":
+            cut = i
+    if cut is None:
+        return preamble, "".join(lines[start:]), None
+    return preamble, "".join(lines[start:cut]), "".join(lines[cut + 1 :])
 
 
 def mend_round(state: dict, role: str) -> int:
@@ -1988,8 +2122,9 @@ def _task(
     revise: str | None = None,
     recheck: bool = False,
 ) -> tuple[str, Path | None, bool] | str:
-    """The prompt a task sends, the file its reply goes to (None for the spec draft, which waits
-    for the person's yes), and whether the reply is added to that file: or why it can't run now.
+    """The prompt a task sends, the file its reply goes to (for the spec draft `runs/spec-draft.md`,
+    never `spec.md`, which waits for the person's yes), and whether the reply is added to that
+    file: or why it can't run now.
     The wording is the build's own; every builder report goes to `build/round-<R+1>.md`, `<R>`
     the highest review round so far, unless it answers a decision before its round's review."""
     rel = folder.relative_to(root).as_posix()
@@ -2005,11 +2140,11 @@ def _task(
         words = read_revision(folder, revise)
         if words is None:
             return f"{revise} isn't a `- [x] {revise} (person, revise): …` line in decisions.md"
-        return f"Revise your draft, as the person asks: {words}", None, False
+        return f"Revise your draft, as the person asks: {words}", folder / SPEC_DRAFT, False
     if task == "spec" and recheck:
-        return RECHECK, None, False
+        return RECHECK, folder / SPEC_DRAFT, False
     if task == "spec":
-        return head + "Draft spec.md for this change.", None, False
+        return head + "Draft spec.md for this change.", folder / SPEC_DRAFT, False
     restart = state.get("restart")
     if task == "build" and restart and rnd == restart["round"]:
         # A fresh builder, told why the approver escalated: never resumed on the old approach.
@@ -2178,6 +2313,22 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     return (head + f"Verify landing round {n}.\n" + "\n".join(asked), where / VERIFIED, False)
 
 
+def _file_draft(root: Path, folder: Path, reply: str) -> dict:
+    """Write a spec-writer's reply as `runs/spec-draft.md` and `runs/spec-questions.md`, each over
+    the last draft's, and say where: `questions` is None, and its old file gone, when the reply
+    has no separator, so a revision never shows the questions of the draft before it."""
+    preamble, draft, questions = split_draft(reply)
+    path = folder / SPEC_QUESTIONS
+    for text, to in ((draft, folder / SPEC_DRAFT), (questions, path)):
+        if text is None:
+            to.unlink(missing_ok=True)
+        else:
+            end = "" if text.endswith("\n") else "\n"
+            to.write_text(text + end, encoding="utf-8", newline="\n")
+    shown = path.relative_to(root).as_posix() if questions is not None else None
+    return {"questions": shown, "preamble": preamble}
+
+
 def cmd_agent(
     root: Path,
     ident: str,
@@ -2258,9 +2409,9 @@ def cmd_agent(
     out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
     if problem:
         return emit({**out, "problem": problem}, 1)
-    if target is None:
-        return emit({**out, "reply": reply})
     target.parent.mkdir(parents=True, exist_ok=True)
+    if task == "spec":
+        return emit({**out, **_file_draft(root, folder, reply)})
     text = reply if reply.endswith("\n") else reply + "\n"
     if append:
         before = target.read_text(encoding="utf-8")
@@ -2622,7 +2773,7 @@ def land_signals(
     if decision == "ESCALATE":
         signals.append("the approver escalated")
     ledger = read_ledger(folder)
-    if [d for d in ledger if not d["decided"]]:
+    if [d for d in ledger if d["open"]]:
         signals.append("decisions still open or assumed in decisions.md")
     assumed = [d["id"] for d in ledger if not d["decided"] and d["kind"] == "default"]
     if assumed:
@@ -3777,6 +3928,8 @@ def main() -> int:
     p_shots = sub.add_parser("shots", help="screenshot the change's pages for its UI reviewers")
     p_shots.add_argument("id")
     p_shots.add_argument("--round", dest="round", type=int, required=True)
+    p_write = sub.add_parser("write-spec", help="copy runs/spec-draft.md into spec.md, once")
+    p_write.add_argument("id")
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
@@ -3868,6 +4021,8 @@ def main() -> int:
         return cmd_shots(root, args.id, args.round)
     if args.cmd == "restart":
         return cmd_restart(root, args.id, args.words)
+    if args.cmd == "write-spec":
+        return cmd_write_spec(root, args.id)
     if args.cmd == "escapes":
         return cmd_escapes(root, args.limit)
     if args.cmd == "report-dir":

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -251,6 +252,79 @@ def test_unfilled_spec_at_build_is_a_problem(tmp_path: Path) -> None:
     )
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
     assert any("still the template" in p["detail"] for p in a["problems"])
+
+
+PLAN_PROBLEM = "plan.md is still the template at stage: build"
+
+
+def _first_build(root: Path, **files: str) -> Path:
+    """A Tier 2 change at stage: build, its plan the scaffold, whose factory builder has started:
+    `runs/builder.sessions` just written, no report yet. `files` adds or overrides run files."""
+    plan = (REPO / "templates" / "plan.md").read_text(encoding="utf-8")
+    d = _change(root, "001-x", _fm(tier=2, stage="build"),
+                {"spec.md": "# spec\n\nWritten.\n", "plan.md": plan})  # fmt: skip
+    (d / "runs").mkdir()
+    (d / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    for rel, text in files.items():
+        path = d / rel.replace("__", "/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return d
+
+
+def _details(root: Path) -> list[str]:
+    return [p["detail"] for p in sdlc.analyze(root, today=date(2026, 10, 17))["problems"]]
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "step",
+    [None, "STEP: build\nROUND: 1\n", "STEP: build\nROUND:\n"],
+    ids=["no-step", "round-1", "no-round"],
+)
+def test_check_leaves_out_the_template_plan_during_a_live_first_build(tmp_path, step) -> None:
+    """105 R10: the builder writes plan.md as its first step; while that build is live, the
+    scaffold is no problem."""
+    _first_build(tmp_path, **({"runs__step.md": step} if step else {}))
+    assert PLAN_PROBLEM not in _details(tmp_path)
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "case",
+    ["report", "stopped", "stale", "review-step", "later-round", "no-sessions"],
+)
+def test_the_template_plan_shows_once_the_first_build_is_not_live(tmp_path, case) -> None:
+    """105 R10: a report written, a stop recorded, a session past the agent timeout, a step other
+    than the first build, or no factory session at all: the problem is back."""
+    files = {
+        "report": {"build__round-1.md": "Built.\n"},
+        "stopped": {"runs__stopped.md": "STOPPED: rerun\nNEXT: rerun it\n"},
+        "review-step": {"runs__step.md": "STEP: review\nROUND: 1\n"},
+        "later-round": {"runs__step.md": "STEP: build\nROUND: 2\n"},
+    }.get(case, {})
+    d = _first_build(tmp_path, **files)
+    sessions = d / "runs" / "builder.sessions"
+    if case == "stale":
+        old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+        os.utime(sessions, (old, old))
+    if case == "no-sessions":
+        sessions.unlink()
+    assert PLAN_PROBLEM in _details(tmp_path)
+
+
+@pytest.mark.portable
+def test_a_live_first_build_hides_no_other_problem(tmp_path) -> None:
+    """105 R10: only the plan's problem is left out: an unfilled spec or intent still shows."""
+    d = _first_build(tmp_path)
+    (d / "spec.md").write_text((REPO / "templates" / "spec.md").read_text(encoding="utf-8"))
+    (d / "intent.md").write_text(
+        _fm(tier=2, stage="build") + "\n<a prompt>\n<another prompt>\n", encoding="utf-8"
+    )
+    details = _details(tmp_path)
+    assert PLAN_PROBLEM not in details
+    assert "spec.md is still the template at stage: build" in details
+    assert "intent.md is still the template at stage: build" in details
 
 
 @pytest.mark.parametrize(

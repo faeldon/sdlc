@@ -16,6 +16,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready *)'
@@ -143,8 +144,10 @@ With `spec` true, first draft the spec, in the background:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec
 ```
 
-Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its `reply`, the
-complete `spec.md` and, after a `---` line, the open questions it resolved and left. Check it
+Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its JSON: `to`, the
+complete draft, `.sdlc/work/NNN-slug/runs/spec-draft.md`; `questions`, the open questions it
+resolved and left, `.sdlc/work/NNN-slug/runs/spec-questions.md` (null when it gave none);
+`preamble`, anything written before the draft, no part of it. Read both files. Check the draft
 against `intent.md` before showing it: every `<...>` prompt replaced, requirements numbered and
 each checkable, a **Contracts touched** line for each invariant the change comes near. If one of
 those is missing, send it back once, to the same spec-writer, which keeps its draft in context, and
@@ -154,7 +157,7 @@ say so if the second draft still lacks it:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --recheck
 ```
 
-Nothing is written yet: the draft is only in the command's output.
+`spec.md` is not written yet: the draft is only in `runs/`, an uncommitted run record.
 
 With a `restart`, show first, naming the change: the decision's first reason, its `## Reconsider
 the approach` section word for word (or that it has none), and the decisions still assumed in its
@@ -175,7 +178,9 @@ to it. Name the files the run will write, all by `factory.py` in the change's fo
 `plan.md` by the builder; `build/round-<N>.md`, `reviews/round-<N>/<role>.md`,
 `reviews/round-<N>/verified.md` and `decision.md`, the agents' replies; `build/round-<N>.gate.md`,
 each attempt of the gate on that round's build; `runs/<agent>.sessions`, each session's id, for
-measuring; `runs/costs.jsonl`, each run's reported cost and tokens; `runs/stopped.md`, while the
+measuring; `runs/costs.jsonl`, each run's reported cost and tokens; with a spec draft, `runs/spec-draft.md` and
+`runs/spec-questions.md`, already written, and `spec.md`, copied from the draft by `write-spec`;
+`runs/stopped.md`, while the
 run is stopped, its problems and the way on, for the board and `/sdlc:status`; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
 resolve; with a `restart`, `decision-<n>.md` and `build/round-<R>.restart.md` by `restart`. Say that the run will ask them about any blocking decision, and that every builder report
@@ -228,15 +233,19 @@ Changing the reviewers or rounds is an edit to `.sdlc/factory.toml` and a new qu
 
 ## Step 3 — Run it
 
-With a spec draft, `Edit` the scaffolded `spec.md` with it, exactly as shown, and strike the open
-questions it resolved in `intent.md` (`- ~~Question?~~ Resolved: ...`). Then:
+With a spec draft, copy it into `spec.md` and advance the change:
 
 ```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec <NNN> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> design && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> build
 ```
 
-The first only with a spec draft. With a `restart`, run `restart` in place of both: it writes
+`write-spec` copies `runs/spec-draft.md` exactly as shown, byte for byte, and refuses, writing
+nothing, with no draft, off a Tier 2 at `stage: plan`, or once `spec.md` is no longer its scaffold;
+a refusal stops the change, reported. Then strike the open questions the spec resolved in
+`intent.md` with `Edit` (`- ~~Question?~~ Resolved: ...`). Without a spec draft, run only the
+last `stage`. With a `restart`, run `restart` in place of both: it writes
 `build/round-<R>.restart.md`, renames `decision.md` to `decision-<n>.md` and sets `stage: build`,
 in that order, and a rerun finishes one cut short. When the yes came with words, first write them
 at the end of `decisions.md` (`Write` it with a `# Decisions` heading first when it doesn't exist)
@@ -400,7 +409,8 @@ and report: the depth it ran at and why, the rounds it took, each round's gate a
 verdicts (or that no gate is configured), each round's verdicts by reviewer and
 how many changes the verifier kept and dropped, the decision and its first reason, the decisions
 the person made during the run and those still assumed (by id, with the default the build rests
-on), what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
+on; a line marked `→ superseded by D<m>` is no assumption, shown as one line beside D<m>, the
+default that replaced it, never counted as open), what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
 what the run cost: the `cost` that `stage <NNN> test` printed, its `usd` total and the split
 `by_role` and `by_model`, called the API-equivalent cost Claude Code reported (on a subscription,
 where the spend went, not a bill), with `unknown` runs said when there are any. Say plainly that

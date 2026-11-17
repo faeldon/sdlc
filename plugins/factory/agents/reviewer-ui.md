@@ -65,7 +65,7 @@ Then, for each required change, one line naming the file and the screenshot:
 A finding that is really the person's call (the spec is silent on the look, or two parts of the
 repo's styling disagree) is not a CHANGE: raise it as `- DECISION: [blocking] ...` or
 `[default] ...` with the options and your recommendation. Read `decisions.md` first: an answered
-decision is settled.
+decision is settled. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Then `## Notes`: which screenshots you read, at most five smaller findings, and at least one
 thing the change does well.

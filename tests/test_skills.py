@@ -1071,10 +1071,29 @@ def test_judging_agents_return_text_the_skill_writes() -> None:
     return, and the spec only after its WAIT."""
     spec = BY_ID["sdlc-factory:spec"].read_text(encoding="utf-8")
     after_wait = spec.split("## Step 2 — WAIT")[1]
-    assert "Edit" in after_wait and "spec.md" in after_wait
+    assert "factory.py write-spec <NNN>" in after_wait and "spec.md" in after_wait
     build = BY_ID["sdlc-factory:build"].read_text(encoding="utf-8")
     assert "reviews/round-<round>/<role>.md" in build and "decision.md" in build
     assert "in one\n     message" in build or "in one message" in build, "reviewers in parallel"
+
+
+@pytest.mark.parametrize("name", ["sdlc-factory:spec", "sdlc-factory:build"])
+def test_the_spec_draft_reaches_spec_md_only_through_write_spec(name: str) -> None:
+    """105 R4: each skill shows the draft from the files `agent` wrote, and after the yes copies it
+    with `write-spec`; no model types it out again with `Edit`. The spec skill drafts through
+    `factory.py agent`, so the `Agent` tool leaves it."""
+    post = frontmatter.load(BY_ID[name])
+    text = post.content
+    assert "runs/spec-draft.md" in text and "runs/spec-questions.md" in text
+    before, after = re.split(r"^## Step 2 — WAIT.*$", text, maxsplit=1, flags=re.M)
+    assert "factory.py write-spec <NNN>" not in before, "nothing is written before the yes"
+    assert "factory.py write-spec <NNN>" in after
+    edits = [s for s in re.split(r"(?<=[.:])\s", " ".join(text.split())) if "Edit" in s]
+    assert not [s for s in edits if "spec.md" in s and "intent.md" not in s], edits
+    assert "Edit` the scaffolded" not in text
+    if name == "sdlc-factory:spec":
+        assert "Agent" not in post["allowed-tools"]
+        assert "agent <NNN> --task spec" in before and "run_in_background" in before
 
 
 def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
@@ -1253,6 +1272,25 @@ def test_the_build_session_brings_the_persons_decisions_to_them() -> None:
     assert "decisions.md" in approver and "still unticked" in approver
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
     assert "- DECISION: [blocking]" in builder and "- DECISION: [default]" in builder
+
+
+def test_agents_say_how_a_default_supersedes() -> None:
+    """105 R9: each agent that raises a default can name the one it replaces, never a decided one,
+    and the readers of the ledger say a superseded line is no assumption."""
+    for name in ("builder", "reviewer-code", "reviewer-security", "reviewer-ui", "reviewer-ux"):
+        text = " ".join((FACTORY / "agents" / f"{name}.md").read_text(encoding="utf-8").split())
+        assert "- DECISION: [default] (supersedes D<n>)" in text or (
+            "`(supersedes D<n>)`" in text
+        ), name
+        assert "→ decided:" in text and "can't be superseded" in text, name
+    readers = {
+        "approver": FACTORY / "agents" / "approver.md",
+        "ship": ROOT / "skills" / "ship" / "factory.md",
+        "build": FACTORY / "skills" / "build" / "SKILL.md",
+    }
+    for name, path in readers.items():
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        assert "→ superseded by D<m>" in text, name
 
 
 def test_the_retro_keeps_evidence_and_the_product_docs_prose_out_of_what_it_writes() -> None:

@@ -18,7 +18,9 @@ The change folder in the prompt. Read `intent.md`, `spec.md` (Tier 2), `plan.md`
 `reviews/round-N/*.md` in order, and `notes.md`: its unticked `- [ ]` lines include what the last
 round still asked for, carried there because the rounds ran out. Read `decisions.md`, the ledger
 of the calls the agents raised for the person: a ticked line was decided by them (`→ decided:`),
-and an unticked `default` one was assumed and built on without them.
+and an unticked `default` one was assumed and built on without them. A ticked line ending
+`→ superseded by D<m>` is a default a later one replaced: no assumption the build rests on, and
+never the person's word. Read it as one line beside D<m>, the default that replaced it.
 
 You have no shell. You judge from the files, the reviewers' findings and how they changed round to
 round.

@@ -105,6 +105,18 @@ Each line says the question, the options, and your recommendation with its reaso
 already answered in `.sdlc/work/NNN-slug/decisions.md` (a ticked line, `→ decided: ...`) is settled:
 build on the answer, never re-raise it.
 
+A default that replaces one already in the ledger (yours or a reviewer's, a call you made
+differently later) names it with `(supersedes D<n>)` after `[default]`, so the two never stand side
+by side as if both held:
+
+```
+- DECISION: [default] (supersedes D2) Keep the `was ESCALATE` badge on a shipped card. Going ahead unless told otherwise.
+```
+
+`factory.py decisions` then marks D2 `→ superseded by D<m>`. Only an open default can be
+superseded: a ticked line with `→ decided:` is the person's word and can't be superseded; if you
+think it wrong, raise a `[blocking]` decision saying why.
+
 ## Rework rounds
 
 When the supervisor resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/verified.md`: the

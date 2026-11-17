@@ -264,23 +264,6 @@ and 095 all did on 2026-11-17. Status and the board could derive "being built" f
 Theme: inbox
 Raised 2026-11-17.
 
-## [2026-11-17-42] [idea] The spec-writer's draft is written to a file
-
-`factory.py agent --task spec` returns the draft only in its reply, so the supervisor cuts
-`spec.md` out of the text; a draft holding its own code fences was cut short twice on 2026-11-17.
-The command could write the draft to the change's folder (say `runs/spec-draft.md`), which Step 3
-copies after the yes.
-Theme: factory
-Raised 2026-11-17.
-
-## [2026-11-17-44] [idea] decisions flags a default that contradicts an earlier one
-
-086's D2 (no badge on a shipped escalated card) and D4 (keep `was ESCALATE`) contradicted each
-other, and only the approver noticed. `factory.py decisions` could ask a later default whether it
-replaces an earlier one, and mark the earlier one superseded in the ledger.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-45] [idea] A Tier 2 at the light depth gets the test reviewer too
 
 At the light depth only the code reviewer runs, so 092's and 095's tests were never read
@@ -294,14 +277,6 @@ Raised 2026-11-17.
 No screenshot on 2026-11-17 showed 088's step track, 086's `was ESCALATE` or 091's gate badge: the
 dev server served this repo's board, whose changes had none of those states, so the ui and ux
 reviewers judged them from code alone. `[ui]` could name fixture data the server starts with.
-Theme: factory
-Raised 2026-11-17.
-
-## [2026-11-17-48] [idea] check --strict stays quiet about a plan a running build is writing
-
-`check --strict` reports "plan.md is still the template at stage: build" for a factory change
-whose builder is writing that plan right now. It could leave out a change with a live run
-(`runs/step.md` naming `build` for round 1).
 Theme: factory
 Raised 2026-11-17.
 
