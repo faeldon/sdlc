@@ -1462,16 +1462,18 @@ def landed_build(root: Path) -> str:
     return (_git(root, "rev-parse", "HEAD") or "")[:16]
 
 
-def _land_gate_state(root: Path, folder: Path, n: int) -> dict | None:
+def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) -> dict | None:
     """The gate on landing round `n`'s rebased change, as `_gate_state` reads a build's: None when
-    the base branch names no check."""
+    the base branch names no check. `settled` reads a round already reviewed: its last attempt's
+    verdict stands whatever `HEAD` is now, which the landing's own record and later rebases move."""
     base = _base(root)
     command = _base_check(root, base) if base else None
     if command is None:
         return None
     record = read_gate_file(land_gate_path(folder, n)) or {"attempts": [], "fails": 0}
     last = record["attempts"][-1] if record["attempts"] else None
-    current = last["verdict"] if last and last["build"] == landed_build(root) else None
+    ran_on = last and (settled or last["build"] == landed_build(root))
+    current = last["verdict"] if ran_on else None
     return {"command": command, "current": current, "exit": last["exit"] if last else None}
 
 
@@ -2268,10 +2270,58 @@ def read_impact(folder: Path) -> str | None:
     return None
 
 
+def resolved_files(folder: Path) -> list[str]:
+    """Every file the change's `conflicts.md` says `sdlc.py resolve` merged, each once, in order:
+    a copy of `sdlc.py`'s `conflicts_resolved()`, pinned to it by `tests/test_land.py`."""
+    record = folder / "conflicts.md"
+    lines = record.read_text(encoding="utf-8").splitlines() if record.is_file() else []
+    return list(dict.fromkeys(ln[2:].strip() for ln in lines if ln.startswith("- ")))
+
+
+LANDED_ROUND_RE = re.compile(r"^land-(\d+)$")
+LANDING_RESOLVED = "a conflict was resolved while landing"
+
+
+def resolution_signals(root: Path, folder: Path, cfg: dict) -> list[str]:
+    """A resolved conflict no reviewer has seen, as a signal: one made while landing until
+    `land_verdict()` for the round its marker names (`runs/land-resolved`'s first line) says
+    `pass`, a pass that stands when the landing's own record or a later rebase moves `HEAD`
+    (`settled`), and always for a marker naming no round, written before the round was. And one
+    `sdlc.py resolve` recorded in `conflicts.md` while any file it names hashes otherwise than
+    in the newest complete build round's snapshot, whose reviewers read exactly that content, or
+    always with no such round or snapshot. Content, never file times, which a checkout resets."""
+    signals = []
+    files = resolved_files(folder)
+    if files:
+        rounds, _, _ = _rounds_at_depth(root, folder, cfg)
+        done = [r["round"] for r in rounds if r["complete"]]
+        snap = read_snapshot(folder, done[-1]) if done else None
+        base = _base(root)
+        if snap is None or base is None:
+            unseen = files
+        else:
+            now = _tree_hashes(root, base)
+            unseen = [f for f in files if now.get(f) != snap.get(f)]
+        if unseen:
+            signals.append(
+                "a conflict resolved by sdlc.py resolve after the last review round: "
+                + ", ".join(unseen)
+            )
+    marker = folder / "runs" / "land-resolved"
+    if marker.is_file():
+        lines = marker.read_text(encoding="utf-8").splitlines()
+        m = LANDED_ROUND_RE.match(lines[0].strip()) if lines else None
+        n = int(m.group(1)) if m else 0
+        if not n or land_verdict(root, folder, cfg, n, settled=True)["next"] != "pass":
+            signals.append(LANDING_RESOLVED)
+    return signals
+
+
 def land_signals(folder: Path, worktree: Path, decision: str, cfg: dict) -> tuple[list, list]:
     """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
     in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
-    notes, its checks, its skills' cases and its issues, and what the run left in its folder."""
+    notes, its checks, its skills' cases and its issues, and what the run left in its folder,
+    a resolved conflict no reviewer has seen among it (`resolution_signals()`)."""
     signals, excluded = [], []
     code, pre, out = _sdlc(["preflight", folder.name], worktree)
     if pre is None:
@@ -2293,8 +2343,7 @@ def land_signals(folder: Path, worktree: Path, decision: str, cfg: dict) -> tupl
     ledger = read_ledger(folder)
     if [d for d in ledger if not d["decided"]]:
         signals.append("decisions still open or assumed in decisions.md")
-    if (folder / "runs" / "land-resolved").is_file():
-        signals.append("a conflict was resolved while landing")
+    signals += resolution_signals(worktree, folder, cfg)
     if not cfg["land"]["auto"]:
         signals.append("land.auto is off on the base branch")
     if (pre.get("undone") or {}).get("items"):
@@ -2336,10 +2385,62 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
     })  # fmt: skip
 
 
-def land_message(root: Path, folder: Path, by: str, refs: bool) -> str:
+# Where a change names the nits it takes in, as `/sdlc:intent` and `/sdlc:spec` write them: an id
+# anywhere else (a Problem citing what an earlier change took in) is never taken in.
+NIT_SECTIONS = (("intent.md", "## Approach"), ("spec.md", "## Requirements"))
+
+
+def _section(text: str, heading: str) -> str:
+    """The lines under `heading` in `text`, up to the next `## ` heading; empty when it has none."""
+    found, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line.rstrip() == heading
+        elif inside:
+            found.append(line)
+    return "\n".join(found)
+
+
+def named_nits(root: Path, folder: Path) -> list[str]:
+    """The open `[nit]` entries of the checkout's register that the change names by id in
+    `NIT_SECTIONS`, in the register's order: each id matched whole, so `2026-11-17-1` is never
+    named by `2026-11-17-11`. Never inferred from the diff."""
+    named = "\n".join(
+        _section((folder / f).read_text(encoding="utf-8"), heading)
+        for f, heading in NIT_SECTIONS if (folder / f).is_file()
+    )  # fmt: skip
+    register = root / INBOX
+    text = register.read_text(encoding="utf-8") if register.is_file() else ""
+    found, fenced = [], False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        elif not fenced and (m := NIT_RE.match(line)):
+            found.append(m.group(1))
+    return [i for i in found if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", named)]
+
+
+def retire_nits(root: Path, ids: list[str]) -> None:
+    """Delete each nit `ids` names from the checkout's register, its heading to the line before
+    the next heading, as `/sdlc:ship` does: the change's commit carries the deletion."""
+    register = root / INBOX
+    kept, dropping, fenced = [], False, False
+    for line in register.read_text(encoding="utf-8").splitlines(keepends=True):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        elif not fenced and line.startswith("#"):
+            m = NIT_RE.match(line)
+            dropping = bool(m and m.group(1) in ids)
+        if not dropping:
+            kept.append(line)
+    register.write_text("".join(kept), encoding="utf-8", newline="\n")
+
+
+def land_message(root: Path, folder: Path, by: str, refs: bool, nits: list[str] = ()) -> str:
     """The landed change's commit message: its title, its Problem's first sentence and its folder,
-    `Refs #N` when its number is its issue's, and who passed the gate. No `Sdlc-Findings`: the
-    factory's rounds stood in for ship's review, and retro reads a missing line as unanswered."""
+    a `Retired nits:` paragraph naming each nit it took in, as `/sdlc:ship` writes one, `Refs #N`
+    when its number is its issue's, and who passed the gate. No `Sdlc-Findings`: the factory's
+    rounds stood in for ship's review, and retro reads a missing line as unanswered."""
     text = (folder / "intent.md").read_text(encoding="utf-8")
     title = next((ln for ln in text.splitlines() if ln.startswith("# ")), f"# {folder.name}")
     title = re.sub(r"^#\s+\d{3,}\s+—\s+", "", title).lstrip("# ").strip()
@@ -2347,6 +2448,10 @@ def land_message(root: Path, folder: Path, by: str, refs: bool) -> str:
     prose = " ".join(problem.split("\n## ", 1)[0].split())
     first = re.split(r"(?<=[.!?])\s", prose, maxsplit=1)[0] if prose else ""
     body = f"{first} See {folder.relative_to(root).as_posix()}/.".strip()
+    if nits:
+        body += "\n\nRetired nits:\n" + "".join(
+            f"- {n}: taken in by {folder.name}\n" for n in nits
+        ).rstrip("\n")
     tail = [f"Refs #{int(folder.name.split('-')[0])}"] if refs else []
     tail.append(f"{LANDED}: by={by}")
     return f"{title}\n\n{body}\n\n" + "\n".join(tail) + "\n"
@@ -2384,6 +2489,7 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     out["change"] = folder.name
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     impact = read_impact(folder)
+    nits: list[str] = []
     decision = read_decision(folder)[0]
     if meta.get("stage") not in ("test", "shipped") or decision is None:
         return emit(
@@ -2404,12 +2510,18 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         findings = folder / "findings.md"
         if pre and (pre.get("risk") or {}).get("deep") and not findings.is_file():
             findings.write_text(f"# Findings\n\n{FRESH_SKIPPED}\n", encoding="utf-8", newline="\n")
+        nits = named_nits(root, folder)
         code, _, said = _sdlc(["ship", folder.name], root)
         if code:
             return emit({**out, "refusals": [f"sdlc.py ship refused: {said.strip()[-500:]}"]}, 1)
+        # The nits the change took in leave the register in its own commit, as ship's skill
+        # deletes them: after ship, so every refusal of its comes before this write.
+        if nits:
+            retire_nits(root, nits)
+            _git(root, "add", "--", INBOX.as_posix())
         _, cfg_out, _ = _sdlc(["config"], root)
         refs = ((cfg_out or {}).get("archive") or {}).get("ids_from") == "github"
-        message = land_message(root, folder, by, refs)
+        message = land_message(root, folder, by, refs, nits)
         try:
             subprocess.run(
                 ["git", "-C", str(root), "commit", "-q", "-F", "-"], input=message,
@@ -2417,10 +2529,14 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
             )  # fmt: skip
         except (subprocess.CalledProcessError, OSError) as e:
             return emit({**out, "refusals": [f"the commit failed: {e}"]}, 1)
+    # Landed before, and the base moved again: the earlier landing's record goes into the
+    # change's commit first, or `base` refuses on a branch with a commit and uncommitted work.
+    elif why := _amend_record(root, folder):
+        return emit({**out, "refusals": [why]}, 1)
     code, based, said = _sdlc(["base", folder.name], root)
     action = (based or {}).get("action")
     reason = str((based or {}).get("reason") or said)
-    out.update(head=_git(root, "rev-parse", "--short", "HEAD"), base=based)
+    out.update(head=_git(root, "rev-parse", "--short", "HEAD"), base=based, retired_nits=nits)
     if action in ("current", "fast-forwarded"):
         out["state"] = "current"
     elif action == "rebased":
@@ -2435,6 +2551,51 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     return emit(out)
 
 
+def _dirty(root: Path) -> list[str] | None:
+    """Every path `root` has uncommitted, untracked ones included, read from `git status
+    --porcelain -z` as it printed it: never through `_git()`, whose strip takes the first entry's
+    leading space (` M path`) and so a character of its path. A rename's old path is skipped.
+    None when git fails."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all"],
+            capture_output=True, encoding="utf-8", check=True,
+        )  # fmt: skip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    entries, paths = done.stdout.split("\0"), []
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        if len(entry) > 3:
+            paths.append(entry[3:])
+            if entry[0] in "RC":
+                i += 1
+        i += 1
+    return paths
+
+
+def _amend_record(root: Path, folder: Path) -> str | None:
+    """The landing's own record (its gate, its review, a resolved conflict's marker, the run's
+    costs), written after the change's commit, amended into that commit, so the change lands as
+    one commit, and `sdlc.py base` and `close` find the worktree clean. Why not, or None: anything
+    dirty outside the change's folder is not the landing's, and is refused."""
+    dirty = _dirty(root)
+    if dirty is None:
+        return "git status couldn't be read"
+    rel = folder.relative_to(root).as_posix() + "/"
+    stray = [p for p in dirty if not p.startswith(rel)]
+    if stray:
+        return f"uncommitted outside the change's folder: {', '.join(stray)}"
+    if dirty:
+        if f"\n{LANDED}: " not in "\n" + (_git(root, "log", "-1", "--format=%B") or ""):
+            return "HEAD isn't the landing's commit, so its record has nothing to be amended into"
+        _git(root, "add", "--", rel)
+        if _git(root, "commit", "-q", "--amend", "--no-edit") is None:
+            return "the landing's record couldn't be added to the commit"
+    return None
+
+
 def cmd_land_close(root: Path, ident: str) -> int:
     """Land change `ident`'s second half: `sdlc.py close` run from the main checkout (from inside
     the change's worktree it would keep the worktree), which merges, archives, removes the folder,
@@ -2442,20 +2603,17 @@ def cmd_land_close(root: Path, ident: str) -> int:
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
-    # The landing's own record (its review, a resolved conflict's marker) is written after the
-    # change's commit: amended into it, so the change lands as one commit and close finds the
-    # worktree clean. Anything dirty outside the change's folder is not the landing's: refused.
-    dirty = (_git(root, "status", "--porcelain", "--untracked-files=all") or "").splitlines()
-    rel = folder.relative_to(root).as_posix() + "/"
-    stray = [line[3:] for line in dirty if not line[3:].strip('"').startswith(rel)]
-    if stray:
-        return emit(
-            {"refusals": [f"uncommitted outside the change's folder: {', '.join(stray)}"]}, 1
-        )
-    if dirty:
-        _git(root, "add", "--", rel)
-        if _git(root, "commit", "-q", "--amend", "--no-edit") is None:
-            return emit({"refusals": ["the landing's record couldn't be added to the commit"]}, 1)
+    # A batch that passed itself closes a change resolved while landing only once its review
+    # passed: the script's rule, never only the skill's. Read before the amend moves `HEAD`. Only
+    # the landing's signal: `land` read the rest before it committed, and its own rebase can move
+    # the files `conflicts.md` names with nothing resolved.
+    if f"\n{LANDED}: by=auto" in "\n" + (_git(root, "log", "-1", "--format=%B") or ""):
+        cfg, _ = load_config(root)
+        if LANDING_RESOLVED in resolution_signals(root, folder, cfg):
+            why = f"landed by=auto, and {LANDING_RESOLVED}: no landing review has passed it"
+            return emit({"refusals": [why]}, 1)
+    if why := _amend_record(root, folder):
+        return emit({"refusals": [why]}, 1)
     main = worktrees(root)[0][0] if worktrees(root) else root
     code, closed, said = _sdlc(["close", ident], main)
     return emit(closed or {"refusals": [said.strip()[-500:]]}, code)
@@ -2486,7 +2644,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     """A rebase onto the base branch that conflicts, left for the builder: `resolve` starts it and
     lists the conflicted files (or finds none, and it is done); `--continue` checks no conflict
     marker is left in them, stages them and continues, aborting the rebase on a second conflict.
-    Every git step is this script's: the builder only edits the files it is given."""
+    Every git step is this script's: the builder only edits the files it is given. A finished
+    resolution leaves `runs/land-resolved`: `land-<n>`, the round under way, then the files. It is
+    a resolved conflict no reviewer has seen until round `n`'s review passes
+    (`resolution_signals()`)."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -2523,7 +2684,9 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         return emit({"refusals": ["a second conflict: the rebase was aborted, ship it by hand"]}, 1)
     marker = folder / "runs" / "land-resolved"
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(", ".join(files) + "\n", encoding="utf-8", newline="\n")
+    marker.write_text(
+        f"land-{land_round(folder)}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n"
+    )
     return emit({"change": folder.name, "resolved": files, "state": "resolved",
                  "head": _git(root, "rev-parse", "--short", "HEAD")})  # fmt: skip
 
@@ -2542,6 +2705,13 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     n = land_round(folder)
     if not n:
         return emit({"change": folder.name, "round": None, "next": "pass", "missing": []})
+    return emit(land_verdict(root, folder, cfg, n))
+
+
+def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = False) -> dict:
+    """Landing round `n`'s verdicts and the step it takes next, as `land-verdicts` emits them for
+    the round under way: the one reading of whether a landing review passed, which
+    `resolution_signals()` asks too, `settled` (see `_land_gate_state()`)."""
     path = folder / "reviews" / f"land-{n}"
     resolved = (folder / "runs" / "land-resolved").is_file()
     rounds, _, run = _rounds_at_depth(root, folder, cfg)
@@ -2567,7 +2737,7 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     problems += wrong
     # The rebased change is gated by the script before any reviewer reads it, as each build was.
     # Red is a stop, never a fix: the landing has no builder round, so the person ships it.
-    gate = _land_gate_state(root, folder, n)
+    gate = _land_gate_state(root, folder, n, settled)
     if gate and gate["current"] == "FAIL":
         problems.append(
             f"the gate failed on the change as rebased (exit {gate['exit']}), in "
@@ -2591,7 +2761,7 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
         )
     else:
         out["next"] = "pass"
-    return emit(out)
+    return out
 
 
 # ---------------------------------------------------------------- what escaped, and old code
@@ -2604,6 +2774,7 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
 
 INBOX = Path(".sdlc") / "work" / "inbox.md"
 BUG_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})-(\d+)\]\s*\[bug\]\s*(.+)$")
+NIT_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2}-\d+)\]\s*\[nit\]")
 FIELD_RE = re.compile(r"^(Severity|Paths|Introduced by):\s*(.+)$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 TRAILER_RE = re.compile(r"^Sdlc-(Fixes|Base):\s*(.*)$")

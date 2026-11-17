@@ -308,53 +308,6 @@ Severity: med
 Paths: scripts/board.py, scripts/sdlc.py
 Theme: board
 
-## [2026-11-17-31] [bug] land --close reads a modified file in the change's own folder as stray
-
-`cmd_land_close()` reads `git status --porcelain` through `_git()`, which strips its output, so
-the first line loses its leading space: ` M .sdlc/work/NNN-slug/runs/costs.jsonl` is read as
-`sdlc/work/…`, outside the change's folder, and the close is refused. It happens whenever the
-first dirty path is modified rather than new (after a landing's behaviour check appends to
-`costs.jsonl`); on 2026-11-17 it was worked around four times by staging the folder first. Parse
-with `-z`, or without stripping.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py
-Theme: landing
-
-## [2026-11-17-32] [bug] A factory landing never retires the nits its change took in
-
-`/sdlc:ship` retires a nit the diff fixed, but `factory.py land` runs `sdlc.py ship` without the
-skill's nit step, and `inbox-commit` refuses to remove a nit at all (`RETIRE_REASONS["nit"]` is
-empty). So 094, which took in nit 2026-11-17-11, landed and left the nit open; it went only when
-090 shipped by hand. A landing should retire the nits the change's intent or spec names by id.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
-Theme: landing
-
-## [2026-11-17-33] [bug] land refuses a second rebase while the landing's record is uncommitted
-
-A landing writes its record (`build/land-<n>.gate.md`, `reviews/land-<n>/`, `runs/land-resolved`)
-into the change's folder uncommitted, and only `land --close` amends it into the change's commit.
-When `main` moves before the close, `land` again is refused: "has commits of its own and
-uncommitted work, so it can't rebase". On 2026-11-17 095's second landing needed the record
-amended by hand first. `land` should amend the record itself before it rebases.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py
-Theme: landing
-
-## [2026-11-17-34] [bug] land-check reads a conflict resolved before the build as no landing signal, inconsistently
-
-095's branch had an inbox conflict resolved by `sdlc.py resolve` before its build
-(`conflicts.md`), and its first landing batch passed itself; the resolution its builder made while
-landing then made the next batch ask. Decide which resolutions are a signal and make `land-check`
-say so: a resolution the reviewers never saw should count, one they reviewed need not.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py
-Theme: landing
-
 ## [2026-11-17-35] [idea] The landing runs acceptance checks and the skills' cases behind its own yes
 
 `land-check` leaves out a change with `checks.md` or skills' cases in scope, because only a person

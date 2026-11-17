@@ -70,17 +70,17 @@ reviewing, and deciding whether to escalate.
   the order to ship them, a change after what it `depends_on`, with the others that touch the same
   paths. The supervisor never ships: you land them.
 - **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
-  changes as one batch, in that order, each shipped with the impact its approver proposed,
-  committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
+  changes as one batch, in that order, each shipped with the impact its approver proposed and
+  the nits its intent or spec names by id retired, committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
   `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
   copy). A change the base branch moved under is gated by the script again, as rebased, before
   its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
   change's own builder, and every reviewer at its depth checks the resolution before it lands. One approval covers the batch, and it **passes itself
   when no change in it carries a risk signal** (a sensitive or irreversible path, `impact: major`,
-  an ESCALATE, an open decision, an issue someone filed, an earlier resolved conflict), recorded
-  as `Sdlc-Landed: by=auto` on the change's commit and never as your review. A change with
-  acceptance checks or undone notes is left for `/sdlc:ship`, one at a time, which also stays the
-  way to land a change by hand.
+  an ESCALATE, an open decision, an issue someone filed, a resolved conflict no reviewer has
+  seen), recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. A
+  change with acceptance checks or undone notes is left for `/sdlc:ship`, one at a time, which
+  also stays the way to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 

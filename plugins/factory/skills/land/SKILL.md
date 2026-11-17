@@ -60,8 +60,11 @@ an empty batch, say why and stop.
 **With `clear` true, the gate passes itself.** Say so, `the batch is clear: landing without
 asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's rules don't let it
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
-decision still open or assumed, an issue someone filed (`closes:`), a conflict resolved in an
-earlier landing, or `land.auto` off.
+decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
+reviewer has seen, or `land.auto` off. A conflict resolved while landing is seen once every
+reviewer at the run's depth passed its landing round; one `sdlc.py resolve` recorded in
+`conflicts.md`, once the newest complete build round's reviewers read its files as they now
+stand. The script decides both; report them as it words them.
 
 ## Step 2 — WAIT for explicit approval
 
@@ -90,7 +93,10 @@ For each change in the batch, one at a time:
    ```
 
    It sets the approver's impact, runs `sdlc.py ship` (stamped shipped, its seed dropped, every
-   path staged), commits with the change's composed message, and runs `sdlc.py base`. Its
+   path staged), deletes from the register each open nit its intent or spec names by id (its
+   `retired_nits`, on a `Retired nits:` paragraph of the message, as `/sdlc:ship` does), commits
+   with the change's composed message, and runs `sdlc.py base`. Landed before, it adds the earlier
+   landing's record to its commit first, so it rebases again when the base moved since. Its
    `state`: `current` (go to 4), `rebased` (the base moved: 2), `conflict` (3), or a refusal,
    which stops this change and every one after it.
 2. **`rebased`: run the gate and the spec's path again**, on the change as it now stands. The gate
@@ -123,9 +129,9 @@ For each change in the batch, one at a time:
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-review --role <role>
    ```
 
-   **In a batch that passed itself, a resolved change stops here** once its review passes: a
-   resolution is a signal, so it lands at the next `/sdlc-factory:land`, behind the person's yes.
-   Go on with the next change.
+   **A resolved change goes on to close once its landing review passes**, in a batch that passed
+   itself too: every reviewer at the run's depth has then seen the resolution, so it is no longer
+   a signal. `land --close` refuses a change landed `by=auto` while that review hasn't passed.
 
    **The landing's verdicts**, after 2 or 3:
 
