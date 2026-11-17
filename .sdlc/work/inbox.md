@@ -260,21 +260,6 @@ escape rate O6 measures). After the 1.9.0 release.
 Theme: review
 Raised 2026-11-17.
 
-## [2026-11-17-51] [bug] A resolve refuses its own source as a conflict marker
-
-`factory.py resolve --continue` (and `sdlc.py resolve`) refuse "conflict markers left in" any
-conflicted file that holds a run of seven less-than signs anywhere, and both scripts hold one in
-their own marker check. So whenever `factory.py` or `sdlc.py` is itself one of the conflicted files,
-the resolution is refused though nothing is left: 103's landing on 2026-11-17 stopped on it, and its
-rebase was finished by hand. Any text quoting that run does the same, this entry's first wording
-included, which stopped 098's landing on `.sdlc/work/inbox.md`. Match a marker only as a whole line
-start: seven less-than signs and a space, seven equals signs alone, or seven greater-than signs and
-a space.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
-Theme: landing
-
 ## [2026-11-17-52] [idea] pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.
 
 Left undone by 098-board-fixes, carried forward when it landed: pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.

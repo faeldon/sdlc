@@ -198,7 +198,8 @@ def test_a_batch_lands_in_order_and_a_conflict_is_resolved_reviewed_and_closed(
     assert out["conflicted"] == ["README.md"]
     code, out = _run(capsys, factory.cmd_resolve, second, "002", True)
     assert code == 1 and "conflict markers left" in out["refusals"][0], "not resolved yet"
-    (second / "README.md").write_text("first's one, and second's\ntwo\nthree\n", encoding="utf-8")
+    resolved = "first's one, and second's, quoting " + "<" * 7 + " mid-line\ntwo\nthree\n"
+    (second / "README.md").write_text(resolved, encoding="utf-8")
     code, out = _run(capsys, factory.cmd_resolve, second, "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
     folder = second / ".sdlc" / "work" / second.name
@@ -1424,3 +1425,21 @@ def test_a_fix_at_landing_is_never_landed_by_auto_later(tmp_path, capsys) -> Non
     code, out = _run(capsys, factory.cmd_land_close, tree, "001")
     assert code == 1 and said in out["refusals"][0], out
     assert tree.exists() and _git(root, "log", "-1", "--format=%s", "main") == "init"
+
+
+def test_a_conflict_marker_is_matched_only_as_a_whole_line() -> None:
+    """108: both resolves refuse a file only for a marker git writes, a whole line. Each script's
+    own source and a register quoting the run mid-line (bug 51's wording, and the check the
+    scripts held) pass; a real marker of each kind is refused, and the factory's copy of the
+    pattern is `sdlc.py`'s."""
+    assert factory.CONFLICT_MARKER_RE.pattern == sdlc.CONFLICT_MARKER_RE.pattern
+    run = "<" * 7
+    quoted = f'## [2026-11-17-51] [bug] A resolve refuses "{run}"\n\nif "{run}" in text:\n'
+    sources = [Path(sdlc.__file__), Path(factory.__file__)]
+    texts = [quoted, "a heading\n========\n", *(p.read_text(encoding="utf-8") for p in sources)]
+    real = [f"{run} HEAD\nours\n", "ours\n=======\ntheirs\n", f"theirs\n{'>' * 7} abc1234\n"]
+    for mod in (factory, sdlc):
+        for text in texts:
+            assert not mod.CONFLICT_MARKER_RE.search(text), (mod.__name__, text[:60])
+        for text in real:
+            assert mod.CONFLICT_MARKER_RE.search(text), (mod.__name__, text)

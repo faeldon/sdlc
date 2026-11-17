@@ -1,0 +1,4 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Should a line of exactly seven equals signs count as a marker, as the intent says, even though a Markdown heading underlined to exactly that length would then be refused? Options: keep it as specified; drop that kind and match only the less-than and greater-than kinds. Going ahead with keeping it: the intent says so, and a heading underline rarely ends up exactly seven characters long inside a conflicted file. → decided: keep it: a line of exactly seven = is a separator
+- [x] D2 (builder round 1, default): Should a line of exactly seven equals signs count as a marker, as the intent says, even though a Markdown heading underlined to exactly that length would be refused? Options: keep it; match only the less-than and greater-than kinds. Going ahead with keeping it: the intent says so, and an underline of exactly that length is rare in a conflicted file. → decided: a duplicate of D1; settled with it

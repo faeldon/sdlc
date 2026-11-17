@@ -76,6 +76,9 @@ from urllib.parse import urlparse
 
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
+# A conflict marker as git writes it, a whole line: never a run of the signs quoted mid-line, as
+# a check like this one, or a register naming it, holds. A copy of `sdlc.py`'s, pinned by a test.
+CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 # Every role a model can be set for, and the reviewers a repo can choose among.
 ROLES = (
     "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "verifier",
@@ -3624,8 +3627,9 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         )
     files = _conflicted(root)
     marked = [
-        f for f in files if "<<<<<<<" in (root / f).read_text(encoding="utf-8", errors="replace")
-    ]
+        f for f in files
+        if CONFLICT_MARKER_RE.search((root / f).read_text(encoding="utf-8", errors="replace"))
+    ]  # fmt: skip
     if marked:
         return emit({"refusals": [f"conflict markers left in: {', '.join(marked)}"]}, 1)
     for f in files:

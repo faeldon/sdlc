@@ -102,7 +102,8 @@ def test_a_conflict_with_the_base_is_resolved_shipped_and_closed(tmp_path: Path)
     _write(tree / "README.md", "one, as main says and as the change says\ntwo\nthree\n")
     _write(tree / ".sdlc" / "work" / "inbox.md",
            INBOX + "\n## [2026-11-02-2] [idea] Main's idea\n\nTheirs.\n"
-           "\n## [2026-11-02-1] [idea] The change's idea\n\nOurs.\n")  # fmt: skip
+           "\n## [2026-11-02-1] [idea] The change's idea\n\nOurs, quoting a marker: "
+           + "<" * 7 + " mid-line.\n")  # fmt: skip
     done = _json(_run(tree, "resolve", "001", "--continue"))
     assert done["state"] == "clean", done
     assert set(done["resolved"]) == {"README.md", ".sdlc/work/inbox.md"}

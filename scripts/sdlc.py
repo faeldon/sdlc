@@ -98,6 +98,9 @@ DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # is empty" failure this process keeps hitting elsewhere. Two or more surviving prompt lines means
 # nobody has written it yet; prose almost never opens consecutive lines with '<'.
 PROMPT_RE = re.compile(r"^<[^>]", re.M)
+# A conflict marker as git writes it, a whole line: never a run of the signs quoted mid-line,
+# as a check like this one, or a register naming it, holds.
+CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 UNFILLED_THRESHOLD = 2
 # work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title", its id
 # (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its kind:
@@ -3895,7 +3898,7 @@ def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
         files = _unmerged(tree)
         marked = [
             f for f in files
-            if "<<<<<<<" in (tree / f).read_text(encoding="utf-8", errors="replace")
+            if CONFLICT_MARKER_RE.search((tree / f).read_text(encoding="utf-8", errors="replace"))
         ]  # fmt: skip
         if marked:
             report["conflicted"] = files
