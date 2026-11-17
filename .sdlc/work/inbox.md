@@ -217,31 +217,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
 
-## [2026-11-17-2] [idea] Two failure classes for the review doc, from the window's escapes
-
-Three bugs escaped from changes in the window, against none in the 14 before it (rate 0.11
-against 0.0, trend up):
-- 2026-11-12-3 from 015;
-- 2026-11-12-4 from 047, whose review had F1 on the bug's paths and answered it `minor`;
-- 2026-11-12-5 from 050, a Tier 1 change whose review had no finding on its paths.
-
-Two more bugs were tied to no change. The escapes, and the Important findings of 049, 052 and 055,
-all sit in how `scripts/metrics.py` reads transcripts. 041's and 059's Important findings share a
-second class.
-
-Add both to `.sdlc/REVIEW.md`'s "The ways this repo's code fails":
-
-- **A transcript's shape assumed, not read.** An event `scripts/metrics.py` counts from what a
-  spec says the harness writes, not from a recorded transcript: a request counted where its outcome
-  decides, a wait taken from agent time the turn never held, two kinds of reply read as one. A
-  change to how an event is read carries a test built from a real transcript's entries.
-- **A path compared as text between two sources that write it differently.** `str()` of a `Path`
-  against git's POSIX output, or git's quoted path against its `-z` output. Normalise both sides
-  first.
-
-Raised by the retrospective of 2026-11-17.
-Theme: review
-
 ## [2026-11-17-3] [idea] Say each rule once in AGENTS.md
 
 `AGENTS.md` was edited by 23 of the 27 changes in the window and is now 447 lines. It changed

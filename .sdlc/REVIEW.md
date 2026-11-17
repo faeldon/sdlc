@@ -39,6 +39,19 @@
   `-s ours --no-ff` for a `Drop` commit only.
 - **A project cited**: a host by name or as the one the plugin came from, a change by its bare
   folder number. Test data uses neutral examples.
+- **A transcript's shape assumed, not read.** An event `scripts/metrics.py` counts from what a spec
+  says the harness writes, not from a recorded transcript: a request counted where its outcome
+  decides, a wait taken from agent time the turn never held, two kinds of reply read as one. A
+  change to how an event is read carries a test built from the shape of a real transcript's entries.
+  The escapes from 047 and 050 are pinned by
+  `test_a_question_ends_with_a_question_mark_its_answers_after_it_or_not` and
+  `test_a_skill_the_session_starts_counts_as_typed`, in `tests/test_metrics.py`.
+- **A path compared as text between two sources that write it differently.** `str()` of a `Path`
+  against git's POSIX output, or git's escaped path against an unescaped one (a `-z` listing, or
+  another command's). Normalise both sides first. 041's F6 and 059's hotspots are pinned by
+  `test_paths_shown_are_posix` (`tests/test_windows.py`), caught only in CI's Windows job (it passes
+  on any other platform whatever the code does), and
+  `test_a_non_ascii_hotspot_on_the_base_branch_is_not_gone` (`tests/test_retro.py`).
 
 ## Pass 2 — Contract
 
