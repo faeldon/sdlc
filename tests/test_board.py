@@ -1632,3 +1632,226 @@ def test_an_empty_column_says_so() -> None:
     _, script = _page_parts()
     assert 'h("div", { class: "empty" }, "nothing waiting here")' in script
     assert 'class: "empty" }, "—"' not in script
+
+
+# ---------------------------------------------------------------- the drawer's markdown (124)
+
+# A stand-in DOM, just what `h()` and the markdown section call, whose tree reads back as JSON.
+_FAKE_DOM = r"""
+class Node {}
+class Text extends Node {
+  constructor(t) { super(); this.text = String(t); }
+  toJSON() { return this.text; }
+}
+class El extends Node {
+  constructor(tag) { super(); this.tag = tag; this.attrs = {}; this.kids = []; }
+  get tagName() { return this.tag.toUpperCase(); }
+  get childNodes() { return this.kids; }
+  set className(v) { this.attrs.class = v; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  append(...ns) { for (const n of ns) this.kids.push(n instanceof Node ? n : new Text(n)); }
+  set textContent(v) { this.kids = [new Text(v)]; }
+  toJSON() { return { tag: this.tag, attrs: this.attrs, kids: this.kids }; }
+}
+const document = { createElement: (t) => new El(t), createTextNode: (t) => new Text(t) };
+"""
+
+
+def _render_markdown(text: str, base: str, files: list[str]) -> list:
+    """`renderMarkdown()` as the page has it, run under node over a stand-in DOM."""
+    _, script = _page_parts()
+    helper = re.search(r"^function h\(tag, attrs, \.\.\.children\) \{.*?^\}$", script, re.S | re.M)
+    section = re.search(r"^// ---- markdown\b.*?^// ---- end markdown$", script, re.S | re.M)
+    assert helper and section, "h() and the page's markdown section"
+    program = "\n".join(
+        [
+            '"use strict";',
+            _FAKE_DOM,
+            helper.group(0),
+            section.group(0),
+            "const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));",
+            "process.stdout.write(JSON.stringify(renderMarkdown(input.text, input.ctx)));",
+        ]
+    )
+    out = subprocess.run(
+        ["node", "-e", program],
+        input=json.dumps({"text": text, "ctx": {"base": base, "files": files}}),
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return json.loads(out.stdout)
+
+
+def _nodes(tree, tag: str | None = None) -> list[dict]:
+    found = []
+    for n in tree if isinstance(tree, list) else [tree]:
+        if isinstance(n, dict):
+            if tag is None or n["tag"] == tag:
+                found.append(n)
+            found += _nodes(n["kids"], tag)
+    return found
+
+
+def _text(tree) -> str:
+    if isinstance(tree, str):
+        return tree
+    if isinstance(tree, list):
+        return "".join(_text(n) for n in tree)
+    return _text(tree["kids"])
+
+
+needs_node = pytest.mark.skipif(
+    not shutil.which("node"), reason="needs node to run the page's script"
+)
+
+MARKDOWN = """\
+---
+id: 005
+stage: build
+---
+
+# 005 — Share drafts
+
+A draft is **shared** by *link*, with `share()` and __bold__ and _em_ but snake_case_name.
+Its second line ~~was~~ joins the paragraph.
+
+## Outcome
+
+- one
+- two, wrapped
+  onto a second line
+  - nested
+- [x] done
+- [ ] not yet
+
+1. first
+2. second
+
+> quoted **text**
+
+```python
+print("<b>not bold</b>")
+```
+
+| Role | Verdict |
+| --- | --- |
+| code | PASS |
+
+See [the spec](../../spec.md), [the site](https://example.com/a), [nothing](missing.md).
+
+<!-- a comment the template left -->
+
+---
+"""
+
+
+@needs_node
+def test_the_drawer_renders_markdown_as_nodes() -> None:
+    """124: a `.md` file in the drawer reads as a document, every construct its own node."""
+    tree = _render_markdown(
+        MARKDOWN, "reviews/round-1/code.md", ["spec.md", "reviews/round-1/code.md"]
+    )
+    front = _nodes(tree, "pre")[0]
+    assert front["attrs"]["class"] == "md-front" and _text(front) == "id: 005\nstage: build"
+    heads = [(n["tag"], _text(n)) for n in _nodes(tree) if re.fullmatch(r"h[4-6]", n["tag"])]
+    assert heads == [("h4", "005 — Share drafts"), ("h5", "Outcome")]
+    para = _nodes(tree, "p")[0]
+    assert _text(para).endswith("snake_case_name. Its second line was joins the paragraph.")
+    assert [_text(n) for n in _nodes(para, "strong")] == ["shared", "bold"]
+    assert [_text(n) for n in _nodes(para, "em")] == ["link", "em"]
+    assert [_text(n) for n in _nodes(para, "code")] == ["share()"]
+    assert [_text(n) for n in _nodes(para, "del")] == ["was"]
+    ul = _nodes(tree, "ul")[0]
+    items = [n for n in ul["kids"] if isinstance(n, dict)]
+    assert len(items) == 4
+    assert _text(items[1]).startswith("two, wrapped onto a second line")
+    assert [_text(n) for n in _nodes(items[1]["kids"], "li")] == ["nested"]
+    boxes = _nodes(ul, "input")
+    assert [b["attrs"].get("checked") for b in boxes] == ["", None]
+    assert all(b["attrs"]["type"] == "checkbox" and "disabled" in b["attrs"] for b in boxes)
+    assert [_text(n) for n in _nodes(_nodes(tree, "ol")[0], "li")] == ["first", "second"]
+    quote = _nodes(tree, "blockquote")[0]
+    assert _text(quote) == "quoted text" and _nodes(quote, "strong")
+    code = next(n for n in _nodes(tree, "pre") if n["attrs"].get("class") == "md-code")
+    assert _text(code) == 'print("<b>not bold</b>")' and _nodes(code, "code")
+    table = next(n for n in _nodes(tree, "div") if n["attrs"].get("class") == "md-table")
+    for box, name in ((code, "code"), (table, "table")):
+        # A box that scrolls sideways is a named tab stop, so a keyboard can scroll it.
+        assert box["attrs"]["tabindex"] == "0" and box["attrs"]["role"] == "region", box["attrs"]
+        assert box["attrs"]["aria-label"] == name
+    assert [_text(n) for n in _nodes(tree, "th")] == ["Role", "Verdict"]
+    assert [_text(n) for n in _nodes(tree, "td")] == ["code", "PASS"]
+    links = {_text(a): a["attrs"] for a in _nodes(tree, "a")}
+    assert links["the spec"]["data-path"] == "spec.md", "a file of the change opens in the drawer"
+    assert links["the site"] == {
+        "href": "https://example.com/a",
+        "target": "_blank",
+        "rel": "noopener noreferrer",
+    }
+    assert "nothing" not in links and "nothing" in _text(tree), "a file it lacks is text"
+    assert "a comment the template left" not in _text(tree)
+    assert _nodes(tree, "hr")
+
+
+@needs_node
+def test_markdown_holding_markup_shows_it_as_text() -> None:
+    """124: nothing in a change's file is parsed as HTML, and no link runs or leaves the change
+    but to the web."""
+    hostile = (
+        "<script>alert(1)</script>\n\n"
+        "<img src=x onerror=alert(2)>\n\n"
+        "[run](javascript:alert(3)) [data](data:text/html,x) [up](../../../etc/passwd) "
+        "[abs](/etc/passwd) [**bold** `code`](JavaScript:alert(4))\n"
+    )
+    tree = _render_markdown(hostile, "intent.md", ["intent.md"])
+    tags = {n["tag"] for n in _nodes(tree)}
+    assert tags <= {"p", "strong", "code", "span"}, tags
+    assert "<script>alert(1)</script>" in _text(tree)
+    assert "<img src=x onerror=alert(2)>" in _text(tree)
+    assert not _nodes(tree, "a"), "every one of those links is refused"
+    for n in _nodes(tree):
+        assert not any(k.startswith("on") or k in ("href", "src", "style") for k in n["attrs"]), n
+    assert "run" in _text(tree) and "bold" in _text(tree)
+
+
+@pytest.mark.portable
+def test_only_a_markdown_file_is_rendered() -> None:
+    """124: `.md` shows rendered, unless the person asks for its raw text; every other file shows
+    in the `pre` as before; code and tables scroll inside themselves at any width."""
+    css, script = _page_parts()
+    paint = re.search(r"function paint\(\) \{(.*?)\n\}", script, re.S)
+    assert paint, "paint() draws the file the drawer holds"
+    body = paint.group(1)
+    assert re.search(r"/\\\.md\$/i\.test\(", body), "a path ending .md, and nothing else"
+    assert "renderMarkdown(" in body and 'h("pre", {}, ' in body
+    assert '$("d-doc").replaceChildren(' in body
+    show = re.search(r"async function show\(change, path\) \{(.*?)\n\}", script, re.S).group(1)
+    assert "paint()" in show and "renderMarkdown" not in show
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    drawer = re.search(r'<aside class="drawer".*?</aside>', page, re.S).group(0)
+    assert re.search(r'<button[^>]*id="d-raw"[^>]*aria-pressed="false"', drawer), "the raw toggle"
+    assert '<div id="d-doc"></div>' in drawer
+
+    def rule(selector: str) -> str:
+        return re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", css).group(1)
+
+    assert "overflow-x: auto" in rule(".md pre.md-code") and "white-space: pre" in rule(
+        ".md pre.md-code"
+    )
+    assert "overflow-x: auto" in rule(".md .md-table")
+
+
+@pytest.mark.portable
+def test_the_focus_trap_skips_a_hidden_node() -> None:
+    """124 R1: the Raw toggle is hidden for any file but `.md`, and a hidden node can't take
+    focus, so the trap's cycle leaves out every node a `[hidden]` holds."""
+    _, script = _page_parts()
+    trap = re.search(r"function trapTab\(e\) \{(.*?)\n\}", script, re.S).group(1)
+    assert re.search(
+        r'querySelectorAll\(FOCUSABLE\)\]\.filter\(\(n\) => !n\.closest\("\[hidden\]"\)\)', trap
+    )
+    css, _ = _page_parts()
+    assert re.search(
+        r"(?m)^\.md \.md-table:focus-visible, \.md pre\.md-code:focus-visible \{[^}]*outline", css
+    )

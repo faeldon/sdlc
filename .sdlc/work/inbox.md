@@ -217,3 +217,17 @@ Raised 2026-11-18.
 Left undone by 114-one-review, carried forward when it shipped: gap: landing rounds: `findings.md` holds only the build rounds (`reviews/round-<N>/`); the landing's review rounds (`reviews/land-<n>/`) are not in it.
 See .sdlc/work/114-one-review/notes.md in its commit.
 Raised 2026-11-18.
+
+## [2026-11-18-8] [idea] The board's drawer says a file is empty instead of showing a blank pane
+
+Left undone by 124-board-renders-markdown, carried forward when it landed: ux: scripts/board.html:570: a `.md` file with no text (`doc.text` is `""`) draws a blank pane, because `??` keeps the empty string and the markdown branch renders an empty `div`. The drawer looks broken. Say the file is empty, for example "This file is empty." in the same note style as "This folder holds no file yet."
+See .sdlc/work/124-board-renders-markdown/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-9] [bug] A slow fetch in the board's drawer can show an older file under a newer file's highlight
+
+Found by the review of 124-board-renders-markdown.
+pre-existing: scripts/board.html:573-585: `show()` assigns `doc` when its fetch resolves, whichever file was asked for last. If two files are clicked quickly and the older response arrives second, the pane shows the older file while the list highlights the newer one. Filed for later, not reworked here.
+
+Severity: med
+Paths: scripts/board.html

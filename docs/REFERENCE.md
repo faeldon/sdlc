@@ -537,7 +537,9 @@ run against the median time that step took at that tier in the last 20 closed fa
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
 them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
 has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A click opens
-any file in the change's folder. It writes nothing, answers only `GET` for the page, `/state.json`
+any file in the change's folder, a markdown file rendered (its text never parsed as HTML; a link
+followed only to the web, in a new tab, or to another file of the change) with a `Raw` toggle for
+its exact text. It writes nothing, answers only `GET` for the page, `/state.json`
 and `/file` (one file inside the folder of a change it shows), refuses a request naming another host,
 and a second `board` on a port a board holds says so rather than starting again. `--port 0` takes
 a port the OS picks, and prints it. A running board serves `board.py` as it is on disk, loading it
