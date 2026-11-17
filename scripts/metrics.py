@@ -91,6 +91,8 @@ SKILL_RE = re.compile(rf"<command-name>/({PLUGIN_SKILL})</command-name>")
 SKILL_NAME_RE = re.compile(rf"^{PLUGIN_SKILL}$")
 ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 STAGE_LINE_RE = re.compile(r"^stage:\s*([a-z]+)\s*$", re.M)
+# A run of the gate by hand, `sdlc.py gate NNN`, wherever the plugin is installed: a `check`.
+HAND_GATE_RE = re.compile(r"scripts/sdlc\.py\s+gate(?:\s|$)")
 # A change's branch: its number and slug (`sdlc.py`'s `DIR_RE`).
 DIR_RE = re.compile(r"^\d{3,}-[a-z0-9][a-z0-9-]*$")
 APPROVE_RE = re.compile(
@@ -698,9 +700,11 @@ def read_events(
                         elif name == "AskUserQuestion":
                             events.append({"ts": ts, "kind": "question"})
                             dialogs[str(block.get("id"))] = ts
-                        elif name == "Bash" and check:
-                            # The gate, alone or piped on (`./check.sh 2>&1 | tail`).
-                            if str(inp.get("command", "")).strip().startswith(check):
+                        elif name == "Bash":
+                            # The gate, alone or piped on (`./check.sh 2>&1 | tail`), or run
+                            # by hand through `sdlc.py gate`, which runs the base branch's.
+                            line = str(inp.get("command", "")).strip()
+                            if (check and line.startswith(check)) or HAND_GATE_RE.search(line):
                                 checks[str(block.get("id"))] = ts
                         elif name == "Agent":
                             agents.add(str(block.get("id")))

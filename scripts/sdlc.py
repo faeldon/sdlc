@@ -97,6 +97,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 import unicodedata
 from collections import Counter
@@ -2520,6 +2521,219 @@ def cmd_accept(root: Path, ident: str) -> int:
     return 0 if passed else 1
 
 
+# ---------------------------------------------------------------- the gate, run by hand
+#
+# `gate` runs the base branch's `[commands] check` on a change built by hand and records the
+# attempt in its folder's `build/gate.md`, in the shape `factory.py gate` writes
+# `build/round-<N>.gate.md`, so the board and status read both alike. The constants and regexes
+# below are `factory.py`'s, copied (each plugin is cached on its own) and pinned to it by a test.
+GATE_TIMEOUT = 30 * 60
+GATE_TAIL = 80
+CLONE_MARK = "<path-to-clone>"
+HOME_MARK = "~"
+ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
+BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
+SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
+# The record, in the change's folder: beside the factory's round files, and matched by none of
+# their readers (`round-*`, `*.gate.md`).
+HAND_GATE = Path("build") / "gate.md"
+
+
+def _hand_paths(checkout: Path, trunk: str) -> tuple[str | None, list[str]]:
+    """Where the change left `trunk` (the merge-base) and every path it has changed since:
+    committed, uncommitted and untracked but not ignored, less the change folders and the
+    plugin's state files, sorted. `-z`, so git quotes no path."""
+    fork = _git(checkout, "merge-base", trunk, "HEAD")
+    if not fork:
+        return None, []
+    tracked = _git(checkout, "diff", "-z", "--name-only", "--no-renames", fork) or ""
+    untracked = _git(checkout, "ls-files", "-z", "--others", "--exclude-standard") or ""
+    own = (f"{work_rel(checkout)}/", *(f"{HOST_DIR}/{name}" for name in STATE_FILES))
+    paths = {p for p in (tracked.split("\0") + untracked.split("\0")) if p}
+    return fork, sorted(p for p in paths if not p.startswith(own))
+
+
+def _hand_digests(checkout: Path, paths: list[str]) -> dict[str, str]:
+    """Each path as the sha256 of its bytes, or `deleted`."""
+    found = {}
+    for p in paths:
+        file = checkout / p
+        found[p] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+    return found
+
+
+def _hand_hash(fork: str | None, digests: dict[str, str]) -> str:
+    text = (fork or "") + "\n" + "".join(f"{p}\0{d}\n" for p, d in sorted(digests.items()))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def hand_build(checkout: Path, trunk: str) -> str:
+    """The build a hand gate judged, as 16 hex digits: the merge-base with `trunk` and the content
+    of every path the change touched (`_hand_paths()`). Over content, so ship's commit of the same
+    work keeps it; over the merge-base, so a rebase onto a moved base doesn't; and never over the
+    change's own folder, so writing the record, or notes, leaves it alone."""
+    fork, paths = _hand_paths(checkout, trunk)
+    return _hand_hash(fork, _hand_digests(checkout, paths))
+
+
+def _hand_placeholders(text: str, root: Path) -> str:
+    """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
+    `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
+    the home directory reads `<path-to-clone>/…`, never `~/…`. Each path is matched as given and
+    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too. A copy of
+    `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed with the
+    change, and a machine's layout never reaches its history."""
+    listed = _git(root, "worktree", "list", "--porcelain") or ""
+    checkouts = [Path(line[len("worktree ") :]) for line in listed.splitlines()
+                 if line.startswith("worktree ")]  # fmt: skip
+    for path, mark in (
+        (checkouts[0] if checkouts else root, CLONE_MARK),
+        (root, CLONE_MARK),
+        (Path.home(), HOME_MARK),
+    ):
+        forms = {str(path), path.as_posix(), str(path.resolve()), path.resolve().as_posix()}
+        for form in sorted(forms - {"", "/", "."}, key=len, reverse=True):
+            text = text.replace(form, mark)
+    return text
+
+
+def _refused(why: str) -> int:
+    print(json.dumps({"refusals": [why]}, indent=2, ensure_ascii=False))
+    return 1
+
+
+def cmd_gate(root: Path, ident: str) -> int:
+    """Run the base branch's `[commands] check` on a change built by hand, from its checkout, and
+    add the attempt to its folder's `build/gate.md`, as `factory.py gate` records a round's: PASS
+    only on exit 0, within `GATE_TIMEOUT`, with every path the build covers as it found it. The
+    check is read from the base branch, never the checkout, so a change can't edit the gate that
+    judges it. Writes only that file, holding no path of this machine's. Never pre-approved: it
+    runs a command, as `accept` does. A factory run is refused: `factory.py gate` gates it."""
+    home = main_root(root)
+    trunk = load_config(home)[0]["git"]["base"]
+    if refusal := trunk_refusal(home, trunk):
+        return _refused(refusal)
+    cfg = _config_at(home, f"refs/heads/{trunk}")
+    if cfg is None:
+        return _refused(f"the base branch's {HOST_DIR}/config.toml doesn't parse")
+    command = cfg["commands"]["check"]
+    if not isinstance(command, str) or not command.strip():
+        return _refused(f"the base branch's {HOST_DIR}/config.toml has no [commands] check")
+    folder = _one_change(root, ident)
+    if folder is None:
+        return 1
+    if (folder / "runs").is_dir():
+        return _refused(f"{folder.name} is a factory run: its gate is `factory.py gate`")
+    checkout = checkout_of(folder)
+    branch = _git(checkout, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch != folder.name:
+        return _refused(
+            f"{_shown(checkout, home)} is on {branch or '?'!r}, not {folder.name}: the record "
+            "must judge the change's own branch"
+        )
+    fork, paths = _hand_paths(checkout, trunk)
+    before = _hand_digests(checkout, paths)
+    build = _hand_hash(fork, before)
+    start = time.monotonic()
+    try:
+        done = subprocess.run(
+            _sh(command), cwd=checkout, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
+        )  # fmt: skip
+        code, output, exit_text = done.returncode, done.stdout + done.stderr, str(done.returncode)
+    except subprocess.TimeoutExpired as e:
+        # A timeout's partial output is bytes even in text mode.
+        partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
+                   (e.stdout, e.stderr)]  # fmt: skip
+        code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
+        exit_text = "timeout"
+    except OSError as e:
+        code, output, exit_text = None, f"didn't run: {e}", "didn't run"
+    seconds = round(time.monotonic() - start, 1)
+    after = _hand_digests(checkout, _hand_paths(checkout, trunk)[1])
+    changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+    verdict = "PASS" if code == 0 and not changed else "FAIL"
+    path = folder / HAND_GATE
+    attempt = len(_gate_attempts(path)) + 1
+    output = _hand_placeholders(output, checkout)
+    tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
+    tail = tail or "    (no output)\n"
+    tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
+    section = (
+        f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
+        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
+        f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
+    )
+    # The first line is the latest verdict; the attempts before it stay as they were.
+    earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
+    earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    out = {"change": folder.name, "attempt": attempt, "verdict": verdict, "exit": exit_text}
+    out.update(seconds=seconds, tree=tree, to=path.relative_to(checkout).as_posix())
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0 if verdict == "PASS" else 1
+
+
+def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
+    """A change's hand gate record as the board and status read it: None without `build/gate.md`,
+    else its last attempt's `verdict`, `exit` and `seconds`, its `attempts` and `fails`, its
+    `path`, and whether it is `current`: that attempt judged the build as it stands now
+    (`hand_build()`), on the change's own branch. A record that won't read is `current: false`
+    with a `problems` line, never an exception: it stands for nothing judged."""
+    path = folder / HAND_GATE
+    if not path.is_file():
+        return None
+    checkout = checkout_of(folder)
+    rel = path.relative_to(checkout).as_posix()
+    try:
+        attempts = _gate_attempts(path)
+    except OSError as e:
+        attempts, why = [], f"{rel} couldn't be read: {e}"
+    else:
+        why = f"{rel} has no ## Attempt section with its Verdict: line"
+    last = attempts[-1] if attempts else None
+    out = {
+        "verdict": last["verdict"] if last else None,
+        "current": False,
+        "exit": last["exit"] if last else None,
+        "seconds": last["seconds"] if last else None,
+        "attempts": len(attempts),
+        "fails": sum(a["verdict"] == "FAIL" for a in attempts),
+        "path": rel,
+    }
+    if not last or not last["verdict"]:
+        return out | {"problems": [why]}
+    on_branch = _git(checkout, "rev-parse", "--abbrev-ref", "HEAD") == folder.name
+    out["current"] = bool(
+        trunk and on_branch and last["build"] and last["build"] == hand_build(checkout, trunk)
+    )
+    return out
+
+
+def _gate_attempts(path: Path) -> list[dict]:
+    """A gate record's attempts, oldest first, each its verdict, build, exit and seconds, read by
+    line as `factory.py`'s `read_gate_file()` reads one: the output is indented, so a line of it
+    never reads as the record's. [] without the file."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except FileNotFoundError:
+        return []
+    attempts: list[dict] = []
+    for line in lines:
+        if line.startswith("## Attempt "):
+            attempts.append({"verdict": None, "build": None, "exit": None, "seconds": None})
+        elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
+            attempts[-1]["verdict"] = m.group(1)
+        elif attempts and (m := BUILD_RE.match(line)):
+            attempts[-1]["build"] = m.group(1)
+        elif attempts and line.startswith("Exit: "):
+            attempts[-1]["exit"] = line[len("Exit: ") :].strip()
+        elif attempts and (m := SECONDS_RE.match(line)):
+            attempts[-1]["seconds"] = float(m.group(1))
+    return attempts
+
+
 # ---------------------------------------------------------------- the skills' own cases
 #
 # `evals/` holds a `claude plugin eval` suite for the core skills, in this plugin's own repo only.
@@ -4459,7 +4673,7 @@ def _ff_deletions(main: Path, tree: Path, trunk: str, branch: str) -> dict:
 # handoff, and set to anything by hand (`off`) skips the first.
 OWN_SCRIPT_ENV = "SDLC_OWN_SCRIPT"
 OWN_SCRIPT_CMDS = (
-    "ship", "drop", "base", "resolve", "sync", "preflight", "findings", "run-cases",
+    "ship", "drop", "base", "resolve", "sync", "preflight", "findings", "run-cases", "gate",
 )  # fmt: skip
 OWN_RAN = "the change's own code"
 
@@ -8196,6 +8410,9 @@ def print_status(a: dict) -> None:
             touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
             mark = "stopped, " if rec.get("stopped") else "quiet, " if rec["quiet"] else ""
             undone += f"  · {mark}{touched}"
+        gate = rec.get("gate")
+        if gate and gate["current"]:
+            undone += "  · gate green" if gate["verdict"] == "PASS" else "  · gate red"
         print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
         indent = " " * 30
         if rec["title"]:
@@ -8468,6 +8685,13 @@ def main() -> int:
     )
     p_accept.add_argument("id", help="the 3-digit id, e.g. 025")
 
+    p_gate = sub.add_parser(
+        "gate",
+        help="run the base branch's check on a change built by hand, into build/gate.md; "
+        "never pre-approved",
+    )
+    p_gate.add_argument("id", help="the 3-digit id, e.g. 025")
+
     p_cases = sub.add_parser(
         "cases", help="the skills' cases in evals/, and a change's scope of them; writes nothing"
     )
@@ -8673,6 +8897,8 @@ def main() -> int:
         return cmd_findings(root, args.id)
     if args.cmd == "accept":
         return cmd_accept(root, args.id)
+    if args.cmd == "gate":
+        return cmd_gate(root, args.id)
     if args.cmd == "cases":
         if args.id == "compare":
             if not args.run:
@@ -8734,6 +8960,10 @@ def main() -> int:
         rec["quiet"] = touched is None or now - touched > QUIET_HOURS * 3600
         # A factory run its supervisor recorded as stopped waits on the person, never quiet.
         rec["stopped"] = factory_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
+        # A gate run by hand (`gate`) says whether the build as it stands is green; a factory
+        # run's gate is its own.
+        folder = Path(root, rec["dir"])
+        rec["gate"] = None if (folder / "runs").is_dir() else hand_gate(folder, home, a["trunk"])
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))

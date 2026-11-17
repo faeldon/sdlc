@@ -219,8 +219,10 @@ request from `status`'s own readers, on `127.0.0.1` only: three GETs, every othe
 request naming another host a 404, and `/file` only inside the folder of a change it shows: every
 open one, and a shipped or dropped one while `ready_to_close()` finds its worktree, under Ready to
 close. It writes nothing, `stage:` included: a change built by hand moves across the columns by what
-its branch and worktree touched outside `.sdlc/work/` and whether ship's review ran (`_seen()`),
-never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
+its branch and worktree touched outside `.sdlc/work/`, whether ship's review ran, and whether
+`sdlc.py gate` left a green record on the build as it stands (`_seen()`, `hand_gate()`: `cmd_gate()`
+writes `build/gate.md` in `factory.py`'s record shape, its copies pinned by
+`tests/test_hand_gate.py`), never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
 factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`, `runs/stopped.md`,
 `runs/step.md`) it reads with copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the
 core still never imports or runs the factory. A factory card's step track (`_progress()`) is the

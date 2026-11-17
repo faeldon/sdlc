@@ -68,6 +68,8 @@ main.board {
   font-size: 11px; padding: 1px 6px; border-radius: 99px; background: var(--chip); color: var(--muted);
 }
 .badge.factory { color: var(--accent); }
+.badge.gate-green { color: var(--accent); }
+.badge.gate-red { color: var(--stop); }
 .title { margin: 4px 0 6px; overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .next { margin-top: 6px; font-size: 12px; }
@@ -257,6 +259,8 @@ function card(c) {
     h("div", { class: "card-top" },
       h("span", { class: "num" }, c.id),
       h("span", { class: `badge ${c.mode}` }, factory ? "factory" : "by hand"),
+      c.gate && c.gate.current ? h("span", { class: c.gate.verdict === "PASS" ? "badge gate-green" : "badge gate-red" },
+        c.gate.verdict === "PASS" ? "gate green" : "gate red") : null,
       chip ? h("span", { class: "badge" }, chip) : null),
     h("div", { class: "title" }, c.title.replace(/^\d+\s*—\s*/, "") || c.slug),
     h("div", { class: "meta" }, meta),

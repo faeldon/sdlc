@@ -217,6 +217,70 @@ def test_a_change_built_by_hand_moves_on_as_its_branch_and_review_do(repo) -> No
     )
 
 
+def _main_check(root: Path, command: str) -> None:
+    """`[commands] check` committed on `main`, the base branch, which the hand gate runs."""
+    _write(root / ".sdlc" / "config.toml", f'[commands]\ncheck = "{command}"\n')
+    _git(root, "add", ".sdlc/config.toml")
+    _git(root, "commit", "-q", "-m", "gate")
+
+
+def _hand_gate(tree: Path, ident: str) -> int:
+    return sdlc.cmd_gate(tree, ident)
+
+
+@pytest.mark.parametrize("stage", ["plan", "build"])
+def test_a_green_gate_moves_a_hand_built_card_to_test_until_an_edit(repo, capsys, stage) -> None:
+    """091 R8, R10: a current green record is `test`, `/sdlc:ship` next, before ship's review
+    has run; an edit outside the change's folder makes it stale, and the card goes back."""
+    _main_check(repo, "true")
+    name = "012-draft-pins"
+    folder = _worktree(repo, name, 1, stage, commit=["src/pins.py"])
+    tree = sdlc.checkout_of(folder)
+    card = _cards(repo)[name]
+    assert (card["column"], card["gate"]) == ("build", None)
+    assert _hand_gate(tree, "012") == 0
+    capsys.readouterr()
+    card = _cards(repo)[name]
+    assert (card["column"], card["seen"], card["next"]) == ("test", "test", "/sdlc:ship")
+    assert (card["gate"]["verdict"], card["gate"]["current"]) == ("PASS", True)
+    assert card["stage"] == stage, "the board reads its stage line, never writes it"
+    _write(tree / "src" / "pins.py", "edited again\n")
+    card = _cards(repo)[name]
+    assert (card["column"], card["gate"]["current"]) == ("build", False)
+    assert card["next"] == "build it, then /sdlc:ship"
+
+
+def test_a_red_gate_keeps_the_card_in_build_and_says_so(repo, capsys) -> None:
+    """091 R9."""
+    _main_check(repo, "exit 1")
+    folder = _worktree(repo, "012-draft-pins", 1, "plan", commit=["src/pins.py"])
+    assert _hand_gate(sdlc.checkout_of(folder), "012") == 1
+    capsys.readouterr()
+    card = _cards(repo)["012-draft-pins"]
+    assert (card["column"], card["gate"]["verdict"], card["gate"]["current"]) == (
+        "build", "FAIL", True,
+    )  # fmt: skip
+    assert card["next"] == "the gate is red: read build/gate.md, fix it, then sdlc.py gate 012"
+
+
+@pytest.mark.portable
+def test_a_factory_card_never_reads_a_hand_gate(repo) -> None:
+    """091 R10: a factory run's gate is its own; a record in its folder moves nothing."""
+    folder = _worktree(repo, "011-draft-lock", 1, "build", commit=["src/lock.py"], factory=True)
+    _write(folder / "build" / "gate.md", "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\n")
+    card = _cards(repo)["011-draft-lock"]
+    assert "gate" not in card and card["seen"] is None and card["column"] == "build"
+    assert _cards(repo)["001-reopen-drafts"]["gate"] is None
+
+
+@pytest.mark.portable
+def test_the_gate_badge_is_built_as_text() -> None:
+    """091 R10: the badge is a node of `h()`'s, only for a record that is current."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert '"gate green"' in page and '"gate red"' in page
+    assert re.search(r"c\.gate && c\.gate\.current\s*\?\s*h\(", page)
+
+
 @pytest.mark.portable
 def test_a_shipped_change_waits_on_close_until_its_worktree_goes(served) -> None:
     root, url, _ = served

@@ -457,7 +457,8 @@ stage is the only mark that the person has answered one, so a change they shippe
 back to `build` leaves Needs you for the column that answer leads to, whatever the run's files
 still say. A change built by hand moves on from its `stage:` line by what it has touched: to Build
 once its branch or worktree changes a path outside `.sdlc/work/`, to Test once ship's review has
-written its `findings.md`. Each card gives the change's tier,
+written its `findings.md` or its gate run by hand is green on the build as it stands (below), with
+a `gate green` or `gate red` badge while that record is current. Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
 each round's verdicts, the verifier's answers, its decisions and what its agents cost, and a step
@@ -470,6 +471,23 @@ has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A c
 any file in the change's folder. It writes nothing, answers only `GET` for the page, `/state.json`
 and `/file` (one file inside the folder of a change it shows), refuses a request naming another host,
 and a second `board` on a port a board holds says so rather than starting again.
+
+**The gate, run by hand.** `sdlc.py gate NNN` runs the base branch's `[commands] check` (never the
+checkout's, so a change can't edit the gate that judges it) from the change's checkout, for up to
+30 minutes, and adds the attempt to `.sdlc/work/NNN-slug/build/gate.md` in the factory's gate
+record's shape: a first line `GATE: PASS` or `GATE: FAIL` for the latest attempt, then one
+`## Attempt <k>` section each with its `Verdict:`, `Command:`, `Build:`, `Exit:`, `Seconds:` and
+`Tree:` lines and the last 80 lines of its output, the main checkout and the change's checkout
+written `<path-to-clone>` and the home directory `~`. PASS only on exit 0, in time, with every path
+the build covers as it was. `Build:` is a hash of where the branch left the base branch and the
+content of every path it changed since (committed, uncommitted or untracked, outside `.sdlc/work/`),
+so committing the same work keeps a record current, and any other edit, or a rebase onto a moved
+base, makes it stale. It prints a JSON summary and exits 0 on PASS, 1 otherwise, and refuses a
+factory run (its folder holds `runs/`; `factory.py gate` gates it), a checkout not on the change's
+branch, and a base branch with no check. It is the person's step after building, never
+pre-approved, since it runs a command: no skill runs it, and ship's own gate is unchanged. The board
+and `/sdlc:status` read the record (`· gate green` or `· gate red` on the change's line) only while
+it is current, and ship commits it with the change's folder.
 
 A change may keep its **acceptance checks** in `.sdlc/work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one

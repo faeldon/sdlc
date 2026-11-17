@@ -659,6 +659,25 @@ def test_tool_prompts_and_gate_runs_are_counted(tmp_path: Path) -> None:
     assert summary["prompts"] == {"Bash:check.sh": {"asked": 1, "rejected": 0}}
 
 
+@pytest.mark.parametrize("check", ["./check.sh", None])
+def test_a_hand_gate_is_counted_as_a_check(tmp_path: Path, check) -> None:
+    """091 R12: `sdlc.py gate` runs the base branch's check, so it is a `check` event like the
+    command itself, failed on an error; with no `commands.check` set too. Nothing else is."""
+    gate = "uv run --quiet --script /x/scripts/sdlc.py gate 012"
+    status = gate.replace("gate 012", "status")
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:ship"),
+        asst(1, "m1", [tool("Bash", "g1", command=gate)]),
+        result(2, "g1", error=True),
+        asst(3, "m2", [tool("Bash", "g2", command=f"FOO=1 {gate} 2>&1 | tail -3")]),
+        result(4, "g2"),
+        asst(5, "m3", [tool("Bash", "g3", command=status)]),
+        result(6, "g3"),
+    ], check=check)  # fmt: skip
+    ship = _summary(events)["stages"]["ship"]
+    assert (ship["checks"], ship["checks_failed"]) == (2, 1)
+
+
 def _decided(source: str, decision: str = "accept", **extra) -> dict:
     return {"decision": decision, "source": source, **extra}
 

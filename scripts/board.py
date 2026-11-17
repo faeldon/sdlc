@@ -163,6 +163,10 @@ def _entry(
         "files": read("the folder", lambda: _files(folder), []),
         "mode": "factory" if (folder / "runs").is_dir() else "manual",
     }  # fmt: skip
+    if entry["mode"] == "manual":
+        # The record a gate run by hand left (`sdlc.py gate`); a factory run's gate is its own.
+        entry["gate"] = read("build/gate.md", lambda: sdlc.hand_gate(folder, home, trunk), None)
+        problems += (entry["gate"] or {}).get("problems", [])
     if entry["mode"] == "factory":
         entry.update(_factory(folder, problems))
         # A stopped run sits at `build`; past it the record is history, and read past.
@@ -188,7 +192,8 @@ def _entry(
 def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | None:
     """How far a change built by hand has got, past what its `stage:` says: nothing moves that line
     between `plan` (or a Tier 2's `design`) and `shipped`, so the board reads what `status` does.
-    `test` once ship's review has written `findings.md`, `build` once the change touches a path
+    `test` once ship's review has written `findings.md`, or once a gate run by hand passed on the
+    build as it stands (`sdlc.py gate`'s record, current); `build` once the change touches a path
     outside the change folders and the plugin's own state, in its branch's commits or, in a
     worktree of its own, its uncommitted edits. None when neither says more, and always for a
     factory run, whose stage line the factory moves itself."""
@@ -198,6 +203,9 @@ def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | Non
     if entry["mode"] != "manual" or stage not in moving:
         return None
     if (folder / "findings.md").is_file():
+        return "test"
+    gate = entry.get("gate")
+    if gate and gate["current"] and gate["verdict"] == "PASS":
         return "test"
     if stage == "build":
         return None
@@ -585,6 +593,9 @@ def next_action(entry: dict) -> str:
         return "/sdlc:ship, or /sdlc-factory:land with the others ready"
     if entry["mode"] == "factory" and stage in ("design", "build") and entry.get("built"):
         return "the factory is building it: wait for its decision"
+    gate = entry.get("gate")
+    if gate and gate["current"] and gate["verdict"] == "FAIL":
+        return f"the gate is red: read build/gate.md, fix it, then sdlc.py gate {entry['id']}"
     if stage == "plan":
         return "/sdlc:spec" if tier == 2 else "plan mode, then build it"
     if stage == "design":
