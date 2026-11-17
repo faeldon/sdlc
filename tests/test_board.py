@@ -258,11 +258,106 @@ def test_the_cost_is_summed_as_the_factory_sums_it(repo) -> None:
     assert mine["usd"] == 0.85 and mine["duration_ms"] == 91500
 
 
+# 078's round 1, as its run left it on 2026-11-17 (each long line cut at `…`): the reviewer asked
+# for one change, and the verifier dropped it in other words than the reviewer's, so `verdicts`
+# found the change answered no times and an answer to a change nobody asked for, and stopped.
+STOP_CHANGE = (
+    '.sdlc/REVIEW.md:50: The bullet says "The escapes from 047 and 050 are pinned by …" The commit'
+    " history doesn't support that mapping. …"
+)
+STOP_DROPPED = (
+    ".sdlc/REVIEW.md:50: the attribution of the two tests is wrong, so credit each to the change"
+    " whose finding it pins."
+)
+STOP_PROBLEMS = [
+    f"reviews/round-1/verified.md answers code: {STOP_CHANGE} 0 times, not once",
+    f"reviews/round-1/verified.md answers code: {STOP_DROPPED}, which no review of round 1"
+    " asks for",
+]
+
+
+def _stopped_run(root: Path, name: str = "013-draft-escapes", stage: str = "build") -> Path:
+    """A factory run stopped as 078's was, after round 1's verification, with the record the
+    supervisor's `verdicts --record` wrote from it:
+
+        build/round-1.md            I added the two failure classes to `.sdlc/REVIEW.md`. …
+                                    ## Evidence …
+        reviews/round-1/code.md     VERDICT: CHANGES
+                                    - CHANGE: .sdlc/REVIEW.md:50: The bullet says …
+        reviews/round-1/verified.md - DROPPED: code: .sdlc/REVIEW.md:50: the attribution … — The
+                                    attribution matches the history. …
+    """
+    folder = _change(root, name, 1, stage, "Review escape classes")
+    _write(folder / "runs" / "builder.sessions", "s-3\n")
+    _write(folder / "build" / "round-1.md", "I added the two failure classes to `.sdlc/REVIEW.md`."
+           "\n\n## Evidence\n\n$ ./check.sh\n1848 passed\nexit: 0\n")  # fmt: skip
+    _write(folder / "reviews" / "round-1" / "code.md",
+           f"VERDICT: CHANGES\n\n- CHANGE: {STOP_CHANGE}\n\n## Notes\n\n- Fine.\n")  # fmt: skip
+    _write(folder / "reviews" / "round-1" / "verified.md",
+           f"- DROPPED: code: {STOP_DROPPED} — The attribution matches the history.\n")  # fmt: skip
+    _write(folder / factory.STOPPED, factory.stop_text(name, "rerun", STOP_PROBLEMS))
+    return folder
+
+
+@pytest.mark.portable
+def test_a_stopped_run_needs_the_person(repo) -> None:
+    """R6: under Needs you, each problem as `verdicts` worded it, and the record's way on."""
+    _stopped_run(repo)
+    card = _cards(repo)["013-draft-escapes"]
+    assert card["column"] == "needs-you"
+    assert card["stopped"]["way"] == "rerun"
+    assert card["stopped"]["problems"] == STOP_PROBLEMS
+    assert card["next"] == factory.WAYS["rerun"].format(id="013")
+    assert "the factory is building it" not in card["next"]
+    assert card["problems"] == [], "a stop is not a file that won't read"
+
+
+@pytest.mark.portable
+def test_an_unreadable_stop_record_is_a_problem(repo) -> None:
+    """R7: a record that won't read still puts the card in front of the person."""
+    folder = _stopped_run(repo)
+    _write(folder / factory.STOPPED, "stopped, somehow\n")
+    card = _cards(repo)["013-draft-escapes"]
+    assert card["column"] == "needs-you" and card["stopped"] is None
+    assert any("runs/stopped.md" in p for p in card["problems"]), card["problems"]
+
+
+@pytest.mark.portable
+def test_a_stop_record_counts_only_at_build(repo) -> None:
+    """R8: a run shipped by hand keeps its record in history, and the board reads past it."""
+    _stopped_run(repo, "013-draft-escapes", "design")
+    folder = _stopped_run(repo, "014-draft-stale", "test")
+    _write(folder / "decision.md", "DECISION: READY\n")
+    cards = _cards(repo)
+    assert cards["013-draft-escapes"]["column"] == "design"
+    assert cards["013-draft-escapes"]["stopped"] is None
+    assert (cards["014-draft-stale"]["column"], cards["014-draft-stale"]["stopped"]) == (
+        "ready",
+        None,
+    )
+    shipped = _worktree(repo, "015-draft-shipped", 1, "shipped", commit=["src/x.py"], factory=True)
+    _write(shipped / factory.STOPPED, "not even readable\n")
+    card = _cards(repo)["015-draft-shipped"]
+    assert (card["column"], card["problems"]) == ("close", [])
+
+
+@pytest.mark.portable
+def test_a_resumed_run_goes_back_to_build(repo) -> None:
+    """R9: a reading that finds the cause gone removes the record, and the card is a run again."""
+    folder = _stopped_run(repo)
+    (folder / factory.STOPPED).unlink()
+    card = _cards(repo)["013-draft-escapes"]
+    assert (card["column"], card["stopped"]) == ("build", None)
+    assert card["next"] == "the factory is building it: wait for its decision"
+
+
 @pytest.mark.portable
 def test_the_factory_parsing_is_a_pinned_copy() -> None:
-    for name in ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "KEPT_RE", "DROPPED_RE", "LEDGER_RE"):
+    names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "KEPT_RE", "DROPPED_RE", "LEDGER_RE")
+    for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
         assert getattr(board, name).pattern == getattr(factory, name).pattern, name
     assert board.VERIFIED == factory.VERIFIED and board.COSTS == factory.COSTS
+    assert board.STOPPED == factory.STOPPED
 
 
 @pytest.mark.portable

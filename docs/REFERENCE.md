@@ -442,13 +442,17 @@ other) is a `⚠`, never a `check` problem.
 
 Each open change's line ends with when it was last touched: its branch's own last commit, or the
 newest file its worktree has changed. One untouched for a day is `quiet`, and `/sdlc:status`
-recommends finishing an open change only once it is: one touched since has a session on it.
+recommends finishing an open change only once it is: one touched since has a session on it. A
+factory run its supervisor stopped (`runs/stopped.md`, at `stage: build`) reads `stopped` in place
+of `quiet`, with each problem on a `⚠` line and the step that moves it on, ship it by hand or rerun
+`/sdlc-factory:build NNN`, on a `→` line under its title.
 
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
 the same open changes as a live page on `127.0.0.1` until it is stopped: one column per stage, then
 **Ready to ship** for a factory change the approver called READY, **Ready to close** for a shipped or
 dropped one whose worktree still stands, and **Needs you** for one with a blocking decision, an
-ESCALATE or a file that won't read. A change built by hand moves on from its `stage:` line by what
+ESCALATE, a file that won't read, or a factory run that stopped, flagged with the stop's problems
+and naming its way on. A change built by hand moves on from its `stage:` line by what
 it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`, to Test
 once ship's review has written its `findings.md`. Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last

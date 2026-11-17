@@ -605,6 +605,58 @@ def test_a_folder_in_the_main_checkout_is_touched_only_by_its_own_files(
     assert next(x for x in out if x.startswith("    001  ")).endswith("· quiet, touched 2d ago")
 
 
+# A stop record as `factory.py verdicts --record` writes one (its `stop_text()`; the patterns are
+# pinned by `tests/test_metrics.py`), one problem longer than a line.
+STOP_NEXT = "fix its cause, then /sdlc-factory:build 001, or ship it by hand with /sdlc:ship 001"
+STOP_LONG = "reviews/round-1/verified.md answers code: " + "a change asked for at length " * 6
+STOP_RECORD = (
+    f"STOPPED: rerun\nNEXT: {STOP_NEXT}\n\n"
+    "- PROBLEM: the gate failed 3 times in round 1: exit 3\n"
+    f"- PROBLEM: {STOP_LONG.strip()}\n"
+)
+
+
+@pytest.mark.portable
+def test_a_stopped_factory_run_is_marked_on_its_status_line(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """R10: a stopped run reads `stopped`, never `quiet`, with each problem and the way on under
+    its title; at any stage but `build` its record is read past, and `check` sees no problem."""
+    root = _repo(tmp_path)
+    assert sdlc.cmd_new(root, "share-drafts", 1, None, worktree=True) == 0
+    tree = root / ".claude" / "worktrees" / "001-share-drafts"
+    folder = tree / ".sdlc" / "work" / "001-share-drafts"
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text("utf-8").replace("stage: plan", "stage: build"), "utf-8")
+    _write(folder, "runs/stopped.md", STOP_RECORD)
+    old = sdlc.datetime.now(sdlc.UTC).timestamp() - 2 * 24 * 3600
+    for rel in sdlc._dirty_paths(tree):
+        for path in (tree / rel, *(tree / rel).rglob("*")):
+            os.utime(path, (old, old))
+    capsys.readouterr()
+
+    out = _status(root, capsys, monkeypatch).splitlines()
+    at = next(i for i, x in enumerate(out) if x.startswith("    001  "))
+    assert out[at].endswith("· stopped, touched 2d ago") and "quiet" not in out[at]
+    below = [x.strip() for x in out[at + 2 : at + 5]]
+    assert below[0] == "⚠ the gate failed 3 times in round 1: exit 3"
+    assert below[1].startswith("⚠ reviews/round-1/verified.md answers code: a change")
+    assert below[1].endswith("…") and len(out[at + 3]) <= 100, "one problem, one line"
+    assert below[2] == f"→ {STOP_NEXT}"
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "check", "--strict"])
+    sdlc.main()
+    with_stop = capsys.readouterr().out
+    (folder / "runs" / "stopped.md").rename(folder / "runs" / "aside.md")
+    sdlc.main()
+    assert capsys.readouterr().out == with_stop, "a stop is not a broken pipeline"
+    (folder / "runs" / "aside.md").rename(folder / "runs" / "stopped.md")
+
+    intent.write_text(intent.read_text("utf-8").replace("stage: build", "stage: plan"), "utf-8")
+    out = _status(root, capsys, monkeypatch)
+    line = next(x for x in out.splitlines() if x.startswith("    001  "))
+    assert "stopped" not in line and "⚠ the gate" not in out and STOP_NEXT not in out
+
+
 NUDGE = "ideas and bugs have no theme: /sdlc:idea --themes proposes them"
 
 

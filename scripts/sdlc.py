@@ -3637,6 +3637,33 @@ FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 # A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
 FACTORY_GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
+# A stopped run's record, which `factory.py verdicts --record` writes and removes; status reads it.
+FACTORY_STOPPED = Path("runs") / "stopped.md"
+FACTORY_STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
+FACTORY_NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
+FACTORY_PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+
+
+def factory_stop(folder: Path) -> dict | None:
+    """The stop a factory run recorded in its folder's `runs/stopped.md`: its way on (`ship`,
+    `mend` or `rerun`), the sentence saying it, and its problems as the factory worded them. None
+    without a record. Never raises: a record that won't read is a stop whose one problem says so,
+    since what it stands for is still a run waiting on the person."""
+    path = folder / FACTORY_STOPPED
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        lines, why = [], str(e)
+    else:
+        why = f"{FACTORY_STOPPED.as_posix()} doesn't open with STOPPED: and its NEXT: line"
+    way = FACTORY_STOPPED_RE.match(lines[0]) if lines else None
+    nxt = [m.group(1) for m in map(FACTORY_NEXT_RE.match, lines) if m]
+    if not way or not nxt:
+        return {"way": None, "next": f"read {FACTORY_STOPPED.as_posix()}", "problems": [why]}
+    found = [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m]
+    return {"way": way.group(1), "next": nxt[0], "problems": found}
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:
@@ -8096,6 +8123,16 @@ def _not_due(due: dict, a: dict) -> str:
     return "not due: " + ", ".join(parts) if parts else "not due"
 
 
+# How wide a line `print_status()` cuts a stopped run's problem to, so each stays one line.
+STATUS_WIDTH = 100
+
+
+def _cut(text: str, width: int) -> str:
+    """`text` on one line of at most `width` characters, ending `…` when cut."""
+    text = " ".join(text.split())
+    return text if len(text) <= width else text[: width - 1].rstrip() + "…"
+
+
 def print_status(a: dict) -> None:
     print(f"{a['work']} — {len(a['open'])} open, {len(a['changes'])} total   today: {a['today']}")
 
@@ -8123,10 +8160,16 @@ def print_status(a: dict) -> None:
         if "quiet" in rec:
             ago = rec["touched_ago"]
             touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
-            undone += f"  · quiet, {touched}" if rec["quiet"] else f"  · {touched}"
+            mark = "stopped, " if rec.get("stopped") else "quiet, " if rec["quiet"] else ""
+            undone += f"  · {mark}{touched}"
         print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
+        indent = " " * 30
         if rec["title"]:
-            print(f"                              {rec['title']}")
+            print(f"{indent}{rec['title']}")
+        if rec.get("stopped"):
+            for problem in rec["stopped"]["problems"]:
+                print(f"{indent}⚠ {_cut(problem, STATUS_WIDTH - len(indent) - 2)}")
+            print(f"{indent}→ {rec['stopped']['next']}")
     if any(rec["unfilled"] for rec in a["open"]):
         print("    ~ = scaffolded from the template, not written yet")
 
@@ -8655,6 +8698,8 @@ def main() -> int:
         touched = last_touched(root, rec, a["trunk"])
         rec["touched_ago"] = None if touched is None else now - touched
         rec["quiet"] = touched is None or now - touched > QUIET_HOURS * 3600
+        # A factory run its supervisor recorded as stopped waits on the person, never quiet.
+        rec["stopped"] = factory_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))

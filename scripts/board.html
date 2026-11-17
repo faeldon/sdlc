@@ -141,7 +141,7 @@ const COLUMNS = [
   { key: "test", label: "Test", who: "the gate and the review" },
   { key: "ready", label: "Ready to ship", who: "factory: READY" },
   { key: "close", label: "Ready to close", who: "/sdlc:close" },
-  { key: "needs-you", label: "Needs you", who: "a decision or a problem" },
+  { key: "needs-you", label: "Needs you", who: "a decision, a problem or a stopped run" },
 ];
 const $ = (id) => document.getElementById(id);
 
@@ -202,6 +202,7 @@ function card(c) {
   ].filter(Boolean).map((t) => h("span", {}, t));
   const flags = [];
   for (const p of c.problems || []) flags.push(h("div", { class: "flag" }, p));
+  for (const p of (c.stopped && c.stopped.problems) || []) flags.push(h("div", { class: "flag" }, `stopped: ${p}`));
   for (const d of c.pending || []) flags.push(h("div", { class: "flag" }, `${d.id} waits on you: ${d.text}`));
   if (c.decision === "ESCALATE") flags.push(h("div", { class: "flag" }, "the approver escalated it to you"));
   const factory = c.mode === "factory";

@@ -46,7 +46,9 @@ go looking for any of it elsewhere.
 **Each open change's line ends with when it was last touched**: `· touched 12m ago`, from its
 branch's own last commit and its worktree's changed files. One untouched for a day reads
 `· quiet, touched 2d ago`. A change that isn't quiet is **in flight**: a session is most likely on
-it already, so it is never the recommendation.
+it already, so it is never the recommendation. A factory run its supervisor stopped reads
+`· stopped, touched 12m ago`, with a `⚠` line per problem and a `→` line, the step that moves it on,
+under its title: it is neither in flight nor merely quiet, but waiting on the person.
 
 **`■ Next up` is what comes after the open changes**, so you never need `.sdlc/work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
@@ -151,11 +153,13 @@ by line. Give them what the tool didn't:
    would go well together as one change.
 
 Pick the recommendation on this order of precedence, stopping at the first that applies. An open
-change in flight (not marked `quiet`) is never picked: say it's in flight in the shape line.
+change in flight (marked neither `quiet` nor `stopped`) is never picked: say it's in flight in the
+shape line.
 
 1. Anything `check --strict` flags as broken — fix the pipeline before extending it.
 2. A change in `Ready to close` — `/sdlc:close NNN` lands it.
-3. A quiet change already at `stage: build` or later — finish what's started before opening more.
+3. A `stopped` change, or a quiet one already at `stage: build` or later — finish what's started
+   before opening more. A stopped one's command is its own `→` line, and its `⚠` lines are the why.
 4. A quiet change others are declared to depend on: nothing that reads a thing can be built, or
    pointed at it, until the thing exists.
 5. `Unpushed` — `/sdlc:publish`, from the main checkout: landed work on one machine alone is work

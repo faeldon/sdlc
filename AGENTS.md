@@ -221,7 +221,7 @@ open one, and a shipped or dropped one while `ready_to_close()` finds its worktr
 close. It writes nothing, `stage:` included: a change built by hand moves across the columns by what
 its branch and worktree touched outside `.sdlc/work/` and whether ship's review ran (`_seen()`),
 never by a stage the board stamps. It is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
-factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`) it reads with
+factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`, `runs/stopped.md`) it reads with
 copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the core still never imports or
 runs the factory. The page builds every node with `textContent`, never from a string of HTML.
 
@@ -423,11 +423,13 @@ higher number), reviewed again before close. A rebased change is gated by the sc
 (`gate --land`, into `build/land-<n>.gate.md`, never under `reviews/land-<n>/`, which the landing
 reads as reviews); red there is a stop, never a fix. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
 the change, which is how `measure` gives the supervisor's dialogs on `main` to their change
-(`_supervised()`). `sdlc` only reads, at ship, the files a run leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
+(`_supervised()`). `sdlc` only reads the files a run leaves in the change's folder: ship reads its rounds, and the board and status read its stop record. A round's `CHANGE:` lines reach the builder only through the
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
 `[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
-`sdlc.py`'s by a test, like its regexes: `verdicts` writes nothing, so a run that reviewed at the
-full depth stays full by what its rounds hold, never by a state file. A builder report and a
+`sdlc.py`'s by a test, like its regexes: `verdicts` decides from the rounds alone and never reads a
+state file, so a run that reviewed at the full depth stays full by what its rounds hold. With
+`--record`, which only the supervisor passes, it writes the stop it found to `runs/stopped.md` for
+the board and status, or removes it, and nothing reads that back into the loop. A builder report and a
 behaviour check end with `## Evidence` (`$` command, output, `exit:`), which `read_evidence()`
 checks; no agent but the builder, which writes it, runs `checks.md`, which only `accept` runs,
 under a prompt (`test_no_agent_but_the_builder_runs_checks`).

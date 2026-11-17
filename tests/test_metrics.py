@@ -1145,5 +1145,7 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
 
     sdlc = load(ROOT / "scripts" / "sdlc.py", "sdlc_for_patterns")
     factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_patterns")
-    for name in ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "KEPT_RE", "DROPPED_RE"):
+    names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "KEPT_RE", "DROPPED_RE")
+    for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
         assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
+    assert sdlc.FACTORY_STOPPED == factory.STOPPED

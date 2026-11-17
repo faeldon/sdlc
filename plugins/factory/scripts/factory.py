@@ -19,7 +19,7 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
     uv run --script factory.py config
     uv run --script factory.py start 008 --for build
     uv run --script factory.py decisions 008
-    uv run --script factory.py verdicts 008 --head 1a2b3c4
+    uv run --script factory.py verdicts 008 --head 1a2b3c4 --record
     uv run --script factory.py gate 008
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
@@ -30,6 +30,7 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
 `carry` to `notes.md`, `stage` to `intent.md`, `gate` its attempt to `build/round-<N>.gate.md`,
+`verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear),
 `agent` the reply an agent session returned, and its id and figures under `runs/`. Nothing is
 written outside the change's folder, and nothing under `.git/`, but by the landing: `land` and
 `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it. A command about
@@ -949,7 +950,15 @@ def cmd_decisions(root: Path, ident: str) -> int:
     )
 
 
-def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
+def stop_text(change: str, way: str, problems: list[str]) -> str:
+    """`runs/stopped.md`'s text: the way on, its sentence, and each problem on a line of its own."""
+    ident = change.split("-", 1)[0]
+    lines = [f"STOPPED: {way}", f"NEXT: {WAYS[way].format(id=ident)}", ""]
+    lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
+    return "\n".join(lines) + "\n"
+
+
+def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
     - `build`: no builder report yet: run the builder (`build/round-1.md`).
@@ -971,15 +980,35 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     than the last complete review round is always reviewed, whether it came from a rework or from
     an answer the person gave, so no build reaches the approver unreviewed.
 
-    Run `decisions` first: this reads the ledger as it stands, and writes nothing.
+    A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
+    missing `## Evidence`, `rerun` otherwise.
+
+    Run `decisions` first: this reads the ledger as it stands, and writes nothing, but with
+    `--record`, which only the supervisor passes and only with `--head`: then a stop is written to
+    `runs/stopped.md` (`stop_text()`) for the board and status, from this same reading, and any
+    other step removes it. Nothing in the loop reads it back.
 
     Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
     changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
     raised again), and for the verifier, `repeats` (a change raised again) and `untouched` (one on
     a path the change doesn't touch: pre-existing, never reworked).
     """
+    if record and not head:
+        why = "--record needs --head: without it a stop for HEAD moving would be removed"
+        return emit({"refusals": [why]}, 1)
     out, refusal = loop_state(root, ident, head)
-    return emit({"refusals": [refusal]}, 1) if refusal else emit(out)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    if record:
+        folder, _ = find_change(root, ident)
+        path = folder / STOPPED
+        if out["next"] == "stop":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = stop_text(folder.name, out["way"], out["problems"])
+            path.write_text(text, encoding="utf-8", newline="\n")
+        else:
+            path.unlink(missing_ok=True)
+    return emit(out)
 
 
 def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | None]:
@@ -1028,21 +1057,25 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out["repeats"] = [a for a in asked if a in out["settled"]]
     # With no base branch nothing is known to be touched, so nothing is called untouched.
     out["untouched"] = [a for a in asked if _untouched(root, a.split(": ", 1)[1], run["changed"])]
+    # Kept apart as they're added, so a stop knows whether a mend alone can move it on.
+    evidence: list[str] = []
     if built:
         report = folder / "build" / f"round-{built}.md"
-        problems += read_evidence(report.read_text(encoding="utf-8"), f"build/round-{built}.md")
+        evidence += read_evidence(report.read_text(encoding="utf-8"), f"build/round-{built}.md")
     for r in rounds:
         for role in RUNS_THE_CHANGE:
             reply = folder / "reviews" / f"round-{r['round']}" / f"{role}.md"
             if role in r["reviews"]:
                 where = f"reviews/round-{r['round']}/{role}.md"
-                problems += read_evidence(reply.read_text(encoding="utf-8"), where)
+                evidence += read_evidence(reply.read_text(encoding="utf-8"), where)
+    problems += evidence
     if moved:
         problems.append(f"HEAD moved from {head} to {now}: no agent may commit")
     if last and last["round"] > built:
         problems.append(f"reviews/round-{last['round']}/ has no build/round-{last['round']}.md")
     if problems:
         out["next"] = "stop"
+        out["way"] = "ship" if moved else "mend" if len(evidence) == len(problems) else "rerun"
     elif out["pending"]:
         out["next"] = "decide"
     elif decision:
@@ -1326,6 +1359,23 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
 AGENT_TIMEOUT = 3 * 3600
 # Each agent run's figures, one JSON object a line, beside the `.sessions` files measuring reads.
 COSTS = Path("runs") / "costs.jsonl"
+# A stopped run's record, written and removed only by `verdicts --record`, read by the board and
+# `sdlc.py status` (each with its own copies of these, pinned by tests), never by the loop.
+STOPPED = Path("runs") / "stopped.md"
+STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
+NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
+PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
+# What moves a stopped run on, by its way: the record's `NEXT:` line.
+WAYS = {
+    "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",
+    "mend": (
+        "rerun /sdlc-factory:build {id}, whose one mend asks again for the missing ## Evidence;"
+        " if that reply still lacks it, ship it by hand with /sdlc:ship {id}"
+    ),
+    "rerun": (
+        "fix its cause, then /sdlc-factory:build {id}, or ship it by hand with /sdlc:ship {id}"
+    ),
+}
 # The run's own token counts, as `runs/costs.jsonl` names them, from the result's `usage`.
 USAGE_FIELDS = {
     "in": "input_tokens", "out": "output_tokens",
@@ -2627,6 +2677,9 @@ def main() -> int:
     p_verdicts = sub.add_parser("verdicts", help="the review rounds, the decision, the next step")
     p_verdicts.add_argument("id")
     p_verdicts.add_argument("--head", help="HEAD as `start` printed it; a move is a stop")
+    p_verdicts.add_argument(
+        "--record", action="store_true", help=f"write a stop to {STOPPED.as_posix()}, or remove it"
+    )
     p_decisions = sub.add_parser("decisions", help="the agents' decisions into decisions.md")
     p_decisions.add_argument("id")
     p_carry = sub.add_parser("carry", help="unresolved changes to notes.md as `- [ ]` items")
@@ -2701,7 +2754,7 @@ def main() -> int:
     if args.cmd == "start":
         return cmd_start(root, args.id, args.purpose)
     if args.cmd == "verdicts":
-        return cmd_verdicts(root, args.id, args.head)
+        return cmd_verdicts(root, args.id, args.head, args.record)
     if args.cmd == "decisions":
         return cmd_decisions(root, args.id)
     if args.cmd == "carry":

@@ -135,7 +135,8 @@ to it. Name the files the run will write, all by `factory.py` in the change's fo
 `plan.md` by the builder; `build/round-<N>.md`, `reviews/round-<N>/<role>.md`,
 `reviews/round-<N>/verified.md` and `decision.md`, the agents' replies; `build/round-<N>.gate.md`,
 each attempt of the gate on that round's build; `runs/<agent>.sessions`, each session's id, for
-measuring; `runs/costs.jsonl`, each run's reported cost and tokens; `build/round-<N>.files` by
+measuring; `runs/costs.jsonl`, each run's reported cost and tokens; `runs/stopped.md`, while the
+run is stopped, its problems and the way on, for the board and `/sdlc:status`; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
 resolve. Say that the run will ask them about any blocking decision, and that every builder report
 and behaviour check must end with its `## Evidence` (each command run, its output, its exit), or
@@ -217,10 +218,12 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py decisions <NNN> && \
-   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts <NNN> --head <head>
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts <NNN> --head <head> --record
    ```
 
-   Do what its `next` says, and nothing else; `factory.py agent` refuses a step it doesn't name:
+   Do what its `next` says, and nothing else; `factory.py agent` refuses a step it doesn't name.
+   `--record` keeps `.sdlc/work/NNN-slug/runs/stopped.md` in step with that reading: written on a
+   `stop`, removed on any other step.
 
    - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
      step 1.
@@ -310,6 +313,12 @@ the next step for that change. A `problem` is a stop, reported for that change a
      ```
 
      Never write the evidence yourself. A second reply without it is a stop like any other.
+
+     The reading that stopped wrote `runs/stopped.md`: its problems word for word, and the way on
+     (`way`: `ship` after a commit, `mend` for a missing `## Evidence`, `rerun` otherwise) with its
+     sentence, which the board and `/sdlc:status` show the person. Name that sentence in your
+     report. Never write, edit or delete `runs/stopped.md` yourself: only a reading that finds the
+     cause gone removes it, when the person reruns `/sdlc-factory:build NNN`.
 3. **Hand it back.**
 
    ```bash

@@ -352,6 +352,170 @@ def test_head_moving_stops_the_run(tmp_path, capsys) -> None:
     assert "no agent may commit" in out["problems"][0]
 
 
+# ---------------------------------------------------------------- the stop record (085)
+
+
+def _record(root, capsys, head: str) -> tuple[int, dict]:
+    return _run(capsys, factory.cmd_verdicts, root, "008", head, True)
+
+
+def _stopped(root: Path) -> Path:
+    return root / ".sdlc" / "work" / NAME / factory.STOPPED
+
+
+def _head(root: Path) -> str:
+    return _git(root, "rev-parse", "--short", "HEAD")
+
+
+@pytest.mark.portable
+def test_record_writes_a_stop_and_removes_it_once_clear(tmp_path, capsys) -> None:
+    """R1: a stopped reading leaves the record, a clear one takes it away."""
+    root = _change(tmp_path)
+    _round(root, 1)
+    _review(root, 1, "code", "Looks fine to me!")
+    code, out = _record(root, capsys, _head(root))
+    assert code == 0 and out["next"] == "stop"
+    assert _stopped(root).is_file(), "a stopped reading leaves no record"
+    _review(root, 1, "code", "VERDICT: PASS")
+    code, out = _record(root, capsys, _head(root))
+    assert out["next"] == "approve" and not _stopped(root).exists(), "a clear reading keeps it"
+    code, out = _record(root, capsys, _head(root))
+    assert code == 0 and not _stopped(root).exists(), "removing what isn't there is fine"
+
+
+@pytest.mark.portable
+def test_the_record_is_verdicts_own_reading(tmp_path, capsys) -> None:
+    """R2: every problem word for word, in its order, and the way the call named."""
+    root = _change(tmp_path)
+    _round(root, 1)
+    _review(root, 1, "code", "Looks fine to me!")
+    _review(root, 1, "test", "Also fine.\nwith a second line")
+    (root / ".sdlc" / "work" / NAME / "decision.md").write_text("Ship it\n", encoding="utf-8")
+    _, out = _record(root, capsys, _head(root))
+    assert len(out["problems"]) == 3, out["problems"]
+    lines = _stopped(root).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == f"STOPPED: {out['way']}"
+    found = [m.group(1) for m in map(factory.PROBLEM_RE.match, lines) if m]
+    assert found == out["problems"]
+    assert _stopped(root).read_text(encoding="utf-8") == factory.stop_text(
+        NAME, out["way"], out["problems"]
+    )
+
+
+@pytest.mark.portable
+def test_a_problem_spanning_lines_is_one_line_of_the_record() -> None:
+    text = factory.stop_text(NAME, "rerun", ["one\nproblem", "two"])
+    assert [m.group(1) for m in map(factory.PROBLEM_RE.match, text.splitlines()) if m] == [
+        "one problem",
+        "two",
+    ]
+    assert factory.STOPPED_RE.match(text.splitlines()[0]).group(1) == "rerun"
+    nxt = [m.group(1) for m in map(factory.NEXT_RE.match, text.splitlines()) if m]
+    assert nxt == [factory.WAYS["rerun"].format(id="008")]
+
+
+@pytest.mark.portable
+def test_verdicts_alone_writes_nothing(tmp_path, capsys) -> None:
+    """R3: without the flag the folder is left byte for byte, a record in it included."""
+    root = _change(tmp_path)
+    _round(root, 1)
+    _review(root, 1, "code", "Looks fine to me!")
+    record = _stopped(root)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text("left as it was\n", encoding="utf-8")
+    folder = root / ".sdlc" / "work" / NAME
+
+    def tree() -> dict:
+        return {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+    before = tree()
+    assert _verdicts(root, capsys, _head(root))["next"] == "stop"
+    assert tree() == before, "a stopped reading wrote"
+    _review(root, 1, "code", "VERDICT: PASS")
+    before = tree()
+    assert _verdicts(root, capsys, _head(root))["next"] == "approve"
+    assert tree() == before
+
+
+@pytest.mark.portable
+def test_record_without_a_head_is_refused(tmp_path, capsys) -> None:
+    """R3: a call that can't see a HEAD move never removes a HEAD-moved stop."""
+    root = _change(tmp_path)
+    code, out = _run(capsys, factory.cmd_verdicts, root, "008", None, True)
+    assert code == 1 and "--head" in out["refusals"][0]
+    assert not _stopped(root).exists()
+
+
+@pytest.mark.portable
+def test_a_stop_names_its_way(tmp_path, capsys) -> None:
+    """R4: HEAD moved is ship, a missing evidence alone is mend, anything else is rerun."""
+    root = _change(tmp_path / "verdict")
+    _round(root, 1)
+    _review(root, 1, "code", "Looks fine to me!")
+    assert _verdicts(root, capsys)["way"] == "rerun"
+
+    root = _change(tmp_path / "evidence")
+    _report(root, 1, "Built it. The gate passed.\n")
+    assert _verdicts(root, capsys)["way"] == "mend"
+    _round(root, 1)
+    _report(root, 1, "Built it. The gate passed.\n")
+    behaviour = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "behaviour.md"
+    behaviour.write_text("VERDICT: PASS\n\n## Notes\n\nIt ran fine.\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["way"], len(out["problems"])) == ("mend", 2)
+    _review(root, 1, "code", "Looks fine to me!")
+    assert _verdicts(root, capsys)["way"] == "rerun", "a missing evidence and another problem"
+
+    root = _change(tmp_path / "moved")
+    head = _head(root)
+    _report(root, 1, "Built it.\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "an agent committed")
+    _, out = _record(root, capsys, head)
+    assert out["way"] == "ship"
+    assert "/sdlc:ship 008" in _stopped(root).read_text(encoding="utf-8")
+
+    assert "way" not in _verdicts(_change(tmp_path / "clear"), capsys), "only a stop has a way"
+
+
+def test_a_third_red_gate_names_rerun(tmp_path, capsys) -> None:
+    """R4, the fourth fixture: a third red gate in a round is fixed by its cause, then rerun."""
+    root = _change(tmp_path)
+    _gate_config(root, "exit 3")
+    _build_report(root, 1)
+    for _ in range(factory.GATE_FIXES):
+        _gate(root, capsys)
+        _fixed(root)
+    _gate(root, capsys)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun")
+
+
+@pytest.mark.portable
+def test_a_stale_record_never_stops_the_loop(tmp_path, capsys) -> None:
+    """R5: the loop reads the rounds alone; the next recording call clears what was left."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _stopped(root).parent.mkdir(parents=True, exist_ok=True)
+    _stopped(root).write_text(factory.stop_text(NAME, "rerun", ["old"]), encoding="utf-8")
+    assert _verdicts(root, capsys)["next"] == "review"
+    _, out = _record(root, capsys, _head(root))
+    assert out["next"] == "review" and not _stopped(root).exists()
+
+
+@pytest.mark.portable
+def test_the_supervisor_records_each_reading() -> None:
+    """R14: the build skill's `verdicts` call records, and the skill never edits the record."""
+    skill = (ROOT / "plugins" / "factory" / "skills" / "build" / "SKILL.md").read_text("utf-8")
+    calls = [
+        line
+        for line in skill.splitlines()
+        if "factory.py verdicts <" in line and not line.lstrip().startswith("- 'Bash(")
+    ]
+    assert calls and all("--head <head> --record" in line for line in calls), calls
+    assert "runs/stopped.md" in skill
+
+
 def test_carry_writes_the_unresolved_changes_to_notes_once(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     _round(root, 1, code="CHANGES", security="CHANGES")
@@ -1609,6 +1773,28 @@ def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> 
     first, second = out["ready"]
     assert second["depends_on"] == ["008"] and first["overlaps"] == ["009-second"]
     assert first["cost"]["usd"] == 0.0 and first["cost"]["runs"] == 0, "no runs recorded yet"
+
+
+def test_ready_leaves_a_stopped_run_out(tmp_path, capsys) -> None:
+    """R13: a stopped run sits at `stage: build`, its record or not, and is never ready."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    tree = tmp_path / NAME
+    _git(root, "worktree", "add", "-q", "-b", NAME, str(tree), "main")
+    folder = tree / ".sdlc" / "work" / NAME
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text(INTENT.format(tier=2, stage="build"), encoding="utf-8")
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    (folder / "runs").mkdir()
+    (folder / factory.STOPPED).write_text(
+        factory.stop_text(NAME, "rerun", ["a problem"]), encoding="utf-8"
+    )
+    code, out = _run(capsys, factory.cmd_ready, root)
+    assert code == 0 and out["ready"] == []
 
 
 # A dev server and a screenshot command, as a host's `[ui]` would name them: the server writes its

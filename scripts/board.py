@@ -8,8 +8,9 @@ The page (`board.html`, beside this file) polls `/state.json`, which is rebuilt 
 folders on every request, so the board and the folders can't disagree. A change the factory ran
 on (its folder holds `runs/`) adds its rounds, decisions and cost, read from the files the run
 left with copies of `factory.py`'s parsing, each pinned to it by a test: the core never imports or
-runs the factory. Nothing here writes: three GET routes, every other method refused, and `/file`
-serves only a file inside an open change's own folder.
+runs the factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the
+person, with the record's problems and its way on. Nothing here writes: three GET routes, every
+other method refused, and `/file` serves only a file inside an open change's own folder.
 """
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
 VERIFIED = "verified.md"
 COSTS = Path("runs") / "costs.jsonl"
+STOPPED = Path("runs") / "stopped.md"
+STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
+NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
+PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 
 
 # ---------------------------------------------------------------- the state
@@ -126,6 +131,12 @@ def _entry(
     }  # fmt: skip
     if entry["mode"] == "factory":
         entry.update(_factory(folder, problems))
+        # A stopped run sits at `build`; past it the record is history, and read past.
+        entry["stopped"] = (
+            read("runs/stopped.md", lambda: _stopped(folder, problems), None)
+            if rec["stage"] == "build"
+            else None
+        )
     entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
     entry["problems"] = problems
     entry["next"] = next_action(entry)
@@ -220,6 +231,23 @@ def _factory(folder: Path, problems: list[str]) -> dict:
     }  # fmt: skip
 
 
+def _stopped(folder: Path, problems: list[str]) -> dict | None:
+    """The stop `factory.py verdicts --record` left in `runs/stopped.md`: its way on, the sentence
+    saying it, and the problems as `verdicts` worded them. None without one; a record that won't
+    read is a `problems` line, so the card still needs the person."""
+    path = folder / STOPPED
+    if not path.is_file():
+        return None
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    way = STOPPED_RE.match(lines[0]) if lines else None
+    nxt = [m.group(1) for m in map(NEXT_RE.match, lines) if m]
+    if not way or not nxt:
+        problems.append(f"{STOPPED.as_posix()} doesn't open with STOPPED: and its NEXT: line")
+        return None
+    found = [m.group(1) for m in map(PROBLEM_RE.match, lines) if m]
+    return {"way": way.group(1), "next": nxt[0], "problems": found}
+
+
 def cost(folder: Path) -> dict | None:
     """What the run's agents cost, from `runs/costs.jsonl`, as `factory.py`'s `run_cost()` sums
     it (each session's last reported total; a test pins the two), plus their time: None without
@@ -265,6 +293,8 @@ def next_action(entry: dict) -> str:
         return "fix intent.md's frontmatter"
     if stage in CLOSED:
         return f"/sdlc:close {entry['id']}"
+    if entry.get("stopped"):
+        return entry["stopped"]["next"]
     if entry.get("pending"):
         return "answer its decision in the factory's supervisor"
     if entry.get("decision") and stage == "test":
@@ -281,9 +311,12 @@ def next_action(entry: dict) -> str:
 
 
 def column(entry: dict) -> str:
-    """The board's column: a stop that is the person's first, then a factory change ready to ship,
-    then one shipped or dropped and waiting on close, else how far it has got."""
-    if entry["problems"] or entry.get("pending") or entry.get("decision") == "ESCALATE":
+    """The board's column: a stop that is the person's first (a problem, a stopped run, a
+    decision), then a factory change ready to ship, then one shipped or dropped and waiting on
+    close, else how far it has got."""
+    if entry["problems"] or entry.get("stopped") or entry.get("pending"):
+        return "needs-you"
+    if entry.get("decision") == "ESCALATE":
         return "needs-you"
     if entry["stage"] == "test" and entry.get("decision") == "READY":
         return "ready"
