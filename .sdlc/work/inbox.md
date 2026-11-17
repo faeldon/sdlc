@@ -453,3 +453,15 @@ verifier wrote `- **KEPT:**`; 099's and 107's approvers wrote a line before `DEC
 2026-11-17). Each was set aside by hand and the agent rerun. The mend could cover those roles too.
 Theme: factory
 Raised 2026-11-17.
+
+## [2026-11-17-78] [bug] The landing carries only a note's first line, and takes its text as the seed's title
+
+When a landing carries an undone `notes.md` item as a seed (103's `_dispose()`), it reads only the
+item's first line, so a note that wraps is cut mid-sentence ("…by the spec's boundary: sharing",
+"…doesn't show them, and": 2026-11-17-63 and -64, retitled by hand). With no `- UNDONE:` line
+from the approver, it also uses the note's whole text as the seed's title (52–59, 65). It should
+read the item's continuation lines, and title a seed with no proposal from its first sentence.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
