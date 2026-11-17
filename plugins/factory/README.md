@@ -16,22 +16,36 @@ changes, and the release and retrospective loops never see the difference: a cha
 built is a change.
 
 ```
-/sdlc:intent ── /sdlc-factory:spec ── /sdlc-factory:build ─────────────────────── /sdlc:ship ── /sdlc:close
-  a person      spec-writer drafts    builder plans and builds                     a person      a person
-  writes why    a person approves     reviewers, in rounds, at the diff's depth    reviews and   lands it
-                (WAIT)                verifier checks what they ask for            commits
-                                      builder reworks what it keeps                (WAIT)        (WAIT)
-                                      approver: READY or ESCALATE
-                                      (one WAIT, then unattended)
+/sdlc:intent ── /sdlc-factory:build, the supervisor ──────────────────────────── /sdlc:ship ── /sdlc:close
+  a person      spec-writer drafts a Tier 2's spec                              a person,     a person
+  writes why    one WAIT: the spec and the run                                  when ready,   lands it
+                builder plans and builds, in its own session                    in order      (WAIT)
+                reviewers, in rounds, at the diff's depth                       (WAIT)
+                verifier checks what they ask for; builder reworks what it keeps
+                approver: READY or ESCALATE → "ready to ship"
 ```
 
-- **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` agent drafts `spec.md`
-  from the intent and the repo's policy and review docs. You read the draft, and nothing is
-  written until you say yes. Then `stage: design`.
-- **`/sdlc-factory:build NNN`** (Tier 2 at `stage: design`, or Tier 1 at `stage: plan`): one
-  approval, showing the agents, each one's model, the round limit and the most agent runs it can
-  take. Then it runs unattended, except to ask you about a blocking decision, and stops at
-  `stage: test` with everything **uncommitted**. `/sdlc:ship` reviews it and makes the one commit.
+- **`/sdlc-factory:build NNN`**, the **supervisor** (Tier 2 at `stage: plan` or `design`, Tier 1
+  at `stage: plan`): your own session, usually a long-running one in the main checkout, which you
+  hand one change at a time, as many as you like. Every agent runs as a session of its own in the
+  change's worktree (`claude -p --agent`), in the background, so the supervisor answers you at once
+  and takes the next change while the first builds. For a Tier 2 at `plan`, the `spec-writer`
+  drafts `spec.md` first; you read it, and the one approval covers the spec and the run, showing
+  the agents, each one's model, the round limit, the permission mode the agents run in and the most
+  agent runs it can take. Then the change runs unattended, except to ask you about a blocking
+  decision (naming the change), and stops at `stage: test` with everything **uncommitted**, and
+  the supervisor says it's ready to ship. Ask it what's ready, and it lists every such change in
+  the order to ship them, a change after what it `depends_on`, with the others that touch the same
+  paths. You ship each one with `/sdlc:ship` from its worktree, which reviews it and makes the one
+  commit; the supervisor never ships.
+- **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
+  want approved on its own before building by hand or with the factory. Then `stage: design`.
+
+The builder may start read-only `Explore` and `Plan` sub-agents of its own while it plans or
+reworks, to read code across the repo; they never write, so it stays the only editor. Each
+reviewer runs on a model that fits the change: haiku for a Tier 1 at the light depth, sonnet for a
+Tier 2 or a run touching a sensitive path, opus for the security reviewer, the builder and the
+approver. The supervisor runs on whatever model your session does.
 
 Two more skills stand outside any change, each run only when you ask, behind one approval that
 states the most agent runs it takes. Both write only under `.sdlc/reports/`, a folder that ignores
@@ -130,9 +144,17 @@ rounds = 3                                 # review rounds before the approver d
 reviewers = ["code"]
 rounds = 2
 
-[models]                                   # override an agent's model
-# builder = "sonnet"
+mode = "auto"                              # the permission mode agent sessions run in, read from
+                                           # the base branch; one of acceptEdits, auto,
+                                           # bypassPermissions, manual, dontAsk, plan
+
+[models]                                   # override a role's model (else the rule above)
+# code = "sonnet"
 ```
+
+`mode` is read from the base branch's copy of the file, never a change's own, so a change can't
+widen what its agents may do unasked. An agent session can't answer a tool prompt, so a command its
+mode doesn't allow is refused, and the agent reports it.
 
 A run takes at most `2 + rounds × (reviewers + 2)` agent runs at the full depth (20 with the
 defaults: each round's reviewers, the verifier and the builder's rework), and the build skill shows
@@ -143,7 +165,9 @@ the number before you approve it, whatever depth the diff turns out to need.
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
 stage allows the step, where `HEAD` was, what each review's first line says, the verifier's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); for the eval and the
+`review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); each agent session, its
+prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
+the one place it runs `claude`); the changes ready to ship and their order (`ready`); for the eval and the
 review, which bugs escaped and through which diff (`escapes`), the slice of code to look at
 (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It doesn't call
 `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads the

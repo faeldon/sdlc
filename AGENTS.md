@@ -364,9 +364,21 @@ so a script change that breaks one fails the gate, not a paid run.
 cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
 `sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. Its
 mechanism is `factory.py`, because its own cached copy has no `sdlc.py`. Agents that judge have
-no Write; only the builder edits, and nothing commits. Decisions that are the person's go
-through `decisions.md`, asked by the build session. `sdlc` only reads, at ship, the files a run
-leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
+no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`, read-only), and
+nothing commits. `/sdlc-factory:build` is the **supervisor**: the person's own session, usually
+long-running in the main checkout, taking one change per invocation, whose commands find each
+change's worktree themselves (`change_root()`). It never waits on an agent: each runs as a
+headless session of its own in the change's worktree, started in the background by
+`factory.py agent`, the one place the factory runs `claude`, which composes the prompt from
+`verdicts`' state (`loop_state()`), refuses a step `verdicts` didn't name, picks the model
+(`model_for()`: `factory.models`, else opus for what builds, decides or hunts exploits, the other
+reviewers sonnet for a Tier 2 or a full-depth run, haiku otherwise) and the permission mode (`mode`,
+from the base branch's `factory.toml`), files the reply, and records the session's id in
+`runs/<agent>.sessions`, which `measure` reads (`_agent_sessions()`), since no transcript names its
+`--agent`. A change ends at "ready to ship"; `factory.py ready` orders them, and the person ships
+each. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
+the change, which is how `measure` gives the supervisor's dialogs on `main` to their change
+(`_supervised()`). `sdlc` only reads, at ship, the files a run leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
 `[review] sensitive`, which `factory.py` reads itself with a copy of `risk_paths()` pinned to
 `sdlc.py`'s by a test, like its regexes: `verdicts` writes nothing, so a run that reviewed at the

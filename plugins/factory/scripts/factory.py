@@ -21,10 +21,14 @@ frontmatter by line, edited by line, never round-tripped (`sdlc.py`'s `stamp_shi
     uv run --script factory.py verdicts 008 --head 1a2b3c4
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
+    uv run --script factory.py agent 008 --task review --role code
+    uv run --script factory.py ready
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
-`carry` to `notes.md`, `stage` to `intent.md`. Nothing is written outside the change's folder, and
-nothing under `.git/`.
+`carry` to `notes.md`, `stage` to `intent.md`, `agent` the reply an agent session returned and its
+id under `runs/`. Nothing is written outside the change's folder, and nothing under `.git/`. A
+command about one change runs in its worktree, found from the main checkout when the supervisor
+runs there (`change_root()`).
 
 **Decisions that are a person's.** An agent that reaches a call it shouldn't make (a trade-off, a
 policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] ...` line in its
@@ -43,6 +47,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import uuid
 from contextlib import suppress
 from datetime import date
 from pathlib import Path
@@ -59,14 +64,27 @@ DEFAULTS: dict = {
     "rounds": 3,
     "light": {"reviewers": ["code"], "rounds": 2},
     "models": {},
+    "mode": "auto",
 }
 MAX_ROUNDS = 5
+# The permission modes `claude -p` takes, for the agent sessions the supervisor starts: none of
+# them can answer a prompt, so the mode is chosen before the run, and named at its gate.
+MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
+# The model each role runs on unless `factory.models` sets one: what builds, decides or looks for
+# exploits on the strongest; the other reviewers on `sonnet` for a Tier 2 change or a run at the
+# full depth, `haiku` otherwise. The supervisor is the person's own session, never set here.
+FIXED_MODELS = {
+    "spec-writer": "opus", "builder": "opus", "security": "opus", "verifier": "sonnet",
+    "approver": "opus",
+}  # fmt: skip
+SCALED = ("code", "test", "behaviour")
 # The stages a factory step moves a change between. `shipped` stays `sdlc ship`'s alone.
 STAGES = ("plan", "design", "build", "test")
-# What each step may start from. A build left at `stage: build` by a run that stopped resumes.
+# What each step may start from. A build left at `stage: build` by a run that stopped resumes; a
+# Tier 2 at `plan` starts with the spec-writer's draft, shown before the run's one gate.
 STARTS = {
     "spec": {(2, "plan")},
-    "build": {(2, "design"), (2, "build"), (1, "plan"), (1, "build")},
+    "build": {(2, "plan"), (2, "design"), (2, "build"), (1, "plan"), (1, "build")},
 }
 # First lines the loop reads, and each required change a reviewer lists below its verdict.
 VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
@@ -142,6 +160,29 @@ def names_change(name: str, ident: str) -> bool:
     return name == ident or name.startswith(f"{ident}-")
 
 
+def worktrees(root: Path) -> list[tuple[Path, str]]:
+    """(path, branch) for every checkout of this repo with a branch out, the main one included.
+    Copied from `sdlc.py`, and pinned to it by a test."""
+    out = _git(root, "worktree", "list", "--porcelain") or ""
+    found: list[tuple[Path, str]] = []
+    path: Path | None = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = Path(line[len("worktree ") :])
+        elif line.startswith("branch refs/heads/") and path is not None:
+            found.append((path, line[len("branch refs/heads/") :]))
+    return found
+
+
+def change_root(root: Path, ident: str) -> Path:
+    """The checkout a command about change `ident` works in: this one when it is on the change's
+    branch, else the change's own worktree, so the supervisor, a session in the main checkout,
+    runs every step there. Unchanged when the change has no worktree: `find_change` refuses it."""
+    if names_change(_git(root, "branch", "--show-current") or "", ident):
+        return root
+    return next((path for path, branch in worktrees(root) if names_change(branch, ident)), root)
+
+
 def load_config(root: Path) -> tuple[dict, list[str]]:
     """`.sdlc/factory.toml` over the defaults, and what was wrong with it. A bad key is a warning,
     never quietly ignored: a reviewer spelled `secruity` would otherwise never run."""
@@ -152,14 +193,15 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         "light": {"reviewers": list(light["reviewers"]), "rounds": light["rounds"]},
         "models": {},
     }
+    cfg["mode"], warnings = _mode(root)
     path = root / CONFIG_FILE
     if not path.is_file():
-        return cfg, []
+        return cfg, warnings
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
-        return cfg, [f"{CONFIG_FILE} won't parse: {e}"]
-    warnings = [f"unknown key {key}" for key in data if key not in DEFAULTS]
+        return cfg, [*warnings, f"{CONFIG_FILE} won't parse: {e}"]
+    warnings += [f"unknown key {key}" for key in data if key not in DEFAULTS]
     _depth_keys(data, cfg, "", warnings)
     table = data.get("light", {})
     if not isinstance(table, dict):
@@ -178,7 +220,38 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
                 warnings.append(f"models.{role} must be a model name")
             else:
                 cfg["models"][role] = model
+    if "mode" in data and data.get("mode") != cfg["mode"]:
+        warnings.append(
+            f"mode is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
+            f"{data.get('mode')!r} applies once it lands"
+        )
     return cfg, warnings
+
+
+def _mode(root: Path) -> tuple[str, list[str]]:
+    """`mode`, the permission mode agent sessions run in, as the base branch's `factory.toml`
+    holds it, never this checkout's: a change can't widen what its own agents may do unasked."""
+    base = _base(root)
+    try:
+        data = tomllib.loads(_git(root, "show", f"{base}:{CONFIG_FILE.as_posix()}") or "")
+    except tomllib.TOMLDecodeError:
+        data = {}
+    mode = data.get("mode", DEFAULTS["mode"]) if base else DEFAULTS["mode"]
+    if mode not in MODES:
+        return DEFAULTS["mode"], [
+            f"mode must be one of {', '.join(MODES)}, so {DEFAULTS['mode']} runs"
+        ]
+    return mode, []
+
+
+def model_for(role: str, cfg: dict, tier: int | None, level: str) -> str:
+    """The model `role` runs on: `factory.models`' entry, else `FIXED_MODELS`, the scaled
+    reviewers on `sonnet` for a Tier 2 change or a full-depth run and `haiku` otherwise."""
+    if role in cfg["models"]:
+        return cfg["models"][role]
+    if role in SCALED:
+        return "sonnet" if tier == 2 or level == "full" else "haiku"
+    return FIXED_MODELS[role]
 
 
 def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> None:
@@ -224,13 +297,14 @@ def frontmatter(text: str) -> dict[str, str]:
 
 
 def find_change(root: Path, ident: str) -> tuple[Path | None, str | None]:
-    """The change folder this checkout's branch holds, or why not. A factory step runs in the
-    change's own worktree, where `/sdlc:intent` put the session, so its agents work there."""
+    """The change folder this checkout's branch holds, or why not. A factory step works in the
+    change's own worktree (`change_root()` finds it from the main checkout), so its agents do."""
     branch = _git(root, "branch", "--show-current") or ""
     if not names_change(branch, ident):
         return None, (
-            f"run it from change {ident}'s own worktree: this checkout is on {branch or '?'!r}, "
-            "not that change's NNN-slug branch"
+            f"run it from change {ident}'s own worktree, or from the main checkout once "
+            f"/sdlc:intent has made one: this checkout is on {branch or '?'!r}, and no worktree "
+            "has that change's NNN-slug branch"
         )
     rel = work_rel(root)
     folder = root / rel / branch
@@ -387,7 +461,14 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     stage = meta.get("stage") or None
-    out.update(change=folder.name, folder=str(folder), tier=tier, stage=stage)
+    out.update(change=folder.name, folder=str(folder), worktree=str(root), tier=tier, stage=stage)
+    # A Tier 2 at `plan` has no spec yet: the spec-writer drafts it before the run's gate.
+    out["spec"] = purpose == "build" and (tier, stage) == (2, "plan")
+    # Each role's model, at either depth, so the gate shows the run's cost before it starts.
+    out["models_at"] = {
+        level: {role: model_for(role, cfg, tier, level) for role in ROLES}
+        for level in ("light", "full")
+    }
     if (tier, stage) not in STARTS[purpose]:
         allowed = " or ".join(f"tier {t} at stage: {s}" for t, s in sorted(STARTS[purpose]))
         out["refusals"].append(
@@ -653,10 +734,17 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     raised again), and for the verifier, `repeats` (a change raised again) and `untouched` (one on
     a path the change doesn't touch: pre-existing, never reworked).
     """
+    out, refusal = loop_state(root, ident, head)
+    return emit({"refusals": [refusal]}, 1) if refusal else emit(out)
+
+
+def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | None]:
+    """What `verdicts` prints, or why not: one reading of the loop, so the step `verdicts` names
+    and the prompt `agent` sends for it are made from the same state."""
     cfg, warnings = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
-        return emit({"refusals": [refusal]}, 1)
+        return {}, refusal
     rounds, problems, run = _rounds_at_depth(root, folder, cfg)
     last = rounds[-1] if rounds else None
     changes = last and any(v["verdict"] == "CHANGES" for v in last["reviews"].values())
@@ -720,7 +808,7 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
         out["next"], out["round"] = "rework", last["round"]
     else:
         out["next"], out["round"], out["exhausted"] = "approve", last["round"], exhausted
-    return emit(out)
+    return out, None
 
 
 def cmd_carry(root: Path, ident: str) -> int:
@@ -816,6 +904,239 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
         return emit({"refusals": [f"intent.md has no {', '.join(unplaced)} line"]}, 1)
     intent.write_text(text, encoding="utf-8", newline="\n")
     return emit({"change": folder.name, "stage": stage})
+
+
+# ---------------------------------------------------------------- the agents, as sessions
+#
+# The supervisor starts each agent as a headless session of its own in the change's worktree, in
+# the background, so it stays free while one runs and can take another change. `agent` is the one
+# place this script runs `claude`: it composes the prompt from the loop's state, picks the model
+# and the session, files the reply where the build's rules say, and records the session's id in
+# `runs/<agent>.sessions`, which is how measuring tells an agent's session from the person's.
+
+AGENT_TIMEOUT = 3 * 3600
+TASKS = ("spec", "build", "review", "verify", "rework", "decided", "mend", "approve")
+# The role each task runs as; `review` and `mend` are told theirs.
+TASK_ROLE = {
+    "spec": "spec-writer", "build": "builder", "verify": "verifier", "rework": "builder",
+    "decided": "builder", "approve": "approver",
+}  # fmt: skip
+# The step `verdicts` must name for a task to run, so no step is taken out of turn.
+TASK_STEP = {"build": "build", "review": "review", "verify": "verify", "rework": "rework",
+             "approve": "approve"}  # fmt: skip
+MEND = (
+    "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
+    "again and reply with it."
+)
+
+
+def agent_name(role: str) -> str:
+    """The agent definition a role runs as: `reviewer-<role>` for a reviewer."""
+    return f"reviewer-{role}" if role in REVIEWERS else role
+
+
+def _claude(argv: list[str], cwd: Path) -> tuple[int, str, str | None]:
+    """Run one headless agent session and return its exit, its reply (the JSON's `result`) and
+    what went wrong. Text mode in UTF-8 whatever the locale, no shell, nothing read from stdin."""
+    try:
+        done = subprocess.run(
+            argv, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=AGENT_TIMEOUT,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return 124, "", f"the agent ran past {AGENT_TIMEOUT // 60} minutes"
+    except OSError as e:
+        return 127, "", f"claude couldn't be run: {e}"
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    reply = data.get("result") if isinstance(data.get("result"), str) else ""
+    if done.returncode or data.get("is_error") or not reply.strip():
+        tail = (done.stderr or done.stdout or "").strip()[-500:]
+        return done.returncode or 1, "", f"the agent session failed: {tail or 'no reply'}"
+    return 0, reply, None
+
+
+def _task(
+    root: Path, folder: Path, state: dict, task: str, role: str, decided: str | None
+) -> tuple[str, Path | None, bool] | str:
+    """The prompt a task sends, the file its reply goes to (None for the spec draft, which waits
+    for the person's yes), and whether the reply is added to that file: or why it can't run now.
+    The wording is the build's own; every builder report goes to `build/round-<R+1>.md`, `<R>`
+    the highest review round so far, unless it answers a decision before its round's review."""
+    rel = folder.relative_to(root).as_posix()
+    head = f"Change folder: {rel}. Worktree: {root}. "
+    step = TASK_STEP.get(task)
+    if step and state["next"] != step:
+        return f"verdicts says {state['next']!r}, not {step!r}"
+    rnd = state["round"]
+    reviews_dir = folder / "reviews" / f"round-{rnd}"
+    if task == "spec":
+        return head + "Draft spec.md for this change.", None, False
+    if task == "build":
+        return (
+            head + "Build it: plan.md first (Tier 2), then the code, test first.",
+            (folder / "build" / "round-1.md"),
+            False,
+        )
+    if task == "review":
+        if role not in state["missing"]:
+            return f"{role} isn't among round {rnd}'s missing reviewers: {state['missing']}"
+        prompt = head + f"Review round {rnd}."
+        before = [r for r in state["rounds"] if r["round"] < rnd and role in r["reviews"]]
+        if before and state["reworked"] is not None:
+            prev = next((r for r in state["rounds"] if r["round"] == rnd - 1), None)
+            kept = (prev or {}).get("verified") or {"kept": []}
+            prompt += (
+                f" Reworked: {', '.join(state['reworked']) or 'nothing'}. Kept last round: "
+                f"{'; '.join(k['role'] + ': ' + k['change'] for k in kept['kept']) or 'none'}. "
+                f"Settled, never raise again: {'; '.join(state['settled']) or 'none'}."
+            )
+        return prompt, reviews_dir / f"{role}.md", False
+    if task == "verify":
+        current = next(r for r in state["rounds"] if r["round"] == rnd)
+        asked = [
+            f"- {name}: {c}"
+            for name, r in current["reviews"].items()
+            if r["verdict"] == "CHANGES"
+            for c in r["changes"]
+        ]
+        return (
+            head + f"Verify round {rnd}.\n" + "\n".join(asked) + "\n"
+            f"Untouched: {'; '.join(state['untouched']) or 'none'}. "
+            f"Repeats: {'; '.join(state['repeats']) or 'none'}. "
+            f"Settled: {'; '.join(state['settled']) or 'none'}.",
+            reviews_dir / VERIFIED,
+            False,
+        )
+    if task == "rework":
+        return (
+            f"Round {rnd}'s changes are verified in {rel}/reviews/round-{rnd}/{VERIFIED}. Address "
+            "every KEPT line, then report.",
+            folder / "build" / f"round-{rnd + 1}.md",
+            False,
+        )
+    if task == "approve":
+        prompt = head + "Decide."
+        if state["exhausted"]:
+            prompt += (
+                " The rounds ran out with changes still kept: say whether the approach should "
+                "be reconsidered."
+            )
+        return prompt, folder / "decision.md", False
+    reviewed = state["rounds"][-1]["round"] if state["rounds"] else 0
+    if task == "decided":
+        entry = next((d for d in read_ledger(folder) if d["id"] == decided), None)
+        if entry is None or not entry["decided"]:
+            return f"{decided} isn't a decided line in decisions.md"
+        prompt = f"{decided} is decided in decisions.md: {entry['answer']}. Continue."
+        if not entry["source"].startswith("builder"):
+            prompt += f" Round {reviewed}'s reviews are in {rel}/reviews/round-{reviewed}/."
+        target = folder / "build" / f"round-{reviewed + 1}.md"
+        return prompt, target, target.is_file() and state["built"] == reviewed + 1
+    # mend: the one stop a run mends itself, once: the builder resumed, or a new behaviour check.
+    if role == "builder":
+        return MEND, folder / "build" / f"round-{state['built']}.md", False
+    if role in RUNS_THE_CHANGE:
+        return (
+            head + f"Review round {reviewed}. " + MEND,
+            (folder / "reviews" / f"round-{reviewed}" / f"{role}.md"),
+            False,
+        )
+    return f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence"
+
+
+def cmd_agent(root: Path, ident: str, task: str, role: str | None, decided: str | None) -> int:
+    """Run one agent for one step of the change's loop, as a session of its own in the change's
+    worktree, and file its reply: the builder resumed with its context for a rework, an answer or
+    a mend, every other agent a fresh session. Writes only in the change's folder: the reply and
+    `runs/<agent>.sessions`. A failed session files nothing, and is reported, never retried."""
+    state, refusal = loop_state(root, ident, None)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    cfg, _ = load_config(root)
+    folder, _ = find_change(root, ident)
+    role = role or TASK_ROLE.get(task)
+    if task == "review" and role not in REVIEWERS:
+        return emit({"refusals": [f"review needs --role, one of {', '.join(REVIEWERS)}"]}, 1)
+    if task == "mend" and role is None:
+        return emit({"refusals": ["mend needs --role: builder or behaviour"]}, 1)
+    if task == "decided" and not decided:
+        return emit({"refusals": ["decided needs --decision D<n>"]}, 1)
+    planned = _task(root, folder, state, task, role, decided)
+    if isinstance(planned, str):
+        return emit({"refusals": [planned]}, 1)
+    prompt, target, append = planned
+    sessions = folder / "runs" / f"{agent_name(role)}.sessions"
+    if role == "builder" and task in ("rework", "decided", "mend"):
+        ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
+        if not ids:
+            return emit({"refusals": ["no builder session to resume: run --task build first"]}, 1)
+        session, how = ids[-1], "--resume"
+    else:
+        session, how = str(uuid.uuid4()), "--session-id"
+        sessions.parent.mkdir(parents=True, exist_ok=True)
+        with sessions.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(session + "\n")
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
+    model = model_for(role, cfg, tier, state["depth"])
+    argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{agent_name(role)}"]
+    argv += ["--model", model, "--permission-mode", cfg["mode"], "--output-format", "json"]
+    argv += [how, session]
+    code, reply, problem = _claude(argv, root)
+    out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
+    out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
+    if problem:
+        return emit({**out, "problem": problem}, 1)
+    if target is None:
+        return emit({**out, "reply": reply})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = reply if reply.endswith("\n") else reply + "\n"
+    if append:
+        before = target.read_text(encoding="utf-8")
+        text = before + ("" if before.endswith("\n") else "\n") + "\n" + text
+    target.write_text(text, encoding="utf-8", newline="\n")
+    return emit(out)
+
+
+def _waits(change: dict, names: list[str]) -> bool:
+    """Whether a ready change depends on another of `names` that hasn't shipped yet."""
+    others = [n for n in names if n != change["change"]]
+    return any(names_change(n, d) for d in change["depends_on"] for n in others)
+
+
+def cmd_ready(root: Path) -> int:
+    """The changes ready to ship: each open worktree's change at `stage: test` with a decision,
+    its `depends_on:`, and the other ready changes its diff shares a path with, ordered so a change
+    comes after what it depends on. Read-only: the person ships, each from its own worktree."""
+    base = _base(root)
+    ready = []
+    for path, branch in worktrees(root):
+        folder = path / work_rel(path) / branch
+        if not DIR_RE.match(branch) or not (folder / "intent.md").is_file():
+            continue
+        meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+        decision, _ = read_decision(folder)
+        if meta.get("stage") != "test" or decision is None:
+            continue
+        ready.append({
+            "change": branch, "worktree": str(path), "decision": decision,
+            "depends_on": re.findall(r"\d{3,}", meta.get("depends_on", "")),
+            "paths": set(_changed_paths(path, base)) if base else set(),
+        })  # fmt: skip
+    for r in ready:
+        r["overlaps"] = sorted(o["change"] for o in ready if o is not r and r["paths"] & o["paths"])
+    order, left = [], sorted(ready, key=lambda r: r["change"])
+    while left:
+        names = [o["change"] for o in left]
+        free = [r for r in left if not _waits(r, names)]
+        pick = free[0] if free else left[0]  # a cycle: by id, and the overlaps say why
+        order.append(pick)
+        left.remove(pick)
+    return emit({"ready": [{k: v for k, v in r.items() if k != "paths"} for r in order]})
 
 
 # ---------------------------------------------------------------- what escaped, and old code
@@ -1111,6 +1432,12 @@ def main() -> int:
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
+    p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
+    p_agent.add_argument("id")
+    p_agent.add_argument("--task", choices=TASKS, required=True)
+    p_agent.add_argument("--role", choices=[*REVIEWERS, "builder"])
+    p_agent.add_argument("--decision", help="the decided ledger id, for --task decided")
+    sub.add_parser("ready", help="the changes ready to ship, in the order to ship them")
     p_escapes = sub.add_parser("escapes", help="escaped bugs and the diffs that let them in")
     p_escapes.add_argument("--limit", type=int, default=10)
     p_report = sub.add_parser("report-dir", help="a fresh run folder under .sdlc/reports/")
@@ -1122,6 +1449,12 @@ def main() -> int:
     p_slice.add_argument("--limit", type=int, default=10)
     args = ap.parse_args()
     root = repo_root()
+    if getattr(args, "id", None):
+        root = change_root(root, args.id)
+    if args.cmd == "agent":
+        return cmd_agent(root, args.id, args.task, args.role, args.decision)
+    if args.cmd == "ready":
+        return cmd_ready(root)
     if args.cmd == "config":
         return cmd_config(root)
     if args.cmd == "start":

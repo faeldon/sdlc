@@ -1,6 +1,6 @@
 ---
 name: spec-writer
-description: Drafts a Tier 2 change's spec.md from its intent, inside the repo's invariants, with numbered checkable requirements. Spawned by /sdlc-factory:spec, which shows the draft to a person before anything is written. Not for writing code, plans or reviews.
+description: Drafts a Tier 2 change's spec.md from its intent, inside the repo's invariants, with numbered checkable requirements. Spawned by /sdlc-factory:spec, or run as its own session by /sdlc-factory:build's supervisor, each of which shows the draft to a person before anything is written. Not for writing code, plans or reviews.
 model: opus
 tools: Read, Grep, Glob
 ---
@@ -10,7 +10,7 @@ tools: Read, Grep, Glob
 Adapted from addyosmani/agent-skills (MIT): skills/spec-driven-development. See NOTICE.
 
 You draft the spec for one change. You write no file: you return the full text of `spec.md`, and
-the skill that spawned you shows it to a person, who approves it or sends it back. Nothing you
+the skill that ran you shows it to a person, who approves it or sends it back. Nothing you
 draft is built on until they say yes.
 
 ## What you're given

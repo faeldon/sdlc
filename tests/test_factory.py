@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -137,6 +138,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "rounds": 3,
         "light": {"reviewers": ["code"], "rounds": 2},
         "models": {},
+        "mode": "auto",
     }
     assert warnings == []
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
@@ -187,7 +189,7 @@ def test_max_runs_is_shown_before_the_cost_is_approved() -> None:
         (2, "design", "spec", False),
         (1, "plan", "spec", False),
         (2, "design", "build", True),
-        (2, "plan", "build", False),
+        (2, "plan", "build", True),  # the supervisor has the spec-writer draft the spec first
         (1, "plan", "build", True),
         (2, "build", "build", True),
         (2, "test", "build", False),
@@ -937,3 +939,188 @@ def test_a_review_leaves_out_what_an_open_change_touches(tmp_path, capsys) -> No
     (tree / "README.md").write_text("an open change edits this\n")
     out = _slice(root, capsys, "README.md", "other.md")
     assert out["paths"] == ["other.md"] and out["left_out"] == ["README.md"]
+
+
+# ---------------------------------------------------------------- the supervisor
+
+
+def _from_main(tmp_path: Path, stage: str = "design") -> tuple[Path, Path]:
+    """A main checkout on `main`, and change 008's own worktree beside it, its folder committed on
+    its branch: where the supervisor, a session in the main checkout, finds it."""
+    root = _change(tmp_path, stage=stage)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "008's folder")
+    _git(root, "checkout", "-q", "main")
+    tree = tmp_path / "wt-008"
+    _git(root, "worktree", "add", "-q", str(tree), NAME)
+    return root, tree
+
+
+def test_a_change_is_found_in_its_worktree_from_the_main_checkout(tmp_path, capsys) -> None:
+    root, tree = _from_main(tmp_path)
+    assert factory.change_root(root, "8").resolve() == tree.resolve()
+    assert factory.change_root(tree, "008") == tree, "already in it"
+    assert factory.change_root(root, "9") == root, "no worktree: left for find_change to refuse"
+    code, out = _run(capsys, factory.cmd_start, factory.change_root(root, "008"), "008", "build")
+    assert code == 0 and Path(out["worktree"]).resolve() == tree.resolve()
+
+
+def test_the_worktree_lister_is_sdlc_s_own(tmp_path) -> None:
+    root, _ = _from_main(tmp_path)
+    assert factory.worktrees(root) == sdlc.worktrees(root)
+
+
+def test_a_tier_two_at_plan_starts_with_a_spec_draft_and_shows_its_models(tmp_path, capsys):
+    root = _change(tmp_path, tier=2, stage="plan")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0 and out["spec"] is True
+    light = out["models_at"]["light"]
+    assert light["code"] == "sonnet", "a Tier 2's reviewers are sonnet at either depth"
+    assert (light["security"], light["builder"], light["approver"]) == ("opus",) * 3
+    code, out = _run(capsys, factory.cmd_start, _change(tmp_path / "b", tier=2), "008", "build")
+    assert out["spec"] is False, "a spec is already approved at stage: design"
+
+
+@pytest.mark.parametrize(
+    "role, tier, level, model",
+    [("code", 1, "light", "haiku"), ("test", 1, "full", "sonnet"),
+     ("behaviour", 2, "light", "sonnet"), ("security", 1, "light", "opus"),
+     ("builder", 1, "light", "opus"), ("approver", 1, "light", "opus"),
+     ("verifier", 1, "light", "sonnet"), ("spec-writer", 2, "full", "opus")],
+)  # fmt: skip
+def test_each_role_runs_on_its_model(role, tier, level, model) -> None:
+    """Reviewers scale with the change: haiku for a Tier 1 at the light depth, sonnet for a Tier 2
+    or a run that touched a sensitive path; what builds, decides or hunts exploits is opus."""
+    cfg, _ = factory.load_config(Path("/nonexistent"))
+    assert factory.model_for(role, cfg, tier, level) == model
+    cfg["models"] = {role: "fable"}
+    assert factory.model_for(role, cfg, tier, level) == "fable", "factory.models wins"
+
+
+def test_the_agents_mode_is_the_base_branchs(tmp_path) -> None:
+    root = _change(tmp_path)
+    _git(root, "checkout", "-q", "main")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "factory.toml").write_text('mode = "acceptEdits"\n', encoding="utf-8")
+    _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "-m", "mode")
+    _git(root, "checkout", "-q", NAME)
+    (root / ".sdlc" / "factory.toml").write_text('mode = "bypassPermissions"\n', encoding="utf-8")
+    cfg, warnings = factory.load_config(root)
+    assert cfg["mode"] == "acceptEdits", "a change can't widen what its own agents may do"
+    assert any("read from the base branch" in w for w in warnings)
+    (root / ".sdlc" / "factory.toml").write_text('mode = "acceptEdits"\n', encoding="utf-8")
+    assert factory.load_config(root)[1] == []
+
+
+FAKE_CLAUDE = """\
+#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
+    f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
+code = int(os.environ.get("FAKE_CLAUDE_EXIT", "0"))
+print(json.dumps({"type": "result", "is_error": code != 0,
+                  "result": os.environ.get("FAKE_CLAUDE_REPLY", "")}))
+sys.exit(code)
+"""
+
+
+@pytest.fixture
+def claude(tmp_path: Path, monkeypatch):
+    """A fake `claude` on PATH that records each call's argv and cwd; returns a reader for them."""
+    bin_dir = tmp_path / "claude-bin"
+    bin_dir.mkdir()
+    (bin_dir / "claude").write_text(FAKE_CLAUDE, encoding="utf-8")
+    (bin_dir / "claude").chmod(0o755)
+    log = tmp_path / "claude.jsonl"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "the report\n\n## Evidence\n$ ./check.sh\nok\nexit: 0")
+    monkeypatch.delenv("FAKE_CLAUDE_EXIT", raising=False)
+    return lambda: [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
+    tmp_path, capsys, claude
+) -> None:
+    root, tree = _from_main(tmp_path)
+    worktree = factory.change_root(root, "008")
+    code, out = _run(capsys, factory.cmd_agent, worktree, "008", "build", None, None)
+    assert code == 0, out
+    folder = tree / ".sdlc" / "work" / NAME
+    assert (folder / "build" / "round-1.md").read_text().startswith("the report")
+    session = (folder / "runs" / "builder.sessions").read_text().split()
+    call = claude()[-1]
+    assert Path(call["cwd"]).resolve() == tree.resolve()
+    argv = call["argv"]
+    assert argv[0] == "-p" and argv[1].startswith("Change folder: .sdlc/work/")
+    pairs = dict(zip(argv[2::2], argv[3::2], strict=True))
+    assert pairs["--agent"] == "sdlc-factory:builder" and pairs["--model"] == "opus"
+    assert pairs["--permission-mode"] == "auto" and pairs["--output-format"] == "json"
+    assert pairs["--session-id"] == session[0] == out["session"]
+
+    # A mend resumes the same builder, with its context, and writes over the report it mends.
+    code, out = _run(capsys, factory.cmd_agent, worktree, "008", "mend", "builder", None)
+    assert code == 0 and claude()[-1]["argv"][-2:] == ["--resume", session[0]]
+    assert (folder / "runs" / "builder.sessions").read_text().split() == session
+
+
+def test_an_agent_out_of_turn_or_failing_files_nothing(tmp_path, capsys, claude, monkeypatch):
+    root = _change(tmp_path)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)
+    assert code == 1 and "verdicts says 'build'" in out["refusals"][0] and not claude()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "rework", None, None)
+    assert code == 1, "no step out of turn"
+    monkeypatch.setenv("FAKE_CLAUDE_EXIT", "1")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    folder = root / ".sdlc" / "work" / NAME
+    assert code == 1 and out["exit"] == 1 and "failed" in out["problem"]
+    assert not (folder / "build" / "round-1.md").exists()
+
+
+def test_the_spec_draft_stays_out_of_the_repo_until_the_yes(tmp_path, capsys, claude) -> None:
+    root = _change(tmp_path, tier=2, stage="plan")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
+    assert code == 0 and out["to"] is None and out["reply"].startswith("the report")
+    assert claude()[-1]["argv"][3] == "sdlc-factory:spec-writer"
+    assert "Written." in (root / ".sdlc" / "work" / NAME / "spec.md").read_text(), "untouched"
+
+
+def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> None:
+    root = _change(tmp_path)
+    runs = root / ".sdlc" / "work" / NAME / "runs"
+    runs.mkdir()
+    (runs / "builder.sessions").write_text("s-1\ns-2\n", encoding="utf-8")
+    (runs / "reviewer-code.sessions").write_text("s-3\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "the run")
+    found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
+    assert found == {"s-1": "builder", "s-2": "builder", "s-3": "reviewer-code"}
+
+
+def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    changes = (
+        ("009-second", "[008]", "test"),
+        ("008-first", "", "test"),
+        ("010-busy", "", "build"),
+    )
+    for name, deps, stage in changes:
+        tree = tmp_path / name
+        _git(root, "worktree", "add", "-q", "-b", name, str(tree), "main")
+        folder = tree / ".sdlc" / "work" / name
+        folder.mkdir(parents=True)
+        text = INTENT.format(tier=2, stage=stage).replace("idea:\n", f"idea:\ndepends_on: {deps}\n")
+        (folder / "intent.md").write_text(text, encoding="utf-8")
+        (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+        (tree / "README.md").write_text(f"{name} edits this\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_ready, root)
+    assert code == 0
+    assert [r["change"] for r in out["ready"]] == ["008-first", "009-second"], "010 isn't ready"
+    first, second = out["ready"]
+    assert second["depends_on"] == ["008"] and first["overlaps"] == ["009-second"]

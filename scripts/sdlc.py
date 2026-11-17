@@ -3470,6 +3470,22 @@ def _change_diff(main: Path, branch: str) -> int | None:
     return total
 
 
+def _agent_sessions(main: Path, branch: str, folder: str) -> dict[str, str]:
+    """The sessions the factory ran as its agents, by session id, from the change's
+    `runs/<role>.sessions` on its branch: one id a line, written by `factory.py agent`. A
+    transcript names no `--agent` role, so this is how measuring tells a builder's session from
+    the person's."""
+    roles: dict[str, str] = {}
+    listed = _git(main, "ls-tree", "--name-only", f"{branch}:{folder}/runs") or ""
+    for name in listed.splitlines():
+        if not name.endswith(".sessions"):
+            continue
+        for line in (_git(main, "show", f"{branch}:{folder}/runs/{name}") or "").splitlines():
+            if line.strip():
+                roles[line.strip()] = name.removesuffix(".sessions")
+    return roles
+
+
 def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]:
     """What a change cost, as a summary and its `Sdlc-*` trailer lines: from this repo's
     transcripts when `metrics.transcripts` allows and they hold the change, else what history
@@ -3516,7 +3532,8 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         files = sum(1 for d in dirs for _ in d.glob("*.jsonl"))
         if not files:
             return from_history("no transcripts for this repo")
-        events = metrics.read_events(dirs, branch, branch, cfg["commands"]["check"])
+        roles = _agent_sessions(main, branch, folder)
+        events = metrics.read_events(dirs, branch, branch, cfg["commands"]["check"], roles)
         if not events:
             return from_history("no transcripts for this change")
         closes = _close_times(main, cfg["git"]["base"])

@@ -929,7 +929,8 @@ def test_the_factory_depends_on_sdlc_and_shares_its_version() -> None:
 # the person before anything is written.
 AGENT_TOOLS = {
     "spec-writer": {"Read", "Grep", "Glob"},
-    "builder": {"Read", "Grep", "Glob", "Edit", "Write", "Bash"},
+    # The only editor; its sub-agents may only be the read-only kinds, so it stays the only one.
+    "builder": {"Read", "Grep", "Glob", "Edit", "Write", "Bash", "Agent(Explore, Plan)"},
     "reviewer-code": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-security": {"Read", "Grep", "Glob", "Bash"},
     # It runs the suite; never checks.md, which it reads like a test.
@@ -943,12 +944,30 @@ AGENT_TOOLS = {
 ADAPTED = {"spec-writer", "builder", "reviewer-code", "reviewer-security", "reviewer-test"}
 
 
+def test_the_factorys_coordinator_is_called_the_supervisor_everywhere() -> None:
+    """One name in the docs and the process: the build session that runs a change's agents is the
+    supervisor. Its old name is spelt here in parts, so this file doesn't hold it; a change's own
+    folder may quote it, as history."""
+    old = re.compile("chief" + r"\s+of\s+" + "staff", re.I)
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files"], capture_output=True, encoding="utf-8", check=True
+    ).stdout.splitlines()
+    found = [
+        p
+        for p in tracked
+        if not p.startswith(".sdlc/work/")
+        and (ROOT / p).is_file()
+        and old.search((ROOT / p).read_text(encoding="utf-8", errors="replace"))
+    ]
+    assert not found, found
+
+
 def test_agents_have_their_tools_and_nothing_more() -> None:
     agents = {p.stem: frontmatter.load(p) for p in sorted((FACTORY / "agents").glob("*.md"))}
     assert set(agents) == set(AGENT_TOOLS)
     for name, post in agents.items():
         assert post["name"] == name and post.get("model") and len(post["description"]) > 80
-        tools = {t.strip() for t in str(post["tools"]).split(",")}
+        tools = {t.strip() for t in re.split(r",(?![^()]*\))", str(post["tools"]))}
         assert tools == AGENT_TOOLS[name], f"{name}: {sorted(tools)}"
         assert "never" in post.content.lower() and "commit" in post.content, f"{name}: no rule"
 

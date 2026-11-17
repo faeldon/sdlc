@@ -754,7 +754,13 @@ machine, for numbers only: never message text, a path or a session id
 Waits while a `depends_on:` change is still open count as **blocked**. It also records the stops
 (gates, questions and anything else that waited on the person) against the gates the way of
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
-per sub-agent role.
+per sub-agent role. A factory change owes `intent`, `run`, `ship` and `close`, and `spec` too when
+its spec was approved at a stage of its own. The factory's supervisor is a session in the main
+checkout carrying several changes: a change counts of it only the `/sdlc-factory:build` naming it
+and the dialogs whose question names its `NNN-slug`. Each agent the factory ran as a session of its
+own (`runs/<agent>.sessions` in the change's folder; its permission mode is `.sdlc/factory.toml`'s
+`mode`, read from the base branch, see the factory's README) counts as a run of that role, its own
+read-only sub-agents as runs of theirs, never as the person's stages.
 
 A stop is the person: an entry the harness sent (a background task's notice, a compaction summary)
 is counted as `harness=`, and a slash command other than the plugins' skills (`/reload-plugins`)

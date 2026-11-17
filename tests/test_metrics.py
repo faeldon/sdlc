@@ -471,7 +471,94 @@ def test_the_factorys_build_gate_comes_first_and_its_decisions_are_questions(tmp
     s = _summary(events, way="factory")
     build = s["stages"]["build"]
     assert (build["gate"], build["question"], build["extra"]) == (1, 1, 0)
-    assert s["totals"]["required"] == 5
+    assert s["totals"]["required"] == 4, "the supervisor drafted the spec before its gate"
+
+
+def test_a_revise_of_the_supervisors_spec_draft_is_a_question_and_the_yes_the_gate(
+    tmp_path,
+) -> None:
+    """The supervisor shows the spec-writer's draft before its one WAIT: a revise of it comes first
+    and is answered, but the gate is the first approval, never the revise."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc-factory:build", "12"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]), chose(2, "q1", "revise a requirement"),
+        asst(3, "m2", [tool("AskUserQuestion", "q2")]), chose(4, "q2", "yes"),  # the WAIT
+        asst(5, "m3", [tool("AskUserQuestion", "q3")]), chose(6, "q3", "option b"),  # a decision
+    ])  # fmt: skip
+    stops = _summary(events, way="factory")["stops"]
+    assert [(s["kind"], s["reply"]) for s in stops] == [
+        ("question", "revise"), ("gate", "approve"), ("question", "other"),
+    ]  # fmt: skip
+
+
+def test_a_close_on_main_is_found_in_a_session_read_after_a_tool_result(tmp_path) -> None:
+    """`read_events` once reused its `ident` for a tool result's id, so every session read after
+    the first tool result lost the change's number, and its typed close with it."""
+    events = _events(
+        tmp_path,
+        [asst(0, "m1", [tool("Bash", "b1", command="ls")]), result(1, "b1")],
+        [cmd(110, "sdlc:close", "12", "main"), turn(111, 1, "main")],
+    )
+    assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc:close"]
+
+
+def ask(t: float, ident: str, question: str, branch: str = "main") -> dict:
+    """An `AskUserQuestion` call asking `question`, from the supervisor's session on `main`."""
+    call = tool("AskUserQuestion", ident, questions=[{"question": question}])
+    return asst(t, f"m-{ident}", [call], branch=branch)
+
+
+def test_the_supervisor_gives_each_change_only_its_own_command_and_dialogs(tmp_path) -> None:
+    """One supervisor session on `main` carries two changes: each change's span opens at the
+    `/sdlc-factory:build` naming it and holds only the dialogs naming its `NNN-slug`, so the other
+    change's command never closes it and its gate never lands in it."""
+    folder = tmp_path / "projects" / "-made-up-repo"
+    _write(folder, "supervisor", [
+        cmd(0, "sdlc-factory:build", "12", "main"),
+        cmd(1, "sdlc-factory:build", "13", "main"),
+        ask(2, "q1", f"Run the factory on {OTHER}: at most 12 agent runs?"),
+        chose(3, "q1", "yes", "main"),
+        ask(4, "q2", f"Write this spec and run the factory on {BRANCH}?"),
+        chose(5, "q2", "revise a requirement", "main"),
+        ask(6, "q3", f"Write this spec and run the factory on {BRANCH}?"),
+        chose(7, "q3", "yes", "main"),
+        ask(8, "q4", f"{BRANCH}: D1, which store?"), chose(9, "q4", "option b", "main"),
+    ])  # fmt: skip
+    events = metrics.read_events([folder], BRANCH, "012", None)
+    assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc-factory:build"]
+    stops = _summary(events, way="factory")["stops"]
+    assert [(s["kind"], s["reply"]) for s in stops] == [
+        ("question", "revise"), ("gate", "approve"), ("question", "other"),
+    ]  # fmt: skip
+    assert OTHER not in json.dumps(events, default=str), "no question text leaves"
+
+
+def test_a_session_the_factory_ran_as_an_agent_is_a_run_of_its_role(tmp_path) -> None:
+    """The factory runs each agent as a headless session in the change's worktree, by a session id
+    it records: that session is one run of its role, its own read-only explorers runs of theirs,
+    and none of it is the person's stages."""
+    folder = tmp_path / "projects" / "-made-up-repo--claude-worktrees-012-reopen-drafts"
+    _write(folder, "sess-b", [
+        user(0, "Build it: plan.md first (Tier 2), then the code, test first."),
+        asst(1, "m1", [tool("Agent", "a1", subagent_type="Explore")], tokens=5),
+        asst(9, "m2", [tool("Edit", "e1", file_path="/x/drafts.py", new_string="a\nb",
+                            old_string="a")], tokens=7),
+        turn(10, 10),
+    ])  # fmt: skip
+    sub = folder / "sess-b" / "subagents"
+    _write(sub, "agent-x1", [asst(2, "s1", tokens=3), asst(4, "s2", tokens=3)])
+    (sub / "agent-x1.meta.json").write_text(
+        json.dumps({"agentType": "Explore", "toolUseId": "a1"}), encoding="utf-8"
+    )
+    events = metrics.read_events([folder], BRANCH, "012", None, roles={"sess-b": "builder"})
+    runs = {e["role"]: e for e in events if e["kind"] == "subagent"}
+    assert set(runs) == {"builder", "Explore"}
+    assert runs["builder"]["out"] == 12 and runs["Explore"]["out"] == 6
+    assert not [e for e in events if e["kind"] in ("turn", "human", "skill")]
+    assert [e.get("role") for e in events if e["kind"] == "edit"] == ["builder"]
+    lines = metrics.trailers(_summary(events, way="factory"))
+    assert any(line.startswith("Sdlc-Role: builder runs=1") for line in lines)
+    assert any(line.startswith("Sdlc-Role: Explore runs=1") for line in lines)
 
 
 def chose(t: float, ident: str, answer: str | None, branch: str = BRANCH, error: bool = False):
@@ -685,14 +772,21 @@ def test_edits_are_kept_as_artifact_kinds(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "way, tier, plan, required",
-    [("manual", 2, False, 5), ("manual", 1, False, 3), ("manual", 1, True, 4),
-     ("factory", 2, False, 5)],
+    "way, tier, plan, specced, required",
+    [("manual", 2, False, False, 5), ("manual", 1, False, False, 3), ("manual", 1, True, False, 4),
+     ("factory", 2, False, False, 4), ("factory", 2, False, True, 5),
+     ("factory", 1, False, False, 4)],
 )  # fmt: skip
-def test_the_gates_each_way_of_running_requires(tmp_path, way, tier, plan, required) -> None:
+def test_the_gates_each_way_of_running_requires(
+    tmp_path, way, tier, plan, specced, required
+) -> None:
+    """A factory change's spec is drafted by the supervisor before its one gate, so it owes no
+    spec gate, unless it ran a spec stage of its own; a Tier 1 never has one."""
     entries = [cmd(0, "sdlc:intent")]
     if plan:
         entries.append(asst(1, "m1", [tool("ExitPlanMode", "x1")]))
+    if specced:
+        entries.append(cmd(2, "sdlc-factory:spec"))
     s = _summary(_events(tmp_path, entries), way=way, tier=tier)
     assert s["totals"]["required"] == required
     assert s["totals"]["target"] == required + 1, "measured against its own gates, plus one"
@@ -733,7 +827,7 @@ def test_history_alone_says_why_and_still_reads_back() -> None:
     s = metrics.history_summary(3 * 3600, "factory", 2, CFG, "no transcripts for this change")
     back = metrics.parse_trailers("\n".join(metrics.trailers(s)))
     assert back["coverage"] == "none: no transcripts for this change"
-    assert back["totals"] == {"elapsed": 180, "required": 5, "target": 6, "allowance": 1}
+    assert back["totals"] == {"elapsed": 180, "required": 4, "target": 5, "allowance": 1}
     assert back["mode"] == "factory"
 
 

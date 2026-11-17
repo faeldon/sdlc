@@ -315,7 +315,9 @@ The script could list the `none` changes by theme in `product`, so the skill doe
 hand. Raised by the retrospective of 2026-11-17.
 Theme: retro
 
-## [2026-11-17-5] [idea] A supervisor agent that runs a factory change and calls the person only when needed
+## [2026-11-17-5] [building] A supervisor agent that runs a factory change and calls the person only when needed
+
+Building in .sdlc/work/070-factory-supervisor/.
 
 The factory's agents (builder, reviewers, verifier) are each started by a skill the person runs,
 so every handoff is a stop. A supervisor agent would take one approved intent through build,

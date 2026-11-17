@@ -6,7 +6,7 @@ directories on sys.path. Pure functions only, and no import of `sdlc.py`.
 
 The contract the follow-ups extend, never redefine:
 
-    read_events(dirs, branch, ident, check_cmd)   -> [event]   time-ordered; numbers, never text
+    read_events(dirs, branch, ident, check_cmd, roles=None) -> [event]   time-ordered; numbers
     summarize(events, dep_closes, cfg, way, tier) -> summary   stages, clocks, stops, tokens
     trailers(summary)                             -> [line]    `Sdlc-Key: name k=v k=v`
     parse_trailers(body)                          -> dict | None
@@ -39,7 +39,13 @@ tool, and for `Bash` the program, from `_prompt_name()`: `Bash:git:push`. It is 
 which counted questions and plan approvals, and is never read as prompts.
 
 `edit.role` is set on an edit a sub-agent made, and absent on the session's own. `artifact()` is
-the classifier, public so a reader of the change's diff names its files the same way.
+the classifier, public so a reader of the change's diff names its files the same way. A session
+the factory ran as one of its agents (`roles`) is a `subagent` run like a sub-agent's, and its own
+sub-agents (the builder's read-only explorers) are runs of their own types.
+
+The factory's supervisor carries several changes from one session in the main checkout: a change
+keeps of it only the `/sdlc-factory:build` naming it and the dialogs whose question names its
+`NNN-slug` (`_supervised()`), so its span holds its own gate and decisions alone.
 
 No message text, file path or session id leaves `read_events`: a reply is a class (approve,
 fix, revise, other), an edit an artifact kind, a check pass or fail. `fix` is asking for the
@@ -122,21 +128,24 @@ STAGE_EDIT = {
     "shipped": "ship",
 }
 # Where each gated skill's WAIT falls among its stops: last, after an interview or a draft, or
-# first, for the factory's build, whose approval comes before an unattended run.
+# first_approval, for the factory's build, whose yes comes before an unattended run: a revise of
+# the spec draft shown before it is a question, never the gate.
 GATES = {
     "sdlc:intent": "last",
     "sdlc:spec": "last",
     "sdlc:ship": "last",
     "sdlc:close": "last",
     "sdlc-factory:spec": "last",
-    "sdlc-factory:build": "first",
+    "sdlc-factory:build": "first_approval",
 }
-# The gates each way of running requires, so a change's stops can be read against them.
+# The gates each way of running requires, so a change's stops can be read against them. A factory
+# Tier 2 that ran a spec stage of its own owes `spec` too (`summarize()`); one whose spec the
+# supervisor drafted before its gate doesn't.
 REQUIRED = {
     ("manual", 2): ("intent", "spec", "plan", "ship", "close"),
     ("manual", 1): ("intent", "ship", "close"),
-    ("factory", 1): ("intent", "spec", "run", "ship", "close"),
-    ("factory", 2): ("intent", "spec", "run", "ship", "close"),
+    ("factory", 1): ("intent", "run", "ship", "close"),
+    ("factory", 2): ("intent", "run", "ship", "close"),
 }
 
 
@@ -338,7 +347,41 @@ def _membership(entries: list[dict], branch: str, ident: str) -> list[bool]:
                 if j > i and any(_reply(a) == "approve" for a in _answers(entries[j])):
                     approved = True
                 keep[j] = True
+    _supervised(entries, branch, ident, keep)
     return keep
+
+
+def _supervised(entries: list[dict], branch: str, ident: str, keep: list[bool]) -> None:
+    """The factory's supervisor, a session in the main checkout carrying several changes: of it,
+    a change keeps the `/sdlc-factory:build` the person typed naming it, which opens its span, and
+    each dialog whose question names its `NNN-slug`, with the answer, so another change's command
+    or dialog never closes or fills its span. Matched by the whole branch name: a number alone in
+    a question (`at most 20 agent runs`) names nothing."""
+    named = re.compile(rf"(?<![\w-]){re.escape(branch)}(?![\w-])")
+    dialogs: set[str] = set()
+    for i, entry in enumerate(entries):
+        if keep[i] or _harness(entry):
+            continue
+        msg = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+        content = msg.get("content")
+        if entry.get("type") == "user":
+            text = _entry_text(content)
+            m, args = SKILL_RE.search(text), ARGS_RE.search(text)
+            if m and m.group(1) == "sdlc-factory:build" and args and _names(ident, args[1]):
+                keep[i] = True
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("tool_use_id") in dialogs:
+                    keep[i] = True
+        elif entry.get("type") == "assistant":
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict) or block.get("name") != "AskUserQuestion":
+                    continue
+                inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                asked = inp.get("questions") if isinstance(inp.get("questions"), list) else []
+                said = " ".join(str(q.get("question", "")) for q in asked if isinstance(q, dict))
+                if named.search(said):
+                    keep[i] = True
+                    dialogs.add(str(block.get("id")))
 
 
 def _usage(msg: dict) -> dict:
@@ -357,13 +400,20 @@ def _subagent(path: Path, branch: str) -> dict | None:
         meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    role = str(meta.get("agentType") or "agent")
-    entries = _lines(path) or []
+    found = _run(_lines(path) or [], str(meta.get("agentType") or "agent"), branch)
+    return {"parent": meta.get("toolUseId"), "events": found["events"]} if found else None
+
+
+def _run(entries: list[dict], role: str, branch: str) -> dict | None:
+    """One agent's run as `role`, from its entries: a sub-agent's transcript, or a whole session
+    the factory ran as that agent (`claude -p --agent`). Its `subagent` event and edits, and the
+    `Agent` calls it made, whose own sub-agents are its to count."""
     stamps = [t for t in (_ts(e) for e in entries) if t]
     tokens = dict.fromkeys(TOKEN_KEYS.values(), 0)
     edits = []
     seen: set[str] = set()
     uses: dict[str, tuple[str, dict]] = {}
+    agents: set[str] = set()
     for e in entries:
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
         if e.get("type") == "user" and _ts(e):
@@ -379,6 +429,8 @@ def _subagent(path: Path, branch: str) -> dict | None:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 uses[str(block.get("id"))] = (str(block.get("name")), inp)
+                if block.get("name") == "Agent":
+                    agents.add(str(block.get("id")))
             if isinstance(block, dict) and block.get("name") in EDIT_TOOLS and _ts(e):
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 target = str(inp.get("file_path") or inp.get("notebook_path") or "")
@@ -396,7 +448,7 @@ def _subagent(path: Path, branch: str) -> dict | None:
         "ms": int((stamps[-1] - stamps[0]).total_seconds() * 1000),
         **tokens,
     }
-    return {"parent": meta.get("toolUseId"), "events": [run, *edits]}
+    return {"events": [run, *edits], "agents": agents}
 
 
 # The person's questions and plan gates: answered by the person, but counted as `question` and
@@ -502,8 +554,17 @@ def _started(
     events.append({"ts": ts, "kind": "skill", "name": skill})
 
 
-def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None) -> list[dict]:
-    """The change's events from every session in `dirs`, oldest first. Numbers and names only."""
+def read_events(
+    dirs: list[Path],
+    branch: str,
+    ident: str,
+    check_cmd: str | None,
+    roles: dict[str, str] | None = None,
+) -> list[dict]:
+    """The change's events from every session in `dirs`, oldest first. Numbers and names only.
+    `roles` names the sessions the factory ran as one of its agents, by session id (a transcript's
+    file is named by it): each is one `subagent` run of that role, with its own sub-agents, never
+    the person's stages."""
     events: list[dict] = []
     check = (check_cmd or "").strip()
     for folder in dirs:
@@ -513,6 +574,16 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                 continue
             keep = _membership(entries, branch, ident)
             if not any(keep):
+                continue
+            if roles and path.stem in roles:
+                found = _run([e for e, k in zip(entries, keep, strict=True) if k],
+                             roles[path.stem], branch)  # fmt: skip
+                if found:
+                    events.extend(found["events"])
+                    for sub in sorted((folder / path.stem / "subagents").glob("agent-*.jsonl")):
+                        inner = _subagent(sub, branch)
+                        if inner and inner["parent"] in found["agents"]:
+                            events.extend(inner["events"])
                 continue
             checks: dict[str, datetime] = {}
             dialogs: dict[str, datetime] = {}  # AskUserQuestion calls awaiting their answer
@@ -550,17 +621,17 @@ def read_events(dirs: list[Path], branch: str, ident: str, check_cmd: str | None
                         for block in content:
                             if not isinstance(block, dict) or block.get("type") != "tool_result":
                                 continue
-                            ident = block.get("tool_use_id")
-                            if ident in checks:
+                            use = block.get("tool_use_id")
+                            if use in checks:
                                 ok = not block.get("is_error")
                                 events.append({"ts": ts, "kind": "check", "ok": ok})
-                            elif ident in pending:
-                                skill, called = pending.pop(ident)
+                            elif use in pending:
+                                skill, called = pending.pop(use)
                                 if not block.get("is_error"):  # a refused call ran nothing
                                     _started(events, called, skill, last_human, skill_since)
                                     skill_since = True
-                            elif ident in dialogs:
-                                asked_at = dialogs.pop(ident)
+                            elif use in dialogs:
+                                asked_at = dialogs.pop(use)
                                 chosen = [] if block.get("is_error") else _answers(entry)
                                 if chosen:  # dismissed, empty or refused: no answer, no stop
                                     events.append({
@@ -737,10 +808,11 @@ def summarize(
             return
         # A dialog nobody answered can't be the gate: it stays the question it was.
         answered = [s for s in span["stops"] if s["reply"] is not None]
+        placement = GATES[span["skill"]]
         if not answered:
             pick = None
-        elif GATES[span["skill"]] == "first":
-            pick = answered[0]
+        elif placement == "first_approval":
+            pick = next((s for s in answered if s["reply"] == "approve"), answered[0])
         else:
             # The WAIT is the last approval: a request typed after it ("now start the plan") is
             # the person moving on, not the gate.
@@ -751,7 +823,7 @@ def summarize(
             if stop is pick:
                 stop["kind"] = "gate"
                 after = True
-            elif stop.get("dialog") or span["skill"] == "sdlc-factory:build":
+            elif stop.get("dialog") or placement != "last":
                 stop["kind"] = "question"
             elif after:
                 stop["why"] = "after_gate"
@@ -870,6 +942,9 @@ def summarize(
     required = list(REQUIRED.get((way, tier), REQUIRED[("manual", 2)]))
     if way == "manual" and tier == 1 and plan_made:
         required.insert(1, "plan")
+    specced = any(e["kind"] == "skill" and e["name"] in SPEC_SKILLS for e in events)
+    if way == "factory" and tier == 2 and specced:
+        required.insert(1, "spec")
     seen = [s for s in STAGES if stages[s]["segments"]]
     totals = {
         "elapsed": sum(s["elapsed"] for s in stages.values()),

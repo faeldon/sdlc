@@ -1,48 +1,60 @@
 ---
 name: build
-description: Hand one change to the factory's agents after one approval — the builder plans and implements it in the change's worktree, reviewers check it in parallel rounds at a depth its diff's risk sets, a verifier checks what they ask for against the code, the builder reworks what it keeps, and the approver writes a READY or ESCALATE decision — leaving everything uncommitted at stage test for /sdlc:ship. Use from the change's own worktree once its spec is approved (Tier 2, stage design) or its intent is written (Tier 1, stage plan), with sdlc-factory installed. Not for drafting the spec (/sdlc-factory:spec), not for committing or shipping (/sdlc:ship), and never to merge or push.
-argument-hint: "[NNN — the change; this worktree's]"
+description: Add one change to the factory's supervisor, this session — the spec-writer drafts a Tier 2's spec first, and after one approval the builder plans and implements it in its own session in the change's worktree, reviewers check it in parallel rounds at a depth its diff's risk sets, a verifier checks what they ask for, the builder reworks what it keeps, and the approver writes a READY or ESCALATE decision — every agent in the background, so the supervisor stays free for the next change, and each ends uncommitted at stage test, ready for the person to ship. Use from the main checkout (or the change's worktree) once its intent is written, with sdlc-factory installed, as many times as there are changes to build. Not for committing or shipping (/sdlc:ship, which the person runs), not for drafting a spec alone (/sdlc-factory:spec), and never to merge or push.
+argument-hint: "[NNN — the change to add]"
 allowed-tools:
   - Read
-  - Write
   - Edit
-  - Agent
-  - SendMessage
   - AskUserQuestion
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py decisions *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready *)'
   - 'Bash(git diff *)'
 disable-model-invocation: true
 ---
 
-# Factory build — agents plan, build and review a change
+# Factory build — the supervisor runs a change's agents
 
-Stages 3 and 4 of the change loop, handed to the factory's agents: the builder plans and
-implements, specialist reviewers check the work in rounds, a verifier checks each change they ask
-for against the code, the builder reworks what it keeps, and the approver recommends. One approval starts it; after that it runs without stopping until it
+Stages 2 to 4 of the change loop, handed to the factory's agents: the spec-writer drafts a Tier 2's
+spec, the builder plans and implements, specialist reviewers check the work in rounds, a verifier
+checks each change they ask for against the code, the builder reworks what it keeps, and the
+approver recommends. One approval starts it; after that it runs without the person until it
 reaches a decision, runs out of rounds, or hits a problem.
 
-**It ends before anything is committed.** The work stays uncommitted in the change's worktree at
-`stage: test`, with every review and the decision in the change's folder, and the person takes it
-from there with `/sdlc:ship`, which reviews the diff itself and makes the one commit. No agent
-commits, pushes or merges, and the run stops if `HEAD` moves.
+**This session is the supervisor.** It is the person's own session, usually a long-running one in
+the main checkout, and each `/sdlc-factory:build NNN` adds one change to it. It never builds,
+reviews or edits code: every agent runs as a session of its own in the change's worktree, started
+by `factory.py agent` with `run_in_background`, which files the agent's reply in the change's
+folder. So the supervisor never waits on an agent. It replies to the person in the turn they
+asked (`070: spec-writer started`), takes their next request, a second change included, and picks
+each change up again when its agent's command exits. Every message and every question it puts to
+the person names the change it is about.
 
-**This session is the chief of staff.** Agents can't talk to the person; this session can. When an
-agent reaches a call that is the person's (a trade-off the spec leaves open, a policy, scope), it
-raises a `- DECISION:` line instead of guessing, and `factory.py decisions` gathers every one into
-the change's ledger, `.sdlc/work/NNN-slug/decisions.md`. A **blocking** one pauses the run: this session
-asks the person, writes the answer into the ledger, and resumes the builder with it. A **default**
-one lets the run go on with the agent's stated default, recorded as assumed; the approver
-escalates while any is unconfirmed, and `/sdlc:ship` shows them all.
+**It ends before anything is committed.** Each change stays uncommitted in its worktree at
+`stage: test`, with every review and the decision in its folder, and the supervisor says it is
+ready to ship. The person ships it with `/sdlc:ship`, from that worktree, in the order they
+choose; the supervisor never does. No agent commits, pushes or merges, and a change stops if its
+`HEAD` moves.
+
+**Decisions that are the person's go through the supervisor.** When an agent reaches a call that
+is the person's (a trade-off the spec leaves open, a policy, scope), it raises a `- DECISION:`
+line instead of guessing, and `factory.py decisions` gathers every one into the change's ledger,
+`.sdlc/work/NNN-slug/decisions.md`. A **blocking** one pauses that change alone: the supervisor
+asks the person, writes the answer into the ledger, and the builder carries on with it. A
+**default** one lets the run go on with the agent's stated default, recorded as assumed; the
+approver escalates while any is unconfirmed, and `/sdlc:ship` shows them all.
 
 **Under the factory, the plan is accepted by approving this run.** The builder writes `plan.md` and
-builds on it without a person reading it first, which plan mode would otherwise require. That is
-the trade this layer makes, and the reviewers check the build against the plan as well as the spec.
+builds on it without a person reading it first, which plan mode would otherwise require; it may
+start read-only `Explore` and `Plan` sub-agents of its own to read the code while it plans. That
+is the trade this layer makes, and the reviewers check the build against the plan as well as the
+spec.
 
 ## Step 0 — The change and the run (mechanical, no confirmation needed)
 
@@ -51,41 +63,66 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start <NNN> --for build
 ```
 
+Every command about a change runs in its worktree, which `factory.py` finds from the main checkout.
 `config` and `start` give the run's shape from `.sdlc/factory.toml`: the full depth's reviewers
 (`factory.reviewers`, default code, security, test and behaviour, the one that runs the gate and
 the spec's end-to-end path) and round limit (`factory.rounds`,
-default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds), any model
-a role is set to (`factory.models`), and `max_runs`, the most agent runs this can take, counted at
-the full depth.
+default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds), the
+permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
+each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
+opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier, and
+for the other reviewers sonnet on a Tier 2 or a full-depth run, haiku otherwise), and `max_runs`,
+the most agent runs this can take, counted at the full depth.
 
 **The depth is set by the diff, after the first build.** With no `[review] sensitive` list in
 the base branch's `.sdlc/config.toml`, every run is full, as it always was. With one, a diff that
 touches none of its paths runs light; one that touches any, or that a round already reviewed at
 the full depth, runs full, and a run never lightens. `verdicts` reports it each time (`depth`,
-`why`, `sensitive`), and the reviewers it calls for follow it. `start` also gives `head`, the commit the run starts from, and every refusal: not
-this change's worktree, or a stage this can't start from (Tier 2 needs `stage: design`, an approved
-spec; Tier 1, `stage: plan`). A run that stopped part way left the change at `stage: build`, and
-starts again from where its files say. **If there are refusals, show them and stop.** Keep `head`.
+`why`, `sensitive`), and the reviewers it calls for follow it. `start` also gives `head`, the commit
+the run starts from, `spec`, true for a Tier 2 at `stage: plan`, whose spec the spec-writer drafts
+before the gate, and every refusal: no worktree for the change, or a stage this can't start from
+(Tier 2 needs `stage: plan` or `design`; Tier 1, `stage: plan`). A run that stopped part way left
+the change at `stage: build`, and starts again from where its files say. **If there are refusals,
+show them and stop.** Keep `head`.
 
 ## Step 1 — Show it
 
-Show the person: the change and its tier, the agents that will run (builder, each reviewer at
-each depth, the verifier, approver) with each one's model (the agent's own unless `factory.models`
-sets one), the round limits, the depth rule above, and `max_runs`, so the cost is in front of them
-before they agree to it. Name the files the run will write: code and `plan.md` by the builder;
-`build/round-<N>.md`, `reviews/round-<N>/<role>.md`, `reviews/round-<N>/verified.md` and
-`decision.md` by this skill, from the agents' replies; `build/round-<N>.files` by `snapshot`;
-`decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't resolve. Say
-that the run will stop to ask them about any blocking decision, so they know to stay near it, and
-that every builder report and behaviour check must end with its `## Evidence` (each command run,
-its output, its exit), or the run stops: the behaviour check runs the gate and the spec's path, and
-reads `checks.md` without running it, which `/sdlc:ship` does under a prompt.
+With `spec` true, first draft the spec, in the background:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec
+```
+
+Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its `reply`, the
+complete `spec.md` and, after a `---` line, the open questions it resolved and left. Check it
+against `intent.md` before showing it: every `<...>` prompt replaced, requirements numbered and
+each checkable, a **Contracts touched** line for each invariant the change comes near. Run it once
+more if one of those is missing, and say so if the second draft still lacks it. Nothing is written
+yet: the draft is only in the command's output.
+
+Then show the person, naming the change: the spec draft and its questions, when there is one; the
+change and its tier; the agents that will run (builder, each reviewer at each depth, the verifier,
+approver) with each one's model from `models_at`; the round limits; the depth rule above; the
+permission mode; and `max_runs`, the factory's own runs, not the builder's sub-agents, so the cost
+is in front of them before they agree to it. Name the files the run will write, all by `factory.py`
+in the change's folder: code and `plan.md` by the builder; `build/round-<N>.md`,
+`reviews/round-<N>/<role>.md`, `reviews/round-<N>/verified.md` and `decision.md`, the agents'
+replies; `runs/<agent>.sessions`, each session's id, for measuring; `build/round-<N>.files` by
+`snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
+resolve. Say that the run will ask them about any blocking decision, and that every builder report
+and behaviour check must end with its `## Evidence` (each command run, its output, its exit), or
+the change stops: the behaviour check runs the gate and the spec's path, and reads `checks.md`
+without running it, which `/sdlc:ship` does under a prompt.
 
 ## Step 2 — WAIT for explicit approval
 
-Ask literally:
+Ask literally, with a spec draft:
 
-> `Run the factory on NNN-<slug>: the builder plans and builds it, <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
+
+And without one:
+
+> `Run the factory on NNN-<slug>: the builder plans and builds it, <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
 
 Leave out the parenthesis when the base branch's `.sdlc/config.toml` lists no `[review]
 sensitive` paths: every run is then full.
@@ -96,33 +133,40 @@ chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empt
 refused is a no. If the tool is unavailable or refused, ask the same text, answers in
 parentheses, and stop.
 
-**Do nothing more until the person says yes.** Approval is for this run only. Changing the
-reviewers or rounds is an edit to `.sdlc/factory.toml` and a new question.
+**Do nothing more for this change until the person says yes.** Approval is for this run only.
+`revise a requirement` runs the spec-writer again with their words, and the question is asked
+again on the new draft. Changing the reviewers or rounds is an edit to `.sdlc/factory.toml` and a
+new question.
 
 ## Step 3 — Run it
 
+With a spec draft, `Edit` the scaffolded `spec.md` with it, exactly as shown, and strike the open
+questions it resolved in `intent.md` (`- ~~Question?~~ Resolved: ...`). Then:
+
 ```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> design && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> build
 ```
 
-Every agent prompt starts with `Change folder: <folder>. Worktree: <worktree root>.`, and an
-agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` and its
-`factory.models` model when one is set.
+The first only with a spec draft. Every `factory.py agent` call below runs with
+`run_in_background`; when it exits, read its JSON (`to`, the file it wrote, or `problem`) and take
+the next step for that change. A `problem` is a stop, reported for that change alone.
 
-1. **Build.** Spawn `sdlc-factory:builder` with `<paths> Build it: plan.md first (Tier 2), then
-   the code, test first.` Keep the agent id it returns; every rework resumes this same builder,
-   with its context, through `SendMessage`. Wait for its report, and `Write` it, exactly as
-   returned, to `.sdlc/work/NNN-slug/build/round-1.md`.
+1. **Build.**
 
-   **Where every builder report goes** decides what gets reviewed, so it has one rule: to
-   `build/round-<R+1>.md`, where `<R>` is the highest review round so far (0 before the first).
-   After round 1's reviews, the next report is `build/round-2.md`, whether it came from a rework
-   or from the person's answer to a decision; the script then calls for round 2's review. Only a
-   report from before any review of its round (the builder resumed with an answer while building)
-   is added to the end of the existing file.
+   ```bash
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task build
+   ```
 
-   **After writing every builder report,** snapshot what its build left, `<N>` being that
-   report's round, so the next round's reviewers read what the rework changed:
+   The builder's session is resumed for every later step it takes (a rework, a decision's
+   answer, a mend), with its context. **Where every builder report goes** decides what gets
+   reviewed, and `factory.py` keeps the rule: `build/round-<R+1>.md`, where `<R>` is the highest
+   review round so far, whether the report came from a rework or from the person's answer to a
+   decision; only a report from before any review of its round is added to the end of the existing
+   file.
+
+   **After every builder report,** snapshot what its build left, `<N>` being that report's
+   round, so the next round's reviewers read what the rework changed:
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot <NNN> --round <N>
@@ -135,78 +179,107 @@ agent spawned with the `Agent` tool gets `subagent_type: "sdlc-factory:<role>"` 
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts <NNN> --head <head>
    ```
 
-   Do what its `next` says, and nothing else:
+   Do what its `next` says, and nothing else; `factory.py agent` refuses a step it doesn't name:
 
    - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
      step 1.
    - **`decide`**: a blocking decision is waiting (`pending`). Ask the person with
-     `AskUserQuestion`, one question per pending decision (up to four at once): the question as the
-     agent put it, the options it gave, its recommendation first and marked as such, and who raised
-     it in which round. Record each answer by `Edit`ing its line in `decisions.md` from `- [ ] D1
-     (...)` to `- [x] D1 (...)`, with ` → decided: <their answer>` at the end. Then resume the
-     agent that needs it: the builder through `SendMessage` (`D1 is decided in decisions.md:
-     <answer>. Continue.`), or, for a reviewer's decision, the builder with the round's reviews and
-     the answer together, and `Write` its report by the rule above, so the work it did on the
-     answer is reviewed. Never answer a decision yourself, and never tick one the person didn't
-     answer.
-
-   - **`review`**: spawn every reviewer in `missing` (`sdlc-factory:reviewer-<role>`) **in one
-     message**, so they run in parallel, each with `<paths> Review round <round>.` From round 2,
-     for a reviewer that reviewed an earlier round, add `Reworked: <reworked>. Kept last round:
-     <the previous round's KEPT lines>. Settled, never raise again: <settled>.`; with `reworked`
-     null, or for a reviewer new to the run, it reviews the whole change. `Write` each reply,
-     exactly as returned, to `.sdlc/work/NNN-slug/reviews/round-<round>/<role>.md`. Never resume
-     the builder until every reviewer of the round has replied and been written.
-   - **`verify`**: spawn `sdlc-factory:verifier` with `<paths> Verify round <round>.`, every
-     `- CHANGE:` line of the round's `VERDICT: CHANGES` reviews (each as `<role>: <change>`), and
-     `Untouched: <untouched>. Repeats: <repeats>. Settled: <settled>.` `Write` its reply, exactly
-     as returned, to `.sdlc/work/NNN-slug/reviews/round-<round>/verified.md`. A reply that leaves a
-     change unanswered, or answers one twice, is a `stop` on the next call: never patch it.
-   - **`rework`**: `SendMessage` to the builder: `Round <round>'s changes are verified in
-     .sdlc/work/NNN-slug/reviews/round-<round>/verified.md. Address every KEPT line, then report.`
-     `Write` its report to `build/round-<round+1>.md`; the script then says `review` for that
-     round.
-   - **`approve`**: first carry what's unresolved into the notes, so `/sdlc:ship` must give each a
-     disposition:
+     `AskUserQuestion`, one question per pending decision (up to four at once): the change's
+     `NNN-slug` first, then the question as the agent put it, the options it gave, its
+     recommendation first and marked as such, and who raised it in which round. Record each answer
+     by `Edit`ing its line in `decisions.md` from `- [ ] D1 (...)` to `- [x] D1 (...)`, with
+     ` → decided: <their answer>` at the end. Then the builder carries on with it, the round's
+     reviews alongside for a reviewer's decision, and its report is reviewed like any:
 
      ```bash
-     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry <NNN>
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task decided --decision <D1>
      ```
 
-     Then spawn `sdlc-factory:approver` with `<paths> Decide.` and `Write` its reply, exactly as
-     returned, to `.sdlc/work/NNN-slug/decision.md`. When `exhausted` is true, the prompt adds
-     `The rounds ran out with changes still kept: say whether the approach should be
-     reconsidered.`, and only an ESCALATE with a `## Reconsider the approach` section passes the
-     next call.
+     Never answer a decision yourself, and never tick one the person didn't answer.
+
+   - **`review`**: start every reviewer in `missing` **in one message**, so they run in parallel,
+     each with:
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task review --role <role>
+     ```
+
+     Its reply goes to `.sdlc/work/NNN-slug/reviews/round-<round>/<role>.md`. From round 2, a
+     reviewer that reviewed an earlier round is told what was reworked, what was kept last round,
+     and what is settled, never to be raised again. Take no next step for the change until every
+     reviewer of the round has replied.
+   - **`verify`**: the verifier checks every `- CHANGE:` line of the round's `VERDICT: CHANGES`
+     reviews, with the round's `untouched`, `repeats` and `settled`, as
+     `sdlc-factory:verifier`, into `.sdlc/work/NNN-slug/reviews/round-<round>/verified.md`. A
+     reply that leaves a change unanswered, or answers one twice, is a `stop` on the next call:
+     never patch it.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task verify
+     ```
+
+   - **`rework`**: the builder is told `Round <round>'s changes are verified in
+     .sdlc/work/NNN-slug/reviews/round-<round>/verified.md. Address every KEPT line, then report.`,
+     and its report goes to `build/round-<round+1>.md`; the script then says `review` for that
+     round.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task rework
+     ```
+
+   - **`approve`**: first carry what's unresolved into the notes, so `/sdlc:ship` must give each a
+     disposition, then run the approver, whose reply goes to `.sdlc/work/NNN-slug/decision.md`.
+     When `exhausted` is true, it is asked whether the approach should be reconsidered, and only an
+     ESCALATE with a `## Reconsider the approach` section passes the next call.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry <NNN> && \
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task approve
+     ```
+
    - **`done`**: the decision is in and readable. Go to step 3.
-   - **`stop`**: report its `problems` and stop. The change stays at `stage: build`. A reviewer
-     reply that doesn't open with a verdict, a decision that doesn't open with one, or `HEAD`
-     moving (an agent committed) is a stop: never patch a verdict in, and never reset a commit.
-     **A missing `## Evidence` is the one stop this run can mend itself,** once: resume the agent
-     whose reply lacks it (the builder through `SendMessage`, or a new behaviour check for that
-     round) with `Your reply has no ## Evidence, or a command without its exit: run what your
-     claims rest on again and reply with it.`, and `Write` the new reply over the old one,
-     exactly as returned. Never write the evidence yourself. A second reply without it is a stop
-     like any other.
+   - **`stop`**: report its `problems` for the change, and leave it. It stays at `stage: build`,
+     and the other changes run on. A reviewer reply that doesn't open with a verdict, a decision
+     that doesn't open with one, or `HEAD` moving (an agent committed) is a stop: never patch a
+     verdict in, and never reset a commit. **A missing `## Evidence` is the one stop this run can
+     mend itself,** once: the builder resumed, or a new behaviour check for that round, asked to
+     run what its claims rest on again, its reply written over the old one.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task mend --role <builder or behaviour>
+     ```
+
+     Never write the evidence yourself. A second reply without it is a stop like any other.
 3. **Hand it back.**
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> test
    ```
 
-## Step 4 — Report and stop
+## Step 4 — Report it ready to ship
 
-Report: the depth it ran at and why, the rounds it took, each round's verdicts by reviewer and
-how many changes the verifier kept and dropped, the decision and its first reason,
-the decisions the person made during the run and those still assumed (by id, with the default the
-build rests on), what `carry` added to `notes.md`, and the files changed (`git diff --stat`). Lead with ESCALATE when
-that is the decision. Say plainly that nothing is committed, and end with the next step:
-**`/sdlc:ship NNN`**, which shows the decision and the verdicts with its own review before asking.
+Say `NNN-slug is ready to ship (READY|ESCALATE)`, leading with ESCALATE when that is the decision,
+and report: the depth it ran at and why, the rounds it took, each round's verdicts by reviewer and
+how many changes the verifier kept and dropped, the decision and its first reason, the decisions
+the person made during the run and those still assumed (by id, with the default the build rests
+on), what `carry` added to `notes.md`, and the files changed (`git diff --stat` in its worktree).
+Say plainly that nothing is committed. Then go on with the other changes: this stops nothing.
+
+When the person asks what's ready, read it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready
+```
+
+Show each change in its order, a change after what it `depends_on`, with its decision and the
+others it `overlaps` (changes touching the same paths, which ship more easily one after the
+other), and how to ship it: `cd <worktree> && claude`, then `/sdlc:ship NNN`, which rebases onto the
+base branch and stops on a conflict for them to resolve. Never start a ship yourself.
 
 ## Out of scope
 
-- Committing, pushing, merging, or approving the change: `/sdlc:ship` and `/sdlc:close`, a
-  person's steps.
-- Drafting the spec: `/sdlc-factory:spec`.
+- Committing, pushing, merging, shipping, or approving a change: `/sdlc:ship` and `/sdlc:close`,
+  the person's steps, in the order they choose.
+- Building, reviewing or editing code in this session: every agent runs in its own.
 - Editing a review, verification or decision an agent returned, or writing one when an agent
   didn't.

@@ -162,7 +162,9 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
 - **Dropping a change.** `/sdlc:drop` closes a change that won't ship: it records why and how far
   it got, closes its issue as not planned, and keeps its commits reachable from `main`.
 - **The factory** (`sdlc-factory`). Hands a change's spec, build and review to agents working in
-  rounds, behind the same approvals; nothing an agent does is committed. See
+  rounds, behind one approval per change, run by a supervisor (your own session) that takes
+  several changes at once and tells you each one's ready to ship; you ship them, in your order, and
+  nothing an agent does is committed. See
   [`plugins/factory/README.md`](plugins/factory/README.md).
 
 ## Updating
