@@ -3502,6 +3502,11 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         created = date.fromisoformat(str(post.get("created")))
     except Exception:
         tier, created = 2, None
+    # Who passed the gate of a change `/sdlc-factory:land` landed: `person`, or `auto` when the
+    # batch had no risk signal, written on the change's own commit, the branch's tip.
+    tip = metrics.parse_trailers(_git(main, "show", "-s", "--format=%B", branch) or "") or {}
+    landed = (tip.get("landed") or {}).get("by") if isinstance(tip.get("landed"), dict) else None
+    landed = landed if landed in ("auto", "person") else None
 
     def finish(summary: dict, events: list[dict]) -> tuple[dict, list[str]]:
         # Rework within the change, on lines of its own. A failure here drops only those lines.
@@ -3510,7 +3515,7 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
             done = metrics.rework(events, summary, factory, _change_diff(main, branch), tier)
             review = _git(main, "show", f"{branch}:{folder}/{FINDINGS}")
             fixed = sum(e["disposition"] == "fixed" for e in _findings_from_text(review or "")[0])
-            first_time = metrics.happy(events, summary, factory, tier, done, fixed)
+            first_time = metrics.happy(events, summary, factory, tier, done, fixed, landed)
             extra = metrics.in_change_trailers(done, first_time, metrics.spike(events, summary))
         except Exception:
             summary["coverage"] += " rework=failed"
@@ -3541,7 +3546,7 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         for ident in depends_on(text):
             name = next((n for n in closes if names_change(n, ident)), ident)
             dep_closes[name] = closes.get(name)
-        summary = metrics.summarize(events, dep_closes, settings, way, tier)
+        summary = metrics.summarize(events, dep_closes, settings, way, tier, landed)
         summary["coverage"] = f"transcripts={files} {summary['coverage']}"
         return finish(summary, events)
     except Exception as e:

@@ -57,8 +57,18 @@ reviewing, and deciding whether to escalate.
   decision (naming the change), and stops at `stage: test` with everything **uncommitted**, and
   the supervisor says it's ready to ship. Ask it what's ready, and it lists every such change in
   the order to ship them, a change after what it `depends_on`, with the others that touch the same
-  paths. You ship each one with `/sdlc:ship` from its worktree, which reviews it and makes the one
-  commit; the supervisor never ships.
+  paths. The supervisor never ships: you land them.
+- **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
+  changes as one batch, in that order, each shipped with the impact its approver proposed,
+  committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
+  `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
+  copy). A rebase that conflicts goes to the change's own builder, and every reviewer at its depth
+  checks the resolution before it lands. One approval covers the batch, and it **passes itself
+  when no change in it carries a risk signal** (a sensitive or irreversible path, `impact: major`,
+  an ESCALATE, an open decision, an issue someone filed, an earlier resolved conflict), recorded
+  as `Sdlc-Landed: by=auto` on the change's commit and never as your review. A change with
+  acceptance checks or undone notes is left for `/sdlc:ship`, one at a time, which also stays the
+  way to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 
@@ -83,7 +93,8 @@ itself, so neither ever dirties a checkout.
   entries. It files nothing: `/sdlc:bug <report>` files the ones you pick. To run it regularly,
   put `/sdlc-factory:review` on a `/schedule` routine: it still stops at its approval.
 
-The agents never commit, push or merge, and the run stops if `HEAD` moves. **Under the factory,
+The agents never commit, push or merge, and the run stops if `HEAD` moves; only the landing
+commits, through `sdlc`'s own ship, and pushes, through its close. **Under the factory,
 the builder's `plan.md` is accepted by your approval of the run**, not read by you in plan mode
 first. That is the trade this layer makes; the reviewers check the build against the plan and the
 spec.
@@ -148,7 +159,8 @@ Only the builder edits. The others return text, and the skill writes it to the c
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
 ```
 
-All of it is committed with the change at `/sdlc:ship`, so history keeps how the change was made.
+All of it is committed with the change, at `/sdlc-factory:land` or `/sdlc:ship`, so history keeps
+how the change was made.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, `CHANGES`
 verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at ship), so a
 factory change and one built by hand are measured the same way.
@@ -171,6 +183,10 @@ mode = "auto"                              # the permission mode agent sessions 
 
 [models]                                   # override a role's model (else the rule above)
 # code = "sonnet"
+
+[land]                                     # /sdlc-factory:land, read from the base branch
+auto = true                                # a batch with no risk signal lands without asking
+batch = 5                                  # the most changes one landing takes
 ```
 
 `mode` is read from the base branch's copy of the file, never a change's own, so a change can't
@@ -188,11 +204,14 @@ stage allows the step, where `HEAD` was, what each review's first line says, the
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
 `review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
-the one place it runs `claude`); the changes ready to ship and their order (`ready`); for the eval and the
-review, which bugs escaped and through which diff (`escapes`), the slice of code to look at
-(`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It doesn't call
-`sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads the
-register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
+the one place it runs `claude`); the changes ready to ship and their order (`ready`); the landing's
+batch and its signals (`land-check`), each change's landing (`land`, `resolve`, `land-verdicts`);
+for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
+code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
+imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads
+the register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
+For landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
+or the cache's), so ship, base and close have one implementation; another version is refused.
 
 ## License
 

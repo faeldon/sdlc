@@ -11,9 +11,10 @@ change a session is in and whether its stage lets a step start, where `HEAD` was
 what each review file's first line says, which step the loop takes next, and the one frontmatter
 line a step moves.
 
-It doesn't call `sdlc.py`. Installed from the marketplace, each plugin is cached on its own, so
-the factory's copy has no `sdlc.py` beside it. It reads the change folder itself, the same way:
-frontmatter by line, edited by line, never round-tripped (`sdlc.py`'s `stamp_shipped` rule).
+It never imports `sdlc.py`. Installed from the marketplace, each plugin is cached on its own, so
+it reads the change folder itself, the same way: frontmatter by line, edited by line, never
+round-tripped (`sdlc.py`'s `stamp_shipped` rule). For landing alone it runs the `sdlc.py` of its
+own version, beside it (`sdlc_path()`), so ship, base and close keep one implementation.
 
     uv run --script factory.py config
     uv run --script factory.py start 008 --for build
@@ -23,12 +24,15 @@ frontmatter by line, edited by line, never round-tripped (`sdlc.py`'s `stamp_shi
     uv run --script factory.py stage 008 test
     uv run --script factory.py agent 008 --task review --role code
     uv run --script factory.py ready
+    uv run --script factory.py land-check
+    uv run --script factory.py land 008 --by auto
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
 `carry` to `notes.md`, `stage` to `intent.md`, `agent` the reply an agent session returned and its
-id under `runs/`. Nothing is written outside the change's folder, and nothing under `.git/`. A
-command about one change runs in its worktree, found from the main checkout when the supervisor
-runs there (`change_root()`).
+id under `runs/`. Nothing is written outside the change's folder, and nothing under `.git/`, but by
+the landing: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close`
+lands it. A command about one change runs in its worktree, found from the main checkout when the
+supervisor runs there (`change_root()`).
 
 **Decisions that are a person's.** An agent that reaches a call it shouldn't make (a trade-off, a
 policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] ...` line in its
@@ -43,7 +47,9 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -65,6 +71,7 @@ DEFAULTS: dict = {
     "light": {"reviewers": ["code"], "rounds": 2},
     "models": {},
     "mode": "auto",
+    "land": {"auto": True, "batch": 5},
 }
 MAX_ROUNDS = 5
 # The permission modes `claude -p` takes, for the agent sessions the supervisor starts: none of
@@ -178,9 +185,34 @@ def change_root(root: Path, ident: str) -> Path:
     """The checkout a command about change `ident` works in: this one when it is on the change's
     branch, else the change's own worktree, so the supervisor, a session in the main checkout,
     runs every step there. Unchanged when the change has no worktree: `find_change` refuses it."""
-    if names_change(_git(root, "branch", "--show-current") or "", ident):
+    if names_change(current_branch(root), ident):
         return root
-    return next((path for path, branch in worktrees(root) if names_change(branch, ident)), root)
+    trees = [p for p in _all_checkouts(root) if names_change(current_branch(p), ident)]
+    return trees[0] if trees else root
+
+
+def current_branch(root: Path) -> str:
+    """The branch `root` has out, or, mid-rebase, the one being rebased, which git keeps in
+    `rebase-merge/head-name` while HEAD is detached: a landing's conflict is still its change's."""
+    branch = _git(root, "branch", "--show-current") or ""
+    if branch:
+        return branch
+    for name in ("rebase-merge", "rebase-apply"):
+        where = _git(root, "rev-parse", "--git-path", f"{name}/head-name")
+        path = Path(where) if where else None
+        if path is not None and not path.is_absolute():
+            path = root / path
+        if path is not None and path.is_file():
+            return path.read_text(encoding="utf-8").strip().removeprefix("refs/heads/")
+    return ""
+
+
+def _all_checkouts(root: Path) -> list[Path]:
+    """Every checkout of this repo, a detached one (a rebase under way) included."""
+    out = _git(root, "worktree", "list", "--porcelain") or ""
+    return [
+        Path(line[len("worktree ") :]) for line in out.splitlines() if line.startswith("worktree ")
+    ]
 
 
 def load_config(root: Path) -> tuple[dict, list[str]]:
@@ -194,6 +226,8 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         "models": {},
     }
     cfg["mode"], warnings = _mode(root)
+    cfg["land"], land_warnings = _land(root)
+    warnings += land_warnings
     path = root / CONFIG_FILE
     if not path.is_file():
         return cfg, warnings
@@ -228,20 +262,47 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     return cfg, warnings
 
 
+def _base_factory(root: Path) -> dict:
+    """The base branch's `factory.toml`, never this checkout's: what a change may do unasked is
+    set where the change can't edit it. Empty when there is none, or it won't parse."""
+    base = _base(root)
+    if not base:
+        return {}
+    try:
+        return tomllib.loads(_git(root, "show", f"{base}:{CONFIG_FILE.as_posix()}") or "")
+    except tomllib.TOMLDecodeError:
+        return {}
+
+
 def _mode(root: Path) -> tuple[str, list[str]]:
     """`mode`, the permission mode agent sessions run in, as the base branch's `factory.toml`
-    holds it, never this checkout's: a change can't widen what its own agents may do unasked."""
-    base = _base(root)
-    try:
-        data = tomllib.loads(_git(root, "show", f"{base}:{CONFIG_FILE.as_posix()}") or "")
-    except tomllib.TOMLDecodeError:
-        data = {}
-    mode = data.get("mode", DEFAULTS["mode"]) if base else DEFAULTS["mode"]
+    holds it: a change can't widen what its own agents may do unasked."""
+    mode = _base_factory(root).get("mode", DEFAULTS["mode"])
     if mode not in MODES:
         return DEFAULTS["mode"], [
             f"mode must be one of {', '.join(MODES)}, so {DEFAULTS['mode']} runs"
         ]
     return mode, []
+
+
+def _land(root: Path) -> tuple[dict, list[str]]:
+    """`[land]` as the base branch holds it: `auto`, whether a batch with no risk signal lands
+    without asking, and `batch`, the most changes one landing takes. A change can't turn either up
+    for itself."""
+    table = _base_factory(root).get("land", {})
+    out, warnings = dict(DEFAULTS["land"]), []
+    if not isinstance(table, dict):
+        return out, ["land must be a table of auto and batch"]
+    for key, value in table.items():
+        if key == "auto" and isinstance(value, bool):
+            out["auto"] = value
+        elif (
+            key == "batch" and isinstance(value, int) and not isinstance(value, bool) and value > 0
+        ):
+            out["batch"] = value
+        else:
+            warnings.append(f"land.{key} must be auto = true|false or batch = a whole number")
+    return out, warnings
 
 
 def model_for(role: str, cfg: dict, tier: int | None, level: str) -> str:
@@ -299,7 +360,7 @@ def frontmatter(text: str) -> dict[str, str]:
 def find_change(root: Path, ident: str) -> tuple[Path | None, str | None]:
     """The change folder this checkout's branch holds, or why not. A factory step works in the
     change's own worktree (`change_root()` finds it from the main checkout), so its agents do."""
-    branch = _git(root, "branch", "--show-current") or ""
+    branch = current_branch(root)
     if not names_change(branch, ident):
         return None, (
             f"run it from change {ident}'s own worktree, or from the main checkout once "
@@ -915,12 +976,16 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
 # `runs/<agent>.sessions`, which is how measuring tells an agent's session from the person's.
 
 AGENT_TIMEOUT = 3 * 3600
-TASKS = ("spec", "build", "review", "verify", "rework", "decided", "mend", "approve")
-# The role each task runs as; `review` and `mend` are told theirs.
+TASKS = ("spec", "build", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
+         "land-review", "land-verify")  # fmt: skip
+# The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
     "spec": "spec-writer", "build": "builder", "verify": "verifier", "rework": "builder",
-    "decided": "builder", "approve": "approver",
+    "decided": "builder", "approve": "approver", "resolve": "builder", "land-verify": "verifier",
 }  # fmt: skip
+# The landing's tasks: the builder resolving a rebase's conflicts, and the review of the change
+# as it now stands on the base branch. Never steps of the build's loop, so `verdicts` names none.
+LAND_TASKS = ("resolve", "land-review", "land-verify")
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
 TASK_STEP = {"build": "build", "review": "review", "verify": "verify", "rework": "rework",
              "approve": "approve"}  # fmt: skip
@@ -999,6 +1064,8 @@ def _task(
         return f"verdicts says {state['next']!r}, not {step!r}"
     rnd = state["round"]
     reviews_dir = folder / "reviews" / f"round-{rnd}"
+    if task in LAND_TASKS:
+        return _land_task(root, folder, task, role)
     if task == "spec" and revise:
         words = read_revision(folder, revise)
         if words is None:
@@ -1081,6 +1148,55 @@ def _task(
     return f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence"
 
 
+def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Path, bool] | str:
+    """The landing's prompts: the builder, resumed, resolving the files a rebase left conflicted;
+    a reviewer reading the change as it now stands on the base branch; the verifier on what they
+    asked for. Each reply goes under `reviews/land-<n>/`, the builder's to `build/land-<n>.md`."""
+    n = land_round(folder)
+    if not n:
+        return "no landing round is under way: run land first"
+    rel = folder.relative_to(root).as_posix()
+    head = f"Change folder: {rel}. Worktree: {root}. "
+    where = folder / "reviews" / f"land-{n}"
+    base = _base(root) or "the base branch"
+    if task == "resolve":
+        files = _conflicted(root)
+        if not files:
+            return "no conflicted file: run resolve first"
+        return (
+            f"The base branch moved under this change, and rebasing onto it conflicts in: "
+            f"{', '.join(files)}. Resolve each, keeping what both sides meant; edit only those "
+            "files, run no git command, then report what you kept from each side, ending with "
+            "## Evidence.",
+            folder / "build" / f"land-{n}.md",
+            False,
+        )
+    if task == "land-review":
+        if role not in REVIEWERS:
+            return f"land-review needs --role, one of {', '.join(REVIEWERS)}"
+        resolved = (folder / "runs" / "land-resolved").is_file()
+        why = (
+            f"its conflicts resolved by the builder, in build/land-{n}.md"
+            if resolved
+            else ("with no conflict")
+        )
+        return (
+            head + f"Review landing round {n}: the change was rebased onto {base}, {why}. Review "
+            f"its whole diff against {base} as it now stands.",
+            where / f"{role}.md",
+            False,
+        )
+    reviews = {}
+    for file in where.glob("*.md"):
+        lines = file.read_text(encoding="utf-8").splitlines()
+        if file.name != VERIFIED and lines and VERDICT_RE.match(lines[0]):
+            reviews[file.stem] = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
+    asked = [f"- {name}: {c}" for name, changes in sorted(reviews.items()) for c in changes]
+    if not asked:
+        return f"landing round {n} asks for no change: there is nothing to verify"
+    return (head + f"Verify landing round {n}.\n" + "\n".join(asked), where / VERIFIED, False)
+
+
 def cmd_agent(
     root: Path,
     ident: str,
@@ -1114,7 +1230,7 @@ def cmd_agent(
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
     sessions = folder / "runs" / f"{agent_name(role)}.sessions"
-    resumed = (role == "builder" and task in ("rework", "decided", "mend")) or bool(
+    resumed = (role == "builder" and task in ("rework", "decided", "mend", "resolve")) or bool(
         task == "spec" and (revise or recheck)
     )
     if resumed:
@@ -1159,7 +1275,13 @@ def _waits(change: dict, names: list[str]) -> bool:
 def cmd_ready(root: Path) -> int:
     """The changes ready to ship: each open worktree's change at `stage: test` with a decision,
     its `depends_on:`, and the other ready changes its diff shares a path with, ordered so a change
-    comes after what it depends on. Read-only: the person ships, each from its own worktree."""
+    comes after what it depends on. Read-only: the person ships, each from its own worktree, or
+    `/sdlc-factory:land` lands them as a batch, in this order."""
+    return emit({"ready": [{k: v for k, v in r.items() if k != "paths"} for r in ready(root)]})
+
+
+def ready(root: Path) -> list[dict]:
+    """`cmd_ready`'s list, each change with its changed `paths` too."""
     base = _base(root)
     ready = []
     for path, branch in worktrees(root):
@@ -1168,7 +1290,8 @@ def cmd_ready(root: Path) -> int:
             continue
         meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
         decision, _ = read_decision(folder)
-        if meta.get("stage") != "test" or decision is None:
+        # `shipped` with its worktree still open: a landing stopped after its commit, to finish.
+        if meta.get("stage") not in ("test", "shipped") or decision is None:
             continue
         ready.append({
             "change": branch, "worktree": str(path), "decision": decision,
@@ -1184,7 +1307,397 @@ def cmd_ready(root: Path) -> int:
         pick = free[0] if free else left[0]  # a cycle: by id, and the overlaps say why
         order.append(pick)
         left.remove(pick)
-    return emit({"ready": [{k: v for k, v in r.items() if k != "paths"} for r in order]})
+    return order
+
+
+# ---------------------------------------------------------------- landing, through sdlc's own code
+#
+# `/sdlc-factory:land` lands a batch of ready changes: each one shipped, committed, brought up to
+# date with the base branch and closed, by `sdlc.py`'s own `ship`, `base` and `close`, never a copy
+# of them. The two plugins always release as one version, so the `sdlc.py` this runs is the one of
+# its own version, beside it: the clone's, read in place, or the marketplace cache's. It is run,
+# never imported, and only for landing. The batch's one gate passes itself when no change in it
+# carries a risk signal (`land-check`), recorded on each change's commit as `Sdlc-Landed: by=auto`.
+
+FACTORY_ROOT = Path(__file__).resolve().parents[1]
+SDLC_TIMEOUT = 3600
+# The environment a landing step runs `sdlc.py` in: without a flag that would stop close handing
+# itself to the main checkout's script, or ship to the change's own, and without this session's
+# virtualenv, so `uv` builds the script's own.
+UNSET_FOR_SDLC = ("SDLC_CLOSE_RAN", "SDLC_OWN_SCRIPT", "VIRTUAL_ENV")
+# What the approver proposes as the change's release impact, read by land.
+IMPACT_RE = re.compile(r"^\s*- IMPACT:\s*(major|minor|patch|none)\b")
+# Who passed the batch's gate, on each landed change's commit: the person, or no one (`auto`).
+LANDED = "Sdlc-Landed"
+FRESH_SKIPPED = "Fresh review: skipped, the factory's rounds stand in"
+
+
+def _plugin(root: Path) -> dict:
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def sdlc_path(factory: Path = FACTORY_ROOT) -> tuple[Path | None, str | None]:
+    """The `sdlc` plugin's `scripts/sdlc.py` of this factory's own version, or why there is none:
+    the clone's, when the factory is read in place from `plugins/factory/` inside it, else the
+    marketplace cache's, `<cache>/<marketplace>/sdlc/<version>/` beside the factory's
+    `<cache>/<marketplace>/sdlc-factory/<version>/`. A copy of another version is refused: landing
+    runs the code this factory was released with."""
+    mine = _plugin(factory).get("version")
+    candidates = [factory.parents[1], factory.parents[1] / "sdlc" / str(mine)]
+    for root in candidates:
+        found = _plugin(root)
+        if found.get("name") == "sdlc" and (root / "scripts" / "sdlc.py").is_file():
+            if found.get("version") != mine:
+                return None, (
+                    f"sdlc at {root} is version {found.get('version')}, this factory {mine}: "
+                    "update both to one version"
+                )
+            return root / "scripts" / "sdlc.py", None
+    return None, f"no sdlc {mine} beside this factory: install sdlc, which the factory depends on"
+
+
+def _sdlc(args: list[str], cwd: Path) -> tuple[int, dict | None, str]:
+    """Run `sdlc.py <args>` of this factory's own version from `cwd`, and return its exit, its
+    JSON when it printed one, and its output. Text mode in UTF-8, no shell, nothing on stdin."""
+    path, why = sdlc_path()
+    if path is None:
+        return 1, None, why or ""
+    uv = shutil.which("uv")
+    argv = [uv, "run", "--quiet", "--script"] if uv else [sys.executable]
+    env = {k: v for k, v in os.environ.items() if k not in UNSET_FOR_SDLC}
+    try:
+        done = subprocess.run(
+            [*argv, str(path), *args], cwd=cwd, capture_output=True, encoding="utf-8",
+            errors="replace", stdin=subprocess.DEVNULL, env=env, timeout=SDLC_TIMEOUT,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, None, f"sdlc.py {args[0]} couldn't run: {e}"
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        data = None
+    return done.returncode, data if isinstance(data, dict) else None, done.stdout + done.stderr
+
+
+def cmd_sdlc_path() -> int:
+    path, why = sdlc_path()
+    return emit(
+        {"sdlc": str(path) if path else None, "refusals": [why] if why else []}, 0 if path else 1
+    )
+
+
+def read_impact(folder: Path) -> str | None:
+    """The release impact the approver proposed in `decision.md`'s `- IMPACT:` line."""
+    path = folder / "decision.md"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if m := IMPACT_RE.match(line):
+            return m.group(1)
+    return None
+
+
+def land_signals(folder: Path, worktree: Path, decision: str, cfg: dict) -> tuple[list, list]:
+    """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
+    in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
+    notes, its checks, its skills' cases and its issues, and what the run left in its folder."""
+    signals, excluded = [], []
+    code, pre, out = _sdlc(["preflight", folder.name], worktree)
+    if pre is None:
+        return [f"preflight couldn't be read: {out.strip()[-300:]}"], []
+    risk = pre.get("risk") or {}
+    if risk.get("sensitive"):
+        signals.append(f"touches sensitive paths: {', '.join(risk['sensitive'][:5])}")
+    if risk.get("irreversible"):
+        signals.append(f"touches irreversible paths: {', '.join(risk['irreversible'][:5])}")
+    if (pre.get("closes") or {}).get("closes"):
+        signals.append("came from a public issue (closes:)")
+    impact = read_impact(folder)
+    if impact is None:
+        signals.append("decision.md proposes no `- IMPACT:`")
+    elif impact == "major":
+        signals.append("impact: major")
+    if decision == "ESCALATE":
+        signals.append("the approver escalated")
+    ledger = read_ledger(folder)
+    if [d for d in ledger if not d["decided"]]:
+        signals.append("decisions still open or assumed in decisions.md")
+    if (folder / "runs" / "land-resolved").is_file():
+        signals.append("a conflict was resolved while landing")
+    if not cfg["land"]["auto"]:
+        signals.append("land.auto is off on the base branch")
+    if (pre.get("undone") or {}).get("items"):
+        excluded.append("notes.md has undone items, which only a person gives a disposition")
+    if (pre.get("checks") or {}).get("checks"):
+        excluded.append("checks.md has acceptance checks, which run only under a prompt")
+    if (pre.get("cases") or {}).get("scope"):
+        excluded.append("its skills' cases are in scope, a paid run that is the person's call")
+    return signals, excluded
+
+
+def cmd_land_check(root: Path, idents: list[str]) -> int:
+    """The batch: the ready changes in `ready`'s order (or those named), at most `land.batch`, each
+    with its signals and why any is left out, and `clear`: true when no change in it has a signal,
+    so the gate passes itself. Read-only."""
+    cfg, warnings = load_config(root)
+    picked = [
+        r for r in ready(root) if not idents or any(names_change(r["change"], i) for i in idents)
+    ]
+    batch, left_out, over = [], [], []
+    for r in picked:
+        worktree = Path(r["worktree"])
+        folder = worktree / work_rel(worktree) / r["change"]
+        signals, excluded = land_signals(folder, worktree, r["decision"], cfg)
+        entry = {
+            "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
+            "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
+        }  # fmt: skip
+        if excluded:
+            left_out.append({**entry, "excluded": excluded})
+        elif len(batch) >= cfg["land"]["batch"]:
+            over.append(r["change"])
+        else:
+            batch.append(entry)
+    clear = bool(batch) and not any(c["signals"] for c in batch)
+    return emit({
+        "batch": batch, "excluded": left_out, "over_limit": over, "clear": clear,
+        "auto": cfg["land"]["auto"], "limit": cfg["land"]["batch"], "warnings": warnings,
+    })  # fmt: skip
+
+
+def land_message(root: Path, folder: Path, by: str, refs: bool) -> str:
+    """The landed change's commit message: its title, its Problem's first sentence and its folder,
+    `Refs #N` when its number is its issue's, and who passed the gate. No `Sdlc-Findings`: the
+    factory's rounds stood in for ship's review, and retro reads a missing line as unanswered."""
+    text = (folder / "intent.md").read_text(encoding="utf-8")
+    title = next((ln for ln in text.splitlines() if ln.startswith("# ")), f"# {folder.name}")
+    title = re.sub(r"^#\s+\d{3,}\s+—\s+", "", title).lstrip("# ").strip()
+    problem = text.split("## Problem", 1)[1] if "## Problem" in text else ""
+    prose = " ".join(problem.split("\n## ", 1)[0].split())
+    first = re.split(r"(?<=[.!?])\s", prose, maxsplit=1)[0] if prose else ""
+    body = f"{first} See {folder.relative_to(root).as_posix()}/.".strip()
+    tail = [f"Refs #{int(folder.name.split('-')[0])}"] if refs else []
+    tail.append(f"{LANDED}: by={by}")
+    return f"{title}\n\n{body}\n\n" + "\n".join(tail) + "\n"
+
+
+def _set_impact(intent: Path, impact: str) -> bool:
+    """`intent.md`'s `impact:` line set in place, by line, never through YAML."""
+    lines = intent.read_text(encoding="utf-8").splitlines(keepends=True)
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            break
+        if line.split(":", 1)[0].strip() == "impact":
+            lines[i] = f"impact: {impact}\n"
+            intent.write_text("".join(lines), encoding="utf-8", newline="\n")
+            return True
+    return False
+
+
+def land_round(folder: Path) -> int:
+    """The landing review round under way: `reviews/land-<n>/`, the highest, 0 before any."""
+    found = [p.name[5:] for p in (folder / "reviews").glob("land-*") if p.is_dir()]
+    return max((int(n) for n in found if n.isdigit()), default=0)
+
+
+def cmd_land(root: Path, ident: str, by: str) -> int:
+    """Land change `ident`'s first half, in its worktree: the approver's impact on `intent.md`,
+    `sdlc.py ship` (stamped, the seed dropped, every path staged), the commit with
+    `land_message()`, then `sdlc.py base`. Its `state`: `current` (nothing to review again),
+    `rebased` (the base moved: the gate and the spec's path run again before close), `conflict`
+    (the rebase was aborted: `resolve` takes it), or `refused`, with why."""
+    folder, refusal = find_change(root, ident)
+    out: dict = {"change": None, "state": "refused", "refusals": []}
+    if refusal:
+        return emit({**out, "refusals": [refusal]}, 1)
+    out["change"] = folder.name
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    impact = read_impact(folder)
+    if meta.get("stage") not in ("test", "shipped") or read_decision(folder)[0] is None:
+        return emit(
+            {**out, "refusals": [f"{folder.name} isn't ready: stage test with a decision"]}, 1
+        )
+    if meta.get("stage") == "test":
+        if impact is None or not _set_impact(folder / "intent.md", impact):
+            return emit({**out, "refusals": ["no impact to set: decision.md has no - IMPACT:"]}, 1)
+        code, pre, _ = _sdlc(["preflight", folder.name], root)
+        findings = folder / "findings.md"
+        if pre and (pre.get("risk") or {}).get("deep") and not findings.is_file():
+            findings.write_text(f"# Findings\n\n{FRESH_SKIPPED}\n", encoding="utf-8", newline="\n")
+        code, _, said = _sdlc(["ship", folder.name], root)
+        if code:
+            return emit({**out, "refusals": [f"sdlc.py ship refused: {said.strip()[-500:]}"]}, 1)
+        _, cfg_out, _ = _sdlc(["config"], root)
+        refs = ((cfg_out or {}).get("archive") or {}).get("ids_from") == "github"
+        message = land_message(root, folder, by, refs)
+        try:
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-q", "-F", "-"], input=message,
+                capture_output=True, encoding="utf-8", check=True,
+            )  # fmt: skip
+        except (subprocess.CalledProcessError, OSError) as e:
+            return emit({**out, "refusals": [f"the commit failed: {e}"]}, 1)
+    code, based, said = _sdlc(["base", folder.name], root)
+    action = (based or {}).get("action")
+    reason = str((based or {}).get("reason") or said)
+    out.update(head=_git(root, "rev-parse", "--short", "HEAD"), base=based)
+    if action in ("current", "fast-forwarded"):
+        out["state"] = "current"
+    elif action == "rebased":
+        out["state"] = "rebased"
+    elif action == "refused" and "conflict" in reason:
+        out["state"] = "conflict"
+    else:
+        return emit({**out, "refusals": [f"sdlc.py base refused: {reason.strip()[-500:]}"]}, 1)
+    if out["state"] != "current":
+        (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
+    out["round"] = land_round(folder) or None
+    return emit(out)
+
+
+def cmd_land_close(root: Path, ident: str) -> int:
+    """Land change `ident`'s second half: `sdlc.py close` run from the main checkout (from inside
+    the change's worktree it would keep the worktree), which merges, archives, removes the folder,
+    the worktree and the branch, and pushes as `git.push` says. Its JSON passes through."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    # The landing's own record (its review, a resolved conflict's marker) is written after the
+    # change's commit: amended into it, so the change lands as one commit and close finds the
+    # worktree clean. Anything dirty outside the change's folder is not the landing's: refused.
+    dirty = (_git(root, "status", "--porcelain", "--untracked-files=all") or "").splitlines()
+    rel = folder.relative_to(root).as_posix() + "/"
+    stray = [line[3:] for line in dirty if not line[3:].strip('"').startswith(rel)]
+    if stray:
+        return emit(
+            {"refusals": [f"uncommitted outside the change's folder: {', '.join(stray)}"]}, 1
+        )
+    if dirty:
+        _git(root, "add", "--", rel)
+        if _git(root, "commit", "-q", "--amend", "--no-edit") is None:
+            return emit({"refusals": ["the landing's record couldn't be added to the commit"]}, 1)
+    main = worktrees(root)[0][0] if worktrees(root) else root
+    code, closed, said = _sdlc(["close", ident], main)
+    return emit(closed or {"refusals": [said.strip()[-500:]]}, code)
+
+
+def _conflicted(root: Path) -> list[str]:
+    return (_git(root, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+
+
+COUNTER = ".sdlc/last-id"
+
+
+def _settle_counter(root: Path) -> None:
+    """`.sdlc/last-id` conflicted, as it is whenever two locally numbered changes land one after
+    the other: never the builder's, it keeps the higher of the two numbers, as `sdlc.py base` does
+    on a fast-forward, so no number is handed out twice."""
+    if COUNTER not in _conflicted(root):
+        return
+    sides = [_git(root, "show", f":{n}:{COUNTER}") or "" for n in (2, 3)]
+    numbers = [int(s) for s in sides if s.strip().isdigit()]
+    if not numbers:
+        return
+    (root / COUNTER).write_text(f"{max(numbers):03d}\n", encoding="utf-8", newline="\n")
+    _git(root, "add", "--", COUNTER)
+
+
+def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
+    """A rebase onto the base branch that conflicts, left for the builder: `resolve` starts it and
+    lists the conflicted files (or finds none, and it is done); `--continue` checks no conflict
+    marker is left in them, stages them and continues, aborting the rebase on a second conflict.
+    Every git step is this script's: the builder only edits the files it is given."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    env = {**os.environ, "GIT_EDITOR": "true"}
+    if not cont:
+        done = subprocess.run(["git", "-C", str(root), "rebase", "-q", base], capture_output=True,
+                              encoding="utf-8", env=env)  # fmt: skip
+        _settle_counter(root)
+        files = _conflicted(root)
+        if done.returncode and not files:
+            return emit({"refusals": [f"git rebase failed: {done.stderr.strip()[-300:]}"]}, 1)
+        return emit(
+            {"change": folder.name, "conflicted": files, "state": "conflict" if files else "clean"}
+        )
+    files = _conflicted(root)
+    marked = [
+        f for f in files if "<<<<<<<" in (root / f).read_text(encoding="utf-8", errors="replace")
+    ]
+    if marked:
+        return emit({"refusals": [f"conflict markers left in: {', '.join(marked)}"]}, 1)
+    for f in files:
+        _git(root, "add", "--", f)
+    done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
+                          encoding="utf-8", env=env)  # fmt: skip
+    if done.returncode:
+        _git(root, "rebase", "--abort")
+        return emit({"refusals": ["a second conflict: the rebase was aborted, ship it by hand"]}, 1)
+    marker = folder / "runs" / "land-resolved"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(", ".join(files) + "\n", encoding="utf-8", newline="\n")
+    return emit({"change": folder.name, "resolved": files, "state": "resolved",
+                 "head": _git(root, "rev-parse", "--short", "HEAD")})  # fmt: skip
+
+
+def cmd_land_verdicts(root: Path, ident: str) -> int:
+    """The landing review of round `land-<n>`, and the step it takes next: `review` for the
+    `missing` reviewers (behaviour alone after a clean rebase, every reviewer at the run's depth
+    after a resolved conflict), `verify` when one asks for changes, `pass` when none is kept, or
+    `stop`, with why: a kept change, a reply without a verdict, or one without its evidence."""
+    cfg, _ = load_config(root)
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    n = land_round(folder)
+    if not n:
+        return emit({"change": folder.name, "round": None, "next": "pass", "missing": []})
+    path = folder / "reviews" / f"land-{n}"
+    resolved = (folder / "runs" / "land-resolved").is_file()
+    rounds, _, run = _rounds_at_depth(root, folder, cfg)
+    wanted = list(run["reviewers"]) if resolved else ["behaviour"]
+    reviews, problems = {}, []
+    for role in wanted:
+        file = path / f"{role}.md"
+        if not file.is_file():
+            continue
+        lines = file.read_text(encoding="utf-8").splitlines()
+        m = VERDICT_RE.match(lines[0]) if lines else None
+        if not m:
+            problems.append(f"reviews/land-{n}/{role}.md doesn't open with a VERDICT")
+            continue
+        reviews[role] = {
+            "verdict": m.group(1),
+            "changes": [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c],
+        }
+        if role in RUNS_THE_CHANGE:
+            problems += read_evidence("\n".join(lines), f"reviews/land-{n}/{role}.md")
+    missing = [r for r in wanted if r not in reviews]
+    verified, wrong = read_verified(path / VERIFIED, n, reviews)
+    problems += wrong
+    out = {"change": folder.name, "round": n, "reviews": reviews, "missing": missing,
+           "resolved": resolved, "problems": problems}  # fmt: skip
+    asks = any(r["verdict"] == "CHANGES" for r in reviews.values())
+    if problems:
+        out["next"] = "stop"
+    elif missing:
+        out["next"] = "review"
+    elif asks and verified is None:
+        out["next"] = "verify"
+    elif verified and verified["kept"]:
+        out["next"], out["problems"] = (
+            "stop",
+            [f"the landing review kept {len(verified['kept'])} change(s): ship it by hand"],
+        )
+    else:
+        out["next"] = "pass"
+    return emit(out)
 
 
 # ---------------------------------------------------------------- what escaped, and old code
@@ -1484,6 +1997,18 @@ def main() -> int:
     p_agent.add_argument("id")
     p_agent.add_argument("--task", choices=TASKS, required=True)
     p_agent.add_argument("--role", choices=[*REVIEWERS, "builder"])
+    sub.add_parser("sdlc-path", help="the sdlc.py of this factory's own version, which land runs")
+    p_check = sub.add_parser("land-check", help="the batch to land, its signals, and whether clear")
+    p_check.add_argument("ids", nargs="*")
+    p_land = sub.add_parser("land", help="ship, commit and rebase a change; or close it")
+    p_land.add_argument("id")
+    p_land.add_argument("--by", choices=("auto", "person"))
+    p_land.add_argument("--close", action="store_true", help="close it, from the main checkout")
+    p_resolve = sub.add_parser("resolve", help="leave a conflicting rebase for the builder")
+    p_resolve.add_argument("id")
+    p_resolve.add_argument("--continue", dest="cont", action="store_true")
+    p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
+    p_lv.add_argument("id")
     p_agent.add_argument("--decision", help="the decided ledger id, for --task decided")
     p_agent.add_argument("--revise", help="the person's revision in decisions.md (R1), for spec")
     p_agent.add_argument("--recheck", action="store_true", help="send a spec draft back once")
@@ -1501,6 +2026,20 @@ def main() -> int:
     root = repo_root()
     if getattr(args, "id", None):
         root = change_root(root, args.id)
+    if args.cmd == "sdlc-path":
+        return cmd_sdlc_path()
+    if args.cmd == "land-check":
+        return cmd_land_check(root, args.ids)
+    if args.cmd == "land" and args.close:
+        return cmd_land_close(root, args.id)
+    if args.cmd == "land":
+        if not args.by:
+            return emit({"refusals": ["land needs --by auto|person, or --close"]}, 1)
+        return cmd_land(root, args.id, args.by)
+    if args.cmd == "resolve":
+        return cmd_resolve(root, args.id, args.cont)
+    if args.cmd == "land-verdicts":
+        return cmd_land_verdicts(root, args.id)
     if args.cmd == "agent":
         return cmd_agent(
             root, args.id, args.task, args.role, args.decision, args.revise, args.recheck

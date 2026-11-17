@@ -198,7 +198,9 @@ Map each old prompt to its slot. See .sdlc/work/032-process-guide-in-plugin/note
 Theme: setup
 Priority: low
 
-## [2026-11-10-1] [idea] Factory gates that pass themselves when nothing is risky
+## [2026-11-10-1] [building] Factory gates that pass themselves when nothing is risky
+
+Building in .sdlc/work/072-factory-land/.
 
 The factory is meant to be fully automated development that raises only high-risk decisions to
 the person. Build already runs that way (one WAIT, then unattended, with blocking decisions and

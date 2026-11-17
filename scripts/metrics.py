@@ -117,6 +117,8 @@ SKILL_STAGE = {
     "sdlc-factory:build": "build",
     "sdlc:ship": "ship",
     "sdlc:close": "close",
+    # The factory's landing ships and closes a batch behind one gate: its stage is ship's.
+    "sdlc-factory:land": "ship",
 }
 STAGE_EDIT = {
     "plan": "intent",
@@ -137,6 +139,7 @@ GATES = {
     "sdlc:close": "last",
     "sdlc-factory:spec": "last",
     "sdlc-factory:build": "first_approval",
+    "sdlc-factory:land": "first_approval",
 }
 # The gates each way of running requires, so a change's stops can be read against them. A factory
 # Tier 2 that ran a spec stage of its own owes `spec` too (`summarize()`); one whose spec the
@@ -367,7 +370,8 @@ def _supervised(entries: list[dict], branch: str, ident: str, keep: list[bool]) 
         if entry.get("type") == "user":
             text = _entry_text(content)
             m, args = SKILL_RE.search(text), ARGS_RE.search(text)
-            if m and m.group(1) == "sdlc-factory:build" and args and _names(ident, args[1]):
+            typed = m and m.group(1) in ("sdlc-factory:build", "sdlc-factory:land")
+            if typed and args and _names(ident, args[1]):
                 keep[i] = True
             for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("tool_use_id") in dialogs:
@@ -765,7 +769,12 @@ def _stage_of(event: dict) -> str | None:
 
 
 def summarize(
-    events: list[dict], dep_closes: dict[str, datetime | None], cfg: dict, way: str, tier: int
+    events: list[dict],
+    dep_closes: dict[str, datetime | None],
+    cfg: dict,
+    way: str,
+    tier: int,
+    landed: str | None = None,
 ) -> dict:
     """Stages as segments, the four clocks, stops against the gates required, and tokens, from
     one change's events. `dep_closes` maps each `depends_on:` change to when its `Close` commit
@@ -945,6 +954,10 @@ def summarize(
     specced = any(e["kind"] == "skill" and e["name"] in SPEC_SKILLS for e in events)
     if way == "factory" and tier == 2 and specced:
         required.insert(1, "spec")
+    # Landed by `/sdlc-factory:land` (`Sdlc-Landed` on its commit): one gate stood for ship's and
+    # close's, and when it passed itself (`auto`) it is counted apart, never as the person's.
+    if landed:
+        required = [g for g in required if g not in ("ship", "close")] + ["land"]
     seen = [s for s in STAGES if stages[s]["segments"]]
     totals = {
         "elapsed": sum(s["elapsed"] for s in stages.values()),
@@ -966,6 +979,8 @@ def summarize(
         "harness": sum(s["harness"] for s in stages.values()),
         "command": sum(s["command"] for s in stages.values()),
         "ship_runs": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:ship"),
+        # A gate that passed itself: beside `stops`, never in it.
+        "auto": 1 if landed == "auto" else 0,
         "reenter": reenter,
     }
     for k in TOKEN_KEYS.values():
@@ -1127,13 +1142,15 @@ def happy(
     tier: int,
     done: dict,
     review_fixed: int = 0,
+    landed: str | None = None,
 ) -> dict:
     """Per stage, whether it went through first time: `yes`, `no`, or `unknown` for a stage
     the transcripts never saw open. `done` is `rework()`'s result. Strict: one failed check is a
     `no`; rates over many changes absorb the odd flaky test. Ship alone can also be `fixed`: run
     more than once with no revise reply, and its findings.md holds `review_fixed` findings marked
     `fixed`, so it stopped for what its own review found, which is the review working, not a
-    miss. `first` counts it with `yes`."""
+    miss. `first` counts it with `yes`. A change `landed` by the factory has ship and close marked
+    `auto` when its gate passed itself, which no rate counts, else by the landing's own replies."""
     seen = {s for s, v in summary["stages"].items() if v.get("segments")}
     walked = [w for w in _walk(events) if w[1] != "spike"]
     revised = _revised(walked)
@@ -1164,12 +1181,17 @@ def happy(
         and "sdlc:ship" not in revised
         and review_fixed > 0
     )
+    if landed:
+        rules["ship"] = rules["close"] = "sdlc-factory:land" not in revised
     out: dict = {}
     for stage in HAPPY_STAGES:
         if stage == "design" and tier < 2:
             continue
+        if landed == "auto" and stage in ("ship", "close"):
+            out[stage] = "auto"
+            continue
         mark = "yes" if rules[stage] else "fixed" if stage == "ship" and ship_fixed else "no"
-        out[stage] = mark if stage in seen else "unknown"
+        out[stage] = mark if stage in seen or (landed and stage == "close") else "unknown"
     out["first"] = sum(1 for v in out.values() if v in ("yes", "fixed"))
     out["of"] = sum(1 for v in out.values() if v in ("yes", "fixed", "no"))
     return out

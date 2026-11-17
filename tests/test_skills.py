@@ -81,6 +81,7 @@ GATED = {
     "sdlc-factory:build",
     "sdlc-factory:eval",
     "sdlc-factory:review",
+    "sdlc-factory:land",
 }
 
 # Every config key a skill reads, by skill. A skill that stops naming its key has gone back to
@@ -184,6 +185,7 @@ READS_CONFIG = {
     ],
     "sdlc-factory:eval": ["factory.reviewers", "factory.models"],
     "sdlc-factory:review": ["factory.models"],
+    "sdlc-factory:land": ["factory.land"],
 }
 
 
@@ -192,7 +194,8 @@ def test_skills_were_found() -> None:
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
     more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea"}
     assert {f"sdlc:{n}" for n in names | more} | {
-        "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review"
+        "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review",
+        "sdlc-factory:land",
     } == set(BY_ID)  # fmt: skip
 
 

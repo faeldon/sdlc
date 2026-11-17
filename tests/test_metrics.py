@@ -909,6 +909,47 @@ CLEAN = [
 ]  # fmt: skip
 
 
+# A factory change landed by `/sdlc-factory:land`: no ship or close skill of its own.
+LANDED = [
+    skill(0, "sdlc:intent"), say(1, "approve"), stage(2, "plan"),
+    skill(3, "sdlc-factory:build"), say(4, "approve"), stage(5, "build"), edit(6, "code", 50),
+    stage(7, "test"), skill(8, "sdlc-factory:land"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("by, auto", [("auto", 1), ("person", 0)])
+def test_a_landed_change_owes_one_gate_for_ship_and_close_and_an_auto_pass_is_apart(
+    by, auto
+) -> None:
+    """One gate, the batch's, stands for ship's and close's; when it passed itself it is counted
+    as `auto`, beside `stops`, never as the person's, and its ship and close read `auto`, which
+    no first-time rate counts."""
+    events = [*LANDED, say(9, "approve")] if by == "person" else LANDED
+    s = metrics.summarize(events, {}, CFG, "factory", 1, by)
+    assert s["required"] == ["intent", "run", "land"]
+    unlanded = metrics.summarize(events, {}, CFG, "factory", 1)
+    assert s["totals"]["auto"] == auto and s["totals"]["stops"] == unlanded["totals"]["stops"]
+    back = metrics.parse_trailers("\n".join(metrics.trailers(s)))
+    assert back["totals"]["auto"] == auto, "auto= reads back"
+    first = metrics.happy(events, s, None, 1, metrics.rework(events, s, None, None, 1), 0, by)
+    assert (first["ship"], first["close"]) == (("auto", "auto") if by == "auto" else ("yes", "yes"))
+
+
+def test_a_land_typed_on_main_names_each_change_it_lands(tmp_path) -> None:
+    """The supervisor's `/sdlc-factory:land 012 013` opens each change's span, so a dialog naming
+    one change counts on it alone."""
+    folder = tmp_path / "projects" / "-made-up-repo"
+    _write(folder, "lander", [
+        cmd(0, "sdlc-factory:land", "12 13", "main"),
+        ask(1, "q1", f"Land {BRANCH} and {OTHER}, each closed and pushed?"),
+        chose(2, "q1", "yes", "main"),
+    ])  # fmt: skip
+    for branch, ident in ((BRANCH, "012"), (OTHER, "013")):
+        events = metrics.read_events([folder], branch, ident, None)
+        assert [e["name"] for e in events if e["kind"] == "skill"] == ["sdlc-factory:land"]
+        assert _summary(events, way="factory")["stages"]["ship"]["gate"] == 1
+
+
 def test_a_clean_change_is_happy_at_every_stage_with_no_rework() -> None:
     _, done, first = _measure(CLEAN, final=400)
     assert first == {"intent": "yes", "design": "yes", "build": "yes", "test": "yes",

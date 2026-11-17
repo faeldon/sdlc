@@ -760,7 +760,12 @@ checkout carrying several changes: a change counts of it only the `/sdlc-factory
 and the dialogs whose question names its `NNN-slug`. Each agent the factory ran as a session of its
 own (`runs/<agent>.sessions` in the change's folder; its permission mode is `.sdlc/factory.toml`'s
 `mode`, read from the base branch, see the factory's README) counts as a run of that role, its own
-read-only sub-agents as runs of theirs, never as the person's stages.
+read-only sub-agents as runs of theirs, never as the person's stages. A change `/sdlc-factory:land`
+landed owes `land` in place of `ship` and `close`: one gate per batch, which passes itself on a
+batch with no risk signal (`[land] auto` in `.sdlc/factory.toml`, read from the base branch, default
+on; `[land] batch`, default 5). Its commit says who passed it, `Sdlc-Landed: by=person|auto`; a pass
+nobody gave is `auto=1` on `Sdlc-Totals`, never a stop, and its ship and close read `auto` on
+`Sdlc-Happy`, which no first-time rate counts.
 
 A stop is the person: an entry the harness sent (a background task's notice, a compaction summary)
 is counted as `harness=`, and a slash command other than the plugins' skills (`/reload-plugins`)

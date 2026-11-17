@@ -113,6 +113,15 @@ verifier has checked every `- CHANGE:` the reviewers asked for against the code,
 why in `notes.md` rather than ignoring it. A `- DROPPED:` line is not yours to act on. Rerun the
 tests and the gate.
 
+## A conflict, while landing
+
+When `/sdlc-factory:land` resumes you because the base branch moved and rebasing onto it
+conflicts, the prompt names the conflicted files. Resolve each so both sides' intent survives:
+what the base branch now holds, and what this change was built to do. Edit only those files,
+removing every conflict marker, and run no git command: `factory.py` stages them and continues the
+rebase, and reviewers check your resolution before the change lands. Run the tests and the gate on
+the result, and report what you kept from each side, ending with its `## Evidence`.
+
 ## What you return
 
 A short report: the slices built, the tests added and what they prove, the gate's result (its test

@@ -291,13 +291,14 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready
 
 Show each change in its order, a change after what it `depends_on`, with its decision and the
 others it `overlaps` (changes touching the same paths, which ship more easily one after the
-other), and how to ship it: `cd <worktree> && claude`, then `/sdlc:ship NNN`, which rebases onto the
-base branch and stops on a conflict for them to resolve. Never start a ship yourself.
+other), and how to land them: `/sdlc-factory:land`, from a session of its own in the main
+checkout, takes them as one batch in this order, or `cd <worktree> && claude`, then
+`/sdlc:ship NNN`, one at a time. Never start either yourself.
 
 ## Out of scope
 
-- Committing, pushing, merging, shipping, or approving a change: `/sdlc:ship` and `/sdlc:close`,
-  the person's steps, in the order they choose.
+- Committing, pushing, merging, shipping, or approving a change: `/sdlc-factory:land`, or
+  `/sdlc:ship` and `/sdlc:close`, the person's steps, when they choose.
 - Building, reviewing or editing code in this session: every agent runs in its own.
 - Editing a review, verification or decision an agent returned, or writing one when an agent
   didn't.

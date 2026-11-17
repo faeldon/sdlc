@@ -139,6 +139,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "light": {"reviewers": ["code"], "rounds": 2},
         "models": {},
         "mode": "auto",
+        "land": {"auto": True, "batch": 5},
     }
     assert warnings == []
     (tmp_path / ".sdlc").mkdir(exist_ok=True)

@@ -54,3 +54,8 @@ The first line is exactly `DECISION: READY` or `DECISION: ESCALATE`. Then:
 - **Decisions to confirm**, one line each: every unticked decision by its id (`D2`), with the
   default the build assumed.
 - **For the person at ship**: what to look at first in the diff.
+- **The release impact you propose**, on a line of its own, exactly `- IMPACT: <major|minor|patch|none>
+  — <why>`: what someone holding the previous release has to do differently (`major`), can newly
+  do (`minor`), merely gets better (`patch`), or `none` when nothing anyone receives changed.
+  `/sdlc-factory:land` sets it on the change; a missing line, or `major`, keeps its gate the
+  person's.

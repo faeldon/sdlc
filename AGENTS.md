@@ -363,9 +363,9 @@ so a script change that breaks one fails the gate, not a paid run.
 **The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
 cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
 `sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. Its
-mechanism is `factory.py`, because its own cached copy has no `sdlc.py`. Agents that judge have
-no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`, read-only), and
-nothing commits. `/sdlc-factory:build` is the **supervisor**: the person's own session, usually
+mechanism is `factory.py`, which never imports `sdlc.py`: each plugin is cached on its own. Agents
+that judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`,
+read-only), and no agent commits. `/sdlc-factory:build` is the **supervisor**: the person's own session, usually
 long-running in the main checkout, taking one change per invocation, whose commands find each
 change's worktree themselves (`change_root()`). It never waits on an agent: each runs as a
 headless session of its own in the change's worktree, started in the background by
@@ -375,8 +375,21 @@ headless session of its own in the change's worktree, started in the background 
 reviewers sonnet for a Tier 2 or a full-depth run, haiku otherwise) and the permission mode (`mode`,
 from the base branch's `factory.toml`), files the reply, and records the session's id in
 `runs/<agent>.sessions`, which `measure` reads (`_agent_sessions()`), since no transcript names its
-`--agent`. A change ends at "ready to ship"; `factory.py ready` orders them, and the person ships
-each. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
+`--agent`. A change ends at "ready to ship"; `factory.py ready` orders them, and the person lands
+them: one at a time with `/sdlc:ship`, or as a batch with `/sdlc-factory:land`, from a session of
+its own. **Land is the one place the factory commits, and it does so through `sdlc`'s own code:**
+`factory.py` runs the `sdlc.py` of its own version, beside it (`sdlc_path()`: the clone's, or the
+marketplace cache's; another version is refused), for `ship`, `base` and `close`, with
+`SDLC_CLOSE_RAN`, `SDLC_OWN_SCRIPT` and `VIRTUAL_ENV` unset, close from the main checkout. Its one
+gate per batch **passes itself** when `land-check` finds no risk signal (a sensitive or irreversible
+path, `impact: major` or none proposed by the approver's `- IMPACT:`, an ESCALATE, an open
+decision, a `closes:` issue, a resolved conflict, `land.auto` off on the base branch): a standing
+approval, recorded on the change's commit as `Sdlc-Landed: by=auto` (never a bare word, which
+`parse_trailers` drops), counted as `auto=` beside `stops`, never as the person's. The factory's
+rounds stand in for ship's review, so a landed commit has no `Sdlc-Findings`. A change with
+undone notes, `checks.md` or skills' cases in scope is left out, for `/sdlc:ship`. A rebase that
+conflicts is the change's builder's to resolve (`resolve`, with `.sdlc/last-id` settled to the
+higher number), reviewed again before close. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
 the change, which is how `measure` gives the supervisor's dialogs on `main` to their change
 (`_supervised()`). `sdlc` only reads, at ship, the files a run leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's
@@ -398,7 +411,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec`, `build`, `eval` and `review`) have exactly one heading
+  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec`, `build`, `eval`, `review` and `land`) have exactly one heading
   containing `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog
   (2–4 answers, publish's `no` first, only a chosen yes approves) and as text where none can be
   shown (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in a gated span as the
