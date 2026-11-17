@@ -307,3 +307,18 @@ touches what `start` accepts and what a run leaves in its folder, so likely Tier
 the board's stage-gated columns.
 Theme: factory
 Raised 2026-11-17.
+
+## [2026-11-17-17] [bug] inbox-commit labels an entry updated when only an entry it waits on went
+
+Retiring an entry that another entry names on its `After:` line makes `inbox-commit` call the
+second one updated, though its text is unchanged: retiring 2026-11-17-7 committed as "Retire
+2026-11-17-7; Update 2026-11-17-10". `parse_entries()` reads an `After:` id as the title of the
+entry it names while that entry is in the file, and as the bare id once it's gone, and
+`cmd_inbox_commit()` compares the parsed entries, so the waiting entry differs. It should compare
+each entry's own text, or the `After:` refs as written, so only an entry whose lines changed is an
+Update. To see it: retire an entry another's `After:` names, from the main checkout, and read the
+commit's subject.
+
+Severity: low
+Paths: scripts/sdlc.py
+Theme: inbox
