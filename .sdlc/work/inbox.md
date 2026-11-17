@@ -363,8 +363,9 @@ and drafts the spec behind its own question.
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-80] [idea] `_resolve()`'s problems still say "round <n>" for a landing round's answer ("C3, which no
+## [2026-11-17-80] [idea] Name the landing round in `_resolve()`'s problems
 
 Left undone by 109-landing-stops-only-for-cause, carried forward when it landed: `_resolve()`'s problems still say "round <n>" for a landing round's answer ("C3, which no
+change of round 1 is"); only the file named before them says which kind of round it is.
 See .sdlc/work/109-landing-stops-only-for-cause/notes.md in its commit.
 Raised 2026-11-17.
