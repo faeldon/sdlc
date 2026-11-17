@@ -135,9 +135,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .md { max-width: 72ch; overflow-wrap: anywhere; line-height: 1.55; }
 .md > :first-child { margin-top: 0; }
 .md h4, .md h5, .md h6 { margin: 1.2em 0 .4em; line-height: 1.3; }
-.md .md-h1 { font-size: 20px; }
-.md .md-h2 { font-size: 16px; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
-.md .md-h3 { font-size: 14.5px; }
+/* Never above the drawer's own 15px title, which names the change. */
+.md .md-h1 { font-size: 15px; }
+.md .md-h2 { font-size: 14.5px; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.md .md-h3 { font-size: 14px; }
 .md .md-h4, .md .md-h5, .md .md-h6 { font-size: 13.5px; color: var(--muted); }
 .md p, .md ul, .md ol, .md blockquote, .md .md-table { margin: 0 0 .8em; }
 .md ul, .md ol { padding-left: 1.4em; }
@@ -317,10 +318,12 @@ function mdList(lines, i, ctx) {
     const task = it.body[0].match(/^\[([ xX])\]\s+(.*)$/);
     if (task) it.body[0] = task[2];
     const blocks = mdBlocks(it.body, ctx);
-    // A tight item's text sits in the item, not in a paragraph of its own.
-    if (blocks[0] && blocks[0].tagName === "P") blocks.splice(0, 1, ...blocks[0].childNodes);
-    return h("li", { class: task ? "md-task" : null },
-      task ? h("input", { type: "checkbox", disabled: true, checked: task[1] !== " " }) : null, blocks);
+    const box = task ? h("input", { type: "checkbox", disabled: true, checked: task[1] !== " " }) : null;
+    // A tight item's text sits in the item, not in a paragraph of its own; a task's sits in the
+    // checkbox's label, so a screen reader names the box by it.
+    const tight = blocks[0] && blocks[0].tagName === "P";
+    if (tight) blocks.splice(0, 1, ...(box ? [h("label", {}, box, [...blocks[0].childNodes])] : blocks[0].childNodes));
+    return h("li", { class: task ? "md-task" : null }, tight ? null : box, blocks);
   }));
   return [list, i];
 }

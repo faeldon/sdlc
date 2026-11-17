@@ -1770,6 +1770,10 @@ def test_the_drawer_renders_markdown_as_nodes() -> None:
     boxes = _nodes(ul, "input")
     assert [b["attrs"].get("checked") for b in boxes] == ["", None]
     assert all(b["attrs"]["type"] == "checkbox" and "disabled" in b["attrs"] for b in boxes)
+    # A task's box sits in a label holding its text, so a screen reader names it.
+    labels = _nodes(ul, "label")
+    assert [_text(n) for n in labels] == ["done", "not yet"]
+    assert all(_nodes(n, "input") for n in labels)
     assert [_text(n) for n in _nodes(_nodes(tree, "ol")[0], "li")] == ["first", "second"]
     quote = _nodes(tree, "blockquote")[0]
     assert _text(quote) == "quoted text" and _nodes(quote, "strong")
@@ -1792,6 +1796,22 @@ def test_the_drawer_renders_markdown_as_nodes() -> None:
     assert "nothing" not in links and "nothing" in _text(tree), "a file it lacks is text"
     assert "a comment the template left" not in _text(tree)
     assert _nodes(tree, "hr")
+
+
+@pytest.mark.portable
+def test_a_rendered_heading_never_outranks_the_drawer_title() -> None:
+    """124: a file's `# ` heading is never larger than the drawer's title."""
+    style, _ = _page_parts()
+
+    def px(selector: str) -> float:
+        rule = re.search(re.escape(selector) + r"\s*\{[^}]*?font-size:\s*([\d.]+)px", style)
+        assert rule, selector
+        return float(rule.group(1))
+
+    title = px(".d-head h3")
+    sizes = [px(f".md .md-h{n}") for n in (1, 2, 3)]
+    assert all(size <= title for size in sizes), (title, sizes)
+    assert sizes == sorted(sizes, reverse=True), "each level no larger than the one above it"
 
 
 @needs_node
