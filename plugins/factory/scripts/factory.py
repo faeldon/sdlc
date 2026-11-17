@@ -61,6 +61,7 @@ import uuid
 from contextlib import suppress
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
@@ -180,9 +181,9 @@ def _utf8_streams() -> None:
 
 def _sh(command: str) -> list[str]:
     """The argv that runs the host's gate, and `[ui]`'s server and screenshots, through `sh -c`
-    on every platform, as `sdlc.py` runs a
-    host's commands: `/bin/sh`, and on Windows the `sh` on PATH, Git for Windows', never
-    `cmd.exe`. Raises OSError when Windows has none. Copied from `sdlc.py`, pinned by a test."""
+    on every platform, as `sdlc.py` runs a host's commands: `/bin/sh`, and on Windows the `sh` on
+    PATH, Git for Windows', never `cmd.exe`. Raises OSError when Windows has none. Copied from
+    `sdlc.py`, pinned by a test."""
     if os.name != "nt":
         return ["/bin/sh", "-c", command]
     found = shutil.which("sh")
@@ -2302,9 +2303,11 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _answers(port: int) -> bool:
+def _answers(host: str, port: int) -> bool:
+    """Whether something accepts on `host`:`port`, `host` resolved to every address it has, so a
+    server bound to `localhost` on IPv6 alone answers too."""
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=1):
+        with socket.create_connection((host, port), timeout=1):
             return True
     except OSError:
         return False
@@ -2384,7 +2387,9 @@ def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], d
             proc, record["problem"] = None, f"the dev server couldn't be started: {e}"
         try:
             deadline = time.monotonic() + ui["timeout"]
-            while proc and record["problem"] is None and not _answers(port):
+            # Wait where the shots will go: `[ui] url`'s host, not one assumed.
+            host = urlparse(_fill(ui["url"], port=port)).hostname or "127.0.0.1"
+            while proc and record["problem"] is None and not _answers(host, port):
                 if proc.poll() is not None:
                     record["problem"] = f"the dev server exited {proc.returncode} before answering"
                 elif time.monotonic() > deadline:

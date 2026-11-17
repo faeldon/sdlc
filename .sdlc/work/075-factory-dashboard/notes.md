@@ -25,5 +25,12 @@
   the home folder, which `test_nothing_local.py` reads (it scans ignored files too) and would fail
   on in this repo after any UI review; the command runs from the checkout, so the relative path
   works, and a test pins it.
+- **Rebased onto 073, 076 and 077 before ship**, as `wip 075`. Four files conflicted, each
+  resolved by keeping both sides: 073's gate and this change's UI clause in build's Step 1 and both
+  WAIT questions; `max_runs()` counting the gate's fixes and the UI reviewers (26 by default, 32
+  with `[ui]`); both subcommands; the README's agents table and run count; AGENTS.md's factory
+  paragraph, where `shots` is no longer called the one place the factory runs a host's commands,
+  since 073's gate is another. 073 had added its own `_sh()` copy and pin, so this change's
+  duplicates were dropped.
 - **074 landed during this build**, so the board's cost reads `runs/costs.jsonl` as it shipped,
   with the run's time summed beside `run_cost()`'s figures (pinned key by key).

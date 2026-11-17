@@ -2,17 +2,6 @@
 
 Seeds, not a backlog. `/sdlc:intent` promotes one into a change.
 
-## [2026-10-24-1] [building] UX and UI reviewers for the factory, and how a repo declares a front end
-
-Building in .sdlc/work/075-factory-dashboard/.
-The factory ships code, security and test reviewers. The factory it learned from also
-runs UX and UI reviewers against a running app. agent-skills has no such agent, only its
-`frontend-ui-engineering` skill to write them from, and the plugin can't know a repo has a UI: it
-needs a declaration (a `factory.toml` key, or `commands.preview` for a dev server) before a UI
-reviewer can run. Raised 2026-10-24.
-Theme: factory
-Priority: low
-
 ## [2026-10-24-2] [idea] A factory queue, and parallel runs across worktrees
 
 The factory runs one change per session. A queue (`/sdlc-factory:next` over seeds or
@@ -21,22 +10,6 @@ watches. GitHub issues and `work/ideas.md` are already the queue; this is the ru
 2026-10-24.
 Theme: factory
 Priority: low
-
-## [2026-10-24-3] [building] A factory status board
-
-Building in .sdlc/work/075-factory-dashboard/.
-A page that shows each running change's stage, round and verdicts as they land, from the change
-folders' files, the way the factory it learned from shows a dashboard. Read-only. Raised
-2026-10-24.
-
-The design, as that factory's: one card per change with its tier, depth and why, a row of chips
-per round (the builder's report, each reviewer's verdict, what the verifier kept and dropped),
-open decisions, the approver's READY or ESCALATE, time and cost (2026-11-17-9), and a click
-through to each file the run wrote. The supervisor runs several changes at once, each in its own
-worktree, so no one folder holds them all: `factory.py board`, read-only over every change
-worktree's folder as `ready` is, writes one self-contained page under `.sdlc/reports/`, which the
-supervisor refreshes after each step. No server, and nothing the page reads is written for it.
-Theme: factory
 
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 

@@ -1546,7 +1546,7 @@ def test_shots_start_the_declared_server_shoot_each_page_and_stop_it(tmp_path) -
     assert paths[0].parent == where and (where / "shots.json").is_file()
     assert (root / ".sdlc" / "reports" / ".gitignore").read_text() == "*\n"
     assert _git(root, "status", "--porcelain", "--", ".sdlc/reports") == "", "none reach git"
-    assert not factory._answers(record["port"]), "the server it started is stopped"
+    assert not factory._answers("127.0.0.1", record["port"]), "the server it started is stopped"
     assert not _alive(int((tmp_path / "server.pid").read_text()))
     assert any("/drafts/" in s["command"] for s in record["shots"])
     first = record["shots"][0]["command"]
@@ -1555,6 +1555,16 @@ def test_shots_start_the_declared_server_shoot_each_page_and_stop_it(tmp_path) -
     (tmp_path / "server.pid").unlink()
     again, record = factory.shots(root, folder, "round-1", ui)
     assert again == paths and not (tmp_path / "server.pid").exists()
+
+
+def test_shots_wait_for_the_server_where_the_url_says(tmp_path) -> None:
+    """F1: the readiness check goes to `[ui] url`'s host, resolved to each of its addresses."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    ui = _ui(tmp_path, url="http://localhost:{port}", pages=["/"], widths=[[390, 844]])
+    paths, record = factory.shots(root, folder, "round-1", ui)
+    assert record["problem"] is None and paths[0].is_file(), record
+    assert "http://localhost:" in record["shots"][0]["command"]
 
 
 def test_a_failed_shot_or_a_silent_server_still_stops_the_server(tmp_path, monkeypatch) -> None:
