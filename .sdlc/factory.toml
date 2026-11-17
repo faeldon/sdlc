@@ -3,7 +3,10 @@
 # it gets the UI and UX reviewers, judging screenshots of the board as that change built it.
 
 [ui]
-serve = "uv run --quiet --script scripts/sdlc.py board --port {port}"
-paths = ["scripts/board.html", "scripts/board.py"]
+# The board over a scratch repo built from the fixture's copy, with a change in every state a card
+# can show, served by this checkout's own scripts/sdlc.py (tests/fixtures/board/serve.sh).
+serve = "sh tests/fixtures/board/serve.sh {fixture} {port}"
+fixture = "tests/fixtures/board/changes"
+paths = ["scripts/board.html", "scripts/board.py", "tests/fixtures/board/"]
 # The board fills in from /state.json after it loads: wait for its columns before the shot.
 shoot = "uvx --from playwright playwright screenshot --wait-for-selector '.col' --viewport-size '{width}, {height}' {url} {out}"

@@ -1,0 +1,5 @@
+VERDICT: PASS
+
+## Notes
+
+Read.

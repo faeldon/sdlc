@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import urllib.error
@@ -1215,3 +1216,40 @@ def test_the_running_board_serves_board_py_as_it_is_on_disk(repo, tmp_path) -> N
 def test_a_board_that_wont_reload_says_so_on_the_page() -> None:
     page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
     assert re.search(r"st\.reload_error\s*\?", page)
+
+
+FIXTURE = ROOT / "tests" / "fixtures" / "board"
+
+
+@pytest.mark.skipif(
+    not all(shutil.which(tool) for tool in ("sh", "git", "uv")), reason="needs sh, git and uv"
+)
+def test_the_board_fixture_shows_every_card_state(tmp_path: Path, monkeypatch) -> None:
+    """106 R13: the data the UI review's server shows holds a card in every column and each state
+    a card can show, built by the fixture's own script, so a screenshot shows them all."""
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    repo = tmp_path / "repo"
+    done = subprocess.run(
+        ["sh", str(FIXTURE / "build.sh"), str(FIXTURE / "changes"), str(repo)],
+        capture_output=True, encoding="utf-8", errors="replace",
+    )  # fmt: skip
+    assert done.returncode == 0, done.stdout + done.stderr
+    cards = {c["change"]: c for c in board.state(repo)["changes"]}
+    assert set(cards) == {p.name for p in (FIXTURE / "changes").iterdir() if p.is_dir()}
+    columns = {c["column"] for c in cards.values()}
+    assert columns == {"plan", "design", "build", "test", "ready", "close", "needs-you"}, columns
+    factory_cards = [c for c in cards.values() if c["mode"] == "factory"]
+    assert any(c.get("progress") and c["progress"]["steps"] for c in factory_cards), "a step track"
+    assert any(c.get("stopped") for c in factory_cards), "a stopped run"
+    assert any(c.get("pending") and c["column"] == "needs-you" for c in factory_cards)
+    assert any(
+        c["stage"] == "test" and c["decision"] == "ESCALATE" and c["column"] == "needs-you"
+        for c in factory_cards
+    ), "an escalated change at test"
+    assert any(
+        c["stage"] in ("shipped", "dropped") and c["decision"] == "ESCALATE" for c in factory_cards
+    ), "a card that was ESCALATE"
+    gates = {c["gate"]["verdict"] for c in cards.values() if (c.get("gate") or {}).get("current")}
+    assert gates == {"PASS", "FAIL"}, "a green and a red gate badge"
+    assert any(c["problems"] for c in cards.values()), "a file that won't read"
+    assert _git(repo, "status", "--porcelain") == "", "the main checkout is left clean"

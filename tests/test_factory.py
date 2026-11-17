@@ -140,7 +140,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
     assert cfg == {
         "reviewers": FULL,
         "rounds": 3,
-        "light": {"reviewers": ["code"], "rounds": 2},
+        "light": {"reviewers": ["code"], "rounds": 2, "chosen": False},
         "models": {},
         "mode": "auto",
         "land": {"auto": True, "batch": 5, "moves": 3},
@@ -168,10 +168,12 @@ def test_light_is_a_table_checked_like_the_top_level(tmp_path: Path) -> None:
     config = tmp_path / ".sdlc" / "factory.toml"
     config.write_text('[light]\nreviewers = ["test"]\nrounds = 1\n', encoding="utf-8")
     cfg, warnings = factory.load_config(tmp_path)
-    assert cfg["light"] == {"reviewers": ["test"], "rounds": 1} and warnings == []
+    assert cfg["light"] == {"reviewers": ["test"], "rounds": 1, "chosen": True} and warnings == []
     config.write_text('[light]\nreviewers = ["nobody"]\nrounds = 0\nloops = 2\n', encoding="utf-8")
     cfg, warnings = factory.load_config(tmp_path)
-    assert cfg["light"] == {"reviewers": ["code"], "rounds": 2}, "a bad value keeps the default"
+    assert cfg["light"] == {"reviewers": ["code"], "rounds": 2, "chosen": False}, (
+        "a bad value keeps the default"
+    )
     assert "unknown key light.loops" in warnings
     assert any("unknown reviewer 'nobody' in light.reviewers" in w for w in warnings)
     assert any(w.startswith("light.rounds must be") for w in warnings)
@@ -1032,7 +1034,7 @@ def test_with_no_sensitive_list_every_run_is_full(tmp_path, capsys) -> None:
 
 
 def test_a_diff_touching_no_sensitive_path_runs_light(tmp_path, capsys) -> None:
-    root = _change(tmp_path, config=LISTED)
+    root = _change(tmp_path, 1, config=LISTED)
     _touch(root, "src/a.py")
     _build_report(root, 1)
     out = _verdicts(root, capsys)
@@ -1065,6 +1067,69 @@ def test_the_sensitive_list_is_the_base_branch_s_not_the_change_s(tmp_path, caps
     _touch(root, "src/a.py")
     _build_report(root, 1)
     assert _verdicts(root, capsys)["depth"] == "light", "editing the list here changes nothing"
+
+
+def _light_round(tmp_path: Path, tier: object, factory_toml: str | None = None) -> Path:
+    """A change at `tier` whose first build touches no sensitive path, with no review yet."""
+    root = _change(tmp_path, tier, "build", config=LISTED)
+    if factory_toml is not None:
+        (root / ".sdlc" / "factory.toml").write_text(factory_toml, encoding="utf-8")
+    _touch(root, "src/a.py")
+    _build_report(root, 1)
+    return root
+
+
+def test_a_tier_2_light_round_includes_the_test_reviewer(tmp_path, capsys) -> None:
+    """R1, R2, R3, R7: a Tier 2's light rounds expect the test reviewer; a Tier 1's, or one whose
+    tier won't read, today's; `start` names the same list for the run's one question."""
+    for tier, want in ((2, ["code", "test"]), (1, ["code"]), ("", ["code"])):
+        root = _light_round(tmp_path / f"tier-{tier or 'none'}", tier)
+        out = _verdicts(root, capsys)
+        assert (out["depth"], out["missing"], out["limit"]) == ("light", want, 2), tier
+        _, start = _run(capsys, factory.cmd_start, root, "008", "build")
+        assert start["light"]["reviewers"] == want and start["light"]["chosen"] is False, tier
+    root = tmp_path / "tier-2" / "repo"
+    _review(root, 1, "code", "VERDICT: PASS")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["missing"]) == ("review", ["test"]), "code alone is incomplete"
+    _review(root, 1, "test", "VERDICT: PASS")
+    assert _verdicts(root, capsys)["next"] == "approve"
+
+
+def test_a_set_light_list_is_kept_at_either_tier(tmp_path, capsys) -> None:
+    """R4, R5: a host's own `[light] reviewers` is used as set, and the Tier 2 default adds
+    `test` only when the full depth runs it."""
+    root = _light_round(tmp_path / "set", 2, '[light]\nreviewers = ["code"]\n')
+    assert _verdicts(root, capsys)["missing"] == ["code"], "a list set by hand is kept"
+    cfg = factory.load_config(root)[0]
+    assert cfg["light"]["chosen"] is True
+    assert factory.light_reviewers(cfg, 2) == factory.light_reviewers(cfg, 1) == ["code"]
+    root = _light_round(tmp_path / "no-test", 2, 'reviewers = ["code", "security"]\n')
+    assert _verdicts(root, capsys)["missing"] == ["code"], "never a reviewer the full depth lacks"
+
+
+def test_the_test_reviewer_never_deepens_a_tier_2_light_run(tmp_path, capsys) -> None:
+    """R6: a Tier 2 light round holding `code` and `test` keeps the run light."""
+    root = _light_round(tmp_path, 2)
+    for role in ("code", "test"):
+        _review(root, 1, role, "VERDICT: CHANGES", f"src/a.py:1: {role} fix")
+    _verified(root, 1, kept=["code: src/a.py:1: code fix", "test: src/a.py:1: test fix"])
+    _build_report(root, 2)
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["missing"], out["limit"]) == ("light", ["code", "test"], 2), out
+
+
+def test_the_landing_review_judges_a_tier_2_light_run_with_its_test_reviewer(
+    tmp_path, capsys
+) -> None:
+    """R8: after a resolved conflict, the landing review asks for the same tier's reviewers."""
+    root = _light_round(tmp_path, 2)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "reviews" / "land-1").mkdir(parents=True)
+    (folder / "runs").mkdir()
+    (folder / "runs" / "land-resolved").write_text("", encoding="utf-8")
+    _, out = _run(capsys, factory.cmd_land_verdicts, root, "008")
+    assert out["missing"] == ["code", "test"], out
 
 
 def _report(root: Path, n: int, text: str) -> None:
@@ -1502,7 +1567,7 @@ def test_without_a_complete_ui_table_no_ui_review_runs(tmp_path, capsys) -> None
 
 
 def test_the_ui_reviewers_join_on_a_ui_path_at_either_depth(tmp_path, capsys) -> None:
-    root = _change(tmp_path, config=LISTED)
+    root = _change(tmp_path, 1, config=LISTED)
     _on_main(root, UI)
     _touch(root, "src/a.py")
     _build_report(root, 1)
@@ -1537,6 +1602,19 @@ def test_ui_reviewers_are_never_chosen_and_the_table_is_the_base_branch_s(tmp_pa
     table, wrong = factory._ui_table({"timeout": "soon", "widths": [[1, 2, 3]], "colour": 1})
     assert table["timeout"] == 60 and table["widths"] == factory.DEFAULTS["ui"]["widths"]
     assert len(wrong) == 3 and "unknown key ui.colour" in wrong
+
+
+def test_ui_fixture_is_checked_like_the_other_keys() -> None:
+    """R9: `fixture` is a path inside the checkout, unset by default; anything else is a warning
+    that leaves it unset."""
+    assert factory.DEFAULTS["ui"]["fixture"] is None
+    table, wrong = factory._ui_table({"fixture": "tests/fixtures/board/changes"})
+    assert (table["fixture"], wrong) == ("tests/fixtures/board/changes", [])
+    for bad in (3, ["a"], "", "/etc/board", "tests/../../elsewhere", "..", "C:/board"):
+        table, wrong = factory._ui_table({"fixture": bad})
+        assert table["fixture"] is None and len(wrong) == 1, bad
+        assert "ui.fixture" in wrong[0], bad
+    assert "fixture" in factory._ui_table("nonsense")[1][0], "the table's message names it"
 
 
 @pytest.mark.parametrize("role", ["ui", "ux"])
@@ -2298,7 +2376,7 @@ def test_a_failed_shot_or_a_silent_server_still_stops_the_server(tmp_path, monke
 def test_a_ui_review_never_runs_blind(tmp_path, capsys, claude, monkeypatch) -> None:
     root = _change(tmp_path)
     ui = _ui(tmp_path)
-    toml = "[ui]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in ui.items())
+    toml = "[ui]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in ui.items() if v is not None)
     _on_main(root, toml)
     _touch(root, "web/page.html")
     _build_report(root, 1)
@@ -2315,6 +2393,76 @@ def test_a_ui_review_never_runs_blind(tmp_path, capsys, claude, monkeypatch) -> 
     assert "index-390x844.png" in argv[1] and "web/page.html" in argv[1]
     assert (folder / "reviews" / "round-1" / "ux.md").is_file()
     assert (folder / "runs" / "reviewer-ux.sessions").is_file()
+
+
+# A dev server that serves fixture data and writes into it, as a real one may: it refuses a copy an
+# earlier server already wrote to, so only a fresh copy lets it answer.
+FIXTURE_SERVE = """\
+import http.server, os, sys
+port, fixture, pid = sys.argv[1:4]
+open(pid, "w").write(str(os.getpid()))
+with open(os.path.join(fixture, "written.txt"), "x") as f:
+    f.write(open(os.path.join(fixture, "seed.txt")).read())
+http.server.ThreadingHTTPServer(("127.0.0.1", int(port)),
+                                http.server.SimpleHTTPRequestHandler).serve_forever()
+"""
+
+
+def _fixture_ui(tmp_path: Path, root: Path, fixture: str = "fixtures/drafts") -> dict:
+    (tmp_path / "fixture_serve.py").write_text(FIXTURE_SERVE)
+    serve = f'"{sys.executable}" "{tmp_path / "fixture_serve.py"}" {{port}} {{fixture}} '
+    serve += f'"{tmp_path / "server.pid"}"'
+    return _ui(tmp_path, serve, fixture=fixture, pages=["/"], widths=[[390, 844]])
+
+
+def test_shots_serve_a_fresh_copy_of_the_fixture(tmp_path) -> None:
+    """R10: each shot serves its own copy of the fixture, the committed one never written, and the
+    record names the copy by a path relative to the checkout."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _touch(root, "fixtures/drafts/seed.txt")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a fixture")
+    ui = _fixture_ui(tmp_path, root)
+    paths, record = factory.shots(root, folder, "round-1", ui)
+    assert record["problem"] is None, record
+    copy = root / ".sdlc" / "reports" / "shots" / NAME / "round-1" / "fixture"
+    assert (copy / "written.txt").read_text() == "x\n", "the server read and wrote its copy"
+    assert not (root / "fixtures" / "drafts" / "written.txt").exists()
+    assert _git(root, "status", "--porcelain") == "", "the committed fixture is as it was"
+    rel = copy.relative_to(root).as_posix()
+    assert f" {rel} " in record["serve"]
+    assert str(root) not in record["serve"], "the record names no machine's checkout"
+    # A second label gets a clean copy of its own; a copy a failed attempt left is replaced.
+    stale = root / ".sdlc" / "reports" / "shots" / NAME / "round-2" / "fixture"
+    stale.mkdir(parents=True)
+    (stale / "written.txt").write_text("stale\n")
+    _, record = factory.shots(root, folder, "round-2", ui)
+    assert record["problem"] is None, record
+    assert (stale / "written.txt").read_text() == "x\n"
+    # A fixture that is one file is copied into the folder, and `{fixture}` names the file.
+    _, record = factory.shots(root, folder, "round-3", _ui(tmp_path, "true", fixture="README.md"))
+    copied = root / ".sdlc" / "reports" / "shots" / NAME / "round-3" / "fixture" / "README.md"
+    assert copied.read_text() == "a repo\n"
+
+
+def test_a_missing_fixture_refuses_the_ui_review(tmp_path, capsys, claude) -> None:
+    """R11: a fixture the checkout lacks is a problem, so no server starts and the UI review is
+    refused; a `serve` naming `{fixture}` with none set is a config warning."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    paths, record = factory.shots(root, folder, "round-1", _fixture_ui(tmp_path, root))
+    assert "fixtures/drafts" in record["problem"] and "doesn't exist" in record["problem"]
+    assert not (tmp_path / "server.pid").exists(), "no server started"
+    ui = _fixture_ui(tmp_path, root)
+    toml = "[ui]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in ui.items() if v is not None)
+    _on_main(root, toml)
+    _touch(root, "web/page.html")
+    _build_report(root, 1)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "ui", None)
+    assert code == 1 and "doesn't run blind" in out["refusals"][0] and not claude()
+    _on_main(root, toml.replace('fixture = "fixtures/drafts"\n', ""))
+    assert "ui.serve names {fixture}, but no ui.fixture is set" in factory.load_config(root)[1]
 
 
 # ---------------------------------------------------------------- the step record (088)

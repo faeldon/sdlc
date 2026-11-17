@@ -1,0 +1,3 @@
+# The hand gates build.sh runs, by change: pass or fail.
+003-draft-export fail
+004-draft-search pass

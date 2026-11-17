@@ -73,7 +73,9 @@ Every command about a change runs in its worktree, which `factory.py` finds from
 `config` and `start` give the run's shape from `.sdlc/factory.toml`: the full depth's reviewers
 (`factory.reviewers`, default code, security, test and behaviour, the one that runs the spec's
 end-to-end path) and round limit (`factory.rounds`,
-default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds), the
+default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds, with
+the test reviewer too for a Tier 2 unless the repo sets `[light] reviewers`, so name `start`'s
+`light.reviewers`, which says this change's), the
 permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
 each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
 opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier, and

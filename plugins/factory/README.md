@@ -167,6 +167,9 @@ spec.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
   one touching any runs the full depth, and a run never lightens. With no list, every run is full.
+  A Tier 2 change's light rounds add the test reviewer, which reads the tests against the spec's
+  numbered requirements, unless you set `[light] reviewers` yourself; a Tier 1's run the code
+  reviewer alone. The tier picks the reviewers, never the depth.
 
 ## Decisions that are yours
 
@@ -259,8 +262,8 @@ reviewers = ["code", "security", "test", "behaviour"]   # the full depth: which 
 rounds = 3                                 # review rounds before the approver decides anyway (1-5)
 
 [light]                                    # the depth a diff touching no sensitive path gets
-reviewers = ["code"]
-rounds = 2
+reviewers = ["code"]                       # unset, a Tier 2 adds "test" when the full depth has
+rounds = 2                                 # it; set, it is used as written at either tier
 
 mode = "auto"                              # the permission mode agent sessions run in, read from
                                            # the base branch; one of acceptEdits, auto,
@@ -285,6 +288,7 @@ pages = ["/"]                              # the pages to shoot
 # shoot = "npx playwright screenshot --viewport-size '{width}, {height}' {url} {out}"
 widths = [[1280, 800], [390, 844]]         # each page at each of these
 timeout = 60                               # seconds the server gets to answer
+# fixture = "fixtures/demo"                # data in the checkout serve is given, as {fixture}
 ```
 
 `mode`, `gate_jobs`, `[land]` and `[ui]` are read from the base branch's copy of the file, never a change's
@@ -294,6 +298,13 @@ yours, so any tool that writes a PNG to `{out}` will do, and Playwright's CLI is
 (`npx playwright install chromium` once, or `uvx --from playwright playwright …` without Node).
 A page that fills in after it loads needs the command to wait for it (Playwright's
 `--wait-for-selector '<css>'`), or the shot shows it empty.
+A page that shows only what its data holds needs data holding each state a change could add.
+Name it in `fixture`: a file or folder in the checkout, so a change that adds a state adds its
+data in the same diff. Before each shot, `shots` copies it afresh to
+`.sdlc/reports/shots/<change>/<label>/fixture/` and puts that copy's path, relative to the
+checkout, in `serve`'s `{fixture}`, so a server that writes to its data never touches the
+committed fixture or the next shot's. A fixture the checkout lacks refuses the UI review, with no
+server started; seeding a database or building a repo from it is `serve`'s job.
 An agent session can't answer a tool prompt, so a command its mode doesn't allow is refused, and
 the agent reports it.
 

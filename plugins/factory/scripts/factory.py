@@ -62,6 +62,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -70,7 +71,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import urlparse
 
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
@@ -96,10 +97,11 @@ DEFAULTS: dict = {
     "land": {"auto": True, "batch": 5, "moves": 3},
     # A repo's front end: the dev server to start (`{port}`), where it answers, the pages to shoot,
     # the paths that count as UI, the screenshot command (`{url}`, `{width}`, `{height}`, `{out}`),
-    # the window sizes, and how long the server gets to answer. Unset, no UI review runs.
+    # the window sizes, how long the server gets to answer, and the data it serves: a path in the
+    # checkout, copied afresh for each shot and passed as `{fixture}`. Unset, no UI review runs.
     "ui": {
         "serve": None, "url": "http://127.0.0.1:{port}", "pages": ["/"], "paths": [],
-        "shoot": None, "widths": [[1280, 800], [390, 844]], "timeout": 60,
+        "shoot": None, "widths": [[1280, 800], [390, 844]], "timeout": 60, "fixture": None,
     },
     # The most `factory.py gate` runs at once across every worktree of the repo: one by default,
     # so parallel runs' gates never fight each other for every core.
@@ -297,7 +299,13 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     cfg = {
         "reviewers": list(DEFAULTS["reviewers"]),
         "rounds": DEFAULTS["rounds"],
-        "light": {"reviewers": list(light["reviewers"]), "rounds": light["rounds"]},
+        # `chosen`: whether `[light] reviewers` was set, so a Tier 2's default isn't applied over
+        # a host's own list (`light_reviewers()`).
+        "light": {
+            "reviewers": list(light["reviewers"]),
+            "rounds": light["rounds"],
+            "chosen": False,
+        },
         "models": {},
     }
     cfg["mode"], warnings = _mode(root)
@@ -321,7 +329,7 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         warnings.append("light must be a table of reviewers and rounds")
     else:
         warnings += [f"unknown key light.{key}" for key in table if key not in light]
-        _depth_keys(table, cfg["light"], "light.", warnings)
+        cfg["light"]["chosen"] = _depth_keys(table, cfg["light"], "light.", warnings)
     models = data.get("models", {})
     if not isinstance(models, dict):
         warnings.append("models must be a table of role = model")
@@ -420,7 +428,9 @@ def _ui_table(table: object) -> tuple[dict, list[str]]:
     """A `[ui]` table over the defaults, each bad value a warning that leaves its default."""
     out = {k: list(v) if isinstance(v, list) else v for k, v in DEFAULTS["ui"].items()}
     if not isinstance(table, dict):
-        return out, ["ui must be a table of serve, url, pages, paths, shoot, widths and timeout"]
+        return out, [
+            "ui must be a table of serve, url, pages, paths, shoot, widths, timeout and fixture"
+        ]
     warnings = []
     for key, value in table.items():
         texts = isinstance(value, list) and all(isinstance(v, str) for v in value)
@@ -429,7 +439,8 @@ def _ui_table(table: object) -> tuple[dict, list[str]]:
             and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in v)
             for v in value
         )  # fmt: skip
-        if key in ("serve", "url", "shoot") and isinstance(value, str) and value.strip():
+        text = isinstance(value, str) and bool(value.strip())
+        if key in ("serve", "url", "shoot") and text or key == "fixture" and _inside(value):
             out[key] = value
         elif key in ("pages", "paths") and texts:
             out[key] = list(value)
@@ -442,11 +453,24 @@ def _ui_table(table: object) -> tuple[dict, list[str]]:
             and value > 0
         ):
             out[key] = value
+        elif key == "fixture":
+            warnings.append("ui.fixture must be a path inside the checkout, so none is served")
         elif key in DEFAULTS["ui"]:
             warnings.append(f"ui.{key} has the wrong shape, so its default stands")
         else:
             warnings.append(f"unknown key ui.{key}")
+    if "{fixture}" in (out["serve"] or "") and not out["fixture"]:
+        warnings.append("ui.serve names {fixture}, but no ui.fixture is set")
     return out, warnings
+
+
+def _inside(value: object) -> bool:
+    """Whether `value` is a path that stays inside the checkout, on any platform: relative, with
+    no drive and no `..`."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    posix = PurePosixPath(value.replace("\\", "/"))
+    return not (posix.is_absolute() or PureWindowsPath(value).anchor or ".." in posix.parts)
 
 
 def ui_complete(ui: dict) -> bool:
@@ -464,9 +488,11 @@ def model_for(role: str, cfg: dict, tier: int | None, level: str) -> str:
     return FIXED_MODELS[role]
 
 
-def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> None:
+def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> bool:
     """A depth's `reviewers` and `rounds` from `data` into `into`, the top level's or `[light]`'s,
-    each bad value a warning that leaves the default in place."""
+    each bad value a warning that leaves the default in place. Whether `data`'s own `reviewers`
+    were taken."""
+    taken = False
     reviewers = data.get("reviewers", into["reviewers"])
     if not isinstance(reviewers, list) or not all(isinstance(r, str) for r in reviewers):
         warnings.append(f"{prefix}reviewers must be a list of names")
@@ -484,6 +510,7 @@ def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> Non
         known = [r for r in dict.fromkeys(reviewers) if r in chosen]
         if known:
             into["reviewers"] = known
+            taken = "reviewers" in data
         else:
             warnings.append(f"no known reviewer is configured in {prefix or 'the top level'}, so "
                             "the defaults run")  # fmt: skip
@@ -492,6 +519,26 @@ def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> Non
         into["rounds"] = rounds
     else:
         warnings.append(f"{prefix}rounds must be a whole number from 1 to {MAX_ROUNDS}")
+    return taken
+
+
+def light_reviewers(cfg: dict, tier: int | None) -> list[str]:
+    """The reviewers the light depth expects of a change at `tier`: `[light] reviewers` as a host
+    set them, at either tier; unset, the default, with the test reviewer added for a Tier 2, whose
+    spec numbers requirements for it to read the tests against, when the full depth runs it too."""
+    light = cfg["light"]
+    if light.get("chosen") or tier != 2 or "test" not in cfg["reviewers"]:
+        return list(light["reviewers"])
+    wanted = {*light["reviewers"], "test"}
+    return [r for r in REVIEWERS if r in wanted]
+
+
+def change_tier(folder: Path) -> int | None:
+    """The tier `intent.md` gives, or None when there is none that reads as a number."""
+    path = folder / "intent.md"
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    tier = frontmatter(text).get("tier", "")
+    return int(tier) if tier.isdigit() else None
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -617,12 +664,16 @@ def risk_paths(paths: list[str], patterns: list[str]) -> list[str]:
     return [p for p in paths if named(p)]
 
 
-def depth(root: Path, cfg: dict, rounds: list[dict], starts: list[int] = ()) -> dict:
+def depth(
+    root: Path, cfg: dict, rounds: list[dict], starts: list[int] = (), tier: int | None = None
+) -> dict:
     """The depth this run reviews at, from the diff as it stands: `full` with no sensitive list
     (every run, as before there was a choice), when the diff touches a listed path, or once any
     round ran beyond `[light]` (a run never lightens); `light` otherwise. A round's place against
     `[light]`'s rounds is its place in its own run, counted from the newest restart at or before
-    it (`starts`, the restarts' rounds), so a restart never deepens a light run. Writes nothing."""
+    it (`starts`, the restarts' rounds), so a restart never deepens a light run. The tier says only
+    which reviewers the light depth expects (`light_reviewers()`), never which depth runs, so a
+    Tier 2's own test reviewer never counts as beyond `[light]`. Writes nothing."""
 
     def place(n: int) -> int:
         return n - max((s for s in starts if s <= n), default=1) + 1
@@ -631,7 +682,7 @@ def depth(root: Path, cfg: dict, rounds: list[dict], starts: list[int] = ()) -> 
     listed = _sensitive(root, base) if base else []
     changed = _changed_paths(root, base) if base else []
     hit = risk_paths(changed, listed)
-    light = cfg["light"]
+    light = {"reviewers": light_reviewers(cfg, tier), "rounds": cfg["light"]["rounds"]}
     beyond = any(
         place(r["round"]) > light["rounds"]
         or set(r["reviews"]) - set(light["reviewers"]) - set(UI_REVIEWERS)
@@ -717,6 +768,8 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     # A Tier 2 at `plan` has no spec yet: the spec-writer drafts it before the run's gate.
     out["spec"] = purpose == "build" and (tier, stage) == (2, "plan")
     # Each role's model, at either depth, so the gate shows the run's cost before it starts.
+    # The light depth's reviewers for this change's tier, as `depth()` will expect them.
+    out["light"] = {**cfg["light"], "reviewers": light_reviewers(cfg, tier)}
     out["models_at"] = {
         level: {role: model_for(role, cfg, tier, level) for role in ROLES}
         for level in ("light", "full")
@@ -889,7 +942,7 @@ def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], l
     rounds, problems = read_rounds(folder, cfg["reviewers"])
     restarts, wrong = read_restarts(folder)
     problems += wrong
-    run = depth(root, cfg, rounds, [r["round"] for r in restarts])
+    run = depth(root, cfg, rounds, [r["round"] for r in restarts], change_tier(folder))
     run["restart"] = restarts[-1] if restarts else None
     run["ui"] = ui_review(cfg, rounds, run["changed"])
     if run["ui"]:
@@ -3904,10 +3957,38 @@ def _stop(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
+def _fixture_copy(root: Path, where: Path, fixture: str | None) -> tuple[str, str | None]:
+    """A fresh copy of `[ui] fixture` at `where/fixture/` (a file inside it, by its name), and its
+    path relative to the checkout, for `{fixture}`: ("", None) without one, and ("", a problem)
+    when the checkout lacks it. Only that folder is replaced, which only `shots` writes, so a
+    server that writes into its data never touches the committed fixture, nor the next shot's."""
+    if not fixture:
+        return "", None
+    source = root / fixture
+    if not source.exists():
+        return "", f"ui.fixture {fixture} doesn't exist in the checkout, so no server started"
+    copy = where / "fixture"
+    if copy.exists():
+        # A git repo a server built in its copy holds read-only objects Windows won't remove.
+        for path in copy.rglob("*"):
+            with suppress(OSError):
+                path.chmod(stat.S_IWRITE | stat.S_IREAD | (stat.S_IEXEC if path.is_dir() else 0))
+        shutil.rmtree(copy)
+    if source.is_dir():
+        shutil.copytree(source, copy, symlinks=True)
+        served = copy
+    else:
+        copy.mkdir(parents=True)
+        served = copy / source.name
+        shutil.copy2(source, served)
+    return served.relative_to(root).as_posix(), None
+
+
 def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], dict]:
     """Each page of `[ui]` at each width, as PNGs under `.sdlc/reports/shots/<change>/<label>/`,
     with `shots.json` saying what ran and how it ended: `problem` is None only when every shot was
-    written. A label already shot without a problem is reused, not shot again."""
+    written. A label already shot without a problem is reused, not shot again. With `fixture` set,
+    the server is given a fresh copy of it (`_fixture_copy()`), or isn't started at all."""
     where = _reports(root) / "shots" / folder.name / label
     record_path = where / "shots.json"
     want = [
@@ -3922,11 +4003,13 @@ def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], d
             return paths, before
     where.mkdir(parents=True, exist_ok=True)
     port = _free_port()
+    served, problem = _fixture_copy(root, where, ui.get("fixture"))
     record: dict = {
-        "serve": _fill(ui["serve"], port=port),
+        # `{fixture}` only with one set: unset, `serve` runs as written.
+        "serve": _fill(ui["serve"], port=port, **({"fixture": served} if served else {})),
         "port": port,
         "shots": [],
-        "problem": None,
+        "problem": problem,
     }
     log = where / "serve.log"
     group = (
@@ -3936,7 +4019,8 @@ def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], d
     )
     with log.open("wb") as sink:
         try:
-            proc = subprocess.Popen(
+            # No data to serve, no server.
+            proc = None if problem else subprocess.Popen(
                 _sh(record["serve"]), cwd=root, stdin=subprocess.DEVNULL, stdout=sink,
                 stderr=subprocess.STDOUT, **group,
             )  # fmt: skip

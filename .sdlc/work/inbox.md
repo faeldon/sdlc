@@ -257,22 +257,6 @@ or at least record on the commit that a hand fix landed unreviewed.
 Theme: landing
 Raised 2026-11-17.
 
-## [2026-11-17-45] [idea] A Tier 2 at the light depth gets the test reviewer too
-
-At the light depth only the code reviewer runs, so 092's and 095's tests were never read
-requirement by requirement, and both approvers said so. A Tier 2's spec names a test per
-requirement; the test reviewer could join its light rounds.
-Theme: factory
-Raised 2026-11-17.
-
-## [2026-11-17-46] [idea] The UI reviewers see the cards a change adds
-
-No screenshot on 2026-11-17 showed 088's step track, 086's `was ESCALATE` or 091's gate badge: the
-dev server served this repo's board, whose changes had none of those states, so the ui and ux
-reviewers judged them from code alone. `[ui]` could name fixture data the server starts with.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-49] [idea] One review checklist and one findings record for ship and the factory
 
 `/sdlc:ship` and the factory review a change differently, and each misses what the other checks.
@@ -409,4 +393,16 @@ Raised 2026-11-17.
 `inbox-commit` allows), but it could read `status`'s `building` list to match. See
 .sdlc/work/100-seeds-marked-by-changes/notes.md in its commit.
 Theme: inbox
+Raised 2026-11-17.
+
+## [2026-11-17-67] [idea] The build skill's summary of `start`'s `ui` (`serve`, `shoot`, `paths`) doesn't name `fixture`; the README does.
+
+Left undone by 106-factory-reviewer-coverage, carried forward when it landed: The build skill's summary of `start`'s `ui` (`serve`, `shoot`, `paths`) doesn't name `fixture`; the README does.
+See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-68] [idea] `tests/test_board.py::test_the_board_fixture_shows_every_card_state` takes about 30s on a cold `uv` cache (two `sdlc.py gate` runs); a `--no-gate` path in `build.sh` isn't worth it yet.
+
+Left undone by 106-factory-reviewer-coverage, carried forward when it landed: `tests/test_board.py::test_the_board_fixture_shows_every_card_state` takes about 30s on a cold `uv` cache (two `sdlc.py gate` runs); a `--no-gate` path in `build.sh` isn't worth it yet.
+See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
 Raised 2026-11-17.
