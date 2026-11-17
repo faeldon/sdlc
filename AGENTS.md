@@ -375,7 +375,11 @@ headless session of its own in the change's worktree, started in the background 
 reviewers sonnet for a Tier 2 or a full-depth run, haiku otherwise) and the permission mode (`mode`,
 from the base branch's `factory.toml`), files the reply, and records the session's id in
 `runs/<agent>.sessions`, which `measure` reads (`_agent_sessions()`), since no transcript names its
-`--agent`. A change ends at "ready to ship"; `factory.py ready` orders them, and the person lands
+`--agent`. The gate is the script's: before any reviewer reads a build, `verdicts` names `gate`, and
+`factory.py gate` runs the base branch's `[commands] check` (never the checkout's) in the change's
+worktree, recording each attempt in `build/round-<N>.gate.md`, which `_factory_files()` counts as
+`gate_fail`; a red one is the builder's `fix`, `GATE_FIXES` a round, then a stop, and a reviewed
+round is never gated again. A change ends at "ready to ship"; `factory.py ready` orders them, and the person lands
 them: one at a time with `/sdlc:ship`, or as a batch with `/sdlc-factory:land`, from a session of
 its own. **Land is the one place the factory commits, and it does so through `sdlc`'s own code:**
 `factory.py` runs the `sdlc.py` of its own version, beside it (`sdlc_path()`: the clone's, or the

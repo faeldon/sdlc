@@ -1132,6 +1132,8 @@ def rework(
                 "reviews": reviews,
             }
         )
+        if "gate_fail" in factory:
+            out["gate_fail"] = factory["gate_fail"]
     return out
 
 

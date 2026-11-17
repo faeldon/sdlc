@@ -14,6 +14,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready *)'
   - 'Bash(git diff *)'
@@ -23,7 +24,8 @@ disable-model-invocation: true
 # Factory build — the supervisor runs a change's agents
 
 Stages 2 to 4 of the change loop, handed to the factory's agents: the spec-writer drafts a Tier 2's
-spec, the builder plans and implements, specialist reviewers check the work in rounds, a verifier
+spec, the builder plans and implements, the script runs the repo's gate on each build before any
+reviewer sees it, specialist reviewers check the work in rounds, a verifier
 checks each change they ask for against the code, the builder reworks what it keeps, and the
 approver recommends. One approval starts it; after that it runs without the person until it
 reaches a decision, runs out of rounds, or hits a problem.
@@ -66,8 +68,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start <NNN> -
 
 Every command about a change runs in its worktree, which `factory.py` finds from the main checkout.
 `config` and `start` give the run's shape from `.sdlc/factory.toml`: the full depth's reviewers
-(`factory.reviewers`, default code, security, test and behaviour, the one that runs the gate and
-the spec's end-to-end path) and round limit (`factory.rounds`,
+(`factory.reviewers`, default code, security, test and behaviour, the one that runs the spec's
+end-to-end path) and round limit (`factory.rounds`,
 default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds), the
 permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
 each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
@@ -79,7 +81,14 @@ the most agent runs this can take, counted at the full depth.
 the base branch's `.sdlc/config.toml`, every run is full, as it always was. With one, a diff that
 touches none of its paths runs light; one that touches any, or that a round already reviewed at
 the full depth, runs full, and a run never lightens. `verdicts` reports it each time (`depth`,
-`why`, `sensitive`), and the reviewers it calls for follow it. `start` also gives `head`, the commit
+`why`, `sensitive`), and the reviewers it calls for follow it.
+
+**The gate is the script's, at either depth.** Before any reviewer reads a build, `factory.py gate`
+runs the base branch's `[commands] check` (never the change's own copy of the config) in the
+change's worktree, and a red one sends the builder back, at most twice a round; a third red gate
+stops the change. `verdicts` reports it (`gate`: its command, this round's fails, and the verdict on
+the build as it stands; null, with `gate_why`, when the base branch names no check, and then no
+build is gated). `start` also gives `head`, the commit
 the run starts from, `spec`, true for a Tier 2 at `stage: plan`, whose spec the spec-writer drafts
 before the gate, and every refusal: no worktree for the change, or a stage this can't start from
 (Tier 2 needs `stage: plan` or `design`; Tier 1, `stage: plan`). A run that stopped part way left
@@ -108,32 +117,35 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 Nothing is written yet: the draft is only in the command's output.
 
 Then show the person, naming the change: the spec draft and its questions, when there is one; the
-change and its tier; the agents that will run (builder, each reviewer at each depth, the verifier,
-approver) with each one's model from `models_at`; the round limits; the depth rule above; the
-permission mode; and `max_runs`, the factory's own runs, not the builder's sub-agents, so the cost
-is in front of them before they agree to it. Name the files the run will write, all by `factory.py`
-in the change's folder: code and `plan.md` by the builder; `build/round-<N>.md`,
-`reviews/round-<N>/<role>.md`, `reviews/round-<N>/verified.md` and `decision.md`, the agents'
-replies; `runs/<agent>.sessions`, each session's id, for measuring; `runs/costs.jsonl`, each
-run's reported cost and tokens; `build/round-<N>.files` by
+change and its tier; the gate command the script will run, from the base branch's
+`.sdlc/config.toml`, or that there is none; the agents that will run (builder, each reviewer at
+each depth, the verifier, approver) with each one's model from `models_at`; the round limits; the
+depth rule above; the permission mode; and `max_runs`, the factory's own runs, the builder's fixes
+of a red gate included and its sub-agents not, so the cost is in front of them before they agree
+to it. Name the files the run will write, all by `factory.py` in the change's folder: code and
+`plan.md` by the builder; `build/round-<N>.md`, `reviews/round-<N>/<role>.md`,
+`reviews/round-<N>/verified.md` and `decision.md`, the agents' replies; `build/round-<N>.gate.md`,
+each attempt of the gate on that round's build; `runs/<agent>.sessions`, each session's id, for
+measuring; `runs/costs.jsonl`, each run's reported cost and tokens; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
 resolve. Say that the run will ask them about any blocking decision, and that every builder report
 and behaviour check must end with its `## Evidence` (each command run, its output, its exit), or
-the change stops: the behaviour check runs the gate and the spec's path, and reads `checks.md`
+the change stops: the behaviour check runs the spec's end-to-end path, and reads `checks.md`
 without running it, which `/sdlc:ship` does under a prompt.
 
 ## Step 2 — WAIT for explicit approval
 
 Ask literally, with a spec draft:
 
-> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
+> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
 
 And without one:
 
-> `Run the factory on NNN-<slug>: the builder plans and builds it, <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+> `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
 
 Leave out the parenthesis when the base branch's `.sdlc/config.toml` lists no `[review]
-sensitive` paths: every run is then full.
+sensitive` paths: every run is then full. When it names no `[commands] check`, the gate clause reads
+`, with no gate configured` instead.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -201,6 +213,24 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
      step 1.
+   - **`gate`**: the round's build hasn't been gated as it stands. The script runs the base
+     branch's check on it, adding the attempt to `.sdlc/work/NNN-slug/build/round-<round>.gate.md`;
+     start no reviewer until `verdicts` says `review`.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate <NNN>
+     ```
+
+   - **`fix`**: the gate is red on the round's build. The builder is told `The gate failed on
+     round <round>: read .sdlc/work/NNN-slug/build/round-<round>.gate.md, fix what it shows, then
+     report.`, and its report is added to `build/round-<round>.md`, the round being unreviewed;
+     snapshot that round again after it, as after every builder report, and the script then says
+     `gate` once more.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task fix
+     ```
+
    - **`decide`**: a blocking decision is waiting (`pending`). Ask the person with
      `AskUserQuestion`, one question per pending decision (up to four at once, all of one change:
      never two changes' in one dialog): the change's
@@ -259,8 +289,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
    - **`done`**: the decision is in and readable. Go to step 3.
    - **`stop`**: report its `problems` for the change, and leave it. It stays at `stage: build`,
      and the other changes run on. A reviewer reply that doesn't open with a verdict, a decision
-     that doesn't open with one, or `HEAD` moving (an agent committed) is a stop: never patch a
-     verdict in, and never reset a commit. **A missing `## Evidence` is the one stop this run can
+     that doesn't open with one, a third red gate in a round, or `HEAD` moving (an agent
+     committed) is a stop: never patch a verdict in, and never reset a commit. **A missing `## Evidence` is the one stop this run can
      mend itself,** once: the builder resumed, or a new behaviour check for that round, asked to
      run what its claims rest on again, its reply written over the old one.
 
@@ -278,7 +308,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
 ## Step 4 — Report it ready to ship
 
 Say `NNN-slug is ready to ship (READY|ESCALATE)`, leading with ESCALATE when that is the decision,
-and report: the depth it ran at and why, the rounds it took, each round's verdicts by reviewer and
+and report: the depth it ran at and why, the rounds it took, each round's gate attempts and their
+verdicts (or that no gate is configured), each round's verdicts by reviewer and
 how many changes the verifier kept and dropped, the decision and its first reason, the decisions
 the person made during the run and those still assumed (by id, with the default the build rests
 on), what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and

@@ -113,6 +113,15 @@ verifier has checked every `- CHANGE:` the reviewers asked for against the code,
 why in `notes.md` rather than ignoring it. A `- DROPPED:` line is not yours to act on. Rerun the
 tests and the gate.
 
+## A red gate
+
+Before any reviewer reads your build, `factory.py` runs the repo's gate on it itself, the base
+branch's `[commands] check`, and records each attempt in `.sdlc/work/NNN-slug/build/round-N.gate.md`.
+That file is the gate's record; your own run of it is a check along the way. When it is red, the
+supervisor resumes you naming that file: fix what its output shows, in the change's code (never the
+gate's own config), and report as you would any round. Your report is added to the round's, and the
+gate runs again. Two fixes a round; a third red gate stops the change for the person.
+
 ## A conflict, while landing
 
 When `/sdlc-factory:land` resumes you because the base branch moved and rebasing onto it

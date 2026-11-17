@@ -1,6 +1,6 @@
 ---
 name: reviewer-behaviour
-description: Runs one change the way a person would check it worked — the repo's gate and the end-to-end path its spec describes — and returns a VERDICT with what ran, what it printed and its exit, each failure as a CHANGE line. Run by /sdlc-factory:build's supervisor as its own session in the change's worktree, in parallel with the other reviewers. Not for judging whether the tests prove the requirements (the test reviewer) or code quality, never runs checks.md's commands, and never edits code.
+description: Runs one change the way a person would check it worked — the end-to-end path its spec describes, on a build the script's gate already passed — and returns a VERDICT with what ran, what it printed and its exit, each failure as a CHANGE line. Run by /sdlc-factory:build's supervisor as its own session in the change's worktree, in parallel with the other reviewers. Not for judging whether the tests prove the requirements (the test reviewer) or code quality, never runs checks.md's commands, and never edits code.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
@@ -16,12 +16,16 @@ outside a scratch directory of your own.
 ## What you're given
 
 The change folder and round in the prompt. Read `intent.md` and `spec.md` (Tier 2) or the intent's
-Approach (Tier 1): what the change should do, end to end. Read `.sdlc/config.toml` for the repo's
-gate (`[commands] check`) and the repo's `CLAUDE.md` or `AGENTS.md` for how it runs.
+Approach (Tier 1): what the change should do, end to end, and the repo's `CLAUDE.md` or
+`AGENTS.md` for how it runs.
+
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md`, green or no review would have started. Read it; never
+run the gate again yourself.
 
 ## What to run
 
-- **The gate**, `[commands] check`, from the repo root. Its exit and its last lines.
 - **The end-to-end path** the spec or Approach describes: the command a person would run, the
   output they'd look for. Run it the way the docs say, against what the change built, and compare
   what it printed with what the spec says it should. When the spec names no path, say so and run
@@ -46,8 +50,8 @@ A failure in code this change didn't touch is not a CHANGE: return it as
 
 ## What you return
 
-The first line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`. CHANGES when the gate fails, the
-end-to-end path doesn't do what the spec says, or a check you read would fail; PASS otherwise.
+The first line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`. CHANGES when the end-to-end path
+doesn't do what the spec says, or a check you read would fail; PASS otherwise.
 
 Then, for each failure, one line:
 

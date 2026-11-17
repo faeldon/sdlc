@@ -1030,12 +1030,35 @@ def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
     )
     assert "Leave out the parenthesis" in wait
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
+    assert "build/round-N.gate.md" in builder and "## A red gate" in builder
     assert "- KEPT:" in builder and "`- DROPPED:` line is not yours" in builder
     for role in ("code", "security", "test"):
         text = (FACTORY / "agents" / f"reviewer-{role}.md").read_text(encoding="utf-8")
         assert "- PREEXISTING:" in text and "never raise a settled point again" in text, role
     approver = (FACTORY / "agents" / "approver.md").read_text(encoding="utf-8")
     assert "## Reconsider the approach" in approver and "verified.md" in approver
+
+
+def test_the_script_gates_each_build_before_any_reviewer() -> None:
+    """073: `verdicts` names `gate` before `review`; the script runs it, a red one is the builder's
+    `fix`, and the one question names the gate the person's yes lets run, or that there is none.
+    The behaviour check reads the gate's record and never runs it again."""
+    build = frontmatter.load(BY_ID["sdlc-factory:build"])
+    rule = 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
+    assert rule in build["allowed-tools"]
+    step3 = build.content.split("## Step 3")[1].split("## Step 4")[0]
+    assert step3.index("**`gate`**") < step3.index("**`fix`**") < step3.index("**`review`**")
+    assert "factory.py gate <NNN>" in step3 and "agent <NNN> --task fix" in step3
+    wait = " ".join(build.content.split("## Step 2")[1].split("## Step 3")[0].split())
+    clause = (
+        "the builder plans and builds it, the base branch's gate <command> runs on each build "
+        "before any reviewer (up to 2 fixes a round), <reviewers> review it"
+    )
+    assert wait.count(clause) == 2, "both questions, with a spec draft and without"
+    assert "`, with no gate configured`" in wait
+    behaviour = (FACTORY / "agents" / "reviewer-behaviour.md").read_text(encoding="utf-8")
+    flat = " ".join(behaviour.split())
+    assert "build/round-N.gate.md" in flat and "never run the gate again yourself" in flat
 
 
 def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None:

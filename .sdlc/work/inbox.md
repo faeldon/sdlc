@@ -316,8 +316,9 @@ transcripts where `measure` reads them. See .sdlc/work/070-factory-supervisor/no
 commit.
 Theme: factory
 
-## [2026-11-17-8] [idea] A factory gate the script runs, before any reviewer
+## [2026-11-17-8] [building] A factory gate the script runs, before any reviewer
 
+Building in .sdlc/work/073-factory-script-gate/.
 The factory finds out whether a build works from an agent: `reviewer-behaviour` runs the gate and
 reports it, alongside the other reviewers, so a failing build still costs a full round of reviewer
 runs, and pass or fail rests on a reply's `## Evidence`. The factory it learned from runs the

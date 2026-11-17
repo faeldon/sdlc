@@ -104,6 +104,13 @@ spec.
 
 ## Rounds that converge
 
+- **Gated by the script, before any reviewer.** After each builder report, `factory.py gate` runs
+  the base branch's `[commands] check` in the change's worktree, never the change's own config, and
+  records each attempt in `build/round-<N>.gate.md`. A red gate, or one that changes the tree,
+  starts no reviewer: the builder fixes it, at most twice a round, and a third red gate stops the
+  change for you. Light runs are gated like full ones. The gate's command can't be changed by the
+  change, but the script it runs (a `check.sh`) is in the change's tree: list it in
+  `[review] sensitive` to have an edit to it reviewed at the full depth and named at ship.
 - **Verified before reworked.** After each round with a `CHANGES` verdict, the `verifier` checks
   every `- CHANGE:` against the code and keeps or drops it, with why. The builder reworks only what
   it keeps; `/sdlc:ship` shows what it dropped.
@@ -115,7 +122,8 @@ spec.
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
   each command run as `$ <command>`, the tail of its output, and `exit: <n>`. `factory.py` stops
-  the run on a reply without it, so "the gate passes" is never taken on an agent's word.
+  the run on a reply without it, and the gate itself is the script's, so "the gate passes" is
+  never taken on an agent's word.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
   one touching any runs the full depth, and a run never lightens. With no list, every run is full.
@@ -143,7 +151,7 @@ options and its recommendation. They're gathered into the change's ledger,
 | `reviewer-code` | correctness against the spec, contract, readability, cost | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
 | `reviewer-test` | every requirement proven by a test that can fail; reads `checks.md`, never runs it | no |
-| `reviewer-behaviour` | runs the gate and the spec's end-to-end path; reads `checks.md`, never runs it | no |
+| `reviewer-behaviour` | runs the spec's end-to-end path on a gated build; reads `checks.md`, never runs it | no |
 | `verifier` | keeps or drops each requested change, checked against the code | no |
 | `approver` | READY or ESCALATE, for the person at ship | no |
 
@@ -155,6 +163,7 @@ Only the builder edits. The others return text, and the skill writes it to the c
 .sdlc/work/NNN-slug/
   build/round-<N>.md            the builder's reports, each ending with its ## Evidence
   build/round-<N>.files         what each round's build left, hashed by path
+  build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for
   decisions.md                  the ledger of the calls that are yours
@@ -175,9 +184,9 @@ total so far, so a session counts once, at its last figure.
 
 All of it is committed with the change, at `/sdlc-factory:land` or `/sdlc:ship`, so history keeps
 how the change was made.
-`/sdlc:close` counts from it what the run cost in rework (rounds after the first, `CHANGES`
-verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at ship), so a
-factory change and one built by hand are measured the same way.
+`/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
+`CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at
+ship), so a factory change and one built by hand are measured the same way.
 
 ## Configuration: `.sdlc/factory.toml`
 
@@ -207,16 +216,19 @@ batch = 5                                  # the most changes one landing takes
 widen what its agents may do unasked. An agent session can't answer a tool prompt, so a command its
 mode doesn't allow is refused, and the agent reports it.
 
-A run takes at most `2 + rounds × (reviewers + 2)` agent runs at the full depth (20 with the
-defaults: each round's reviewers, the verifier and the builder's rework), and the build skill shows
-the number before you approve it, whatever depth the diff turns out to need.
+A run takes at most `2 + rounds × (reviewers + 4)` agent runs at the full depth (26 with the
+defaults: each round's reviewers, the verifier, the builder's rework and its two fixes of a red
+gate), and the build skill shows the number before you approve it, whatever depth the diff turns
+out to need.
 
 ## Mechanism
 
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
 stage allows the step, where `HEAD` was, what each review's first line says, the verifier's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); each agent session, its
+`gate`, `fix`, `review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); the gate
+itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
+one place it runs a host's command); each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
 the one place it runs `claude`); the changes ready to ship and their order (`ready`); the landing's
 batch and its signals (`land-check`), each change's landing (`land`, `resolve`, `land-verdicts`);

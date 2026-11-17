@@ -3378,13 +3378,16 @@ FACTORY_CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 FACTORY_LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
 FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
+# A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
+FACTORY_GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:
     """What the factory left in the change's commit, as counts: review rounds, each reviewer's
     `CHANGES` verdicts, change requests and requests the verifier dropped (`dropped`, from each
-    round's `verified.md`), the approver's decision, and the ledger's blocking and default
-    decisions. None for a change built by hand (no `decision.md`)."""
+    round's `verified.md`), the approver's decision, the ledger's blocking and default decisions,
+    and the script gate's red attempts (`gate_fail`, only when a gate file exists). None for a
+    change built by hand (no `decision.md`)."""
     folder = f"{work_rel(main)}/{branch}"
     decision = _git(main, "show", f"{branch}:{folder}/decision.md")
     if decision is None:
@@ -3418,7 +3421,7 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     ledger = _git(main, "show", f"{branch}:{folder}/decisions.md") or ""
     entries = [e for e in map(FACTORY_LEDGER_RE.match, ledger.splitlines()) if e]
     defaults = [e for e in entries if e.group(4) == "default"]
-    return {
+    found = {
         "rounds": len(rounds),
         "reviews": reviews,
         "decision": m.group(1) if m else None,
@@ -3426,6 +3429,18 @@ def _factory_files(main: Path, branch: str) -> dict | None:
         "defaults": len(defaults),
         "defaults_open": sum(1 for e in defaults if e.group(1) == " "),
     }
+    # The script gate's red attempts, known only for a run that had the gate: one from before it,
+    # or with no gate configured, says nothing, never 0.
+    built = _git(main, "ls-tree", "-r", "--name-only", branch, f"{folder}/build") or ""
+    gates = [p for p in built.splitlines() if p.endswith(".gate.md")]
+    if gates:
+        found["gate_fail"] = sum(
+            1
+            for p in gates
+            for line in (_git(main, "show", f"{branch}:{p}") or "").splitlines()
+            if FACTORY_GATE_FAIL_RE.match(line)
+        )
+    return found
 
 
 def _change_base(

@@ -14,8 +14,9 @@ Read the decision, the highest round's reviews, every `verified.md` and the ledg
 evidence for Step 3, never a substitute for it. A dropped change your own passes confirm is a
 finding like any other. The builder's reports in `build/round-<N>.md` and the behaviour check's
 `reviews/round-<N>/behaviour.md` end with a `## Evidence` section, each command with its output and
-exit: what the agents say they ran, which Step 1's gate and acceptance checks still run for
-themselves.
+exit: what the agents say they ran. `build/round-<N>.gate.md`, where there is one, is the script's
+own record of the base branch's gate on each build before its review, every attempt with its exit.
+Step 1's gate and acceptance checks still run for themselves.
 
 ## Step 4
 

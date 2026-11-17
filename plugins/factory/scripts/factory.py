@@ -20,6 +20,7 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
     uv run --script factory.py start 008 --for build
     uv run --script factory.py decisions 008
     uv run --script factory.py verdicts 008 --head 1a2b3c4
+    uv run --script factory.py gate 008
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
     uv run --script factory.py agent 008 --task review --role code
@@ -28,11 +29,12 @@ own version, beside it (`sdlc_path()`), so ship, base and close keep one impleme
     uv run --script factory.py land 008 --by auto
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
-`carry` to `notes.md`, `stage` to `intent.md`, `agent` the reply an agent session returned, and
-its id and figures under `runs/`. Nothing is written outside the change's folder, and nothing
-under `.git/`, but by the landing: `land` and `resolve` commit and rebase the change's own branch,
-and `sdlc.py close` lands it. A command about one change runs in its worktree, found from the main
-checkout when the supervisor runs there (`change_root()`).
+`carry` to `notes.md`, `stage` to `intent.md`, `gate` its attempt to `build/round-<N>.gate.md`,
+`agent` the reply an agent session returned, and its id and figures under `runs/`. Nothing is
+written outside the change's folder, and nothing under `.git/`, but by the landing: `land` and
+`resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it. A command about
+one change runs in its worktree, found from the main checkout when the supervisor runs there
+(`change_root()`).
 
 **Decisions that are a person's.** An agent that reaches a call it shouldn't make (a trade-off, a
 policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] ...` line in its
@@ -52,6 +54,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 import uuid
 from contextlib import suppress
@@ -113,6 +116,16 @@ EVIDENCE = "## Evidence"
 EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
 # The reviewers whose replies owe evidence too: the ones that run the change.
 RUNS_THE_CHANGE = ("behaviour",)
+# The gate, the base branch's `[commands] check`, which this script runs on each build before any
+# reviewer, into `build/round-<N>.gate.md`: its first line the latest attempt's verdict, then one
+# `## Attempt <k>` section each. A red gate sends the builder back at most `GATE_FIXES` times a
+# round; one more red is a stop. A fix never counts as a round, which stays a reviewed one.
+GATE_TIMEOUT = 30 * 60
+GATE_FIXES = 2
+GATE_TAIL = 80
+GATE_RE = re.compile(r"^GATE: (PASS|FAIL)\s*$")
+ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
+BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -149,6 +162,18 @@ def _utf8_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         with suppress(AttributeError, ValueError, OSError):
             stream.reconfigure(encoding="utf-8")
+
+
+def _sh(command: str) -> list[str]:
+    """The argv that runs the host's gate through `sh -c` on every platform, as `sdlc.py` runs a
+    host's commands: `/bin/sh`, and on Windows the `sh` on PATH, Git for Windows', never
+    `cmd.exe`. Raises OSError when Windows has none. Copied from `sdlc.py`, pinned by a test."""
+    if os.name != "nt":
+        return ["/bin/sh", "-c", command]
+    found = shutil.which("sh")
+    if found is None:
+        raise OSError("no sh on PATH: install Git for Windows, whose sh runs a host's commands")
+    return [found, "-c", command]
 
 
 def repo_root() -> Path:
@@ -382,9 +407,10 @@ def work_rel(root: Path) -> str:
 
 def max_runs(cfg: dict) -> int:
     """The most agent runs one build can take, at the full depth: the builder, the approver, and
-    each round's reviewers, verifier and builder resume. An upper bound to show before a person
-    approves the cost, whatever depth the diff turns out to need."""
-    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + 2)
+    each round's reviewers, verifier, builder resume and the builder's fixes of a red gate. An
+    upper bound to show before a person approves the cost, whatever depth the diff turns out to
+    need."""
+    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + 2 + GATE_FIXES)
 
 
 # The base branch's review lists, read here because the factory's cached copy has no `sdlc.py`.
@@ -416,6 +442,18 @@ def _sensitive(root: Path, base: str) -> list[str]:
     review = data.get("review")
     listed = review.get("sensitive") if isinstance(review, dict) else None
     return [p for p in listed if isinstance(p, str)] if isinstance(listed, list) else []
+
+
+def _base_check(root: Path, base: str) -> str | None:
+    """`[commands] check` as the base branch holds it, never this checkout's: a change can't edit
+    the gate it is judged by. None when the base branch names none."""
+    try:
+        data = tomllib.loads(_git(root, "show", f"{base}:{SDLC_CONFIG.as_posix()}") or "")
+    except tomllib.TOMLDecodeError:
+        return None
+    commands = data.get("commands")
+    check = commands.get("check") if isinstance(commands, dict) else None
+    return check if isinstance(check, str) and check.strip() else None
 
 
 def _changed_paths(root: Path, base: str) -> list[str]:
@@ -775,7 +813,12 @@ def cmd_verdicts(root: Path, ident: str, head: str | None) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
     - `build`: no builder report yet: run the builder (`build/round-1.md`).
-    - `review`: run the reviewers for `round` (all of them, or the `missing` ones).
+    - `gate`: run `gate` on `round`'s build, which no attempt has judged as it stands now.
+    - `fix`: the gate is red on `round`'s build: resume the builder with
+      `build/round-<round>.gate.md`; its report is added to `build/round-<round>.md`. A red gate
+      more than `GATE_FIXES` times in a round is a `stop`.
+    - `review`: run the reviewers for `round` (all of them, or the `missing` ones), once its
+      gate is green or the base branch names none (`gate` null, `gate_why`).
     - `verify`: run the verifier on `round`'s changes, before any rework.
     - `rework`: resume the builder with `round`'s kept changes; its report is
       `build/round-<round+1>.md`.
@@ -826,6 +869,14 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and not d["decided"]]
     built = build_round(folder)
     out["built"] = built
+    # A build no review round has read yet is gated first; a reviewed one never is again.
+    unreviewed = bool(built) and (last is None or last["round"] < built)
+    gate, out["gate_why"] = _gate_state(root, folder, built) if built else (None, None)
+    out["gate"] = gate
+    if gate and unreviewed and gate["current"] == "FAIL" and gate["fails"] > GATE_FIXES:
+        problems.append(
+            f"the gate failed {gate['fails']} times in round {built}: exit {gate['exit']}"
+        )
     out["reworked"] = reworked(folder, built) if built else None
     out["settled"] = settled(rounds, last["round"] if last else 0)
     asked = [
@@ -858,7 +909,11 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["next"] = "done"
     elif built == 0:
         out["next"], out["round"] = "build", 1
-    elif last is None or last["round"] < built:
+    elif unreviewed and gate and gate["current"] is None:
+        out["next"], out["round"] = "gate", built
+    elif unreviewed and gate and gate["current"] == "FAIL":
+        out["next"], out["round"] = "fix", built
+    elif unreviewed:
         out["next"], out["round"], out["missing"] = "review", built, list(run["reviewers"])
     elif not last["complete"]:
         out["next"], out["round"] = "review", last["round"]
@@ -909,6 +964,16 @@ def cmd_carry(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "notes": str(notes), "added": added})
 
 
+def _tree_hashes(root: Path, base: str) -> dict[str, str]:
+    """Every path the change touches, as path → its content's sha256, or `deleted`: what a
+    snapshot records, and what the gate compares before and after it runs."""
+    found = {}
+    for p in _changed_paths(root, base):
+        file = root / p
+        found[p] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+    return found
+
+
 def cmd_snapshot(root: Path, ident: str, n: int) -> int:
     """Write `build/round-<N>.files`: a hash of every path the change touches as round `n`'s build
     left it, so the next round's reviewers read what the rework changed. A file in the change's
@@ -921,16 +986,122 @@ def cmd_snapshot(root: Path, ident: str, n: int) -> int:
     base = _base(root)
     if base is None:
         return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
-    lines = []
-    for p in _changed_paths(root, base):
-        file = root / p
-        digest = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
-        lines.append(f"{digest}  {p}\n")
+    lines = [f"{digest}  {p}\n" for p, digest in _tree_hashes(root, base).items()]
     path = snapshot_path(folder, n)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(lines), encoding="utf-8", newline="\n")
     rel = path.relative_to(root).as_posix()
     return emit({"change": folder.name, "snapshot": rel, "paths": len(lines)})
+
+
+def gate_path(folder: Path, n: int) -> Path:
+    return folder / "build" / f"round-{n}.gate.md"
+
+
+def build_hash(folder: Path, n: int) -> str:
+    """Round `n`'s build as the gate judges it: its report and its snapshot together. A fix adds
+    to the report and is snapshotted again, so it is always a new build, gated again."""
+    digest = hashlib.sha256()
+    for path in (folder / "build" / f"round-{n}.md", snapshot_path(folder, n)):
+        digest.update(path.read_bytes() if path.is_file() else b"")
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def read_gate(folder: Path, n: int) -> dict | None:
+    """`build/round-<N>.gate.md` as its attempts, oldest first, each its verdict and the build it
+    ran on, or None when the gate never ran on round `n`."""
+    path = gate_path(folder, n)
+    if not path.is_file():
+        return None
+    attempts: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        # The gate's output is indented, so a line of it never reads as a record's.
+        if line.startswith("## Attempt "):
+            attempts.append({"verdict": None, "build": None, "exit": None})
+        elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
+            attempts[-1]["verdict"] = m.group(1)
+        elif attempts and (m := BUILD_RE.match(line)):
+            attempts[-1]["build"] = m.group(1)
+        elif attempts and line.startswith("Exit: "):
+            attempts[-1]["exit"] = line[len("Exit: ") :].strip()
+    fails = sum(a["verdict"] == "FAIL" for a in attempts)
+    return {"attempts": attempts, "fails": fails}
+
+
+def _gate_state(root: Path, folder: Path, built: int) -> tuple[dict | None, str | None]:
+    """The gate as it stands for round `built`'s build, or None and why there is no gate: the
+    command, its fails so far this round, and the last attempt's verdict when it ran on this
+    build exactly (`current`), else None, which calls for a fresh attempt."""
+    base = _base(root)
+    command = _base_check(root, base) if base else None
+    if command is None:
+        return None, "the base branch's .sdlc/config.toml has no [commands] check"
+    record = read_gate(folder, built) or {"attempts": [], "fails": 0}
+    last = record["attempts"][-1] if record["attempts"] else None
+    now = build_hash(folder, built)
+    current = last["verdict"] if last and last["build"] == now else None
+    out = {"command": command, "round": built, "fails": record["fails"], "current": current}
+    return out | {"exit": last["exit"] if last else None}, None
+
+
+def cmd_gate(root: Path, ident: str) -> int:
+    """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
+    add the attempt to `build/round-<N>.gate.md`. PASS only on exit 0, within `GATE_TIMEOUT`, with
+    the tree as it found it. Any time, not only when `verdicts` says `gate`, so a step after a
+    rebase can run it too. Writes only that file."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    command = _base_check(root, base)
+    if command is None:
+        why = "the base branch's .sdlc/config.toml has no [commands] check"
+        return emit({"refusals": [why]}, 1)
+    n = build_round(folder)
+    if n == 0:
+        return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
+    before = _tree_hashes(root, base)
+    start = time.monotonic()
+    try:
+        done = subprocess.run(
+            _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
+        )  # fmt: skip
+        code, output = done.returncode, done.stdout + done.stderr
+        exit_text = str(code)
+    except subprocess.TimeoutExpired as e:
+        # A timeout's partial output is bytes even in text mode.
+        partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
+                   (e.stdout, e.stderr)]  # fmt: skip
+        code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
+        exit_text = "timeout"
+    except OSError as e:
+        code, output, exit_text = None, f"didn't run: {e}", "didn't run"
+    seconds = round(time.monotonic() - start, 1)
+    after = _tree_hashes(root, base)
+    changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+    verdict = "PASS" if code == 0 and not changed else "FAIL"
+    path = gate_path(folder, n)
+    attempt = len((read_gate(folder, n) or {"attempts": []})["attempts"]) + 1
+    tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
+    tail = tail or "    (no output)\n"
+    tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
+    section = (
+        f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
+        f"Build: {build_hash(folder, n)}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
+        f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
+    )
+    # The first line is the latest verdict; the attempts before it stay as they were.
+    earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
+    earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    out = {"change": folder.name, "round": n, "attempt": attempt, "verdict": verdict}
+    out.update(exit=exit_text, seconds=seconds, tree=tree, to=path.relative_to(root).as_posix())
+    return emit(out, 0 if verdict == "PASS" else 1)
 
 
 def set_stage(text: str, stage: str, today: str) -> tuple[str, list[str]]:
@@ -986,19 +1157,22 @@ USAGE_FIELDS = {
     "in": "input_tokens", "out": "output_tokens",
     "cache_create": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens",
 }  # fmt: skip
-TASKS = ("spec", "build", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
-         "land-review", "land-verify")  # fmt: skip
+TASKS = ("spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve",
+         "resolve", "land-review", "land-verify")  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
-    "spec": "spec-writer", "build": "builder", "verify": "verifier", "rework": "builder",
-    "decided": "builder", "approve": "approver", "resolve": "builder", "land-verify": "verifier",
+    "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
+    "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
+    "land-verify": "verifier",
 }  # fmt: skip
 # The landing's tasks: the builder resolving a rebase's conflicts, and the review of the change
 # as it now stands on the base branch. Never steps of the build's loop, so `verdicts` names none.
 LAND_TASKS = ("resolve", "land-review", "land-verify")
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
-TASK_STEP = {"build": "build", "review": "review", "verify": "verify", "rework": "rework",
-             "approve": "approve"}  # fmt: skip
+TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
+             "rework": "rework", "approve": "approve"}  # fmt: skip
+# What the builder resumes on when a task carries on its own session.
+RESUMES = ("fix", "rework", "decided", "mend", "resolve")
 MEND = (
     "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
     "again and reply with it."
@@ -1160,6 +1334,14 @@ def _task(
             (folder / "build" / "round-1.md"),
             False,
         )
+    if task == "fix":
+        # Added to the round's report, as an answer before review is: the round isn't reviewed.
+        return (
+            f"The gate failed on round {rnd}: read {rel}/build/round-{rnd}.gate.md, fix what it "
+            "shows, then report.",
+            folder / "build" / f"round-{rnd}.md",
+            True,
+        )
     if task == "review":
         if role not in state["missing"]:
             return f"{role} isn't among round {rnd}'s missing reviewers: {state['missing']}"
@@ -1310,7 +1492,7 @@ def cmd_agent(
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
     sessions = folder / "runs" / f"{agent_name(role)}.sessions"
-    resumed = (role == "builder" and task in ("rework", "decided", "mend", "resolve")) or bool(
+    resumed = (role == "builder" and task in RESUMES) or bool(
         task == "spec" and (revise or recheck)
     )
     if resumed:
@@ -2087,6 +2269,8 @@ def main() -> int:
     p_snapshot = sub.add_parser("snapshot", help="hash what a round's build left, for the next")
     p_snapshot.add_argument("id")
     p_snapshot.add_argument("--round", dest="round", type=int, required=True)
+    p_gate = sub.add_parser("gate", help="run the base branch's gate on the newest build")
+    p_gate.add_argument("id")
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
@@ -2155,6 +2339,8 @@ def main() -> int:
         return cmd_carry(root, args.id)
     if args.cmd == "snapshot":
         return cmd_snapshot(root, args.id, args.round)
+    if args.cmd == "gate":
+        return cmd_gate(root, args.id)
     if args.cmd == "escapes":
         return cmd_escapes(root, args.limit)
     if args.cmd == "report-dir":

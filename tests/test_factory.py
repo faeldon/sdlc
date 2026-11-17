@@ -175,9 +175,9 @@ def test_light_is_a_table_checked_like_the_top_level(tmp_path: Path) -> None:
 
 def test_max_runs_is_shown_before_the_cost_is_approved() -> None:
     """At the full depth, whatever the diff turns out to need: the builder, the approver, and each
-    round's reviewers, verifier and builder resume."""
+    round's reviewers, verifier, builder resume and the builder's two fixes of a red gate."""
     cfg = {"reviewers": ["code", "security", "test"], "rounds": 3, "models": {}}
-    assert factory.max_runs(cfg) == 2 + 3 * 5
+    assert factory.max_runs(cfg) == 2 + 3 * (3 + 2 + 2)
 
 
 # ---------------------------------------------------------------- start
@@ -202,7 +202,7 @@ def test_start_checks_the_tier_and_stage(tmp_path, capsys, tier, stage, purpose,
     assert (code == 0) is ok and (not out["refusals"]) is ok, out["refusals"]
     assert out["head"] == _git(root, "rev-parse", "--short", "HEAD")
     if ok:
-        assert out["change"] == NAME and out["max_runs"] == 20, "2 + 3 rounds × (4 + 2)"
+        assert out["change"] == NAME and out["max_runs"] == 26, "2 + 3 rounds × (4 + 2 + 2)"
 
 
 def test_a_tier_1_spec_is_told_its_approach_is_the_spec(tmp_path, capsys) -> None:
@@ -694,7 +694,7 @@ def test_a_host_s_own_reviewers_are_kept_and_behaviour_is_one_it_can_name(tmp_pa
     config.write_text('reviewers = ["behaviour"]\n', encoding="utf-8")
     cfg, warnings = factory.load_config(tmp_path)
     assert cfg["reviewers"] == ["behaviour"] and warnings == []
-    assert factory.max_runs(factory.load_config(tmp_path / "none")[0]) == 20
+    assert factory.max_runs(factory.load_config(tmp_path / "none")[0]) == 26
 
 
 @pytest.mark.parametrize(
@@ -1213,6 +1213,165 @@ def test_a_revision_reaches_the_same_spec_writer_through_the_ledger(tmp_path, ca
     assert factory.read_ledger(folder) == [], "a revision is no decision the loop waits on"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None, None, True)
     assert code == 1 and "for --task spec" in out["refusals"][0]
+
+
+# ---------------------------------------------------------------- the gate
+
+
+def _gate_config(root: Path, command: str, extra: str = "") -> None:
+    """Commit `[commands] check` on `main`, the base branch, and go back to the change's branch,
+    whose own checkout then has no config of its own."""
+    _git(root, "checkout", "-q", "main")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    text = f"[commands]\ncheck = {json.dumps(command)}\n{extra}"
+    (root / ".sdlc" / "config.toml").write_text(text, encoding="utf-8")
+    _git(root, "add", ".sdlc/config.toml")
+    _git(root, "commit", "-q", "-m", "gate")
+    _git(root, "checkout", "-q", NAME)
+
+
+def _gate(root, capsys) -> tuple[int, dict]:
+    return _run(capsys, factory.cmd_gate, root, "008")
+
+
+def _fixed(root: Path, n: int = 1) -> None:
+    """What a fix does to the round's report and snapshot: added to, so the build is a new one."""
+    report = root / ".sdlc" / "work" / NAME / "build" / f"round-{n}.md"
+    report.write_text(report.read_text(encoding="utf-8") + "\nFixed it.\n", encoding="utf-8")
+
+
+def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """R1–R4: the base branch's command, never the checkout's; each attempt appended, the first
+    line the latest; a red gate is a fix for the same builder, appended to the round's report,
+    and the fixed build is gated again before any review."""
+    root = _change(tmp_path)
+    _gate_config(root, 'echo base-ran; test -z "$FAKE_GATE_FAIL"')
+    (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "echo mine"\n')
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"]) == ("gate", 1) and out["gate"]["current"] is None
+
+    monkeypatch.setenv("FAKE_GATE_FAIL", "1")
+    code, out = _gate(root, capsys)
+    assert code == 1 and (out["verdict"], out["attempt"], out["exit"]) == ("FAIL", 1, "1")
+    record = (folder / "build" / "round-1.gate.md").read_text(encoding="utf-8")
+    assert record.startswith("GATE: FAIL\n") and "    base-ran" in record and "mine" not in record
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["gate"]["fails"]) == ("fix", 1), "no reviewer on a red build"
+
+    (folder / "runs").mkdir()
+    (folder / "runs" / "builder.sessions").write_text("builder-1\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "fix", None, None)
+    assert code == 0 and out["to"].endswith("build/round-1.md"), out
+    argv = claude()[-1]["argv"]
+    assert "The gate failed on round 1" in argv[1] and argv[-2:] == ["--resume", "builder-1"]
+    report = (folder / "build" / "round-1.md").read_text(encoding="utf-8")
+    assert report.startswith("Built slice 1.") and "the report" in report, "added, not replaced"
+    assert _verdicts(root, capsys)["next"] == "gate", "a fixed build is gated again"
+
+    monkeypatch.delenv("FAKE_GATE_FAIL")
+    code, out = _gate(root, capsys)
+    assert code == 0 and (out["verdict"], out["attempt"]) == ("PASS", 2)
+    record = (folder / "build" / "round-1.gate.md").read_text(encoding="utf-8")
+    assert record.startswith("GATE: PASS\n") and record.count("## Attempt ") == 2
+    assert [a["verdict"] for a in factory.read_gate(folder, 1)["attempts"]] == ["FAIL", "PASS"]
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
+
+
+def test_a_third_red_gate_in_a_round_is_a_stop(tmp_path, capsys) -> None:
+    """R5: two fixes a round; the third red gate stops the change, never a review."""
+    root = _change(tmp_path)
+    _gate_config(root, "exit 3")
+    _build_report(root, 1)
+    for fix in range(factory.GATE_FIXES):
+        _gate(root, capsys)
+        assert _verdicts(root, capsys)["next"] == "fix", fix
+        _fixed(root)
+    _gate(root, capsys)
+    out = _verdicts(root, capsys)
+    assert out["next"] == "stop"
+    assert any("the gate failed 3 times in round 1: exit 3" in p for p in out["problems"])
+
+
+def test_a_gate_that_changes_the_tree_or_runs_too_long_fails(tmp_path, capsys, monkeypatch):
+    """R2: PASS only on exit 0, within the timeout, with the tree as the gate found it."""
+    root = _change(tmp_path)
+    _gate_config(root, "printf more >> README.md")
+    _build_report(root, 1)
+    code, out = _gate(root, capsys)
+    assert code == 1 and out["exit"] == "0" and out["tree"] == "changed: README.md"
+    _gate_config(root, "exec sleep 5")
+    monkeypatch.setattr(factory, "GATE_TIMEOUT", 0.5)
+    code, out = _gate(root, capsys)
+    assert code == 1 and out["exit"] == "timeout" and out["attempt"] == 2
+
+
+def test_with_no_gate_the_build_goes_to_review(tmp_path, capsys) -> None:
+    """R6: no `[commands] check` on the base branch, no step and no file, and why."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    out = _verdicts(root, capsys)
+    assert out["next"] == "review" and out["gate"] is None and "[commands] check" in out["gate_why"]
+    code, out = _gate(root, capsys)
+    assert code == 1 and "no [commands] check" in out["refusals"][0]
+    assert not (root / ".sdlc" / "work" / NAME / "build" / "round-1.gate.md").exists()
+
+
+def test_the_light_depth_is_gated_too(tmp_path, capsys) -> None:
+    """R7: a diff touching no sensitive path runs light, and its build is gated all the same."""
+    root = _change(tmp_path)
+    _gate_config(root, "true", '[review]\nsensitive = ["secrets/"]\n')
+    _build_report(root, 1)
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["next"]) == ("light", "gate")
+
+
+def test_a_reviewed_round_is_never_gated_after_the_fact(tmp_path, capsys) -> None:
+    """R14: a run from before the gate, its round reviewed with no gate file, reads as it did."""
+    root = _change(tmp_path)
+    _gate_config(root, "true")
+    _round(root, 1, code="CHANGES")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"]) == ("verify", 1) and out["problems"] == []
+
+
+def test_close_counts_the_red_gates_only_for_a_run_that_had_one(tmp_path, capsys) -> None:
+    """R10: `gate_fail` from the committed gate files reaches `Sdlc-Rework`; a run with no gate
+    file says nothing, never 0, so an old trailer reads as unknown."""
+    metrics = sdlc.metrics
+    root = _change(tmp_path)
+    _gate_config(root, "test -f fixed.txt")
+    _round(root, 1)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "decision.md").write_text("DECISION: READY\n\nAll pass.\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "built, no gate yet")
+    assert "gate_fail" not in sdlc._factory_files(root, NAME)
+    _gate(root, capsys)
+    (root / "fixed.txt").write_text("ok\n", encoding="utf-8")
+    _fixed(root)
+    _gate(root, capsys)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "gated")
+    found = sdlc._factory_files(root, NAME)
+    assert found["gate_fail"] == 1 and found["rounds"] == 1, "the gate file is no review round"
+    done = metrics.rework([], {}, found, None, 2)
+    assert done["gate_fail"] == 1
+    assert any("gate_fail=1" in line for line in metrics.in_change_trailers(done, {}, None))
+    old = {k: v for k, v in found.items() if k != "gate_fail"}
+    assert "gate_fail" not in metrics.rework([], {}, old, None, 2)
+
+
+def test_a_fix_is_refused_unless_the_gate_is_red(tmp_path, capsys, claude) -> None:
+    root = _change(tmp_path)
+    _gate_config(root, "true")
+    _build_report(root, 1)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "fix", None, None)
+    assert code == 1 and "verdicts says 'gate'" in out["refusals"][0] and not claude()
 
 
 def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> None:
