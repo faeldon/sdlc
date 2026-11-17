@@ -176,7 +176,9 @@ sessions and hosts need, one line for each key it holds: `scripts`, live in ever
 the plugin from this clone, nothing to do; `skills`, named, read when a session starts, so
 `/reload-plugins` in each open session that uses them, between stages and never during one, since
 old skill text calling the new script can break a run partway; `agents`, the factory's, named, the
-same as skills; `hosts`, the files named, which reach a host only through `/sdlc:setup` there, and
+same as skills; `settings`, the shared `.claude/settings.json`, read when a session starts, so
+`/reload-plugins` in each open session when its `enabledPlugins` moved, and a new session for
+any other setting that must take effect now, between stages as for skills; `hosts`, the files named, which reach a host only through `/sdlc:setup` there, and
 `status` there won't nudge until the version moves; `unknown`, its reason, and that the human
 reads the change's diff to see which of these apply. Say nothing about it when the report has
 none.

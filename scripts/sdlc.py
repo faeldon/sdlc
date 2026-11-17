@@ -4349,9 +4349,11 @@ def landing_reach(paths: list[str]) -> dict:
     """What a landed change to this plugin asks of the sessions and hosts running it from a clone:
     `scripts` are live in every session at once, and so are the guides, read in place at each
     stage; `skills` and the `agents`, sdlc's and the factory's (by namespaced name), are read
-    when a session starts, so need `/reload-plugins`, and `hosts` (setup's defaults and
-    templates) need `/sdlc:setup` in each host. Only the kinds the paths touch."""
-    scripts, skills, agents, hosts = False, set(), set(), []
+    when a session starts, so need `/reload-plugins`, as does `settings` (the shared
+    `.claude/settings.json`, its `enabledPlugins`; a new session for the rest), and `hosts`
+    (setup's defaults and templates) need `/sdlc:setup` in each host. Only the kinds the paths
+    touch."""
+    scripts, skills, agents, hosts, settings = False, set(), set(), [], []
     for path in paths:
         parts = path.split("/")
         if parts[0] in ("scripts", "guide") or parts[:3] == ["plugins", "factory", "scripts"]:
@@ -4366,9 +4368,11 @@ def landing_reach(paths: list[str]) -> dict:
             agents.add(f"sdlc:{parts[1].removesuffix('.md')}")
         elif parts[0] in ("defaults", "templates"):
             hosts.append(path)
+        elif path == ".claude/settings.json":
+            settings.append(path)
     found = {
         "scripts": scripts, "skills": sorted(skills), "agents": sorted(agents),
-        "hosts": sorted(hosts),
+        "settings": settings, "hosts": sorted(hosts),
     }  # fmt: skip
     return {k: v for k, v in found.items() if v}
 

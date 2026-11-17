@@ -152,7 +152,8 @@ script after a merge that brought `scripts/`, so a change closes on its own code
 `SDLC_CLOSE_RAN` stops a loop. There too, `reaches` (`landing_reach()`, over the change's whole
 diff) tells the person what the landed change asks of the sessions and hosts running the plugin
 from a clone: scripts live at once, skills and the factory's agents at `/reload-plugins`,
-setup's files at `/sdlc:setup`, or `unknown` and why. The commands ship runs from a change's
+`.claude/settings.json` at `/reload-plugins` or a new session, setup's files at `/sdlc:setup`,
+or `unknown` and why. The commands ship runs from a change's
 worktree (`OWN_SCRIPT_CMDS`: those that write, and `preflight` and `findings`, whose reading the
 change may have changed) have a handoff of their own, apart from close's: `_own_script()` runs
 the change's `scripts/sdlc.py` once the change edits `scripts/`, before `main()` parses anything,

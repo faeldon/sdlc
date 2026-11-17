@@ -641,6 +641,10 @@ def test_main_never_hands_off_a_command_that_only_reads(own_tree, monkeypatch) -
         (["README.md", "docs/CONTRIBUTING.md", ".sdlc/work/001-thing/intent.md", "tests/t.py"], {}),
         # The guides are read in place at each stage: live, never a host's to set up again.
         (["guide/process.md", "guide/review.md"], {"scripts": True}),
+        # The shared settings are read when a session starts (079's `enabledPlugins`).
+        ([".claude/settings.json"], {"settings": [".claude/settings.json"]}),
+        # CLAUDE.md only imports AGENTS.md, which nearly every change edits.
+        ([".claude/CLAUDE.md"], {}),
     ],
 )
 def test_landing_reach_sorts_paths_into_what_each_needs(paths, reaches) -> None:

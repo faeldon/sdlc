@@ -47,6 +47,7 @@ or host does then depends on what the change touched:
 | `scripts/` (and the factory's) | at once: every skill runs the script from the clone | nothing |
 | `skills/`, `agents/` and the factory's `agents/` | when the session starts | `/reload-plugins` in each open session, or restart it |
 | `guide/` | at once: read in place at each stage | nothing |
+| `.claude/settings.json` | when the session starts | `/reload-plugins` for `enabledPlugins`, else a new session |
 | `defaults/`, `templates/`, a config key | never: the host owns its copies | `/sdlc:setup` in each host repo |
 
 Reload between stages, never during one. A session halfway through `/sdlc:ship` keeps its old
@@ -56,7 +57,7 @@ the version moves only at a release. A config key's rename lives in `scripts/sdl
 `RETIRED_KEYS` entry, so it needs setup too, which reports it as breaking.
 
 Close's report lists all of it, as `reaches`, in this repo only: whether scripts changed, which
-skills and agents, and which of setup's files, or `unknown` and why when it couldn't tell.
+skills and agents, whether the shared settings, and which of setup's files, or `unknown` and why when it couldn't tell.
 
 Before it lands, a change runs its own script where it writes. In this repo, once a change edits
 `scripts/`, `ship`, `drop`, `base`, `sync`, `preflight` and `findings` run from its worktree hand
