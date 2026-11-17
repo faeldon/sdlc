@@ -311,3 +311,13 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 077-ship-resolves-conflicts (correctness)
+
+## [2026-11-17-12] [bug] Close's reaches says nothing of a change to .claude/settings.json
+
+Found by the review of 079-enable-factory.
+
+`landing_reach()` (scripts/sdlc.py:4355-4369) classifies no `.claude/` path, so `_reaches()` returns
+None for a change whose only effect is a setting read when a session starts (`enabledPlugins`), and
+close says the landed change asks nothing of open sessions, which need `/reload-plugins`.
+Severity: low
+Paths: scripts/sdlc.py

@@ -16,6 +16,9 @@ claude plugin install sdlc@sdlc
 claude plugin list                               # "Read from: <path-to-clone>"
 ```
 
+This repo's `.claude/settings.json` enables `sdlc@sdlc` and `sdlc-factory@sdlc` for every session
+in it, so the factory's skills load here too once the marketplace is registered.
+
 The `Read from:` line is the check. Without it, sessions run a cached copy in
 `~/.claude/plugins/cache/sdlc/sdlc/<version>/`, which changes only when a release bumps
 the version. A session started before the switch keeps its old path, so `/sdlc:close` in the
