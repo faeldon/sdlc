@@ -228,17 +228,6 @@ fixes of 2026-11-17-30.
 Theme: factory
 Raised 2026-11-17.
 
-## [2026-11-17-27] [idea] Bring sdlc.py's docstrings up to date: the .sdlc/work/ name and the subcommand list
-
-AGENTS.md now points at docstrings for detail, and some are stale: `sdlc.py`'s module docstring,
-`change_dirs()`, `next_id()`, `claim()` and `cmd_uninstall()` still name the change folder `work/`
-(its pre-1.4.0 name), and the module docstring lists about half the subcommands (no `base`,
-`resolve`, `preflight`, `findings`, `checks`, `accept`, `board`, `record`, `drift`, …): complete
-it, or cut it to the module's purpose. See .sdlc/work/090-agents-rules-once/notes.md in 090's
-commit.
-Theme: docs
-Raised 2026-11-17.
-
 ## [2026-11-17-28] [idea] CONTRIBUTING's Writing a tracker lists the intake methods
 
 AGENTS.md points at CONTRIBUTING.md's *Writing a tracker* for the tracker interface, which leaves
@@ -247,15 +236,6 @@ out the intake methods core calls when a tracker has them: `mark()`, `unmark()`,
 090's commit.
 Theme: docs
 Raised 2026-11-17.
-
-## [2026-11-17-29] [bug] _drop_record()'s docstring breaks off mid-sentence
-
-Found by the review of 090-agents-rules-once.
-Its docstring ends "Why not, or" (scripts/sdlc.py:4186), so a reader following AGENTS.md's
-pointers into close's docstrings meets half a rule.
-
-Severity: low
-Paths: scripts/sdlc.py
 
 ## [2026-11-17-37] [idea] The landing follows main when it moves before the close
 
@@ -446,4 +426,10 @@ Raised 2026-11-17.
 
 Left undone by 101-factory-start-fresh, carried forward when it landed: `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and
 See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-65] [idea] Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
+
+Left undone by 102-sdlc-docstrings, carried forward when it landed: Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
+See .sdlc/work/102-sdlc-docstrings/notes.md in its commit.
 Raised 2026-11-17.

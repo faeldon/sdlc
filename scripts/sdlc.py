@@ -5,65 +5,23 @@
 # ///
 """sdlc — the mechanical half of the change process in the host repo's process doc.
 
-Every non-trivial change to a repo using this plugin gets a numbered folder under `work/` holding
-its artifacts: `intent.md` always, plus `spec.md` and `plan.md` when the change is Tier 2. That
-convention is only worth having if something checks it, because the failure mode is silent — an
-intent stuck at `stage: build` for three weeks, or a Tier 2 change that quietly never got a spec,
-looks exactly like a repo with nothing open.
+Every non-trivial change to a repo using this plugin gets a numbered folder under `.sdlc/work/`
+holding its artifacts: `intent.md` always, plus `spec.md` and `plan.md` when the change is Tier 2.
+That convention is only worth having if something checks it, because the failure mode is silent —
+an intent stuck at `stage: build` for three weeks, or a Tier 2 change that quietly never got a
+spec, looks exactly like a repo with nothing open.
 
-`work/` is committed. A change's folder lives on its own branch, in its own worktree
+`.sdlc/work/` is committed. A change's folder lives on its own branch, in its own worktree
 (`.claude/worktrees/NNN-slug`), so a session there writes its artifacts where it works and the
 review reads them in the diff. Close lands the branch, mirrors the folder to the tracker, and
 removes it from `main` in a commit of its own: history is the copy. The folders this tool reads are
-the checkout's own `work/` and each change worktree's folder (`change_dirs`).
+the checkout's own `.sdlc/work/` and each change worktree's folder (`change_dirs`).
 
-So this tool answers the questions that are queries rather than decisions:
-
-    status      every open change, in any worktree: its tier and stage, its age, which artifacts
-                exist
-    new         claim the next id, make the change's worktree and branch (--worktree), and scaffold
-                its folder there from the host's .sdlc/templates/, or this plugin's templates/
-                where the host has none
-    check       artifacts missing for the declared tier/stage; frontmatter that won't parse;
-                work/inbox.md entries tagged [building] with no change behind them
-    ship        stamp stage: shipped + today's date, in place
-                (refused while notes.md has an unticked `- [ ]` item)
-    drop        stamp stage: dropped and how far it got, in place, and commit the change's folder
-                on its branch (refused without a `## Dropped` reason)
-    close       land a shipped change on main, measure what it cost from this repo's session
-                transcripts (scripts/metrics.py), mirror it to the tracker, remove its folder in a
-                commit carrying the numbers as Sdlc-* trailers, then its worktree and branch; a
-                dropped one is measured too and gets a `Drop` commit instead
-    sync        rewrite the change's tracker issue from its artifacts as they are now (the
-                trackers are modules in scripts/trackers/; `archive.target = "none"` loads none)
-    lookup      the values the project doc's issue fields can take (milestone, project,
-                assignees), from the tracker, a host command or a fixed list, as JSON
-    next-entry  the id the next work/inbox.md entry would take today, or --count N of them
-    bugs        the open [bug] entries, as JSON, with the closed change that last touched a path
-                (--introduced), a candidate for the bug's `Introduced by:`
-    inbox-commit  commit work/inbox.md alone, on the base branch in the main checkout, as File,
-                Retire or Update <id>, and triage's verdicts (--triaged) as `Sdlc-Triaged:`
-                trailers; from a change's worktree, only the entries it names
-    intake      the open issues people filed that triage has to read, as JSON
-    closes      the issues a change's `closes:` line names, with their titles, as JSON
-    mark-triaged  label, comment on and relate each open issue the repo records
-    needs-info  ask an issue's author for the detail triage needs
-    undone      a change's unticked `- [ ]` items in notes.md, as JSON
-    readiness   whether this repo is set up for the plugin, item by item, with the commands its own
-                task files suggest for the gate, the slower check and the scans, as JSON
-    context     the docs that give a session its context and that this diff could have made
-                wrong, with their lines naming a path it deletes or renames, as JSON
-    config      the host's settings from .sdlc/config.toml, every path resolved, as JSON
-    unreleased  the changes landed on main since the current version's tag, read from history,
-                with their impacts and the version they add up to, as JSON
-    release     bump the version files, commit `Release X.Y.Z` and tag it, locally
-    publish     push main and the release tag, then run the host's publish command: the one
-                command that sends anything anywhere
-    retro       what the retrospective counts rather than judges: the changes closed since the
-                last `Retrospective` commit, open changes, seeds, tiers, impacts, releases, rework
-                and the size of each skill, as JSON
-    retro-commit  record a retrospective: commit the direction doc and work/inbox.md, and nothing
-                else, as `Retrospective YYYY-MM-DD`
+So this tool answers the questions that are queries rather than decisions, and does the
+mechanical steps the skills ask of it: ids, worktrees, scaffolding, audits, landing and
+archiving. Its subcommands, each with a line on what it does, are the parser's own list, which
+cannot drift from the code: `sdlc.py -h` lists them, and `sdlc.py <subcommand> -h` gives one's
+arguments.
 
 It deliberately does **not** write artifact prose. An `intent.md` is an argument about why a change
 is worth making; generating one produces a restatement of the slug. The tool scaffolds and audits;
@@ -852,8 +810,8 @@ def last_id_path(home: Path) -> Path:
 
 
 def change_dirs(root: Path) -> list[Path]:
-    """Every change folder this checkout can see: its own `work/`, the main checkout's, and each
-    change worktree's own folder, `work/<branch>/`, one stopped mid-rebase included
+    """Every change folder this checkout can see: its own `.sdlc/work/`, the main checkout's, and
+    each change worktree's own folder, `.sdlc/work/<branch>/`, one stopped mid-rebase included
     (`_change_trees()`). Only that one from a worktree: it also holds whatever `main` had when it
     was made, and those copies would read as the same change twice. A name found twice counts
     once, the copy on its own branch winning. Skips non-conforming names."""
@@ -1949,8 +1907,8 @@ def next_id(home: Path) -> str:
     The counter on main only moves when a change merges, so the open changes are counted too. A
     change abandoned before it merged (worktree, branch and folder all removed) leaves nothing
     behind, and its number is handed out again: it never reached main, so nothing refers to it.
-    Only when the counter is missing does history count, to seed it: with work/ empty, numbering
-    from 001 would collide with every change already closed."""
+    Only when the counter is missing does history count, to seed it: with `.sdlc/work/` empty,
+    numbering from 001 would collide with every change already closed."""
     last = read_last_id(home)
     seeds = [last or 0, _highest(home), _worktree_highest(home)]
     if last is None:
@@ -2001,11 +1959,11 @@ def claim(
     """Take the next number and make the change: (folder, worktree, None), or (None, None, why).
 
     With `base`, the change gets its worktree and branch from it, and its folder inside; without,
-    its folder goes in `where`'s `work/` (the main checkout's by default). Under `_main_lock()`,
-    which every worktree shares: a `mkdir` alone isn't one, since
-    two sessions that read the same id for different slugs would both get it. What is made under
-    the lock (the worktree's branch, or the folder) is what the next claim counts, so the counter
-    can be written after the lock is released."""
+    its folder goes in `where`'s `.sdlc/work/` (the main checkout's by default). Under
+    `_main_lock()`, which every worktree shares: a `mkdir` alone isn't one, since two sessions
+    that read the same id for different slugs would both get it. What is made under the lock (the
+    worktree's branch, or the folder) is what the next claim counts, so the counter can be written
+    after the lock is released."""
     with _main_lock(home):
         name = f"{next_id(home)}-{slug}"
         tree = None
@@ -2212,7 +2170,7 @@ def stamp_shipped(text: str, stamp: str) -> tuple[str, list[str]]:
     all of it: keys come back alphabetized, an empty `idea:` becomes `idea: null`, and `id: 001` is
     re-read as the integer 1 — so a shipped intent silently stops matching every open one, and the
     tool that exists to do the bookkeeping is the thing corrupting it. An `intent.md` is
-    hand-authored, hand-ordered prose; this is the Edit-not-Write rule applied to `work/`.
+    hand-authored, hand-ordered prose; this is the Edit-not-Write rule applied to `.sdlc/work/`.
 
     Returns the new text plus the keys it could not place, so a pattern that matches nothing is
     reported instead of written past.
@@ -4304,8 +4262,8 @@ def _drop_record(
     """Record a dropped change on main: `Drop <branch>`, a merge that keeps main's tree, so the
     branch's commits stay reachable and `branch -d` can delete it. Only the state `new` wrote
     comes along: the higher counter, so the number stays spent. `measure`'s trailers end the
-    message, as on a `Close` commit. Why not, or
-    None; a failure leaves main as it was."""
+    message, as on a `Close` commit. Returns why it failed, or None once the commit is made; a
+    failure aborts the merge and leaves main as it was."""
     steps = [["merge", "-q", "-s", "ours", "--no-ff", "--no-commit", branch]]
     shown = _git(main, "show", f"{branch}:.sdlc/{LAST_ID}") or ""
     theirs = int(shown) if shown.isdigit() else None
@@ -8423,7 +8381,7 @@ def uninstall_plan(root: Path) -> dict:
 
 def cmd_uninstall(root: Path, check_only: bool = False) -> int:
     """Take setup back out of the main checkout, after `uninstall_plan()`'s refusals. Commits
-    nothing, and leaves `work/`, the context docs and the tracker alone."""
+    nothing, and leaves `.sdlc/work/`, the context docs and the tracker alone."""
     home = main_root(root)
     plan = uninstall_plan(root)
     print(json.dumps(plan, indent=2, ensure_ascii=False))

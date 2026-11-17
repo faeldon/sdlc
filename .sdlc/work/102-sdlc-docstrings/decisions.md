@@ -1,0 +1,3 @@
+# Decisions
+
+- [x] D1 (code round 1, default): Intent's open question is still unstruck: keep the module docstring's subcommand list complete and pin it with a test, or cut it to a pointer at `-h`. Options: cut (the intent's Approach, and this diff) or keep and pin. I assume cut, as the Approach says. The cut drops some per-subcommand detail that the one-line `-h` help does not carry, for example `close`'s measure step and its `Drop` split. That detail still lives in the functions' docstrings and in git history. Strike the question in `intent.md` once answered. → decided: confirm the cut; the module docstring states its purpose and points at `sdlc.py -h`
