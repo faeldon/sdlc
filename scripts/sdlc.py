@@ -1186,8 +1186,17 @@ FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
 # And, in this plugin's repo, whether a diff that reaches a skill with cases ran them.
 CASES_RE = re.compile(r"^>?\s*Skill evals:\s*(ran|skipped)\b,?\s*(.*)$")
 # Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
-# a deep diff gets (`agents/reviewer.md`).
-FINDING_BY = ("fresh",)
+# a deep diff gets (`agents/reviewer.md`), or a factory reviewer, whose findings `factory.py
+# carry` writes. `AGENT_ROLES` is a copy of `factory.py`'s `REVIEWERS`, pinned by a test.
+AGENT_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
+FINDING_BY = ("fresh", *AGENT_ROLES)
+
+
+def ship_findings(entries: list[dict]) -> list[dict]:
+    """The findings ship's own review raised (no `By:`, or `By: fresh`), never an agent's: the ones
+    the `Sdlc-Findings` trailer and `findings`' counts are of, so a factory review is never
+    counted as the person's."""
+    return [e for e in entries if e.get("by") in (None, "fresh")]
 
 
 def findings_entries(folder: Path) -> dict:
@@ -1315,8 +1324,12 @@ def findings_trailer(entries: list[dict]) -> str:
     """The `Sdlc-Findings` line for a change's findings: the count by rank and by pass, as ship
     has always written it, then each disposition but `open` as its count by pass
     (`fixed=correctness:2,context:1`), or `0`, then how many the fresh reviewer raised and how
-    many of those were answered `wrong`. Old keys keep their meaning; retro reads a trailer
-    without dispositions, or without `fresh`, as one whose answers are unknown there."""
+    many of those were answered `wrong`, then `agents=`, how many findings the factory's agents
+    left in the file, counted in no other key (`ship_findings()`). Old keys keep their meaning;
+    retro reads a trailer without dispositions, or without `fresh`, as one whose answers are
+    unknown there."""
+    agents = len(entries) - len(ship_findings(entries))
+    entries = ship_findings(entries)
     counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
     passes = {p: sum(e["pass"] == p for e in entries) for p in FINDING_PASSES}
     words = [f"{k}={v}" for k, v in {**counts, **passes}.items()]
@@ -1327,6 +1340,7 @@ def findings_trailer(entries: list[dict]) -> str:
     fresh = [e for e in entries if e.get("by") == "fresh"]
     words.append(f"fresh={len(fresh)}")
     words.append(f"fresh_wrong={sum(e['disposition'] == 'wrong' for e in fresh)}")
+    words.append(f"agents={agents}")
     return "Sdlc-Findings: " + " ".join(words)
 
 
@@ -2662,11 +2676,13 @@ def _checks_report(path: Path) -> dict:
 
 def _findings_report(path: Path) -> dict:
     """A change's review findings, for `findings` and `preflight`: the entries, the ones still
-    `open`, the count by rank, and the `Sdlc-Findings` line ship's commit carries."""
+    `open`, the count by rank of ship's own (`ship_findings()`), how many the factory's agents
+    left (`agents`), and the `Sdlc-Findings` line ship's commit carries."""
     found = findings_entries(path)
     entries = found["entries"]
-    counts = {r: sum(e["rank"] == r for e in entries) for r in FINDING_RANKS.values()}
-    return {"change": path.name, **found, "counts": counts,
+    own = ship_findings(entries)
+    counts = {r: sum(e["rank"] == r for e in own) for r in FINDING_RANKS.values()}
+    return {"change": path.name, **found, "counts": counts, "agents": len(entries) - len(own),
             "trailer": findings_trailer(entries)}  # fmt: skip
 
 
@@ -3407,8 +3423,9 @@ def cmd_ship(
         print(
             f"⚠  {path.name}/notes.md has {len(undone)} undone item(s):\n"
             + "".join(f"     notes.md:{i['line']}  {i['text']}\n" for i in undone)
-            + "   Give each a disposition: tick it with `→ seed: <title>` after adding that seed "
-            "to the inbox, or `→ dropped: <reason>`. Then re-run. Not stamping.",
+            + "   Give each a disposition: tick it with `→ seed: <id>` after adding that seed "
+            "to the inbox, `→ bug: <id>` after filing a `pre-existing:` one as a bug there, or "
+            "`→ dropped: <reason>`. Then re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1

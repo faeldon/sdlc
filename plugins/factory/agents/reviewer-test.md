@@ -73,5 +73,11 @@ When a requirement can't be tested as written (it isn't checkable, or two requir
 raise it as `- DECISION: [blocking] ...` with the options and your recommendation, rather than
 guessing what it meant. Read `decisions.md` first: an answered decision is settled.
 
-Then `## Notes`: lower-priority gaps, what is well covered, each check in `checks.md` and what you
-expect of it, and the test command you ran with its count.
+A finding is filed under the correctness pass; one that belongs to another may open with it
+after the colon (`- CHANGE: [cost] tests/test_drafts.py:9: …`), as may a `- PREEXISTING:` or
+`- NIT:` line.
+
+Then `## Notes`: lower-priority gaps, its nits (at most five) each on a line of its own as
+`- NIT: path/to/file.py:42: what` (never a reason for CHANGES, never reworked: recorded in the
+change's `findings.md`), what is well covered, each check in `checks.md` and what you expect of
+it, and the test command you ran with its count.

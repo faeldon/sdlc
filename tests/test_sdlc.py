@@ -716,6 +716,16 @@ def test_ship_refuses_while_an_item_is_undone_then_ships_once_each_is_answered(
     assert "stage: shipped" in (d / "intent.md").read_text(encoding="utf-8")
 
 
+def test_ship_refusal_names_every_disposition(tmp_path: Path, capsys) -> None:
+    """114 R19: an undone item is answered by a seed, a bug or a drop, and the refusal names all
+    three, so a `pre-existing:` item filed as a bug isn't sent back as a seed."""
+    _change(tmp_path, "001-x", _fm(stage="build", impact="patch"), {"notes.md": NOTES})
+    assert sdlc.cmd_ship(tmp_path, "001") == 1
+    err = " ".join(capsys.readouterr().err.split())
+    for said in ("→ seed: <id>", "→ bug: <id>", "→ dropped: <reason>"):
+        assert said in err, err
+
+
 # ---------------------------------------------------------------- worktrees
 
 

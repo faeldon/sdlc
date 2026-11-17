@@ -190,9 +190,9 @@ same heading or lead and add the rest, its own failure classes. Read them if the
 context; when `docs.review`'s `source` is `plugin`, the repo has no review of its own and the
 guide stands alone, which is worth saying. Do not skim the diff; read it.
 
-1. **Correctness** — walk the requirements (`spec.md` R1, R2, …, or `intent.md`'s Outcome for
-   Tier 1) one at a time and find the code for each. A requirement with no code is a finding. Then
-   hunt the failure classes the review names for this repo.
+1. **Correctness** — the repo's failure classes, then per requirement (`spec.md` R<n>, or Tier 1's
+   Outcome), name its code and its test, with the line whose removal fails it, or its `checks.md`
+   check: no code or test, or a test that passes without the code is a `[correctness]` finding.
 2. **Contract** — every invariant the policy doc (`docs.policy`) declares that the diff comes near.
 3. **Cost & simplification** — as the review defines it.
 4. **Context** — whether the docs that give a session its context still tell the truth after this
@@ -237,8 +237,8 @@ only the change's own uncommitted folder, decides nothing (the WAIT approves eve
 in it), and the next run rewrites it. It is how a finding fixed between two runs is counted.
 
 - **When `preflight`'s `findings` part holds an earlier run's,** build on it: keep every id, mark
-  one this diff no longer shows `fixed`, never raise again one answered `wrong`, `intentional` or
-  `minor` (the person has heard it), and number a new one after the highest id.
+  one this diff no longer shows `fixed`, never raise again one the person answered `wrong`,
+  `intentional` or `minor` (they have heard it), and number a new one after the highest id.
 - **Each new finding's disposition is the one this skill proposes:** one you recommend fixing
   before the commit, Important or Nit, is `fix`, with a `Fix:` line saying the exact change, when
   that change costs S and touches only files the diff already changes (the review guide's

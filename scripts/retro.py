@@ -537,6 +537,7 @@ def process_views(
             "previous": ((bugs.get("rate") or {}).get("previous") or {}).get("rate"),
             "trend": (bugs.get("rate") or {}).get("trend"),
         },
+        "review_sources": bugs.get("review_sources") or {},
         "cycle": None, "time": None, "wip": None, "capacity": None,
     }  # fmt: skip
     if not measured:
@@ -667,6 +668,17 @@ def _spend_text(spend: dict | None, closed: int) -> str:
     ])  # fmt: skip
 
 
+def _sources_text(sources: dict[str, dict]) -> str:
+    """Who found what in the window's reviews, one line per source (`_review_sources()`), after
+    the escapes: ship's own beside the fresh reviewer's and each factory role's."""
+    if not sources:
+        return ""
+    return "\n\nFindings by who raised them:\n\n" + _table(
+        ["Source", "Changes", "Important", "Nit", "Pre-existing", "Wrong"],
+        [[s, *(r[k] for k in ("changes", *REVIEW_KINDS))] for s, r in sources.items()],
+    )
+
+
 def render_report(template: str, process: dict, spend: dict | None = None) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
@@ -695,7 +707,7 @@ def render_report(template: str, process: dict, spend: dict | None = None) -> st
             ["Reported", "Fixed", "Median days to fix", "Rate", "Previous rate", "Trend"],
             [[process["escapes"][k]
               for k in ("reported", "fixed", "days_to_fix", "rate", "previous", "trend")]],
-        ),  # fmt: skip
+        ) + _sources_text(process.get("review_sources") or {}),  # fmt: skip
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
     }  # fmt: skip
@@ -1212,7 +1224,8 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         a, b = now["rate"], before["rate"]
         trend = "up" if a > b else "down" if a < b else "flat"
 
-    # The window's Important findings, for a class that recurs across changes.
+    # The window's Important findings, for a class that recurs across changes, each with who
+    # raised it, and the findings by who raised them (`_review_sources()`).
     important, important_unknown = [], 0
     for rec in changes:
         seen = review(rec["name"])
@@ -1223,10 +1236,11 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
             important_unknown += 1
         important += [
             {"change": rec["name"], **{k: f[k] for k in ("id", "pass", "title", "class",
-                                                         "disposition")}}
+                                                         "disposition", "by")}}
             for f in seen["findings"]
             if f["rank"] == "important"
         ]  # fmt: skip
+    sources, review_unknown = _review_sources(changes, review)
 
     def by_severity(rows: list[dict] | list[str]) -> dict[str, int]:
         counts = Counter(r if isinstance(r, str) else r.get("severity") or "unset" for r in rows)
@@ -1259,7 +1273,43 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         "rate": {"window": now, "previous": before, "trend": trend},
         "important": important,
         "important_unknown": important_unknown,
+        "review_sources": sources,
+        "review_unknown": review_unknown,
     }
+
+
+# Who a finding's `By:` says raised it, as retro counts them: ship's own passes (no `By:`), its
+# fresh-context reviewer, then each factory role, so the two ways of building compare from one
+# record and an agent's finding is never counted as ship's.
+REVIEW_KINDS = ("important", "nit", "preexisting", "wrong")
+
+
+def _review_sources(changes: list[dict], review) -> tuple[dict[str, dict], int]:
+    """Per source (`ship`, `fresh`, then each factory role, in that order, only those that
+    counted any), the window's findings by rank, the ones answered `wrong`, and the changes the
+    source reviewed: one whose findings.md holds a finding of its, and for ship any change whose
+    commit carries `Sdlc-Findings` too. A change whose findings.md wasn't read is counted in
+    `unknown`, never as a review that found nothing."""
+    order = ("ship", "fresh", *sdlc.AGENT_ROLES)
+    rows: dict[str, dict] = {}
+    unknown = 0
+    for rec in changes:
+        seen = review(rec["name"])
+        if seen["state"] != "file":
+            unknown += 1
+            continue
+        found = {f.get("by") or "ship" for f in seen["findings"]}
+        if rec.get("findings") is not None:
+            found.add("ship")
+        for source in found:
+            row = rows.setdefault(source, {"changes": 0, **dict.fromkeys(REVIEW_KINDS, 0)})
+            row["changes"] += 1
+        for f in seen["findings"]:
+            row = rows[f.get("by") or "ship"]
+            row[f["rank"]] += 1
+            row["wrong"] += f["disposition"] == "wrong"
+    ranked = [s for s in order if s in rows] + sorted(set(rows) - set(order))
+    return {s: rows[s] for s in ranked}, unknown
 
 
 def _bug_paths(raw: object) -> list[str] | None:

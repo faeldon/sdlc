@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
+  "version": "1.9.0",
   "config_keys": [
     "archive.command",
     "archive.target",
@@ -55,7 +55,7 @@
     "review": {
       "path": ".sdlc/REVIEW.md",
       "layout": "answers",
-      "guide": "sha256:7c3ec4f4a1dedfb0"
+      "guide": "sha256:46cec6fcd02386f1"
     },
     "product": {
       "path": ".sdlc/PRODUCT.md",
@@ -70,15 +70,16 @@
     }
   },
   "templates": {
+    "changelog.md": "sha256:48b581908d580275",
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:c5ad891b8c064f84",
-    "findings.md": "sha256:6fb257600a25d65d",
+    "findings.md": "sha256:8b169d02874239a3",
     "inbox.md": "sha256:5fd3e606e689ccc6",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:8244f74828b145b1",
     "notes.md": "sha256:b7a4be5bca95078c",
     "plan.md": "sha256:c8f2e95ebf1071df",
-    "retro.md": "sha256:1488f3b2de47f9e9",
+    "retro.md": "sha256:fde97b1dc118254e",
     "spec.md": "sha256:44e198408d01b8a0"
   },
   "created": [],

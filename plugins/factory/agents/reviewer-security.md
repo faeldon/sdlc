@@ -75,5 +75,11 @@ they can approve) is not a CHANGE: raise it as `- DECISION: [blocking] ...` or
 `- DECISION: [default] ...`, with the options and your recommendation. Read `decisions.md` first:
 an answered decision is settled. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
-Then `## Notes`: Medium, Low and Info findings with their fixes, what is done well, and what you
+A finding is filed under the contract pass; one that belongs to another may open with it after
+the colon (`- CHANGE: [correctness] path/to/file.py:42: …`), as may a `- PREEXISTING:` or
+`- NIT:` line.
+
+Then `## Notes`: Medium, Low and Info findings with their fixes, each Low or Info one that is a nit
+(at most five) on a line of its own as `- NIT: path/to/file.py:42: what` (never a reason for
+CHANGES, never reworked: recorded in the change's `findings.md`), what is done well, and what you
 checked and ran.

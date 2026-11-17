@@ -590,10 +590,17 @@ when ship recommends fixing it before the commit (a change of cost S in files th
 touches, said on a `Fix:` line), then `fixed`, `recorded` (as a nit or a bug), or `wrong`,
 `intentional` or `minor` with a `Reason:`. A rerun keeps each id, marks one the diff no longer
 shows `fixed`, and never raises again one the person dismissed. On a diff that touches a sensitive
-path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. `sdlc.py findings
-NNN` reads it and prints the counts and the `Sdlc-Findings` line the commit carries; `sdlc.py ship`
-refuses while a finding is `open` or `fix`, and a deep diff whose note says neither. The file
-reaches history and the change's issue with the folder.
+path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. A finding's `By:`
+line names who raised it: none on ship's own, `fresh` for the fresh-context reviewer, or a factory
+role (`code`, `security`, `test`, `behaviour`, `ui`, `ux`). A factory run writes its agents'
+findings into the same file (`factory.py carry`, at its approve step), each with its role's `By:`,
+and ship keeps those sections as they are and numbers its own after them. `sdlc.py findings NNN`
+reads it and prints the counts of ship's own, the agents' as `agents`, and the `Sdlc-Findings`
+line the commit carries; `sdlc.py ship` refuses while a finding is `open` or `fix`, and a deep
+diff whose note says neither. The file reaches history and the change's issue with the folder.
+
+The guide's *Review dimensions* list what a review covers and who covers each in a ship and in a
+factory run, a way that leaves one uncovered saying so.
 
 Ship's question leads with its recommendation, so `yes` always takes it. `sdlc.py preflight NNN
 --question` words it from `findings.md`: `Commit this, …? (yes / edit the message)` when nothing is
@@ -865,7 +872,11 @@ paths (null when they weren't recorded), `trailer` when only the `Sdlc-Findings`
 two retrospectives before it, by the bugs' reported dates, with a `trend` of `up`, `down`, `flat`,
 or `unknown` when either window has fewer than five closed changes; and `important`, the window's
 Important findings with their class, beside `important_unknown`, the changes with no
-`findings.md`, or one that no longer parses, whose review's `problems` say which sections.
+`findings.md`, or one that no longer parses, whose review's `problems` say which sections, each
+with its `by`. `review_sources` compares the two ways of building from the one record: for each
+source (`ship`, `fresh`, then each factory role) the findings by rank, those answered `wrong`, and
+the changes it reviewed, counted from every `findings.md` in the window; a change with none read
+is in `review_unknown`, never a review that found nothing. The report gives one line per source.
 
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
@@ -993,8 +1004,11 @@ without `tools=` or `words=` is read as unrecorded, never as none. Ship adds its
 commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
 each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
 then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of
-those were answered `wrong`. A trailer from before dispositions, or before `fresh`, keeps its counts,
-and `/sdlc:retro` reads what it lacks as unknown.
+those were answered `wrong`, then `agents`: how many findings a factory run's agents left in the
+file. Every other key counts ship's own alone (no `By:`, or `By: fresh`), so an agent's finding is
+never counted as the person's review; a factory landing writes no `Sdlc-Findings` at all. A
+trailer from before dispositions, `fresh` or `agents` keeps its counts, and `/sdlc:retro` reads
+what it lacks as unknown.
 
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,
 no or unknown, ship also `fixed` when it ran again only for findings its own review raised and

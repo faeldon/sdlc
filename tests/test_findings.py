@@ -178,10 +178,10 @@ def test_the_trailer_counts_ranks_passes_and_dispositions(tmp_path: Path) -> Non
     assert sdlc.findings_trailer(entries) == (
         "Sdlc-Findings: important=1 nit=2 preexisting=1 correctness=2 contract=0 cost=2 "
         "context=0 fixed=correctness:1 recorded=correctness:1,cost:1 wrong=cost:1 "
-        "intentional=0 minor=0 fresh=0 fresh_wrong=0"
+        "intentional=0 minor=0 fresh=0 fresh_wrong=0 agents=0"
     )
     assert sdlc.findings_trailer([]).endswith(
-        "fixed=0 recorded=0 wrong=0 intentional=0 minor=0 fresh=0 fresh_wrong=0"
+        "fixed=0 recorded=0 wrong=0 intentional=0 minor=0 fresh=0 fresh_wrong=0 agents=0"
     )
 
 
@@ -209,7 +209,7 @@ def test_the_fresh_reviewer_s_findings_are_marked_and_counted(tmp_path: Path) ->
     assert found["problems"] == []
     assert [e["by"] for e in found["entries"]] == [None, None, None, None, "fresh", "fresh"]
     trailer = sdlc.findings_trailer(found["entries"])
-    assert trailer.endswith("fresh=2 fresh_wrong=1")
+    assert trailer.endswith("fresh=2 fresh_wrong=1 agents=0")
     parsed = metrics.parse_trailers("Ship it\n\n" + trailer)["findings"]
     assert (parsed["fresh"], parsed["fresh_wrong"]) == (2, 1)
 
@@ -217,7 +217,8 @@ def test_the_fresh_reviewer_s_findings_are_marked_and_counted(tmp_path: Path) ->
 def test_a_by_line_naming_anyone_else_is_a_problem(tmp_path: Path) -> None:
     text = FINDINGS + FRESH.replace("By: fresh", "By: someone", 1)
     found = sdlc.findings_entries(_write(tmp_path / "c", text))
-    assert any("By must be one of fresh, got 'someone'" in p for p in found["problems"])
+    assert any("By must be one of fresh|code|" in p and "got 'someone'" in p
+               for p in found["problems"])  # fmt: skip
 
 
 def test_an_old_and_a_new_trailer_both_parse_unchanged(tmp_path: Path) -> None:
@@ -462,3 +463,66 @@ def test_ship_refuses_a_deep_diff_whose_note_says_nothing_of_the_fresh_review(ch
     assert "Fresh review" in capsys.readouterr().err
     _write(folder, FINDINGS.replace("> The note.\n", "> The note.\n> Fresh review: ran\n"))
     assert sdlc.cmd_ship(root, "001") == 0
+
+
+AGENTS = """\
+
+## F7. [important] [context] The docs say the old command
+
+Evidence: docs/REFERENCE.md:12
+Class: code review, round 1
+Disposition: fixed
+By: code
+
+## F8. [nit] [cost] A name that could be shorter
+
+Evidence: drafts/list.py:3
+Class: security review, round 1
+Disposition: minor
+Reason: raised by an agent; not weighed or filed
+By: security
+
+## F9. [pre-existing] [correctness] An old crash
+
+Evidence: drafts/old.py:9
+Class: test review, round 2
+Disposition: recorded
+By: test
+
+## F10. [important] [correctness] A guard no caller needs
+
+Evidence: drafts/store.py:1
+Class: code review, round 1
+Disposition: wrong
+Reason: the verifier found the guard is reached
+By: code
+"""
+
+
+def test_finding_by_names_every_factory_reviewer() -> None:
+    """Core's copy of the factory's reviewers, so a factory role's `By:` is never a problem."""
+    path = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+    spec = importlib.util.spec_from_file_location("factory_findings_by", path)
+    factory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(factory)
+    assert sdlc.AGENT_ROLES == factory.REVIEWERS
+    assert ("fresh", *factory.REVIEWERS) == sdlc.FINDING_BY
+    assert factory.PASSES == sdlc.FINDING_PASSES, "the factory's copy of the passes"
+
+
+def test_the_trailer_never_counts_an_agent_finding(tmp_path: Path, change, capsys) -> None:
+    """Every key the trailer has counts ship's own findings (no `By:`, or `fresh`) alone, and
+    `agents=` says how many the agents raised: their findings move nothing else."""
+    own = sdlc.findings_entries(_write(tmp_path / "a", FINDINGS + FRESH))
+    both = sdlc.findings_entries(_write(tmp_path / "b", FINDINGS + FRESH + AGENTS))
+    assert both["problems"] == []
+    assert [e["by"] for e in both["entries"]][-4:] == ["code", "security", "test", "code"]
+    mine = sdlc.findings_trailer(own["entries"])
+    assert mine.endswith(" agents=0")
+    assert sdlc.findings_trailer(both["entries"]) == mine.removesuffix("agents=0") + "agents=4"
+    root, folder = change
+    _write(folder, FINDINGS + AGENTS)
+    assert sdlc.cmd_findings(root, "001") == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["counts"] == {"important": 1, "nit": 2, "preexisting": 1}
+    assert out["agents"] == 4

@@ -397,3 +397,57 @@ def test_the_bug_form_takes_its_severities_from_the_process_doc() -> None:
     text = (sdlc.DEFAULTS_DIR / "issue-forms" / "sdlc-bug.yml").read_text(encoding="utf-8")
     [severity] = [f for f in yaml.safe_load(text)["body"] if f["id"] == "severity"]
     assert severity["attributes"]["options"] == ["<severities>"], "setup fills it in"
+
+
+DIMENSIONS = (
+    "requirements", "tests-fail", "failure-classes", "contract", "security", "cost", "context",
+    "end-to-end", "ui", "ux", "false-positives", "pre-existing", "nits", "fresh-eyes",
+    "acceptance", "recovery",
+)  # fmt: skip
+
+
+def _dimensions() -> list[tuple[str, str]]:
+    """`guide/review.md`'s `## Review dimensions`, as (key, the bullet's whole text)."""
+    text = _text("guide/review.md")
+    assert "\n## Review dimensions\n" in text
+    section = text.split("\n## Review dimensions\n", 1)[1].split("\n## ", 1)[0]
+    bullets: list[list[str]] = []
+    for line in section.splitlines():
+        if line.startswith("- "):
+            bullets.append([line])
+        elif bullets and line.startswith("  ") and line.strip():
+            bullets[-1].append(line.strip())
+    out = []
+    for lines in bullets:
+        m = re.match(r"^- \*\*([a-z-]+)\*\*", lines[0])
+        assert m, f"a dimension opens `- **<key>**`: {lines[0]!r}"
+        out.append((m.group(1), " ".join(lines)))
+    return out
+
+
+def test_every_review_dimension_names_both_ways() -> None:
+    """Each dimension says who covers it in a ship and in a factory run, a pass its findings carry
+    is one core counts, and every factory reviewer it names exists."""
+    found = _dimensions()
+    keys = [k for k, _ in found]
+    assert len(keys) == len(set(keys)), "a key appears twice"
+    assert sorted(keys) == sorted(DIMENSIONS)
+    agents = ROOT / "plugins" / "factory" / "agents"
+    for key, text in found:
+        assert re.search(r"\bShip: \S", text), f"{key} has no Ship: clause"
+        assert re.search(r"\bFactory: \S", text), f"{key} has no Factory: clause"
+        for p in re.findall(r"\bPass: `?([a-z]+)", text):
+            assert p in sdlc.FINDING_PASSES, f"{key}: Pass: {p}"
+        for role in re.findall(r"`reviewer-([a-z]+)`", text):
+            assert (agents / f"reviewer-{role}.md").is_file(), f"{key}: reviewer-{role}"
+
+
+def test_findings_head_is_the_template() -> None:
+    """The factory starts a missing findings.md from a copy of the template's title and note."""
+    path = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+    spec = importlib.util.spec_from_file_location("factory_findings", path)
+    factory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(factory)
+    head = _text("templates/findings.md").split("\n## ", 1)[0].rstrip("\n") + "\n"
+    assert head == factory.FINDINGS_HEAD
+    assert "`By:`" in factory.FINDINGS_HEAD and "factory" in factory.FINDINGS_HEAD

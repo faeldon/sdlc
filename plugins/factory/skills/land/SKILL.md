@@ -55,12 +55,14 @@ and stop. `land-check` lists the changes `ready` would, in its order (a change a
 depends on), or those named: `batch`, each with its decision, the impact its approver proposed,
 the others it `overlaps`, its `signals`, and what the yes approves for it: `checks` (each
 acceptance check's `name` and `command`), `cases` (the skills' cases in `scope`, with `cap_usd`,
-the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title or the
-`dropped` reason its approver proposed), `assumed` (each assumed decision, by `id`) and `recover`
-(the `How to recover:` lines its commit will carry), each empty when it has none; `excluded`, the
-changes only `/sdlc:ship` can land, and why (an irreversible path with no `- RECOVER:` line in
-`decision.md`); `over_limit`, those past `batch`; `question`, the batch's question, worded by the
-script; and `clear`, true when no change in the batch has a signal.
+the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title, the
+`dropped` reason or, for a `pre-existing:` item, the `bug` its approver proposed, with its
+`shown` line), `assumed` (each assumed decision, by `id`) and `recover` (the `How to recover:`
+lines its commit will carry), each empty when it has none; `excluded`, the changes only
+`/sdlc:ship` can land, and why (an irreversible path with no `- RECOVER:` line in `decision.md`,
+or a bug proposed on a severity that isn't the process doc's, with no paths, or on an item that
+isn't `pre-existing:`); `over_limit`, those past `batch`; `question`, the batch's question, worded
+by the script; and `clear`, true when no change in the batch has a signal.
 
 ## Step 1 — Show it
 
@@ -68,9 +70,10 @@ Show the batch in its order: each change, its decision, its impact, the changes 
 a rebase may conflict), and each signal. Under each change, what the yes approves for it, each
 part only when it has one: each acceptance check's name and its command, as written; the skills'
 cases in scope and their cap (`at most $<cap_usd>`, a paid run); each undone item and its
-disposition (`→ seed: <title>`, or `→ dropped: <reason>`); each assumed decision by id, with what
-the build assumed; and the `How to recover:` lines. Then the changes `excluded`, each with why and
-that `/sdlc:ship` from its worktree lands it, and any `over_limit`, which the next landing takes.
+disposition (`→ seed: <title>`, `→ dropped: <reason>`, or a bug's `shown` line, `filed as a bug,
+<severity>: <title> (<paths>)`); each assumed decision by id, with what the build assumed; and the
+`How to recover:` lines. Then the changes `excluded`, each with why and that `/sdlc:ship` from its
+worktree lands it, and any `over_limit`, which the next landing takes.
 With an empty batch, say why and stop.
 
 **With `clear` true, the gate passes itself.** Say so, `the batch is clear: landing without
@@ -131,8 +134,9 @@ For each change in the batch, one at a time:
 
    It refuses, before writing anything, a change whose checks haven't passed on it as it stands
    or whose cases haven't run. On `--by person` it writes each disposition (a carried item's seed
-   in the register, ticked `→ seed: <id>`; a dropped one ticked `→ dropped: <reason>`) and ticks
-   each assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
+   in the register, ticked `→ seed: <id>`; a bug filed there with its `Severity:` and `Paths:`,
+   ticked `→ bug: <id>`; a dropped one ticked `→ dropped: <reason>`) and ticks each assumed
+   decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
    (stamped shipped, its seed dropped, every path staged), deletes from the register each open
    nit its intent or spec names by id (its `retired_nits`), commits with the change's composed
    message (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as

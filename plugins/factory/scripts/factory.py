@@ -147,6 +147,15 @@ DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 # A problem in code the change didn't touch: filed for later, never reworked.
 PREEXISTING_RE = re.compile(r"^\s*- PREEXISTING:\s*(.+?)\s*$")
+# A reviewer's nit, under its `## Notes`: recorded in findings.md, never verified or reworked.
+# (`NIT_RE` is the register's `[nit]` heading.)
+FINDING_NIT_RE = re.compile(r"^\s*- NIT:\s*(.+?)\s*$")
+# The pass a finding opens with, `[context] docs/a.md:3: …`: one of the four `sdlc.py` counts
+# (`FINDING_PASSES`). Without one, or with another word, its role's pass (`ROLE_PASS`, else
+# correctness), and an unknown tag stays in the text.
+PASSES = ("correctness", "contract", "cost", "context")
+PASS_TAG_RE = re.compile(r"^\[([a-z]+)\]\s*(.*)$")
+ROLE_PASS = {"security": "contract"}
 # The verifier's answer to each `CHANGE:` of a round, in `reviews/round-<N>/verified.md`: kept for
 # the builder, or dropped with why (after the last ` — `).
 VERIFIED = "verified.md"
@@ -234,6 +243,29 @@ NOTES_HEAD = """\
 > disposition, carried to a `.sdlc/work/inbox.md` seed or dropped with a reason, and `sdlc.py ship`
 > refuses while one is still unticked.
 """
+# How `carry` and `_note_line()` start a `findings.md` the change doesn't have yet: a copy of
+# `sdlc`'s `templates/findings.md` title and note, pinned by a test as `NOTES_HEAD` is.
+FINDINGS_HEAD = """\
+# Findings
+
+> What a change's review found, one `## ` section a finding, committed with the change.
+> `/sdlc:ship` writes it after every review, and the factory's `carry` writes its agents' findings
+> into it; `By:` names who raised one: `fresh` for ship's fresh-context reviewer, a factory role
+> (`code`, `test`, …) for an agent, and no line on ship's own. A rerun keeps each id, marks one the
+> diff no longer shows `fixed`, and never raises again one the person answered `wrong`,
+> `intentional` or `minor`; an agent's `wrong` is its verifier's, never the person's, and the same
+> fault worded differently is one more. `sdlc.py` reads each heading and its `Evidence:`, `Class:`,
+> `Disposition:`, `Reason:`, `By:` and `Fix:` lines, counts ship's own alone into the
+> `Sdlc-Findings` trailer (its `agents=` says how many it left out), words ship's question from
+> the ones proposed `fix`, and `ship` refuses while one is still `open` or `fix`. On a diff that
+> touches a sensitive path, this note also says `Fresh review: ran`, or `Fresh review: skipped,
+> <why>`.
+"""
+# What `carry` writes for each agent finding: its `By:` is the role, its `Class:` names the round,
+# and a nit's `Reason:` says no one weighed it.
+FINDING_HEAD_RE = re.compile(r"^## F(\d+)\.")
+NIT_REASON = "raised by an agent; not weighed or filed"
+LEAD_RE = re.compile(r"^`?([^\s:`]*[./][^\s:`]*?)(?::(\d+(?:[-–]\d+)?))?`?:\s+(.+)$")
 CONFIG_FILE = Path(".sdlc") / "factory.toml"
 
 
@@ -837,10 +869,10 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
 
 
 def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[str]]:
-    """Every `reviews/round-<N>/`, in order: each reviewer's verdict, the changes it asks for and
-    the pre-existing problems it found, the verifier's answer when there is one, and whether the
-    round is complete for `reviewers`, the ones the run's depth expects. A file whose first line
-    isn't a verdict is a problem, never a guess."""
+    """Every `reviews/round-<N>/`, in order: each reviewer's verdict, the changes it asks for, the
+    pre-existing problems it found and its nits, the verifier's answer when there is one, and
+    whether the round is complete for `reviewers`, the ones the run's depth expects. A file whose
+    first line isn't a verdict is a problem, never a guess."""
     base = folder / "reviews"
     found = []
     problems = []
@@ -865,7 +897,9 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
                 )
                 continue
             preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, lines[1:]) if c]
-            reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting}
+            nits = [c.group(1) for c in map(FINDING_NIT_RE.match, lines[1:]) if c]
+            reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting,
+                             "nits": nits}  # fmt: skip
         verified, wrong = read_verified(path / VERIFIED, n, reviews)
         problems += wrong
         complete = set(reviewers) <= set(reviews)
@@ -905,7 +939,7 @@ def asked_changes(reviews: dict) -> list[tuple[str, str, str]]:
 
 def _change_lead(change: str) -> str | None:
     """A `CHANGE:`'s `path:line` lead, `src/a.py:42: what` → `src/a.py:42`, or None without one."""
-    parts = change.split(":", 2)
+    parts = finding_pass("", change)[1].split(":", 2)
     if len(parts) < 3 or not parts[1].strip().isdigit():
         return None
     return f"{_change_path(change)}:{parts[1].strip()}"
@@ -1007,9 +1041,19 @@ def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], l
     return rounds, problems, run
 
 
+def finding_pass(role: str, text: str) -> tuple[str, str]:
+    """A reviewer's finding's pass and its text: the `[<pass>] ` it opens with, taken off, when
+    the pass is one of the four, else its role's and the text as written."""
+    m = PASS_TAG_RE.match(text)
+    if m and m.group(1) in PASSES:
+        return m.group(1), m.group(2)
+    return ROLE_PASS.get(role, "correctness"), text
+
+
 def _change_path(change: str) -> str:
-    """The path a `CHANGE:` names, `path/to/file.py:42: what` → `path/to/file.py`."""
-    return change.split(":", 1)[0].strip().strip("`")
+    """The path a `CHANGE:` names, `path/to/file.py:42: what` → `path/to/file.py`, past a pass
+    tag it opens with."""
+    return finding_pass("", change)[1].split(":", 1)[0].strip().strip("`")
 
 
 def _untouched(root: Path, change: str, changed: list[str]) -> bool:
@@ -1798,7 +1842,8 @@ def cmd_carry(root: Path, ident: str) -> int:
     """Each change the last complete round still asks for and the verifier kept (every one, in a
     round from before there was a verifier), and every pre-existing problem a reviewer found, as an
     unticked `- [ ]` line in notes.md, so `/sdlc:ship` must give each a disposition. Once only: a
-    line already there, ticked or not, isn't added again."""
+    line already there, ticked or not, isn't added again. Then the record: every agent finding of
+    every complete round, in `findings.md` beside notes.md (`write_findings()`)."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -1828,7 +1873,104 @@ def cmd_carry(root: Path, ident: str) -> int:
             text += "\n"
         text += "\n" + "".join(f"- [ ] {item}\n" for item in added)
         notes.write_text(text, encoding="utf-8", newline="\n")
-    return emit({"change": folder.name, "notes": str(notes), "added": added})
+    findings = write_findings(folder, rounds)
+    return emit({"change": folder.name, "notes": str(notes), "added": added, "findings": findings})
+
+
+def agent_findings(rounds: list[dict]) -> list[dict]:
+    """Every distinct `(role, text)` the complete `rounds` raised, as the record's findings, in
+    round order, then `REVIEWERS` order, then each file's order (its changes, its pre-existing
+    problems, its nits): a change the verifier kept is `fixed`, or `recorded` while the last
+    complete round still carries it to notes.md, one it dropped is `wrong` with its why; a
+    pre-existing problem `recorded`; a nit `minor`. In a round from before there was a verifier,
+    every change counts as kept. A change asked under a `PASS` verdict was never asked."""
+    done = [r for r in rounds if r["complete"]]
+
+    def kept_of(r: dict) -> list[tuple[str, str]]:
+        if r["verified"] is not None:
+            return [(k["role"], k["change"]) for k in r["verified"]["kept"]]
+        return [(role, c) for _, role, c in asked_changes(r["reviews"])]
+
+    carried = set(kept_of(done[-1])) if done else set()
+    kept = {k for r in done for k in kept_of(r)}
+    why = {(d["role"], d["change"]): d["why"] for r in done
+           for d in (r["verified"] or {"dropped": []})["dropped"]}  # fmt: skip
+    found: dict[tuple[str, str], dict] = {}
+    for r in done:
+        for role in [x for x in REVIEWERS if x in r["reviews"]]:
+            review = r["reviews"][role]
+            asked = review["changes"] if review["verdict"] == "CHANGES" else []
+            for kind, texts in (("change", asked), ("pre-existing", review["preexisting"]),
+                                ("nit", review.get("nits") or [])):  # fmt: skip
+                for text in texts:
+                    if (role, text) in found:
+                        continue
+                    item = {"role": role, "text": text, "round": r["round"], "reason": None}
+                    if kind == "pre-existing":
+                        item.update(rank="pre-existing", disposition="recorded")
+                    elif kind == "nit":
+                        item.update(rank="nit", disposition="minor", reason=NIT_REASON)
+                    elif (role, text) in carried:
+                        item.update(rank="important", disposition="recorded")
+                    elif (role, text) in kept:
+                        item.update(rank="important", disposition="fixed")
+                    elif (role, text) in why:
+                        item.update(rank="important", disposition="wrong", reason=why[(role, text)])
+                    else:
+                        continue
+                    found[(role, text)] = item
+    return list(found.values())
+
+
+def finding_section(n: int, item: dict) -> str:
+    """One agent finding as findings.md's `## F<n>. [rank] [pass] title` section: its title the
+    text after its lead, to the first sentence's end; its whole line below; `Evidence:` its
+    leading `path[:line]`, else the review file it is in."""
+    pass_, text = finding_pass(item["role"], item["text"])
+    where = f"reviews/round-{item['round']}/{item['role']}.md"
+    m = LEAD_RE.match(text)
+    evidence = (m.group(1) + (f":{m.group(2)}" if m.group(2) else "")) if m else where
+    title = first_sentence(m.group(3) if m else text).strip() or text
+    lines = [f"## F{n}. [{item['rank']}] [{pass_}] {title}", "", text, "",
+             f"Evidence: {evidence}", f"Class: {item['role']} review, round {item['round']}",
+             f"Disposition: {item['disposition']}"]  # fmt: skip
+    if item["reason"]:
+        lines.append(f"Reason: {item['reason']}")
+    lines.append(f"By: {item['role']}")
+    return "\n".join(lines) + "\n"
+
+
+def write_findings(folder: Path, rounds: list[dict]) -> int:
+    """findings.md with the agents' findings (`agent_findings()`) in place of the ones a run of
+    this wrote before, found by their `By:` naming a factory role: its title and note, a line
+    `_note_line()` set in it included, and every other section, ship's own, kept as written, and
+    the agents' numbered after the highest id kept. Started from `FINDINGS_HEAD` when missing.
+    With no complete round, an existing file is left as it is. How many agent findings it holds."""
+    path = folder / "findings.md"
+    text = path.read_text(encoding="utf-8") if path.is_file() else FINDINGS_HEAD
+    if not any(r["complete"] for r in rounds):
+        if not path.is_file():
+            path.write_text(text, encoding="utf-8", newline="\n")
+        return 0
+    head, sections, fenced = [], [], False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        if not fenced and line.startswith("## "):
+            sections.append([line])
+        elif sections:
+            sections[-1].append(line)
+        else:
+            head.append(line)
+    agents = {f"By: {r}" for r in REVIEWERS}
+    kept = [sec for sec in sections if not agents & {ln.strip() for ln in sec}]
+    top = max((int(m.group(1)) for sec in kept if (m := FINDING_HEAD_RE.match(sec[0]))), default=0)
+    items = agent_findings(rounds)
+    parts = ["\n".join(head).rstrip("\n") + "\n"]
+    parts += ["\n".join(sec).rstrip("\n") + "\n" for sec in kept]
+    parts += [finding_section(top + i, item) for i, item in enumerate(items, 1)]
+    path.write_text("\n".join(parts), encoding="utf-8", newline="\n")
+    return len(items)
 
 
 def _tree_hashes(root: Path, base: str) -> dict[str, str]:
@@ -2692,7 +2834,10 @@ def _task(
         prompt += (
             " For each unticked `- [ ]` item in notes.md, propose its disposition at landing: "
             "`- UNDONE: <the item's text, exactly> → seed: <a short title>` or `→ dropped: "
-            "<why>`."
+            "<why>`; an item starting `pre-existing:` may instead be filed as a bug, "
+            "`→ bug: <severity>: <path>[, <path>…]: <title>`, its severity one of the words in "
+            "the Bugs section of the repo's process doc (`[docs] process`, else the plugin's "
+            "guide), never guessed: with no word that fits, carry it as a seed."
         )
         base = _base(root)
         touched = risk_paths(_changed_paths(root, base), _irreversible(root, base)) if base else []
@@ -3075,13 +3220,16 @@ IMPACT_RE = re.compile(r"^\s*- IMPACT:\s*(major|minor|patch|none)\b")
 LANDED = "Sdlc-Landed"
 FRESH_SKIPPED = "Fresh review: skipped, the factory's rounds stand in"
 # What the approver proposes for each undone notes.md item, and for each irreversible path the
-# diff touches: read by land-check, which shows them, and by land, which writes them.
-UNDONE_RE = re.compile(r"^\s*- UNDONE:\s*(.+?)\s+→\s+(seed|dropped):\s*(.+?)\s*$")
+# diff touches: read by land-check, which shows them, and by land, which writes them. A
+# `pre-existing:` item may be proposed as a bug, `→ bug: <severity>: <path>[, <path>…]: <title>`.
+UNDONE_RE = re.compile(r"^\s*- UNDONE:\s*(.+?)\s+→\s+(seed|dropped|bug):\s*(.+?)\s*$")
+BUG_PROPOSAL_RE = re.compile(r"^([^\s:]+):\s*(.*?):\s+(.+)$")
+PREEXISTING_ITEM = "pre-existing:"
 RECOVER_RE = re.compile(r"^\s*- RECOVER:\s*(.+?):\s+(.+?)\s*$")
 # A notes.md item a landing (or ship) gave its disposition, as `land_message()` reads it back.
 # An unticked note, as `sdlc.py`'s `OPEN_ITEM_RE` reads one.
 OPEN_NOTE_RE = re.compile(r"^\s*[-*] \[ \] (.+?)\s*$")
-TICKED_RE = re.compile(r"^\s*[-*] \[x\] (.+?) → (seed|dropped): (.+?)\s*$")
+TICKED_RE = re.compile(r"^\s*[-*] \[x\] (.+?) → (seed|dropped|bug): (.+?)\s*$")
 # findings.md's note lines ship reads, and the cost ceiling of a change's run of the skills'
 # cases: copies of `sdlc.py`'s `FRESH_RE`, `CASES_RE` and `CASE_CAP["change"]`, pinned by a test.
 FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
@@ -3319,18 +3467,52 @@ def _preflight(folder: Path, worktree: Path) -> tuple[dict | None, str]:
     return pre, out
 
 
-def read_proposals(folder: Path) -> tuple[dict[str, tuple[str, str]], list[tuple[str, str]]]:
+def read_proposals(folder: Path) -> tuple[dict[str, tuple], list[tuple[str, str]]]:
     """What the approver proposed in `decision.md`: each undone item's disposition by its exact
-    text, as (`seed`, title) or (`dropped`, reason), and each `- RECOVER:` line as (the path or
-    group it covers, the way back)."""
+    text, as (`seed`, title), (`dropped`, reason) or (`bug`, severity, paths, title), a bug line
+    that doesn't read as one with no severity and no paths, and each `- RECOVER:` line as (the
+    path or group it covers, the way back)."""
     path = folder / "decision.md"
     undone, recover = {}, []
     for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
-        if m := UNDONE_RE.match(line):
+        if (m := UNDONE_RE.match(line)) and m.group(2) == "bug":
+            b = BUG_PROPOSAL_RE.match(m.group(3))
+            paths = [p.strip().strip("`") for p in b.group(2).split(",") if p.strip()] if b else []
+            undone.setdefault(
+                m.group(1), ("bug", b.group(1), paths, b.group(3)) if b else ("bug", "", [], "")
+            )
+        elif m:
             undone.setdefault(m.group(1), (m.group(2), m.group(3)))
         elif m := RECOVER_RE.match(line):
             recover.append((m.group(1), m.group(2)))
     return undone, recover
+
+
+def bad_bugs(undone: list[dict], words: list[str]) -> list[str]:
+    """Why each bug the approver proposed can't be filed as it stands: an item not starting
+    `pre-existing:`, no paths, or a severity outside `words`, the process doc's (any word when it
+    names none). The script never guesses one: such a change is left for `/sdlc:ship`."""
+    out = []
+    for u in undone:
+        if "bug" not in u:
+            continue
+        bug, item = u["bug"], u["text"]
+        if not item.startswith(PREEXISTING_ITEM):
+            out.append(f"a bug proposed for {item!r}, which isn't a {PREEXISTING_ITEM} item")
+        elif not bug["paths"]:
+            out.append(f"a bug proposed for {item!r} names no paths")
+        elif not bug["severity"] or (words and bug["severity"] not in words):
+            out.append(f"a bug proposed for {item!r} is {bug['severity'] or 'without a severity'}"
+                       + (f", not one of {', '.join(words)}" if words else ""))  # fmt: skip
+    return out
+
+
+def severity_words(worktree: Path) -> tuple[list[str] | None, str]:
+    """The process doc's severity words, from `sdlc.py bugs`'s `severities`, or None and what it
+    said when it can't be read."""
+    _, data, said = _sdlc(["bugs"], worktree)
+    words = (data or {}).get("severities")
+    return (words, "") if isinstance(words, list) else (None, said)
 
 
 def unrecovered(paths: list[str], recover: list[tuple[str, str]]) -> list[str]:
@@ -3372,18 +3554,25 @@ def land_parts(folder: Path, pre: dict) -> dict:
     """What the batch's yes approves for change `folder`, each part empty when it has none: its
     acceptance checks, its skills' cases with the cap, its undone notes, each with its whole text
     (`note_items()`) and the disposition the approver proposed for its first line or its whole
-    text (a seed titled by the note's first sentence when none was), its assumed decisions, and
+    text (a seed titled by the note's first sentence when none was; a bug with what the question
+    shows of it), its assumed decisions, and
     the `How to recover:` lines its commit will carry."""
     proposed, recover = read_proposals(folder)
     notes = note_items(folder)
     undone = []
     for item in (pre.get("undone") or {}).get("items") or []:
         full = notes.get(item["line"], item["text"])
-        kind, said = (
+        kind, *said = (
             proposed.get(full) or proposed.get(item["text"]) or ("seed", first_sentence(full))
         )
-        undone.append({"line": item["line"], "text": full,
-                       ("seed" if kind == "seed" else "dropped"): said})  # fmt: skip
+        part = {"line": item["line"], "text": full}
+        if kind == "bug":
+            severity, paths, title = said
+            part["bug"] = {"severity": severity, "paths": paths, "title": title}
+            part["shown"] = f"filed as a bug, {severity}: {title} ({', '.join(paths)})"
+        else:
+            part["seed" if kind == "seed" else "dropped"] = said[0]
+        undone.append(part)
     scope = (pre.get("cases") or {}).get("scope") or []
     return {
         "checks": [{"name": c["name"], "command": c["command"]}
@@ -3425,8 +3614,9 @@ def land_signals(
     """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
     in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
     notes, its checks, its skills' cases and its issues, and what the run left in its folder,
-    a resolved conflict no reviewer has seen among it (`resolution_signals()`). The one exclusion
-    is an irreversible path the approver proposed no way back for. `unreviewed` is
+    a resolved conflict no reviewer has seen among it (`resolution_signals()`). The exclusions
+    are an irreversible path the approver proposed no way back for, and a bug it proposed that
+    `bad_bugs()` refuses. `unreviewed` is
     `land_unreviewed()` as the caller read it at `stage: test`: paths, or None for no snapshot."""
     signals, excluded = [], []
     if pre is None:
@@ -3444,6 +3634,13 @@ def land_signals(
                 f"decision.md proposes no How to recover for {', '.join(missing[:5])}: "
                 "ship it by hand"
             )
+    undone = land_parts(folder, pre)["undone"]
+    if any("bug" in u for u in undone):
+        words, said = severity_words(worktree)
+        if words is None:
+            excluded.append(f"sdlc.py bugs couldn't be read: {said.strip()[-300:]}")
+        else:
+            excluded += [f"{why}: ship it by hand" for why in bad_bugs(undone, words)]
     if (pre.get("closes") or {}).get("closes"):
         signals.append("came from a public issue (closes:)")
     impact = read_impact(folder)
@@ -3494,11 +3691,13 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
         parts.append(f"its {' and '.join(runs)} run as shown{ceiling}")
     undone = any(c["undone"] for c in batch)
     assumed = any(c["assumed"] for c in batch)
+    bugs = any("bug" in u for c in batch for u in c["undone"])
+    notes = ("its undone notes carried, filed as bugs or dropped" if bugs
+             else "its undone notes carried or dropped")  # fmt: skip
     if undone and assumed:
-        parts.append("its undone notes carried or dropped and its assumed decisions confirmed "
-                     "as shown")  # fmt: skip
+        parts.append(f"{notes} and its assumed decisions confirmed as shown")
     elif undone:
-        parts.append("its undone notes carried or dropped as shown")
+        parts.append(f"{notes} as shown")
     elif assumed:
         parts.append("its assumed decisions confirmed as shown")
     if any(c["recover"] for c in batch):
@@ -3714,12 +3913,11 @@ def _note_says(folder: Path, line_re: re.Pattern) -> bool:
 
 def _note_line(folder: Path, line_re: re.Pattern, line: str) -> None:
     """Set `line` in `findings.md`'s note, by line: in place of the one `line_re` reads, else after
-    the note's last line, before the first finding. A missing file is created as just the note."""
+    the note's last line, before the first finding. A missing file is started from
+    `FINDINGS_HEAD`."""
     path = folder / "findings.md"
-    if not path.is_file():
-        path.write_text(f"# Findings\n\n{line}\n", encoding="utf-8", newline="\n")
-        return
-    lines = path.read_text(encoding="utf-8").splitlines()
+    text = path.read_text(encoding="utf-8") if path.is_file() else FINDINGS_HEAD
+    lines = text.splitlines()
     end = next((i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines))
     at = next((i for i in range(end) if line_re.match(lines[i].strip())), None)
     if at is not None:
@@ -3728,7 +3926,7 @@ def _note_line(folder: Path, line_re: re.Pattern, line: str) -> None:
         at = end
         while at > 0 and not lines[at - 1].strip():
             at -= 1
-        lines[at:at] = ["", line] if at and lines[at - 1].startswith("# ") else [line]
+        lines[at:at] = ["", line] if at and lines[at - 1].startswith(("# ", ">")) else [line]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -3834,12 +4032,13 @@ def land_round(folder: Path) -> int:
 def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
     """What the person's yes approved for change `folder`'s undone notes and assumed decisions,
     written in its worktree before `sdlc.py ship`, every edit by line: each carried item appended
-    to the register as an `[idea]` seed (ids from one `next-entry` call; the register created from
-    its template when missing) and ticked `→ seed: <id>`, each dropped one ticked `→ dropped:
-    <reason>`, and each assumed decision ticked as confirmed. What a rerun finds ticked it never
-    writes again. None, or why nothing was written."""
+    to the register as an `[idea]` seed and each approved bug as a `[bug]` with its `Severity:`
+    and `Paths:` and no `Introduced by:` (ids from one `next-entry` call; the register created
+    from its template when missing), ticked `→ seed: <id>` or `→ bug: <id>`, each dropped one
+    ticked `→ dropped: <reason>`, and each assumed decision ticked as confirmed. What a rerun
+    finds ticked it never writes again. None, or why nothing was written."""
     parts = land_parts(folder, pre)
-    seeds = [u for u in parts["undone"] if "seed" in u]
+    seeds = [u for u in parts["undone"] if "seed" in u or "bug" in u]
     notes, ids = folder / "notes.md", []
     if seeds:
         _, config, said = _sdlc(["config"], root)
@@ -3858,6 +4057,13 @@ def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
                 else Path(template).read_text(encoding="utf-8"))  # fmt: skip
         rel = folder.relative_to(root).as_posix()
         for entry_id, item in zip(ids, seeds, strict=True):
+            if bug := item.get("bug"):
+                text = text.rstrip("\n") + (
+                    f"\n\n## [{entry_id}] [bug] {bug['title']}\n\nFound by the review of "
+                    f"{folder.name}.\n{item['text']}\n\nSeverity: {bug['severity']}\n"
+                    f"Paths: {', '.join(bug['paths'])}\n"
+                )
+                continue
             text = text.rstrip("\n") + (
                 f"\n\n## [{entry_id}] [idea] {item['seed']}\n\nLeft undone by {folder.name}, "
                 f"carried forward when it landed: {item['text']}\nSee {rel}/notes.md in its "
@@ -3869,7 +4075,10 @@ def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
         lines = notes.read_text(encoding="utf-8").splitlines()
         given = iter(ids)
         for item in parts["undone"]:
-            said = f"seed: {next(given)}" if "seed" in item else f"dropped: {item['dropped']}"
+            if "dropped" in item:
+                said = f"dropped: {item['dropped']}"
+            else:
+                said = f"{'bug' if 'bug' in item else 'seed'}: {next(given)}"
             at = item["line"] - 1
             lines[at] = lines[at].replace("[ ]", "[x]", 1).rstrip() + f" → {said}"
         notes.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")

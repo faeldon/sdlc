@@ -65,9 +65,15 @@ even a sentence of your own. Then:
 - **Each undone item's disposition**, one line per unticked `- [ ]` item in `notes.md`, its text
   exactly as written there: `- UNDONE: <item text> → seed: <title>` to carry it forward as a new
   seed in the register, or `- UNDONE: <item text> → dropped: <reason>` when it is done after all,
-  superseded or not worth doing. `/sdlc-factory:land` shows them in its question and writes them
-  on the person's yes; an item with no line is carried as a seed titled by its own text, never
-  dropped.
+  superseded or not worth doing. An item starting `pre-existing:` (a fault a reviewer found in
+  code the change didn't touch) may instead be filed as a bug:
+  `- UNDONE: <item text> → bug: <severity>: <path>[, <path>…]: <title>`, its severity one of the
+  words in the Bugs section of the repo's process doc (`docs.process` in `.sdlc/config.toml`, else
+  the plugin's process guide), judged as `/sdlc:bug` would, and the paths the fault is in. Never
+  guess a word: with none that fits, carry it as a seed. A word that isn't the doc's, no paths, or
+  a bug on any other item keeps the change out of the landing, for `/sdlc:ship`.
+  `/sdlc-factory:land` shows them in its question and writes them on the person's yes; an item
+  with no line is carried as a seed titled by its own text, never dropped or filed as a bug.
 - **How to recover**, when the prompt names irreversible paths the diff touches: one line per path
   or group, `- RECOVER: <path or glob>: <the way back>`, the command that reverses it or
   `fix forward:` and what the follow-up change would do. Start from `plan.md`'s Rollback, checked

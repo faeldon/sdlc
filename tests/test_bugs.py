@@ -707,6 +707,8 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         },
         "important": [],
         "important_unknown": 0,
+        "review_sources": {},
+        "review_unknown": 0,
     }
 
 
@@ -903,7 +905,8 @@ def test_the_windows_important_findings_are_listed_and_the_unreviewed_counted(
     assert out["important"] == [
         {"change": "001-start", "id": "F1", "pass": "correctness",
          "title": "A draft saved twice keeps two",
-         "class": "a write with no check for the row it replaces", "disposition": "fixed"}
+         "class": "a write with no check for the row it replaces", "disposition": "fixed",
+         "by": None}
     ]  # fmt: skip
     assert out["important_unknown"] == 1, "a trailer alone holds no classes"
 

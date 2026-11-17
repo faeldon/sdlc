@@ -43,6 +43,18 @@ Read the tests before the code; they show what the builder meant.
    justified, module boundaries, abstraction at the level of its neighbours.
 4. **Cost.** Reuse over reimplementation; nothing speculative; obvious waste (N+1 work, unbounded
    loops).
+5. **Context.** Whether the docs that give a session its context still tell the truth after this
+   diff. Read the docs `[docs] context` names in `.sdlc/config.toml` (else `CLAUDE.md`,
+   `.claude/CLAUDE.md` and `AGENTS.md`), plus any `CLAUDE.md` in a directory above a changed path,
+   and ask of each, as `/sdlc:ship`'s context pass does:
+   - Does it now say something false? Then it is a CHANGE:
+     `- CHANGE: [context] <doc>:<line>: what it says, what is now true, and the edit`.
+   - Does the diff add something a future session needs and couldn't find quickly in the code (a
+     command, a convention, an invariant a test now enforces, architecture only several files
+     show), said in no other context doc or docstring? Only then is it a `[context]` CHANGE too.
+     The bar is high on purpose: not a list of files, not a generic practice, not a restatement
+     of the code.
+   - Anything else gets no line.
 
 You may run the repo's tests or gate to check a claim. Run nothing that writes.
 
@@ -69,12 +81,18 @@ Then, for each Critical or Required finding, one line:
 - CHANGE: path/to/file.py:42: what is wrong, and the specific fix
 ```
 
+A finding may open with the pass it belongs to, `[correctness]`, `[contract]`, `[cost]` or
+`[context]`, after the colon (`- CHANGE: [contract] path/to/file.py:42: …`); one without is filed
+under correctness. The same goes for a `- PREEXISTING:` or `- NIT:` line.
+
 A finding that is really a question for the person (the spec is silent or contradicts itself, or
 the fix is a trade-off only they can make) is not a CHANGE. Raise it instead, as
 `- DECISION: [blocking] <question>, options, your recommendation` when the change can't be judged
 without the answer, or `[default]` with the default you'd assume. Read `decisions.md` first: an
 answered decision is settled, so review against its answer. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
-Then `## Notes`: Optional findings and Nits (at most five), what is done well (at least one), and
-which tests and commands you ran. Say when you're unsure, and what would settle it, rather than
+Then `## Notes`: Optional findings and Nits (at most five), each nit on a line of its own as
+`- NIT: path/to/file.py:42: what` (they never make the verdict CHANGES, and nothing reworks them:
+they are recorded in the change's `findings.md`), what is done well (at least one), and which
+tests and commands you ran. Say when you're unsure, and what would settle it, rather than
 guessing.

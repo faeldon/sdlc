@@ -93,10 +93,13 @@ reviewing, and deciding whether to escalate.
   and command and the skills' cases with their cost cap, each run then through `factory.py
   accept` and `cases` behind the harness's own prompt (a failure stops that change and those
   after it, and a rebased change runs its checks again); each undone note carried to the
-  register as a seed or dropped, as its approver proposed; each assumed decision confirmed; and
-  the `How to recover:` its commit carries for an irreversible path. A change touching an
-  irreversible path its approver proposed no way back for is left for `/sdlc:ship`, which also
-  stays the way to land a change by hand.
+  register as a seed or dropped, as its approver proposed, and a `pre-existing:` one it proposed
+  as a bug filed as a `[bug]` with its severity and paths (`filed as a bug, <severity>: <title>
+  (<paths>)`); each assumed decision confirmed; and the `How to recover:` its commit carries for
+  an irreversible path. A change touching an irreversible path its approver proposed no way back
+  for, or with a bug proposed on a severity that isn't one of the process doc's words (`sdlc.py
+  bugs`), with no paths or on any other item, is left for `/sdlc:ship`, which also stays the way
+  to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 
@@ -154,7 +157,11 @@ spec.
 - **Later rounds read the rework.** After every builder report, `factory.py snapshot` hashes what
   the build left, so a reviewer back for round 2 reads the paths the rework changed and the kept
   changes, never raises a settled point again, and files a problem in code the change didn't
-  touch as `- PREEXISTING:`, carried to `notes.md` for ship, never reworked here.
+  touch as `- PREEXISTING:`, carried to `notes.md` for ship, never reworked here. A finding may
+  open with its pass (`[correctness]`, `[contract]`, `[cost]` or `[context]`; without one, the
+  security reviewer's is contract and every other's correctness), and the code, security and test
+  reviewers list their nits as `- NIT:` lines under `## Notes`, recorded but never verified or
+  reworked.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
 - **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`
@@ -212,7 +219,7 @@ options and its recommendation. They're gathered into the change's ledger,
 |---|---|---|
 | `spec-writer` | drafts `spec.md`, filed in `runs/` for you to approve, copied after your yes | no |
 | `builder` | writes `plan.md` and the code, test first, in slices; reworks | yes |
-| `reviewer-code` | correctness against the spec, contract, readability, cost | no |
+| `reviewer-code` | correctness against the spec, contract, readability, cost, and whether the context docs still tell the truth | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
 | `reviewer-test` | every requirement proven by a test that can fail; reads `checks.md`, never runs it | no |
 | `reviewer-behaviour` | runs the spec's end-to-end path on a gated build; reads `checks.md`, never runs it | no |
@@ -252,6 +259,9 @@ its own folder, fixture copy and server, so a round's two start together.
   build/round-<N>.upgraded.md   UPGRADED: D<k>, the decision your answer upgraded to Tier 2 by:
                                 round N is the upgraded run's first
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
+  findings.md                   every agent finding of every complete round, once, By: its role,
+                                as fixed, recorded, wrong (the verifier's drop) or a nit: the same
+                                record ship writes, counted apart from ship's own
   runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
                                 spec.md after your yes
   runs/spec-questions.md        the open questions it resolved and left, after the draft's ---
@@ -273,7 +283,10 @@ subscription it shows where the spend went, not a bill. A resumed builder's sess
 total so far, so a session counts once, at its last figure.
 
 All of it is committed with the change, at `/sdlc-factory:land` or `/sdlc:ship`, so history keeps
-how the change was made.
+how the change was made. `findings.md` is written by `factory.py carry` at the approve step, and
+rewritten by a rerun, which replaces only the sections a factory role raised; the landing commits
+it with no `Sdlc-Findings` trailer, so `/sdlc:retro` compares the two ways of building from one
+record without counting the agents' review as yours.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
 `CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at
 ship), so a factory change and one built by hand are measured the same way.

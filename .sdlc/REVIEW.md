@@ -53,6 +53,13 @@
   on any other platform whatever the code does), and
   `test_a_non_ascii_hotspot_on_the_base_branch_is_not_gone` (`tests/test_retro.py`).
 
+- **A finding counted for the wrong reviewer.** A factory agent's finding (`By:` a factory role)
+  counted in a `Sdlc-Findings` key that means ship's review, or ship's own counted as an agent's:
+  the retro would read a factory review as the person's. Every key but `agents=` counts no `By:`
+  or `By: fresh` alone, and `AGENT_ROLES` is `factory.py`'s `REVIEWERS`; pinned by
+  `test_the_trailer_never_counts_an_agent_finding` and `test_finding_by_names_every_factory_reviewer`
+  (`tests/test_findings.py`).
+
 ## Pass 2 — Contract
 
 Does the change stay inside the invariants in `AGENTS.md` (`[docs] policy`), under

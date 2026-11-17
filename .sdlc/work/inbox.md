@@ -159,29 +159,6 @@ out of git, captured per machine before a run, and approve cases skipped while t
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
-## [2026-11-17-49] [idea] One review checklist and one findings record for ship and the factory
-
-`/sdlc:ship` and the factory review a change differently, and each misses what the other checks.
-Ship has a context pass (docs still true), nits weighed and recorded in the register, existing
-faults filed as bugs, acceptance checks, skills' cases and `How to recover:`; the factory has none
-of them (35 and 39 cover part). The factory has a test reviewer (do the tests prove the
-requirements, can they fail), security depth, the spec's path run end to end, a verifier that
-drops false positives, and UI/UX; ship has none of them, but the fresh reviewer on a sensitive
-path. Standardize what a review covers and how it is recorded, not how it runs: a keyed checklist
-of review dimensions in `guide/review.md`, each naming who covers it in each way; then fill each
-gap where it is cheapest (likely first: ship's correctness pass asks whether each test can fail;
-the factory gets the context pass and files its nits and bugs); and both write `findings.md` in
-one shape with `By: <role>`, so the retro can compare them from then on without counting a
-factory review as the person's.
-
-Decide from the evidence already in history, no experiment: the factory's `reviews/round-N/` and
-`verified.md` in each landed factory change's commit, ship's `findings.md` and `Sdlc-Findings`
-trailers, the `Sdlc-Totals` on each `Close` (stops; the factory's tokens there are the
-supervisor's alone, its agents' in `runs/costs.jsonl`), and the bugs with `Introduced by:` (the
-escape rate O6 measures). After the 1.9.0 release.
-Theme: review
-Raised 2026-11-17.
-
 ## [2026-11-17-59] [idea] The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
 
 Left undone by 099-board-page-fixes, carried forward when it landed: The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
@@ -204,4 +181,45 @@ Raised 2026-11-17.
 
 Left undone by 123-evidence-reads, carried forward when it landed: `file` is on R1's plain-read list, but `file -C -m <magic>` compiles a magic file and writes `<magic>.mgc`. A later change could give `file` its own condition (no `-C`) the way `sort` has one; left as the spec lists it here.
 See .sdlc/work/123-evidence-reads/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-2] [idea] Ship's security pass at the factory's depth
+
+Left undone by 114-one-review, carried forward when it shipped: gap: security: ship checks only secrets, plus the fresh reviewer on a sensitive path; it has no security pass at the depth of the factory's `reviewer-security`.
+See .sdlc/work/114-one-review/notes.md in its commit.
+Raised 2026-11-18.
+
+
+## [2026-11-18-3] [idea] Ship runs the spec's path end to end
+
+Left undone by 114-one-review, carried forward when it shipped: gap: end-to-end: ship never runs the spec's path end to end, as the factory's `reviewer-behaviour` does at landing.
+See .sdlc/work/114-one-review/notes.md in its commit.
+Raised 2026-11-18.
+
+
+## [2026-11-18-4] [idea] Ship's UI review for changes that render a page
+
+Left undone by 114-one-review, carried forward when it shipped: gap: ui: ship has no UI review of a change that renders a page, where the factory runs `reviewer-ui` when `[ui]` is set.
+See .sdlc/work/114-one-review/notes.md in its commit.
+Raised 2026-11-18.
+
+
+## [2026-11-18-5] [idea] Ship's UX review when `[ui]` is set
+
+Left undone by 114-one-review, carried forward when it shipped: gap: ux: ship has no UX review, where the factory runs `reviewer-ux` when `[ui]` is set.
+See .sdlc/work/114-one-review/notes.md in its commit.
+Raised 2026-11-18.
+
+
+## [2026-11-18-6] [idea] Factory weighs its agents' nits and files them as `[nit]`
+
+Left undone by 114-one-review, carried forward when it shipped: gap: nits: the factory records its agents' `- NIT:` lines in `findings.md` but never weighs them (theme, cost, value) or files them as `[nit]` entries, as ship does.
+See .sdlc/work/114-one-review/notes.md in its commit.
+Raised 2026-11-18.
+
+
+## [2026-11-18-7] [idea] Landing review rounds in `findings.md`
+
+Left undone by 114-one-review, carried forward when it shipped: gap: landing rounds: `findings.md` holds only the build rounds (`reviews/round-<N>/`); the landing's review rounds (`reviews/land-<n>/`) are not in it.
+See .sdlc/work/114-one-review/notes.md in its commit.
 Raised 2026-11-18.

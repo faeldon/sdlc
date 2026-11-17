@@ -192,14 +192,14 @@ change through one read-only `preflight` call and asks the question `preflight -
 (`ship_question()`), never one worded by hand. A new list ship needs is a new part of
 `cmd_preflight()`, not a new command in the skill; what only some runs need is a side file
 `preflight`'s `branches` names (`SHIP_BRANCHES`), while the WAIT and every rule that binds each
-run stay in `SKILL.md`. Ship writes `findings.md` and the script only reads it
-(`findings_entries()`); `fix` never reaches a commit. `[review] sensitive` and `irreversible` are
-matched by the script (`risk_paths()`), never judged by a skill, and read from the base branch's
-config, so a change can't lighten its own review; risk never changes a tier. The fresh review is
-`agents/reviewer.md` (`sdlc:reviewer`), the core plugin's one agent, with `Read`, `Grep` and
-`Glob` and nothing that writes. Acceptance checks (`acceptance()`) run only through `accept`,
-and are never rerun by a later change. REFERENCE.md, *`.sdlc/work/` and worktrees* and *Risky
-paths*.
+run stay in `SKILL.md`. Ship, and the factory's `carry`, write `findings.md`, and `sdlc.py` only
+reads it (`findings_entries()`); `fix` never reaches a commit. `[review] sensitive` and
+`irreversible` are matched by the script (`risk_paths()`), never judged by a skill, and read from
+the base branch's config, so a change can't lighten its own review; risk never changes a tier. The
+fresh review is `agents/reviewer.md` (`sdlc:reviewer`), the core plugin's one agent, with `Read`,
+`Grep` and `Glob` and nothing that writes. Acceptance checks (`acceptance()`) run only through
+`accept`, and are never rerun by a later change. REFERENCE.md, *`.sdlc/work/` and worktrees* and
+*Risky paths*.
 
 **The skills' cases: `evals/`.** A `claude plugin eval` suite, in this plugin's repo only
 (`_cases_report()`). No command name holds `eval`, which the harness refuses from a worktree

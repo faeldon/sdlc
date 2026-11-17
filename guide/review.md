@@ -10,6 +10,47 @@
 **Scope:** the diff, and only the diff. Three passes, in order. Stop at the first pass that produces
 a blocking finding — fix it and re-run rather than accumulating a long list.
 
+## Review dimensions
+
+What a review covers, whichever way the change was built: by hand and reviewed at `/sdlc:ship`,
+or by the optional factory's agents in rounds. Each says who covers it in each way, and the pass
+its findings are tagged with where they carry one. A way that leaves one uncovered says so, so a
+gap is seen rather than assumed closed. Both ways record what they found in the change's
+`findings.md`, `By:` naming the reviewer.
+
+- **requirements**: every requirement has its code. Ship: the correctness pass. Factory:
+  `reviewer-code`. Pass: correctness.
+- **tests-fail**: every requirement has a test that would fail without its code. Ship: the
+  correctness pass, naming the test and the line. Factory: `reviewer-test`. Pass: correctness.
+- **failure-classes**: the ways this repo's code has failed, from its review doc. Ship: the
+  correctness pass reads them. Factory: `reviewer-code` reads them. Pass: correctness.
+- **contract**: the policy doc's invariants the diff comes near. Ship: the contract pass.
+  Factory: `reviewer-code`. Pass: contract.
+- **security**: secrets, injection, trust boundaries. Ship: secrets in the contract pass, and the
+  fresh reviewer on a sensitive path. Factory: `reviewer-security`. Pass: contract.
+- **cost**: reuse, nothing speculative, waste. Ship: the cost pass. Factory: `reviewer-code`.
+  Pass: cost.
+- **context**: the docs a session reads for its context still tell the truth. Ship: the context
+  pass. Factory: `reviewer-code`'s context pass. Pass: context.
+- **end-to-end**: the spec's path run through, as a user would. Ship: not covered. Factory:
+  `reviewer-behaviour`. Pass: correctness.
+- **ui**: the page a change renders, looked at. Ship: not covered. Factory: `reviewer-ui`, when
+  the factory's UI review is set up. Pass: correctness.
+- **ux**: whether a person can use that page. Ship: not covered. Factory: `reviewer-ux`, when the
+  factory's UI review is set up. Pass: correctness.
+- **false-positives**: a finding checked against the code before anyone acts on it. Ship: the
+  person answers each finding. Factory: the verifier keeps or drops each required change.
+- **pre-existing**: a fault the diff didn't make, filed rather than fixed. Ship: proposed as a
+  bug. Factory: carried to the change's notes, and proposed as a bug when it lands.
+- **nits**: the small things, weighed and filed. Ship: weighed and proposed as nit entries.
+  Factory: recorded in `findings.md`, never weighed or filed.
+- **fresh-eyes**: a reviewer that never saw the session that built it. Ship: the fresh reviewer
+  on a sensitive path. Factory: every agent.
+- **acceptance**: the change's acceptance checks run. Ship: its checks step. Factory: the
+  landing runs them.
+- **recovery**: how to undo what a revert can't. Ship: `How to recover:`. Factory: the approver's
+  way back for each irreversible path.
+
 ## Pass 1 — Correctness
 
 Does the change do what `intent.md` (Tier 1) or `spec.md`'s numbered requirements (Tier 2) said?
@@ -17,6 +58,11 @@ Walk the requirements one at a time; **a requirement with no corresponding code 
 requirement with code but no test that would fail without it is one too, unless only a revert
 could fail it and the change's `checks.md` holds the check that proves it (`notes.md` when it
 can't run).
+
+A requirement's test is the one that would fail without its code. For every requirement, the
+review names that test and the line whose removal would fail it, or the `checks.md` check that
+stands in for one as above; a requirement whose test or check can't be named, or whose test would
+still pass with that line gone, is a finding.
 
 Then look for the failures that don't announce themselves:
 

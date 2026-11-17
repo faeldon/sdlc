@@ -298,6 +298,26 @@ def test_a_refused_step_lands_nothing_of_that_change(tmp_path, capsys) -> None:
     assert register.read_bytes() == REGISTER.encode("utf-8"), "the register as it was"
 
 
+@needs_uv
+def test_a_landing_commits_the_agents_findings_and_no_trailer(tmp_path, capsys) -> None:
+    """114 R10: the agents' findings.md, written by `carry`, lands with the folder, and the
+    commit still carries no `Sdlc-Findings`: a factory review is never counted as the person's."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    code_md = folder / "reviews" / "round-1" / "code.md"
+    code_md.write_text(code_md.read_text() + "\n## Notes\n\n- NIT: README.md:1: terse\n")
+    assert _run(capsys, factory.cmd_carry, tree, "001")[1]["findings"] == 1
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    body = _git(tree, "log", "-1", "--format=%B")
+    assert "Sdlc-Findings" not in body and "Sdlc-Landed: by=person" in body
+    shown = _git(tree, "show", "--name-only", "--format=")
+    assert f".sdlc/work/{tree.name}/findings.md" in shown.splitlines()
+    landed = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/findings.md")
+    assert "By: code" in landed and "Fresh review: skipped" in landed
+
+
 CHECKS = "# Checks\n\n> Acceptance checks.\n\n## It runs\n\n```sh\ntrue\n```\n"
 
 
@@ -894,7 +914,9 @@ def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, mon
     code, out = _run(capsys, factory.cmd_cases, tree, "001")
     assert code == 0 and calls == [["run-cases", tree.name]]
     findings = folder / "findings.md"
-    assert findings.read_text(encoding="utf-8") == "# Findings\n\nSkill evals: ran, 2 of 2\n"
+    assert findings.read_text(encoding="utf-8") == (
+        factory.FINDINGS_HEAD + "\nSkill evals: ran, 2 of 2\n"
+    ), "a missing file starts from the template's note"
     assert sdlc.findings_entries(folder)["cases"] == {"ran": True, "said": "2 of 2"}
 
     # A rerun replaces the line, in a findings.md that has findings, inside its note.
@@ -1108,6 +1130,93 @@ def test_the_approver_proposes_dispositions_and_recovery(tmp_path, capsys) -> No
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert code == 1 and out["refusals"][0].startswith("ship it by hand"), out
     assert _git(tree, "log", "-1", "--format=%s") == "config", "nothing committed"
+
+
+PRE = "pre-existing: README.md:2: the second line says two, and nothing reads it"
+BUG = f"- UNDONE: {PRE} → bug: med: README.md, docs/a.md: The second line is never read\n"
+
+
+def test_the_approver_may_propose_a_preexisting_item_as_a_bug(tmp_path) -> None:
+    """114 R17: a `pre-existing:` item may be proposed as a bug, its severity, paths and title
+    read from the line; the prompt and the agent file both give the format."""
+    folder = tmp_path / "001-noted"
+    folder.mkdir()
+    (folder / "notes.md").write_text(f"# Notes\n\n- [ ] {PRE}\n- [ ] Page the list\n")
+    (folder / "decision.md").write_text(f"DECISION: READY\n\n{BUG}")
+    undone, _ = factory.read_proposals(folder)
+    title = "The second line is never read"
+    assert undone[PRE] == ("bug", "med", ["README.md", "docs/a.md"], title)
+    pre = {"undone": {"items": [{"line": 3, "text": PRE}, {"line": 4, "text": "Page the list"}]}}
+    parts = factory.land_parts(folder, pre)["undone"]
+    assert parts[0]["bug"] == {"severity": "med", "paths": ["README.md", "docs/a.md"],
+                               "title": "The second line is never read"}  # fmt: skip
+    assert parts[0]["shown"] == (
+        "filed as a bug, med: The second line is never read (README.md, docs/a.md)"
+    )
+    assert parts[1] == {"line": 4, "text": "Page the list", "seed": "Page the list"}
+    assert factory.TICKED_RE.match(f"- [x] {PRE} → bug: 2026-11-18-3").group(2) == "bug"
+    state = {"next": "approve", "round": 1, "exhausted": False}
+    prompt, _, _ = factory._task(folder.parent, folder, state, "approve", "builder", None)
+    assert "→ bug: <severity>: <path>[, <path>…]: <title>" in prompt
+    approver = (ROOT / "plugins" / "factory" / "agents" / "approver.md").read_text(encoding="utf-8")
+    assert "- UNDONE: <item text> → bug: <severity>: <path>[, <path>…]: <title>" in approver
+
+
+@needs_uv
+def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
+    """114 R18: land-check checks a bug's severity against the process doc's words, its paths and
+    its item, leaving a bad one for ship; the person's yes files each approved bug once, with its
+    `Severity:` and `Paths:`, ticks it `→ bug: <id>`, and the commit names it in no paragraph."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    (folder / "notes.md").write_text(f"# Notes\n\n- [ ] {PRE}\n- [ ] Page the list\n")
+    decision = folder / "decision.md"
+    head = "DECISION: READY\n\nFine.\n\n- IMPACT: minor — a test change\n"
+    for bad, why in (
+        (BUG.replace("bug: med:", "bug: urgent:"), "urgent, not one of high, med, low"),
+        (BUG.replace("med: README.md, docs/a.md:", "med: :"), "names no paths"),
+        ("- UNDONE: Page the list → bug: med: README.md: Paging\n", "isn't a pre-existing: item"),
+    ):  # fmt: skip
+        decision.write_text(head + bad)
+        code, batch = _run(capsys, factory.cmd_land_check, root, [])
+        assert batch["batch"] == [], batch
+        said = " ".join(batch["excluded"][0]["excluded"])
+        assert why in said and "ship it by hand" in said, said
+    decision.write_text(head + BUG)
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    [entry] = batch["batch"]
+    assert entry["undone"][0]["shown"].startswith("filed as a bug, med: The second line")
+    assert "filed as bugs" in batch["question"]
+
+    (folder / "findings.md").write_text(OPEN_FINDING, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert code == 1 and "sdlc.py ship refused" in out["refusals"][0], out
+    bugs, problems = sdlc.bug_entries(tree)
+    assert problems == [] and len(bugs) == 1
+    [bug] = bugs
+    assert (bug["title"], bug["severity"], bug["paths"]) == (
+        "The second line is never read",
+        "med",
+        ["README.md", "docs/a.md"],
+    )
+    assert bug["introduced_by"] is None, "an escape is confirmed, never assumed here"
+    assert bug["text"].startswith(f"Found by the review of {tree.name}. {PRE}")
+    notes = (folder / "notes.md").read_text(encoding="utf-8")
+    assert f"- [x] {PRE} → bug: {bug['id']}\n" in notes
+    register = (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+
+    (folder / "findings.md").write_text(
+        OPEN_FINDING.replace("Disposition: open", "Disposition: fixed"), encoding="utf-8"
+    )
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    assert (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == register, (
+        "a rerun files nothing twice"
+    )
+    body = _git(tree, "log", "-1", "--format=%B")
+    assert "Carried forward:\n- Page the list →" in body
+    assert "second line" not in body, "a bug is in neither Carried forward nor Dropped"
 
 
 @needs_uv

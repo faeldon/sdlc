@@ -941,6 +941,151 @@ def test_carry_takes_the_kept_changes_and_the_pre_existing_problems(tmp_path, ca
     assert out["added"] == ["code: code fix 1", "pre-existing: src/old.py:3: an unclosed file"]
 
 
+@pytest.mark.parametrize(
+    ("role", "text", "found"),
+    [
+        ("code", "[context] docs/a.md:3: old flag", ("context", "docs/a.md:3: old flag")),
+        ("code", "[cost] src/a.py:1: one caller", ("cost", "src/a.py:1: one caller")),
+        ("security", "[correctness] src/a.py:2: wrong", ("correctness", "src/a.py:2: wrong")),
+        ("code", "src/a.py:1: no tag", ("correctness", "src/a.py:1: no tag")),
+        ("security", "src/a.py:1: no tag", ("contract", "src/a.py:1: no tag")),
+        ("test", "[style] src/a.py:1: unknown", ("correctness", "[style] src/a.py:1: unknown")),
+        ("security", "[style] src/a.py:1: unknown", ("contract", "[style] src/a.py:1: unknown")),
+    ],
+)  # fmt: skip
+def test_a_finding_takes_its_tagged_pass_else_its_roles(role, text, found) -> None:
+    """A line may open with one of the four passes; otherwise, or with any other tag left in its
+    text, its role's: `security` is contract, every other reviewer correctness."""
+    assert factory.finding_pass(role, text) == found
+    if not text.startswith("[style]"):
+        assert factory._change_path(text) == found[1].split(":", 1)[0], "a tag is no path"
+    assert factory.CHANGE_RE.pattern == r"^\s*- CHANGE:\s*(.+?)\s*$", "unchanged"
+
+
+def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
+    """A reviewer's `- NIT:` lines are read apart from its changes: they never make a verdict
+    CHANGES, never reach the verifier and are never reworked."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:2: name it")
+    review = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "code.md"
+    review.write_text(review.read_text() + "- NIT: src/a.py:9: a long line\n")
+    _review(root, 1, "security", "VERDICT: PASS")
+    sec = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "security.md"
+    sec.write_text(sec.read_text() + "- NIT: [cost] src/b.py:1: a helper with one caller\n")
+    for role in ("test", "behaviour"):
+        _review(root, 1, role, "VERDICT: PASS")
+    folder = root / ".sdlc" / "work" / NAME
+    [r1], problems = factory.read_rounds(folder, FULL)
+    assert problems == []
+    assert r1["reviews"]["code"]["changes"] == ["src/a.py:2: name it"]
+    assert r1["reviews"]["code"]["nits"] == ["src/a.py:9: a long line"]
+    assert r1["reviews"]["security"] == {
+        "verdict": "PASS", "changes": [], "preexisting": [],
+        "nits": ["[cost] src/b.py:1: a helper with one caller"],
+    }  # fmt: skip
+    state, _ = factory.loop_state(root, "008", None)
+    prompt, _, _ = factory._task(root, folder, state, "verify", "verifier", None)
+    assert "a long line" not in prompt and "one caller" not in prompt
+    assert [line for line in prompt.splitlines() if line.startswith("- ")] == [
+        "- C1: code: src/a.py:2: name it"
+    ]
+
+
+def _two_rounds(root: Path) -> Path:
+    """Two reviewed rounds: kept, dropped, pre-existing and nit lines, and a kept change round 2
+    asks for again word for word."""
+    folder = root / ".sdlc" / "work" / NAME
+    for n in (1, 2):
+        _build_report(root, n)
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:1: fix a",
+            "[context] docs/x.md:3: says the old flag")  # fmt: skip
+    _review(root, 1, "security", "VERDICT: CHANGES", "src/b.py:2: escape it")
+    _review(root, 1, "test", "VERDICT: PASS")
+    test = folder / "reviews" / "round-1" / "test.md"
+    test.write_text(
+        test.read_text()
+        + "- PREEXISTING: src/old.py:3: an unclosed file\n- NIT: src/a.py:9: a long line\n"
+    )
+    _review(root, 1, "behaviour", "VERDICT: PASS")
+    _verified(root, 1,
+              kept=["code: src/a.py:1: fix a", "code: [context] docs/x.md:3: says the old flag"],
+              dropped=["security: src/b.py:2: escape it"])  # fmt: skip
+    _review(root, 2, "code", "VERDICT: CHANGES", "[context] docs/x.md:3: says the old flag")
+    for role in ("security", "test", "behaviour"):
+        _review(root, 2, role, "VERDICT: PASS")
+    _verified(root, 2, kept=["code: [context] docs/x.md:3: says the old flag"])
+    return folder
+
+
+def test_carry_writes_each_agent_finding_once_by_its_role(tmp_path, capsys) -> None:
+    """114 R7: every distinct finding of every complete round, once, by its role, ranked and
+    disposed by what became of it, in a findings.md core reads with no problem."""
+    root = _change(tmp_path)
+    folder = _two_rounds(root)
+    code, out = _run(capsys, factory.cmd_carry, root, "008")
+    assert code == 0 and out["findings"] == 5
+    text = (folder / "findings.md").read_text(encoding="utf-8")
+    assert text.startswith(factory.FINDINGS_HEAD)
+    found = sdlc.findings_entries(folder)
+    assert found["problems"] == [] and found["open"] == [] and found["fix"] == []
+    rows = [(e["id"], e["rank"], e["pass"], e["disposition"], e["by"], e["evidence"], e["class"])
+            for e in found["entries"]]  # fmt: skip
+    assert rows == [
+        ("F1", "important", "correctness", "fixed", "code", "src/a.py:1", "code review, round 1"),
+        ("F2", "important", "context", "recorded", "code", "docs/x.md:3", "code review, round 1"),
+        ("F3", "important", "contract", "wrong", "security", "src/b.py:2",
+         "security review, round 1"),
+        ("F4", "preexisting", "correctness", "recorded", "test", "src/old.py:3",
+         "test review, round 1"),
+        ("F5", "nit", "correctness", "minor", "test", "src/a.py:9", "test review, round 1"),
+    ]  # fmt: skip
+    entries = found["entries"]
+    assert entries[2]["reason"] == "not in the code"
+    assert entries[4]["reason"] == "raised by an agent; not weighed or filed"
+    assert text.count("says the old flag") == 2, "its heading and body once: round 2 repeats it"
+    assert sdlc.findings_trailer(entries).endswith(" agents=5")
+
+
+def test_carry_with_no_complete_round_writes_the_note_alone(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:1: fix a")
+    _run(capsys, factory.cmd_carry, root, "008")
+    assert (folder / "findings.md").read_text(encoding="utf-8") == factory.FINDINGS_HEAD
+    assert sdlc.findings_entries(folder)["problems"] == []
+
+
+def test_carry_rewrites_only_the_agents_findings(tmp_path, capsys) -> None:
+    """114 R8: a rerun replaces only the sections a factory role raised, keeps the note's lines
+    and every other section as written, numbers its own after the highest it kept, and changes no
+    byte when nothing is new."""
+    root = _change(tmp_path)
+    folder = _two_rounds(root)
+    ship = (
+        "## F1. [important] [correctness] Ship's own\n\nEvidence: src/a.py:4\nClass: logic\n"
+        "Disposition: fixed\n"
+    )
+    path = folder / "findings.md"
+    path.write_text(factory.FINDINGS_HEAD + "Fresh review: skipped, no Agent tool\n\n" + ship)
+    _run(capsys, factory.cmd_carry, root, "008")
+    once = path.read_text(encoding="utf-8")
+    assert "Fresh review: skipped, no Agent tool\n" in once and ship in once
+    ids = [(e["id"], e["by"]) for e in sdlc.findings_entries(folder)["entries"]]
+    assert ids == [("F1", None), ("F2", "code"), ("F3", "code"), ("F4", "security"),
+                   ("F5", "test"), ("F6", "test")]  # fmt: skip
+    _run(capsys, factory.cmd_carry, root, "008")
+    assert path.read_text(encoding="utf-8") == once, "a rerun with nothing new is the same bytes"
+    fresh = ship.replace("F1.", "F9.").replace("Ship's own", "A fresh one") + "By: fresh\n"
+    path.write_text(once.rstrip("\n") + "\n\n" + fresh)
+    _run(capsys, factory.cmd_carry, root, "008")
+    ids = [(e["id"], e["by"]) for e in sdlc.findings_entries(folder)["entries"]]
+    assert ids[:2] == [("F1", None), ("F9", "fresh")]
+    assert [i for i, _ in ids[2:]] == ["F10", "F11", "F12", "F13", "F14"]
+    assert factory.FINDINGS_HEAD + "Fresh review: skipped" in path.read_text(encoding="utf-8")
+
+
 def test_an_exhausted_run_must_escalate_and_ask_to_reconsider(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     for n in (1, 2, 3):
