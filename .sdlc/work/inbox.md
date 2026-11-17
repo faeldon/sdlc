@@ -217,14 +217,14 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
 
-## [2026-11-17-19] [idea] Port 0 for the factory's UI review server, and the board's printed URL
+## [2026-11-17-19] [idea] Port 0 for the factory's UI review server
 
-089 closed the pick-then-bind window in the board's tests by serving on port 0. Two places keep
-a cousin of it: `factory.py`'s `_free_port()` (about line 2497) picks a port for the UI review's
-dev server and releases it before the outside `[ui] serve` command binds it, so a parallel run
-could take it between; and `sdlc.py board --port 0` serves on the port the OS picks but prints
-`http://127.0.0.1:0/`. The first needs a design of its own (a retry, or a serve command that
-reports its port); the second should print the bound port.
+089 closed the pick-then-bind window in the board's tests by serving on port 0. `factory.py`'s
+`_free_port()` (about line 2767) keeps a cousin of it: it picks a port for the UI review's dev
+server and releases it before the outside `[ui] serve` command binds it, so a parallel run could
+take it between. It needs a design of its own (a retry, or a serve command that reports its port).
+The board's half, `sdlc.py board --port 0` printing `http://127.0.0.1:0/`, goes with the board
+fixes of 2026-11-17-30.
 Theme: factory
 Raised 2026-11-17.
 
