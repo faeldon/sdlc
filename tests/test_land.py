@@ -1441,6 +1441,11 @@ def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) ->
         "VERDICT: CHANGES\n- CHANGE: README.md:1: keep both\n\n## Evidence\n$ true\nexit: 0\n",
         encoding="utf-8",
     )
+    # 111: an answer naming no change of the landing round says which round: land-1, not round 1.
+    (reviews / "verified.md").write_text("- KEPT: behaviour: C9: made up\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert any("C9, which no change of land-1 is" in p for p in out["problems"]), out
+    assert not any("round 1" in p for p in out["problems"]), out
     (reviews / "verified.md").write_text("- **KEPT:** behaviour: C1: keep both\n", encoding="utf-8")
     code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
     assert (out["next"], out["mend"]) == ("mend", ["verifier"]), out

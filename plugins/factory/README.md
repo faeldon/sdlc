@@ -130,7 +130,7 @@ spec.
 ## Rounds that converge
 
 - **Built on current code.** Before its spec-writer or its question, `/sdlc-factory:build NNN`
-  runs `factory.py fresh`, which brings the change's branch up to the base branch through
+  (and `/sdlc-factory:spec NNN`, before its spec-writer) runs `factory.py fresh`, which brings the change's branch up to the base branch through
   `sdlc`'s own `base` (and its `resolve` when the base changed what the change's uncommitted work
   changes), and shows how far behind it was, what moved and the undo. Only the change's own branch
   moves; never a stash, a merge of the base or a force. A real conflict is aborted and left for
@@ -211,8 +211,10 @@ Only the builder edits. The others return text, and the skill writes it to the c
 **The UI and UX reviewers** run only in a repo that declares a front end (`[ui]`, below), and only
 on a round whose diff touches its `paths`; once one round runs them, the later ones do too. They
 never make a run's depth full. Neither has a shell: before each runs, `factory.py agent` starts
-the dev server `[ui]` names on a free port, takes each page at each width with its screenshot
-command, stops the process group it started, and gives the reviewer the images and the changed
+the dev server `[ui]` names on a free port (on a new one, up to three tries, when another process
+takes it first, each lost try in `shots.json`'s `retries`; only a port that already answers, or
+won't bind once the server has exited, is lost, and a server that fails on its own is started
+once), takes each page at each width with its screenshot command, stops the process group it started, and gives the reviewer the images and the changed
 paths. A shot that fails refuses that review, with what the commands printed, so neither judges a
 page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N>/` with a
 `shots.json` of what ran, a folder that ignores itself, so none is committed.

@@ -9,6 +9,7 @@ allowed-tools:
   - Edit
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py fresh *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
@@ -36,7 +37,25 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start <NNN> -
 (`spec-writer = "opus"`) when the repo overrides it. `start` names the change folder and its tier and stage, and every refusal:
 not this change's worktree, a Tier 1 change, a stage past `plan`. **If there are refusals, show
 them and stop.** For a Tier 1 change, say its intent's Approach stands in for a spec, and that
-`/sdlc-factory:build` can start from it.
+`/sdlc-factory:build` can start from it. `start` also gives `base`, the branch the change lands
+on, and `behind`, how many of its commits the change lacks.
+
+With no refusals, bring the change up to date before the spec-writer reads it, with the call
+`/sdlc-factory:build` makes:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py fresh <NNN>
+```
+
+`fresh` runs `sdlc.py`'s own `base` in the change's worktree, and its `resolve` when the base
+changed what the change's uncommitted work changes, so the spec is drafted against current code.
+It is a write before this skill's WAIT, by a named exception to
+confirm-before-writing, as ship's `base` is: it moves only the change's own branch, never stashes,
+merges the base or forces, and prints the command that undoes it. Its `state`: `current`,
+`fast-forwarded`, `rebased` or `resolved`, each with `from`, `head` and `undo`; or `refused`, with
+the worktree as it was. A conflict git can't settle is aborted and refused, naming its files: the
+person resolves it with `/sdlc:ship` from the worktree, or `sdlc.py resolve`, never an agent.
+**If `fresh` refuses, show its refusal and stop.**
 
 ## Step 1 — Draft it
 
@@ -59,8 +78,9 @@ context, and say so if the second draft still lacks it:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --recheck
 ```
 
-Show the person the draft, and the questions the agent resolved and left. A question left for the
-person is theirs to answer now, or to leave open in the intent.
+Show the person the draft, and the questions the agent resolved and left; and how far the change
+was behind `base` (`behind`) and what `fresh` did: its state, `from` → `head` and its `undo`. A
+question left for the person is theirs to answer now, or to leave open in the intent.
 
 ## Step 2 — WAIT for explicit approval
 

@@ -105,8 +105,8 @@ mirrors an open change and never creates an issue. The interface: CONTRIBUTING.m
 tracker*; what a host sees: REFERENCE.md, *Trackers* and *The project doc*.
 
 **Writes before a WAIT.** Four, each a named exception to confirm-before-writing: ship's `base`
-and `resolve`, which move only the change's own branch and print the undo; the factory build's
-`fresh`, which is those two, run through `sdlc.py` before the spec-writer drafts, and leaves the
+and `resolve`, which move only the change's own branch and print the undo; the factory's
+`fresh`, which is those two, run through `sdlc.py` by its build and spec skills before the spec-writer drafts, and leaves the
 worktree as it found it on a conflict; and ship's `findings.md`, which decides nothing. Never a stash (the stack is shared across worktrees), and
 never a merge of `main` into the branch, which close would put on `main`'s first-parent line,
 where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
@@ -219,7 +219,7 @@ judge have no Write; only the builder edits (its sub-agents only `Agent(Explore,
 agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
 gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
 the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its own version
-(`sdlc_path()`), and `fresh` moves a change's branch onto the base before a build, through
+(`sdlc_path()`), and `fresh` moves a change's branch onto the base before a build or a spec, through
 `sdlc`'s own `base` and `resolve`; a gate holds one of `gate_jobs` slots, locks in the git common
 dir, never `sdlc.lock`; its gate passes itself only when no change carries a risk signal, recorded as
 `Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.

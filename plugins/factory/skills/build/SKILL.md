@@ -81,7 +81,7 @@ each role's model at either depth (`models_at`: `factory.models` where the repo 
 opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier, and
 for the other reviewers sonnet on a Tier 2 or a full-depth run, haiku otherwise), the base
 branch's `[ui]` (`ui`: the dev server `serve` starts, the screenshot command `shoot`, the `paths`
-that count as UI), and `max_runs`, the most agent runs this can take, counted at the full depth.
+that count as UI, and the `fixture` data the server is given a fresh copy of), and `max_runs`, the most agent runs this can take, counted at the full depth.
 
 **The UI reviewers join on their own.** With `[ui]`'s `serve`, `shoot` and `paths` all set, a round
 whose diff touches one of those paths adds the `ui` and `ux` reviewers at either depth, and keeps

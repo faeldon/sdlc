@@ -160,17 +160,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
 
-## [2026-11-17-19] [idea] Port 0 for the factory's UI review server
-
-089 closed the pick-then-bind window in the board's tests by serving on port 0. `factory.py`'s
-`_free_port()` (about line 2767) keeps a cousin of it: it picks a port for the UI review's dev
-server and releases it before the outside `[ui] serve` command binds it, so a parallel run could
-take it between. It needs a design of its own (a retry, or a serve command that reports its port).
-The board's half, `sdlc.py board --port 0` printing `http://127.0.0.1:0/`, goes with the board
-fixes of 2026-11-17-30.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-28] [idea] CONTRIBUTING's Writing a tracker lists the intake methods
 
 AGENTS.md points at CONTRIBUTING.md's *Writing a tracker* for the tracker interface, which leaves
@@ -215,12 +204,6 @@ Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py
 See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-64] [idea] /sdlc-factory:spec shows how far behind the change is and brings it up to date
-
-Left undone by 101-factory-start-fresh, carried forward when it landed: `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and doesn't run `fresh`, so a spec can be drafted on a stale branch.
-See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-65] [idea] Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
 
 Left undone by 102-sdlc-docstrings, carried forward when it landed: Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
@@ -236,12 +219,6 @@ Raised 2026-11-17.
 Theme: inbox
 Raised 2026-11-17.
 
-## [2026-11-17-67] [idea] The build skill's summary of `start`'s `ui` (`serve`, `shoot`, `paths`) doesn't name `fixture`; the README does.
-
-Left undone by 106-factory-reviewer-coverage, carried forward when it landed: The build skill's summary of `start`'s `ui` (`serve`, `shoot`, `paths`) doesn't name `fixture`; the README does.
-See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
 
 097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at
@@ -250,13 +227,6 @@ Raised 2026-11-17.
 to `plan` by hand. A promotion should have a path: `factory.py` sets `tier: 2`, keeps the build,
 and drafts the spec behind its own question.
 Theme: factory
-Raised 2026-11-17.
-
-## [2026-11-17-80] [idea] Name the landing round in `_resolve()`'s problems
-
-Left undone by 109-landing-stops-only-for-cause, carried forward when it landed: `_resolve()`'s problems still say "round <n>" for a landing round's answer ("C3, which no
-change of round 1 is"); only the file named before them says which kind of round it is.
-See .sdlc/work/109-landing-stops-only-for-cause/notes.md in its commit.
 Raised 2026-11-17.
 
 ## [2026-11-17-81] [idea] Wrap long tokens in a card's next step

@@ -72,6 +72,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import BinaryIO
 from urllib.parse import urlparse
 
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
@@ -869,15 +870,15 @@ def _change_lead(change: str) -> str | None:
     return f"{_change_path(change)}:{parts[1].strip()}"
 
 
-def _resolve(role: str, text: str, asked: list, n: int) -> tuple[str | None, str]:
-    """The asked change an answer in round `n` names, by its id, else its exact text, else a
-    `path:line` lead only one of its role's changes has: the reviewer's text, or None and why it
-    names none."""
+def _resolve(role: str, text: str, asked: list, label: str) -> tuple[str | None, str]:
+    """The asked change an answer in round `label` (`round 1`, `land-1`) names, by its id, else its
+    exact text, else a `path:line` lead only one of its role's changes has: the reviewer's text, or
+    None and why it names none."""
     if m := ID_RE.match(text):
         ident = f"C{m.group(1)}"
         match = next((a for a in asked if a[0] == ident), None)
         if not match:
-            return None, f"{ident}, which no change of round {n} is"
+            return None, f"{ident}, which no change of {label} is"
         if match[1] != role:
             return None, f"{ident}, which is {match[1]}'s change, not {role}'s"
         return match[2], ""
@@ -889,7 +890,7 @@ def _resolve(role: str, text: str, asked: list, n: int) -> tuple[str | None, str
         return leads[0], ""
     if len(leads) > 1:
         return None, f"{text}, whose lead {lead} {len(leads)} of {role}'s changes open with"
-    return None, f"{text}, which no review of round {n} asks for"
+    return None, f"{text}, which no review of {label} asks for"
 
 
 def read_verified(
@@ -905,6 +906,8 @@ def read_verified(
         return None, []
     asked = asked_changes(reviews)
     where = where or f"reviews/round-{n}/{VERIFIED}"
+    # The round's kind is its folder's: a landing round's is `land-<n>`, never a build round's.
+    label = f"land-{n}" if path.parent.name == f"land-{n}" else f"round {n}"
     kept, dropped, problems = [], [], []
     for line in path.read_text(encoding="utf-8").splitlines():
         if m := KEPT_RE.match(line):
@@ -914,7 +917,7 @@ def read_verified(
             role, text, why = m.group(1), (change if sep else m.group(2)).strip(), why.strip()
         else:
             continue
-        change, wrong = _resolve(role, text, asked, n)
+        change, wrong = _resolve(role, text, asked, label)
         if change is None:
             problems.append(f"{where} answers {role}: {wrong}")
             continue
@@ -4137,6 +4140,8 @@ def _reports(root: Path) -> Path:
 
 SHOT_TIMEOUT = 120
 STOP_GRACE = 5
+# Starts of `[ui] serve`, each on a new port, before a port lost to another process is a problem.
+SERVE_TRIES = 3
 
 
 def _free_port() -> int:
@@ -4217,6 +4222,105 @@ def _fixture_copy(root: Path, where: Path, fixture: str | None) -> tuple[str, st
     return served.relative_to(root).as_posix(), None
 
 
+def _binds(host: str, port: int) -> bool:
+    """Whether `host`:`port` binds now, the socket closed straight after: a port that won't is held
+    by another process. `SO_REUSEADDR` lets a port whose last connection is in TIME_WAIT bind, as
+    a server restarting on it would, while one another socket holds, listening or bound, still
+    won't; on Windows it would let a held port bind too, and TIME_WAIT never blocks a bind there."""
+    try:
+        with socket.socket() as s:
+            if os.name != "nt":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
+def _lost(host: str, port: int) -> bool:
+    """Whether a server that has exited lost `port` to another process, so a new one is worth
+    trying: only when the port won't bind (`_binds()`). One that binds means the server failed on
+    its own. The one place a serve's end is judged, whichever way it ended."""
+    return not _binds(host, port)
+
+
+def _up(proc: subprocess.Popen, host: str, port: int, timeout: float) -> tuple[str | None, bool]:
+    """Whether the server `proc` came up on `port`: (None, False) once it answers, else why not and
+    whether the port was lost (`_lost()`, for every way the server ended). A port that answers
+    after `proc` exited is never shot. A timeout is the server's own, never lost."""
+    deadline = time.monotonic() + timeout
+    answered = False
+    while proc.poll() is None:
+        if _answers(host, port):
+            answered = True
+            # Answering, and still running after: up.
+            if proc.poll() is None:
+                return None, False
+            break
+        if time.monotonic() > deadline:
+            return f"the dev server didn't answer on {port} in {timeout}s", False
+        time.sleep(0.2)
+    if answered:
+        why = f"port {port} answered, but the dev server had exited {proc.returncode}"
+    else:
+        why = f"the dev server exited {proc.returncode} before answering on {port}"
+    return why, _lost(host, port)
+
+
+def _serve(
+    root: Path, where: Path, ui: dict, record: dict, sink: BinaryIO
+) -> tuple[subprocess.Popen | None, int | None]:
+    """Start `[ui] serve` on a free port and wait until it answers, up to `SERVE_TRIES` times: a
+    port another process took between `_free_port()` and the serve (it already answers, or won't
+    bind once the server has exited, however it ended: `_lost()`) is tried again on a new one, each
+    lost try in `record`'s `retries`. A server that exits on a port that binds, doesn't answer in
+    time, or can't start, failed on its own and isn't retried. The process
+    started and its port, or (None, …) with `record`'s `problem` set; a fresh fixture copy each
+    try, since a server may have written into the last."""
+    group = (
+        {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    port = None
+    for _ in range(SERVE_TRIES):
+        port = _free_port()
+        served, problem = _fixture_copy(root, where, ui.get("fixture"))
+        # `{fixture}` only with one set: unset, `serve` runs as written.
+        record["serve"] = _fill(ui["serve"], port=port, **({"fixture": served} if served else {}))
+        record["port"], record["problem"] = port, problem
+        if problem:
+            # No data to serve, no server.
+            return None, port
+        # Wait where the shots will go: `[ui] url`'s host, not one assumed.
+        host = urlparse(_fill(ui["url"], port=port)).hostname or "127.0.0.1"
+        if _answers(host, port):
+            lost = f"port {port} already answered before the dev server started"
+            record["retries"].append({"port": port, "why": lost})
+            record["problem"] = lost
+            continue
+        try:
+            proc = subprocess.Popen(
+                _sh(record["serve"]), cwd=root, stdin=subprocess.DEVNULL, stdout=sink,
+                stderr=subprocess.STDOUT, **group,
+            )  # fmt: skip
+        except OSError as e:
+            record["problem"] = f"the dev server couldn't be started: {e}"
+            return None, port
+        why, lost = _up(proc, host, port, ui["timeout"])
+        if why is None:
+            return proc, port
+        _stop(proc)
+        record["problem"] = why
+        if not lost:
+            return None, port
+        record["retries"].append({"port": port, "why": why})
+    record["problem"] = (
+        f"the dev server came up on none of {SERVE_TRIES} ports: {record['problem']}"
+    )
+    return None, port
+
+
 def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], dict]:
     """Each page of `[ui]` at each width, as PNGs under `.sdlc/reports/shots/<change>/<label>/`,
     with `shots.json` saying what ran and how it ended: `problem` is None only when every shot was
@@ -4235,43 +4339,12 @@ def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], d
         if before.get("problem") is None and all(p.is_file() for p in paths):
             return paths, before
     where.mkdir(parents=True, exist_ok=True)
-    port = _free_port()
-    served, problem = _fixture_copy(root, where, ui.get("fixture"))
-    record: dict = {
-        # `{fixture}` only with one set: unset, `serve` runs as written.
-        "serve": _fill(ui["serve"], port=port, **({"fixture": served} if served else {})),
-        "port": port,
-        "shots": [],
-        "problem": problem,
-    }
+    record: dict = {"serve": None, "port": None, "shots": [], "problem": None, "retries": []}
     log = where / "serve.log"
-    group = (
-        {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
-        if os.name == "nt"
-        else {"start_new_session": True}
-    )
     with log.open("wb") as sink:
+        proc = None
         try:
-            # No data to serve, no server.
-            proc = None if problem else subprocess.Popen(
-                _sh(record["serve"]), cwd=root, stdin=subprocess.DEVNULL, stdout=sink,
-                stderr=subprocess.STDOUT, **group,
-            )  # fmt: skip
-        except OSError as e:
-            proc, record["problem"] = None, f"the dev server couldn't be started: {e}"
-        try:
-            deadline = time.monotonic() + ui["timeout"]
-            # Wait where the shots will go: `[ui] url`'s host, not one assumed.
-            host = urlparse(_fill(ui["url"], port=port)).hostname or "127.0.0.1"
-            while proc and record["problem"] is None and not _answers(host, port):
-                if proc.poll() is not None:
-                    record["problem"] = f"the dev server exited {proc.returncode} before answering"
-                elif time.monotonic() > deadline:
-                    record["problem"] = (
-                        f"the dev server didn't answer on {port} in {ui['timeout']}s"
-                    )
-                else:
-                    time.sleep(0.2)
+            proc, port = _serve(root, where, ui, record, sink)
             for page, w, h, path in want if record["problem"] is None else []:
                 url = _fill(ui["url"], port=port).rstrip("/") + "/" + page.lstrip("/")
                 # Relative to the checkout, where the command runs: the record names no machine.

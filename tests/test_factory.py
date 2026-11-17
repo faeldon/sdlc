@@ -3192,3 +3192,144 @@ def test_a_killed_gate_frees_its_slot(tmp_path) -> None:
         assert slot == 0
     assert time.monotonic() - start < 2, "the slot outlived its gate"
     assert lock.is_file(), "the file stays; only the lock goes"
+
+
+def test_a_landing_verifiers_answer_names_its_landing_round(tmp_path) -> None:
+    """111: a problem in a landing round's `verified.md` names the round `land-<n>`, as its file
+    does, and a build round's names it `round <n>`."""
+    reviews = {"code": {"verdict": "CHANGES", "changes": ["src/a.py:2: name it"]}}
+    for kind, label in (("land", "land-1"), ("round", "round 1")):
+        where = tmp_path / kind / "reviews" / f"{kind}-1"
+        where.mkdir(parents=True)
+        (where / "verified.md").write_text(
+            "- KEPT: code: C9: made up\n- KEPT: code: src/b.py:1: reworded\n", encoding="utf-8"
+        )
+        _, problems = factory.read_verified(where / "verified.md", 1, reviews)
+        assert f"C9, which no change of {label} is" in problems[1], problems
+        assert f"reworded, which no review of {label} asks for" in problems[2], problems
+
+
+def _held(listening: bool):
+    """A socket holding a port on 127.0.0.1, as a parallel run's server would: one that answers,
+    or one bound that a second server can't bind."""
+    import socket
+
+    held = socket.socket()
+    held.bind(("127.0.0.1", 0))
+    if listening:
+        held.listen()
+    return held
+
+
+def test_shots_take_a_new_port_when_theirs_is_lost(tmp_path, monkeypatch) -> None:
+    """111: a port another process takes between `_free_port()` and the serve is tried again on a
+    new one, and the record says so: taken before the serve started (it already answers), or bound
+    so the serve exits before answering. Every try lost is a problem, with no server left."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    ui = _ui(tmp_path, pages=["/"], widths=[[390, 844]])
+    answering, bound = _held(True), _held(False)
+    ports = [answering.getsockname()[1], bound.getsockname()[1]]
+    free = iter([*ports, factory._free_port()])
+    monkeypatch.setattr(factory, "_free_port", lambda: next(free))
+    try:
+        paths, record = factory.shots(root, folder, "round-1", ui)
+        assert record["problem"] is None and paths[0].is_file(), record
+        assert [r["port"] for r in record["retries"]] == ports, record
+        assert "already answered" in record["retries"][0]["why"], record
+        assert "exited" in record["retries"][1]["why"], record
+        assert record["port"] not in ports and f" {record['port']} " in record["serve"]
+        assert not _alive(int((tmp_path / "server.pid").read_text()))
+        monkeypatch.setattr(factory, "_free_port", lambda: ports[0])
+        (tmp_path / "server.pid").unlink()
+        _, record = factory.shots(root, folder, "round-2", ui)
+        assert len(record["retries"]) == factory.SERVE_TRIES, record
+        assert "already answered" in record["problem"], record
+        assert not (tmp_path / "server.pid").exists(), "no server started on a port taken"
+    finally:
+        answering.close()
+        bound.close()
+
+
+def test_a_port_is_lost_only_when_it_wont_bind_whichever_way_the_server_ended(tmp_path) -> None:
+    """111 round 3: every way `_up()` sees the server end decides lost the same way, by whether the
+    port binds. One that answered, then exited with the port free, failed on its own; one whose
+    port is still held (another's server answering) lost it."""
+
+    class Ended:
+        """A server running on `held` when first asked, exited 1 when asked again, letting the
+        port go when `frees`."""
+
+        returncode = 1
+
+        def __init__(self, held, frees: bool) -> None:
+            self.held, self.frees, self.asked = held, frees, 0
+
+        def poll(self) -> int | None:
+            self.asked += 1
+            if self.asked == 1:
+                return None
+            if self.frees:
+                self.held.close()
+            return 1
+
+    for frees, lost in ((True, False), (False, True)):
+        held = _held(True)
+        port = held.getsockname()[1]
+        try:
+            why, got = factory._up(Ended(held, frees), "127.0.0.1", port, 5)
+        finally:
+            held.close()
+        assert why == f"port {port} answered, but the dev server had exited 1", why
+        assert got is lost, (frees, why)
+
+
+def test_a_server_that_answered_and_closed_first_has_not_lost_its_port(tmp_path) -> None:
+    """111 round 4: a server that answered a real request, closing the connection first as a
+    server ending its reply does (its port's side left in TIME_WAIT), then exited on its own,
+    failed on its own: its port is free to bind again, so it is not lost."""
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        conn, _ = listener.accept()
+        conn.close()
+        assert client.recv(1) == b"", "the server's side closed first"
+
+    class Answered:
+        """Running when first asked; exited 1, its port let go, when asked again."""
+
+        returncode, asked = 1, 0
+
+        def poll(self) -> int | None:
+            self.asked += 1
+            if self.asked == 1:
+                return None
+            listener.close()
+            return 1
+
+    try:
+        why, lost = factory._up(Answered(), "127.0.0.1", port, 5)
+    finally:
+        listener.close()
+    assert why == f"port {port} answered, but the dev server had exited 1", why
+    assert lost is False, why
+
+
+def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -> None:
+    """111 C1: a serve that exits before answering on a port that still binds failed on its own,
+    not to another process: one start, no retry, and its exit is the problem."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    starts = tmp_path / "starts"
+    serve = f'echo started >> "{starts}"; exit 1'
+    ports = []
+    real = factory._free_port
+    monkeypatch.setattr(factory, "_free_port", lambda: ports.append(real()) or ports[-1])
+    _, record = factory.shots(root, folder, "round-1", _ui(tmp_path, serve, timeout=5))
+    assert starts.read_text().splitlines() == ["started"], "started once"
+    assert len(ports) == 1 and record["retries"] == [], record
+    assert "exited 1 before answering" in record["problem"], record

@@ -1450,6 +1450,33 @@ def test_no_shipped_text_names_migrate_inbox() -> None:
     assert named == []
 
 
+def test_factory_spec_brings_the_change_up_to_date_before_its_spec_writer() -> None:
+    """111: the factory's spec skill makes the build skill's own `fresh` call once `start` refuses
+    nothing, before the spec-writer and the WAIT, stops on its refusal, and shows `behind`."""
+    spec = frontmatter.load(BY_ID["sdlc-factory:spec"]).content
+    step0 = spec.split("## Step 0")[1].split("## Step 1")[0]
+    blocks = re.findall(r"```bash\n(.*?)```", step0, re.S)
+    call = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py fresh <NNN>'
+    assert any(call in b for b in blocks), "fresh runs in Step 0's bash"
+    build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
+    assert call in build, "the same call the build skill makes"
+    fresh = spec.index("factory.py fresh <NNN>")
+    assert fresh < spec.index("--task spec") and fresh < spec.index("## Step 2 — WAIT")
+    assert "If `fresh` refuses, show its refusal and stop" in step0
+    assert "named exception to" in step0 and "confirm-before-writing" in step0
+    shown = spec.split("## Step 1")[1].split("## Step 2")[0]
+    assert "`behind`" in shown and "`undo`" in shown
+
+
+def test_build_names_every_ui_key_start_gives() -> None:
+    """111: the build skill's summary of `start`'s `ui` names each key a host sets, `fixture`
+    too."""
+    build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
+    summary = build.split("the base\nbranch's `[ui]` (`ui`:")[1].split(")")[0]
+    for key in ("serve", "shoot", "paths", "fixture"):
+        assert f"`{key}`" in summary, key
+
+
 def test_build_brings_the_change_up_to_date_before_its_spec_writer() -> None:
     """101 R6: Step 0 runs `fresh` once `start` refuses nothing, before the spec-writer or the
     WAIT, and keeps `fresh`'s `head` for `verdicts`; Step 1 shows what it did."""
