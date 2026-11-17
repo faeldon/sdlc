@@ -2,12 +2,12 @@
 
 Seeds, not a backlog. `/sdlc:intent` promotes one into a change.
 
-## [2026-10-24-2] [idea] A factory queue, and parallel runs across worktrees
+## [2026-10-24-2] [idea] A factory queue
 
-The factory runs one change per session. A queue (`/sdlc-factory:next` over seeds or
-open intents) and several runs at once, one per worktree, would let ideas move while nobody
-watches. GitHub issues and `work/ideas.md` are already the queue; this is the runner. Raised
-2026-10-24.
+A queue (`/sdlc-factory:next` over seeds or open intents) would let ideas move while nobody
+watches: the supervisor (070) already runs several changes at once, one per worktree, but the
+person still starts each. The register and GitHub issues are already the queue; this is the
+runner. Raised 2026-10-24.
 Theme: factory
 Priority: low
 
@@ -216,16 +216,6 @@ out of git, captured per machine before a run, and approve cases skipped while t
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
-
-## [2026-11-17-10] [idea] Try the landing on a real factory batch
-
-`/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two
-ready changes from a real supervised run (seed 2026-11-17-7) landed from a fresh session in the
-main checkout, is the only check of the marketplace cache lookup of sdlc's script, of the builder
-resolving a real conflict and the reviewers checking it in headless sessions, and of close's push
-from a subprocess. See .sdlc/work/072-factory-land/notes.md in 072's commit.
-After: 2026-11-17-7
-Theme: factory
 
 ## [2026-11-17-19] [idea] Port 0 for the factory's UI review server, and the board's printed URL
 
