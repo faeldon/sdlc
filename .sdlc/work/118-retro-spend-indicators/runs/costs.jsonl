@@ -1,7 +1,0 @@
-{"session": "f83a376f-506b-4d77-8a3f-ad9aae0a5031", "role": "builder", "model": "opus", "cost_usd": 3.0455560000000004, "duration_ms": 832287, "turns": 44, "in": 84, "out": 43763, "cache_create": 149951, "cache_read": 4851760}
-{"session": "67feef0f-2cdc-4592-adda-cfc928dacab1", "role": "code", "model": "sonnet", "cost_usd": 0.19476899999999997, "duration_ms": 173347, "turns": 6, "in": 10, "out": 2656, "cache_create": 39261, "cache_read": 111450}
-{"session": "f3bc18e7-24b1-4364-8852-17ca5a46764d", "role": "test", "model": "sonnet", "cost_usd": 0.15236119999999997, "duration_ms": 241602, "turns": 9, "in": 16, "out": 2247, "cache_create": 28024, "cache_read": 177632}
-{"session": "6c6e1473-274b-4029-ae1e-95f97f0fdbac", "role": "approver", "model": "opus", "cost_usd": 0.351053, "duration_ms": 31660, "turns": 14, "in": 8, "out": 3370, "cache_create": 33642, "cache_read": 72425}
-{"session": "f83a376f-506b-4d77-8a3f-ad9aae0a5031", "role": "builder", "model": "opus", "cost_usd": 3.3925320000000005, "duration_ms": 77217, "turns": 5, "in": 10, "out": 1740, "cache_create": 17785, "cache_read": 849280}
-{"session": "d4b0fed9-4550-42d9-b6b9-a41f1ea7d1f9", "role": "code", "model": "sonnet", "cost_usd": 0.1973524, "duration_ms": 60477, "turns": 7, "in": 14, "out": 2524, "cache_create": 38614, "cache_read": 176284}
-{"session": "33ee6429-59c5-4330-86aa-70dbfa33fca7", "role": "test", "model": "sonnet", "cost_usd": 0.1287167, "duration_ms": 90957, "turns": 5, "in": 8, "out": 1859, "cache_create": 25827, "cache_read": 68027}
