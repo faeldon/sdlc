@@ -1,5 +1,0 @@
-STEP: done
-ROUND:
-LIMIT: 2
-REVIEWERS: code, test, ui, ux
-SINCE: 2026-11-17T15:56:24Z
