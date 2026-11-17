@@ -350,7 +350,13 @@ in the same run (`sdlc.py resolve`): the uncommitted work is set aside as a comm
 sides survive, and the work comes back uncommitted on the new base. The files resolved are
 recorded in the change's `conflicts.md` and named in ship's question, and `sdlc.py resolve <NNN>
 --abort` puts the worktree back until ship commits. Anything else `base` refuses stops ship,
-untouched, for the person. Once a change
+untouched, for the person. A Tier 1 change that turns out to need a spec is upgraded in place
+with `sdlc.py upgrade <NNN>`, from its own worktree, at `stage: plan` or `build`: it sets
+`tier: 2` and `stage: plan` by editing those lines, scaffolds `spec.md` and `plan.md` from
+your templates where they are missing (a file there already is kept), and refuses on the base
+branch, at any other stage, or for a change already at Tier 2. It is one-way: there is no
+downgrade. The factory runs it when the person's answer to a blocking decision starts `upgrade
+to Tier 2` (`plugins/factory/README.md`). Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `.sdlc/work/` never fills up
 with finished changes: the change's commit keeps them in history. `.sdlc/work/inbox.md` is committed
 too; a closed seed is deleted from it, history keeping that as well. Every entry there is a

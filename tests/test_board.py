@@ -662,6 +662,19 @@ def test_a_factory_card_shows_its_step_track(repo, step) -> None:
 
 
 @pytest.mark.portable
+@pytest.mark.parametrize("step", ["upgrade", "spec"])
+def test_an_upgrade_pauses_the_step_track(repo, step) -> None:
+    """112 R13: an upgrade and its spec pause the track where the run was, as a decide does, from
+    the board's pinned copy of the paused steps."""
+    assert board.PAUSES == factory.PAUSES
+    _run_at(repo, step, 2, after="review")
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert progress is not None, "the track is kept, not dropped"
+    assert [s["state"] for s in progress["steps"]] == TRACKS["decide"]
+    assert progress["paused"] is True and progress["elapsed"] is None
+
+
+@pytest.mark.portable
 def test_a_decision_or_a_stop_overrides_the_record(repo) -> None:
     """R4: a valid decision is every step done, at the stage it belongs to (098); a stop shown
     has no track at all."""

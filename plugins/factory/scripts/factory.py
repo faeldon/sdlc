@@ -13,9 +13,9 @@ line a step moves.
 
 It never imports `sdlc.py`. Installed from the marketplace, each plugin is cached on its own, so
 it reads the change folder itself, the same way: frontmatter by line, edited by line, never
-round-tripped (`sdlc.py`'s `stamp_shipped` rule). For `fresh` and landing alone it runs the
-`sdlc.py` of its own version, beside it (`sdlc_path()`), so ship, base, resolve and close keep one
-implementation.
+round-tripped (`sdlc.py`'s `stamp_shipped` rule). For `fresh`, `upgrade` and landing alone it runs
+the `sdlc.py` of its own version, beside it (`sdlc_path()`), so ship, base, resolve, upgrade and
+close keep one implementation.
 
     uv run --script factory.py config
     uv run --script factory.py start 008 --for build
@@ -26,6 +26,7 @@ implementation.
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
     uv run --script factory.py write-spec 008
+    uv run --script factory.py upgrade 008
     uv run --script factory.py agent 008 --task review --role code
     uv run --script factory.py ready
     uv run --script factory.py land-check
@@ -33,6 +34,8 @@ implementation.
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
 `carry` to `notes.md`, `stage` to `intent.md`, `write-spec` the approved draft to `spec.md`,
+`upgrade` its record to `build/round-<P>.upgraded.md` (and, through `sdlc.py upgrade`, the tier and
+stage to `intent.md` and the scaffolds a Tier 2 owes),
 `gate` its attempt to `build/round-<N>.gate.md`, `verdicts --record` a stop to `runs/stopped.md`
 (or removes it once the run is clear) and the step it read, with since when, to `runs/step.md`,
 `agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
@@ -51,6 +54,11 @@ policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] .
 reply. `decisions` gathers them into `decisions.md`; `verdicts` says `decide` while a blocking one
 is unanswered, and the session running the build, the only one that can talk to the person, asks
 them. A default one lets the run go on, recorded as assumed until the person confirms it.
+
+**An upgrade to Tier 2.** A Tier 1 change found bigger than its Approach is upgraded only by the
+person's answer to a blocking decision, one that starts `upgrade to Tier 2`: `verdicts` names
+`upgrade`, then `spec` until the approved spec moves the change to `stage: build`, then `build` at
+round P, the upgraded run's first, which resumes the builder. Once only, and never back.
 """
 
 from __future__ import annotations
@@ -157,6 +165,13 @@ RESTART_RE = re.compile(r"^RESTART: (decision-(\d+)\.md)\s*$")
 WORDS_RE = re.compile(r"^WORDS: (R\d+)\s*$")
 RESTART_WORDS_RE = re.compile(r"^- \[x\] (R\d+) \(person, restart\): (.+?)\s*$")
 ARCHIVE_RE = re.compile(r"^decision-(\d+)\.md$")
+# A Tier 1 change upgraded to Tier 2 during its run, on the person's answer to a blocking decision,
+# which starts `upgrade to Tier 2` in any case: `upgrade` writes `build/round-<P>.upgraded.md`
+# beside the gate files, naming that decision, then has `sdlc.py upgrade` set the tier. Round P is
+# the upgraded run's first, as a restart's round is. `sdlc.py` keeps a copy of the file's pattern.
+UPGRADED_RE = re.compile(r"^UPGRADED: (D\d+)\s*$")
+UPGRADED_FILE_RE = re.compile(r"^round-(\d+)\.upgraded\.md$")
+UPGRADE_ANSWER_RE = re.compile(r"^upgrade to tier 2\b", re.I)
 # What a builder report and a behaviour check end with: each command run (`$ <command>`), the tail
 # of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
 EVIDENCE = "## Evidence"
@@ -772,6 +787,10 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     out.update(change=folder.name, folder=str(folder), worktree=str(root), tier=tier, stage=stage)
     # A Tier 2 at `plan` has no spec yet: the spec-writer drafts it before the run's gate.
     out["spec"] = purpose == "build" and (tier, stage) == (2, "plan")
+    # A run upgraded to Tier 2 part way: the gate's question is asked in its upgraded form.
+    upgrade, _ = read_upgrade(folder)
+    keys = ("round", "decision", "answer")
+    out["upgraded"] = {k: upgrade[k] for k in keys} if upgrade else None
     # Each role's model, at either depth, so the gate shows the run's cost before it starts.
     # The light depth's reviewers for this change's tier, as `depth()` will expect them.
     out["light"] = {**cfg["light"], "reviewers": light_reviewers(cfg, tier)}
@@ -948,12 +967,17 @@ def ui_review(cfg: dict, rounds: list[dict], changed: list[str]) -> bool:
 def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
     """The rounds, their problems and the run's depth, each round's `complete` judged against the
     reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`), and
-    the newest restart (`restart`, or None), whose round starts the run."""
+    the newest restart (`restart`, or None) and the upgrade (`upgrade`, or None), whose round
+    starts the run, the newer of the two."""
     rounds, problems = read_rounds(folder, cfg["reviewers"])
     restarts, wrong = read_restarts(folder)
     problems += wrong
-    run = depth(root, cfg, rounds, [r["round"] for r in restarts], change_tier(folder))
+    upgrade, wrong = read_upgrade(folder)
+    problems += wrong
+    starts = [r["round"] for r in restarts] + ([upgrade["round"]] if upgrade else [])
+    run = depth(root, cfg, rounds, starts, change_tier(folder))
     run["restart"] = restarts[-1] if restarts else None
+    run["upgrade"] = upgrade
     run["ui"] = ui_review(cfg, rounds, run["changed"])
     if run["ui"]:
         run["reviewers"] += [r for r in UI_REVIEWERS if r not in run["reviewers"]]
@@ -1100,6 +1124,65 @@ def read_restarts(folder: Path) -> tuple[list[dict], list[str]]:
     return found, problems
 
 
+def upgraded_path(folder: Path, n: int) -> Path:
+    return folder / "build" / f"round-{n}.upgraded.md"
+
+
+def upgrade_answer(ledger: list[dict]) -> dict | None:
+    """The first ledger line that upgrades the change: blocking, ticked and decided by the person
+    (never superseded), its answer starting `upgrade to Tier 2`. An open line, a default, or any
+    other answer is None: an agent asking is never the person deciding."""
+    for d in ledger:
+        if d["kind"] == "blocking" and d["decided"] and UPGRADE_ANSWER_RE.match(d["answer"] or ""):
+            return d
+    return None
+
+
+def read_upgrade(folder: Path) -> tuple[dict | None, list[str]]:
+    """The upgrade record, `build/round-<P>.upgraded.md`, as its round, the decision it names, that
+    decision's question and the person's answer, and its own path in the folder; and what's wrong
+    with it: a second record (a change is upgraded once), a first line that isn't `UPGRADED:
+    D<n>`, or a decision that isn't a decided upgrade answer. (None, []) with no record."""
+    found = []
+    for path in (folder / "build").glob("round-*.upgraded.md"):
+        m = UPGRADED_FILE_RE.match(path.name)
+        if m:
+            found.append((int(m.group(1)), path))
+    if not found:
+        return None, []
+    found.sort()
+    problems = []
+    if len(found) > 1:
+        names = ", ".join(f"build/{p.name}" for _, p in found)
+        problems.append(f"{names}: a change is upgraded once, and these are {len(found)} records")
+    n, path = found[0]
+    where = f"build/{path.name}"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    m = UPGRADED_RE.match(lines[0]) if lines else None
+    if not m:
+        return None, [*problems, f"{where} doesn't open with UPGRADED: D<n>"]
+    entry = next((d for d in read_ledger(folder) if d["id"] == m.group(1)), None)
+    if entry is None or upgrade_answer([entry]) is None:
+        return None, [*problems, (
+            f"{where} names {m.group(1)}, which isn't a decided blocking line in decisions.md "
+            "answered `upgrade to Tier 2`"
+        )]  # fmt: skip
+    return {
+        "round": n, "decision": entry["id"], "question": entry["text"], "answer": entry["answer"],
+        "record": where,
+    }, problems  # fmt: skip
+
+
+def newest_round(folder: Path) -> int:
+    """The newest round built or reviewed: one past it is the round a restart or an upgrade
+    starts."""
+    reviewed = [
+        int(p.name[6:]) for p in (folder / "reviews").glob("round-*")
+        if p.is_dir() and p.name[6:].isdigit()
+    ]  # fmt: skip
+    return max([build_round(folder), *reviewed])
+
+
 def next_archive(folder: Path) -> int:
     """The number the next archived decision takes: one past the highest `decision-<n>.md`."""
     names = [ARCHIVE_RE.match(p.name) for p in folder.glob("decision-*.md")]
@@ -1126,11 +1209,7 @@ def restart_state(folder: Path) -> tuple[dict | None, str | None]:
     exists, is a restart cut short, to finish. A READY, a decision that won't read, or neither,
     is refused. Writes nothing."""
     path = folder / "decision.md"
-    reviewed = [
-        int(p.name[6:]) for p in (folder / "reviews").glob("round-*")
-        if p.is_dir() and p.name[6:].isdigit()
-    ]  # fmt: skip
-    newest = max([build_round(folder), *reviewed])
+    newest = newest_round(folder)
     if path.is_file():
         decision, problem = read_decision(folder)
         if problem:
@@ -1308,7 +1387,7 @@ def read_step(text: str) -> dict | None:
 
 def step_text(out: dict, since: str, after: str | None = None) -> str:
     """`runs/step.md`'s text for one `verdicts` reading: the step, its round, the run's round
-    limit and expected reviewers, since when, and on a `decide` the step it paused at."""
+    limit and expected reviewers, since when, and on a pause (`PAUSES`) the step it paused at."""
     rnd = "" if out.get("round") is None else str(out["round"])
     lines = [
         f"STEP: {out['next']}", f"ROUND: {rnd}", f"LIMIT: {out.get('limit') or ''}",
@@ -1321,7 +1400,7 @@ def step_text(out: dict, since: str, after: str | None = None) -> str:
 
 def _record_step(folder: Path, out: dict) -> None:
     """Write `runs/step.md` for this reading, keeping the record's `SINCE:` while its step and
-    round hold, and on a `decide` the step it paused at."""
+    round hold, and on a pause (`PAUSES`) the step it paused at."""
     path = folder / STEP
     try:
         old = read_step(path.read_text(encoding="utf-8", errors="replace"))
@@ -1330,8 +1409,8 @@ def _record_step(folder: Path, out: dict) -> None:
     same = old and old["step"] == out["next"] and old["round"] == out.get("round")
     since = old["since"] if same and old["since"] else _utc_now()
     after = None
-    if out["next"] == "decide" and old:
-        after = old["after"] if old["step"] == "decide" else old["step"]
+    if out["next"] in PAUSES and old:
+        after = old["after"] if old["step"] in PAUSES else old["step"]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(step_text(out, since, after), encoding="utf-8", newline="\n")
 
@@ -1351,6 +1430,11 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
       `build/round-<round+1>.md`.
     - `approve`: carry what's unresolved to notes.md and run the approver.
     - `decide`: a blocking decision in `decisions.md` is waiting for the person (`pending`).
+    - `upgrade`: the person answered `upgrading`, a blocking decision, `upgrade to Tier 2`, on a
+      Tier 1 change: run `upgrade`. A record left with the tier still 1 names it again, to finish.
+    - `spec`: an upgraded change (`upgraded`) owes its spec before round `round` builds: draft it
+      and ask for it, `written` true once `spec.md` is no longer its scaffold. At `stage: build`,
+      `build` at that round, the builder resumed.
     - `done`: the decision is in.
     - `stop`: a problem, or `HEAD` moved: an agent committed, which none may.
 
@@ -1406,9 +1490,10 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     last = rounds[-1] if rounds else None
     changes = last and any(v["verdict"] == "CHANGES" for v in last["reviews"].values())
     kept = bool(last and last["verified"] and last["verified"]["kept"])
-    # A restarted run's rounds count from its restart: round R is its first.
-    restart = run["restart"]
-    first = restart["round"] if restart else 1
+    # A restarted or upgraded run's rounds count from its restart or its upgrade, the newer: round
+    # R or P is its first.
+    restart, upgrade = run["restart"], run["upgrade"]
+    first = max(restart["round"] if restart else 1, upgrade["round"] if upgrade else 1)
     exhausted = bool(last and last["complete"] and changes and kept)
     exhausted = exhausted and last["round"] - first + 1 >= run["rounds"]
     decision, problem = read_decision(folder, exhausted)
@@ -1422,6 +1507,9 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
     out["limit"] = first - 1 + run["rounds"]
     out["restart"] = restart
+    out.update(upgraded=upgrade, upgrading=None, written=None)
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    tier, stage = change_tier(folder), meta.get("stage") or None
     ledger = read_ledger(folder)
     out["pending"] = [d["id"] for d in ledger if d["kind"] == "blocking" and d["open"]]
     out["assumed"] = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
@@ -1490,10 +1578,20 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
             out["mend"] = [role for role, found in mendable.items() if found]
     elif out["pending"]:
         out["next"] = "decide"
+    elif tier == 1 and not decision and (upgrade or upgrade_answer(ledger)):
+        # A record with the tier still 1 is an upgrade cut short: the same one, finished.
+        out["next"] = "upgrade"
+        out["upgrading"] = upgrade["decision"] if upgrade else upgrade_answer(ledger)["id"]
+    elif upgrade and upgrade["round"] > built and stage != "build" and not decision:
+        out["next"], out["round"] = "spec", upgrade["round"]
+        spec = folder / "spec.md"
+        out["written"] = spec.is_file() and not _scaffold(spec.read_text(encoding="utf-8"))
     elif decision:
         out["next"] = "done"
     elif restart and restart["round"] > built:
         out["next"], out["round"] = "build", restart["round"]
+    elif upgrade and upgrade["round"] > built:
+        out["next"], out["round"] = "build", upgrade["round"]
     elif built == 0:
         out["next"], out["round"] = "build", 1
     elif unreviewed and gate and gate["current"] is None:
@@ -1905,6 +2003,40 @@ def cmd_write_spec(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "to": spec.relative_to(root).as_posix()})
 
 
+def cmd_upgrade(root: Path, ident: str) -> int:
+    """Upgrade a Tier 1 change to Tier 2 during its run, once the person's answer to a blocking
+    decision said so: refused unless `verdicts` names `upgrade`. Writes
+    `build/round-<P>.upgraded.md`, `P` one past the newest round built or reviewed, then runs
+    `sdlc.py upgrade` of this factory's own version, which sets `tier: 2` and `stage: plan` and
+    scaffolds what a Tier 2 owes. The record first, so a rerun after a stop between the two
+    finishes the same upgrade, writing no second record. Commits nothing."""
+    state, refusal = loop_state(root, ident, None)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    if state["next"] != "upgrade":
+        why = f"verdicts says {state['next']!r}, not 'upgrade'"
+        return emit({"change": state["change"], "refusals": [why]}, 1)
+    folder, _ = find_change(root, ident)
+    stage = frontmatter((folder / "intent.md").read_text(encoding="utf-8")).get("stage")
+    if stage not in ("plan", "build"):
+        why = f"upgrade takes a Tier 1 change at stage: plan or build, not stage: {stage}"
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    upgrade = state["upgraded"]
+    rnd = upgrade["round"] if upgrade else newest_round(folder) + 1
+    record = upgraded_path(folder, rnd)
+    out = {"change": folder.name, "round": rnd, "decision": state["upgrading"]}
+    out["record"] = record.relative_to(folder).as_posix()
+    if not upgrade:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(f"UPGRADED: {state['upgrading']}\n", encoding="utf-8", newline="\n")
+    code, data, said = _sdlc(["upgrade", folder.name], root)
+    if code or data is None:
+        why = "; ".join((data or {}).get("refusals") or []) or said.strip()[-500:]
+        return emit({**out, "refusals": [f"sdlc.py upgrade refused: {why}"]}, 1)
+    out.update({k: data.get(k) for k in ("tier", "stage", "created", "kept")})
+    return emit({**out, "refusals": []})
+
+
 def cmd_restart(root: Path, ident: str, words: str | None) -> int:
     """Send an escalated change back to the factory, once the person said yes: the checks `start`
     made (`restart_state()`), then `build/round-<R>.restart.md`, then `decision.md` renamed to
@@ -1965,7 +2097,7 @@ NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 # The step the supervisor's last reading named, and since when: written on every reading by
 # `verdicts --record`, read by the board (with its own copies of these, pinned by a test), never by
-# the loop. `SINCE:` holds while `STEP:` and `ROUND:` do; `AFTER:` is the step a `decide` paused.
+# the loop. `SINCE:` holds while `STEP:` and `ROUND:` do; `AFTER:` is the step a pause held.
 STEP = Path("runs") / "step.md"
 STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
@@ -1973,6 +2105,9 @@ LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
 REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
+# The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
+# decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
+PAUSES = ("decide", "upgrade", "spec")
 # What moves a stopped run on, by its way: the record's `NEXT:` line.
 WAYS = {
     "ship": "an agent committed: read the commit, then ship it by hand with /sdlc:ship {id}",
@@ -2258,8 +2393,17 @@ def _task(
         return f"Revise your draft, as the person asks: {words}", folder / SPEC_DRAFT, False
     if task == "spec" and recheck:
         return RECHECK, folder / SPEC_DRAFT, False
+    upgrade = state.get("upgraded")
     if task == "spec":
-        return head + "Draft spec.md for this change.", folder / SPEC_DRAFT, False
+        prompt = head + "Draft spec.md for this change."
+        if upgrade and state["next"] == "spec":
+            prompt += (
+                f" It was upgraded from Tier 1 to Tier 2 before round {upgrade['round']}, on the "
+                f"person's answer to {upgrade['decision']} ({upgrade['question']}): "
+                f"{upgrade['answer']}. The build so far, up to round {upgrade['round'] - 1}, is in "
+                "the worktree: specify the whole change, what is built included."
+            )
+        return prompt, folder / SPEC_DRAFT, False
     restart = state.get("restart")
     if task == "build" and restart and rnd == restart["round"]:
         # A fresh builder, told why the approver escalated: never resumed on the old approach.
@@ -2274,6 +2418,16 @@ def _task(
             prompt += "\n\n" + section
         if restart["words"]:
             prompt += f"\n\nThe person adds: {read_restart_words(folder, restart['words'])}"
+        return prompt, folder / "build" / f"round-{rnd}.md", False
+    if task == "build" and upgrade and rnd == upgrade["round"]:
+        # The builder resumed, its context kept: told the answer, the spec, and to replan first.
+        prompt = head + (
+            f"{upgrade['decision']} is decided in decisions.md: {upgrade['answer']}. So this "
+            f"change is now Tier 2, upgraded before round {rnd}, and {rel}/spec.md is its approved "
+            f"spec. Rewrite {rel}/plan.md against it first, keeping what still holds of your plan "
+            f"so far, then build round {rnd} to the spec, test first. Every other ticked line in "
+            "decisions.md is settled: build on it."
+        )
         return prompt, folder / "build" / f"round-{rnd}.md", False
     if task == "build":
         return (
@@ -2293,6 +2447,11 @@ def _task(
         if role not in state["missing"]:
             return f"{role} isn't among round {rnd}'s missing reviewers: {state['missing']}"
         prompt = head + f"Review round {rnd}."
+        if upgrade and rnd == upgrade["round"]:
+            prompt += (
+                f" This change was upgraded from Tier 1 to Tier 2 before this round "
+                f"({upgrade['decision']}): review it against spec.md."
+            )
         before = [r for r in state["rounds"] if r["round"] < rnd and role in r["reviews"]]
         if before and state["reworked"] is not None:
             prev = next((r for r in state["rounds"] if r["round"] == rnd - 1), None)
@@ -2328,6 +2487,11 @@ def _task(
         )
     if task == "approve":
         prompt = head + "Decide."
+        if upgrade:
+            prompt += (
+                f" This change was upgraded from Tier 1 to Tier 2 before round {upgrade['round']}, "
+                f"on the person's answer to {upgrade['decision']}: judge it against spec.md."
+            )
         if state["exhausted"]:
             prompt += (
                 " The rounds ran out with changes still kept: say whether the approach should "
@@ -2350,6 +2514,19 @@ def _task(
         return prompt, folder / "decision.md", False
     reviewed = state["rounds"][-1]["round"] if state["rounds"] else 0
     if task == "decided":
+        upgrading = state.get("upgrading") or (upgrade or {}).get("decision")
+        if decided == upgrading:
+            return (
+                f"{decided} upgraded the change: `upgrade`, the spec and the builder's round "
+                f"{(upgrade or {}).get('round') or 'P'} answer it, never `decided`"
+            )
+        if state["next"] in ("upgrade", "spec") or (
+            upgrade and state["next"] == "build" and rnd == upgrade["round"]
+        ):
+            return (
+                f"verdicts says {state['next']!r}: the upgrade comes first, and the builder it "
+                "resumes is told every decided line"
+            )
         entry = next((d for d in read_ledger(folder) if d["id"] == decided), None)
         if entry is None or not entry["decided"]:
             return f"{decided} isn't a decided line in decisions.md"
@@ -2567,6 +2744,10 @@ def cmd_agent(
         task == "spec" and (revise or recheck)
     )
     resumed = resumed or (task == "mend" and verdict_mend(folder, state, role))
+    # An upgraded run's first build carries on the builder that raised the upgrade.
+    upgrade = state.get("upgraded")
+    at_p = bool(upgrade) and state["next"] == "build" and state["round"] == upgrade["round"]
+    resumed = resumed or (task == "build" and at_p)
     resumed = resumed or bool(task == "land-mend" and (role == "verifier" or preamble(target)))
     if resumed:
         ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
@@ -2766,6 +2947,13 @@ def cmd_fresh(root: Path, ident: str) -> int:
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     stage = meta.get("stage") or None
+    if any(UPGRADED_FILE_RE.match(p.name) for p in (folder / "build").glob("round-*.upgraded.md")):
+        out.update(state="held", reason=(
+            f"{folder.name} was upgraded to Tier 2 part way through its run: its rounds so far "
+            "were gated and reviewed on the base they had, so it carries on there, and landing "
+            "rebases and gates it again"
+        ))  # fmt: skip
+        return emit(out)
     if stage == "build":
         out.update(state="held", reason=(
             f"{folder.name} stopped part way at stage: build: its rounds were gated and reviewed "
@@ -4553,6 +4741,8 @@ def main() -> int:
     p_restart = sub.add_parser("restart", help="send an escalated change back for another build")
     p_restart.add_argument("id")
     p_restart.add_argument("--words", help="the person's words in decisions.md (R1), if any")
+    p_upgrade = sub.add_parser("upgrade", help="make a Tier 1 change Tier 2 on the person's answer")
+    p_upgrade.add_argument("id")
     p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
     p_agent.add_argument("id")
     p_agent.add_argument("--task", choices=TASKS, required=True)
@@ -4645,6 +4835,8 @@ def main() -> int:
         return cmd_shots(root, args.id, args.round, args.role)
     if args.cmd == "restart":
         return cmd_restart(root, args.id, args.words)
+    if args.cmd == "upgrade":
+        return cmd_upgrade(root, args.id)
     if args.cmd == "write-spec":
         return cmd_write_spec(root, args.id)
     if args.cmd == "escapes":

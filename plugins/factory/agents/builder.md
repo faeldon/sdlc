@@ -117,6 +117,21 @@ by side as if both held:
 superseded: a ticked line with `→ decided:` is the person's word and can't be superseded; if you
 think it wrong, raise a `[blocking]` decision saying why.
 
+**A Tier 1 change that needs a spec.** If building it shows the change is bigger than its
+Approach (requirements a reviewer would need numbered, a design the intent doesn't settle), don't
+write a spec yourself and don't stretch the Approach. Stop where the tree still works and raise a
+blocking decision with `upgrade to Tier 2` among its options, beside the narrower Tier 1 it could
+stay:
+
+```
+- DECISION: [blocking] Upgrade to Tier 2? Drafts need a retention policy the Approach doesn't settle. Options: upgrade to Tier 2; stay Tier 1 without retention. Recommend upgrade to Tier 2: the policy needs requirements to check against.
+```
+
+If the person upgrades it, a spec-writer drafts the spec and the person approves it. You are
+then resumed for the next round, told the answer: rewrite `plan.md` against the approved spec
+first, keeping what still holds, then build to it, test first. A change is upgraded once, and
+never back.
+
 ## Rework rounds
 
 When the supervisor resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/verified.md`: the

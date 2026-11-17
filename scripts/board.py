@@ -71,10 +71,12 @@ SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
 
 # A factory card's step track: the six positions of a round, and where each step the record names
-# sits on it (`fix` is the gate, fixing). `decide` keeps the position it paused at; `done` is past
-# them all. An estimate never fills its bar past `CAP` while the step runs.
+# sits on it (`fix` is the gate, fixing). A pause (`PAUSES`, `factory.py`'s, pinned by a test)
+# keeps the position it paused at; `done` is past them all. An estimate never fills its bar past
+# `CAP` while the step runs.
 TRACK = ("build", "gate", "review", "verify", "rework", "approve")
 AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
+PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
 # only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
@@ -411,7 +413,7 @@ def _progress(
     step = rec["step"]
     if step == "stop":
         return None
-    paused = step == "decide"
+    paused = step in PAUSES
     at = AT.get(rec.get("after") or "") if paused else AT.get(step)
     if step == "done":
         at = len(TRACK)

@@ -3454,3 +3454,371 @@ def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -
     assert starts.read_text().splitlines() == ["started"], "started once"
     assert len(ports) == 1 and record["retries"] == [], record
     assert "exited 1 before answering" in record["problem"], record
+
+
+# ---------------------------------------------------------------- a run upgraded to Tier 2 (112)
+
+UPGRADE_Q = (
+    "Upgrade to Tier 2? Drafts need a retention policy. Options: upgrade to Tier 2; stay Tier 1"
+)
+UPGRADE_LINE = (
+    f"- [x] D1 (builder round 1, blocking): {UPGRADE_Q} → decided: "
+    "Upgrade to Tier 2: keep 30 days\n"
+)
+
+
+def _tier1_run(
+    tmp_path: Path, ledger: str | None = UPGRADE_LINE, config: str | None = None
+) -> tuple[Path, Path]:
+    """A Tier 1 run at `stage: build` whose builder raised an upgrade in round 1, unreviewed, and
+    the person's answer in the ledger: (root, folder). No spec.md or plan.md, as `new` left it."""
+    root = _change(tmp_path, 1, "build", config=config)
+    folder = root / ".sdlc" / "work" / NAME
+    for name in ("spec.md", "plan.md"):
+        (folder / name).unlink()
+    _build_report(root, 1, f"- DECISION: [blocking] {UPGRADE_Q}\n")
+    if ledger is not None:
+        (folder / "decisions.md").write_text(f"# Decisions\n\n{ledger}", encoding="utf-8")
+    return root, folder
+
+
+def _upgrade(root, capsys) -> tuple[int, dict]:
+    return _run(capsys, factory.cmd_upgrade, root, "008")
+
+
+def _upgraded(root: Path, folder: Path, n: int = 2) -> None:
+    """What `factory.py upgrade` leaves, written by hand for the tests that don't run `sdlc.py`."""
+    (folder / "build" / f"round-{n}.upgraded.md").write_text("UPGRADED: D1\n", encoding="utf-8")
+    intent = folder / "intent.md"
+    text = intent.read_text(encoding="utf-8").replace("tier: 1", "tier: 2")
+    intent.write_text(text.replace("stage: build", "stage: plan"), encoding="utf-8")
+    spec = (ROOT / "templates" / "spec.md").read_text(encoding="utf-8")
+    (folder / "spec.md").write_text(spec, encoding="utf-8")
+    plan = (ROOT / "templates" / "plan.md").read_text(encoding="utf-8")
+    (folder / "plan.md").write_text(plan, encoding="utf-8")
+
+
+@pytest.mark.portable
+def test_verdicts_names_upgrade_on_an_upgrade_answer(tmp_path, capsys) -> None:
+    """R3: a ticked blocking answer starting `upgrade to Tier 2`, in any case, on a Tier 1."""
+    root, _ = _tier1_run(tmp_path)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["upgrading"], out["upgraded"]) == ("upgrade", "D1", None), out
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "ledger, step",
+    [
+        (f"- [ ] D1 (builder round 1, blocking): {UPGRADE_Q}\n", "decide"),
+        (
+            f"- [x] D1 (builder round 1, default): {UPGRADE_Q} → decided: upgrade to Tier 2\n",
+            "review",
+        ),
+        (
+            f"- [x] D1 (builder round 1, blocking): {UPGRADE_Q} → superseded by D2 → decided: "
+            "upgrade to Tier 2\n",
+            "review",
+        ),
+        (
+            f"- [x] D1 (builder round 1, blocking): {UPGRADE_Q} → decided: stay Tier 1, upgrade to "
+            "Tier 2 later\n",
+            "review",
+        ),
+    ],
+    ids=["open", "default", "superseded", "another-answer"],
+)
+def test_only_a_decided_blocking_answer_upgrades(tmp_path, capsys, ledger, step) -> None:
+    """R3: an open line, a default, a superseded line or another answer is never an upgrade."""
+    root, _ = _tier1_run(tmp_path, ledger)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["upgrading"]) == (step, None), out
+
+
+@pytest.mark.portable
+def test_a_tier_2_answer_never_upgrades(tmp_path, capsys) -> None:
+    """R3: only a Tier 1 change is upgraded."""
+    root = _change(tmp_path, 2, "build")
+    _build_report(root, 1)
+    ledger = root / ".sdlc" / "work" / NAME / "decisions.md"
+    ledger.write_text(UPGRADE_LINE, encoding="utf-8")
+    assert _verdicts(root, capsys)["next"] == "review"
+
+
+@needs_uv
+def test_upgrade_writes_the_record_then_the_tier(tmp_path, capsys) -> None:
+    """R4: refused unless verdicts names it; then the record, then sdlc.py's tier and scaffolds."""
+    root, folder = _tier1_run(tmp_path, ledger=None)
+    code, out = _upgrade(root, capsys)
+    assert code == 1 and "not 'upgrade'" in out["refusals"][0], out
+    assert not list((folder / "build").glob("*.upgraded.md"))
+    (folder / "decisions.md").write_text(UPGRADE_LINE, encoding="utf-8")
+    code, out = _upgrade(root, capsys)
+    assert code == 0, out
+    assert (out["change"], out["round"], out["decision"]) == (NAME, 2, "D1")
+    assert (out["tier"], out["stage"], out["created"], out["kept"]) == (
+        2,
+        "plan",
+        ["spec.md", "plan.md"],
+        [],
+    )
+    assert (folder / "build" / "round-2.upgraded.md").read_text() == "UPGRADED: D1\n"
+    meta = factory.frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    assert (meta["id"], meta["tier"], meta["stage"]) == ("008", "2", "plan")
+
+
+@needs_uv
+def test_upgrade_moves_no_head(tmp_path, capsys) -> None:
+    """R4: it commits nothing, and writes only the change's folder."""
+    root, _ = _tier1_run(tmp_path)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "the run so far")
+    head = _head(root)
+    code, out = _upgrade(root, capsys)
+    assert code == 0 and _head(root) == head, out
+    changed = _git(root, "status", "--porcelain").splitlines()
+    assert changed and all(f".sdlc/work/{NAME}/" in line for line in changed), changed
+
+
+@needs_uv
+def test_an_upgrade_cut_short_finishes_on_rerun(tmp_path, capsys) -> None:
+    """R4: the record written, the tier still 1: verdicts names upgrade again, and the rerun sets
+    the tier without a second record."""
+    root, folder = _tier1_run(tmp_path)
+    (folder / "build" / "round-2.upgraded.md").write_text("UPGRADED: D1\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["upgrading"]) == ("upgrade", "D1"), out
+    code, out = _upgrade(root, capsys)
+    assert (code, out["round"], out["tier"]) == (0, 2, 2), out
+    assert [p.name for p in (folder / "build").glob("*.upgraded.md")] == ["round-2.upgraded.md"]
+    assert (folder / "build" / "round-2.upgraded.md").read_text() == "UPGRADED: D1\n"
+
+
+@needs_uv
+def test_no_second_upgrade(tmp_path, capsys) -> None:
+    """R5: once upgraded, a later upgrade answer is no upgrade, and the command refuses."""
+    root, folder = _tier1_run(tmp_path)
+    assert _upgrade(root, capsys)[0] == 0
+    ledger = folder / "decisions.md"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8")
+        + "- [x] D2 (code round 2, blocking): Bigger still? → decided: upgrade to Tier 2 again\n",
+        encoding="utf-8",
+    )
+    assert _verdicts(root, capsys)["next"] != "upgrade"
+    code, out = _upgrade(root, capsys)
+    assert code == 1 and out["refusals"], out
+    assert [p.name for p in (folder / "build").glob("*.upgraded.md")] == ["round-2.upgraded.md"]
+    assert not hasattr(factory, "cmd_downgrade")
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "record, problem",
+    [
+        ("Upgraded on the person's word.\n", "doesn't open with UPGRADED"),
+        ("UPGRADED: D2\n", "D2"),
+    ],
+)
+def test_a_bad_upgrade_record_stops_the_run(tmp_path, capsys, record, problem) -> None:
+    """A record that won't read, or names no decided upgrade answer, is a stop, never a guess."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    (folder / "build" / "round-2.upgraded.md").write_text(record, encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun"), out
+    assert any(problem in p for p in out["problems"]), out["problems"]
+
+
+def _approved(folder: Path) -> None:
+    """Step 3 after the upgraded spec's yes: `write-spec`, then `stage design` and `stage build`."""
+    (folder / "spec.md").write_text("# 008 — spec\n\n1. **R1.** Written.\n", encoding="utf-8")
+    intent = folder / "intent.md"
+    intent.write_text(
+        intent.read_text(encoding="utf-8").replace("stage: plan", "stage: build"), encoding="utf-8"
+    )
+
+
+@pytest.mark.portable
+def test_an_upgraded_run_specs_then_builds_round_p(tmp_path, capsys) -> None:
+    """R6: `spec` at P while the stage isn't build, `written` once the spec is, then `build`."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["written"]) == ("spec", 2, False), out
+    assert out["upgraded"]["round"] == 2 and out["upgraded"]["decision"] == "D1"
+    (folder / "spec.md").write_text("# 008 — spec\n\nWritten.\n", encoding="utf-8")
+    _run(capsys, factory.cmd_stage, root, "008", "design")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["written"]) == ("spec", 2, True), out
+    _run(capsys, factory.cmd_stage, root, "008", "build")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["limit"]) == ("build", 2, 4), out
+    _build_report(root, 2)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["missing"]) == ("review", 2, FULL), out
+
+
+@pytest.mark.portable
+def test_an_upgraded_run_counts_its_rounds_from_p(tmp_path, capsys) -> None:
+    """R6: the limit, `exhausted` and the light depth's places all count from round P."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    _approved(folder)
+    for n in (2, 3):
+        _round(root, n, code="CHANGES")
+        _verified(root, n, kept=[f"code: code fix {n}"])
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["round"], out["limit"]) == ("rework", 3, 4), out
+    _round(root, 4, code="CHANGES")
+    _verified(root, 4, kept=["code: code fix 4"])
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["exhausted"]) == ("approve", True), out
+
+    root, folder = _tier1_run(tmp_path / "b", config=LISTED)
+    _touch(root, "src/a.py")
+    _upgraded(root, folder)
+    _approved(folder)
+    for n in (2, 3):
+        _build_report(root, n)
+        _review(root, n, "code", "VERDICT: CHANGES", f"src/a.py:{n}: move it")
+        _verified(root, n, kept=[f"code: src/a.py:{n}: move it"])
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["limit"]) == ("light", 3), out["why"]
+
+
+def test_the_spec_prompt_names_the_upgrade(tmp_path, capsys, claude) -> None:
+    """R7: the round, the question and the answer, and the build so far; the reply only in runs/."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    scaffold = (folder / "spec.md").read_bytes()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
+    assert code == 0 and out["to"].endswith("runs/spec-draft.md"), out
+    prompt = claude()[-1]["argv"][1]
+    assert "Draft spec.md" in prompt and "round 2" in prompt and "D1" in prompt
+    assert UPGRADE_Q in prompt and "Upgrade to Tier 2: keep 30 days" in prompt
+    assert "build so far" in prompt
+    assert (folder / "spec.md").read_bytes() == scaffold, "spec.md waits for write-spec"
+
+
+def test_the_upgraded_build_resumes_the_builder_into_round_p(tmp_path, capsys, claude) -> None:
+    """R8: the builder's own session, told the answer and the spec, its report a new round-P."""
+    root, folder = _tier1_run(tmp_path)
+    (folder / "runs").mkdir()
+    (folder / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    _upgraded(root, folder)
+    _approved(folder)
+    first = (folder / "build" / "round-1.md").read_bytes()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0 and out["to"].endswith("build/round-2.md"), out
+    argv = claude()[-1]["argv"]
+    assert argv[-2:] == ["--resume", "s-1"], "resumed, never a new session"
+    prompt = argv[1]
+    assert "D1" in prompt and "Upgrade to Tier 2: keep 30 days" in prompt
+    assert "Tier 2" in prompt and "spec.md" in prompt and "plan.md" in prompt
+    assert "round 2" in prompt and "test first" in prompt
+    assert (folder / "build" / "round-2.md").read_text().startswith("the report")
+    assert (folder / "build" / "round-1.md").read_bytes() == first, "never added to round 1"
+    assert (folder / "runs" / "builder.sessions").read_text() == "s-1\n"
+
+
+def test_decided_refuses_while_an_upgrade_is_under_way(tmp_path, capsys, claude) -> None:
+    """R9: the upgrading decision never, and no decision at upgrade, spec or round P's build."""
+    other = "- [x] D2 (builder round 1, blocking): CSV or JSON? → decided: CSV\n"
+    root, folder = _tier1_run(tmp_path, UPGRADE_LINE + other)
+    (folder / "runs").mkdir()
+    (folder / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+
+    def refused(decision: str) -> list[str]:
+        code, out = _run(capsys, factory.cmd_agent, root, "008", "decided", None, decision)
+        assert code == 1, out
+        return out["refusals"]
+
+    assert _verdicts(root, capsys)["next"] == "upgrade"
+    assert refused("D1") and refused("D2")
+    _upgraded(root, folder)
+    assert _verdicts(root, capsys)["next"] == "spec"
+    assert refused("D1") and refused("D2")
+    _approved(folder)
+    assert _verdicts(root, capsys)["next"] == "build"
+    assert refused("D1") and refused("D2")
+    _build_report(root, 2)
+    assert any("D1" in r for r in refused("D1")), "the upgrading decision, ever"
+    assert claude() == [], "no agent ran"
+
+
+def test_reviewers_and_approver_are_told_of_the_upgrade(tmp_path, capsys, claude) -> None:
+    """R10: round P's reviewers, and the approver of an upgraded run."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    _approved(folder)
+    _build_report(root, 2)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    prompt = claude()[-1]["argv"][1]
+    assert "to Tier 2 before this round" in prompt and "spec.md" in prompt
+    _round(root, 2)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)
+    assert code == 0, out
+    prompt = claude()[-1]["argv"][1]
+    assert "upgraded" in prompt and "round 2" in prompt and "D1" in prompt
+    assert "spec.md" in prompt
+
+
+@pytest.mark.portable
+def test_start_reports_an_upgrade(tmp_path, capsys) -> None:
+    """R11: `upgraded` with its round, decision and answer; null before."""
+    root, folder = _tier1_run(tmp_path)
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0 and out["upgraded"] is None, out
+    _upgraded(root, folder)
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 0 and out["spec"] is True, out
+    assert out["upgraded"] == {
+        "round": 2,
+        "decision": "D1",
+        "answer": "Upgrade to Tier 2: keep 30 days",
+    }
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("stage", ["plan", "design", "build"])
+def test_fresh_holds_an_upgraded_run(tmp_path, capsys, monkeypatch, stage) -> None:
+    """R11: its earlier rounds were gated on the base they had, so nothing moves."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    _run(capsys, factory.cmd_stage, root, "008", stage)
+    _main_moves(root, "one.txt")
+    monkeypatch.setattr(factory, "_sdlc", lambda *a: pytest.fail("held: nothing to run"))
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert (code, out["state"]) == (0, "held"), out
+    assert "upgraded" in out["reason"] and _git(root, "rev-parse", "HEAD") == head
+
+
+@pytest.mark.portable
+def test_the_upgraded_record_pattern_is_a_pinned_copy() -> None:
+    """R12: `sdlc.py`'s `check` reads the record by its own copy of the factory's pattern."""
+    assert sdlc.FACTORY_UPGRADED_FILE_RE.pattern == factory.UPGRADED_FILE_RE.pattern
+    assert sdlc.FACTORY_UPGRADED_FILE_RE.match("round-12.upgraded.md").group(1) == "12"
+
+
+@pytest.mark.portable
+def test_an_upgrade_or_spec_record_keeps_the_step_it_paused_at(tmp_path, capsys) -> None:
+    """R13: `AFTER:` on an `upgrade` and a `spec` reading, as on a `decide`; none once building."""
+    root, folder = _tier1_run(tmp_path, ledger=None)
+    _record(root, capsys, _head(root))
+    assert _fields(root)["step"] == "review"
+    (folder / "decisions.md").write_text(UPGRADE_LINE, encoding="utf-8")
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["after"]) == ("upgrade", "review")
+    _upgraded(root, folder)
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["after"]) == ("spec", "review")
+    _approved(folder)
+    _record(root, capsys, _head(root))
+    assert (_fields(root)["step"], _fields(root)["round"], _fields(root)["after"]) == (
+        "build",
+        2,
+        None,
+    )

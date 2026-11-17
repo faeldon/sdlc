@@ -1503,3 +1503,16 @@ def test_build_brings_the_change_up_to_date_before_its_spec_writer() -> None:
     assert "`head`" in step0 and "fresh" in step0.split("Keep")[-1], "fresh's head is kept"
     step1 = build.split("## Step 1")[1].split("## Step 2")[0]
     assert "`behind`" in step1 and "`undo`" in step1 and "held" in step1
+
+
+def test_the_build_skill_handles_every_step_verdicts_names() -> None:
+    """112 R14: every step `factory.py`'s `loop_state()` can name has a bullet in the build
+    skill's loop, saying what the supervisor does there: a step with none is one it has no move
+    for, which is how a hand step creeps in."""
+    source = (FACTORY / "scripts" / "factory.py").read_text(encoding="utf-8")
+    body = source.split("def loop_state(", 1)[1].split("\ndef ", 1)[0]
+    steps = set(re.findall(r'out\["next"\](?:, [^=]+)? = "([a-z]+)"', body))
+    assert {"build", "decide", "upgrade", "spec", "stop", "done"} <= steps, steps
+    skill = (FACTORY / "skills" / "build" / "SKILL.md").read_text(encoding="utf-8")
+    missing = sorted(s for s in steps if f"- **`{s}`**" not in skill)
+    assert missing == [], f"steps verdicts names with no bullet in the build skill: {missing}"

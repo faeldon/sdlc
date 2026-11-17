@@ -163,6 +163,17 @@ spec.
   `stage: build`. A fresh builder rebuilds from round R told the approver's reasons, and the new
   run is gated, reviewed and decided like any, its round limit and gate fixes counted from R. A
   READY decision never goes back: it is ship's.
+- **A Tier 1 that needs a spec is upgraded, once.** When the builder finds a Tier 1 change bigger
+  than its Approach, it raises a blocking decision offering `upgrade to Tier 2`. If your answer
+  starts with those words, `verdicts` names `upgrade`, and `factory.py upgrade` writes
+  `build/round-<P>.upgraded.md` and has `sdlc`'s own `sdlc.py upgrade` set `tier: 2` and `stage:
+  plan` and scaffold `spec.md` and `plan.md` where they are missing, keeping a plan the builder
+  wrote. `verdicts` then names `spec`: the spec-writer drafts it, told the upgrade and that the
+  build so far is in the worktree, and the run asks you to approve it as its gate's question
+  does, before anything builds on it. The builder that raised it is then resumed for round P,
+  rewrites `plan.md` against the approved spec, and builds to it. Round P is gated, reviewed
+  against the spec and decided like any, its round limit counted from P. Nothing is moved by
+  hand. A change is upgraded once and never back, and `fresh` holds an upgraded run where it is.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
   each command run as `$ <command>`, the tail of its output, and `exit: <n>`. A reply without
   it, or holding its answer after a preamble (a verdict, the approver's decision, or a verifier's
@@ -235,6 +246,8 @@ its own folder, fixture copy and server, so a round's two start together.
   decision-<n>.md               an escalated run's decision, kept as it was when it was sent back
   build/round-<N>.restart.md    RESTART: decision-<n>.md, and WORDS: R<k> with your words: round N
                                 starts the run again
+  build/round-<N>.upgraded.md   UPGRADED: D<k>, the decision your answer upgraded to Tier 2 by:
+                                round N is the upgraded run's first
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
   runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
                                 spec.md after your yes
@@ -326,7 +339,9 @@ it, whatever depth the diff turns out to need.
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
 stage allows the step, where `HEAD` was, what each review's first line says, the verifier's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`gate`, `fix`, `review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); the gate
+`gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
+`stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
+`upgrade`); the gate
 itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
 one place it runs a host's command), each holding one of `gate_jobs` slots, an OS lock on
 `sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends, and
@@ -344,8 +359,8 @@ for the eval and the review, which bugs escaped and through which diff (`escapes
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads
 the register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
-For `fresh` and landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
-or the cache's), so ship, base and close have one implementation; another version is refused.
+For `fresh`, `upgrade` and landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
+or the cache's), so ship, base, upgrade and close have one implementation; another version is refused.
 
 ## License
 

@@ -1751,9 +1751,12 @@ def analyze(root: Path, today: date | None = None) -> dict:
                     }
                 )
             elif is_unfilled(folder / name) and not (
-                # The factory's builder writes plan.md as its first step: a live first build's
-                # scaffold is the plan being written, not one left behind.
-                name == "plan.md" and stage == "build" and factory_first_build(folder)
+                # The factory's builder writes plan.md as its first step, and rewrites it first in
+                # an upgraded run's round P: a live build's scaffold is the plan being written,
+                # not one left behind.
+                name == "plan.md"
+                and stage == "build"
+                and (factory_first_build(folder) or factory_upgraded_build(folder))
             ):
                 problems.append(
                     {
@@ -2144,14 +2147,7 @@ def cmd_new(
     heading = title or slug.replace("-", " ")
     stamp = date.today().isoformat()
     for artifact in wanted:
-        source, origin = template_path(home, artifact)
-        text = source.read_text(encoding="utf-8")
-        text = (
-            text.replace("NNN", nid)
-            .replace("SLUG", slug)
-            .replace("YYYY-MM-DD", stamp)
-            .replace("TITLE", heading)
-        )
+        text, origin = render_template(home, artifact, nid, slug, stamp, heading)
         if artifact == "intent.md":
             text = text.replace("tier: 1", f"tier: {tier}", 1)
         (dest / artifact).write_text(text, encoding="utf-8", newline="\n")
@@ -2163,6 +2159,103 @@ def cmd_new(
         f"({'Problem → Outcome → Approach' if tier == 1 else 'Problem → Outcome, then /sdlc:spec'})"
     )
     return 0
+
+
+def render_template(
+    home: Path, name: str, nid: str, slug: str, stamp: str, heading: str
+) -> tuple[str, str]:
+    """Template `name` as `new` scaffolds it, its placeholders filled, and whose it was (`host` or
+    `plugin`): the one rendering `new` and `upgrade` share."""
+    source, origin = template_path(home, name)
+    text = source.read_text(encoding="utf-8")
+    text = (
+        text.replace("NNN", nid)
+        .replace("SLUG", slug)
+        .replace("YYYY-MM-DD", stamp)
+        .replace("TITLE", heading)
+    )
+    return text, origin
+
+
+# A change's title, as `new` wrote it into the intent's heading: `# NNN — TITLE`.
+TITLE_RE = re.compile(r"^# \d{3,} — (.+?)\s*$", re.M)
+# What `upgrade` takes a Tier 1 change from, and the files it owes as a Tier 2.
+UPGRADE_FROM = ("plan", "build")
+UPGRADE_SCAFFOLDS = ("spec.md", "plan.md")
+
+
+def cmd_upgrade(root: Path, ident: str) -> int:
+    """Upgrade a Tier 1 change to Tier 2 in its own checkout: `tier: 2`, `stage: plan` and
+    `updated:` edited in place by `stamp_shipped`'s rule, every other byte of `intent.md` kept,
+    and `spec.md` and `plan.md` scaffolded from the templates `new` uses, only where missing: a
+    file there already is `kept`, never written over. Refused, writing nothing, on the base
+    branch, for an id this checkout's branch doesn't name, a change already at Tier 2, or one at
+    any stage but `plan` or `build`. The factory runs it, through `factory.py upgrade`, once the
+    person's answer to a blocking decision says so; it is one-way, and there is no downgrade."""
+    home = main_root(root)
+    report: dict = {"change": None, "tier": None, "stage": None, "created": [], "kept": [],
+                    "refusals": []}  # fmt: skip
+
+    def emit(code: int) -> int:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return code
+
+    git_cfg = load_config(home)[0]["git"]
+    trunk = git_cfg["base"]
+    if why := trunk_refusal(home, trunk, git_cfg["base_source"]):
+        report["refusals"].append(why)
+        return emit(1)
+    branch = _git(root, "branch", "--show-current") or ""
+    if branch == trunk:
+        report["refusals"].append(
+            f"this checkout is on the base branch {trunk}: upgrade a change from its own worktree"
+        )
+        return emit(1)
+    if not DIR_RE.match(branch) or not names_change(branch, ident):
+        report["refusals"].append(
+            f"{ident} isn't this checkout's change: it is on {branch or '?'!r}; run upgrade from "
+            "the change's own worktree"
+        )
+        return emit(1)
+    folder = work_dir(root) / branch
+    intent = folder / "intent.md"
+    if not intent.is_file():
+        report["refusals"].append(f"{work_rel(root)}/{branch}/intent.md doesn't exist")
+        return emit(1)
+    report["change"] = branch
+    text = intent.read_text(encoding="utf-8")
+    tier = (frontmatter_list(text, "tier") or [""])[0]
+    stage = (frontmatter_list(text, "stage") or [""])[0]
+    if tier == "2":
+        report["refusals"].append(f"{branch} is already Tier 2: a change is upgraded once")
+    elif tier != "1":
+        report["refusals"].append(f"{branch} has no tier: 1 line to upgrade from")
+    elif stage not in UPGRADE_FROM:
+        report["refusals"].append(
+            f"{branch} is at stage: {stage}; upgrade takes a Tier 1 change at stage: plan or build"
+        )
+    missing = [n for n in UPGRADE_SCAFFOLDS if not template_path(home, n)[0].is_file()]
+    if missing:
+        report["refusals"].append(f"missing template(s) in {TEMPLATE_DIR}: {', '.join(missing)}")
+    stamp = date.today().isoformat()
+    stamped, unplaced = _stamp(text, {"tier": "2", "stage": "plan", "updated": stamp})
+    if unplaced:
+        report["refusals"].append(f"intent.md has no {', '.join(unplaced)} line")
+    if report["refusals"]:
+        return emit(1)
+    nid, slug = branch.split("-", 1)
+    found = TITLE_RE.search(text)
+    heading = found.group(1) if found else slug.replace("-", " ")
+    for name in UPGRADE_SCAFFOLDS:
+        if (folder / name).exists():
+            report["kept"].append(name)
+            continue
+        rendered, _ = render_template(home, name, nid, slug, stamp, heading)
+        (folder / name).write_text(rendered, encoding="utf-8", newline="\n")
+        report["created"].append(name)
+    intent.write_text(stamped, encoding="utf-8", newline="\n")
+    report.update(tier=2, stage="plan")
+    return emit(0)
 
 
 def _report_drop(issue: str, err: str | None) -> None:
@@ -2195,9 +2288,10 @@ def stamp_dropped(text: str, stamp: str, reached: str) -> tuple[str, list[str]]:
     return _stamp(text, {"stage": "dropped", "updated": stamp, "dropped_at": reached}, "dropped_at")
 
 
-def _stamp(text: str, wanted: dict[str, str], new_key: str) -> tuple[str, list[str]]:
+def _stamp(text: str, wanted: dict[str, str], new_key: str | None = None) -> tuple[str, list[str]]:
     """Each `wanted` frontmatter line rewritten in place; `new_key`, the one a first stamp adds,
-    anchored under `updated:`. The new text and the keys it couldn't place."""
+    anchored under `updated:` (none for a stamp that adds no key). The new text and the keys it
+    couldn't place."""
     lines = text.splitlines()
     close = next((i for i, ln in enumerate(lines) if i and ln.strip() == "---"), None)
     if not lines or lines[0].strip() != "---" or close is None:
@@ -4118,6 +4212,9 @@ FACTORY_STEP = Path("runs") / "step.md"
 FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 FACTORY_AGENT_TIMEOUT = 3 * 3600
+# A run upgraded to Tier 2 part way: `build/round-<P>.upgraded.md`, round P the upgraded run's
+# first, which `factory_upgraded_build()` reads.
+FACTORY_UPGRADED_FILE_RE = re.compile(r"^round-(\d+)\.upgraded\.md$")
 # The heading an escalation a run's rounds ran out on holds, in `decision.md`.
 FACTORY_RECONSIDER = "## Reconsider the approach"
 # An open box the ledger can't read: a problem, never an answered decision.
@@ -4167,6 +4264,35 @@ def factory_first_build(folder: Path) -> bool:
     first = FACTORY_STEP_RE.match(lines[0]) if lines else None
     rounds = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
     return bool(first) and first.group(1) == "build" and (rounds or [""])[0] in ("", "1")
+
+
+def factory_upgraded_build(folder: Path) -> bool:
+    """Whether a factory run upgraded to Tier 2 is building its first round, P, in `folder`, so
+    its resumed builder is rewriting `plan.md` now: `factory_first_build()`'s rule for round P. An
+    upgrade record for P, no `build/round-<P>.md`, no stop recorded, and `runs/step.md` naming
+    `build` at round P, written less than `FACTORY_AGENT_TIMEOUT` ago (the builder is resumed, so
+    its session file is as old as round 1). Never raises: a file that won't read is no live
+    build."""
+    try:
+        rounds = [
+            int(m.group(1))
+            for m in (FACTORY_UPGRADED_FILE_RE.match(p.name) for p in (folder / "build").iterdir())
+            if m
+        ]
+        if not rounds:
+            return False
+        n = max(rounds)
+        if (folder / "build" / f"round-{n}.md").exists() or (folder / FACTORY_STOPPED).exists():
+            return False
+        step = folder / FACTORY_STEP
+        if time.time() - step.stat().st_mtime >= FACTORY_AGENT_TIMEOUT:
+            return False
+        lines = step.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    first = FACTORY_STEP_RE.match(lines[0]) if lines else None
+    found = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
+    return bool(first) and first.group(1) == "build" and (found or [""])[0] == str(n)
 
 
 def factory_reading(folder: Path) -> dict:
@@ -9259,6 +9385,11 @@ def main() -> int:
     p_drop.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
     p_drop.add_argument("--check", action="store_true", help="preconditions only, write nothing")
 
+    p_upgrade = sub.add_parser(
+        "upgrade", help="make this checkout's Tier 1 change a Tier 2, its spec and plan scaffolded"
+    )
+    p_upgrade.add_argument("id", help="the change, e.g. 023")
+
     p_base = sub.add_parser(
         "base", help="bring a change's branch up to date with main in its worktree, or refuse"
     )
@@ -9457,6 +9588,8 @@ def main() -> int:
         return cmd_drop(root, args.id, args.check)
     if args.cmd == "base":
         return cmd_base(root, args.id)
+    if args.cmd == "upgrade":
+        return cmd_upgrade(root, args.id)
     if args.cmd == "resolve":
         mode = "continue" if args.cont else "abort" if args.abort else "start"
         return cmd_resolve(root, args.id, mode)

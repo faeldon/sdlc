@@ -188,16 +188,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
-
-097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at
-`stage: build` neither `/sdlc-factory:spec` nor the build skill drafts a spec (both start from
-`plan` or `design`), and the builder rightly won't write one; the supervisor moved the stage back
-to `plan` by hand. A promotion should have a path: `factory.py` sets `tier: 2`, keeps the build,
-and drafts the spec behind its own question.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-81] [idea] Wrap long tokens in a card's next step
 
 Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: `scripts/board.html:82`: `.next code` has no `overflow-wrap`, so a long unbroken token in a next step could push past a narrow card. None appears in these shots, so this is for later, not a change.

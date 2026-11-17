@@ -221,7 +221,9 @@ agent commits. `factory.py agent` is the one place the factory runs `claude`, an
 gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
 the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its own version
 (`sdlc_path()`), and `fresh` moves a change's branch onto the base before a build or a spec, through
-`sdlc`'s own `base` and `resolve`; a gate holds one of `gate_jobs` slots, locks in the git common
+`sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run, only on the
+person's blocking answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`, once, its
+round counted as a restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots, locks in the git common
 dir, never `sdlc.lock`; its gate passes itself only when no change carries a risk signal, recorded as
 `Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.
 `verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder

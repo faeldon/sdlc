@@ -313,6 +313,65 @@ def test_the_template_plan_shows_once_the_first_build_is_not_live(tmp_path, case
     assert PLAN_PROBLEM in _details(tmp_path)
 
 
+def _upgraded_build(root: Path, **files: str) -> Path:
+    """112: a change upgraded to Tier 2 before round 2, its spec approved, at stage: build, its
+    plan the scaffold, whose resumed builder is building round 2 now: the supervisor's reading
+    names it, just written. `files` adds or overrides run files."""
+    plan = (REPO / "templates" / "plan.md").read_text(encoding="utf-8")
+    d = _change(root, "001-x", _fm(tier=2, stage="build"),
+                {"spec.md": "# spec\n\nWritten.\n", "plan.md": plan})  # fmt: skip
+    files = {
+        "build__round-1.md": "Built round 1.\n",
+        "build__round-2.upgraded.md": "UPGRADED: D1\n",
+        "runs__builder.sessions": "s-1\n",
+        "runs__step.md": "STEP: build\nROUND: 2\n",
+        **files,
+    }
+    for rel, text in files.items():
+        path = d / rel.replace("__", "/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+    os.utime(d / "runs" / "builder.sessions", (old, old))  # the session began in round 1
+    return d
+
+
+@pytest.mark.portable
+def test_check_leaves_out_the_template_plan_during_a_live_upgraded_build(tmp_path) -> None:
+    """112 R12: the resumed builder rewrites plan.md first; while round P is live, the scaffold is
+    no problem, and nothing else is hidden."""
+    d = _upgraded_build(tmp_path)
+    assert PLAN_PROBLEM not in _details(tmp_path)
+    (d / "spec.md").write_text((REPO / "templates" / "spec.md").read_text(encoding="utf-8"))
+    details = _details(tmp_path)
+    assert PLAN_PROBLEM not in details
+    assert "spec.md is still the template at stage: build" in details
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "case", ["report", "stopped", "stale", "review-step", "other-round", "no-record", "no-step"]
+)
+def test_the_template_plan_shows_once_the_upgraded_build_is_not_live(tmp_path, case) -> None:
+    """112 R12: round P's report written, a stop recorded, a reading past the agent timeout, a step
+    other than round P's build, no upgrade record, or no reading: the problem is back."""
+    files = {
+        "report": {"build__round-2.md": "Built round 2.\n"},
+        "stopped": {"runs__stopped.md": "STOPPED: rerun\nNEXT: rerun it\n"},
+        "review-step": {"runs__step.md": "STEP: review\nROUND: 2\n"},
+        "other-round": {"runs__step.md": "STEP: build\nROUND: 3\n"},
+    }.get(case, {})
+    d = _upgraded_build(tmp_path, **files)
+    if case == "stale":
+        old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+        os.utime(d / "runs" / "step.md", (old, old))
+    if case == "no-record":
+        (d / "build" / "round-2.upgraded.md").unlink()
+    if case == "no-step":
+        (d / "runs" / "step.md").unlink()
+    assert PLAN_PROBLEM in _details(tmp_path)
+
+
 @pytest.mark.portable
 def test_a_live_first_build_hides_no_other_problem(tmp_path) -> None:
     """105 R10: only the plan's problem is left out: an unfilled spec or intent still shows."""
@@ -2638,3 +2697,120 @@ def test_a_problem_needs_fixing_at_any_stage_and_a_closed_change_nothing_more() 
     shipped = _rec(stage="shipped", problems=["p"], decision="ESCALATE")
     assert sdlc.needs_of(shipped) == ["fix: p"]
     assert sdlc.needs_of(_rec(stage="dropped", decision="ESCALATE")) == []
+
+
+# ---------------------------------------------------------------- upgrade (112)
+
+UPGRADE_NAME = "012-reopen-drafts"
+UPGRADE_INTENT = """\
+---
+id: 012
+slug: reopen-drafts
+tier: {tier}
+impact:
+stage: {stage}
+created: 2026-10-01
+updated: 2026-10-02
+idea:
+depends_on: [003]
+---
+
+# 012 — Reopen saved drafts
+
+## Problem
+
+Real prose, not a template.
+"""
+
+
+def _upgradable(tmp_path: Path, tier: int = 1, stage: str = "build") -> tuple[Path, Path]:
+    """A repo on change 012's branch, its Tier 1 folder as a factory run leaves it: (root,
+    folder)."""
+    root = _repo(tmp_path)
+    _git(root, "checkout", "-q", "-b", UPGRADE_NAME)
+    folder = root / ".sdlc" / "work" / UPGRADE_NAME
+    folder.mkdir(parents=True)
+    text = UPGRADE_INTENT.format(tier=tier, stage=stage)
+    (folder / "intent.md").write_text(text, encoding="utf-8", newline="\n")
+    return root, folder
+
+
+def _upgrade(root: Path, capsys, ident: str = "012") -> tuple[int, dict]:
+    code = sdlc.cmd_upgrade(root, ident)
+    return code, json.loads(capsys.readouterr().out)
+
+
+def _folder_bytes(folder: Path) -> dict[str, bytes]:
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*")
+            if p.is_file()}  # fmt: skip
+
+
+@pytest.mark.portable
+def test_upgrade_sets_tier_and_stage_by_line(tmp_path, capsys) -> None:
+    """R1: three lines change in place; every other byte, `id: 012` and the key order kept."""
+    root, folder = _upgradable(tmp_path)
+    before = (folder / "intent.md").read_text(encoding="utf-8")
+    code, out = _upgrade(root, capsys)
+    assert code == 0, out
+    assert (out["change"], out["tier"], out["stage"]) == (UPGRADE_NAME, 2, "plan")
+    after = (folder / "intent.md").read_text(encoding="utf-8")
+    today = date.today().isoformat()
+    expected = (
+        before.replace("tier: 1", "tier: 2")
+        .replace("stage: build", "stage: plan")
+        .replace("updated: 2026-10-02", f"updated: {today}")
+    )
+    assert after == expected
+    assert "id: 012\n" in after and "idea:\n" in after and "depends_on: [003]\n" in after
+
+
+@pytest.mark.portable
+def test_upgrade_scaffolds_only_what_is_missing(tmp_path, capsys) -> None:
+    """R1: spec.md and plan.md from the templates with new's substitutions; a plan the Tier 1
+    builder already wrote is kept, byte for byte."""
+    root, folder = _upgradable(tmp_path)
+    code, out = _upgrade(root, capsys)
+    assert (code, out["created"], out["kept"]) == (0, ["spec.md", "plan.md"], []), out
+    spec = (folder / "spec.md").read_text(encoding="utf-8")
+    assert spec.startswith("---\nid: 012\nslug: reopen-drafts\nkind: spec\n")
+    assert "# 012 — Reopen saved drafts · spec" in spec and sdlc.is_unfilled(folder / "spec.md")
+    assert "NNN" not in spec and "YYYY-MM-DD" not in spec
+
+    (tmp_path / "b").mkdir()
+    root, folder = _upgradable(tmp_path / "b", stage="plan")
+    (folder / "plan.md").write_text("# a plan\n\nWritten by the builder.\n", encoding="utf-8")
+    code, out = _upgrade(root, capsys)
+    assert (code, out["created"], out["kept"]) == (0, ["spec.md"], ["plan.md"]), out
+    written = "# a plan\n\nWritten by the builder.\n"
+    assert (folder / "plan.md").read_text(encoding="utf-8") == written
+
+
+@pytest.mark.portable
+def test_upgrade_leaves_check_strict_clean(tmp_path, capsys) -> None:
+    """R1, R12: a Tier 2 at `plan` with its scaffolds owes nothing yet."""
+    root, folder = _upgradable(tmp_path)
+    assert _upgrade(root, capsys)[0] == 0
+    problems = sdlc.analyze(root, today=date(2026, 10, 17))["problems"]
+    assert [p for p in problems if p["dir"].endswith(UPGRADE_NAME)] == []
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("case", ["tier-2", "stage-design", "another-change", "base-branch"])
+def test_upgrade_refuses_and_writes_nothing(tmp_path, capsys, case) -> None:
+    """R2: each refusal leaves the folder as it was."""
+    tier = 2 if case == "tier-2" else 1
+    stage = {"tier-2": "plan", "stage-design": "design"}.get(case, "build")
+    root, folder = _upgradable(tmp_path, tier, stage)
+    ident = "013" if case == "another-change" else "012"
+    if case == "base-branch":
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "012's folder")
+        _git(root, "checkout", "-q", "main")
+        _git(root, "checkout", "-q", UPGRADE_NAME, "--", ".sdlc")
+    before = _folder_bytes(folder)
+    code, out = _upgrade(root, capsys, ident)
+    assert code == 1 and out["refusals"], out
+    assert _folder_bytes(folder) == before
+    needle = {"tier-2": "already Tier 2", "stage-design": "stage: design",
+              "another-change": "013", "base-branch": "main"}[case]  # fmt: skip
+    assert any(needle in r for r in out["refusals"]), out["refusals"]

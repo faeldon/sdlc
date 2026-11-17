@@ -19,6 +19,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py upgrade *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready *)'
   - 'Bash(git diff *)'
 disable-model-invocation: true
@@ -115,8 +116,10 @@ name the old decision will be kept under (`decision-<n>.md`, never written over)
 round the new build will be (the new run's first, so its round limit and the gate's fixes count
 from there), `reconsider`, whether the decision has a `## Reconsider the approach` section, and
 `reasons`, its text. Nothing is written yet. A READY decision is refused (it is ship's or land's),
-as is a test change with no decision or one that won't read. **If there are refusals, show them
-and stop.** `start` also gives `base`, the branch the change lands on, and `behind`, how many of
+as is a test change with no decision or one that won't read. **A run upgraded to Tier 2 part way**
+(see `upgrade` in Step 3) is named by `start`'s `upgraded`, its `round` (P, the upgraded run's first),
+the `decision` that upgraded it and the person's `answer`; null otherwise. **If there are refusals,
+show them and stop.** `start` also gives `base`, the branch the change lands on, and `behind`, how many of
 its commits the change lacks.
 
 With no refusals, bring the change up to date before any agent reads it:
@@ -131,7 +134,7 @@ builds on current code. It is a write before this skill's WAIT, by a named excep
 confirm-before-writing, as ship's `base` is: it moves only the change's own branch, never stashes,
 merges the base or forces, and prints the command that undoes it. Its `state`: `current`,
 `fast-forwarded`, `rebased` or `resolved`, each with `from`, `head` and `undo`; `held` for a run that
-stopped part way at `stage: build`, which moves nothing, since its rounds were gated and reviewed on
+stopped part way at `stage: build`, or one upgraded to Tier 2 at any stage, which moves nothing, since its rounds were gated and reviewed on
 the base they had and landing rebases and gates it again; or `refused`, with the worktree as it
 was. A conflict git can't settle is aborted and refused, naming its files: the person resolves it
 with `/sdlc:ship` from the worktree, or `sdlc.py resolve`, never an agent before the run's yes.
@@ -161,6 +164,11 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 
 `spec.md` is not written yet: the draft is only in `runs/`, an uncommitted run record.
 
+With `upgraded`, show first, naming the change: that it was upgraded from Tier 1 to Tier 2 before
+round `round` on the person's answer to `decision` (`answer`, word for word), that the draft
+specifies the whole change, the build so far included, and that the builder that built it is
+resumed for round `round`, rewriting `plan.md` against the spec before it builds.
+
 With a `restart`, show first, naming the change: the decision's first reason, its `## Reconsider
 the approach` section word for word (or that it has none), and the decisions still assumed in its
 `decisions.md` (an unconfirmed default is a common reason to escalate, and the person may want to
@@ -182,6 +190,8 @@ to it. Name the files the run will write, all by `factory.py` in the change's fo
 each attempt of the gate on that round's build; `runs/<agent>.sessions`, each session's id, for
 measuring; `runs/costs.jsonl`, each run's reported cost and tokens; with a spec draft, `runs/spec-draft.md` and
 `runs/spec-questions.md`, already written, and `spec.md`, copied from the draft by `write-spec`;
+with `upgraded`, `build/round-<P>.upgraded.md`, `spec.md` and `plan.md`, already written by
+`upgrade`;
 `runs/stopped.md`, while the
 run is stopped, its problems and the way on, for the board and `/sdlc:status`; `build/round-<N>.files` by
 `snapshot`; `decisions.md` for the calls the agents raise; `notes.md` for what the rounds don't
@@ -203,6 +213,13 @@ And without one:
 And with a `restart`:
 
 > `Send NNN-<slug> back to the factory: decision.md kept as decision-<n>.md, the builder rebuilds from round <R> with the approver's reasons, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> more rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides again, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+
+And with `upgraded`, on its spec draft:
+
+> `Write this spec and carry on NNN-<slug>'s factory run as Tier 2: the builder, resumed, rewrites plan.md against it and builds round <P>, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> more rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> more agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
+
+A no leaves the change a Tier 2 at `stage: plan`, which `sdlc.py check` reads as sound; the person
+comes back to it with `/sdlc-factory:build`, `/sdlc-factory:spec` or `/sdlc:spec`.
 
 A typed `yes, <words>` to it is a yes with the person's direction for the builder.
 
@@ -245,7 +262,9 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage <NNN> b
 
 `write-spec` copies `runs/spec-draft.md` exactly as shown, byte for byte, and refuses, writing
 nothing, with no draft, off a Tier 2 at `stage: plan`, or once `spec.md` is no longer its scaffold;
-a refusal stops the change, reported. Then strike the open questions the spec resolved in
+a refusal stops the change, reported. On an upgraded run whose `verdicts` said `written` true (a
+rerun after the spec was copied), run only the moves still owed: no `write-spec`, `stage design`
+only while the change is at `stage: plan`, then `stage build`. Then strike the open questions the spec resolved in
 `intent.md` with `Edit` (`- ~~Question?~~ Resolved: ...`). Without a spec draft, run only the
 last `stage`. With a `restart`, run `restart` in place of both: it writes
 `build/round-<R>.restart.md`, renames `decision.md` to `decision-<n>.md` and sets `stage: build`,
@@ -296,7 +315,10 @@ the next step for that change. A `problem` is a stop, reported for that change a
    `.sdlc/work/NNN-slug/runs/step.md`, which the board's step track reads; leave both to it.
 
    - **`build`**: no builder report exists yet (a run that stopped before the first), or a
-     restart's round has none: go back to step 1. At a restart's round the builder is a fresh
+     restart's or an upgrade's round has none: go back to step 1. At an upgrade's round the
+     builder is resumed, told the decision, its answer and the approved spec, rewrites `plan.md`
+     against it first, and reports to `build/round-<P>.md`, gated and reviewed like any round,
+     the round limit counted from `P`. At a restart's round the builder is a fresh
      session, told `decision-<n>.md` and its `## Reconsider the approach` section (and the
      person's words, with `--words`), and its report is `build/round-<R>.md`, gated and reviewed
      like any round.
@@ -332,6 +354,31 @@ the next step for that change. A `problem` is a stop, reported for that change a
      ```
 
      Never answer a decision yourself, and never tick one the person didn't answer.
+
+     **An answer that upgrades the change.** When the person chooses, or types, that a Tier 1
+     change should become Tier 2 (an agent offers it as `upgrade to Tier 2`), write their answer
+     starting with exactly those words, `→ decided: upgrade to Tier 2: <their words, if any>`, and
+     run no `decided` for it, nor for any other line answered in the same dialog: the next
+     `verdicts` names `upgrade`, and the builder resumed after the spec is told every decided line.
+     Only the person's answer upgrades a change, never an agent's question or your reading of it.
+
+   - **`upgrade`**: the person's answer to `upgrading` makes this Tier 1 change a Tier 2. The script
+     writes `build/round-<P>.upgraded.md`, `P` the upgraded run's first round, then runs `sdlc`'s
+     own `sdlc.py upgrade`, which sets `tier: 2` and `stage: plan` and scaffolds `spec.md` and
+     `plan.md` where they are missing, keeping a `plan.md` the builder wrote. It commits nothing,
+     and a rerun finishes one cut short. A refusal is a stop for the change, reported. It happens
+     once: there is no second upgrade, and no downgrade.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py upgrade <NNN>
+     ```
+
+   - **`spec`**: an upgraded change owes its spec before round `round` builds. Go back to Step 1:
+     `start` reports `upgraded`, and the spec-writer drafts it, told the upgrade, the person's
+     answer and that the build so far is in the worktree; then ask Step 2's question in its
+     upgraded form, and on a yes run Step 3's `write-spec` and stages, only the moves still owed
+     when `written` is true. Nothing builds on the spec before that yes. Then come back here:
+     `verdicts` names `build` at round `round`.
 
    - **`review`**: start every reviewer in `missing` **in one message**, so they run in parallel,
      each with:
