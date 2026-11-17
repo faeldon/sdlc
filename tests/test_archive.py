@@ -1624,6 +1624,36 @@ def test_sync_tells_each_issue_the_change_closes_once(tmp_path, gh, capsys) -> N
     assert _issue(gh, 60)["comments"] == []
 
 
+def test_sync_sends_an_issue_that_left_the_closes_line_back_to_triage(tmp_path, gh, capsys) -> None:
+    """116 R1: the record withdrawn, core calls the tracker's `unmark()`: only on an issue this
+    change marked, that nothing else the repo holds records."""
+    root = _repo(tmp_path)
+    folder = _open(root)
+    for n in (50, 51, 52):
+        _filed(gh, n)
+    _filed(gh, 60, labels=("triaged",))  # labelled by a person, recorded by nothing
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50, 51, 52]\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0, out
+    assert all({"name": "triaged"} in _issue(gh, n)["labels"] for n in (50, 51, 52))
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #52\n")
+    _set(folder, "closes: [50, 51, 52]\n", "closes: [51]\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0 and "#50: back to triage" in out["done"], out
+    code, out = _sync(root, capsys, "001")
+    assert code == 0 and not any("triage" in d for d in out["done"]), out
+    gone = _issue(gh, 50)
+    assert {"name": "triaged"} not in gone["labels"] and gone["parent"] is None
+    assert [c["body"] for c in gone["comments"]][1:] == [
+        "<!-- sdlc:withdrawn:001-thing -->\n"
+        "001-thing no longer takes this issue on; it is open for triage again."
+    ], "one comment, however often sync runs"
+    assert {"name": "triaged"} in _issue(gh, 51)["labels"], "still on the line"
+    assert {"name": "triaged"} in _issue(gh, 52)["labels"], "an entry records it now"
+    assert {"name": "triaged"} in _issue(gh, 60)["labels"], "a person's label stays"
+    assert _issue(gh, 60)["comments"] == []
+
+
 def _shipped_closing(root: Path, closes: str) -> str:
     folder = _open(root)
     _set(folder, "impact:\n", "impact: none\n")

@@ -420,7 +420,8 @@ verdict closed. It reads only what is committed on the base branch and the open 
 that stops halfway is finished by the next. `intake` lists as `dangling` an issue labelled
 `triaged` that nothing records anymore, and `/sdlc:close` reruns the marking once the change's
 entries are on the base branch. `sdlc.py sync` marks a change's own `closes:` issues as soon as
-its intent names them, so a filer hears the change took the issue on.
+its intent names them, so a filer hears the change took the issue on, and sends one that left the
+line back to triage, with a comment saying so, unless another record holds it now.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A

@@ -102,10 +102,10 @@ PROMPT_RE = re.compile(r"^<[^>]", re.M)
 # as a check like this one, or a register naming it, holds.
 CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 UNFILLED_THRESHOLD = 2
-# work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title", its id
-# (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its kind:
-# `[idea]`, `[bug]` or `[nit]`, with `[building]` the tag older versions wrote on an idea a change
-# was building (an open change's `idea:` line marks it now). Any other tag reads as an idea,
+# .sdlc/work/inbox.md, the register of change requests: "## [2026-10-25-3] [idea] Some title",
+# its id (the date it came in and a count) then its tag. Every entry is a seed, and its tag is its
+# kind: `[idea]`, `[bug]` or `[nit]`, with `[building]` the tag older versions wrote on an idea a
+# change was building (an open change's `idea:` line marks it now). Any other tag reads as an idea,
 # `[seed]` (what ideas were tagged before) for good.
 ENTRY_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})-(\d+)\]\s*\[([^\]]+)\]\s*(.+)$")
 # A heading from before ids, `[2026-10-17]` with no count, read for good where history is: an
@@ -135,9 +135,9 @@ NIT_RAISED_RE = re.compile(r"^(\d{3,}-[a-z0-9][a-z0-9-]*)\s*(?:\(([^)]*)\))?\s*$
 NIT_COSTS = ("S", "M")
 NIT_VALUES = ("med", "low")
 # notes.md is free-form, with one rule: anything left undone is an unticked `- [ ]` line.
-# /sdlc:ship carries each one to a work/inbox.md seed or drops it with a reason, ticking it as it
-# goes, and `ship` refuses while one is still unticked, so nothing lands on main with a question
-# nobody answered.
+# /sdlc:ship carries each one to a .sdlc/work/inbox.md seed or drops it with a reason, ticking it
+# as it goes, and `ship` refuses while one is still unticked, so nothing lands on main with a
+# question nobody answered.
 OPEN_ITEM_RE = re.compile(r"^\s*[-*] \[ \] (.+?)\s*$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
@@ -297,8 +297,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`; and the section
-# release adds to `release.changelog`.
+# `.sdlc/work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`; and the
+# section release adds to `release.changelog`.
 DOC_TEMPLATES = (
     "direction.md",
     "issue.md",
@@ -624,8 +624,8 @@ def cmd_config(root: Path) -> int:
     out = {
         "config_file": f"{HOST_DIR}/config.toml" if cfg_file.is_file() else None,
         # This checkout's: a change's folder is committed on its branch, in its worktree.
-        # The file entries go in: `work/inbox.md`, or `work/ideas.md` until a repo migrates, so
-        # a skill never starts a second register beside the one being read.
+        # The file entries go in, `.sdlc/work/inbox.md`, named so a skill never starts a second
+        # register beside the one being read.
         "work": {
             "dir": str(work_dir(root)),
             "rel": work_rel(root),
@@ -804,10 +804,10 @@ def names_change(name: str, ident: str) -> bool:
 
 # The last id handed out, as the bare number, in `.sdlc/last-id`. "Last", not "next": the meaning
 # is in the name, so nobody has to guess which side of the off-by-one the file is on. It is
-# committed, so a fresh clone carries on from it, and deleting work/ (which close does to a
-# change's folder once it is archived) can't reset the numbering. `new --worktree` writes it in the
-# change's own worktree, so the bump reaches main with the change's commit: the main checkout is
-# never left dirty, which close would refuse.
+# committed, so a fresh clone carries on from it, and removing a change's folder from
+# `.sdlc/work/` (which close does once it is archived) can't reset the numbering. `new --worktree`
+# writes it in the change's own worktree, so the bump reaches main with the change's commit: the
+# main checkout is never left dirty, which close would refuse.
 LAST_ID = "last-id"
 
 
@@ -2256,13 +2256,16 @@ def cmd_sync(root: Path, ident: str | None) -> int:
     report = {"nothing": why} if why else tracker(home, cfg).sync(_tracker_change(home, path))
     if "nothing" in report:
         report = {"nothing to sync": report["nothing"]}
-    elif not report.get("error") and (closes := load_change(path, home).get("closes")):
-        # Each issue the change takes on hears so now, not at the next marking; never fatal.
+    elif not report.get("error"):
+        # Each issue the change takes on hears so now, not at the next marking, and one that left
+        # its line, with nothing else recording it, goes back to triage; never fatal.
+        closes = set(load_change(path, home).get("closes") or [])
         found, _ = _intake_tracker(home, cfg)
         if found is not None:
-            marked = mark_issues(home, found, set(closes))
-            report.setdefault("done", []).extend(marked["done"])
-            report.setdefault("skipped", []).extend(marked["failed"])
+            marked = mark_issues(home, found, closes) if closes else {"done": [], "failed": []}
+            sent = withdraw_issues(home, found, path.name, closes)
+            report.setdefault("done", []).extend(marked["done"] + sent["done"])
+            report.setdefault("skipped", []).extend(marked["failed"] + sent["failed"])
     print(json.dumps({"change": path.name, **report}, indent=2, ensure_ascii=False))
     return 1 if report.get("error") else 0
 
@@ -5020,7 +5023,7 @@ def _merged_scripts(main: Path, before: str | None, trunk: str) -> bool:
 # Close mirrors a landed change's folder to a tracker before it removes the folder from main. A
 # tracker is a module in scripts/trackers/ (`Tracker`, made by `make(home, cfg)`), loaded by path
 # only when `archive.target` names it: with `none`, no tracker code runs at all. Core renders
-# what the tracker shows; the tracker never reads work/ or .sdlc/ itself.
+# what the tracker shows; the tracker never reads .sdlc/, the change folder included.
 
 # GitHub refuses an issue body or comment over 65,536 characters; this leaves room for the header.
 ISSUE_LIMIT = 65_000
@@ -5219,10 +5222,12 @@ def render_issue(
 
 def closes_texts(name: str) -> dict[str, str]:
     """What the tracker posts on an issue a change's `closes:` line names: as it closes it where
-    no push will (`fixed`), and as it sends it back to triage when the change is dropped."""
+    no push will (`fixed`), as it sends it back to triage when the change is dropped, and when the
+    issue left the line with nothing else recording it (`withdrawn`, `withdraw_issues()`)."""
     return {
         "fixed": f"Fixed by {name}.",
         "dropped": f"{name} was dropped; this issue is open for triage again.",
+        "withdrawn": f"{name} no longer takes this issue on; it is open for triage again.",
     }
 
 
@@ -7619,6 +7624,41 @@ def mark_issues(home: Path, found, only: set[int] | None = None) -> dict:
             continue
         err = found.mark(n, r["comment"], r["marker"], parent=r["parent"], close=r["close"])
         (report["failed"] if err else report["done"]).append(err or f"#{n}: {r['filed']}")
+    return report
+
+
+def withdraw_issues(home: Path, found, name: str, closes: set[int]) -> dict:
+    """Send back to triage, through the tracker's `unmark()`, each open issue change `name` marked
+    (its `<!-- sdlc:intake:<name> -->` comment) that is still marked triaged, isn't on its
+    `closes:` line now, and that no record the repo holds names (`recorded_issues()`): an issue a
+    person labelled, or one another record took over, is never touched. A drop reaches `unmark()`
+    through `archive()` instead. Needs `open_marks()` to see the comments; never raises."""
+    report: dict = {"done": [], "failed": []}
+    if not (hasattr(found, "unmark") and hasattr(found, "open_marks")):
+        return report
+    marker = f"<!-- sdlc:intake:{name} -->"
+    try:
+        marks = found.open_marks()
+    except Exception as e:  # a tracker that fails here still lets sync report
+        report["failed"].append(f"listing open issues: {type(e).__name__}: {e}")
+        return report
+    if marks is None:
+        report["failed"].append("couldn't list the open issues")
+        return report
+    left = [
+        n
+        for n, seen in sorted(marks.items())
+        if n not in closes and seen["triaged"] and any(marker in b for b in seen["comments"])
+    ]
+    if not left:
+        return report
+    recorded = recorded_issues(home)
+    text = closes_texts(name)["withdrawn"]
+    for n in left:
+        if n in recorded:
+            continue
+        err = found.unmark(n, text, f"<!-- sdlc:withdrawn:{name} -->")
+        (report["failed"] if err else report["done"]).append(err or f"#{n}: back to triage")
     return report
 
 

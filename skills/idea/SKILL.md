@@ -8,6 +8,7 @@ allowed-tools:
   - Write
   - Edit
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py inbox-commit *)'
 disable-model-invocation: true
@@ -77,8 +78,18 @@ When the argument is an entry's id, or the human wants one changed or gone:
 **Themes for what has none**, when the argument is `--themes` (status says `N ideas and bugs have
 no theme`). Only from the main checkout: when `work.dir` is inside `.claude/worktrees/`, say that
 a worktree's copy of each entry may be older than the main checkout's, which filing from here
-would put back, and stop. Otherwise, from the register you read in Step 0, take every `[idea]` and
-`[bug]` with no `Theme:` line, leaving out those tagged `[building]`. Propose a theme for each:
+would put back, and stop. Otherwise, see what is being built:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status --all
+```
+
+Under *Next up*, its `N being built` line lists each entry an open change's `idea:` or `fixes:`
+line names (or, in an older register, the `[building]` tag), one `<id> <title> — <change>` line
+each. From the register you read in Step 0, take every `[idea]` and `[bug]` with no `Theme:` line,
+leaving out each entry that list names: status counts no theme for a seed being built, and its
+change takes it out of the register at ship. With no *Next up* section, no idea or bug is open but those being built, and there is nothing
+to propose: say so and stop. Propose a theme for each:
 a word the register's `Theme:` lines already hold, nits' included, the one closest to the entry;
 a new one only where none fits, one word or a short kebab-case phrase, and the same new word for
 the entries that share it. This touches a `[bug]` only to add its `Theme:`, the one edit of a bug

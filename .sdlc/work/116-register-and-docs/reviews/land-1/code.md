@@ -1,0 +1,14 @@
+VERDICT: CHANGES
+
+- CHANGE: .sdlc/work/inbox.md:162: the change is not rebased onto current main. Its base is `93f2ba1`, and main is now at `175ad83`, three commits ahead (`f7957df`, `6f20997`, `175ad83`). Those commits remove seeds 19, 64, 67 and 80 from the register, beside this change's removal of 28, 65 and 66. A three-way merge of the change onto current main (done in /tmp, nothing written) leaves two conflict hunks in this file, and no others: `sdlc.py`, the docs, the skill and both test files merge cleanly. Fix: rebase onto `175ad83`, resolving the register so it keeps main's four removals, this change's three removals and seed 2026-11-17-89 after 88. Then rerun the gate on the rebased tree. The recorded gate (build `f4b0930`) doesn't cover what would land.
+
+The code itself is sound. The one CHANGE is the stale landing, not a defect in the code.
+
+## Notes
+
+- Nit: `skills/idea/SKILL.md:91` is 138 characters. Round 1 flagged it, and it is unchanged. The sentence "With no *Next up* section, no idea or bug is open but those being built, and there is nothing to propose: say so and stop." needs rewrapping.
+- Nit: `docs/CONTRIBUTING.md:201` is a short line in the middle of the intake paragraph ("`closed_by()` is read"). Round 3 flagged it, and it is unchanged. Reflow it.
+- Note: `intent.md`'s Constraints still say "Comments only in `sdlc.py`'s first part: no behaviour change". Round 3's R1 wired `unmark()` into `sync`, which the intent's constraint rules out. The decision record covers it, but the intent should say so before ship.
+- Note: `cmd_sync` now calls `_intake_tracker()` and `withdraw_issues()` on every run, even for a change with no `closes:` line. That costs one `open_marks()` listing of up to 1000 issues, with comments, per `sync`. D3 accepts that cost. The JSON `sync` prints also always carries `done` and `skipped` keys now, even when empty. That is a small output change, and the decision record doesn't mention it.
+- Done well: `withdraw_issues()` is narrow. It unmarks only an issue this change marked (its own `<!-- sdlc:intake:<name> -->` comment, still triaged, off its `closes:` line), and it checks `recorded_issues(home)`, which walks every worktree, so another open change's `closes:` line is seen. A person's label is never touched. The `status --all` list the skill now reads matches the code: `next_up()` builds its `holder` from `idea:` and `fixes:`, and themeless counts only ready and waiting seeds, so "no *Next up* section means nothing to propose" holds.
+- Tests and commands: I ran no test suite, since this review is read-only and pytest writes caches. The one gate run I relied on is the builder's recorded `./check.sh` at `f4b0930`, which is not current main. I did check the inbox merge with `git merge-tree` and `git merge-file` on temp copies in `/tmp`. I also read `recorded_issues()`, `next_up()`, `_next_themes()`, the GitHub tracker's `open_marks()` and `unmark()`, and `mark_issues()`.

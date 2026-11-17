@@ -718,6 +718,20 @@ def test_idea_files_by_the_script_from_any_checkout() -> None:
         assert "Run it from any checkout" in body, skill
 
 
+def test_idea_themes_leave_out_what_status_lists_as_being_built() -> None:
+    """116: an open change's `idea:` or `fixes:` line is all that marks a seed taken, so the themes
+    pass reads status's being-built list, the open changes as status reads them, rather than the
+    register's tags, and proposes no theme for a seed being built."""
+    text = (ROOT / "skills" / "idea" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    run = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status --all'
+    assert run in text
+    assert f"Bash({run.rsplit(' ', 1)[0]} *)" in text
+    themes = flat[flat.index("**Themes for what has none**") : flat.index("## Step 3")]
+    assert "being built" in themes and "`idea:` or `fixes:`" in themes
+    assert "leaving out those tagged `[building]`" not in themes
+
+
 def test_only_close_and_drop_leave_the_worktree() -> None:
     """Every stage before close writes its artifacts in the change's worktree, where the session
     already is, so none of them needs to step out and back. Drop ends a change the way close

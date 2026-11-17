@@ -159,16 +159,6 @@ out of git, captured per machine before a run, and approve cases skipped while t
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 
-
-## [2026-11-17-28] [idea] CONTRIBUTING's Writing a tracker lists the intake methods
-
-AGENTS.md points at CONTRIBUTING.md's *Writing a tracker* for the tracker interface, which leaves
-out the intake methods core calls when a tracker has them: `mark()`, `unmark()`, `needs_info()`,
-`open_marks()`, `open_numbers()`, `closed_by()`. See .sdlc/work/090-agents-rules-once/notes.md in
-090's commit.
-Theme: docs
-Raised 2026-11-17.
-
 ## [2026-11-17-49] [idea] One review checklist and one findings record for ship and the factory
 
 `/sdlc:ship` and the factory review a change differently, and each misses what the other checks.
@@ -202,21 +192,6 @@ Raised 2026-11-17.
 
 Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by 101's spec's boundary: sharing the slots would make the lock files' names a contract between sdlc and sdlc-factory.
 See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-65] [idea] Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
-
-Left undone by 102-sdlc-docstrings, carried forward when it landed: Six `#` comments in `scripts/sdlc.py` still call the change folder `work/` (above `ENTRY_RE`, `OPEN_ITEM_RE`, `DOC_TEMPLATES`, `LAST_ID`, `config`'s `"work"` key, and the trackers section). They aren't docstrings, so they're outside this change's scope.
-See .sdlc/work/102-sdlc-docstrings/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-66] [idea] /sdlc:idea --themes skips seeds an open change names
-
-`/sdlc:idea --themes` leaves out entries tagged `[building]` but not those an open change's
-`idea:` names, so it may propose a `Theme:` for a seed being built: harmless (an update, which
-`inbox-commit` allows), but it could read `status`'s `building` list to match. See
-.sdlc/work/100-seeds-marked-by-changes/notes.md in its commit.
-Theme: inbox
 Raised 2026-11-17.
 
 ## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
@@ -292,4 +267,10 @@ Raised 2026-11-17.
 
 Left undone by 118-retro-spend-indicators, carried forward when it landed: `retro()` and `retro_report()` each call `_change_rows()` per change, and `_spend()` now adds one `git diff -U0` per change on top; `_rework()` runs the same `-U0` diff. One diff per change shared between `_rework()` and `_spend()` would halve those calls. Not this change.
 See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-89] [idea] Unmark withdrawn issues in the full marking pass, using closed_by() on the unpushed commits
+
+Left undone by 116-register-and-docs, carried forward when it landed: A full marking pass (close, `mark-triaged`) still leaves a core-marked issue whose record went (an entry's `Issue:` line removed by hand) as `dangling` for triage, not unmarked: close's pass runs between its Close commit and the push that closes the change's issues, so it would need `closed_by()` on the unpushed commits to tell a just-fixed issue from a withdrawn one.
+See .sdlc/work/116-register-and-docs/notes.md in its commit.
 Raised 2026-11-17.

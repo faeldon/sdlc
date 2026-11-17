@@ -192,6 +192,44 @@ valid. `sdlc.py` loads it by path and calls `make(home, cfg)`, which returns an 
 - `lookup(field)`: the values it has for `milestone`, `project` or `assignees`, as
   `(values, None)` or `(None, why)`. Read-only.
 
+A tracker that reads the issues people file has `intake()`. The commands that read or mark issues
+go through `_intake_tracker()`, which refuses a tracker without it: `intake` (`intake()`,
+`dangling()`), `closes` and ship's `preflight` (`titles()`), `needs-info` (`needs_info()`), and
+`mark-triaged` and `sync` (`mark()`, `open_marks()`, `open_numbers()`, and `sync`'s
+`unmark()`). Close is the exception: once a change has landed, its record step marks issues
+whenever the tracker has `mark()`, with or without `intake()`, calling `mark()`, `open_marks()`
+and `open_numbers()`. `closed_by()` is read
+on its own, whenever the tracker has it. Core says what the repo records about each issue
+(`recorded_issues()`); these only read the tracker or set what core says, and each that writes
+returns None or why not, and is safe to rerun:
+
+- `intake()`: the open issues no change claims and triage hasn't marked, as
+  `(issues, more, None)` or `(None, False, why)`, one waiting on its author coming back once they
+  reply. `sdlc.py intake`, for `/sdlc:triage`;
+- `dangling(recorded)`: the open issues marked triaged whose numbers `recorded` doesn't hold, as
+  `(issues, None)` or `(None, why)`. `sdlc.py intake`, beside `intake()`;
+- `titles(numbers)`: each issue's number, title, state and URL, or its `error`. `sdlc.py closes`
+  and ship's `preflight`, for the issues a change's `closes:` line names;
+- `open_numbers()`: the open issues' numbers, or None when they can't be listed. Every marking
+  pass, to pass over a closed issue;
+- `open_marks()`, optional: each open issue's number with whether it is marked triaged, whether it
+  waits on its author, and its comments' bodies, in one listing, or None. A full marking pass uses
+  it in place of `open_numbers()` to skip an issue already marked;
+- `mark(number, comment, marker, parent=None, close=None)`: record triage on an issue: the comment
+  once (under `marker`), marked triaged and no longer waiting, `parent` as its parent, and closed
+  for `close` (`completed` or `not planned`). `sdlc.py mark-triaged`, `sync` for a change's
+  `closes:`, and close once the change has landed;
+- `unmark(number, comment, marker)`, optional: send an issue back to triage: the comment once
+  (under `marker`), no longer marked triaged, and no parent. `sdlc.py sync`, for an issue the
+  change marked that has left its `closes:` line and that nothing else the repo holds records
+  (`withdraw_issues()`), only when the tracker also has `open_marks()`. A dropped change's
+  `closes:` issues are the tracker's own to let go, in `archive()`, with core's text;
+- `needs_info(number, comment)`: ask the issue's author for detail, once until they reply, and
+  mark it waiting. `sdlc.py needs-info`, for `/sdlc:triage`;
+- `closed_by(message)`, optional: the issue numbers a commit message closes once it reaches the
+  default branch, reading no network. The unpushed commits status, close and release report
+  (`_unpushed()`), for the issues a push would close.
+
 `change` is a dict: the change's record (`id`, `slug`, `name`, `title`, `tier`, `stage`, `impact`,
 `depends_on`, `updated`), its `branch` and `sha`, the `issue_title` its issue carries (the heading
 without its id, or None when unread), the rendered `marker`, `body` and `comments`, an
