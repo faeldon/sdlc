@@ -744,11 +744,12 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
         bases[rec["name"]] = _change_rows(home, rec)[0]
         rec["days_open"] = sdlc._days_between(rec["created"], rec["close_date"])
     dropped = sdlc.dropped_changes(home, since["sha"] if since else None, trunk)
-    rework, questions, _ = _rework(home, trunk, changes, bases)
+    diffs = _diffs(home, changes, bases)
+    rework, questions, _ = _rework(home, trunk, changes, bases, diffs)
     bugs = bugs_retro(home, cfg, since, changes, today)
     process = process_views(changes, dropped, rework, questions, bugs, since, today)
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
-    return render_report(template, process, _spend(home, cfg, changes, bases))
+    return render_report(template, process, _spend(home, cfg, changes, diffs))
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -768,7 +769,11 @@ def rankable_entries(home: Path, today: date) -> list[dict]:
 
 
 def _rework(
-    home: Path, trunk: str | None, changes: list[dict], bases: dict[str, str | None]
+    home: Path,
+    trunk: str | None,
+    changes: list[dict],
+    bases: dict[str, str | None],
+    diffs: dict[str, str],
 ) -> tuple[list[dict], list[dict], list[str]]:
     """Retro's rework, from what people declared, and the questions blame raises beside it.
 
@@ -778,7 +783,7 @@ def _rework(
     no link explains: lines an earlier change in the window wrote that a later one removed or
     replaced, blamed at the later change's start. Appending touches nothing, so it is never one.
     Questions are never counted: a planned follow-up replacing a first draft isn't a fix. Each id
-    naming no change is a problem."""
+    naming no change is a problem. `diffs` is `_diffs()`'s, read once for `_spend()` too."""
     if not changes:
         return [], [], []
     closed = {
@@ -828,7 +833,7 @@ def _rework(
         base = bases.get(rec["name"])
         if not base:
             continue
-        diff = sdlc._git(home, "diff", "-U0", "--no-renames", base, rec["sha"]) or ""
+        diff = diffs[rec["name"]]
         for path, runs in indicators.removed_ranges(diff).items():
             if path.startswith(sdlc.CHANGE_FOLDERS) or path in written:
                 continue
@@ -888,7 +893,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             (sdlc._git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
         )
         rec["files"] = len(files)
-    rework, questions, unnamed = _rework(home, trunk, changes, bases)
+    diffs = _diffs(home, changes, bases)
+    rework, questions, unnamed = _rework(home, trunk, changes, bases, diffs)
     problems += unnamed
     bugs = bugs_retro(home, cfg, since, changes, today)
     a = sdlc.analyze(home, today)
@@ -942,7 +948,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "product": product,
         "prose": prose_metrics(home, cfg),
         "architecture": _architecture(home, cfg, since, changes, kind),
-        "spend": _spend(home, cfg, changes, bases),
+        "spend": _spend(home, cfg, changes, diffs),
     }
 
 
@@ -967,6 +973,12 @@ def _added_diff(home: Path, rec: dict, base: str | None) -> str:
     return sdlc._git(home, "diff-tree", "-U0", "-p", "--no-commit-id", "-r", rec["sha"]) or ""
 
 
+def _diffs(home: Path, changes: list[dict], bases: dict[str, str | None]) -> dict[str, str]:
+    """Each change's `_added_diff()`, by name: one git call per change, which `_rework()`'s blame
+    and `_spend()`'s comment count share."""
+    return {rec["name"]: _added_diff(home, rec, bases.get(rec["name"])) for rec in changes}
+
+
 def _unrecorded(m: dict | None) -> str | None:
     """Why a change's `Close` commit carries no tool calls or words, None when it does."""
     totals = (m or {}).get("totals") or {}
@@ -980,13 +992,14 @@ def _unrecorded(m: dict | None) -> str | None:
     return "closed before tool calls and words were counted"
 
 
-def _spend(home: Path, cfg: dict, changes: list[dict], bases: dict[str, str | None]) -> dict:
+def _spend(home: Path, cfg: dict, changes: list[dict], diffs: dict[str, str]) -> dict:
     """What each change in the window spent beside its size: its added code lines and their line
     comments (`indicators.comment_lines()`, code alone as `_kind()` tells it), its agent `out`
     tokens, the person's words per stage and its tool calls from its `Close` commit, then
     `indicators.spend()`'s medians, outliers and tool ranking over them. A change whose commit has
     no `tools=` or `words=` is `recorded: false` with `why`, and its missing counts stay None.
-    `changes` holds a change's own numbers: `cmd_retro()` prints them only with `--metrics`."""
+    `diffs` is `_diffs()`'s. `changes` holds a change's own numbers: `cmd_retro()` prints them
+    only with `--metrics`."""
     kind = _kind(cfg)
     register = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
 
@@ -1000,7 +1013,7 @@ def _spend(home: Path, cfg: dict, changes: list[dict], bases: dict[str, str | No
         m = rec.get("metrics") or {}
         totals = m.get("totals") or {}
         why = _unrecorded(m)
-        counted = indicators.comment_lines(_added_diff(home, rec, bases.get(rec["name"])), code)
+        counted = indicators.comment_lines(diffs[rec["name"]], code)
         tools = m.get("tools") or {}
         rows.append({
             "change": rec["name"], "tier": rec["tier"],

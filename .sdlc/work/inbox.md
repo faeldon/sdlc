@@ -233,12 +233,6 @@ Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, 
 See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-88] [idea] Share one -U0 diff per change between retro's rework and spend
-
-Left undone by 118-retro-spend-indicators, carried forward when it landed: `retro()` and `retro_report()` each call `_change_rows()` per change, and `_spend()` now adds one `git diff -U0` per change on top; `_rework()` runs the same `-U0` diff. One diff per change shared between `_rework()` and `_spend()` would halve those calls. Not this change.
-See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-89] [idea] Unmark withdrawn issues in the full marking pass, using closed_by() on the unpushed commits
 
 Left undone by 116-register-and-docs, carried forward when it landed: A full marking pass (close, `mark-triaged`) still leaves a core-marked issue whose record went (an entry's `Issue:` line removed by hand) as `dangling` for triage, not unmarked: close's pass runs between its Close commit and the push that closes the change's issues, so it would need `closed_by()` on the unpushed commits to tell a just-fixed issue from a withdrawn one.

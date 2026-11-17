@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import subprocess
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -330,6 +331,25 @@ def test_a_question_sees_lines_an_earlier_change_s_later_commit_wrote(tmp_path: 
         {"change": "002-keep-one-draft", "touches": "001-reopen-drafts",
          "files": ["src/other.py"], "lines": 1}
     ]  # fmt: skip
+
+
+@pytest.mark.parametrize("run", ["retro", "retro_report"])
+def test_a_retrospective_reads_each_change_s_diff_once(tmp_path: Path, monkeypatch, run) -> None:
+    """122: rework's blame and spend's comment count share one `git diff -U0` per change."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",))
+    _close(root, "002-keep-one-draft", closed="2026-10-04", rewrite=("src/drafts.py",))
+    real, diffs = sdlc._git, Counter()
+
+    def counting(home, *args):
+        if args[:2] == ("diff", "-U0"):
+            diffs[args[-1]] += 1
+        return real(home, *args)
+
+    monkeypatch.setattr(sdlc, "_git", counting)
+    cfg = sdlc.load_config(root)[0]
+    getattr(sdlc.retro, run)(root, cfg, date(2026, 10, 24))
+    assert len(diffs) == 2 and set(diffs.values()) == {1}, diffs
 
 
 def test_a_change_with_no_start_has_no_size(tmp_path: Path, monkeypatch) -> None:
