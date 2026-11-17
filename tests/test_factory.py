@@ -4190,6 +4190,16 @@ def test_no_build_question_for_a_refusal_or_a_spec(tmp_path, capsys) -> None:
     assert code == 1 and out["question"] is None, "no worktree of its own"
 
 
+def test_no_build_question_without_a_base_branch(tmp_path, capsys) -> None:
+    """125: the gate and depth clauses are the base branch's, so with none `start` refuses rather
+    than word a question saying there is no gate."""
+    root = _change(tmp_path, 1, "plan")
+    _git(root, "branch", "-q", "-m", "main", "trunk")
+    code, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert code == 1 and out["question"] is None
+    assert "no base branch: set [git] base in .sdlc/config.toml" in out["refusals"]
+
+
 @pytest.mark.parametrize(
     "names, said",
     [([], "no reviewer"), (["code"], "code"), (["code", "test"], "code and test"),

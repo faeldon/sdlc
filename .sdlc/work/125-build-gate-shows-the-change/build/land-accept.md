@@ -9,3 +9,13 @@ Build: d2be6d1e917af7d9
     (no output)
 - Step 2 asks the script's question, and the hand-filled forms are gone: exit 0, passed
     (no output)
+
+## Attempt 2
+
+Verdict: PASS
+Build: 4ff2ea3590410c08
+
+- Step 1 opens with the change, quoted from its intent: exit 0, passed
+    (no output)
+- Step 2 asks the script's question, and the hand-filled forms are gone: exit 0, passed
+    (no output)

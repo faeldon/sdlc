@@ -936,11 +936,13 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         )
         if purpose == "spec" and tier == 1:
             out["refusals"].append("a Tier 1 change has no spec: its intent's Approach is the spec")
-    # The build gate's question, worded by the script; the spec skill asks its own.
+    # The build gate's question, worded by the script; the spec skill asks its own. Its gate and
+    # depth clauses are the base branch's, so with none it refuses rather than say there is no gate.
+    if purpose == "build" and not out["refusals"] and out["base"] is None:
+        out["refusals"].append("no base branch: set [git] base in .sdlc/config.toml")
     if purpose == "build" and not out["refusals"]:
         base = out["base"]
-        check, sensitive = (_base_check(root, base), _sensitive(root, base)) if base else (None, [])
-        out["question"] = build_question(out, check, sensitive)
+        out["question"] = build_question(out, _base_check(root, base), _sensitive(root, base))
     return emit(out, 1 if out["refusals"] else 0)
 
 
