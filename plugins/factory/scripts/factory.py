@@ -2571,8 +2571,9 @@ def _task(
 def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Path, bool] | str:
     """The landing's prompts: the builder, resumed, resolving the files a rebase left conflicted,
     or making the fix the person asked for at landing (`build/land-<n>.ask.md`); a reviewer
-    reading the change as it now stands on the base branch; the verifier on what they asked for.
-    Each reply goes under `reviews/land-<n>/`, the builder's to `build/land-<n>.md`."""
+    reading the change's diff from the commit the round rebased it onto (`_land_diff()`); the
+    verifier on what they asked for, against that diff. Each reply goes under
+    `reviews/land-<n>/`, the builder's to `build/land-<n>.md`."""
     n = land_round(folder)
     if not n:
         return "no landing round is under way: run land first"
@@ -2644,9 +2645,10 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
                 f"the builder made a fix the person asked for while landing, in build/land-{n}.md. "
                 f"The person asked: {ask}"
             )
+        if (diff := _land_diff(root, base)) is None:
+            return _NO_FORK.format(base=base)
         return (
-            head + f"Review landing round {n}: {what}. Review its whole diff against {base} as it "
-            "now stands.",
+            head + f"Review landing round {n}: {what}. Review its whole diff: " + diff,
             where / f"{role}.md",
             False,
         )
@@ -2660,7 +2662,32 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(reviews)]
     if not asked:
         return f"landing round {n} asks for no change: there is nothing to verify"
-    return (head + f"Verify landing round {n}.\n" + "\n".join(asked), where / VERIFIED, False)
+    if (diff := _land_diff(root, base)) is None:
+        return _NO_FORK.format(base=base)
+    return (
+        head + f"Verify landing round {n} against its diff: {diff}\n" + "\n".join(asked),
+        where / VERIFIED,
+        False,
+    )
+
+
+_NO_FORK = "no fork point between {base} and HEAD: the landing can't be reviewed"
+
+
+def _land_diff(root: Path, base: str) -> str | None:
+    """The diff a landing round's reviewers and verifier read: from the commit the round rebased
+    the change onto, `HEAD`'s merge base with the base branch, which a later move of the branch
+    leaves where it is (the amend that adds the landing's record keeps `HEAD`'s parent). Never
+    the branch's tip, where a commit that landed since reads as one the change deleted: None when
+    there is no merge base, for the caller to refuse (`_NO_FORK`)."""
+    fork = _git(root, "merge-base", base, "HEAD")
+    if not fork:
+        return None
+    return (
+        f"`git diff {fork}...HEAD`, from the commit this round rebased the change onto. {base} "
+        "may have moved since: a commit on it that isn't in that diff is not the change's, and a "
+        "move is the script's to catch before the close, never a finding."
+    )
 
 
 def _file_draft(root: Path, folder: Path, reply: str) -> dict:

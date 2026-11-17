@@ -1353,6 +1353,48 @@ def _replies(monkeypatch, reply: str) -> list[list[str]]:
 
 
 @needs_uv
+def test_a_landing_review_reads_the_change_from_its_rounds_own_base(tmp_path, capsys) -> None:
+    """121: a commit that reaches the base branch after the landing rebased the change is never
+    in the diff its reviewers and verifier are told to read, so it never reads as the change's."""
+    root, tree = _landing(tmp_path, capsys)
+    folder = _folder(tree)
+    rebased_onto = _git(root, "rev-parse", "main")
+    (root / "later.txt").write_text("filed after the rebase\n", encoding="utf-8")
+    _git(root, "add", "later.txt")
+    _git(root, "commit", "-q", "-m", "main moves again, under the landing")
+    moved = _git(root, "rev-parse", "main")
+    (folder / "reviews" / "land-1" / "code.md").write_text(
+        "VERDICT: CHANGES\n- CHANGE: later.txt:1: put it back\n", encoding="utf-8"
+    )
+    for task, role in (("land-review", "code"), ("land-verify", "verifier")):
+        prompt = factory._land_task(tree, folder, task, role)[0]
+        assert f"git diff {rebased_onto}...HEAD" in prompt, prompt
+        assert moved not in prompt and "may have moved" in prompt, prompt
+    named = _git(tree, "diff", "--name-only", f"{rebased_onto}...HEAD").splitlines()
+    assert "later.txt" not in named and "README.md" in named, named
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert (code, out["state"]) == (0, "moved"), "the script catches the move, never a review"
+
+
+@needs_uv
+def test_a_landing_review_with_no_fork_point_is_refused(tmp_path, capsys, monkeypatch) -> None:
+    """121: with no merge base to read the round's diff from, the landing's review and verify
+    are refused, never handed a diff against the base branch's tip."""
+    root, tree = _landing(tmp_path, capsys)
+    folder = _folder(tree)
+    (folder / "reviews" / "land-1" / "code.md").write_text(
+        "VERDICT: CHANGES\n- CHANGE: README.md:1: name it\n", encoding="utf-8"
+    )
+    real = factory._git
+    monkeypatch.setattr(
+        factory, "_git", lambda r, *a: None if a[:1] == ("merge-base",) else real(r, *a)
+    )
+    for task, role in (("land-review", "code"), ("land-verify", "verifier")):
+        refused = factory._land_task(tree, folder, task, role)
+        assert isinstance(refused, str) and "no fork point between main and HEAD" in refused
+
+
+@needs_uv
 def test_a_landing_review_missing_an_exit_is_mended_not_stopped(tmp_path, capsys) -> None:
     """109 R1: a landing behaviour check whose read has no `exit:` is a mend, not a stop."""
     root, tree = _landing(tmp_path, capsys)

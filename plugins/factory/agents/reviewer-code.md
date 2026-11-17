@@ -25,6 +25,10 @@ the failure classes this repo adds to the passes below: those come first (`docs.
 `.sdlc/REVIEW.md`). A review doc that is a whole copy of the plugin's review guide holds its passes
 too; one that holds only the repo's answers holds just what it adds, the passes being these.
 
+A landing round's change is committed: read the diff its prompt names, from the commit the
+round rebased it onto, never one against the base branch as it is now, which may hold commits
+that landed since and aren't the change's.
+
 Read the tests before the code; they show what the builder meant.
 
 ## The passes

@@ -212,21 +212,6 @@ Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-ex
 See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-86] [bug] A landing review reads the base branch's newer commits as the change's deletions
-
-A landing review compares a rebased change against the base branch as it is now, not against the
-commit the change was rebased onto, so a commit that reaches the base branch during the landing
-reads as something the change deleted. On 2026-11-17, 110-board-says-it-plainly's landing round 1
-was rebased onto 09a8622; bug 2026-11-17-85 was then filed on main (e7e2f1a); the landing's code
-reviewer reported that the branch "drops" 85 from .sdlc/work/inbox.md, the verifier kept it, and
-land-verdicts stopped the landing ("the landing review kept 1 change(s): ship it by hand"). The
-branch never held 85. Landing again rebased it and opened round 2. The landing review should read
-the diff from the rebase's base (the merge base, or the head the round's gate recorded).
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-code.md
-Theme: factory
-
 ## [2026-11-17-87] [idea] Retro proposes a pruning pass over the test suite
 
 Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, at ship: file the suite-pruning pass as a seed through `/sdlc:idea` (`inbox-commit`, on the base branch, never this branch), carrying 2026-11-12-2's third bullet: nothing looks at the tests already in the suite again (one whose code was rewritten, one a newer test repeats, one that passes for the wrong reason, the slowest). Needs per-test run times and a test-to-code map no host records today (spec, *Alternatives rejected*).

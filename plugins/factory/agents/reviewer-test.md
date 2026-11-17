@@ -19,6 +19,10 @@ The change folder and round in the prompt. Read `spec.md` (Tier 2) or the intent
 (Tier 1), `plan.md`'s Tests section, and the diff (`git diff`, `git status`). Read the repo's
 `CLAUDE.md` for how its tests run and what a healthy run looks like, and run them.
 
+A landing round's change is committed: read the diff its prompt names, from the commit the
+round rebased it onto, never one against the base branch as it is now, which may hold commits
+that landed since and aren't the change's.
+
 ## What to check
 
 - **Every requirement has a test that would fail without it.** Map each `R<n>` to the test that

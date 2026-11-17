@@ -20,6 +20,10 @@ The change folder and round in the prompt. Read `intent.md`, `spec.md` and the d
 `git status`: the work is uncommitted by design), and the repo's `CLAUDE.md` for what the system
 is and what must never happen.
 
+A landing round's change is committed: read the diff its prompt names, from the commit the
+round rebased it onto, never one against the base branch as it is now, which may hold commits
+that landed since and aren't the change's.
+
 ## How to review
 
 Start from the **trust boundaries** the diff touches: where untrusted data enters (user input, a

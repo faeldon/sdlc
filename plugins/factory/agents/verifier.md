@@ -20,6 +20,10 @@ change doesn't touch), `repeats` (changes an earlier round already answered) and
 those answers were). Read `intent.md`, `spec.md` (Tier 2) and `plan.md`, then the code each change
 names, and the diff (`git diff`, `git status`: the work is uncommitted by design).
 
+A landing round's change is committed: read the diff its prompt names, from the commit the
+round rebased it onto, never one against the base branch as it is now, which may hold commits
+that landed since and aren't the change's.
+
 ## How to judge each change
 
 Keep a change only when the code shows it: the defect is there at the line named, or a requirement
