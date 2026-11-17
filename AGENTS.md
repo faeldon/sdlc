@@ -277,8 +277,8 @@ Changing a skill or the script usually means satisfying these, so know them befo
   plain name (`# Process`, `# Review`), or `# NNN — TITLE` in a change template; a `>` note saying
   what the file is for and what the plugin reads from it; then `##` sections, every `<…>` prompt
   inside one. No `---` rules, no skipped heading levels. A doc's note stays in a host's copy, so
-  it never says "default". `templates/issue.md` is the one exception: its text is every issue's
-  body.
+  it never says "default". `templates/issue.md` and `templates/changelog.md` are the two exceptions:
+  their text is every issue's body and every release's changelog section, rendered verbatim.
 - **This repo's process docs hold only its answers** (`tests/test_defaults.py`): `.sdlc/SDLC.md`
   and `.sdlc/REVIEW.md` are this plugin's own answers to `guide/process.md` and `guide/review.md`.
   Every block sits under a heading the guide has, and none restates the guide's word for word. An

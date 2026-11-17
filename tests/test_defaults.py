@@ -37,6 +37,8 @@ EXCEPTIONS = {
     # Its text is the issue body, rendered verbatim into every issue: a title or note would
     # land on all of them.
     "templates/issue.md": "rendered verbatim into every issue",
+    # Its text is a release's changelog section, rendered verbatim the same way.
+    "templates/changelog.md": "rendered verbatim into every release's changelog section",
 }
 CHANGE_TEMPLATES = {"templates/intent.md", "templates/spec.md", "templates/plan.md"}
 FILES = sorted(

@@ -56,40 +56,6 @@ should use its terms. Raised 2026-10-25.
 Theme: docs
 Priority: low
 
-## [2026-10-25-4] [idea] A changelog that keeps its own layout
-
-`release.changelog` puts each release's `## X.Y.Z — date` section right under the file's `# `
-title. A changelog that opens with prose or a table before its releases is split by it, and a Keep
-a Changelog file's `## [Unreleased]` section is left above the new one. Let a host mark where
-releases go (`<!-- sdlc:releases -->`, inserted after), falling back to today's place, and make the
-section heading a template a host can override. Tier 2: it changes what release writes in a host.
-Raised 2026-10-25 by a host.
-Theme: release
-Priority: low
-
-## [2026-10-25-5] [idea] Version lines release can't read, and the first release's baseline
-
-`VERSION_RE` reads `version = "x"` and `"version": "x"`, not Python's `__version__ = "x"`, so a
-host has to move its version elsewhere to use `/sdlc:release`. And with no tag for the current
-version, release's `git tag -a` hint points at the last commit that touched the version files,
-which can predate the repo's adoption of the plugin, so the first release takes in every change
-closed since. Read the dunder form, and point the hint at the adoption commit when that is later.
-Raised 2026-10-25 by a host.
-Theme: release
-Priority: low
-
-## [2026-10-25-6] [idea] Publish's "published" note never leaves the machine
-
-Publish marks a tag `published` in `refs/notes/sdlc` so a rerun skips the host's upload, but the
-notes ref isn't pushed: from a second clone, publish runs the upload again. Push the notes ref with
-the tag (inside `cmd_publish`, so only publish still pushes), or ask the remote. Also say in
-`docs/REFERENCE.md` that the tag message holds the notes (`gh release create {tag}
---notes-from-tag`), that `release.prepare` can show what a push will upload (`git lfs push
---dry-run`), and that releases outside `release.tag`'s pattern live outside the loop. Raised
-2026-10-25 by a host.
-Theme: release
-Priority: low
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts

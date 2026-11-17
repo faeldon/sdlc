@@ -281,6 +281,34 @@ def test_a_missing_tag_names_the_command_that_would_make_it(tmp_path: Path) -> N
     assert _git(root, "tag") == ""
 
 
+def _adopted_later(tmp_path: Path) -> tuple[Path, str]:
+    """A repo whose version files predate its `.sdlc/config.toml`: the plugin came later."""
+    root = _repo(tmp_path, tag=False)
+    _git(root, "rm", "-q", "--cached", ".sdlc/config.toml")
+    _git(root, "commit", "-q", "--amend", "-m", "before the plugin")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "work before the plugin")
+    _git(root, "add", ".sdlc/config.toml")
+    _git(root, "commit", "-q", "-m", "adopt the plugin")
+    return root, _git(root, "rev-parse", "--short", "HEAD")
+
+
+def test_a_missing_tag_points_at_adoption_when_it_came_after_the_version(tmp_path: Path) -> None:
+    root, adopted = _adopted_later(tmp_path)
+    _close(root, "002-reopen-drafts", "patch")
+    assert _unreleased(root)["missing"]["hint"] == f'git tag -a v0.4.2 -m "v0.4.2" {adopted}'
+
+
+def test_a_version_bump_after_adoption_is_still_the_hint(tmp_path: Path) -> None:
+    root, adopted = _adopted_later(tmp_path)
+    for name in ("pkg.json", "pyproject.toml"):
+        text = (root / name).read_text(encoding="utf-8")
+        (root / name).write_text(text.replace("0.4.2", "0.4.3"), encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "bump by hand")
+    bump = _git(root, "rev-parse", "--short", "HEAD")
+    assert bump != adopted
+    assert _unreleased(root)["missing"]["hint"] == f'git tag -a v0.4.3 -m "v0.4.3" {bump}'
+
+
 def test_version_files_that_disagree_or_hold_two_lines_are_problems(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "pkg.json").write_text(PKG.replace("{v}", "0.4.3"), encoding="utf-8")
@@ -357,6 +385,20 @@ def test_a_crlf_file_keeps_its_line_endings(tmp_path: Path) -> None:
     assert sdlc.write_version(text, "0.5.0") == text.replace("0.4.2", "0.5.0")
 
 
+def test_python_s_dunder_version_is_a_version_line(tmp_path: Path) -> None:
+    text = (
+        '"""The demo package."""\n\n'
+        'import os\n\n__version__ = "0.4.2"  # bumped by release\n\nNAME = "demo"\n'
+    )
+    root = _repo(tmp_path, config='[release]\nversion_files = ["pkg/__init__.py"]\n', tag=False)
+    (root / "pkg").mkdir()
+    (root / "pkg" / "__init__.py").write_text(text, encoding="utf-8")
+    assert sdlc.read_versions(root, sdlc.load_config(root)[0]) == ("0.4.2", [])
+    assert sdlc.write_version(text, "0.5.0") == text.replace("0.4.2", "0.5.0")
+    for line in ('my__version__ = "1.0.0"\n', 'target-version = "py311"\n'):
+        assert not sdlc.VERSION_RE.findall(line), line
+
+
 def test_the_notes_are_the_same_in_the_tag_the_commit_and_the_changelog(tmp_path: Path, capsys):
     config = CONFIG + 'changelog = "CHANGELOG.md"\n\n[archive]\ntarget = "github"\n'
     root = _repo(tmp_path, config=config)
@@ -375,6 +417,85 @@ def test_the_notes_are_the_same_in_the_tag_the_commit_and_the_changelog(tmp_path
     assert log.startswith("# Changelog\n\n## 0.5.0 — ") and log.endswith("- old\n")
     assert notes in log and log.index("0.5.0") < log.index("0.4.2")
     assert "CHANGELOG.md" in _git(root, "show", "--name-only", "--format=", "HEAD")
+
+
+SECTION = "## 0.5.0 — 2026-11-17\n\n- 002 Reopen (minor)\n"
+
+
+@pytest.mark.parametrize(
+    "before, after",
+    [
+        ("# Changelog\n\n## 0.4.2\n", f"# Changelog\n\n{SECTION}\n## 0.4.2\n"),
+        ("# Changelog\n", f"# Changelog\n\n{SECTION}"),
+        ("## 0.4.2\n", f"{SECTION}\n## 0.4.2\n"),
+        ("", SECTION),
+        ("# Changelog\r\n\r\n## 0.4.2\r\n", f"# Changelog\r\n\n{SECTION}\n\r\n## 0.4.2\r\n"),
+    ],
+)
+def test_without_a_marker_the_changelog_is_written_as_before(tmp_path, before, after) -> None:
+    section = sdlc.changelog_section(tmp_path, "0.5.0", "- 002 Reopen (minor)", "2026-11-17")
+    assert section == SECTION, "the plugin's template renders today's heading"
+    assert sdlc.with_changelog(before, section) == after
+
+
+def _changelogged(tmp_path: Path, text: str) -> Path:
+    root = _repo(tmp_path, config=CONFIG + 'changelog = "CHANGELOG.md"\n')
+    (root / "CHANGELOG.md").write_bytes(text.encode("utf-8"))
+    _git(root, "add", "CHANGELOG.md")
+    _git(root, "commit", "-q", "-m", "a changelog")
+    _close(root, "002-reopen-drafts", "minor", "Reopen saved drafts")
+    return root
+
+
+def test_a_marker_places_the_release_after_it(tmp_path: Path, capsys) -> None:
+    head = (
+        "# Changelog\n\nEvery release of demo, newest first.\n\n"
+        "| Channel | Where |\n|---|---|\n| stable | npm |\n\n"
+        "## [Unreleased]\n\n- nothing yet\n\n  <!-- sdlc:releases -->  \n"
+    )
+    root = _changelogged(tmp_path, head + "\n\n\n## 0.4.2 — 2026-10-01\n\n- old\n")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    today = date.today().isoformat()
+    section = f"## 0.5.0 — {today}\n\n- 002 Reopen saved drafts (minor)\n"
+    assert log == f"{head}\n{section}\n## 0.4.2 — 2026-10-01\n\n- old\n"
+
+
+def test_a_host_changelog_template_shapes_the_section(tmp_path: Path, capsys) -> None:
+    root = _changelogged(tmp_path, "# Changelog\n")
+    (root / ".sdlc" / "templates").mkdir()
+    (root / ".sdlc" / "templates" / "changelog.md").write_text(
+        "## [{{version}}] - {{date}}\n\n{{notes}}\n\n\n", encoding="utf-8"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "our template")
+    code, out = _run(capsys, sdlc.cmd_release, root)
+    assert code == 0, out["refusals"]
+    today = date.today().isoformat()
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == (
+        f"# Changelog\n\n## [0.5.0] - {today}\n\n- 002 Reopen saved drafts (minor)\n"
+    )
+
+
+def test_a_brace_in_a_note_is_never_a_format_error(tmp_path: Path) -> None:
+    notes = "- 002 Read {name} and {{x}} (patch)"
+    assert notes in sdlc.changelog_section(tmp_path, "0.5.0", notes, "2026-11-17")
+
+
+def test_a_changelog_template_without_notes_is_breaking(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "templates").mkdir()
+    path = root / ".sdlc" / "templates" / "changelog.md"
+    path.write_text("## {{version}} — {{date}}\n", encoding="utf-8")
+    found = [b for b in sdlc.drift(root)["breaking"] if b["what"] == "template"]
+    assert [b["where"] for b in found] == [".sdlc/templates/changelog.md"]
+    assert "{{notes}}" in found[0]["detail"]
+    path.write_text("## {{version}}\n\n{{notes}}\n", encoding="utf-8")
+    assert not [b for b in sdlc.drift(root)["breaking"] if b["what"] == "template"], (
+        "{{date}} is optional"
+    )
+    assert "changelog.md" in sdlc.DOC_TEMPLATES
 
 
 def test_check_writes_nothing_and_version_overrides_upward_only(tmp_path: Path, capsys) -> None:
@@ -470,7 +591,7 @@ def test_publish_pushes_main_then_the_tag_then_runs_the_command(tmp_path: Path, 
     assert code == 0 and _git(remote, "tag") == "v0.4.2", "--check pushes nothing"
     code, out = _run(capsys, sdlc.cmd_publish, root)
     assert code == 0, out["refusals"]
-    assert out["done"] == ["push main", "push tag", "publish command"]
+    assert out["done"] == ["push main", "push tag", "publish command", "push notes"]
     assert _git(remote, "rev-parse", "main") == _git(root, "rev-parse", "main")
     assert _git(remote, "rev-parse", "v0.4.3") == _git(root, "rev-parse", "v0.4.3")
     assert (root / "published.log").read_text() == "0.4.3 v0.4.3\n"
@@ -500,7 +621,7 @@ def test_a_failed_command_is_rerun_alone(tmp_path: Path, capsys) -> None:
     assert "release.publish exited 1" in out["refusals"][0]
     (root / "go").write_text("")
     code, out = _run(capsys, sdlc.cmd_publish, root)
-    assert code == 0 and out["done"] == ["publish command"]
+    assert code == 0 and out["done"] == ["publish command", "push notes"]
     assert out["skipped"] == ["push main (already done)", "push tag (already done)"]
     assert (root / "published.log").read_text() == "ran\n"
 
@@ -520,6 +641,83 @@ def test_publish_refuses_when_main_has_moved_past_the_release(tmp_path: Path, ca
     code, out = _run(capsys, sdlc.cmd_publish, root)
     assert code == 1 and "main has moved past v0.4.3" in out["refusals"][0]
     assert _git(remote, "tag") == "v0.4.2"
+
+
+def _ref(root: Path, ref: str) -> str | None:
+    found = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "-q", "--verify", ref], capture_output=True, text=True
+    )
+    return found.stdout.strip() or None
+
+
+def test_publish_pushes_the_published_note(tmp_path: Path, capsys) -> None:
+    root, remote = _released(tmp_path, capsys, "true")
+    code, out = _run(capsys, sdlc.cmd_publish, root, True)
+    assert out["will_run"] == ["push main", "push tag", "publish command", "push notes"]
+    assert _ref(remote, "refs/notes/sdlc") is None, "--check pushes no notes"
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0 and out["done"] == ["push main", "push tag", "publish command", "push notes"]
+    assert _ref(remote, "refs/notes/sdlc") == _ref(root, "refs/notes/sdlc") is not None
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0 and out["done"] == [] and "push notes (already done)" in out["skipped"]
+
+
+def test_a_refused_notes_push_does_not_fail_publish(tmp_path: Path, capsys) -> None:
+    root, remote = _released(tmp_path, capsys, "true")
+    hook = remote / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\nwhile read old new ref; do case $ref in refs/notes/*)\n"
+        "  echo no notes here >&2; exit 1;; esac; done\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0 and out["refusals"] == []
+    assert out["done"] == ["push main", "push tag", "publish command"]
+    assert "no notes here" in out["notes_push_failed"]
+    assert _ref(remote, "refs/notes/sdlc") is None
+    assert _git(remote, "rev-parse", "v0.4.3") == _git(root, "rev-parse", "v0.4.3")
+
+
+def test_a_second_clone_skips_the_upload_another_made(tmp_path: Path, capsys) -> None:
+    uploads = tmp_path / "uploads.log"
+    root, remote = _released(tmp_path, capsys, f"echo {{tag}} >> '{uploads.as_posix()}'")
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0, out["refusals"]
+    assert uploads.read_text() == "v0.4.3\n"
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", str(remote), str(other))
+    assert _ref(other, "refs/notes/sdlc") is None, "a clone doesn't fetch notes"
+    code, out = _run(capsys, sdlc.cmd_publish, other)
+    assert code == 0, out["refusals"]
+    assert uploads.read_text() == "v0.4.3\n", "the upload isn't run a second time"
+    assert "publish command (already done)" in out["skipped"] and out["done"] == []
+    assert "notes_fetch_failed" not in out
+
+
+def test_a_second_clone_s_own_notes_survive_the_fetch(tmp_path: Path, capsys) -> None:
+    """Local notes the remote doesn't hold (a push it refused) are merged, never overwritten."""
+    root, remote = _released(tmp_path, capsys, "true")
+    assert sdlc.cmd_publish(root) == 0
+    capsys.readouterr()
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", str(remote), str(other))
+    _git(other, "notes", "--ref", "sdlc", "add", "-m", "published", "v0.4.2")
+    code, out = _run(capsys, sdlc.cmd_publish, other)
+    assert code == 0 and "publish command (already done)" in out["skipped"], out
+    assert _git(other, "notes", "--ref", "sdlc", "show", "v0.4.2") == "published"
+    assert out["done"] == ["push notes"], "the merged notes go back to the remote"
+
+
+def test_publish_without_a_command_moves_no_notes(tmp_path: Path, capsys) -> None:
+    root, remote = _released(tmp_path, capsys)
+    _git(root, "notes", "--ref", "sdlc", "add", "-m", "published", "v0.4.2")
+    code, out = _run(capsys, sdlc.cmd_publish, root, True)
+    assert "push notes" not in out["will_run"]
+    code, out = _run(capsys, sdlc.cmd_publish, root)
+    assert code == 0 and out["done"] == ["push main", "push tag"]
+    assert _ref(remote, "refs/notes/sdlc") is None
+    assert _ref(root, "refs/notes/sdlc-remote") is None
 
 
 # ---------------------------------------------------------------- status
@@ -735,7 +933,10 @@ def test_publish_shows_what_release_prepared(tmp_path: Path, capsys) -> None:
     assert code == 0 and out["prepared"] == "pkg-0.4.3.tgz"
     code, out = _run(capsys, sdlc.cmd_publish, root)
     assert code == 0, out["refusals"]
-    assert out["prepared"] == "pkg-0.4.3.tgz" and out["done"][-1] == "publish command"
+    assert out["prepared"] == "pkg-0.4.3.tgz" and out["done"][-2:] == [
+        "publish command",
+        "push notes",
+    ]
     assert (root / "uploaded.log").read_text() == "pkg-0.4.3.tgz\n"
 
 
@@ -848,3 +1049,15 @@ def test_a_failed_release_removes_the_changelog_it_created(tmp_path: Path, capsy
     code, out = _run(capsys, sdlc.cmd_release, root)
     assert code == 0, out["refusals"]
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8").count("## 0.4.3") == 1
+
+
+def test_reference_names_the_changelog_marker_and_the_notes_push() -> None:
+    text = (ROOT / "docs" / "REFERENCE.md").read_text(encoding="utf-8")
+    for needed in (
+        "<!-- sdlc:releases -->",
+        "--notes-from-tag",
+        "refs/notes/sdlc`",
+        "__version__",
+        "`changelog.md`",
+    ):
+        assert needed in text, needed

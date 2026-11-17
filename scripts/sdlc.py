@@ -297,7 +297,8 @@ PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
 # Templates `config` names besides the change artifacts: the direction doc /sdlc:retro drafts, the
 # layout of a change's tracker issue, and the files a skill starts when a change first needs one:
-# `work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`.
+# `work/inbox.md`, a change's `notes.md`, its `checks.md` and its `findings.md`; and the section
+# release adds to `release.changelog`.
 DOC_TEMPLATES = (
     "direction.md",
     "issue.md",
@@ -306,6 +307,7 @@ DOC_TEMPLATES = (
     "checks.md",
     "findings.md",
     "retro.md",
+    "changelog.md",
 )
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
@@ -5308,9 +5310,12 @@ def _read_text(path: Path) -> str | None:
 # bumps the version files, commits and tags, undoable until pushed; `publish` pushes and runs the
 # host's command. Close and release push too when `git.push` names them, behind their questions.
 
-# One `version` line per version file: JSON's `"version": "1.2.0",` or TOML's `version = "1.2.0"`.
-# Not `target-version = ...`: the key must open the line.
-VERSION_RE = re.compile(r'^([ \t]*"?version"?[ \t]*[:=][ \t]*")([^"\n]+)(".*)$', re.M)
+# One `version` line per version file: JSON's `"version": "1.2.0",`, TOML's `version = "1.2.0"`
+# or Python's `__version__ = "1.2.0"`. Not `target-version = ...` or `my__version__ = ...`: the
+# key must open the line.
+VERSION_RE = re.compile(
+    r'^([ \t]*(?:"?version"?|__version__)[ \t]*[:=][ \t]*")([^"\n]+)(".*)$', re.M
+)
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 # Seconds before `release.after_bump` or `release.prepare` is stopped: a lock refresh or a build
 # may resolve over the network.
@@ -5601,6 +5606,13 @@ def _release_tag(rel: dict, version: str) -> tuple[str | None, str | None]:
         return None, f"release.tag {rel['tag']!r} may hold only {{version}}"
 
 
+def _adoption_commit(home: Path) -> str | None:
+    """The commit that first added `.sdlc/config.toml`: where the repo took the plugin up. The
+    oldest add, `log`'s last line, since `-1 --reverse` limits before it reverses."""
+    out = _git(home, "log", "--diff-filter=A", "--format=%h", "--", f"{HOST_DIR}/config.toml")
+    return out.splitlines()[-1] if out else None
+
+
 def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: bool = True) -> dict:
     """Every change landed on main since the current version's tag, from history, with the bump
     they add up to. Read-only. `next` is set only when nothing stands in the way of a release.
@@ -5636,7 +5648,13 @@ def unreleased(home: Path, cfg: dict, open_ids: list[str] | None = None, read: b
                 out["since"] = tag
             else:
                 last = _git(home, "log", "-1", "--format=%h", "--", *rel["version_files"])
-                at = last or "<the commit that released it>"
+                adopt = _adoption_commit(home)
+                at = last or adopt or "<the commit that released it>"
+                # A version older than the plugin's adoption would take every change closed
+                # since into the first release: tag where the repo took the plugin up instead.
+                later = last and adopt and last != adopt
+                if later and _git_err(home, "merge-base", "--is-ancestor", last, adopt) is None:
+                    at = adopt
                 out["missing"] = {"tag": tag, "hint": f'git tag -a {tag} -m "{tag}" {at}'}
 
     trunk = cfg["git"]["base"]
@@ -5704,9 +5722,32 @@ def release_notes(changes: list[dict], github: bool) -> str:
     )
 
 
-def with_changelog(text: str, version: str, notes: str, today: str) -> str:
-    """`text` with this release's section on top, under its `# ` title when it has one."""
-    section = f"## {version} — {today}\n\n{notes}\n"
+# The line a host's changelog marks where releases go with: each new section goes right after it.
+CHANGELOG_MARKER = "<!-- sdlc:releases -->"
+
+
+def changelog_section(home: Path, version: str, notes: str, today: str) -> str:
+    """This release's changelog section, from the changelog template (the host's, else the
+    plugin's), ending in one newline. Filled by `str.replace`, so a brace in a note is text, and
+    `{{notes}}` last, so a placeholder a note holds stays as written."""
+    text = template_path(home, "changelog.md")[0].read_text(encoding="utf-8")
+    text = text.replace("{{version}}", version).replace("{{date}}", today)
+    return text.replace("{{notes}}", notes).rstrip("\r\n") + "\n"
+
+
+def with_changelog(text: str, section: str) -> str:
+    """`text` with this release's section added: right after the first `CHANGELOG_MARKER` line
+    when there is one, every byte above it kept; else on top, under its `# ` title when it has
+    one."""
+    lines = text.splitlines(keepends=True)
+    at = next((i for i, line in enumerate(lines) if line.strip() == CHANGELOG_MARKER), None)
+    if at is not None:
+        head = "".join(lines[: at + 1])
+        head += "" if head.endswith("\n") else "\n"
+        rest = lines[at + 1 :]
+        while rest and not rest[0].strip():
+            rest.pop(0)
+        return f"{head}\n{section}" + (f"\n{''.join(rest)}" if rest else "")
     first, _, rest = text.partition("\n")
     if first.startswith("# "):
         rest = rest.lstrip("\n")
@@ -5868,7 +5909,8 @@ def cmd_release(
         if not path.is_file():
             created.append(rel["changelog"])
         text = path.read_bytes().decode("utf-8") if path.is_file() else "# Changelog\n"
-        path.write_bytes(with_changelog(text, new, notes, date.today().isoformat()).encode())
+        section = changelog_section(home, new, notes, date.today().isoformat())
+        path.write_bytes(with_changelog(text, section).encode())
         return None
 
     def restore() -> None:
@@ -6022,6 +6064,32 @@ def _push(home: Path, remote: str, ref: str) -> str | None:
     return made.stderr.strip() or made.stdout.strip() or f"exited {made.returncode}"
 
 
+# Where publish keeps a run's `published` note on each tag, and the mirror of the remote's copy
+# it fetches into, so a second clone skips an upload another one made.
+NOTES_REF = "refs/notes/sdlc"
+NOTES_MIRROR = "refs/notes/sdlc-remote"
+
+
+def _fetch_notes(home: Path, remote: str) -> str | None:
+    """Fold the remote's publish notes into this repo's; why not, or None. Called only by
+    `cmd_publish`, after its approval. A remote with none is nothing to do. Fetched into a mirror,
+    never forced, then merged: notes held here and not there (a push the remote refused) are kept,
+    and both sides only ever say `published`, so the merge can't conflict. Like the one push, it
+    never asks: no terminal prompt and stdin closed."""
+    if _remote_sha(home, remote, NOTES_REF) is None:
+        return None
+    made = subprocess.run(
+        ["git", "-C", str(home), "fetch", "-q", remote, f"{NOTES_REF}:{NOTES_MIRROR}"],
+        capture_output=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )  # fmt: skip
+    if made.returncode != 0:
+        return made.stderr.strip() or made.stdout.strip() or f"exited {made.returncode}"
+    return _git_err(
+        home, "notes", "--ref", NOTES_REF, "merge", "-q", "-s", "cat_sort_uniq", NOTES_MIRROR
+    )
+
+
 def _pushed(home: Path, remote: str, ref: str) -> bool:
     """Whether the remote holds `ref` as this repo does: a rerun's push is skipped, not repeated."""
     return _remote_sha(home, remote, ref) == _git(home, "rev-parse", ref)
@@ -6099,7 +6167,9 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     Never forced, so a remote that has moved is refused. A rerun skips what the remote already has
     and a publish command that already succeeded. Once the tag is on the remote, the base branch
     may have moved past it: what landed since is pushed alone, the retry for a push close or
-    release couldn't make. While the tag isn't, a base branch past it is refused."""
+    release couldn't make. While the tag isn't, a base branch past it is refused. With a command,
+    the remote's `published` notes are read first and this repo's pushed after, so a second clone
+    skips an upload; a refused notes push is reported, never a failed publish."""
     home = main_root(root)
     cfg, _, _ = load_config(home)
     rel = cfg["release"]
@@ -6152,9 +6222,14 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
             refusals.append(problem)
     if refusals:
         return emit(1)
+    # Another clone may have published already: read its note before deciding the command runs.
+    if report["command"] and not check_only:
+        err = _fetch_notes(home, remote)
+        if err:
+            report["notes_fetch_failed"] = err
 
     def published() -> bool:
-        return "published" in (_git(home, "notes", "--ref", "sdlc", "show", tag) or "")
+        return "published" in (_git(home, "notes", "--ref", NOTES_REF, "show", tag) or "")
 
     def run_command() -> str | None:
         # No terminal and no stdin: the approval came before, so a command that asks fails now.
@@ -6167,7 +6242,7 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
             return f"release.publish didn't run: {e}"
         if ran.returncode != 0:
             return f"release.publish exited {ran.returncode}: {ran.stderr.strip()}"
-        return _git_err(home, "notes", "--ref", "sdlc", "add", "-f", "-m", "published", tag)
+        return _git_err(home, "notes", "--ref", NOTES_REF, "add", "-f", "-m", "published", tag)
 
     def push(ref: str):
         return lambda: _push(home, remote, ref)
@@ -6184,6 +6259,9 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
         # alone once the tag is out, or nothing at all.
         report["already"] = [name for name, done_already, _ in steps if done_already()]
         report["will_run"] = [name for name, _, _ in steps if name not in report["already"]]
+        # The note's push is bookkeeping under the same yes: it goes when the command does.
+        if "publish command" in report["will_run"]:
+            report["will_run"].append("push notes")
         report["skipped"] = [f"{name} (--check)" for name in report["will_run"]]
         return emit(0)
     for i, (name, done_already, step) in enumerate(steps):
@@ -6196,6 +6274,15 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
             refusals.append(f"{name} failed: {err}")
             return emit(1)
         report["done"].append(name)
+    # So a second clone skips the upload. Not one of the steps: a refusal here leaves the release
+    # published, so it is reported, never a failed publish.
+    if report["command"] and _git(home, "rev-parse", "-q", "--verify", NOTES_REF) is not None:
+        if _pushed(home, remote, NOTES_REF):
+            report["skipped"].append("push notes (already done)")
+        elif err := _push(home, remote, NOTES_REF):
+            report["notes_push_failed"] = err
+        else:
+            report["done"].append("push notes")
     return emit(0)
 
 
@@ -7950,6 +8037,8 @@ TEMPLATE_READS: dict[str, dict[str, tuple[str, ...]]] = {
         "headings": ("Problem", "Outcome", "Open questions"),
     },
     "issue.md": {"placeholders": ("{{artifacts}}",)},
+    # `{{date}}` is left out: a host's changelog may not date its releases.
+    "changelog.md": {"placeholders": ("{{version}}", "{{notes}}")},
     # The board's plan hint counts the paths this section names.
     "plan.md": {"headings": ("Files to change",)},
 }

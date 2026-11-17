@@ -46,8 +46,8 @@ changes, no tag for the current version (`/sdlc:release` first), `main` moved pa
 remote doesn't have yet (changes were closed after the release; release again so they are in it),
 or no such remote. Once the tag is on the remote, `main` past it is landed work, pushed alone.
 `will_run` names the steps a yes would run, and `already` those the remote or the notes show done:
-`push <git.base>`, `push tag`, `publish command`. With `will_run` empty there is nothing to
-publish: say so and stop, with no question.
+`push <git.base>`, `push tag`, `publish command`, and `push notes` with the command. With
+`will_run` empty there is nothing to publish: say so and stop, with no question.
 
 ## Step 1 — Show it
 
@@ -87,7 +87,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py publish
 
 Its steps run in order: `push <git.base>`, `push tag`, `publish command`. Each is skipped when it
 is already done, so a rerun after a failure picks up where it stopped without pushing twice or
-publishing twice, and a push-only publish does just the first.
+publishing twice, and a push-only publish does just the first. With a publish command, publish
+first reads the remote's record of what was published, so a command another clone ran is
+skipped. After the steps, `push notes` pushes this clone's record (`refs/notes/sdlc`). It is part
+of the same approval, and `will_run` lists it with the command.
 
 - Exit 0: everything in `done` happened, and `skipped` says what was already in place.
 - Exit 1: a step failed, named in `refusals` with what it said. A push the remote refused means
@@ -99,11 +102,14 @@ publishing twice, and a push-only publish does just the first.
 
 Report what `done` and `skipped` list, the remote, and the tag. If the command printed where the
 release went (a URL), pass it on. Say plainly what was pushed and published, since it now can't
-be undone, and that the next release starts from this tag.
+be undone, and that the next release starts from this tag. `notes_push_failed` means the remote
+refused the record of the publish: the release is out, but until a rerun pushes the record,
+another clone may run the upload again. Say so, with what git said. `notes_fetch_failed` means
+the remote's record couldn't be read, so this run went by this clone's alone.
 
 ## Out of scope
 
 - Making the release, or changing its version: `/sdlc:release`.
 - `--force`, deleting a remote tag, or rewriting `main` on the remote. Never.
-- Pushing anything but `main` and the release tag.
+- Pushing anything but `main`, the release tag and the publish record (`refs/notes/sdlc`).
 - `git push` from this skill: the script's push is the only one.

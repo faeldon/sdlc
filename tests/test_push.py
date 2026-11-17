@@ -259,7 +259,7 @@ def test_a_publish_command_release_left_is_named_with_the_push(tmp_path, capsys)
     assert sdlc.cmd_release(root) == 0
     _landed(root, "003-export-totals")
     code, out = _run(capsys, sdlc.cmd_publish, root, True)
-    assert code == 0 and out["will_run"] == ["push main", "publish command"], out
+    assert code == 0 and out["will_run"] == ["push main", "publish command", "push notes"], out
 
 
 def test_release_without_push_stays_local(tmp_path, capsys) -> None:

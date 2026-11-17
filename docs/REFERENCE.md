@@ -55,7 +55,7 @@ command = "my-tracker save {dir} {id}"      # target = "command": archive {dir},
 [release]
 version_files = ["package.json"]            # each with one `version` line, edited in place; unset = no releases
 tag = "v{version}"                          # the default: the release tag, and the next release's boundary
-changelog = "CHANGELOG.md"                  # optional: the notes are added to the top of it
+changelog = "CHANGELOG.md"                  # optional: the notes are added after its <!-- sdlc:releases --> line, else to the top
 after_bump = "uv lock"                      # optional: run by /sdlc:release after the bump; the tracked files it changes are committed too; {version}, {tag}
 prepare = "npm pack"                        # optional: run by /sdlc:release after after_bump; builds into untracked or ignored paths only; what it prints is shown at /sdlc:publish; {version}, {tag}
 remote = "origin"                           # the default: where publish, and close and release by `[git] push`, push main and the tag
@@ -269,6 +269,11 @@ copy a scaffold, which `sdlc.py check` reports rather than runs. `findings.md` i
 file `/sdlc:ship` writes its review's findings into; an override keeps its `## F<n>. [rank]
 [pass] title` headings and `Evidence:`, `Class:`, `Disposition:` and `Reason:` lines, which
 `sdlc.py` counts.
+
+`changelog.md` here replaces the section `/sdlc:release` adds to `release.changelog`. Its
+placeholders are `{{version}}`, `{{date}}` and `{{notes}}`, filled as plain text, so a brace in a
+note is kept as written. An override must keep `{{version}}` and `{{notes}}`. Like `issue.md`, its
+text is rendered as it stands, so it has no title or note.
 
 `issue.md` here replaces the layout of the change's issue. Its placeholders are `{{title}}`,
 `{{name}}`, `{{tier}}`, `{{stage}}`, `{{impact}}`, `{{branch}}`, `{{commit}}`, `{{depends_on}}`,
@@ -767,6 +772,42 @@ flag, or build in `prepare` and keep `publish` to the upload. Once the tag is on
 publish pushes what landed on `main` since, alone. A repo without a tag for its current version
 is told the `git tag -a` command that makes one; a repo with no `version_files` gets the listing
 and nothing else. Dropped changes are never released.
+
+**Version files.** Each holds exactly one version line, the key opening the line: JSON's
+`"version": "1.2.0"`, TOML's `version = "1.2.0"`, or Python's `__version__ = "1.2.0"`. Release
+changes only the value and keeps every other byte. When no tag exists for the current version, the
+`git tag -a` hint names the last commit that changed the version files. If the plugin was adopted
+after that commit, it names the adoption commit instead: the first commit to add
+`.sdlc/config.toml`. That way the first release doesn't take in every change closed before the
+repo used the plugin. Only a tag that `release.tag` makes from a version is read. A tag outside
+that pattern is outside the loop: it is never a boundary, and nothing since it is counted by it.
+
+**The changelog.** By default each release's section goes at the top of `release.changelog`,
+under its `# ` title when it has one. A changelog that opens with prose, a table or a Keep a
+Changelog `## [Unreleased]` section marks where releases go with a line of its own:
+
+```markdown
+<!-- sdlc:releases -->
+```
+
+Release puts each new section right after the first such line, with one blank line on either side.
+Everything above the marker, and the marker itself, is kept byte for byte. The section is rendered
+from the `changelog.md` template (*Templates*), so `## [{{version}}] - {{date}}` there gives Keep a
+Changelog's heading.
+
+**Publishing.** The tag's message holds the release's notes, so
+`publish = "gh release create {tag} --notes-from-tag"` makes a GitHub release that carries them.
+`release.prepare` can also show what a push will upload without building anything:
+`prepare = "git lfs push --dry-run origin {tag}"` lists the large files, and publish's approval
+shows that list.
+
+Publish marks a tag `published` in `refs/notes/sdlc` once `release.publish` succeeds, so a rerun
+skips the upload. After that mark, publish pushes the notes ref to `release.remote`, never forced,
+and reports it as `push notes`. Before its steps run, publish fetches the remote's notes into
+`refs/notes/sdlc-remote` and merges them into its own. So a second clone skips an upload another
+clone already made. A refused notes push (`notes_push_failed`) doesn't fail the publish, but until
+it succeeds, another clone may run the upload again. A failed fetch (`notes_fetch_failed`) leaves
+publish with this clone's notes alone. Without `release.publish`, no notes move.
 
 **Shims: `release.deprecations`.** A shim is code kept working for something older: an old key
 still read, an old name still accepted. Each one the repo keeps is a `[[shim]]` in
