@@ -23,7 +23,9 @@ With the factory enabled for the repo (Claude Code's `enabledPlugins`, at any sc
 `/sdlc:intent`'s question offers `yes, for the factory` beside `yes, by hand`. That answer creates
 the change, its worktree and its issue as the other does, but starts no plan mode and leaves the
 session in the main checkout, with the change at `stage: plan`, where `/sdlc-factory:build NNN`
-starts it. It starts no run: the supervisor's own WAIT does.
+starts it. It starts no run: the supervisor's own WAIT does. A batch (`/sdlc:intent` with
+groups separated by `;`) always does the same, and its report gives each change's
+`/sdlc-factory:build NNN`.
 
 What stays deterministic, and the person's, is manual mode's:
 

@@ -94,7 +94,8 @@ say `main`, they mean that branch.
    a tier, and shows the draft `intent.md`. On your yes it opens the change, numbered `NNN`, in a
    worktree and branch of its own (`.claude/worktrees/NNN-slug`), with its folder
    `.sdlc/work/NNN-slug/`, and moves the session there. Several changes can be open at once, each in its
-   own worktree.
+   own worktree, and several seeds' changes open from one run as a batch, groups separated by `;`
+   (`/sdlc:intent <id> as <slug> tier 1; <id> as <slug> tier 2 after <slug>`), behind one question.
 2. **`/sdlc:spec`**, for a Tier 2 change only: numbered, checkable requirements, the design and
    what it rejected, inside your repo's invariants.
 3. **Plan mode**: `/sdlc:spec` starts it on your yes (a Tier 1 intent offers to), Claude reads

@@ -1,7 +1,7 @@
 ---
 name: intent
-description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work.
-argument-hint: "[what the change is about, or the path to a brief file]"
+description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work, or several groups of seeds into several changes at once (a batch, its groups separated by `;`).
+argument-hint: "[what the change is about, the path to a brief file, or a batch: <id> … as <slug> tier <n>; …]"
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -20,6 +20,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py lookup *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py groups *)'
 disable-model-invocation: true
 ---
 
@@ -67,7 +68,14 @@ human has approved a draft.
 If an open change already covers this, say so and ask whether to extend that intent instead of
 opening a second one. Two intents for one change is the failure this step prevents.
 
+**An argument holding `;` is a batch:** several changes, each a group of register ids, opened in
+one run behind one question. Read `batch.md`, beside this file, now, and at each step below follow
+its section of the same number as well. Without a `;`, there is no batch, and nothing in
+`batch.md` applies.
+
 ## Step 1 — Interview
+
+For a batch, `batch.md`'s Step 1 replaces this interview.
 
 Ask about whatever the human hasn't already told you. Keep it to the gaps — they've usually just
 explained the problem, so don't make them repeat it.
@@ -125,7 +133,8 @@ doc names push-backs of its own for Stage 1, make those too.
 
 ## Step 2 — Assign a tier
 
-Propose one from the process doc's tier table and say why in a sentence. Where it has none, these
+Propose one from the process doc's tier table and say why in a sentence (for each group of a
+batch without a `tier`). Where it has none, these
 are the defaults:
 
 - **Tier 0** — a typo, a comment, a one-line fix nothing else depends on. No folder at all. Say so
@@ -154,6 +163,8 @@ named by id in the **Approach** section; `/sdlc:ship` retires it once the diff f
 listed is the usual answer, and then there is nothing to say. Never take one in unasked.
 
 ## Step 3 — Draft and show it
+
+For a batch, every change's, as `batch.md`'s Step 3 shows them.
 
 Write the full `intent.md` body — every section filled, no placeholder text left from the template —
 and show it in the conversation. For Tier 1, include the **Approach** section; for Tier 2, delete it.
@@ -214,6 +225,14 @@ section)`. For **Tier 2**: `…off <git.base>, then write its spec here or hand 
 same things: the change, its worktree and its issue. `yes, for the factory` starts no factory run;
 `/sdlc-factory:build` asks its own question.
 
+For a batch, ask instead, every change in `order` named with its tier and what it serves:
+
+> `Create these <n> changes in this order, each in a new worktree and branch off <git.base>, <slug> (Tier <t>, serving <O1 (name)>), …? (yes / leave one out / edit one / no)`
+
+With `ids_from: github`, `, each opening its GitHub issue with its title and intent` follows
+`<git.base>`. The yes approves every change it names and nothing else; `leave one out` and `edit
+one` are `batch.md`'s Step 4.
+
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
 chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
@@ -224,6 +243,8 @@ parentheses, and stop.
 same gate `/sdlc:spec` and `/sdlc:ship` use, for the same reason.
 
 ## Step 5 — Create it
+
+For a batch, `batch.md`'s Step 5 runs this step once a change, in `order`.
 
 Every change gets its own worktree and branch, both named `NNN-slug` and branched from `git.base`, so
 a new session can never land inside another change's branch, and its folder `.sdlc/work/NNN-slug/`
@@ -290,6 +311,8 @@ If it fails, say so in Step 6 with what it printed: the change is created either
 `sdlc.py sync <NNN>` can be rerun.
 
 ## Step 6 — Report and stop
+
+For a batch, `batch.md`'s Step 6 is the report.
 
 Print the id `new` allocated, the issue URL if it opened one, the worktree path, the folder path and
 the next action, then stop.

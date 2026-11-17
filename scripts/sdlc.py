@@ -2431,6 +2431,126 @@ def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
     return 1 if out["problems"] else 0
 
 
+GROUP_KEYS = ("as", "tier", "after")
+
+
+def _parse_group(text: str) -> tuple[dict, list[str]]:
+    """One batch group, `<id> <id> as <slug> tier <n> after <slug>`, as its ids, slug, tier and
+    `after`, and the words it couldn't read. The `— words` are the skill's, removed before this."""
+    group: dict = {"ids": [], "slug": None, "tier": None, "after": None}
+    bad: list[str] = []
+    words = text.split()
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if ENTRY_ID_RE.match(word):
+            group["ids"].append(word)
+        elif word in GROUP_KEYS and i + 1 < len(words):
+            value = words[i + 1]
+            i += 1
+            if word == "tier":
+                group["tier"] = int(value) if value.isdigit() else value
+            else:
+                group["slug" if word == "as" else "after"] = slugify(value) or value
+        else:
+            bad.append(word)
+        i += 1
+    return group, bad
+
+
+def _group_order(groups: list[dict]) -> tuple[list[str], list[str]]:
+    """The groups' slugs in creation order, each after the one its `after` names and in the given
+    order otherwise, and the slugs a cycle leaves unplaced."""
+    placed: list[str] = []
+    waiting = [g for g in groups if g["slug"]]
+    while waiting:
+        ready = next((g for g in waiting if not g["after"] or g["after"] in placed), None)
+        if ready is None:
+            break
+        placed.append(ready["slug"])
+        waiting.remove(ready)
+    return placed, [g["slug"] for g in waiting]
+
+
+def cmd_groups(root: Path, texts: list[str]) -> int:
+    """A batch of changes for `/sdlc:intent`, one group an argument, read against the register
+    and the open changes, as JSON: each group's ids (kind, title, `Issue:` numbers), slug, tier,
+    `after`, the open change already holding its slug (`created`, which makes a rerun skip it) and
+    the number its `after` was created as (`depends_on`); `drafted`, false while that change's
+    intent is still the scaffold `new` wrote (a run stopped between the two); the creation
+    `order`; and `refusals`, each naming its group, which a batch must have none of before its
+    question. A slug only a shipped or dropped folder holds is refused, as `new` would refuse it.
+    Writes nothing: every number still comes from `new`, one change at a time."""
+    home = main_root(root)
+    entries = {e["id"]: e for e in inbox_entries(home)}
+    claims = _open_claims(home)
+    # Every folder on disk, as `new` checks a slug: an open one is this batch's own, made by an
+    # earlier run, and a shipped or dropped one a slug `new` would refuse.
+    folders = {DIR_RE.match(p.name).group(2): p for p in change_dirs(home)}
+    refusals: list[str] = []
+    groups: list[dict] = []
+    seen_ids: dict[str, str] = {}
+    for n, text in enumerate(texts, 1):
+        group, bad = _parse_group(text)
+        name = group["slug"] or f"group {n}"
+        say = refusals.append
+        if bad:
+            say(f"{name}: can't read {' '.join(bad)!r}")
+        if not group["ids"]:
+            say(f"{name}: names no register id")
+        if not group["slug"]:
+            say(f"{name}: has no `as <slug>`")
+        if group["tier"] not in (1, 2):
+            say(f"{name}: tier must be 1 or 2, not {group['tier']!r}")
+        created, drafted = None, None
+        if (folder := folders.get(group["slug"])) is not None:
+            stage = load_change(folder, home)["stage"]
+            if stage in ("shipped", "dropped"):
+                say(f"{name}: taken by {folder.name} ({stage})")
+            else:
+                created, drafted = folder.name, not is_unfilled(folder / "intent.md")
+        ids = []
+        for ident in group["ids"]:
+            entry = entries.get(ident)
+            if ident in seen_ids:
+                say(f"{name}: {ident} is in {seen_ids[ident]} too")
+            seen_ids.setdefault(ident, name)
+            if entry is None:
+                say(f"{name}: {ident} isn't in the register")
+                ids.append({"id": ident, "kind": None, "title": None, "issues": []})
+                continue
+            holders = {c for r, c in claims if ref_matches(r, entry)} - {created}
+            if holders:
+                say(f"{name}: {ident} is taken by {', '.join(sorted(holders))}")
+            elif entry["status"] == "building" and not created:
+                say(f"{name}: {ident} is tagged [building]")
+            issues = entry_issues(entry)
+            if issues is None:
+                say(f"{name}: {ident}'s Issue: line isn't #N, …")
+            kind = "idea" if entry["status"] == "seed" else entry["status"]
+            ids.append({"id": ident, "kind": kind, "title": entry["title"],
+                        "issues": issues or []})  # fmt: skip
+        groups.append(
+            {**group, "ids": ids, "created": created, "drafted": drafted, "depends_on": None}
+        )
+
+    slugs = [g["slug"] for g in groups if g["slug"]]
+    for slug in sorted({s for s in slugs if slugs.count(s) > 1}):
+        refusals.append(f"{slug}: two groups take this slug")
+    by_slug = {g["slug"]: g for g in groups if g["slug"]}
+    for g in groups:
+        if g["after"] and g["after"] not in by_slug:
+            refusals.append(f"{g['slug']}: `after {g['after']}` names no group of this batch")
+        elif g["after"] and (made := by_slug[g["after"]]["created"]):
+            g["depends_on"] = made.split("-", 1)[0]
+    order, cycle = _group_order([g for g in groups if g["after"] in (None, *by_slug)])
+    if cycle:
+        refusals.append(f"{', '.join(cycle)}: their `after`s make a cycle")
+    print(json.dumps({"groups": groups, "order": order, "refusals": refusals}, indent=2,
+                     ensure_ascii=False))  # fmt: skip
+    return 1 if refusals else 0
+
+
 def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | None) -> int:
     """The open bugs, the register's `[bug]` entries, as JSON with their age and the process
     doc's severity words. `--touching` keeps those the given paths touch; `--introduced` names, for
@@ -7449,7 +7569,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
     "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
-    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings",
+    "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings", "groups",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
 SETTINGS = ".claude/settings.json"  # as git prints it, on every platform
@@ -8741,6 +8861,12 @@ def main() -> int:
     p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
     p_nits.add_argument("--change", help="only those this change's diff against main touches")
 
+    p_groups = sub.add_parser(
+        "groups",
+        help="a batch of changes for /sdlc:intent, read and ordered, as JSON; writes nothing",
+    )
+    p_groups.add_argument("group", nargs="+", help='one group each: "<id> … as <slug> tier <n>"')
+
     p_checks = sub.add_parser(
         "checks", help="a change's acceptance checks in checks.md, as JSON; runs nothing"
     )
@@ -8962,6 +9088,8 @@ def main() -> int:
         return cmd_undone(root, args.id)
     if args.cmd == "nits":
         return cmd_nits(root, args.touching, args.change)
+    if args.cmd == "groups":
+        return cmd_groups(root, args.group)
     if args.cmd == "checks":
         return cmd_checks(root, args.id)
     if args.cmd == "findings":

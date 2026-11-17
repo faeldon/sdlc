@@ -448,6 +448,15 @@ under those two headers, ready first. Ten are shown across both, each with
 its `[theme]`, then a count, and `status --all` lists every candidate, grouped by theme, with
 `/sdlc:intent <id> <id> …` under a theme holding two or more ideas: one change that takes them all
 writes every id on its `idea:` line, `idea: [2026-10-24-4, 2026-11-12-2]`, and ship deletes each.
+Several changes open from one run as a batch, its groups separated by `;`, each `<id> … as <slug>
+tier <1|2>`, with `after <slug>` for one that waits on another group and `— <words>` for the
+person's own: `/sdlc:intent 2026-10-24-4 2026-11-12-2 as keep-drafts tier 1; 2026-11-14-1 as
+reopen-drafts tier 2 after keep-drafts`. `sdlc.py groups`, which writes nothing, reads the groups
+against the register and the open changes, refuses an unknown or taken id, a shared slug, an
+`after` naming no group and a cycle, and gives the creation order; intent drafts every change,
+asks one question for all, and creates them in that order, each `depends_on:` the number `new`
+gave the change it waits on. The session stays where it started, and the same command run again
+after a stop makes only what it didn't.
 Below
 them, `Themes:` counts each theme's open entries by kind (nits of every cost included), the theme
 with the best-ranked line first and `(no theme)` last, then how many seeds wait on an `After:`.
