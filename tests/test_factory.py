@@ -1639,6 +1639,32 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
     assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
 
 
+def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch) -> None:
+    """087: `claude plugin validate` prints its manifests' absolute paths and `pytest -n auto` a
+    failing worker's venv, and the record is committed with the change, so the checkout reads
+    `<path-to-clone>` and the home directory `~`. Home holds the checkout here: the checkout is
+    written first, so it never reads `~/…`."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root = _change(tmp_path)
+    _gate_config(
+        root,
+        'echo "Validating marketplace manifest: $PWD/.claude-plugin/marketplace.json"; '
+        'echo "[gw0] crashed under $HOME/.cache/uv/venv"; exit 1',
+    )
+    _build_report(root, 1)
+    code, out = _gate(root, capsys)
+    assert code == 1 and (out["verdict"], out["exit"]) == ("FAIL", "1")
+    folder = root / ".sdlc" / "work" / NAME
+    record = (folder / "build" / "round-1.gate.md").read_text(encoding="utf-8")
+    for path in {str(root), str(root.resolve()), str(tmp_path), str(tmp_path.resolve())}:
+        assert path not in record, path
+    assert "    Validating marketplace manifest: <path-to-clone>/.claude-plugin/" in record
+    assert "    [gw0] crashed under ~/.cache/uv/venv" in record
+    assert [(a["verdict"], a["exit"]) for a in factory.read_gate(folder, 1)["attempts"]] == [
+        ("FAIL", "1")
+    ]
+
+
 def test_a_third_red_gate_in_a_round_is_a_stop(tmp_path, capsys) -> None:
     """R5: two fixes a round; the third red gate stops the change, never a review."""
     root = _change(tmp_path)

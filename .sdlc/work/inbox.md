@@ -287,17 +287,6 @@ Cost: S
 Value: low
 Raised by: 077-ship-resolves-conflicts (correctness)
 
-## [2026-11-17-13] [bug] factory.py gate records check.sh's output with the checkout and home path
-
-Found by the review of 082-parallel-gate. `gate` copies the output's tail verbatim into
-`build/round-<N>.gate.md`, which commits with the change: `claude plugin validate` prints absolute
-paths on every run, and a failing `-n auto` run adds xdist's worker line with the venv's path, so
-every record carries the machine's home path and the next gate is red on it. 083's records put it
-in a17dd91 and 90d71b9 already. Fix: write the checkout's root as `<path-to-clone>` and the home
-directory as `~` in the tail before it is recorded.
-Severity: med
-Paths: plugins/factory/scripts/factory.py
-
 ## [2026-11-17-14] [idea] Board tests serve on port 0 rather than a port picked free beforehand
 
 `tests/test_board.py`'s `_free_port()` releases the port before `board.serve()` binds it, so under

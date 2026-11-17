@@ -143,6 +143,10 @@ RUNS_THE_CHANGE = ("behaviour",)
 GATE_TIMEOUT = 30 * 60
 GATE_FIXES = 2
 GATE_TAIL = 80
+# What the recorded output says in place of the main checkout's root and the home directory: the
+# record is committed with the change, and a machine's layout never reaches its history.
+CLONE_MARK = "<path-to-clone>"
+HOME_MARK = "~"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
@@ -1246,11 +1250,29 @@ def _land_gate_state(root: Path, folder: Path, n: int) -> dict | None:
     return {"command": command, "current": current, "exit": last["exit"] if last else None}
 
 
+def _placeholders(text: str, root: Path) -> str:
+    """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
+    `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
+    the home directory reads `<path-to-clone>/…`, never `~/…`. Each path is matched as given and
+    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too."""
+    checkouts = _all_checkouts(root)
+    for path, mark in (
+        (checkouts[0] if checkouts else root, CLONE_MARK),
+        (root, CLONE_MARK),
+        (Path.home(), HOME_MARK),
+    ):
+        forms = {str(path), path.as_posix(), str(path.resolve()), path.resolve().as_posix()}
+        for form in sorted(forms - {"", "/", "."}, key=len, reverse=True):
+            text = text.replace(form, mark)
+    return text
+
+
 def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
     add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
     it, into `build/land-<n>.gate.md`. PASS only on exit 0, within `GATE_TIMEOUT`, with the tree as
-    it found it. Writes only that file."""
+    it found it. Writes only that file, its copy of the output holding no path of this machine's
+    (`_placeholders()`): the record is committed with the change."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1293,6 +1315,7 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
     attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
+    output = _placeholders(output, root)
     tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
     tail = tail or "    (no output)\n"
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
