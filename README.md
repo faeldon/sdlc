@@ -186,6 +186,11 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   Each is measured by how it was actually built (`Sdlc-Mode: factory` or `manual` on its `Close`
   commit), so retrospectives can set the two ways side by side.
 
+  With the factory enabled for the repo, `/sdlc:intent`'s question offers both ways as its yes:
+  `yes, by hand` (plan mode for a Tier 1, `/sdlc:spec` for a Tier 2, the session moving into the
+  change's worktree) or `yes, for the factory`, which creates the same change but starts no plan
+  mode and leaves the session in the main checkout, ready for `/sdlc-factory:build NNN`.
+
 ## Updating
 
 An install is a copy pinned to the version in the plugin's manifest, so it changes only when a

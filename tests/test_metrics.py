@@ -1168,3 +1168,9 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
         assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
     assert sdlc.FACTORY_STOPPED == factory.STOPPED
+
+
+def test_both_intent_yes_answers_read_as_approval() -> None:
+    """093 R9: intent's two yes answers, by hand and for the factory, are both the gate's yes."""
+    assert metrics._reply("yes, by hand") == "approve"
+    assert metrics._reply("yes, for the factory") == "approve"

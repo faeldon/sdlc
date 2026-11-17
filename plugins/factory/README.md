@@ -19,6 +19,12 @@ Inside the change loop, between a person's intent and the change's landing. Noth
 changes, and the release and retrospective loops never see the difference: a change the agents
 built is a change.
 
+With the factory enabled for the repo (Claude Code's `enabledPlugins`, at any scope),
+`/sdlc:intent`'s question offers `yes, for the factory` beside `yes, by hand`. That answer creates
+the change, its worktree and its issue as the other does, but starts no plan mode and leaves the
+session in the main checkout, with the change at `stage: plan`, where `/sdlc-factory:build NNN`
+starts it. It starts no run: the supervisor's own WAIT does.
+
 What stays deterministic, and the person's, is manual mode's:
 
 - **The stages.** `factory.py` refuses a step the change's tier and `stage:` don't allow, and

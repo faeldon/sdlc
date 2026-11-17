@@ -53,8 +53,10 @@ for each theme): draft one Problem covering them all. Note
 `docs.project.fields` too: the issue fields the repo's project doc turns on, which Step 1 asks
 about. Empty is the usual answer, and then there is nothing to ask. Note whether
 `docs.product` exists, and its `outcomes`: with a product doc, Step 1 asks what the change serves.
-Note `git.base` too: the branch every change starts from, `main` unless the repo's is another.
-Where this skill says `main`, it means that branch. When it is null, stop here and say why: `new`
+Note `factory.enabled` too: whether `sdlc-factory` is enabled for this repo, read from Claude
+Code's settings files, which decides the form of Step 4's question. It is all this skill knows of
+the factory. Note `git.base` too: the branch every change starts from, `main` unless the repo's
+is another. Where this skill says `main`, it means that branch. When it is null, stop here and say why: `new`
 refuses without one, and `/sdlc:setup` sets it.
 
 **`.sdlc/work/` is committed**: each change's folder lives on its own branch, in its own worktree, and
@@ -197,10 +199,20 @@ updated again at spec and ship; `/sdlc:close` archives it. With issue fields cho
 too: `…with this title and this intent, in milestone Q4 2026, assigned to ana and bo, in a new
 worktree…`.
 
-For **Tier 1**, end it with plan mode, so the person doesn't have to ask for it after the yes:
+When `factory.enabled` is false, the question is the one above. For **Tier 1**, end it with plan
+mode, so the person doesn't have to ask for it after the yes:
 `…off <git.base>, then start plan mode? (yes / yes, without plan mode / change the tier / edit a
 section)`. Starting plan mode approves nothing; the plan is approved when plan mode ends. A Tier 2
-question stays as it is: `/sdlc:spec` comes first.
+question stays as it is, ending `(yes / change the tier / edit a section)`: `/sdlc:spec` comes
+first.
+
+When `factory.enabled` is true, the question offers both ways to build the change, by hand first,
+and `yes, without plan mode` isn't among them. For **Tier 1**: `…off <git.base>, then plan it here
+or hand it to the factory? (yes, by hand / yes, for the factory / change the tier / edit a
+section)`. For **Tier 2**: `…off <git.base>, then write its spec here or hand it to the factory?
+(yes, by hand / yes, for the factory / change the tier / edit a section)`. Each yes approves the
+same things: the change, its worktree and its issue. `yes, for the factory` starts no factory run;
+`/sdlc-factory:build` asks its own question.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -233,9 +245,13 @@ account of what those are. The subshell keeps a `cd` in it from moving this sess
 worktree before `EnterWorktree` does, which would leave close nothing to exit. With none
 configured, skip it and say so.
 
-Then move **this session** into the worktree, so the human never has to start another:
-`EnterWorktree` with `path` set to the worktree path `new` printed. If the tool isn't available
-or refuses, carry on from here and say so in Step 6, which then names the fallback.
+Then move **this session** into the worktree, so the human never has to start another. Unless the
+answer was `yes, for the factory`: then the session stays in the checkout it started in, where
+the factory's supervisor runs, and every step below writes to the paths `new` printed, as it
+always does, the register included: the `inbox.md` beside the change's folder in the worktree,
+never the one `config` named from here. Otherwise, `EnterWorktree` with `path` set to the worktree path `new` printed. If
+the tool isn't available or refuses, carry on from here and say so in Step 6, which then names
+the fallback.
 
 Then `Edit` the scaffolded `intent.md` at the folder path `new` printed, inside the worktree, to
 replace the template body with the approved draft. Keep the frontmatter the tool stamped, and add
@@ -280,16 +296,22 @@ the next action, then stop.
 If the id differs from the one Step 4 showed, say so first: another session took that number in
 the meantime, and the change is NNN, not the number approved.
 
-The session is now in the worktree, so the next action happens here. Only if `EnterWorktree` didn't
-move it, the next action starts with a new session there: `cd "<worktree path>" && claude`.
+Answered by hand (`yes`, `yes, by hand` or `yes, without plan mode`), the session is now in the
+worktree, so the next action happens here. Only if `EnterWorktree` didn't move it, the next action
+starts with a new session there: `cd "<worktree path>" && claude`.
 
-- **Tier 1**, answered `yes` → call `EnterPlanMode` last, once the session is in the worktree:
-  plan mode reads the code, and the plan the person approves when it ends is saved as `plan.md`
-  if it's more than a couple of files. If the tool isn't available or refuses, say the next step
-  instead, as below.
-- **Tier 1**, answered `yes, without plan mode` → "start it in plan mode when you're ready; save
-  the approved plan as `plan.md` if it's more than a couple of files."
-- **Tier 2** → "run `/sdlc:spec` next."
+- **Tier 1**, answered `yes` or `yes, by hand` → call `EnterPlanMode` last, once the session is in
+  the worktree: plan mode reads the code, and the plan the person approves when it ends is saved
+  as `plan.md` if it's more than a couple of files. If the tool isn't available or refuses, say
+  the next step instead, as below.
+- **Tier 1**, answered `yes, without plan mode` (offered only without the factory) → "start it in
+  plan mode when you're ready; save the approved plan as `plan.md` if it's more than a couple of
+  files."
+- **Tier 2**, answered `yes` or `yes, by hand` → "run `/sdlc:spec` next."
+- **Either tier**, answered `yes, for the factory` → the session stays where it is, and the change
+  stays at `stage: plan`, where the factory starts it: "run `/sdlc-factory:build NNN` from the main
+  checkout, or hand it to the supervisor already running there. Its builder plans a Tier 1; its
+  spec-writer drafts a Tier 2's spec, which its own question approves."
 
 Do **not** continue into Stage 2 or 3 in this same turn beyond entering plan mode, which writes
 nothing and approves nothing. Do not start editing code. This skill's job ends here.

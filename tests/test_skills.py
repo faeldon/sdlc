@@ -96,6 +96,7 @@ READS_CONFIG = {
         "docs.product",
         "git.base",
         "work.register",
+        "factory.enabled",
     ],
     "sdlc:spec": [
         "docs.policy",
@@ -343,6 +344,67 @@ def test_spec_and_a_tier_one_intent_start_plan_mode_after_their_wait() -> None:
         assert "`EnterPlanMode`" in after.split("## Step 6", 1)[1], name
     intent = (ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8")
     assert "yes, without plan mode" in intent
+
+
+def _intent_steps() -> tuple[str, str, str]:
+    """Intent's WAIT, Step 5 and Step 6, each flattened to one line."""
+    text = (ROOT / "skills" / "intent" / "SKILL.md").read_text(encoding="utf-8")
+    wait = text.split("WAIT", 1)[1].split("## Step 5", 1)[0]
+    step5, step6 = text.split("## Step 5", 1)[1].split("## Step 6", 1)
+    step6 = step6.split("## Out of scope", 1)[0]
+    return tuple(" ".join(t.split()) for t in (wait, step5, step6))
+
+
+def test_intent_asks_as_before_without_the_factory() -> None:
+    """093 R4: a host without the factory is asked exactly today's question, for either tier."""
+    wait, _, _ = _intent_steps()
+    assert (
+        "`…off <git.base>, then start plan mode? (yes / yes, without plan mode / change the tier"
+        " / edit a section)`" in wait
+    )
+    assert "(yes / change the tier / edit a section)`" in wait
+    assert "When `factory.enabled` is false" in wait
+
+
+def test_intent_offers_the_factory_when_it_is_enabled() -> None:
+    """093 R5: with the factory enabled, both paths are yes answers, the manual one first, four
+    answers in all, and `yes, without plan mode` isn't among them."""
+    wait, _, _ = _intent_steps()
+    assert "When `factory.enabled` is true" in wait
+    tier1 = (
+        "`…off <git.base>, then plan it here or hand it to the factory? (yes, by hand / yes, for"
+        " the factory / change the tier / edit a section)`"
+    )
+    tier2 = (
+        "`…off <git.base>, then write its spec here or hand it to the factory? (yes, by hand /"
+        " yes, for the factory / change the tier / edit a section)`"
+    )
+    assert tier1 in wait and tier2 in wait
+    factory_form = wait.split("When `factory.enabled` is true", 1)[1]
+    assert "yes, without plan mode /" not in factory_form.split("Ask it with", 1)[0]
+
+
+def test_intent_by_hand_is_the_old_yes() -> None:
+    """093 R6: `yes, by hand` takes the branch `yes` always took: the worktree, then plan mode for
+    a Tier 1 or `/sdlc:spec` for a Tier 2."""
+    _, step5, step6 = _intent_steps()
+    assert "`EnterWorktree` with" in step5
+    assert "**Tier 1**, answered `yes` or `yes, by hand` → call `EnterPlanMode`" in step6
+    assert '**Tier 2**, answered `yes` or `yes, by hand` → "run `/sdlc:spec` next."' in step6
+
+
+def test_intent_for_the_factory_stays_in_the_main_checkout() -> None:
+    """093 R7, R8: the factory answer creates the change the same way, but never enters the
+    worktree or plan mode, and names `/sdlc-factory:build` as the next step; intent runs nothing
+    of the factory's."""
+    _, step5, step6 = _intent_steps()
+    enter = step5.split("`EnterWorktree` with", 1)[0].rsplit("Then move", 1)[1]
+    assert "Unless the answer was `yes, for the factory`" in enter
+    factory = step6.split("answered `yes, for the factory`", 1)[1].split("- **", 1)[0]
+    assert "`/sdlc-factory:build NNN`" in factory and "EnterPlanMode" not in factory
+    assert "stays" in factory
+    skill = frontmatter.load(ROOT / "skills" / "intent" / "SKILL.md")
+    assert not [t for t in skill["allowed-tools"] if "factory" in t]
 
 
 def test_intent_moves_the_session_and_close_brings_it_back() -> None:

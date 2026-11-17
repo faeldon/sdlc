@@ -580,6 +580,33 @@ def product_doc(root: Path, cfg: dict) -> dict | None:
     return product_items(path.read_text(encoding="utf-8"))
 
 
+FACTORY_PLUGIN = "sdlc-factory@"
+
+
+def factory_enabled(home: Path) -> tuple[bool, str | None]:
+    """Whether `sdlc-factory` is enabled for the repo whose main checkout is `home`, and the
+    scope that says so: Claude Code's own `enabledPlugins`, read from the most specific file
+    first (`local`, `project`, `user`), the first naming the factory, from any marketplace,
+    deciding. Files only: nothing run, nothing of the factory's read, and a missing or unreadable
+    file is skipped, since a wrong answer only hides intent's factory option."""
+    files = (
+        ("local", home / ".claude" / "settings.local.json"),
+        ("project", home / ".claude" / "settings.json"),
+        ("user", Path.home() / ".claude" / "settings.json"),
+    )
+    for scope, path in files:
+        try:
+            plugins = json.loads(path.read_text(encoding="utf-8")).get("enabledPlugins")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if not isinstance(plugins, dict):
+            continue
+        named = [v for k, v in plugins.items() if str(k).startswith(FACTORY_PLUGIN)]
+        if named:
+            return named[0] is True, scope
+    return False, None
+
+
 def cmd_config(root: Path) -> int:
     """The resolved settings as JSON, for every skill's Step 0. Writes nothing; exit 1 only when
     `.sdlc/config.toml` exists and won't parse, because then nothing it says can be trusted."""
@@ -655,6 +682,8 @@ def cmd_config(root: Path) -> int:
         # This checkout's lists; ship's `risk` reads the base branch's, which a change can't edit.
         "review": cfg["review"],
         "git": cfg["git"],
+        # Whether intent may offer to hand the change to the factory: settings files alone.
+        "factory": dict(zip(("enabled", "scope"), factory_enabled(home), strict=True)),
         "templates": templates,
         "warnings": warnings,
     }

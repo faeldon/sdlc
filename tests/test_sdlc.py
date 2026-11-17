@@ -2351,3 +2351,93 @@ def test_a_left_path_already_staged_refuses_before_any_write(tmp_path: Path, cap
     assert "already staged" in capsys.readouterr().err
     assert (d / "intent.md").read_text(encoding="utf-8") == before
     assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+
+
+# 093: whether the factory is enabled, from Claude Code's own settings files and nothing else.
+def _settings(where: Path, name: str, text: str) -> None:
+    (where / ".claude").mkdir(parents=True, exist_ok=True)
+    (where / ".claude" / name).write_text(text, encoding="utf-8", newline="\n")
+
+
+def _plugins(**enabled: bool) -> str:
+    return json.dumps(
+        {"enabledPlugins": {k.replace("_", "-") + "@sdlc": v for k, v in enabled.items()}}
+    )
+
+
+def _user_home(tmp_path: Path, monkeypatch) -> Path:
+    user = tmp_path / "user"
+    user.mkdir()
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))
+    return user
+
+
+@pytest.mark.portable
+def test_config_reports_the_factory_by_scope(tmp_path: Path, monkeypatch, capsys) -> None:
+    """R1: each of the three files names the factory on its own, and the most specific decides,
+    so a person who turns it off for one repo isn't offered it there."""
+    user = _user_home(tmp_path, monkeypatch)
+    for name, scope in (
+        ("settings.local.json", "local"),
+        ("settings.json", "project"),
+        (None, "user"),
+    ):
+        home = tmp_path / f"repo-{scope}"
+        home.mkdir()
+        _settings(
+            user if name is None else home, name or "settings.json", _plugins(sdlc_factory=True)
+        )
+        assert sdlc.factory_enabled(home) == (True, scope)
+        if name is None:
+            (user / ".claude" / "settings.json").unlink()
+    home = tmp_path / "both"
+    home.mkdir()
+    _settings(user, "settings.json", _plugins(sdlc_factory=True))
+    _settings(home, "settings.local.json", _plugins(sdlc_factory=False))
+    assert sdlc.factory_enabled(home) == (False, "local")
+    # Any marketplace counts; another plugin never does.
+    _settings(home, "settings.local.json", json.dumps({"enabledPlugins": {"sdlc@sdlc": True}}))
+    _settings(home, "settings.json", json.dumps({"enabledPlugins": {"sdlc-factory@fork": True}}))
+    assert sdlc.factory_enabled(home) == (True, "project")
+    root = _repo(tmp_path)
+    _settings(root, "settings.json", _plugins(sdlc_factory=True))
+    capsys.readouterr()
+    assert sdlc.cmd_config(root) == 0
+    assert json.loads(capsys.readouterr().out)["factory"] == {"enabled": True, "scope": "project"}
+
+
+@pytest.mark.portable
+def test_config_reports_no_factory_without_settings(tmp_path: Path, monkeypatch, capsys) -> None:
+    """R2: nothing names it, a file won't parse, or `enabledPlugins` isn't an object: no factory,
+    no traceback, no warning, exit 0. Wrong here only hides an option."""
+    user = _user_home(tmp_path, monkeypatch)
+    root = _repo(tmp_path)
+    capsys.readouterr()
+    assert sdlc.cmd_config(root) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["factory"] == {"enabled": False, "scope": None}
+    assert not [w for w in out["warnings"] if "factory" in w or "settings" in w]
+    _settings(root, "settings.local.json", "{not json")
+    _settings(root, "settings.json", json.dumps({"enabledPlugins": ["sdlc-factory@sdlc"]}))
+    _settings(user, "settings.json", json.dumps(["no", "object"]))
+    capsys.readouterr()
+    assert sdlc.cmd_config(root) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["factory"] == {"enabled": False, "scope": None}
+    assert not [w for w in out["warnings"] if "factory" in w or "settings" in w]
+
+
+@pytest.mark.portable
+def test_factory_detection_runs_nothing(tmp_path: Path, monkeypatch) -> None:
+    """R3: three files read, nothing run: no `claude plugin list`, no git, nothing of the
+    factory's own."""
+    user = _user_home(tmp_path, monkeypatch)
+    _settings(user, "settings.json", _plugins(sdlc_factory=True))
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(f"ran {args}")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    assert sdlc.factory_enabled(tmp_path) == (True, "user")

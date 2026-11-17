@@ -177,6 +177,23 @@ Changing `base` in a repo that has already closed changes points every history r
 branch's line. The changes closed on the old one aren't found there unless the old branch was
 merged into it by fast-forward.
 
+### Whether the factory is enabled: `config`'s `factory`
+
+`sdlc.py config` prints `factory: {"enabled": …, "scope": …}`, which `/sdlc:intent` reads to
+decide whether its question offers `yes, for the factory` beside `yes, by hand`. It is not a
+setting: it comes from Claude Code's own `enabledPlugins`, in three files read from the most
+specific down, the first naming any `sdlc-factory@<marketplace>` deciding:
+
+1. `.claude/settings.local.json` in the main checkout (`scope: local`);
+2. `.claude/settings.json` in the main checkout (`project`);
+3. `~/.claude/settings.json` (`user`).
+
+So a factory turned off in `settings.local.json` is off for that repo, whatever the user's file
+says. A missing file, one that won't parse, or no file naming the factory reads as
+`{"enabled": false, "scope": null}`, with no warning: the core never needs the factory, and runs
+nothing to find it. A factory loaded with `claude --plugin-dir` writes no settings, so it isn't
+found, and intent asks its question as it does without one.
+
 ## The docs
 
 The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left to your project.

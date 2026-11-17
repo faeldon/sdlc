@@ -389,7 +389,9 @@ so a script change that breaks one fails the gate, not a paid run.
 
 **The factory: `plugins/factory/`.** `sdlc-factory`, optional by being installed or not. `sdlc`'s
 cached copy carries the folder but never loads it (`test_sdlc_loads_nothing_from_plugins`):
-`sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. Its
+`sdlc`'s own `agents/` holds only its reviewer, and no manifest key widens a scan. The core
+knows only whether it is enabled, from Claude Code's settings files (`factory_enabled()`, printed
+as `config`'s `factory`, nothing run), for intent's `yes, for the factory`. Its
 mechanism is `factory.py`, which never imports `sdlc.py`: each plugin is cached on its own. Agents
 that judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`,
 read-only), and no agent commits. `/sdlc-factory:build` is the **supervisor**: the person's own session, usually

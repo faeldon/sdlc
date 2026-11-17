@@ -47,8 +47,8 @@ SCAFFOLDS = [
 ]
 # The cases that stop at their skill's WAIT, and the commands each must never have run before it.
 STOP_CASES = {
-    "intent": ["new"], "spec": [], "ship": ["ship"], "ship-open-finding": ["ship"],
-    "close": ["close"], "idea": ["inbox-commit"],
+    "intent": ["new"], "intent-product": ["new"], "spec": [], "ship": ["ship"],
+    "ship-open-finding": ["ship"], "close": ["close"], "idea": ["inbox-commit"],
 }  # fmt: skip
 
 

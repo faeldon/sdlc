@@ -1,0 +1,17 @@
+# A small repo set up for the sdlc plugin, tracked locally.
+
+[commands]
+# The tests are a one-liner: drafts.py imports.
+check = "python3 -c 'import drafts'"
+
+[docs]
+# The invariants are in AGENTS.md; there is no CLAUDE.md.
+policy = "AGENTS.md"
+
+[archive]
+# Tracked locally: the counter numbers changes, and nothing is mirrored.
+target = "none"
+
+[git]
+# Asked at setup: no agent attribution in commits.
+attribution = false

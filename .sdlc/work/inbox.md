@@ -231,17 +231,6 @@ would then also ask whether a proposed line is already said elsewhere. Raised by
 of 2026-11-17.
 Theme: docs
 
-## [2026-11-17-6] [nit] No skill case runs intent with a product doc
-
-The `intent` case's fixture has no `.sdlc/PRODUCT.md`, so no paid run shows intent proposing
-`serves:` without asking and naming the outcomes at its gate; only the skill's wording is pinned.
-Theme: tests
-Paths: evals/intent/, evals/fixtures/
-Cost: M
-Value: med
-Raised by: 069-intent-proposes-serves (correctness)
-
-
 ## [2026-11-17-10] [idea] Try the landing on a real factory batch
 
 `/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two
