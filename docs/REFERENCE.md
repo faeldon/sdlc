@@ -321,8 +321,13 @@ built. `sdlc.py status` lists the open changes in every worktree, from any of th
 one whose branch lacks commits `main` has (`behind main by N`). Since close only fast-forwards,
 `/sdlc:ship` brings such a branch up to date before the gate runs (`sdlc.py base`): a
 fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
-clean tree, reported with the command that undoes it. Anything that would conflict is refused,
-untouched, for the person to resolve. Once a change
+clean tree, reported with the command that undoes it. When that would conflict, ship resolves it
+in the same run (`sdlc.py resolve`): the uncommitted work is set aside as a commit kept under
+`refs/sdlc/aside/<branch>`, the branch rebases, the agent merges each conflicted file so both
+sides survive, and the work comes back uncommitted on the new base. The files resolved are
+recorded in the change's `conflicts.md` and named in ship's question, and `sdlc.py resolve <NNN>
+--abort` puts the worktree back until ship commits. Anything else `base` refuses stops ship,
+untouched, for the person. Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `.sdlc/work/` never fills up
 with finished changes: the change's commit keeps them in history. `.sdlc/work/inbox.md` is committed
 too; a closed seed is deleted from it, history keeping that as well. Every entry there is a

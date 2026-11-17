@@ -1171,6 +1171,185 @@ def test_base_rebases_a_clean_branch_with_commits(tmp_path: Path, capsys) -> Non
     assert (tree / "ours.txt").is_file() and (tree / "theirs.txt").is_file()
 
 
+def test_base_says_which_refusals_resolve_can_take_on(tmp_path: Path, capsys) -> None:
+    """The three conflicts are `resolvable`, and their words are as before: the factory's landing
+    reads `action` and `reason`."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our edit\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "their edit\n")
+    code, out = _base(tree, "001", capsys)
+    assert (code, out["action"], out["resolvable"]) == (1, "refused", True), out
+    assert out["reason"].startswith("main changed what this change's uncommitted work changes")
+
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    (tree / "more.txt").write_text("more\n", encoding="utf-8")
+    code, out = _base(tree, "001", capsys)
+    assert (code, out["resolvable"]) == (1, True) and "commit the work" in out["reason"], out
+
+    (tree / "more.txt").unlink()
+    code, out = _base(tree, "001", capsys)
+    assert (code, out["resolvable"]) == (1, True), out
+    assert "conflicts, so it was aborted" in out["reason"]
+    assert _base(tree, "001", capsys)[1]["resolvable"] is True, "aborted, so it can be asked again"
+
+
+def _resolve(root: Path, ident, capsys, mode: str = "start") -> tuple[int, dict]:
+    capsys.readouterr()
+    code = sdlc.cmd_resolve(root, ident, mode)
+    return code, json.loads(capsys.readouterr().out)
+
+
+def _ref(tree: Path, kind: str, branch: str = "001-thing") -> str | None:
+    return _git_or_none(tree, "rev-parse", "--verify", "-q", f"refs/sdlc/{kind}/{branch}")
+
+
+def _git_or_none(root: Path, *args: str) -> str | None:
+    return sdlc._git(root, *args)
+
+
+def test_resolve_takes_uncommitted_work_over_a_file_main_changed(tmp_path: Path, capsys) -> None:
+    """071's shape: no commits of its own, uncommitted work over a file main changed, and an
+    untracked file beside it. The work ends uncommitted on main, merged, and named in
+    conflicts.md; nothing is ever committed on the branch."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    start = _git(tree, "rev-parse", "HEAD")
+    (tree / "README.md").write_text("our line\n", encoding="utf-8")
+    (tree / "new.txt").write_text("new\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "their line\n")
+
+    code, out = _resolve(tree, "001", capsys)
+    assert (code, out["state"], out["conflicted"]) == (0, "conflict", ["README.md"]), out
+    assert "--abort" in out["undo"] and _ref(tree, "aside") and _ref(tree, "start") == start
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert code == 1 and "conflict markers left in: README.md" in out["reason"], "not merged yet"
+
+    (tree / "README.md").write_text("their line, and our line\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert (code, out["state"], out["resolved"]) == (0, "clean", ["README.md"]), out
+    assert _git(tree, "rev-parse", "HEAD") == _git(root, "rev-parse", "main"), "nothing committed"
+    status = _git(tree, "status", "--porcelain", "--untracked-files=all").splitlines()
+    assert "M README.md" in status and "?? new.txt" in status, status
+    record = (tree / ".sdlc" / "work" / "001-thing" / "conflicts.md").read_text(encoding="utf-8")
+    assert "onto main" in record and "- README.md" in record
+    assert _ref(tree, "aside") and _ref(tree, "end") and _ref(tree, "pending") is None
+    assert _resolve(tree, "001", capsys)[1]["state"] == "current"
+    capsys.readouterr()
+    assert sdlc.cmd_ship_question(tree, "001", False, False, [], []) == 0
+    asked = capsys.readouterr().out
+    assert "with the conflicts in README.md resolved" in asked, "ship can't leave it out"
+
+
+def test_resolve_takes_commits_of_its_own_one_stop_at_a_time(tmp_path: Path, capsys) -> None:
+    """Two commits of its own, each conflicting with main: two stops, both named in the record;
+    a branch with commits and nothing uncommitted keeps its commits."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    for name in ("a.txt", "b.txt"):
+        (tree / name).write_text(f"ours {name}\n", encoding="utf-8")
+        _git(tree, "add", "-A")
+        _git(tree, "commit", "-q", "-m", f"ours {name}")
+    _commit_on_main(root, "a.txt", "theirs a\n")
+    _commit_on_main(root, "b.txt", "theirs b\n")
+
+    code, out = _resolve(tree, "001", capsys)
+    assert out["conflicted"] == ["a.txt"] and _ref(tree, "aside") is None, out
+    (tree / "a.txt").write_text("both a\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert (out["state"], out["conflicted"]) == ("conflict", ["b.txt"]), out
+    (tree / "b.txt").write_text("both b\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert (code, out["state"], out["resolved"]) == (0, "clean", ["a.txt", "b.txt"]), out
+    log = _git(tree, "log", "--format=%s", "main..HEAD").splitlines()
+    assert log == ["ours b.txt", "ours a.txt"], "its own commits, rebased"
+
+
+def test_resolve_with_commits_and_uncommitted_work(tmp_path: Path, capsys) -> None:
+    """What base can't take at all: commits of its own and uncommitted work. The work rides on a
+    temporary commit through the rebase and comes back uncommitted."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "a.txt").write_text("ours\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours")
+    (tree / "README.md").write_text("our readme\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "their readme\n")
+    code, out = _resolve(tree, "001", capsys)
+    assert out["conflicted"] == ["README.md"], out
+    (tree / "README.md").write_text("their readme and ours\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert out["state"] == "clean", out
+    assert _git(tree, "log", "--format=%s", "main..HEAD") == "ours", "the aside commit is gone"
+    assert "M README.md" in _git(tree, "status", "--porcelain").splitlines()
+
+
+def test_resolve_abort_puts_everything_back(tmp_path: Path, capsys) -> None:
+    """Mid-rebase or after it finished, abort leaves the worktree as resolve found it, and keeps
+    the resolved work under refs/sdlc/end; once the branch moves on, it refuses."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    (tree / "README.md").write_text("our line\n", encoding="utf-8")
+    (tree / "new.txt").write_text("new\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "their line\n")
+    head = _git(tree, "rev-parse", "HEAD")
+    status = _git(tree, "status", "--porcelain", "--untracked-files=all")
+
+    _resolve(tree, "001", capsys)
+    code, out = _resolve(tree, "001", capsys, "abort")
+    assert (code, out["state"]) == (0, "aborted"), out
+    assert _git(tree, "rev-parse", "HEAD") == head
+    assert _git(tree, "status", "--porcelain", "--untracked-files=all") == status
+    assert (tree / "README.md").read_text(encoding="utf-8") == "our line\n"
+
+    _resolve(tree, "001", capsys)
+    (tree / "README.md").write_text("both\n", encoding="utf-8")
+    assert _resolve(tree, "001", capsys, "continue")[1]["state"] == "clean"
+    code, out = _resolve(tree, "001", capsys, "abort")
+    assert (code, out["state"]) == (0, "aborted"), out
+    assert _git(tree, "rev-parse", "HEAD") == head
+    assert _git(tree, "status", "--porcelain", "--untracked-files=all") == status
+    assert not (tree / ".sdlc" / "work" / "001-thing" / "conflicts.md").exists()
+    end = _ref(tree, "end")
+    assert end and _git(tree, "show", f"{end}:README.md") == "both", "the resolved work is kept"
+
+    _resolve(tree, "001", capsys)
+    (tree / "README.md").write_text("both\n", encoding="utf-8")
+    _resolve(tree, "001", capsys, "continue")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "shipped")
+    code, out = _resolve(tree, "001", capsys, "abort")
+    assert code == 1 and "moved since the resolution" in out["reason"], out
+
+
+def test_resolve_settles_the_counter_and_keeps_an_earlier_record(tmp_path: Path, capsys) -> None:
+    """`.sdlc/last-id` is the script's: the higher number, never listed. A change that resolved
+    before, its conflicts.md committed, resolves again with the file untouched mid-rebase."""
+    root = _repo(tmp_path)
+    tree = _opened(root)
+    folder = tree / ".sdlc" / "work" / "001-thing"
+    (folder / "conflicts.md").write_text("# Conflicts\n\n## earlier\n\n- x\n", encoding="utf-8")
+    (tree / "README.md").write_text("ours\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ours, with an earlier record")
+    (tree / ".sdlc" / "last-id").write_text("007\n", encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "our counter")
+    _commit_on_main(root, ".sdlc/last-id", "009\n")
+    _commit_on_main(root, "README.md", "theirs\n")
+
+    code, out = _resolve(tree, "001", capsys)
+    assert out["conflicted"] == ["README.md"], out
+    (tree / "README.md").write_text("both\n", encoding="utf-8")
+    code, out = _resolve(tree, "001", capsys, "continue")
+    assert (code, out["state"], out["resolved"]) == (0, "clean", ["README.md"]), out
+    assert (tree / ".sdlc" / "last-id").read_text(encoding="utf-8") == "009\n"
+    record = (folder / "conflicts.md").read_text(encoding="utf-8")
+    assert "## earlier" in record and record.rstrip().endswith("- README.md")
+    assert sdlc.conflicts_resolved(folder) == ["x", "README.md"]
+
+
 def test_base_follows_a_trunk_that_isnt_main(tmp_path: Path, capsys) -> None:
     """Fast-forward with no commits of its own, rebase with some: both onto `git.base`."""
     root = _repo(tmp_path, "master")

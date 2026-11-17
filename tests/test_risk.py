@@ -150,6 +150,13 @@ def test_the_question_names_sensitive_paths_five_then_how_many_more() -> None:
     assert "sensitive" not in _ask()
 
 
+def test_the_question_names_the_conflicts_a_resolution_merged() -> None:
+    assert "with the conflicts in README.md resolved, and" in _ask(conflicts=["README.md"])
+    many = _ask(conflicts=[f"f{i}" for i in range(6)])
+    assert "with the conflicts in f0, f1, f2, f3, f4 and 1 more resolved" in many
+    assert "conflicts" not in _ask() and "conflicts" not in _ask(conflicts=[])
+
+
 def test_the_question_says_a_skipped_fresh_review_and_a_recovery() -> None:
     assert "without the fresh review (no Agent tool here)" in _ask(
         fresh={"ran": False, "why": "no Agent tool here"}

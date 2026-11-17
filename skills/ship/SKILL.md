@@ -18,6 +18,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next-entry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py findings *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py resolve *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
@@ -67,14 +68,12 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base <NNN>
 ```
 
 `/sdlc:close` only fast-forwards, so a gate and a review run on a base `main` has moved past are
-spent on code that never lands, and run again after the rebase. This is one of two writes this
-skill makes before its WAIT, without asking (the other is Step 3's `findings.md`), because it
-touches nothing unless it is clean: a
-fast-forward that carries the uncommitted work, or a rebase of the branch's own commits from a
-clean tree. `current` needs no mention. `fast-forwarded` or `rebased`: say so, with `behind` (the
-commits that came in) and the `undo` line, and carry on. **`refused`: stop here,** before Step 1,
-with its `reason`; the person resolves it and runs `/sdlc:ship` again. Never resolve a conflict,
-stash, or retry it by hand from this skill.
+spent on code that never lands, and run again after the rebase. This is one of three writes this
+skill makes before its WAIT, without asking (with a conflict's resolution and Step 3's
+`findings.md`), because it touches nothing unless it is clean: a fast-forward that carries the
+uncommitted work, or a rebase of the branch's own commits from a clean tree. `current` needs no mention. `fast-forwarded` or `rebased`: say so, with `behind` (the
+commits that came in) and the `undo` line, and carry on. **`refused`, `resolvable: true`: resolve
+it now, by `conflict.md`;** otherwise **stop,** with its `reason`. Never stash, merge or reset.
 
 **`.sdlc/work/` in this skill is `work.dir` from `config`**: this checkout's. The change's folder,
 `.sdlc/work/NNN-slug/`, is part of the diff and of the commit: the review reads the artifacts alongside
@@ -109,7 +108,8 @@ Keep its output in view; the steps below read its parts by name, and run none of
 - **`cases`**: in this plugin's own repo, the skills' cases this diff calls for (`scope`), which
   Step 1 runs; `available: false` everywhere else, and then nothing below mentions them.
 - **`branches`**: the files beside this skill this change calls for: `factory.md` (a change built
-  by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, `cases.md`.
+  by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, `cases.md`,
+  `conflict.md`.
 
 Empty is the usual answer for the first three, and for `branches`. A non-empty `problems` names the
 part that has one; a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
@@ -231,7 +231,7 @@ proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
 `pre-existing`; `correctness`, `contract`, `cost` or `context`), with its `Evidence:`, `Class:` and
-`Disposition:` lines, and `By: fresh` on the fresh reviewer's. This is the one write besides `base` this skill makes before its WAIT, by a
+`Disposition:` lines, and `By: fresh` on the fresh reviewer's. This is one of the writes beside `base` and `resolve` this skill makes before its WAIT, by a
 named exception to confirm-before-writing, on every run, a run that stops included: it writes
 only the change's own uncommitted folder, decides nothing (the WAIT approves every disposition
 in it), and the next run rewrites it. It is how a finding fixed between two runs is counted.

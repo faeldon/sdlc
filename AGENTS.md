@@ -117,9 +117,17 @@ skipped, never fatal.
 **Bringing a branch up to date: `cmd_base()`.** Ship's Step 0 runs it before the gate, since
 close only fast-forwards: the branch fast-forwards to `main` when it has no commits of its own
 (git carries the uncommitted work or refuses), rebases from a clean tree when it has, and any
-conflict is aborted and refused. It is one of two writes a skill makes before its WAIT, by a named
-exception to confirm-before-writing: it moves only the change's own branch and prints the undo.
-The other is ship's `findings.md` (below).
+conflict is aborted and refused, `resolvable: true` when `cmd_resolve()` can take it on. Then ship
+resolves it rather than stopping (`skills/ship/conflict.md`): `resolve` commits the uncommitted
+work as a temporary commit, rebases and stops at each conflict, the agent only edits the files it
+names, and `--continue` undoes the temporary commit once the rebase is done and records the files
+in the change's `conflicts.md`, which `ship_question()` names; `--abort` puts the worktree back
+any time before ship commits. Its state is refs, never a file in the tree, which a rebase would
+trip on: `refs/sdlc/{start,aside,end,pending}/<branch>`, the work recoverable from `aside`, all
+deleted by close with the branch. `base` and `resolve` are two of three writes a skill makes
+before its WAIT, by a named exception to confirm-before-writing: each moves only the change's own
+branch and prints the undo. The third is ship's `findings.md` (below). 072's landing reads
+`base`'s refusal and resolves with its own `factory.py resolve`, so `base` never resolves itself.
 Never a stash (the stack is shared across worktrees), and never a merge of `main` into the
 branch, which close would put on `main`'s first-parent line, where `closed_changes()` walks.
 

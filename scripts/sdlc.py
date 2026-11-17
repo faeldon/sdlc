@@ -1232,6 +1232,14 @@ def findings_fresh(text: str) -> dict | None:
     return _note_says(text, FRESH_RE)
 
 
+def conflicts_resolved(path: Path) -> list[str]:
+    """Every file the change's `conflicts.md` says a resolution merged, each once, in order: what
+    `sdlc.py resolve` wrote as each one finished, and ship's question names."""
+    record = path / "conflicts.md"
+    lines = record.read_text(encoding="utf-8").splitlines() if record.is_file() else []
+    return list(dict.fromkeys(ln[2:].strip() for ln in lines if ln.startswith("- ")))
+
+
 def _note_says(text: str, line_re: re.Pattern) -> dict | None:
     """What findings.md's note, before its first finding, says ran: `{"ran": True}`, with what it
     said after `ran,` as `said` when anything; `{"ran": False, "why": ...}`; or None."""
@@ -3294,7 +3302,8 @@ def cmd_base(root: Path, ident: str | None) -> int:
     found = [(t, b) for t, b in trees if names_change(b, ident)] if ident else []
     main = main_root(root)
     report: dict = {"change": ident, "branch": None, "behind": None, "action": "current",
-                    "from": None, "to": None, "undo": None, "reason": None}  # fmt: skip
+                    "from": None, "to": None, "undo": None, "reason": None,
+                    "resolvable": False}  # fmt: skip
 
     def emit(code: int) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -3310,8 +3319,10 @@ def cmd_base(root: Path, ident: str | None) -> int:
     behind = behind_trunk(main, branch, trunk)
     report.update(change=branch, branch=branch, behind=behind, **{"from": before, "to": before})
 
-    def refuse(reason: str) -> int:
-        report.update(action="refused", reason=reason, to=_git(tree, "rev-parse", "HEAD"))
+    def refuse(reason: str, resolvable: bool = False) -> int:
+        """`resolvable`: a conflict `resolve` can take on, so ship resolves instead of stopping."""
+        report.update(action="refused", reason=reason, to=_git(tree, "rev-parse", "HEAD"),
+                      resolvable=resolvable)  # fmt: skip
         return emit(1)
 
     if why := trunk_refusal(main, trunk, git_cfg["base_source"]):
@@ -3325,12 +3336,13 @@ def cmd_base(root: Path, ident: str | None) -> int:
         if _dirty_paths(tree):
             return refuse(
                 f"{branch} has commits of its own and uncommitted work, so it can't rebase: "
-                "commit the work, then run /sdlc:ship again"
+                "commit the work, then run /sdlc:ship again",
+                resolvable=True,
             )
         err = _git_err(tree, "rebase", "-q", trunk)
         if err:
             _git_err(tree, "rebase", "--abort")
-            return refuse(f"rebasing onto {trunk} conflicts, so it was aborted: {err}")
+            return refuse(f"rebasing onto {trunk} conflicts, so it was aborted: {err}", True)
         report["action"] = "rebased"
     else:
         # The counter `new` wrote beside the folder is untracked until ship commits it, and a
@@ -3349,13 +3361,258 @@ def cmd_base(root: Path, ident: str | None) -> int:
         if err:
             if kept is not None:
                 counter.write_text(kept, encoding="utf-8", newline="\n")
-            return refuse(f"{trunk} changed what this change's uncommitted work changes: {err}")
+            return refuse(
+                f"{trunk} changed what this change's uncommitted work changes: {err}", True
+            )
         ours = int(kept.strip()) if kept is not None and kept.strip().isdigit() else 0
         if kept is not None and (_read_number(counter) or 0) < ours:
             _write_state(tree, LAST_ID, kept)
         report["action"] = "fast-forwarded"
     report.update(to=_git(tree, "rev-parse", "HEAD"), undo=f"git -C {tree} reset --keep {before}")
     return emit(0)
+
+
+# What a resolution keeps, each under the change's branch name, in refs every worktree shares:
+# `start`, the branch before; `aside`, the uncommitted work as a commit, when there was any; `end`,
+# the branch once resolved (or, after an abort, the resolved work); `pending`, a blob listing the
+# files resolved so far, only while one is under way. Close deletes them with the branch.
+RESOLVE_REFS = ("start", "aside", "end", "pending")
+ASIDE_MESSAGE = "sdlc: set aside for resolve"
+CONFLICTS = "conflicts.md"
+
+
+def _resolve_ref(kind: str, branch: str) -> str:
+    return f"refs/sdlc/{kind}/{branch}"
+
+
+def _rebasing(tree: Path) -> bool:
+    """Whether a rebase is stopped in `tree`."""
+    for name in ("rebase-merge", "rebase-apply"):
+        found = _git(tree, "rev-parse", "--git-path", name)
+        if found and (Path(found) if Path(found).is_absolute() else tree / found).exists():
+            return True
+    return False
+
+
+def _rebase_branch(tree: Path) -> str | None:
+    """The branch a rebase stopped in `tree` is rebasing: its HEAD is detached meanwhile, so
+    `worktrees()` doesn't list it under its branch."""
+    for name in ("rebase-merge", "rebase-apply"):
+        found = _git(tree, "rev-parse", "--git-path", f"{name}/head-name")
+        path = (Path(found) if Path(found).is_absolute() else tree / found) if found else None
+        if path and path.is_file():
+            head = path.read_text(encoding="utf-8").strip()
+            return head.removeprefix("refs/heads/") or None
+    return None
+
+
+def _change_trees(root: Path) -> list[tuple[Path, str]]:
+    """(worktree, branch) for each change's checkout, one stopped mid-rebase included."""
+    found = [(t, b) for t, b in worktrees(root) if DIR_RE.match(b)]
+    listed = {t for t, _ in found}
+    for line in (_git(root, "worktree", "list", "--porcelain") or "").splitlines():
+        if line.startswith("worktree "):
+            tree = Path(line[len("worktree ") :])
+            branch = None if tree in listed else _rebase_branch(tree)
+            if branch and DIR_RE.match(branch):
+                found.append((tree, branch))
+    return found
+
+
+def _unmerged(tree: Path) -> list[str]:
+    return (_git(tree, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+
+
+def _settle_last_id(tree: Path) -> None:
+    """`.sdlc/last-id` conflicted: the higher number kept and staged, as `base` keeps it, so no
+    number is handed out twice. Never the agent's to resolve. A copy of `factory.py`'s
+    `_settle_counter()`."""
+    rel = f".sdlc/{LAST_ID}"
+    if rel not in _unmerged(tree):
+        return
+    sides = [_git(tree, "show", f":{n}:{rel}") or "" for n in (2, 3)]
+    numbers = [int(s) for s in sides if s.strip().isdigit()]
+    if numbers:
+        (tree / rel).write_text(f"{max(numbers):03d}\n", encoding="utf-8", newline="\n")
+        _git(tree, "add", "--", rel)
+
+
+def _pending(tree: Path, branch: str) -> list[str] | None:
+    """The files resolved so far in the resolution under way, or None when none is."""
+    ref = _resolve_ref("pending", branch)
+    if _git(tree, "rev-parse", "--verify", "-q", ref) is None:
+        return None
+    return (_git(tree, "cat-file", "-p", ref) or "").splitlines()
+
+
+def _set_pending(tree: Path, branch: str, files: list[str]) -> None:
+    made = subprocess.run(
+        ["git", "-C", str(tree), "hash-object", "-w", "--stdin"],
+        input="".join(f"{f}\n" for f in files), capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    _git(tree, "update-ref", _resolve_ref("pending", branch), made.stdout.strip())
+
+
+def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
+    """Bring a change's branch up to date with the base branch when `base` refused on a conflict,
+    leaving each conflicted file for the agent and doing every git step itself. `start` commits
+    the uncommitted work as one temporary commit (`refs/sdlc/aside/<branch>`), rebases the branch
+    onto the base and stops at the first conflict; `continue`, once the files hold no markers,
+    stages them and goes on, stopping again at the next; when the rebase is done, the temporary
+    commit is undone (a mixed reset), so the work is uncommitted on the new base, and the change's
+    `conflicts.md` gets a section naming the files resolved. `abort` puts the worktree back where
+    `start` found it, at any point before ship commits, keeping the resolved work under
+    `refs/sdlc/end/<branch>`. `.sdlc/last-id` is settled by the script, never the agent. Never a
+    stash, a merge of the base, `--force` or `--hard`; only the change's own branch moves."""
+    trees = _change_trees(root)
+    if ident is None:
+        here = _git(root, "branch", "--show-current") or _rebase_branch(root) or ""
+        ident = here if DIR_RE.match(here) else None
+    found = [(t, b) for t, b in trees if names_change(b, ident)] if ident else []
+    main = main_root(root)
+    report: dict = {"change": ident, "state": None, "conflicted": [], "resolved": [],
+                    "base": None, "undo": None, "reason": None}  # fmt: skip
+
+    def emit(code: int) -> int:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return code
+
+    def refuse(reason: str) -> int:
+        report.update(state="refused", reason=reason)
+        return emit(1)
+
+    if len(found) != 1 or found[0][0].resolve() == main.resolve():
+        return refuse("not in a change's worktree: nothing to resolve")
+    tree, branch = found[0]
+    git_cfg = load_config(main)[0]["git"]
+    trunk = git_cfg["base"]
+    report.update(change=branch, base=trunk)
+    if why := trunk_refusal(main, trunk, git_cfg["base_source"]):
+        return refuse(why)
+    ref = {kind: _resolve_ref(kind, branch) for kind in RESOLVE_REFS}
+    aside = _git(tree, "rev-parse", "--verify", "-q", ref["aside"])
+    report["undo"] = f"sdlc.py resolve {branch} --abort" + (
+        f" (the work as it was is commit {aside[:12]}, {ref['aside']})" if aside else ""
+    )
+    env = {**os.environ, "GIT_EDITOR": "true"}
+
+    def finish() -> int:
+        if aside and _git(tree, "log", "-1", "--format=%s") == ASIDE_MESSAGE:
+            _git(tree, "reset", "-q", "HEAD^")
+        _git(tree, "update-ref", ref["end"], _git(tree, "rev-parse", "HEAD") or "")
+        files = list(dict.fromkeys(f for f in _pending(tree, branch) or [] if f))
+        files = [f for f in files if f != f".sdlc/{LAST_ID}"]
+        if files:
+            path = tree / work_rel(tree) / branch / CONFLICTS
+            path.parent.mkdir(parents=True, exist_ok=True)
+            old = path.read_text(encoding="utf-8") if path.is_file() else "# Conflicts\n"
+            sha = _git(tree, "rev-parse", "--short", trunk) or "?"
+            section = f"\n## {date.today().isoformat()} onto {trunk} {sha}\n\n" + "".join(
+                f"- {f}\n" for f in files
+            )
+            path.write_text(old.rstrip("\n") + "\n" + section, encoding="utf-8", newline="\n")
+        _git(tree, "update-ref", "-d", ref["pending"])
+        report.update(state="clean", resolved=files)
+        return emit(0)
+
+    def step() -> int:
+        """Where the rebase stands now: a stop with files for the agent, or done."""
+        while _rebasing(tree):
+            _settle_last_id(tree)
+            files = _unmerged(tree)
+            if files:
+                _set_pending(tree, branch, [*(_pending(tree, branch) or []), *files])
+                report.update(state="conflict", conflicted=files)
+                return emit(0)
+            # Only `.sdlc/last-id` conflicted, and it is settled: go on.
+            done = subprocess.run(["git", "-C", str(tree), "rebase", "--continue"],
+                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+            if done.returncode and not _unmerged(tree):
+                return refuse(f"the rebase stopped: {(done.stderr or done.stdout).strip()[-300:]}")
+        return finish()
+
+    if mode == "continue":
+        if not _rebasing(tree):
+            if _pending(tree, branch) is not None:
+                return finish()  # the rebase finished, and finish() didn't
+            return refuse("no resolution is under way: run resolve first")
+        files = _unmerged(tree)
+        marked = [
+            f for f in files
+            if "<<<<<<<" in (tree / f).read_text(encoding="utf-8", errors="replace")
+        ]  # fmt: skip
+        if marked:
+            report["conflicted"] = files
+            return refuse(f"conflict markers left in: {', '.join(marked)}")
+        for f in files:
+            _git(tree, "add", "--", f)
+        done = subprocess.run(["git", "-C", str(tree), "rebase", "--continue"],
+                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+        if done.returncode and _rebasing(tree) and not _unmerged(tree):
+            return refuse(f"the rebase won't go on: {(done.stderr or done.stdout).strip()[-300:]}")
+        return step()
+
+    if mode == "abort":
+        start = _git(tree, "rev-parse", "--verify", "-q", ref["start"])
+        if start is None:
+            return refuse("no resolution to abort")
+        if _rebasing(tree):
+            _git_err(tree, "rebase", "--abort")
+        else:
+            end = _git(tree, "rev-parse", "--verify", "-q", ref["end"])
+            if end is None or _git(tree, "rev-parse", "HEAD") != end:
+                return refuse("the branch has moved since the resolution: nothing aborted")
+            if _dirty_paths(tree):
+                _git(tree, "add", "-A")
+                _git(tree, "commit", "-q", "--no-verify", "-m", "sdlc: the resolved work, aborted")
+                _git(tree, "update-ref", ref["end"], _git(tree, "rev-parse", "HEAD") or "")
+            if err := _git_err(tree, "reset", "-q", "--keep", aside or start):
+                return refuse(f"couldn't go back: {err}")
+        if aside:
+            _git(tree, "reset", "-q", start)
+        for kind in ("start", "pending"):
+            _git(tree, "update-ref", "-d", ref[kind])
+        report.update(state="aborted", undo=None)
+        return emit(0)
+
+    # start
+    if _rebasing(tree):
+        return refuse("a resolution is under way: resolve --continue, or resolve --abort")
+    if _pending(tree, branch) is not None:
+        return refuse("an earlier resolution didn't finish: resolve --abort, then resolve again")
+    before = _git(tree, "rev-parse", "HEAD") or ""
+    behind = behind_trunk(main, branch, trunk)
+    if behind is None:
+        return refuse(f"no local {trunk} branch to bring it up to date with")
+    if behind == 0:
+        report.update(state="current")
+        return emit(0)
+    for kind in ("aside", "end"):
+        _git(tree, "update-ref", "-d", ref[kind])
+    _git(tree, "update-ref", ref["start"], before)
+    aside = None
+    if _dirty_paths(tree):
+        _git(tree, "add", "-A")
+        if err := _git_err(tree, "commit", "-q", "--no-verify", "-m", ASIDE_MESSAGE):
+            _git(tree, "reset", "-q")
+            return refuse(f"couldn't set the work aside: {err}")
+        aside = _git(tree, "rev-parse", "HEAD")
+        _git(tree, "update-ref", ref["aside"], aside or "")
+        report["undo"] = (
+            f"sdlc.py resolve {branch} --abort (the work as it was is commit {(aside or '')[:12]}, "
+            f"{ref['aside']})"
+        )
+    else:
+        report["undo"] = f"sdlc.py resolve {branch} --abort"
+    _set_pending(tree, branch, [])
+    err = _git_err(tree, "rebase", "-q", trunk)
+    if err and not _rebasing(tree):
+        if aside:
+            _git(tree, "reset", "-q", before)
+        for kind in ("start", "pending"):
+            _git(tree, "update-ref", "-d", ref[kind])
+        return refuse(f"rebasing onto {trunk} failed before any conflict: {err}")
+    return step()
 
 
 def _close_times(main: Path, trunk: str) -> dict[str, datetime]:
@@ -3997,6 +4254,14 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             gone = _git_err(main, "update-ref", "-d", start)
             if gone:
                 report["base_ref"] = f"{start} kept: {gone}"
+        # A resolution's refs (`cmd_resolve()`) go with the branch, the work they kept landed.
+        for kind in RESOLVE_REFS if err is None else ():
+            ref = _resolve_ref(kind, branch)
+            kept = _git(main, "rev-parse", "--verify", "-q", ref) and _git_err(
+                main, "update-ref", "-d", ref
+            )
+            if kept:
+                report.setdefault("resolve_refs", []).append(f"{ref} kept: {kept}")
         return err
 
     def push() -> None:
@@ -4162,7 +4427,9 @@ def _ff_deletions(main: Path, tree: Path, trunk: str, branch: str) -> dict:
 # the arguments are parsed, so a flag only the change knows reaches it. The variable stops a second
 # handoff, and set to anything by hand (`off`) skips the first.
 OWN_SCRIPT_ENV = "SDLC_OWN_SCRIPT"
-OWN_SCRIPT_CMDS = ("ship", "drop", "base", "sync", "preflight", "findings", "run-cases")
+OWN_SCRIPT_CMDS = (
+    "ship", "drop", "base", "resolve", "sync", "preflight", "findings", "run-cases",
+)  # fmt: skip
 OWN_RAN = "the change's own code"
 
 
@@ -6432,6 +6699,8 @@ SHIP_BRANCHES = {
     "cases.md": lambda parts, path: bool(
         parts["cases"].get("available") and parts["cases"].get("scope")
     ),
+    # Step 0 reads it on `base`'s `resolvable`; once a resolution is recorded, every later step.
+    "conflict.md": lambda parts, path: (path / CONFLICTS).is_file(),
 }
 
 
@@ -6530,12 +6799,14 @@ def ship_question(
     fresh: dict | None = None,
     findings: list[dict] | None = None,
     cases: dict | None = None,
+    conflicts: list[str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
     one, so the question never leaves one out. It opens with ship's recommendation from
     `findings` (`_question_head()`). A question that commits has each clause only when its fact
-    is: the sensitive paths the diff touches, a fresh review that didn't run (`fresh`, from
+    is: the sensitive paths the diff touches, the files a conflict with the base was resolved in
+    (`conflicts`, from the change's conflicts.md), a fresh review that didn't run (`fresh`, from
     findings.md's note), skill evals that didn't run (`cases`, from the same note), how to
     recover what a revert can't undo, the context update shown, the
     nits recorded in `register`, the pre-existing findings filed there as bugs, the issues closed
@@ -6559,6 +6830,11 @@ def ship_question(
         more = len(sensitive) - len(shown)
         names = [*shown, f"{more} more"] if more else shown
         clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {_and(names)}")
+    if conflicts:
+        shown = conflicts[:RISK_SHOWN]
+        more = len(conflicts) - len(shown)
+        clauses.append(f"with the conflicts in {_and([*shown, f'{more} more'] if more else shown)} "
+                       "resolved")  # fmt: skip
     if fresh and not fresh["ran"]:
         clauses.append(f"without the fresh review ({fresh['why'] or 'no reason given'})")
     if cases and not cases["ran"]:
@@ -6608,7 +6884,7 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
         risk["sensitive"], bool(risk["irreversible"]), found["fresh"], found["entries"],
-        found["cases"],
+        found["cases"], conflicts_resolved(path),
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -8129,6 +8405,20 @@ def main() -> int:
     )
     p_base.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
 
+    p_resolve = sub.add_parser(
+        "resolve",
+        help="bring a change's branch up to date when base refused on a conflict, file by file",
+    )
+    p_resolve.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
+    p_resolve_mode = p_resolve.add_mutually_exclusive_group()
+    p_resolve_mode.add_argument(
+        "--continue", dest="cont", action="store_true",
+        help="go on once the conflicted files hold no markers",
+    )  # fmt: skip
+    p_resolve_mode.add_argument(
+        "--abort", action="store_true", help="put the worktree back where resolve found it"
+    )
+
     p_close = sub.add_parser(
         "close",
         help="land a shipped change on main, or record a dropped one there; mirror it, remove its "
@@ -8300,6 +8590,9 @@ def main() -> int:
         return cmd_drop(root, args.id, args.check)
     if args.cmd == "base":
         return cmd_base(root, args.id)
+    if args.cmd == "resolve":
+        mode = "continue" if args.cont else "abort" if args.abort else "start"
+        return cmd_resolve(root, args.id, mode)
     if args.cmd == "close":
         return cmd_close(root, args.id, args.check)
     if args.cmd == "unreleased":

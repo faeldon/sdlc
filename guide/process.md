@@ -215,8 +215,9 @@ changes: `/sdlc:intent` writes it in the change's worktree and the change's comm
 in the main checkout, and refuses while it is on another branch or has uncommitted changes. Start
 new changes from it too; `sdlc.py status` there lists the open changes in every worktree,
 marking a branch `main` has moved past. `/sdlc:ship` brings such a branch up to date before the
-gate runs, so the tests and the review see what will land, and stops, touching nothing, when
-that would conflict.
+gate runs, so the tests and the review see what will land. When that conflicts, ship resolves it
+in the same run, keeping both sides, and its question names the files it merged; it stops only
+when the two sides can't both be kept, with the worktree put back as it was.
 
 ### What a worktree needs
 

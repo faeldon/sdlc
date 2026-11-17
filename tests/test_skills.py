@@ -824,13 +824,14 @@ def test_every_rule_is_for_a_command_the_skill_runs(skill: Path) -> None:
 _MD_NAMES = {
     Path(line).name
     for line in subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "*.md"],
+        # Untracked too: a new side file is named in its change before ship commits it.
+        ["git", "-C", str(ROOT), "ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
         capture_output=True, encoding="utf-8", check=True,
     ).stdout.splitlines()
 }  # fmt: skip
 # The files a skill names that the factory's agents write into a change's folder, with no copy in
 # the repo to find: the run's verdict and the person's calls it raised.
-WRITTEN_ELSEWHERE = {"decision.md", "decisions.md"}
+WRITTEN_ELSEWHERE = {"decision.md", "decisions.md", "conflicts.md"}
 
 
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)

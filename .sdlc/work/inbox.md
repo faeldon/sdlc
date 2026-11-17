@@ -325,3 +325,14 @@ resolving a real conflict and the reviewers checking it in headless sessions, an
 from a subprocess. See .sdlc/work/072-factory-land/notes.md in 072's commit.
 After: 2026-11-17-7
 Theme: factory
+
+## [2026-11-17-11] [nit] resolve stops when a merge empties one of the branch's commits
+
+`git rebase --continue` refuses with "No changes" when merging a conflict leaves a commit with
+nothing of its own, and `resolve --continue` reports "the rebase won't go on", so ship aborts and
+stops. Nothing is lost. The fix is `git rebase --skip` on that answer, minding the aside commit.
+Theme: landing
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 077-ship-resolves-conflicts (correctness)
