@@ -260,30 +260,6 @@ escape rate O6 measures). After the 1.9.0 release.
 Theme: review
 Raised 2026-11-17.
 
-## [2026-11-17-52] [idea] pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.
-
-Left undone by 098-board-fixes, carried forward when it landed: pre-existing: scripts/board.html: the `.col-head` row lets the "who" subtitle wrap beside the heading, so the Test column's "the gate and the review" sits indented under a one-line title and looks misaligned at 1280px. Filed for later.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-56] [idea] pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
-
-Left undone by 098-board-fixes, carried forward when it landed: pre-existing: an empty column (DESIGN, TEST, READY TO SHIP, READY TO CLOSE in the screenshots) shows a bare "—". It does not say the column is empty or that nothing is waiting there.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-57] [idea] code (round 2 note): a card with a problem and a pending decision at `build` names only "fix what its problems name", by the precedence in `plan.md`; it no longer says a decision is waiting too. The card's other lines still show `pending`; whether its next step should name both is for ship.
-
-Left undone by 098-board-fixes, carried forward when it landed: code (round 2 note): a card with a problem and a pending decision at `build` names only "fix what its problems name", by the precedence in `plan.md`; it no longer says a decision is waiting too. The card's other lines still show `pending`; whether its next step should name both is for ship.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-58] [idea] code (round 2 note): the rebasing card's `--abort` wording doesn't say `resolve --abort` keeps the resolved work under `refs/sdlc/end/<branch>`.
-
-Left undone by 098-board-fixes, carried forward when it landed: code (round 2 note): the rebasing card's `--abort` wording doesn't say `resolve --abort` keeps the resolved work under `refs/sdlc/end/<branch>`.
-See .sdlc/work/098-board-fixes/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-59] [idea] The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
 
 Left undone by 099-board-page-fixes, carried forward when it landed: The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
@@ -323,18 +299,6 @@ Left undone by 106-factory-reviewer-coverage, carried forward when it landed: Th
 See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-69] [idea] Make the board and status read an unreadable stop record the same way
-
-Left undone by 107-board-needs-you, carried forward when it landed: A stop record that won't read reads differently in the two places: the board makes it a problem (`fix: runs/stopped.md doesn't open …`, card `stopped: None`, as 086 pinned), while `status`'s `factory_stop()` keeps it a stop (`stopped: read runs/stopped.md`). Both put it in front of the person; aligning them means changing one of the two pinned behaviours.
-See .sdlc/work/107-board-needs-you/notes.md in its commit.
-Raised 2026-11-17.
-
-## [2026-11-17-70] [idea] Make the board's next step follow what the change needs
-
-Left undone by 107-board-needs-you, carried forward when it landed: `next_action()` is unchanged, as the spec says: an escalation that still needs `decide D2` names `/sdlc:ship, or /sdlc-factory:land …` as its next step, beside its `needs you:` line. A next step that follows the needs would read better.
-See .sdlc/work/107-board-needs-you/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
 
 097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at
@@ -350,6 +314,30 @@ Raised 2026-11-17.
 Left undone by 109-landing-stops-only-for-cause, carried forward when it landed: `_resolve()`'s problems still say "round <n>" for a landing round's answer ("C3, which no
 change of round 1 is"); only the file named before them says which kind of round it is.
 See .sdlc/work/109-landing-stops-only-for-cause/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-81] [idea] Wrap long tokens in a card's next step
+
+Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: `scripts/board.html:82`: `.next code` has no `overflow-wrap`, so a long unbroken token in a next step could push past a narrow card. None appears in these shots, so this is for later, not a change.
+See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-82] [idea] Shorten the factory's stop NEXT: wording for phone-width cards
+
+Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: `scripts/board.html:292`: a stop's `next:` is a long run-on command in monospace (006's "rerun /sdlc-factory:build 006, whose one mend asks again…"), and it wraps badly at 390px. The text comes from the factory's stop record, which this change doesn't touch.
+See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-83] [idea] Parenthesise the stop test in board.py's _progress()
+
+Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: scripts/board.py:393: `if entry.get("stopped") or (folder / STOPPED).is_file() and entry["stage"] == "build":` mixes `or` and `and` with no parentheses. The `and` binds first, so it reads as intended, but it is easy to misread. This line is in `_progress()`, which this change doesn't touch. Parenthesise it when someone next edits `_progress()`.
+See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-84] [idea] Say "stopped: mend" in plain words on the needs-you line
+
+Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-existing: scripts/sdlc.py:4108: a stop waiting on the person reads `needs you: stopped: mend`, and `mend` is the factory's word for a re-run of the reviewer, not something a person knows. The card's `next:` line spells out the step, so the person can still act, but the label is not plain.
+See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
 Raised 2026-11-17.
 
 ## [2026-11-17-85] [bug] The factory's ui and ux reviewers can't run at once

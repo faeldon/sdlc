@@ -178,7 +178,9 @@ def test_a_blocking_decision_or_an_unreadable_reply_needs_the_person(repo) -> No
     assert four["column"] == "needs-you"
     assert [d["text"] for d in four["pending"]] == ["purge after 30 or 90 days?"]
     assert any("round-1/code.md" in p for p in four["problems"])
-    assert four["next"] == "fix what its problems name", "the problem first, as its column (098)"
+    assert four["next"] == (
+        "decide D1 in the factory's supervisor, and fix what its problems name"
+    ), "the problem, as its column (098), and the decision that still waits (110)"
 
 
 def _worktree(
@@ -392,13 +394,17 @@ def test_a_stopped_run_needs_the_person(repo) -> None:
 
 
 @pytest.mark.portable
-def test_an_unreadable_stop_record_is_a_problem(repo) -> None:
-    """R7: a record that won't read still puts the card in front of the person."""
+def test_an_unreadable_stop_record_is_a_stop_as_in_status(repo) -> None:
+    """R7, as 110 (2026-11-17-69) aligned it on `status`: a record that won't read is still a
+    stop, whose way on is to read it, so the card and `/sdlc:status` say the same thing."""
     folder = _stopped_run(repo)
     _write(folder / factory.STOPPED, "stopped, somehow\n")
     card = _cards(repo)["013-draft-escapes"]
-    assert card["column"] == "needs-you" and card["stopped"] is None
-    assert any("runs/stopped.md" in p for p in card["problems"]), card["problems"]
+    assert card["stopped"] == sdlc.factory_stop(folder), "the reading status shows"
+    assert card["stopped"]["next"] == "read runs/stopped.md"
+    assert card["column"] == "needs-you" and card["problems"] == []
+    assert card["needs"] == ["stopped: read runs/stopped.md"]
+    assert card["next"] == "read runs/stopped.md"
 
 
 @pytest.mark.portable
@@ -433,7 +439,7 @@ def test_a_resumed_run_goes_back_to_build(repo) -> None:
 @pytest.mark.portable
 def test_the_factory_parsing_is_a_pinned_copy() -> None:
     names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "KEPT_RE", "DROPPED_RE", "LEDGER_RE")
-    for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
+    for name in names:
         assert getattr(board, name).pattern == getattr(factory, name).pattern, name
     assert board.VERIFIED == factory.VERIFIED and board.COSTS == factory.COSTS
     assert board.RECONSIDER == factory.RECONSIDER
@@ -1058,11 +1064,13 @@ def test_a_card_with_a_problem_never_names_close(repo) -> None:
 
 # `next_action()`'s precedence, highest first: each state's fields, and the step it names when
 # it is the highest a card holds. A card in two states names the higher one's step, whatever
-# else it holds; two states that set `stage` to different values can't overlap.
+# else it holds, but for the pairs in `BOTH`; two states that set `stage` to different values
+# can't overlap.
 PRECEDENCE = [
     ("rebasing", {"rebasing": True},
      "a rebase is stopped in its worktree: resolve its conflicts, then "
-     "sdlc.py resolve 016 --continue, or sdlc.py resolve 016 --abort"),
+     "sdlc.py resolve 016 --continue, or sdlc.py resolve 016 --abort, which keeps the "
+     "resolved work under refs/sdlc/end/016-draft-tags"),
     ("stage missing", {"stage": None, "problems": ["intent.md couldn't be read: conflict"]},
      "fix intent.md's frontmatter"),
     ("problems", {"problems": ["findings.md couldn't be read: conflict"]},
@@ -1070,8 +1078,11 @@ PRECEDENCE = [
     ("closed", {"stage": "shipped"}, "/sdlc:close 016"),
     ("stopped", {"stopped": {"next": "read runs/step.md, then rerun the build"}},
      "read runs/step.md, then rerun the build"),
-    ("decision pending", {"stage": "build", "pending": ["D1"]},
-     "answer its decision in the factory's supervisor"),
+    ("decision pending", {"stage": "build", "pending": ["D1"], "needs": ["decide D1"]},
+     "decide D1 in the factory's supervisor"),
+    ("escalation pending",
+     {"stage": "test", "decision": "ESCALATE", "needs": ["decide D2", "confirm 1 default"]},
+     "decide D2, then /sdlc:ship, or /sdlc-factory:land with the others ready"),
     ("approver decided", {"stage": "test", "decision": "READY"},
      "/sdlc:ship, or /sdlc-factory:land with the others ready"),
     ("factory building", {"stage": "build", "mode": "factory", "built": [1]},
@@ -1081,10 +1092,19 @@ PRECEDENCE = [
     ("its stage's step", {}, "plan mode, then build it"),
 ]  # fmt: skip
 
+# The pairs whose step names both states (2026-11-17-57): a decision still waits while a file
+# won't read, so the card says so, the decision first, as its `needs you:` line holds it.
+BOTH = {
+    ("problems", "decision pending"):
+        "decide D1 in the factory's supervisor, and fix what its problems name",
+    ("problems", "escalation pending"): "decide D2, and fix what its problems name",
+}  # fmt: skip
+
 
 def _in_states(*states: dict) -> dict | None:
     """A card holding every state in `states`, or None when two set different stages."""
-    entry = {"id": "016", "tier": 1, "stage": "plan", "mode": "manual", "problems": []}
+    entry = {"id": "016", "change": "016-draft-tags", "tier": 1, "stage": "plan",
+             "mode": "manual", "problems": [], "needs": []}  # fmt: skip
     stages = {fields["stage"] for fields in states if "stage" in fields}
     if len(stages) > 1:
         return None
@@ -1107,7 +1127,32 @@ def test_a_card_in_two_states_names_the_higher_ones_step(high, low) -> None:
     entry = _in_states(high[1], low[1])
     if entry is None:
         pytest.skip(f"{high[0]} and {low[0]} set different stages")
-    assert board.next_action(entry) == high[2]
+    assert board.next_action(entry) == BOTH.get((high[0], low[0]), high[2])
+
+
+@pytest.mark.portable
+def test_a_card_with_a_problem_and_a_decision_names_both(repo) -> None:
+    """2026-11-17-57: a `build` card with a reply that won't read and a blocking decision says
+    the decision waits too, never only the problem."""
+    four = _cards(repo)["004-draft-purge"]
+    assert four["problems"] and four["needs"][-1] == "decide D1", four["needs"]
+    assert four["next"] == "decide D1 in the factory's supervisor, and fix what its problems name"
+
+
+@pytest.mark.portable
+def test_an_escalation_names_the_decision_it_still_needs_first(repo) -> None:
+    """2026-11-17-70: the next step follows the `needs you:` line, so an escalation that still
+    needs `decide D2` names it before ship or land; one with nothing to decide names ship."""
+    folder = _escalated(repo, "033-esc-open", "test", commit=["src/h.py"])
+    _write(folder / "decisions.md", "# Decisions\n\n"
+           "- [x] D1 (code round 1, default): page at 50 → decided: 50\n"
+           "- [ ] D2 (builder round 1, blocking): keep drafts 30 days?\n")  # fmt: skip
+    card = _cards(repo)["033-esc-open"]
+    assert card["needs"] == ["decide D2"] and card["column"] == "needs-you"
+    assert card["next"] == "decide D2, then /sdlc:ship, or /sdlc-factory:land with the others ready"
+    _write(folder / "decisions.md", TICKED)
+    card = _cards(repo)["033-esc-open"]
+    assert card["needs"] == [] and card["next"].startswith("/sdlc:ship")
 
 
 @pytest.mark.portable
@@ -1155,8 +1200,9 @@ def test_a_change_being_rebased_keeps_its_card(repo) -> None:
     assert card["rebasing"] is True and card["problems"] == [], card
     assert card["next"] == (
         "a rebase is stopped in its worktree: resolve its conflicts, then "
-        "sdlc.py resolve 029 --continue, or sdlc.py resolve 029 --abort"
-    ), "never ship or build mid-rebase"
+        "sdlc.py resolve 029 --continue, or sdlc.py resolve 029 --abort, which keeps the "
+        "resolved work under refs/sdlc/end/029-draft-rebase"
+    ), "never ship or build mid-rebase; 2026-11-17-58: what --abort keeps, and where"
     assert _cards(repo)["001-reopen-drafts"]["rebasing"] is False
     assert name in [p.name for p in sdlc.change_dirs(repo)], "status finds it too"
     assert (_git(tree, "status", "--porcelain"), _git(tree, "rev-parse", "HEAD")) == before
@@ -1488,3 +1534,31 @@ def test_aria_live_sits_on_the_status_line_alone() -> None:
     say = re.search(r"function say\(text, down\) \{(.*?)\n\}", script, re.S)
     assert say and '$("status").textContent !== text' in say.group(1), "set only when it changes"
     assert re.search(r"`live · \$\{need\} need", script)
+
+
+@pytest.mark.portable
+def test_a_column_subtitle_sits_under_its_heading() -> None:
+    """2026-11-17-52: the column head is two rows, CSS alone, at every width: the heading and its
+    count on the first, the `who` subtitle on a row of its own under the heading, so a wrapped
+    subtitle never sits indented beside a one-line title."""
+    css, script = _page_parts()
+
+    def rule(selector: str) -> re.Match:
+        return re.search(rf"(?m)^{re.escape(selector)} \{{([^}}]*)\}}", css)
+
+    head = rule(".col-head").group(1)
+    assert re.search(r"display:\s*grid", head) and "flex" not in head, head
+    assert re.search(r"grid-template-columns:\s*1fr auto", head), head
+    who = rule(".col-head .who").group(1)
+    assert re.search(r"grid-column:\s*1 / -1", who) and re.search(r"grid-row:\s*2", who), who
+    count = rule(".col-head .count").group(1)
+    assert re.search(r"grid-row:\s*1", count) and "margin-left" not in count, count
+    assert 'h("h2", {}, col.label), h("span", { class: "who" }, col.who)' in script, "DOM order"
+
+
+@pytest.mark.portable
+def test_an_empty_column_says_so() -> None:
+    """2026-11-17-56: an empty column says in words that nothing waits there, never a bare dash."""
+    _, script = _page_parts()
+    assert 'h("div", { class: "empty" }, "nothing waiting here")' in script
+    assert 'class: "empty" }, "—"' not in script

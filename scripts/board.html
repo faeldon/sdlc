@@ -45,12 +45,14 @@ main.board {
   main.board { grid-template-columns: 1fr; overflow-x: visible; }
 }
 .col { min-width: 0; }
+/* Two rows: the heading and its count, then the subtitle under the heading, at every width. */
 .col-head {
-  display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px; padding: 0 2px;
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 6px;
+  margin: 0 0 8px; padding: 0 2px;
 }
 .col-head h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
-.col-head .who { color: var(--muted); font-size: 12px; }
-.col-head .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+.col-head .who { grid-column: 1 / -1; grid-row: 2; color: var(--muted); font-size: 12px; }
+.col-head .count { grid-column: 2; grid-row: 1; color: var(--muted); font-size: 12px; }
 .col.needs-you .col-head h2 { color: var(--stop); }
 .col.ready .col-head h2, .col.close .col-head h2 { color: var(--accent); }
 .empty { color: var(--muted); padding: 8px 2px; }
@@ -318,7 +320,7 @@ function render(st) {
     return h("section", { class: `col ${col.key}`, "aria-label": col.label },
       h("div", { class: "col-head" }, h("h2", {}, col.label), h("span", { class: "who" }, col.who),
         h("span", { class: "count" }, cards.length || "")),
-      cards.length ? cards.map(card) : h("div", { class: "empty" }, "—"));
+      cards.length ? cards.map(card) : h("div", { class: "empty" }, "nothing waiting here"));
   });
   $("board").replaceChildren(...cols);
   if (held && !open) {

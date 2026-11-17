@@ -9,7 +9,8 @@ folders on every request, so the board and the folders can't disagree. A change 
 on (its folder holds `runs/`) adds its rounds, decisions and cost, read from the files the run
 left with copies of `factory.py`'s parsing, each pinned to it by a test: the core never imports or
 runs the factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the
-person, with the record's problems and its way on. Its card's step track is the step the
+person, with the record's problems and its way on, read by `sdlc.factory_stop()` as `status`
+reads it. Its card's step track is the step the
 supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
 factory runs, read from history once per base-branch tip and kept in memory. Nothing here
 writes: three GET routes, every other method refused, and `/file` serves only a file inside an
@@ -59,9 +60,6 @@ OPEN_BOX = "- [ ]"
 VERIFIED = "verified.md"
 COSTS = Path("runs") / "costs.jsonl"
 STOPPED = Path("runs") / "stopped.md"
-STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
-NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
-PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 STEP = Path("runs") / "step.md"
 STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
@@ -189,7 +187,7 @@ def _entry(
         entry.update(_factory(folder, problems))
         # A stopped run sits at `build`; past it the record is history, and read past.
         entry["stopped"] = (
-            read("runs/stopped.md", lambda: _stopped(folder, problems), None)
+            read("runs/stopped.md", lambda: _stopped(folder), None)
             if rec["stage"] == "build"
             else None
         )
@@ -351,21 +349,11 @@ def _factory(folder: Path, problems: list[str]) -> dict:
     }  # fmt: skip
 
 
-def _stopped(folder: Path, problems: list[str]) -> dict | None:
-    """The stop `factory.py verdicts --record` left in `runs/stopped.md`: its way on, the sentence
-    saying it, and the problems as `verdicts` worded them. None without one; a record that won't
-    read is a `problems` line, so the card still needs the person."""
-    path = folder / STOPPED
-    if not path.is_file():
-        return None
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    way = STOPPED_RE.match(lines[0]) if lines else None
-    nxt = [m.group(1) for m in map(NEXT_RE.match, lines) if m]
-    if not way or not nxt:
-        problems.append(f"{STOPPED.as_posix()} doesn't open with STOPPED: and its NEXT: line")
-        return None
-    found = [m.group(1) for m in map(PROBLEM_RE.match, lines) if m]
-    return {"way": way.group(1), "next": nxt[0], "problems": found}
+def _stopped(folder: Path) -> dict | None:
+    """The stop `factory.py verdicts --record` left in `runs/stopped.md`, as `status` reads it:
+    `sdlc.factory_stop()` itself, so the card and `status` can't say two things. None without
+    one; a record that won't read is still a stop, whose way on is to read it."""
+    return sdlc.factory_stop(folder)
 
 
 def read_step(text: str) -> dict | None:
@@ -610,30 +598,42 @@ def cost(folder: Path) -> dict | None:
 
 def next_action(entry: dict) -> str:
     """What a person runs next on the change, from its stage and tier, and for a factory run its
-    decision and ledger: the step `status` and each skill's report name. The first state a card
-    holds names it, highest first: a stopped rebase, a missing stage, any other problem, shipped
-    or dropped, a factory stop, a pending decision, the approver's decision, a factory build, a red
-    gate, then the stage's own step (`PRECEDENCE` in `tests/test_board.py` pins every pair)."""
+    decision and the decisions its `needs` still holds (`sdlc.needs_of()`, so the step follows the
+    card's `needs you:` line): the step `status` and each skill's report name. The first state a
+    card holds names it, highest first: a stopped rebase, a missing stage, any other problem (with
+    a decision that still waits named before it), shipped or dropped, a factory stop, a decision
+    still to make, the approver's decision, a factory build, a red gate, then the stage's own step
+    (`PRECEDENCE` and `BOTH` in `tests/test_board.py` pin every pair)."""
     stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
     # A stopped rebase comes first: until it ends, no step of the stage's applies, and its
-    # conflicted files may be what won't read. `sdlc.py resolve` finishes or undoes it.
+    # conflicted files may be what won't read. `sdlc.py resolve` finishes or undoes it, and an
+    # undo keeps what was resolved under `refs/sdlc/end/<branch>` (`sdlc.RESOLVE_REFS`).
     if entry.get("rebasing"):
         ident = entry["id"]
         return (
             "a rebase is stopped in its worktree: resolve its conflicts, then "
-            f"sdlc.py resolve {ident} --continue, or sdlc.py resolve {ident} --abort"
+            f"sdlc.py resolve {ident} --continue, or sdlc.py resolve {ident} --abort, which keeps "
+            f"the resolved work under refs/sdlc/end/{entry['change']}"
         )
     if entry["problems"] and stage is None:
         return "fix intent.md's frontmatter"
+    # The decisions its `needs` still holds: a blocking one at `build`, answered in the session
+    # running the factory, or one an escalation at `test` still needs, answered at ship.
+    ids = [n.removeprefix("decide ") for n in entry.get("needs") or [] if n.startswith("decide ")]
+    decide = f"decide {', '.join(ids)}" + (
+        " in the factory's supervisor" if stage == "build" else ""
+    )
     # A problem is the card's column at any stage (`column()`), so it is the next step too.
     if entry["problems"]:
-        return "fix what its problems name"
+        return f"{decide}, and fix what its problems name" if ids else "fix what its problems name"
     if stage in CLOSED:
         return f"/sdlc:close {entry['id']}"
     if entry.get("stopped"):
         return entry["stopped"]["next"]
-    if entry.get("pending") and stage == "build":
-        return "answer its decision in the factory's supervisor"
+    if ids and stage == "build":
+        return decide
+    if ids:
+        return f"{decide}, then /sdlc:ship, or /sdlc-factory:land with the others ready"
     if entry.get("decision") and stage == "test":
         return "/sdlc:ship, or /sdlc-factory:land with the others ready"
     if entry["mode"] == "factory" and stage in ("design", "build") and entry.get("built"):

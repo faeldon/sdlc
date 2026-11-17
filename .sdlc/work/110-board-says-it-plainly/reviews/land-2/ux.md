@@ -1,0 +1,14 @@
+VERDICT: PASS
+
+- DECISION: [default] A card stopped at `build` with a blocking decision still open names only the stop, `rerun …` or `mend`, as its next step. The `needs you:` line names both (`stopped: …` then `decide D1`), so the next step doesn't match the line, which Outcome 6 says it should. The same holds for a `rebasing` card with a decision waiting. Recommend: name the decision with the stop when both hold, the way the problem and decision pair already does: `rerun …, and decide D1 in the factory's supervisor`. The alternative is to keep the stop first and say in REFERENCE.md that a decision waits behind it. The person decides whether the rerun should wait for the decision, so I'm not making this a CHANGE.
+
+## Notes
+
+I read both screenshots, `intent.md` (Tier 1, so there is no `spec.md`; the Approach is the spec), `build/land-2.md`, `scripts/board.html` in full, and `scripts/board.py` at `_entry`, `_stopped`, `_progress`, `next_action()` and `column()`. I read `sdlc.factory_stop()` and the `PRECEDENCE`/`BOTH` tables in `tests/test_board.py`, plus REFERENCE.md's board section. `decisions.md` does not exist in the change folder, so there were no answered decisions to respect. I had no git, so I reviewed the files as they now stand rather than a diff against `main`.
+
+- **Seen in the screenshots:** at 1280px every column head has its heading and count on one row and the subtitle beneath it, and the Test column's "the gate and the review" no longer sits indented. At 390px the stacked columns lead with Needs you, and each card's `needs you:` and `next:` lines read in full. Card 006's stop is named in red, then its way on.
+- **Empty columns (not in the screenshots):** `.empty` reads "nothing waiting here" in each of the seven columns, from the code. No column is empty in either shot, so this is judged from `board.html`, not seen.
+- **Unreadable stop (not in the screenshots):** the card shows `stopped: runs/stopped.md doesn't open with STOPPED: and its NEXT: line` and `next: read runs/stopped.md`. The drawer lists every file in the folder, so the person can open it in one click. The record names no way on, so after reading it the person is still left to choose one. Worth a line in the next round, not a change here.
+- **Loading and error (not seen):** the status line reads "connecting…" until the first poll, and "the board isn't answering: is `sdlc.py board` still running?" when the server is down. Both say what to do.
+- **Narrow-width card text:** a long next step is a `<code>` run that wraps at spaces but has no `overflow-wrap`, so a long single token could push past the card. Already seed 2026-11-17-81, so not repeated here.
+- **Done well:** the unreadable stop reads the same on the board and in `/sdlc:status`, from one function (`factory_stop()`), and the tests pin that wording. The precedence table tests every pair of states and their step, which is what keeps the next step honest.

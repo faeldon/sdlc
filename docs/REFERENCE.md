@@ -508,8 +508,12 @@ to Test once ship's review has written its `findings.md` or its gate run by hand
 build as it stands (below), with a `gate green` or `gate red` badge while that record is current.
 A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, with a
 `rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
-`--continue` or `--abort` as its next step. A card with a file that won't read names that as its
-next step, at any stage.
+`--continue` or `--abort` as its next step, saying that `--abort` keeps the resolved work under
+`refs/sdlc/end/<branch>`. A card with a file that won't read names that as its next step, at any
+stage. Its next step follows its `needs you:` line: a decision still to make (`decide D<n>`) is
+named first, before the problem a card also has, or before `/sdlc:ship` on an escalation. A stop
+record that won't read is a stop, its next step `read runs/stopped.md`, on the board as in
+`/sdlc:status`.
 Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
