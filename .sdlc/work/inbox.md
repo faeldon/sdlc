@@ -477,3 +477,26 @@ whose builder is writing that plan right now. It could leave out a change with a
 (`runs/step.md` naming `build` for round 1).
 Theme: factory
 Raised 2026-11-17.
+
+## [2026-11-17-49] [idea] One review checklist and one findings record for ship and the factory
+
+`/sdlc:ship` and the factory review a change differently, and each misses what the other checks.
+Ship has a context pass (docs still true), nits weighed and recorded in the register, existing
+faults filed as bugs, acceptance checks, skills' cases and `How to recover:`; the factory has none
+of them (35 and 39 cover part). The factory has a test reviewer (do the tests prove the
+requirements, can they fail), security depth, the spec's path run end to end, a verifier that
+drops false positives, and UI/UX; ship has none of them, but the fresh reviewer on a sensitive
+path. Standardize what a review covers and how it is recorded, not how it runs: a keyed checklist
+of review dimensions in `guide/review.md`, each naming who covers it in each way; then fill each
+gap where it is cheapest (likely first: ship's correctness pass asks whether each test can fail;
+the factory gets the context pass and files its nits and bugs); and both write `findings.md` in
+one shape with `By: <role>`, so the retro can compare them from then on without counting a
+factory review as the person's.
+
+Decide from the evidence already in history, no experiment: the factory's `reviews/round-N/` and
+`verified.md` in each landed factory change's commit, ship's `findings.md` and `Sdlc-Findings`
+trailers, the `Sdlc-Totals` on each `Close` (stops; the factory's tokens there are the
+supervisor's alone, its agents' in `runs/costs.jsonl`), and the bugs with `Introduced by:` (the
+escape rate O6 measures). After the 1.9.0 release.
+Theme: review
+Raised 2026-11-17.
