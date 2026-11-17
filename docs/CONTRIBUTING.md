@@ -108,6 +108,8 @@ the full one. Results go under `.sdlc/reports/`, never committed. `run-cases --k
 run's folder and trace to debug a case that fails. A case is a folder in `evals/` with
 `prompt.md`, `case.yaml` (its `tags` name the skill it tests) and `graders/`; its scaffold passes
 `--sandbox` so `evals/scaffold.sh` readies uv in the run's home, where the sandbox has no network.
+An `llm` grader that judges what a reply showed before its question sets `focus: trace`: the
+default, `last_message`, is only the question when the skill asks it in a message of its own.
 
 ## How a change is made here
 

@@ -1,0 +1,3 @@
+{"session": "b7eff625-d4e2-42a0-af62-8af9e89ec578", "role": "builder", "model": "opus", "cost_usd": 0.8490402, "duration_ms": 364334, "turns": 31, "in": 56, "out": 11829, "cache_create": 49787, "cache_read": 1069701}
+{"session": "ab94afaf-aa04-4204-bfc0-4f137e4986b2", "role": "code", "model": "haiku", "cost_usd": 0.020622650000000003, "duration_ms": 73902, "turns": 16, "in": 28, "out": 12001, "cache_create": 49250, "cache_read": 476935}
+{"session": "d0bbde70-2da7-409c-8f9e-3d50e8315875", "role": "approver", "model": "opus", "cost_usd": 0.2554402, "duration_ms": 28752, "turns": 11, "in": 8, "out": 2880, "cache_create": 23254, "cache_read": 58881}

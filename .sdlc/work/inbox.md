@@ -335,18 +335,6 @@ Left undone by 107-board-needs-you, carried forward when it landed: `next_action
 See .sdlc/work/107-board-needs-you/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-75] [bug] The intent cases' judgment grader reads only the last message
-
-The `intent` and `intent-product` cases' `judgment` grader judges the run's last message. When the
-model asks its WAIT as plain text in a message of its own (no `AskUserQuestion` in the case), the
-judge never sees the draft and the tier before it and votes FAIL: 096's and 100's ships on
-2026-11-17 each failed one case, a different one each run, and passed it on a rerun. The grader
-should read the whole reply, or the case end on one message.
-
-Severity: med
-Paths: evals/intent/graders/judgment.md, evals/intent-product
-Theme: tests
-
 ## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
 
 097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at

@@ -124,6 +124,16 @@ def test_a_stop_case_keeps_every_never_write_grader(case: str) -> None:
     assert fixture in FIXTURES and flag == "--sandbox", case
 
 
+@pytest.mark.parametrize("case", sorted(STOP_CASES))
+def test_a_judgment_grader_reads_the_whole_reply(case: str) -> None:
+    """A stop case's `llm` grader judges what came before its question, which a skill may ask in
+    a message of its own: so it reads the run's trace, never only the last message (the default)."""
+    for name, g in _graders(case).items():
+        if g["type"] == "llm":
+            assert g.get("focus") == "trace", f"{case}: {name}"
+            assert "before its final question" in g.content, f"{case}: {name}"
+
+
 def test_the_setup_case_stops_before_its_drafts() -> None:
     """R10: on a set-up repo, setup asks config, reads none of its drafts, writes, commits or
     pushes nothing, and ends saying so: it has no question to end at, so no `asks-the-question`."""
