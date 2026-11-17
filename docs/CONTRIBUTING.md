@@ -195,11 +195,11 @@ valid. `sdlc.py` loads it by path and calls `make(home, cfg)`, which returns an 
 A tracker that reads the issues people file has `intake()`. The commands that read or mark issues
 go through `_intake_tracker()`, which refuses a tracker without it: `intake` (`intake()`,
 `dangling()`), `closes` and ship's `preflight` (`titles()`), `needs-info` (`needs_info()`), and
-`mark-triaged` and `sync` (`mark()`, `open_marks()`, `open_numbers()`, and `sync`'s
-`unmark()`). Close is the exception: once a change has landed, its record step marks issues
-whenever the tracker has `mark()`, with or without `intake()`, calling `mark()`, `open_marks()`
-and `open_numbers()`. `closed_by()` is read
-on its own, whenever the tracker has it. Core says what the repo records about each issue
+`mark-triaged` and `sync` (`mark()`, `open_marks()`, `open_numbers()`, `unmark()`, and
+`closed_by()`). Close is the exception: once a change has landed, its record step marks issues
+whenever the tracker has `mark()`, with or without `intake()`, calling `mark()`, `open_marks()`,
+`open_numbers()`, `unmark()` and `closed_by()`. `closed_by()` is also read on its own, whenever
+the tracker has it. Core says what the repo records about each issue
 (`recorded_issues()`); these only read the tracker or set what core says, and each that writes
 returns None or why not, and is safe to rerun:
 
@@ -222,13 +222,17 @@ returns None or why not, and is safe to rerun:
 - `unmark(number, comment, marker)`, optional: send an issue back to triage: the comment once
   (under `marker`), no longer marked triaged, and no parent. `sdlc.py sync`, for an issue the
   change marked that has left its `closes:` line and that nothing else the repo holds records
-  (`withdraw_issues()`), only when the tracker also has `open_marks()`. A dropped change's
+  (`withdraw_issues()`), only when the tracker also has `open_marks()`. A full marking pass
+  (close, `mark-triaged`), for an issue it marked whose record went, unless a commit the base
+  branch hasn't pushed closes it (`unmark_withdrawn()`), only when the tracker also has
+  `open_marks()` and `closed_by()`. A dropped change's
   `closes:` issues are the tracker's own to let go, in `archive()`, with core's text;
 - `needs_info(number, comment)`: ask the issue's author for detail, once until they reply, and
   mark it waiting. `sdlc.py needs-info`, for `/sdlc:triage`;
 - `closed_by(message)`, optional: the issue numbers a commit message closes once it reaches the
   default branch, reading no network. The unpushed commits status, close and release report
-  (`_unpushed()`), for the issues a push would close.
+  (`_unpushed()`), for the issues a push would close, and a full marking pass reads
+  (`unpushed_closes()`), so it leaves an issue the push will close for the push.
 
 `change` is a dict: the change's record (`id`, `slug`, `name`, `title`, `tier`, `stage`, `impact`,
 `depends_on`, `updated`), its `branch` and `sha`, the `issue_title` its issue carries (the heading

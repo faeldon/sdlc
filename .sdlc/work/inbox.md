@@ -171,12 +171,6 @@ Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, 
 See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-89] [idea] Unmark withdrawn issues in the full marking pass, using closed_by() on the unpushed commits
-
-Left undone by 116-register-and-docs, carried forward when it landed: A full marking pass (close, `mark-triaged`) still leaves a core-marked issue whose record went (an entry's `Issue:` line removed by hand) as `dangling` for triage, not unmarked: close's pass runs between its Close commit and the push that closes the change's issues, so it would need `closed_by()` on the unpushed commits to tell a just-fixed issue from a withdrawn one.
-See .sdlc/work/116-register-and-docs/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-18-2] [idea] Ship's security pass at the factory's depth
 
 Left undone by 114-one-review, carried forward when it shipped: gap: security: ship checks only secrets, plus the fresh reviewer on a sensitive path; it has no security pass at the depth of the factory's `reviewer-security`.
@@ -236,4 +230,10 @@ Paths: scripts/board.html
 
 Left undone by 125-build-gate-shows-the-change, carried forward when it landed: `/sdlc-factory:spec`'s WAIT still words its question in the skill (`Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design?`), but its only placeholder is the folder name, so there is nothing a model could get wrong in it; left out of this change, per the intent's scope.
 See .sdlc/work/125-build-gate-shows-the-change/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-12] [idea] Triage's dangling bullet says an issue an unpushed commit closes waits on the push
+
+Left undone by 128-unmark-withdrawn-issues, carried forward when it landed: `skills/triage/SKILL.md`'s `dangling` bullet offers every dangling issue for triage again, one an unpushed commit closes included: it could say that one waits on the push.
+See .sdlc/work/128-unmark-withdrawn-issues/notes.md in its commit.
 Raised 2026-11-18.

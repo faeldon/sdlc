@@ -1828,6 +1828,69 @@ def test_marking_again_views_only_what_one_listing_can_t_settle(tmp_path, gh, ca
     assert views_of_a_run() == ["15"], "#15's parent is the one thing a listing can't confirm"
 
 
+def test_a_full_pass_unmarks_an_issue_whose_record_was_withdrawn(tmp_path, gh, capsys) -> None:
+    """128: an entry's `Issue:` line removed by hand, the next full pass sends the issue it marked
+    back to triage, once. One a person labelled, with no marker of core's, stays `dangling`."""
+    root = _repo(tmp_path)
+    for n in (52, 53):
+        _filed(gh, n)
+    _filed(gh, 60, labels=("triaged",))  # labelled by a person, recorded by nothing
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #52, #53\n")
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert code == 0 and {"name": "triaged"} in _issue(gh, 52)["labels"], out
+    _register(root, "## [2026-10-26-1] [idea] Keep drafts\n\nx\n\nIssue: #53\n")
+    for _ in range(2):
+        code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+        assert code == 0, out
+    gone = _issue(gh, 52)
+    assert {"name": "triaged"} not in gone["labels"]
+    assert [c["body"] for c in gone["comments"]][1:] == [
+        "<!-- sdlc:withdrawn:2026-10-26-1 -->\n"
+        "2026-10-26-1 no longer records this issue; it is open for triage again."
+    ], "one comment, however often the pass runs"
+    assert {"name": "triaged"} in _issue(gh, 53)["labels"], "still recorded"
+    assert {"name": "triaged"} in _issue(gh, 60)["labels"] and _issue(gh, 60)["comments"] == []
+    _, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert [d["number"] for d in out["dangling"]] == [60], "a person's label stays dangling"
+    assert [i["number"] for i in out["issues"]] == [52], "the withdrawn one is triaged again"
+    # A person labels it `triaged` again by hand: core's last word on it was the withdrawal.
+    state = gh()
+    next(i for i in state["issues"] if i["number"] == 52)["labels"].append({"name": "triaged"})
+    Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps(state), encoding="utf-8")
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert code == 0 and {"name": "triaged"} in _issue(gh, 52)["labels"], out
+
+
+def test_a_full_pass_leaves_an_issue_an_unpushed_commit_closes(tmp_path, gh, capsys) -> None:
+    """128: close's pass runs between its Close commit and the push: the issue the change closes
+    has lost its record, and is left for the push to close. Once the base branch's tracking ref
+    holds that commit, nothing unpushed closes it, and a pass sends it back to triage."""
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0 and {"name": "triaged"} in _issue(gh, 50)["labels"], out
+    _set(folder, "impact:\n", "impact: none\n")
+    assert sdlc.cmd_ship(root, "001") == 0
+    tree = sdlc.checkout_of(folder)
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ship 001-thing")
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and "Closes #50" in _git(root, "log", "-1", "--format=%b", "main"), out
+    assert {"name": "triaged"} in _issue(gh, 50)["labels"], "close's own pass leaves it"
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert code == 0 and {"name": "triaged"} in _issue(gh, 50)["labels"], "no tracking ref"
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    code, out = _json(capsys, lambda: sdlc.cmd_mark_triaged(root))
+    assert code == 0 and "#50: back to triage" in out["done"], out
+    assert {"name": "triaged"} not in _issue(gh, 50)["labels"]
+    assert _issue(gh, 50)["comments"][-1]["body"] == (
+        "<!-- sdlc:withdrawn:001-thing -->\n"
+        "001-thing no longer takes this issue on; it is open for triage again."
+    )
+
+
 def test_mark_triaged_points_an_attached_issue_at_its_change(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     folder = _open(root)

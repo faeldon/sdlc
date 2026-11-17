@@ -423,11 +423,14 @@ label; `intake` leaves it out until the author comments. Then `sdlc.py mark-tria
 main checkout, tells each open issue the repo records where it stands: one comment each, the
 `triaged` label, and its parent (the entry's first issue, or the change's issue), closing those a
 verdict closed. It reads only what is committed on the base branch and the open changes, so a run
-that stops halfway is finished by the next. `intake` lists as `dangling` an issue labelled
-`triaged` that nothing records anymore, and `/sdlc:close` reruns the marking once the change's
-entries are on the base branch. `sdlc.py sync` marks a change's own `closes:` issues as soon as
-its intent names them, so a filer hears the change took the issue on, and sends one that left the
-line back to triage, with a comment saying so, unless another record holds it now.
+that stops halfway is finished by the next. `/sdlc:close` reruns the marking once the change's
+entries are on the base branch. An issue the marking labelled whose record went (an entry's
+`Issue:` line removed by hand) goes back to triage, with a comment saying so, unless a commit
+the base branch hasn't pushed closes it (every commit on it, with no remote-tracking ref): that
+one is left for the push. `intake` lists as `dangling` an issue labelled `triaged` that nothing
+records anymore, which includes one whose send-back failed, or that waits on that push. `sdlc.py
+sync` marks a change's own `closes:` issues as soon as its intent names them, so a filer hears
+the change took the issue on, and sends one that left the line back to triage, with a comment saying so, unless another record holds it now.
 
 **What comes next.** `sdlc.py status` ends with a `■ Next up` section: what to start once the open
 changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A

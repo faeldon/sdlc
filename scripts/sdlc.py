@@ -7843,12 +7843,14 @@ def _closes_report(root: Path, path: Path) -> dict:
 def mark_issues(home: Path, found, only: set[int] | None = None) -> dict:
     """Bring every open issue the base branch and the open changes record (or those of them in
     `only`) in line with its record on the tracker: its comment once, the `triaged` label, its
-    parent, and closed for a verdict that closes it. Never raises; what failed is listed."""
+    parent, and closed for a verdict that closes it. A full pass (no `only`) also sends back to
+    triage each one it marked whose record went (`unmark_withdrawn()`). Never raises; what
+    failed is listed."""
     report: dict = {"done": [], "failed": []}
     records = recorded_issues(home, committed_only=True)
     if only is not None:
         records = {n: r for n, r in records.items() if n in only}
-    if not records:
+    if not records and (only is not None or not hasattr(found, "unmark")):
         return report
     # A full pass (close, mark-triaged) lists each issue's marks once, where the tracker can, so an
     # issue marked already costs no view of its own. A pass over a change's own few (`only`) lists
@@ -7881,6 +7883,80 @@ def mark_issues(home: Path, found, only: set[int] | None = None) -> dict:
             continue
         err = found.mark(n, r["comment"], r["marker"], parent=r["parent"], close=r["close"])
         (report["failed"] if err else report["done"]).append(err or f"#{n}: {r['filed']}")
+    if only is None and hasattr(found, "unmark"):
+        for k, v in unmark_withdrawn(home, found, marks).items():
+            report[k] += v
+    return report
+
+
+# A comment core leaves on an issue: its marker names the record (`intake`, `triage`) or the one
+# that let it go (`withdrawn`). Read from `open_marks()`'s comment bodies.
+CORE_MARK_RE = re.compile(r"<!-- sdlc:(intake|triage|withdrawn):(.+?) -->")
+
+
+def _last_core_mark(comments: list[str]) -> tuple[str, str] | None:
+    """(kind, ref) of the newest comment core left on an issue, or None when it left none."""
+    for body in reversed(comments):
+        if m := CORE_MARK_RE.search(body):
+            return m.group(1), m.group(2)
+    return None
+
+
+def unpushed_closes(home: Path, cfg: dict, closed_by) -> set[int] | None:
+    """The issues a commit the base branch holds and its remote-tracking ref doesn't would close,
+    each commit's message read by the tracker's `closed_by()`; with no tracking ref, every commit
+    on the base branch, since none is known to be pushed. None when git can't say. Read locally."""
+    remote, trunk = cfg["release"]["remote"], cfg["git"]["base"]
+    if not trunk:
+        return None
+    ref = f"refs/remotes/{remote}/{trunk}"
+    known = _git(home, "rev-parse", "-q", "--verify", ref) is not None
+    out = _git(home, "log", "--format=%B%x03", f"{ref}..{trunk}" if known else trunk)
+    if out is None:
+        return None
+    return {n for body in out.split("\x03") for n in closed_by(body)}
+
+
+def unmark_withdrawn(home: Path, found, marks: dict[int, dict] | None) -> dict:
+    """Send back to triage each open issue whose record went (an entry's `Issue:` line removed by
+    hand): still `triaged`, core's newest comment on it a mark (not a withdrawal), no record the
+    repo holds names it (`recorded_issues()`, every checkout's), and no commit the base branch
+    hasn't pushed closes it, which close's pass, between its Close commit and the push, must
+    leave for the push. Nothing on a guess: no listing of `marks`, no `closed_by()`, or git
+    unable to read the unpushed commits, and nothing is unmarked. Never raises."""
+    report: dict = {"done": [], "failed": []}
+    closed_by = getattr(found, "closed_by", None)
+    if not marks or closed_by is None:
+        return report
+    left = {}
+    for n, seen in sorted(marks.items()):
+        last = _last_core_mark(seen["comments"])
+        if seen["triaged"] and last and last[0] != "withdrawn":
+            left[n] = last[1]
+    if not left:
+        return report
+    recorded = recorded_issues(home)
+    left = {n: ref for n, ref in left.items() if n not in recorded}
+    if not left:
+        return report
+    try:
+        closing = unpushed_closes(home, load_config(home)[0], closed_by)
+    except Exception as e:  # a tracker that fails here still lets close land
+        report["failed"].append(f"reading the unpushed commits: {type(e).__name__}: {e}")
+        return report
+    if closing is None:
+        report["failed"].append("couldn't read the unpushed commits; nothing sent back to triage")
+        return report
+    for n, ref in left.items():
+        if n in closing:
+            continue
+        text = (
+            f"{ref} no longer records this issue; it is open for triage again."
+            if ENTRY_ID_RE.match(ref)
+            else closes_texts(ref)["withdrawn"]
+        )
+        err = found.unmark(n, text, f"<!-- sdlc:withdrawn:{ref} -->")
+        (report["failed"] if err else report["done"]).append(err or f"#{n}: back to triage")
     return report
 
 
