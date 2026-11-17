@@ -1,9 +1,12 @@
 # sdlc-factory — agents for the change loop, optional
 
-A companion to the `sdlc` plugin. Where `sdlc` has a person drive every stage of a change, this
-hands a change's **spec, plan, build and review** to agents, inside the same loop and behind the
-same gates. Install it in the repos where you want that; leave it out where you don't. A repo
-without it runs `sdlc` exactly as before, and a repo with it can still build any change by hand.
+A companion to the `sdlc` plugin. `sdlc` on its own is **manual mode**: a person drives every
+stage of a change. The factory doesn't replace that process; it runs on it. Manual mode is its
+deterministic spine, and the factory hands the judgment in it (a change's **spec, plan, build and
+review**) to agents, while every stage and check around them stays the code a person runs by hand,
+and ship and close stay the person's. Install it in the repos where you want that; leave it out
+where you don't. A repo without it runs `sdlc` exactly as before, and a repo with it can still
+build any change by hand.
 
 ```bash
 claude plugin install sdlc-factory@sdlc      # needs sdlc, which it depends on
@@ -14,6 +17,24 @@ claude plugin install sdlc-factory@sdlc      # needs sdlc, which it depends on
 Inside the change loop, between a person's intent and a person's ship. Nothing before or after
 changes, and the release and retrospective loops never see the difference: a change the agents
 built is a change.
+
+What stays deterministic, and the person's, is manual mode's:
+
+- **The stages.** `factory.py` refuses a step the change's tier and `stage:` don't allow, and
+  moves `stage:` only as far as `test`: `shipped` is `sdlc.py ship`'s alone.
+- **The artifacts.** The agents write the same `spec.md`, `plan.md` and code a person would, in
+  the same folder, and `sdlc.py check` audits them the same way.
+- **The depth of review.** It comes from the diff against the base branch's `[review] sensitive`,
+  read by the script, never judged by an agent, so a change can't lighten its own review.
+- **The gates.** The supervisor starts nothing before its one WAIT (the spec and the run, or
+  `/sdlc-factory:spec`'s for a spec alone), and the run leaves everything uncommitted.
+  `/sdlc:ship` reviews it as it would any change, with its own checks, its WAIT and its one
+  commit, and `/sdlc:close` lands it.
+- **The measuring.** Close counts a factory change's rework from the same trailers as one built
+  by hand.
+
+The agents fill only the slots where a person would otherwise judge: drafting, building,
+reviewing, and deciding whether to escalate.
 
 ```
 /sdlc:intent ── /sdlc-factory:build, the supervisor ──────────────────────────── /sdlc:ship ── /sdlc:close

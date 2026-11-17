@@ -161,10 +161,12 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   in its commit how to recover. With neither set, every change ships alike.
 - **Dropping a change.** `/sdlc:drop` closes a change that won't ship: it records why and how far
   it got, closes its issue as not planned, and keeps its commits reachable from `main`.
-- **The factory** (`sdlc-factory`). Hands a change's spec, build and review to agents working in
-  rounds, behind one approval per change, run by a supervisor (your own session) that takes
-  several changes at once and tells you each one's ready to ship; you ship them, in your order, and
-  nothing an agent does is committed. See
+- **The factory** (`sdlc-factory`). Runs on manual mode (`sdlc` as above) as its deterministic
+  spine: it hands a change's spec, build and review to agents working in rounds, while the stages,
+  checks, review depth, ship and close stay the ones a change built by hand meets. One approval per
+  change starts a run, under a supervisor (your own session) that takes several changes at once
+  and tells you each one's ready to ship; you ship them, in your order, and nothing an agent does
+  is committed. See
   [`plugins/factory/README.md`](plugins/factory/README.md).
 
 ## Updating
