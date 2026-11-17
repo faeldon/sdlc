@@ -405,3 +405,81 @@ Raised 2026-11-17.
 Left undone by 107-board-needs-you, carried forward when it landed: `next_action()` is unchanged, as the spec says: an escalation that still needs `decide D2` names `/sdlc:ship, or /sdlc-factory:land …` as its next step, beside its `needs you:` line. A next step that follows the needs would read better.
 See .sdlc/work/107-board-needs-you/notes.md in its commit.
 Raised 2026-11-17.
+
+## [2026-11-17-71] [bug] The landing's behaviour check leaves an exit off its evidence and stops a passing change
+
+The landing's behaviour check (`agent --task land-review --role behaviour`) kept writing a command
+into its `## Evidence` without an `exit:` line, mostly a trivial read (`head -5 …`, `sdlc.py
+status`), so `land-verdicts` stopped four landings on 2026-11-17 (103, 098, 104, 107) whose
+verdicts were all `PASS`; each was closed by hand. One also put its `VERDICT:` on line 7 after a
+self-correction (105). The landing has no mend for either: its prompt or the evidence check
+should make a missing exit on a read-only command mendable, or not a stop.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md
+Theme: landing
+
+## [2026-11-17-72] [bug] A mend during a landing writes into the build round
+
+`factory.py agent <NNN> --task mend --role behaviour`, run on a landing's stop, wrote its reply to
+`reviews/round-1/behaviour.md`, the change's build round, which had no behaviour review, instead of
+`reviews/land-<n>/behaviour.md`; the landing stayed stopped and the build round gained a review it
+never ran (103 on 2026-11-17, set aside as `behaviour.misfiled.md`). A mend should target the
+landing round when a landing is open, or refuse.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-73] [bug] A landing's failed commit drops git's own error
+
+`cmd_land()` reports `the commit failed: Command … returned non-zero exit status 128` and drops
+the `CalledProcessError`'s `stderr`, so why git refused can't be seen (098 on 2026-11-17; a
+dry run with the same message passed, and a retry by hand committed). The refusal should carry
+git's message.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-74] [bug] A landing that fails between ship and its commit can't be resumed
+
+When `land`'s commit fails after `sdlc.py ship` stamped the change shipped and staged it, a rerun of
+`land` reads `stage: shipped` as landed before and tries to amend a commit that doesn't exist (098
+on 2026-11-17, committed by hand with the landing's composed message). A rerun should see no
+landing commit (`Sdlc-Landed:` on `HEAD`) and make the commit.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Theme: landing
+
+## [2026-11-17-75] [bug] The intent cases' judgment grader reads only the last message
+
+The `intent` and `intent-product` cases' `judgment` grader judges the run's last message. When the
+model asks its WAIT as plain text in a message of its own (no `AskUserQuestion` in the case), the
+judge never sees the draft and the tier before it and votes FAIL: 096's and 100's ships on
+2026-11-17 each failed one case, a different one each run, and passed it on a rerun. The grader
+should read the whole reply, or the case end on one message.
+
+Severity: med
+Paths: evals/intent/graders/judgment.md, evals/intent-product
+Theme: tests
+
+## [2026-11-17-76] [idea] Promote a change to Tier 2 in the middle of a factory run
+
+097 was promoted from Tier 1 to Tier 2 at its builder's blocking decision on 2026-11-17, but at
+`stage: build` neither `/sdlc-factory:spec` nor the build skill drafts a spec (both start from
+`plan` or `design`), and the builder rightly won't write one; the supervisor moved the stage back
+to `plan` by hand. A promotion should have a path: `factory.py` sets `tier: 2`, keeps the build,
+and drafts the spec behind its own question.
+Theme: factory
+Raised 2026-11-17.
+
+## [2026-11-17-77] [idea] Mend an approver's or verifier's answer written after a preamble
+
+A run mends a builder's missing evidence and a reviewer's verdict after a preamble, but not an
+approver's decision or a verifier's answers that open with a preamble or in another shape (099's
+verifier wrote `- **KEPT:**`; 099's and 107's approvers wrote a line before `DECISION:` on
+2026-11-17). Each was set aside by hand and the agent rerun. The mend could cover those roles too.
+Theme: factory
+Raised 2026-11-17.
