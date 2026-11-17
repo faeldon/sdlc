@@ -269,6 +269,17 @@ def test_milestones_put_forward_their_first_ready_seed_in_doc_order(
     ]
 
 
+def test_next_up_is_the_same_with_and_without_serves_lines(tmp_path: Path) -> None:
+    """092 R4: a milestone's `Serves:` line changes nothing status puts forward."""
+    root = _repo(tmp_path)
+    _ideas(root, _seed("2026-10-01", "Only in M1"), _seed("2026-10-02", "Loose"))
+    _direction(root, _milestone("M1", "First goal", '"Only in M1"'))
+    before = _next(root)
+    _direction(root, _milestone("M1", "First goal", '"Only in M1"\nServes: G1, O4'))
+    assert _next(root) == before
+    assert [i["rule"] for i in before["items"]] == ["milestone", "idea"]
+
+
 def test_nits_of_cost_s_come_one_line_per_theme_oldest_first(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     nits = (

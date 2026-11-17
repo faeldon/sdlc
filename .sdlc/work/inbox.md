@@ -231,20 +231,6 @@ would then also ask whether a proposed line is already said elsewhere. Raised by
 of 2026-11-17.
 Theme: docs
 
-## [2026-11-17-4] [idea] Retro checks its goals and the work against the outcomes
-
-The product pass scores each outcome, but it never asks whether the outcomes still cover the work.
-8 of the window's 27 changes served `none`, most of them cost and cleanup work the person counts as
-important. Last time, M12 was drafted with no goal or outcome behind it. Each retrospective would:
-- name the goals and milestones that cite no outcome;
-- group the changes that serve `none` by theme;
-- where a theme keeps recurring, propose an outcome line (a new `O<n>`) for the person to approve
-  at its WAIT.
-
-The script could list the `none` changes by theme in `product`, so the skill doesn't group them by
-hand. Raised by the retrospective of 2026-11-17.
-Theme: retro
-
 ## [2026-11-17-6] [nit] No skill case runs intent with a product doc
 
 The `intent` case's fixture has no `.sdlc/PRODUCT.md`, so no paid run shows intent proposing

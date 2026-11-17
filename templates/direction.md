@@ -9,7 +9,7 @@
 > an open one. The forms, which `sdlc.py retro` reads:
 >
 > ```
-> - G1. No one loses a draft
+> - G1. No one loses a draft (O1)
 > - ~~G2. Drafts shared between accounts~~ Dropped: nobody has asked for it
 >
 > ### M1. Drafts reopen where they were left
@@ -17,6 +17,7 @@
 > What's true when it's done.
 >
 > Groups: 006, 2026-10-01-2
+> Serves: G1
 >
 > ### ~~M2. Drafts sync every hour~~ Revised → M3: on every save, not on a timer
 >
@@ -25,7 +26,9 @@
 > Groups: 009
 > ```
 >
-> A struck item stays for one more retrospective, then may go.
+> A goal ends with the outcomes in the product doc it answers to, and a milestone's `Serves:` line
+> names its goal, outcomes or both: `sdlc.py retro` reports an open one that reaches no open
+> outcome, and never refuses it. A struck item stays for one more retrospective, then may go.
 
 ## Since the last retrospective
 
@@ -43,14 +46,15 @@ are running.>
 ## Goals
 
 <Each goal as `- G<n>. <what it's for>`, stated so a later retrospective can say whether it was
-met; a closed one struck, `- ~~G<n>. …~~ Done: …`. Three open at most: a list of ten goals sets
-no direction.>
+met, ending with the outcomes it answers to, `(O1, O3)`; a closed one struck,
+`- ~~G<n>. …~~ Done: …`. Three open at most: a list of ten goals sets no direction.>
 
 ## Milestones
 
 <Each milestone as its own `### M<n>. Name` heading: what is true when it's done, then one
 `Groups:` line naming the changes (NNN) and inbox entries (by id, or "their title" for one from
-before ids) it groups. In the order they should land.>
+before ids) it groups, and a `Serves:` line naming the goal it reaches (and so its outcomes) or the
+outcomes themselves. In the order they should land.>
 
 ## Next major release
 

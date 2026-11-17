@@ -810,6 +810,8 @@ def test_the_templates_example_parses_to_its_ids() -> None:
         "changes": ["006"],
         "seeds": ["2026-10-01-2"],
     }
+    g1 = next(i for i in out["items"] if i["id"] == "G1")
+    assert (g1["serves"], m1["serves"]) == (["O1"], ["G1"])
 
 
 def test_the_template_itself_holds_no_items() -> None:
@@ -874,6 +876,85 @@ def test_a_doc_without_ids_or_no_doc_is_a_first_retrospective(tmp_path: Path) ->
     assert sdlc.direction_items("# Direction\n\n## Goals\n\nShip releases.\n")["problems"] == []
     direction = _retro(_repo(tmp_path))["direction"]
     assert direction["items"] == [] and direction["next_ids"] == {"G": "G1", "M": "M1"}
+
+
+# ---------------------------------------------------------------- what goals and milestones serve
+
+
+def test_a_goal_cites_the_outcomes_at_the_end_of_its_line() -> None:
+    """092 R1: a trailing `(O1, O3)`, as text and in order; anything else in it cites nothing, and
+    the title keeps it."""
+    doc = (
+        "## Goals\n\n"
+        "- G6. Each rule is said once (O2)\n"
+        "- G7. **Lean.** The loop costs less (O1, O3,O6)\n"
+        "- ~~G8. Offline drafts (O4)~~ Dropped: nobody asked for it\n"
+        "- G9. Drafts are kept (see below)\n"
+        "- G10. Drafts sync\n"
+        "- G11. Drafts merge (O1, later)\n"
+        "- G12. Drafts survive a crash, a restart and a move between the\n"
+        "  devices a person uses (O2, O5)\n"
+        "- G13. Drafts are small\n\n  (O3)\n"
+        "- ~~G14. Drafts are shared~~ Dropped: nobody asked, not even\n  for (O1)\n"
+        "- G15. Drafts are fast\n- O1. In the wrong doc\n  (O4)\n"
+    )
+    by = {i["id"]: i for i in sdlc.direction_items(doc)["items"]}
+    assert by["G6"]["serves"] == ["O2"] and by["G6"]["title"] == "Each rule is said once (O2)"
+    assert by["G7"]["serves"] == ["O1", "O3", "O6"] and by["G7"]["name"] == "Lean"
+    assert by["G8"]["serves"] == ["O4"] and by["G8"]["status"] == "dropped"
+    assert by["G9"]["serves"] == [] and by["G10"]["serves"] == [] and by["G11"]["serves"] == []
+    # A goal wrapped onto indented lines cites at the end of its last one; a later paragraph
+    # isn't the goal's.
+    assert by["G12"]["serves"] == ["O2", "O5"]
+    assert by["G12"]["title"] == "Drafts survive a crash, a restart and a move between the"
+    assert by["G13"]["serves"] == [] and by["G14"]["serves"] == [] and by["G15"]["serves"] == []
+
+
+def test_a_milestone_cites_on_its_serves_line() -> None:
+    """092 R2: the `G<n>`/`O<n>` tokens of a milestone's first `Serves:` line; other words are
+    ignored, and a `Serves:` line anywhere but under a milestone is nothing."""
+    doc = (
+        "## Goals\n\n- G1. Drafts are kept (O1)\n\nServes: O9\n\n"
+        "## Milestones\n\n"
+        '### M1. One draft\n\nGroups: 011, "Reopen drafts"\nServes: G1, O4 and then some\n'
+        "Serves: O5\n\n"
+        "### M2. Titles\n\nGroups: 012\n\n"
+        "## Next major release\n\nServes: O7\n"
+    )
+    by = {i["id"]: i for i in sdlc.direction_items(doc)["items"]}
+    assert by["M1"]["serves"] == ["G1", "O4"]
+    assert by["M1"]["groups"] == {"changes": ["011"], "seeds": ["Reopen drafts"]}
+    assert by["M2"]["serves"] == [] and by["M2"]["groups"]["changes"] == ["012"]
+    assert by["G1"]["serves"] == ["O1"]
+    product = sdlc.product_items("## Outcomes\n\n- O1. **Setup.** Unaided\n\nServes: O2\n")
+    assert product["items"][0]["serves"] == []
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        "## Goals\n\n- G1. Kept\n\n## Milestones\n\n### M1. One\n\nGroups: 011\n",
+        "## Goals\n\n- G1. Kept (O1,\n\n## Milestones\n\n### M1. One\n\nServes: nonsense, G\n",
+        "## Goals\n\n- G1. Kept (O99)\n\n## Milestones\n\n### M1. One\n\nServes: G9, O42\n",
+    ],
+)
+def test_citations_never_add_a_problem(doc: str) -> None:
+    """092 R3: no citation, a malformed one, or one naming nothing is reported by `retro`, never a
+    format problem `retro-commit` would refuse."""
+    assert sdlc.direction_items(doc)["problems"] == []
+
+
+def test_retro_commit_takes_an_uncited_goal(tmp_path: Path, capsys) -> None:
+    root = _repo(tmp_path)
+    _direction(root)
+    (root / ".sdlc" / "DIRECTION.md").write_text(
+        "# Direction\n\n## Goals\n\n- G1. Drafts are kept\n\n## Milestones\n\n"
+        "### M1. One draft\n\nGroups: 011\n",
+        encoding="utf-8",
+    )
+    code = sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24))
+    assert code == 0, capsys.readouterr().out
+    assert _git(root, "log", "-1", "--format=%s") == "Retrospective 2026-10-24"
 
 
 def test_each_grouped_seed_and_change_says_what_it_became(tmp_path: Path) -> None:
@@ -1325,6 +1406,122 @@ def test_an_open_change_serving_a_struck_outcome_is_stale(tmp_path: Path) -> Non
     product = _retro(root)["product"]
     assert product["stale"] == [{"change": "004-open", "outcome": "O2"}]
     assert product["outcomes"]["O3"]["open"] == ["004-open"]
+
+
+COVERAGE = """\
+# Direction
+
+## Goals
+
+- G1. Drafts are kept (O1)
+- G2. Drafts sync (O2)
+- G3. Drafts are fast
+- ~~G4. Offline drafts~~ Dropped: nobody asked for it
+- G5. Drafts merge (O9)
+
+## Milestones
+
+### M1. Through its goal
+
+Serves: G1
+
+### M2. Cites nothing
+
+Groups: 011
+
+### M3. An unknown goal
+
+Serves: G9
+
+### M4. A struck outcome
+
+Serves: G2, O2
+
+### M5. A goal that cites nothing
+
+Serves: G3
+"""
+
+
+def test_retro_names_goals_and_milestones_that_reach_no_open_outcome(tmp_path: Path) -> None:
+    """092 R5: each open goal and milestone whose citations, a milestone's through its goals too,
+    reach no open outcome, with why; in the doc's order, never a struck one."""
+    root = _repo(tmp_path)
+    _product(root)
+    (root / ".sdlc" / "DIRECTION.md").write_text(COVERAGE, encoding="utf-8")
+    got = [
+        (r["id"], r["kind"], r["serves"], r["reaches"], r["why"])
+        for r in _retro(root)["product"]["uncited"]
+    ]
+    assert got == [
+        ("G2", "goal", ["O2"], ["O2"], "closed"),
+        ("G3", "goal", [], [], "none"),
+        ("G5", "goal", ["O9"], ["O9"], "unknown"),
+        ("M2", "milestone", [], [], "none"),
+        ("M3", "milestone", ["G9"], [], "unknown"),
+        ("M4", "milestone", ["G2", "O2"], ["O2"], "closed"),
+        ("M5", "milestone", ["G3"], [], "none"),
+    ]
+    row = _retro(root)["product"]["uncited"][0]
+    assert (row["name"], row["title"]) == ("", "Drafts sync (O2)")
+
+
+def _none_change(root: Path, name: str, seeds: tuple[tuple[str, str | None], ...] = ()) -> None:
+    """A change serving no outcome, built from `seeds` (id, theme): they are filed on main first,
+    and its ship commit deletes them from the register, as ship does, so only the register at
+    its base still holds them."""
+    register = root / ".sdlc" / "work" / "inbox.md"
+    register.parent.mkdir(parents=True, exist_ok=True)
+    text = register.read_text(encoding="utf-8") if register.exists() else "# Inbox\n\n"
+    filed = text
+    for sid, theme in seeds:
+        filed += f"## [{sid}] [idea] Seed {sid}\n\nWhy.\n\n" + (
+            f"Theme: {theme}\n\n" if theme else ""
+        )
+    if seeds:
+        register.write_text(filed, encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "seeds")
+        register.write_text(text, encoding="utf-8")
+    intent = _serving(name, "none")
+    if seeds:
+        listed = ", ".join(sid for sid, _ in seeds)
+        intent = intent.replace("idea:\n", f"idea: [{listed}]\n", 1)
+    _close(root, name, intent=intent, based=True)
+
+
+def test_none_changes_are_grouped_by_their_seeds_themes(tmp_path: Path) -> None:
+    """092 R6: each `none` change under every distinct theme its seeds had at its base, once;
+    with none of them themed, `(no theme)`. Rows by count, then theme."""
+    root = _repo(tmp_path)
+    _product(root)
+    _none_change(root, "001-a", (("2026-10-01-1", "cleanup"),))
+    _none_change(root, "002-b", (("2026-10-01-2", "cost"), ("2026-10-01-3", "cost")))
+    _none_change(root, "003-c")
+    _none_change(root, "004-d", (("2026-10-01-4", "cost"), ("2026-10-01-5", None)))
+    _close(root, "005-e", intent=_serving("005-e", "[O1]"))
+    assert "Theme:" not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    product = _retro(root)["product"]
+    assert product["none"] == ["001-a", "002-b", "003-c", "004-d"]
+    assert product["none_themes"] == [
+        {"theme": "cost", "changes": ["002-b", "004-d"], "recurring": False},
+        {"theme": "(no theme)", "changes": ["003-c"], "recurring": False},
+        {"theme": "cleanup", "changes": ["001-a"], "recurring": False},
+    ]
+
+
+@pytest.mark.parametrize(
+    "themes, recurring",
+    [(("cleanup", "cleanup"), False), (("cleanup",) * 3, True), ((None,) * 3, False)],
+)
+def test_a_theme_recurs_at_three_none_changes(tmp_path: Path, themes, recurring: bool) -> None:
+    """092 R7: three `none` changes under one theme in the window; `(no theme)` never recurs."""
+    root = _repo(tmp_path)
+    _product(root)
+    for n, theme in enumerate(themes, 1):
+        _none_change(root, f"00{n}-c{n}", ((f"2026-10-0{n}-1", theme),))
+    (row,) = _retro(root)["product"]["none_themes"]
+    assert len(row["changes"]) == len(themes) and row["recurring"] is recurring
 
 
 def test_a_change_carries_the_first_release_that_holds_it(tmp_path: Path) -> None:

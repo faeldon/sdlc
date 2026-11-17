@@ -5882,7 +5882,20 @@ ITEM_FORMS = {"- ": "`- {id}.` list items", "### ": "`### {id}.` headings"}
 # show it beside the id, so a person never has to remember what O3 was. Open outcomes need one.
 NAME_RE = re.compile(r"^\*\*(?P<name>[^*]+?)\.?\*\*\.?\s*")
 GROUPS_RE = re.compile(r"^Groups:\s*(.+)$")
+# What a goal or milestone answers to, which `retro` checks against the open outcomes: a goal ends
+# with the outcomes it serves, `- G1. … (O1, O3)`; a milestone has a `Serves:` line beside its
+# `Groups:`, naming its goal, outcomes or both. Optional, and never a problem: an uncited item is
+# reported by `retro`, not refused.
+CITES_RE = re.compile(r"\((O\d+(?:\s*,\s*O\d+)*)\)\s*$")
+SERVES_RE = re.compile(r"^Serves:\s*(.+)$")
+SERVES_ID_RE = re.compile(r"\b[GO]\d+\b")
 GROUP_CHANGE_RE = re.compile(r"\b(\d{3,})(?:-[a-z0-9][a-z0-9-]*)?\b")
+
+
+def _goal_cites(text: str) -> list[str]:
+    """The outcome ids a goal's text ends with, `(O1, O3)`, in order; [] for any other ending."""
+    cites = CITES_RE.search(text)
+    return [o.strip() for o in cites[1].split(",")] if cites else []
 
 
 def direction_items(text: str) -> dict:
@@ -5904,6 +5917,9 @@ def doc_items(text: str, kinds: str) -> dict:
     items: list[dict] = []
     problems: list[str] = []
     current: dict | None = None
+    cited: set[str] = set()
+    # A goal wrapped onto indented lines, with the text so far: its citation ends the last one.
+    goal: tuple[dict, str] | None = None
     fenced = False
     for line in text.splitlines():
         # An example in a fence is the format shown, not an item.
@@ -5914,6 +5930,7 @@ def doc_items(text: str, kinds: str) -> dict:
             continue
         m = ITEM_RE.match(line.rstrip())
         if m:
+            goal = None
             letter = m["id"][0]
             kind, mark, belongs = ITEM_KINDS[letter]
             # Skipped either way, it would never be tracked, so say so rather than pass over it.
@@ -5941,7 +5958,12 @@ def doc_items(text: str, kinds: str) -> dict:
                 "reason": (m["reason"] or "").strip() if struck else "",
                 "successor": m["successor"] if struck else None,
                 "groups": {"changes": [], "seeds": []},
+                "serves": [],
             }
+            if kind == "goal":
+                item["serves"] = _goal_cites(item["title"])
+            # A struck goal's wrapped lines are its reason's, never its title's.
+            goal = (item, item["title"]) if kind == "goal" and not struck else None
             status = item["status"]
             if m["struck"] and not m["status"]:
                 problems.append(f"{m['id']} is struck through with no Done, Dropped or Revised")
@@ -5954,6 +5976,11 @@ def doc_items(text: str, kinds: str) -> dict:
             items.append(item)
             current = item if kind == "milestone" else None
             continue
+        if goal and line[:1].isspace() and line.strip():
+            goal = (goal[0], f"{goal[1]} {line.strip()}")
+            goal[0]["serves"] = _goal_cites(goal[1])
+            continue
+        goal = None
         if line.startswith("#"):
             current = None
         g = GROUPS_RE.match(line.strip())
@@ -5963,6 +5990,11 @@ def doc_items(text: str, kinds: str) -> dict:
             current["groups"]["seeds"] = refs_in(g[1])
             rest = ENTRY_ID_TOKEN_RE.sub("", re.sub(r'"[^"]*"', "", g[1]))
             current["groups"]["changes"] = GROUP_CHANGE_RE.findall(rest)
+        s = SERVES_RE.match(line.strip())
+        if s and current and current["id"] not in cited:
+            # The first `Serves:` line under a milestone, as with `Groups:`.
+            cited.add(current["id"])
+            current["serves"] = SERVES_ID_RE.findall(s[1])
     ids = {i["id"] for i in items}
     for item in items:
         if item["status"] == "revised" and item["successor"] not in ids:

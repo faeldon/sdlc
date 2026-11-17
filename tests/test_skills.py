@@ -1196,6 +1196,18 @@ def test_the_retro_keeps_evidence_and_the_product_docs_prose_out_of_what_it_writ
     assert "the product pass first of all" in text.split("## Step 2")[1].split("## Step 3")[0]
 
 
+def test_the_retro_skill_names_the_coverage_fields() -> None:
+    """092 R9: the skill reads what each goal and milestone serves, the uncited ones and the `none`
+    changes' themes, and drafts every milestone with its `Serves:` line."""
+    text = BY_ID["sdlc:retro"].read_text(encoding="utf-8")
+    passes = text.split("## Step 2")[1].split("## Step 3")[0]
+    for word in ("`uncited`", "`none_themes`", "`recurring`", "`Serves:`"):
+        assert word in passes, word
+    step0 = text.split("## Step 0")[1].split("## Step 1")[0]
+    for word in ("`serves`", "`uncited`", "`none_themes`"):
+        assert word in step0, word
+
+
 def test_intent_proposes_what_a_change_serves_and_its_gate_names_it() -> None:
     """Asking which outcomes a change serves was most of intent's stops beyond its gate, though the
     seed usually said: intent proposes the line in its draft, and the retrospective still counts

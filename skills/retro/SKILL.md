@@ -99,7 +99,8 @@ What `retro` gives:
   last retrospective (`then`, `growth`; null on a first one). `host` is a row per
   `retro.indicators` command, as `evidence` is: what it means is the host's.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
-  `done`, `dropped` or `revised`), its format `problems`, the `next_ids` to give new ones, and
+  `done`, `dropped` or `revised`, with `serves`: the outcomes a goal's line ends with, `(O1, O3)`,
+  or the goals and outcomes a milestone's `Serves:` line names), its format `problems`, the `next_ids` to give new ones, and
   `milestones`: for each open milestone, what every seed and change on its `Groups:` line became
   (a change `closed`, `open` or `unknown`; a seed `shipped` by a change, still `open`, or
   `vanished` with no change behind it). Empty items with no doc, or a doc without ids, means a
@@ -133,7 +134,12 @@ What `retro` gives:
   `next_ids`), and `outcomes`: for each open one, the changes closed since `since` that serve it
   (with `release` and `moves`) and the open changes that do. `unlinked` are closed changes with no
   `serves:` line, `none` the ones that serve no outcome on purpose, `unserved` the open outcomes
-  nothing serves, and `stale` the open changes naming an outcome already struck. `evidence` is a
+  nothing serves, and `stale` the open changes naming an outcome already struck. `uncited` are the
+  open goals and milestones whose `serves` reach no open outcome (a milestone through its goals
+  too), each with what it `reaches` and `why`: `none` (it reaches no outcome), `closed` (only
+  struck ones) or `unknown` (it names an id neither doc holds). `none_themes` groups the `none`
+  changes by their seeds' `Theme:` (`theme`, `changes`), `recurring` at three or more; `(no
+  theme)` never recurs. `evidence` is a
   row per `retro.evidence` command: its `output` (capped, `truncated` when cut), `exit` and
   `error`. What it means is the host's: the script passes it through unread.
 
@@ -242,6 +248,10 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    haven't had it, so no evidence can show it yet. Then name the `unserved` outcomes, the `stale`
    changes, anything the evidence shows users need that no outcome or seed covers, and the bets
    the evidence breaks. A share of `none` and `unlinked` that keeps growing is a finding too.
+   Name each `uncited` goal and milestone with its `why`, as `G7 (…): none`. For each
+   `recurring` theme in `none_themes`, either propose a new outcome line covering that work,
+   `- O<n>. **<name>.** …` numbered from `product.next_ids`, or give the reason it isn't an aim
+   under *Dropped findings*. Name a `(no theme)` group by its count alone.
    Name every outcome by its id and its `name` from `product.items`, as `O1 (Unaided setup)`:
    an id alone means nothing to someone without the doc open. With no product doc, skip this pass
    and say so in Step 7.
@@ -255,8 +265,10 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 
    A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it. Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
-   numbered from `next_ids`. Each milestone says what is true when it's done and has one `Groups:`
-   line naming its changes and seeds, each seed by its id. Then say what the next **major** release would contain (the
+   numbered from `next_ids`. Each goal ends with the outcomes it answers to, `(O1, O3)`. Each
+   milestone says what is true when it's done and has one `Groups:` line naming its changes and
+   seeds, each seed by its id, and one `Serves:` line naming its goal or outcomes, an outcome the
+   product pass proposed included. Then say what the next **major** release would contain (the
    process doc's `impact:` table: users have to change what they do), or that none is planned.
 
    Last, **re-rank the register** for that direction, from `entries`, so status's Next up starts

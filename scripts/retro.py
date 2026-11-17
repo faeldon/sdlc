@@ -24,6 +24,10 @@ sdlc = None  # sdlc.py's own names, bound by sdlc.py right after it loads this f
 # Fewer closed changes than this in either window, and the escape rate's trend is `unknown`.
 RATE_MIN_CHANGES = 5
 
+# This many closed changes serving no outcome under one seed theme in the window, and the theme
+# recurs: an aim the outcomes don't name, for the product pass to propose an outcome for.
+NONE_THEME_RECURS = 3
+
 
 # The closed changes hotspots and co-change read, back past the retrospective's boundary: where
 # changes land is structure, and one window is too few changes to show it.
@@ -143,11 +147,21 @@ def _evidence(home: Path, commands: list[str]) -> list[dict]:
     return rows
 
 
-def _product(home: Path, cfg: dict, doc: dict, changes: list[dict], open_recs: list[dict]) -> dict:
+def _product(
+    home: Path,
+    cfg: dict,
+    doc: dict,
+    changes: list[dict],
+    open_recs: list[dict],
+    direction: dict,
+    bases: dict[str, str | None],
+) -> dict:
     """What the product pass counts: for each open outcome, the changes closed since the last
     retrospective that serve it and the open ones that do; the closed changes that name no outcome
-    (`unlinked`, from before the doc) or say `none`; the open outcomes nothing serves; and the open
-    changes still naming one a retrospective has struck (`stale`). Then the evidence."""
+    (`unlinked`, from before the doc) or say `none`, and those by their seeds' themes; the open
+    outcomes nothing serves; the open changes still naming one a retrospective has struck
+    (`stale`); and the direction doc's open goals and milestones that reach no open outcome
+    (`uncited`). Then the evidence."""
     open_ids = [i["id"] for i in doc["items"] if i["status"] == "open"]
     struck = {i["id"] for i in doc["items"] if i["status"] != "open"}
     outcomes: dict[str, dict] = {o: {"closed": [], "open": []} for o in open_ids}
@@ -175,8 +189,74 @@ def _product(home: Path, cfg: dict, doc: dict, changes: list[dict], open_recs: l
         "none": [c["name"] for c in changes if c["serves"] == ["none"]],
         "unserved": [o for o, rows in outcomes.items() if not rows["closed"] and not rows["open"]],
         "stale": stale,
+        "uncited": _uncited(direction["items"], doc["items"]),
+        "none_themes": _none_themes(home, changes, bases),
         "evidence": _evidence(home, cfg["retro"]["evidence"]),
     }
+
+
+def _uncited(items: list[dict], outcomes: list[dict]) -> list[dict]:
+    """The open goals and milestones, in the direction doc's order, whose citations reach no open
+    outcome: a goal through the outcomes it ends with, a milestone through its `Serves:` line's
+    outcomes and the outcomes of each goal it names, at whatever status. `why` is `none` when it
+    reaches no outcome at all, `closed` when all it reaches is struck, and `unknown` when it names
+    an id neither doc holds."""
+    open_o = {o["id"] for o in outcomes if o["status"] == "open"}
+    every_o = {o["id"] for o in outcomes}
+    goals = {i["id"]: i for i in items if i["kind"] == "goal"}
+    rows = []
+    for item in items:
+        if item["status"] != "open":
+            continue
+        reaches: list[str] = []
+        unknown = False
+        for ref in item["serves"]:
+            if ref.startswith("G"):
+                unknown |= ref not in goals
+                cited = goals[ref]["serves"] if ref in goals else []
+            else:
+                cited = [ref]
+            reaches += [o for o in cited if o not in reaches]
+        unknown |= any(o not in every_o for o in reaches)
+        if any(o in open_o for o in reaches):
+            continue
+        why = "unknown" if unknown else "closed" if reaches else "none"
+        rows.append({
+            "id": item["id"], "kind": item["kind"], "name": item["name"], "title": item["title"],
+            "serves": item["serves"], "reaches": reaches, "why": why,
+        })  # fmt: skip
+    return rows
+
+
+def _none_themes(home: Path, changes: list[dict], bases: dict[str, str | None]) -> list[dict]:
+    """The closed changes serving no outcome, by the `Theme:` of the seeds their `idea:` names, as
+    the register held them at each change's base: ship deletes a change's seeds on its branch, so
+    the base is the last the base branch saw of them. A change counts once under each theme, and
+    under `(no theme)` when none of its seeds has one. Rows by count, then theme; `recurring` at
+    NONE_THEME_RECURS changes, never for `(no theme)`."""
+    registers: dict[str, list[dict]] = {}
+    grouped: dict[str, list[str]] = {}
+    for rec in changes:
+        if rec["serves"] != ["none"]:
+            continue
+        base = bases.get(rec["name"])
+        if base and base not in registers:
+            rel = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
+            registers[base] = sdlc.parse_entries(sdlc._git(home, "show", f"{base}:{rel}") or "")
+        entries = registers.get(base or "", [])
+        themes: list[str] = []
+        for ref in sdlc.ideas_of(rec):
+            for e in entries:
+                theme = sdlc.ref_matches(ref, e) and sdlc.entry_theme(e)
+                if theme and theme not in themes:
+                    themes.append(theme)
+        for theme in themes or [sdlc.NO_THEME]:
+            grouped.setdefault(theme, []).append(rec["name"])
+    return [
+        {"theme": theme, "changes": names,
+         "recurring": theme != sdlc.NO_THEME and len(names) >= NONE_THEME_RECURS}
+        for theme, names in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    ]  # fmt: skip
 
 
 # The totals a retrospective compares, as medians per tier and way of running.
@@ -763,7 +843,9 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     open_names = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     direction["milestones"] = sdlc._milestone_verdicts(home, direction["items"], open_names, trunk)
     doc = sdlc.product_doc(home, cfg)
-    product = None if doc is None else _product(home, cfg, doc, changes, a["open"])
+    product = (
+        None if doc is None else _product(home, cfg, doc, changes, a["open"], direction, bases)
+    )
     return {
         "since": since,
         "today": today.isoformat(),

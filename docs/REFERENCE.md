@@ -769,6 +769,11 @@ Goals and milestones in the direction doc keep ids across retrospectives (`- G1.
 with a `Groups:` line naming its changes and seeds), and each one ends struck through as `Done`,
 `Dropped: <reason>` or `Revised → M5: <reason>`, never silently gone: `retro` reports what each
 milestone's seeds and changes became, and `retro-commit` refuses a doc that drops an open id.
+A goal ends with the outcomes in the product doc it answers to (`- G1. … (O1, O3)`), and a
+milestone has a `Serves:` line beside `Groups:` naming its goal, its outcomes or both
+(`Serves: G1, O4`). With a product doc, `retro`'s `product.uncited` reports each open goal or
+milestone that reaches no open outcome, and `product.none_themes` groups the changes serving
+`none` by their seeds' themes; an uncited item is reported, never refused.
 
 ## Metrics
 
