@@ -175,9 +175,12 @@ spec.
   against the spec and decided like any, its round limit counted from P. Nothing is moved by
   hand. A change is upgraded once and never back, and `fresh` holds an upgraded run where it is.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
-  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. A reply without
-  it, or holding its answer after a preamble (a verdict, the approver's decision, or a verifier's
-  answers the script can't read), goes back to the agent that wrote it once a round, a landing
+  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. Only a read that
+  shows its output may leave its exit off, and the script alone judges a read (`is_read()`): a
+  short allowlist of programs that change nothing, each stage of a pipeline among them, writing
+  nowhere. A test run, a gate or a script always owes its exit. A reply without its evidence, or
+  holding its answer after a preamble (a verdict, the approver's decision, or a verifier's answers
+  the script can't read), goes back to the agent that wrote it once a round, a landing
   round included, and its new reply is written over the old; a second stops the run. The gate
   itself is the script's, so "the gate passes" is never taken on an agent's word.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's

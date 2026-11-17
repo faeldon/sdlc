@@ -1321,8 +1321,61 @@ def test_a_resolution_drops_entries_by_id_alone(tmp_path) -> None:
     assert "## [2026-11-17-6] [idea] an example" in after and "own seed" not in after
 
 
-NO_EXIT = "VERDICT: PASS\n\nIt reopens.\n\n## Evidence\n\n$ head -5 intent.md\n---\nid: 001\n"
+# A command that is not a read, with its output and no exit: 123 moved it off `head`, which a
+# read showing its output now passes, so 109's tests still test a real missing exit.
+NO_EXIT = "VERDICT: PASS\n\nIt reopens.\n\n## Evidence\n\n$ uv run pytest -q\n3 passed\n"
 PASSED = "VERDICT: PASS\n\nIt reopens.\n\n## Evidence\n\n$ head -5 intent.md\n---\nexit: 0\n"
+
+
+@pytest.mark.portable
+def test_no_exit_is_not_a_read() -> None:
+    """123 R7: `NO_EXIT` keeps 109's landing tests on a real missing exit; were it a read again,
+    they would pass for the wrong reason."""
+    assert factory.read_evidence(NO_EXIT, "r") == ["r: `uv run pytest -q` has no `exit:` line"]
+
+
+# 119-ui-review-folders' two landing behaviour replies, as bug 2026-11-17-90 quotes their commands,
+# rebuilt with the elided arguments filled in: every command a read, its output shown, no exit.
+W119 = ".sdlc/work/119-ui-review-folders"
+CHAIN_119 = (
+    f'grep -n "^VERDICT" {W119}/build/round-1.gate.md ; '
+    f'grep -n "^VERDICT" {W119}/build/land-1.gate.md ; '
+    f"cmp {W119}/build/round-1.gate.md {W119}/build/land-1.gate.md"
+)
+REPLY_119 = f"""VERDICT: PASS
+
+The landing gate's verdict matches the build's; nothing the rebase touched changed the result.
+
+## Evidence
+
+$ {CHAIN_119}
+1:VERDICT: PASS
+1:VERDICT: PASS
+"""
+MENDED_119 = f"""VERDICT: PASS
+
+The plan still says what was built.
+
+## Evidence
+
+$ cat {W119}/plan.md
+# 119 — Review folders in the UI · plan
+
+## Files to change
+"""
+
+
+@needs_uv
+def test_119s_landing_replies_pass(tmp_path, capsys) -> None:
+    """123 R5: 119's landing replies, a chain of reads and the mend's `cat`, each showing its output
+    and no `exit:`, pass: the landing is neither mended nor stopped for the missing exits."""
+    root, tree = _landing(tmp_path, capsys)
+    reply = _folder(tree) / "reviews" / "land-1" / "behaviour.md"
+    for text in (REPLY_119, MENDED_119):
+        reply.write_text(text, encoding="utf-8")
+        code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+        assert out["next"] not in ("mend", "stop"), out
+        assert not any("exit:" in p for p in out.get("problems", [])), out
 
 
 def _landing(tmp_path: Path, capsys, config: str | None = None) -> tuple[Path, Path]:

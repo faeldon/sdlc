@@ -200,19 +200,8 @@ Left undone by 116-register-and-docs, carried forward when it landed: A full mar
 See .sdlc/work/116-register-and-docs/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-90] [bug] The behaviour reviewer leaves exit off read-only commands, and one mend doesn't cure it
+## [2026-11-18-1] [idea] `is_read()` refuses `file -C`, and git's `--ext-diff`/`--textconv`
 
-The behaviour reviewer leaves `exit:` off read-only commands in its `## Evidence`, and the one
-mend 109 allows doesn't cure it. On 2026-11-17, 119-ui-review-folders' landing behaviour check gave
-VERDICT: PASS, but `grep … build/round-1.gate.md ; grep … build/land-1.gate.md ; cmp …` had no
-`exit:` line. The mend's reply, again PASS, left it off `cat .sdlc/work/119-ui-review-folders/plan.md`,
-so land-verdicts stopped the landing ("has no `exit:` line") on a change that passed. 108's builder
-(round 1, a before-the-fix `pytest … | grep`) and earlier landings hit the same class. Either the
-script stops requiring `exit:` on commands that only read (cat, grep, sed -n, git show/diff/log,
-cmp), or the reviewer's prompt makes the rule unmissable; 109's spec chose a mend over exempting
-reads, and this is the evidence against it.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md
-Introduced by: 109-landing-stops-only-for-cause
-Theme: factory
+Left undone by 123-evidence-reads, carried forward when it landed: `file` is on R1's plain-read list, but `file -C -m <magic>` compiles a magic file and writes `<magic>.mgc`. A later change could give `file` its own condition (no `-C`) the way `sort` has one; left as the spec lists it here.
+See .sdlc/work/123-evidence-reads/notes.md in its commit.
+Raised 2026-11-18.

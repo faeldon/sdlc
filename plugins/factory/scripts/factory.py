@@ -69,6 +69,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import stat
@@ -176,6 +177,26 @@ UPGRADE_ANSWER_RE = re.compile(r"^upgrade to tier 2\b", re.I)
 # of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
 EVIDENCE = "## Evidence"
 EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
+# The one judge of a read, a command the script can tell changes nothing (`is_read()`): a read
+# that shows its output owes no `exit:`, since its output is its result. A closed allowlist, each
+# program under its own condition; anything else, or anything it can't see into, is not a read.
+READS = frozenset(
+    {"cat", "head", "tail", "grep", "egrep", "fgrep", "ls", "wc", "cmp", "diff", "nl", "cut"}
+    | {"tr", "stat", "file", "pwd", "cd", "echo", "true", "test", "[", "jq"}
+)
+SEPARATORS = frozenset({"|", "||", "&&", ";"})
+REDIRECTS = frozenset({"<", ">", ">>", ">&", "&>"})
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+AWK_PRINT_RE = re.compile(r"\bprintf?\b[^;}\n]*>")
+# awk allows space between a builtin's name and its `(`: `system ("rm f")` runs as well.
+AWK_RUNS_RE = re.compile(r"system\s*\(|@load|@include")
+SED_ADDR = r"(?:\d+|\$|/(?:[^/\\]|\\.)*/)"
+SED_PRINT_RE = re.compile(rf"^\s*(?:{SED_ADDR}(?:\s*,\s*{SED_ADDR})?)?\s*p\s*$")
+GIT_READS = frozenset(
+    {"show", "diff", "log", "status", "rev-parse", "ls-files", "ls-tree", "cat-file", "grep"}
+    | {"blame", "merge-base", "shortlog", "describe"}
+)
+FIND_REFUSED = ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fls")
 # The reviewers whose replies owe evidence too: the ones that run the change.
 RUNS_THE_CHANGE = ("behaviour",)
 # The gate, the base branch's `[commands] check`, which this script runs on each build before any
@@ -1021,25 +1042,184 @@ def build_round(folder: Path) -> int:
     return max((int(n) for n in names if n.isdigit()), default=0)
 
 
+def _substitutes(command: str) -> bool:
+    """Whether the shell would run something inside `command` before it runs: a backtick, `$(`,
+    `<(` or `>(` anywhere but in single-quoted text, where the shell substitutes nothing."""
+    quote, escaped = "", False
+    for i, ch in enumerate(command):
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+        elif escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "`" or command[i : i + 2] in ("$(", "<(", ">("):
+            return True
+        elif ch == "'" and not quote:
+            quote = "'"
+        elif ch == '"':
+            quote = "" if quote else '"'
+    return False
+
+
+def _awk_reads(args: list[str]) -> bool:
+    """awk changes nothing when its only options are `-F` and `-v` (so no `-f`, `-i`, `-l` or `-E`
+    reads a program or loads an extension the script can't see), and its program holds no pipe, no
+    `system(`, no `@load`/`@include`, and no print with a `>` in it."""
+    program, i = None, 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            program = args[i + 1] if i + 1 < len(args) else None
+            break
+        if not arg.startswith("-") or arg == "-":
+            program = arg
+            break
+        if arg in ("-F", "-v"):
+            i += 2
+            continue
+        if arg[:2] in ("-F", "-v"):
+            i += 1
+            continue
+        return False
+    if program is None:
+        return False
+    if "|" in program or AWK_RUNS_RE.search(program):
+        return False
+    return not AWK_PRINT_RE.search(program)
+
+
+def _sed_reads(args: list[str]) -> bool:
+    """sed changes nothing when it edits nothing in place and every script only prints lines."""
+    scripts, files, take = [], [], False
+    for arg in args:
+        if take:
+            scripts.append(arg)
+            take = False
+        elif arg in ("-e", "--expression"):
+            take = True
+        elif arg.startswith("--expression="):
+            scripts.append(arg.split("=", 1)[1])
+        elif arg in ("-n", "-E", "-r", "--quiet", "--silent"):
+            continue
+        elif arg.startswith("-") and arg != "-":
+            return False
+        else:
+            files.append(arg)
+    if not scripts and files:
+        scripts.append(files.pop(0))
+    if take or not scripts:
+        return False
+    return all(SED_PRINT_RE.match(part) for s in scripts for part in s.split(";"))
+
+
+def _git_reads(args: list[str]) -> bool:
+    """git changes nothing in a subcommand that only shows, with no option that writes a file."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        if args[i] == "-C" and i + 1 < len(args):
+            i += 2
+        elif args[i] == "--no-pager":
+            i += 1
+        else:
+            return False
+    if i >= len(args) or args[i] not in GIT_READS:
+        return False
+    for arg in args[i + 1 :]:
+        name = arg.split("=", 1)[0]
+        if name in ("--output", "--open-files-in-pager") or arg.startswith("-O"):
+            return False
+    return True
+
+
+def _simple_read(words: list[str]) -> bool:
+    """One simple command, its redirections already taken out, judged by its own program."""
+    if not words or ASSIGNMENT_RE.match(words[0]):
+        return False
+    name, args = words[0], words[1:]
+    if name in READS:
+        return True
+    if name == "awk":
+        return _awk_reads(args)
+    if name == "sed":
+        return _sed_reads(args)
+    if name == "git":
+        return _git_reads(args)
+    if name == "sort":
+        return not any(
+            a.startswith(("--o", "--compress"))
+            or (a.startswith("-") and not a.startswith("--") and "o" in a)
+            for a in args
+        )
+    if name == "rg":
+        return not any(a.startswith("--pre") for a in args)  # `--pre <cmd>` runs a program
+    if name == "find":
+        return not any(a.startswith(FIND_REFUSED) for a in args)
+    return False
+
+
+def is_read(command: str) -> bool:
+    """Whether the script can tell `command` changes nothing: every stage of it, split at `|`,
+    `||`, `&&` and `;`, a program on the closed allowlist under that program's condition, with no
+    substitution, no assignment, and no output redirected anywhere but `/dev/null` or a descriptor.
+    Pure, and strict: a read judged a non-read costs one mend; the other way loses a result."""
+    if _substitutes(command):
+        return False
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split, lexer.commenters = True, ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    stages: list[list[str]] = [[]]
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in SEPARATORS:
+            stages.append([])
+        elif token in REDIRECTS:
+            if i + 1 >= len(tokens):
+                return False
+            target = tokens[i + 1]
+            # Only `>&` takes a descriptor (`2>&1`, `>&2`): after `>`, `>>` or `&>` a digit is
+            # a file's name (`cat a >2` writes `2`).
+            descriptor = token == ">&" and target.isdigit()
+            if token != "<" and target != "/dev/null" and not descriptor:
+                return False
+            i += 1
+        elif token and all(ch in lexer.punctuation_chars for ch in token):
+            return False
+        else:
+            stages[-1].append(token)
+        i += 1
+    return all(_simple_read(stage) for stage in stages)
+
+
 def read_evidence(text: str, where: str) -> list[str]:
     """What's wrong with a reply's `## Evidence` section: missing, no command in it, or a command
-    whose `exit:` line never comes before the next command or the section's end."""
+    whose `exit:` line never comes before the next command or the section's end, unless it is a
+    read (`is_read()`) that printed a line, neither blank nor a fence, which is its result."""
     lines = text.splitlines()
     if EVIDENCE not in [line.strip() for line in lines]:
         return [f"{where} has no `{EVIDENCE}` section: each command it ran, its output, its exit"]
     start = [line.strip() for line in lines].index(EVIDENCE) + 1
-    commands, open_cmd, problems = 0, None, []
+    commands, open_cmd, printed, problems = 0, None, False, []
+
+    def close() -> None:
+        if open_cmd and not (printed and is_read(open_cmd)):
+            problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
+
     for line in lines[start:]:
         if line.startswith("## "):
             break
         if line.lstrip().startswith("$ "):
-            if open_cmd:
-                problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
-            open_cmd, commands = line.strip()[2:], commands + 1
+            close()
+            open_cmd, printed, commands = line.strip()[2:], False, commands + 1
         elif EXIT_RE.match(line):
             open_cmd = None
-    if open_cmd:
-        problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
+        elif line.strip() and not line.lstrip().startswith(("```", "~~~")):
+            printed = True
+    close()
     if not commands:
         problems.append(f"{where}'s `{EVIDENCE}` shows no command run (`$ <command>`)")
     return problems

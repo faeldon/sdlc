@@ -65,6 +65,6 @@ Read `decisions.md` first: an answered decision is settled.
 
 Then `## Notes`: each check in `checks.md` and what you expect of it, and anything you couldn't
 run and why. **End with `## Evidence`:** every command you ran, as `$ <command>`, the tail of what
-it printed, and `exit: <n>`, a read included (`head`, `cat`, `ls`): every `$` line gets its `exit:`.
-A result without its `$` line is a claim, and the skill's script stops
-the run on a reply without this section.
+it printed, and `exit: <n>`, a read included (`head`, `cat`, `ls`). A result without its `$` line
+is a claim, and the skill's script stops the run on a reply without this section, or with a command
+missing its `exit:`, unless it is a read that shows its output.

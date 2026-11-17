@@ -179,4 +179,5 @@ exit: 0
 
 Claim no result this section doesn't show: "the gate passes" with no `$` line for the gate is a
 claim, not a result. A failing command goes in too, with its exit. The skill's script refuses a
-report without this section, or with a command missing its `exit:`, and the run stops there.
+report without this section, or with a command missing its `exit:` unless it is a read that shows
+its output, and the run stops there.

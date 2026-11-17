@@ -1162,6 +1162,10 @@ def _report(root: Path, n: int, text: str) -> None:
         ("Built it.\n\n## Evidence\n\nAll green.\n", "shows no command run"),
         ("Built.\n\n## Evidence\n\n$ ./check.sh\n12 passed\n$ pytest\nexit: 0\n", "`./check.sh`"),
         ("Built.\n\n## Evidence\n\n$ ./check.sh\n12 passed\n\n## Notes\n\nexit: 0\n", "no `exit:`"),
+        (
+            "Built.\n\n## Evidence\n\n$ uv run pytest -q | grep passed\n12 passed\n",
+            "`uv run pytest -q | grep passed` has no `exit:`",
+        ),
     ],
 )
 def test_a_builder_report_without_its_evidence_stops_the_run(
@@ -1172,6 +1176,86 @@ def test_a_builder_report_without_its_evidence_stops_the_run(
     out = _verdicts(root, capsys)
     assert out["next"] == "stop"
     assert any("build/round-1.md" in p and problem in p for p in out["problems"]), out["problems"]
+
+
+# 123 R1: what the script can tell changes nothing, and what it can't.
+READS = [
+    "cat plan.md",
+    "grep -n x a ; grep -n x b ; cmp a b",
+    "git -C . show HEAD:a",
+    "sed -n '1,5p' f",
+    "jq '.a | .b' f.json",
+    "awk '$2 > 0 {print $1}' f",
+    "awk -F, -v n=2 '{print $n}' f",
+    "cat a 2>&1",
+    "rg -n x src",
+]
+NON_READS = [
+    "./check.sh",
+    "uv run pytest -q | grep passed",
+    "sed -i s/a/b/ f",
+    "cat a > b",
+    "cat $(x)",
+    "find . -delete",
+    "git diff --output=f",
+    "tee f",
+    "xargs rm",
+    "X=1 cat f",
+    "jq . f > g",
+    "awk '{print > \"out\"}' f",
+    "awk '{print | \"sh\"}' f",
+    "awk 'BEGIN{system(\"rm f\")}'",
+    "awk -i inplace '{print}' f",
+    "awk -f prog.awk f",
+    "awk 'BEGIN{system (\"rm f\")}'",
+    "cat a >2",
+    "cat a > 2",
+    "echo hi >> 1",
+    "cat a 2>1",
+    "cat a &>1",
+    "rg --pre ./x y",
+    "rg --pre=./x y",
+    "rg --pre-glob '*.gz' --pre ./x y",
+]
+
+
+@pytest.mark.portable
+def test_a_read_is_only_what_the_script_can_tell_changes_nothing() -> None:
+    """123 R1: `is_read()` passes only the closed allowlist, judged stage by stage; anything it
+    can't see into, or that writes, redirects or runs something else, is not a read."""
+    wrong = [c for c in READS if not factory.is_read(c)]
+    wrong += [c for c in NON_READS if factory.is_read(c)]
+    assert not wrong, wrong
+
+
+@pytest.mark.portable
+def test_a_read_showing_its_output_needs_no_exit() -> None:
+    """123 R2: a read followed by a non-blank, non-fence line owes no `exit:`, fenced or not."""
+    plain = "## Evidence\n\n$ cat plan.md\n# Plan\n$ grep -n x a ; cmp a b\n3:x\n"
+    fenced = "## Evidence\n\n```\n$ git -C . show HEAD:a\nline\n```\n"
+    assert factory.read_evidence(plain, "r") == []
+    assert factory.read_evidence(fenced, "r") == []
+
+
+@pytest.mark.portable
+def test_a_silent_read_still_needs_its_exit() -> None:
+    """123 R3: a read that prints nothing, before the next `$` or the end, a fence or a blank line
+    all it shows, still owes its exit: the exit is its only result."""
+    for text in (
+        "## Evidence\n\n$ cmp a b\n$ ./check.sh\n1 passed\nexit: 0\n",
+        "## Evidence\n\n```\n$ cmp a b\n\n```\n",
+    ):
+        assert factory.read_evidence(text, "r") == ["r: `cmp a b` has no `exit:` line"], text
+
+
+def test_a_builders_read_needs_no_exit(tmp_path, capsys) -> None:
+    """123 R6: the builder's report goes through the same parser: its gate shows its exit, a read
+    after it shows only its output, and the run goes on to review."""
+    root = _change(tmp_path)
+    evidence = "$ ./check.sh\n12 passed\nexit: 0\n$ cat plan.md\n# Plan\n"
+    _report(root, 1, f"Built.\n\n## Evidence\n\n{evidence}")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["problems"]) == ("review", []), out
 
 
 def test_a_report_showing_each_command_and_its_exit_goes_on(tmp_path, capsys) -> None:
@@ -1913,7 +1997,7 @@ def test_a_build_mend_is_refused_when_verdicts_names_none(tmp_path, capsys, clau
     land = folder / "reviews" / "land-1"
     land.mkdir(parents=True)
     (land / "behaviour.md").write_text(
-        "VERDICT: PASS\n\n## Evidence\n\n$ head -5 intent.md\n---\n", encoding="utf-8"
+        "VERDICT: PASS\n\n## Evidence\n\n$ uv run pytest -q\n3 passed\n", encoding="utf-8"
     )
     before = _files(folder / "reviews" / "round-1")
     assert _verdicts(root, capsys)["next"] == "done"
