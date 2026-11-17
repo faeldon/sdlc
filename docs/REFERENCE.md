@@ -595,8 +595,9 @@ shows `fixed`, and never raises again one the person dismissed. On a diff that t
 path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. A finding's `By:`
 line names who raised it: none on ship's own, `fresh` for the fresh-context reviewer, or a factory
 role (`code`, `security`, `test`, `behaviour`, `ui`, `ux`). A factory run writes its agents'
-findings into the same file (`factory.py carry`, at its approve step), each with its role's `By:`,
-and ship keeps those sections as they are and numbers its own after them. `sdlc.py findings NNN`
+findings into the same file (`factory.py carry`, at its approve step, and its landing's review
+rounds at `land --close`), each with its role's `By:`, and ship keeps those sections as they are
+and numbers its own after them. `sdlc.py findings NNN`
 reads it and prints the counts of ship's own, the agents' as `agents`, and the `Sdlc-Findings`
 line the commit carries; `sdlc.py ship` refuses while a finding is `open` or `fix`, and a deep
 diff whose note says neither. The file reaches history and the change's issue with the folder.

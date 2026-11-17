@@ -212,10 +212,10 @@ See .sdlc/work/114-one-review/notes.md in its commit.
 Raised 2026-11-18.
 
 
-## [2026-11-18-7] [idea] Landing review rounds in `findings.md`
+## [2026-11-18-11] [idea] findings.md template note names the landing as a writer
 
-Left undone by 114-one-review, carried forward when it shipped: gap: landing rounds: `findings.md` holds only the build rounds (`reviews/round-<N>/`); the landing's review rounds (`reviews/land-<n>/`) are not in it.
-See .sdlc/work/114-one-review/notes.md in its commit.
+Left undone by 127-landing-rounds-in-findings, carried forward when it landed: `templates/findings.md`'s note (and its copy `FINDINGS_HEAD`) still says only "the factory's `carry` writes its agents' findings into it"; it could name the landing too. Left out: the note is pinned to the template, ships to hosts, and needs `sdlc.py record`.
+See .sdlc/work/127-landing-rounds-in-findings/notes.md in its commit.
 Raised 2026-11-18.
 
 ## [2026-11-18-8] [idea] The board's drawer says a file is empty instead of showing a blank pane

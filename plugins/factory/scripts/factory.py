@@ -946,17 +946,21 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     return emit(out, 1 if out["refusals"] else 0)
 
 
-def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[str]]:
-    """Every `reviews/round-<N>/`, in order: each reviewer's verdict, the changes it asks for, the
-    pre-existing problems it found and its nits, the verifier's answer when there is one, and
-    whether the round is complete for `reviewers`, the ones the run's depth expects. A file whose
-    first line isn't a verdict is a problem, never a guess."""
+def read_rounds(
+    folder: Path, reviewers: list[str], kind: str = "round"
+) -> tuple[list[dict], list[str]]:
+    """Every `reviews/round-<N>/`, in order (the landing's `reviews/land-<n>/` with `kind`
+    `land`): each reviewer's verdict, the changes it asks for, the pre-existing problems it found
+    and its nits, the verifier's answer when there is one, and whether the round is complete for
+    `reviewers`, the ones the run's depth expects. A file whose first line isn't a verdict is a
+    problem, never a guess."""
     base = folder / "reviews"
     found = []
     problems = []
-    dirs = [p for p in base.glob("round-*") if p.is_dir() and p.name[6:].isdigit()]
-    for path in sorted(dirs, key=lambda p: int(p.name[6:])):
-        n = int(path.name[6:])
+    cut = len(kind) + 1
+    dirs = [p for p in base.glob(f"{kind}-*") if p.is_dir() and p.name[cut:].isdigit()]
+    for path in sorted(dirs, key=lambda p: int(p.name[cut:])):
+        n = int(path.name[cut:])
         reviews = {}
         for role in REVIEWERS:
             file = path / f"{role}.md"
@@ -965,30 +969,34 @@ def read_rounds(folder: Path, reviewers: list[str]) -> tuple[list[dict], list[st
             lines = file.read_text(encoding="utf-8").splitlines()
             m = VERDICT_RE.match(lines[0]) if lines else None
             if not m:
-                problems.append(_no_verdict(n, role))
+                problems.append(_no_verdict(n, role, kind))
                 continue
             changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
             if m.group(1) == "CHANGES" and not changes:
                 # Nothing to verify or rework: a malformed reply, refused like one with no verdict.
                 problems.append(
-                    f"reviews/round-{n}/{role}.md says VERDICT: CHANGES but lists no - CHANGE: line"
+                    f"reviews/{kind}-{n}/{role}.md says VERDICT: CHANGES but lists no - CHANGE: "
+                    "line"
                 )
                 continue
             preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, lines[1:]) if c]
             nits = [c.group(1) for c in map(FINDING_NIT_RE.match, lines[1:]) if c]
             reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting,
                              "nits": nits}  # fmt: skip
-        verified, wrong = read_verified(path / VERIFIED, n, reviews)
+        verified, wrong = read_verified(
+            path / VERIFIED, n, reviews, f"reviews/{kind}-{n}/{VERIFIED}"
+        )
         problems += wrong
         complete = set(reviewers) <= set(reviews)
-        found.append({"round": n, "reviews": reviews, "complete": complete, "verified": verified})
+        found.append({"round": n, "kind": kind, "reviews": reviews, "complete": complete,
+                      "verified": verified})  # fmt: skip
     return found, problems
 
 
-def _no_verdict(n: int, role: str) -> str:
+def _no_verdict(n: int, role: str, kind: str = "round") -> str:
     """The problem a round's reply that doesn't open with its verdict is, word for word as the
     board and status show it."""
-    return f"reviews/round-{n}/{role}.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
+    return f"reviews/{kind}-{n}/{role}.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
 
 
 def preamble(path: Path) -> bool:
@@ -1964,11 +1972,13 @@ def cmd_carry(root: Path, ident: str) -> int:
 
 def agent_findings(rounds: list[dict]) -> list[dict]:
     """Every distinct `(role, text)` the complete `rounds` raised, as the record's findings, in
-    round order, then `REVIEWERS` order, then each file's order (its changes, its pre-existing
-    problems, its nits): a change the verifier kept is `fixed`, or `recorded` while the last
-    complete round still carries it to notes.md, one it dropped is `wrong` with its why; a
-    pre-existing problem `recorded`; a nit `minor`. In a round from before there was a verifier,
-    every change counts as kept. A change asked under a `PASS` verdict was never asked."""
+    round order (the build's rounds, then the landing's), then `REVIEWERS` order, then each file's
+    order (its changes, its pre-existing problems, its nits): a change the verifier kept is
+    `fixed`, or `recorded` while the last complete build round still carries it to notes.md, or
+    the last landing round kept it and no later one followed; one it dropped is `wrong` with its
+    why; a pre-existing problem `recorded`; a nit `minor`. In a round from before there was a
+    verifier, every change counts as kept. A change asked under a `PASS` verdict was never asked.
+    The same `(role, text)` in a build round and a landing round is one finding, the first."""
     done = [r for r in rounds if r["complete"]]
 
     def kept_of(r: dict) -> list[tuple[str, str]]:
@@ -1976,7 +1986,10 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
             return [(k["role"], k["change"]) for k in r["verified"]["kept"]]
         return [(role, c) for _, role, c in asked_changes(r["reviews"])]
 
-    carried = set(kept_of(done[-1])) if done else set()
+    carried = set()
+    for kind in ("round", "land"):
+        last = [r for r in done if r.get("kind", "round") == kind][-1:]
+        carried |= set(kept_of(last[0])) if last else set()
     kept = {k for r in done for k in kept_of(r)}
     why = {(d["role"], d["change"]): d["why"] for r in done
            for d in (r["verified"] or {"dropped": []})["dropped"]}  # fmt: skip
@@ -1990,7 +2003,8 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
                 for text in texts:
                     if (role, text) in found:
                         continue
-                    item = {"role": role, "text": text, "round": r["round"], "reason": None}
+                    item = {"role": role, "text": text, "round": r["round"], "reason": None,
+                            "kind": r.get("kind", "round")}  # fmt: skip
                     if kind == "pre-existing":
                         item.update(rank="pre-existing", disposition="recorded")
                     elif kind == "nit":
@@ -2012,12 +2026,14 @@ def finding_section(n: int, item: dict) -> str:
     text after its lead, to the first sentence's end; its whole line below; `Evidence:` its
     leading `path[:line]`, else the review file it is in."""
     pass_, text = finding_pass(item["role"], item["text"])
-    where = f"reviews/round-{item['round']}/{item['role']}.md"
+    kind = item.get("kind", "round")
+    where = f"reviews/{kind}-{item['round']}/{item['role']}.md"
     m = LEAD_RE.match(text)
     evidence = (m.group(1) + (f":{m.group(2)}" if m.group(2) else "")) if m else where
     title = first_sentence(m.group(3) if m else text).strip() or text
+    which = "landing round" if kind == "land" else "round"
     lines = [f"## F{n}. [{item['rank']}] [{pass_}] {title}", "", text, "",
-             f"Evidence: {evidence}", f"Class: {item['role']} review, round {item['round']}",
+             f"Evidence: {evidence}", f"Class: {item['role']} review, {which} {item['round']}",
              f"Disposition: {item['disposition']}"]  # fmt: skip
     if item["reason"]:
         lines.append(f"Reason: {item['reason']}")
@@ -4375,6 +4391,13 @@ def cmd_land_close(root: Path, ident: str) -> int:
     # fast-forwards), so the landing goes back to its rebase, `land` again, with the move
     # recorded before the amend so the commit it was found on carries it.
     cfg, _ = load_config(root)
+    # The landing's review rounds join carry's record before it is amended in, every rerun
+    # included; with none reviewed, carry's file stands as it is.
+    landing, _ = read_rounds(folder, [], "land")
+    for r in landing:
+        r["complete"] = bool(r["reviews"])
+    if any(r["complete"] for r in landing):
+        write_findings(folder, _rounds_at_depth(root, folder, cfg)[0] + landing)
     moved = _behind(root) > 0
     if moved and (why := _record_move(root, folder, cfg)):
         return emit({"refusals": [why]}, 1)

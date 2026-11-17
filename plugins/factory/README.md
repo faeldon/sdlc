@@ -259,9 +259,10 @@ its own folder, fixture copy and server, so a round's two start together.
   build/round-<N>.upgraded.md   UPGRADED: D<k>, the decision your answer upgraded to Tier 2 by:
                                 round N is the upgraded run's first
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
-  findings.md                   every agent finding of every complete round, once, By: its role,
-                                as fixed, recorded, wrong (the verifier's drop) or a nit: the same
-                                record ship writes, counted apart from ship's own
+  findings.md                   every agent finding of every complete round, the landing's too,
+                                once, By: its role, as fixed, recorded, wrong (the verifier's
+                                drop) or a nit: the same record ship writes, counted apart from
+                                ship's own
   runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
                                 spec.md after your yes
   runs/spec-questions.md        the open questions it resolved and left, after the draft's ---
@@ -284,8 +285,9 @@ total so far, so a session counts once, at its last figure.
 
 All of it is committed with the change, at `/sdlc-factory:land` or `/sdlc:ship`, so history keeps
 how the change was made. `findings.md` is written by `factory.py carry` at the approve step, and
-rewritten by a rerun, which replaces only the sections a factory role raised; the landing commits
-it with no `Sdlc-Findings` trailer, so `/sdlc:retro` compares the two ways of building from one
+rewritten by a rerun, which replaces only the sections a factory role raised; `land --close` adds
+its landing rounds' findings the same way, each `Class:` naming its landing round, and commits it
+with no `Sdlc-Findings` trailer, so `/sdlc:retro` compares the two ways of building from one
 record without counting the agents' review as yours.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
 `CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at

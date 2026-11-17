@@ -1733,6 +1733,89 @@ def test_main_moving_before_close_sends_the_landing_back_to_its_rebase(tmp_path,
     assert "Sdlc-Landed: by=auto" in _git(root, "log", "-1", "--format=%B", "main~1")
 
 
+def _agents_sections(text: str) -> list[str]:
+    """findings.md's sections a factory role raised, as written."""
+    sections = ["## " + s for s in text.split("\n## ")[1:]]
+    return [s for s in sections if any(f"\nBy: {r}" in s for r in factory.REVIEWERS)]
+
+
+@needs_uv
+def test_a_landing_writes_its_rounds_findings_into_its_commit(tmp_path, capsys) -> None:
+    """127: `land --close` writes the landing rounds' findings into findings.md beside carry's,
+    in the same shape, each `Class:` naming its landing round, before the record is amended in: a
+    kept change `fixed`, a dropped one `wrong` with the verifier's why, a pre-existing problem
+    `recorded`, each once, and one a build round raised too only once. A rerun (the base moved)
+    changes none of the agents' sections, ship's own stays, and the commit has no
+    `Sdlc-Findings`."""
+    root = _gated(tmp_path)
+    tree = _ready(root, "late", "late's one")
+    folder = _folder(tree)
+    old = "README.md:3: an old fault"
+    (folder / "reviews" / "round-1" / "behaviour.md").write_text(
+        _verdict("behaviour") + f"- PREEXISTING: {old}\n", encoding="utf-8"
+    )
+    assert _run(capsys, factory.cmd_carry, tree, "001")[1]["findings"] == 1
+    ship = (
+        "## F9. [important] [correctness] Ship's own\n\nEvidence: README.md:1\nClass: logic\n"
+        "Disposition: fixed"
+    )
+    path = folder / "findings.md"
+    path.write_text(path.read_text(encoding="utf-8").rstrip("\n") + "\n\n" + ship + "\n")
+    _move(root, 1)
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"], out["round"]) == (0, "rebased", 1), out
+    kept, dropped, pre = "README.md:1: says late", "README.md:2: two is wrong", "README.md:9: slow"
+    land = folder / "reviews" / "land-1"
+    (land / "behaviour.md").write_text(
+        _verdict("behaviour", "CHANGES", (kept, dropped))
+        + f"- PREEXISTING: {pre}\n- PREEXISTING: {old}\n",
+        encoding="utf-8",
+    )
+    (land / "verified.md").write_text(
+        f"- KEPT: behaviour: {kept}\n- DROPPED: behaviour: {dropped} — not in the code\n",
+        encoding="utf-8",
+    )
+
+    _move(root, 2)
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert (code, out.get("state")) == (0, "moved"), out
+    rel = f".sdlc/work/{tree.name}/findings.md"
+    first = _git(tree, "show", f"HEAD:{rel}")
+    assert _git(tree, "status", "--porcelain") == "", "the findings are in the commit"
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"], out["round"]) == (0, "rebased", 2), out
+    _pass_behaviour(folder, 2)
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert code == 0 and "merge" in out["done"], out
+
+    landed = _git(root, "show", f"main~1:{rel}")
+    # Kept in the last landing round, with none after it, it was never claimed fixed; once round
+    # 2 passes, it is. Nothing else changes.
+    before = [s.replace("Disposition: recorded", "Disposition: fixed") if kept in s else s
+              for s in _agents_sections(first)]  # fmt: skip
+    assert _agents_sections(landed) == before, "a rerun rewrites only what moved"
+    assert (
+        f"{kept}\n\nEvidence: README.md:1\nClass: behaviour review, landing round 1\n"
+        "Disposition: recorded" in first
+    )
+    assert ship in landed, "ship's own section is kept as written"
+    found = [
+        (e["disposition"], e["class"], e["reason"])
+        for e in sdlc._findings_from_text(landed)[0]
+        if e["by"] == "behaviour"
+    ]
+    assert found == [
+        ("recorded", "behaviour review, round 1", None),
+        ("fixed", "behaviour review, landing round 1", None),
+        ("wrong", "behaviour review, landing round 1", "not in the code"),
+        ("recorded", "behaviour review, landing round 1", None),
+    ], found
+    for text in (kept, dropped, pre, old):
+        assert landed.count(text.split(": ", 1)[1]) == 2, f"{text}: its heading and line, once"
+    assert sdlc._findings_from_text(landed)[1] == [], "it reads as sdlc reads it"
+    assert "Sdlc-Findings" not in _git(root, "log", "-1", "--format=%B", "main~1")
+
+
 @needs_uv
 def test_a_move_racing_close_reads_as_moved(tmp_path, capsys, monkeypatch) -> None:
     """R4: the base moves after the check and before close's merge, so close refuses. The landing
