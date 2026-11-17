@@ -71,10 +71,12 @@ main.board {
 .badge.gate-green { color: var(--accent); }
 .badge.gate-red { color: var(--stop); }
 .badge.rebasing { color: var(--changes); }
+.badge.answered { color: var(--accent); }
 .title { margin: 4px 0 6px; overflow-wrap: anywhere; }
 .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .next { margin-top: 6px; font-size: 12px; }
 .next code { font-size: 12px; }
+.needs { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--stop); overflow-wrap: anywhere; }
 .flag { font-size: 12px; color: var(--stop); margin-top: 6px; overflow-wrap: anywhere; }
 .rounds { margin-top: 6px; display: grid; gap: 4px; }
 .round { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
@@ -132,10 +134,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 <body>
 <header>
   <h1 id="repo">Change board</h1>
-  <span class="status" id="status">connecting…</span>
+  <span class="status" id="status" aria-live="polite">connecting…</span>
+  <span class="status" id="polled"></span>
   <span class="status" id="totals"></span>
 </header>
-<main class="board" id="board" aria-live="polite"></main>
+<main class="board" id="board"></main>
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" hidden>
   <div class="d-head">
@@ -156,9 +159,9 @@ const COLUMNS = [
   { key: "design", label: "Design", who: "spec" },
   { key: "build", label: "Build", who: "plan and code" },
   { key: "test", label: "Test", who: "the gate and the review" },
-  { key: "ready", label: "Ready to ship", who: "factory: READY" },
+  { key: "ready", label: "Ready to ship", who: "factory: READY, or answered" },
   { key: "close", label: "Ready to close", who: "/sdlc:close" },
-  { key: "needs-you", label: "Needs you", who: "a decision, a problem or a stopped run" },
+  { key: "needs-you", label: "Needs you", who: "what each card says it needs" },
 ];
 const $ = (id) => document.getElementById(id);
 // The width the CSS stacks the columns at.
@@ -261,7 +264,7 @@ function card(c) {
   for (const p of (c.stopped && c.stopped.problems) || []) flags.push(h("div", { class: "flag" }, `stopped: ${p}`));
   // A signal flags the card only at the stage it belongs to, as its column does (board.py).
   for (const d of c.stage === "build" ? c.pending || [] : []) flags.push(h("div", { class: "flag" }, `${d.id} waits on you: ${d.text}`));
-  if (c.stage === "test" && c.decision === "ESCALATE") flags.push(h("div", { class: "flag" }, "the approver escalated it to you"));
+  if (c.stage === "test" && c.decision === "ESCALATE" && !c.answered) flags.push(h("div", { class: "flag" }, "the approver escalated it to you"));
   const factory = c.mode === "factory";
   // The approver's word is live only at `test`; past it (shipped, dropped) it is history.
   const chip = !c.decision ? null
@@ -274,6 +277,7 @@ function card(c) {
       c.gate && c.gate.current ? h("span", { class: c.gate.verdict === "PASS" ? "badge gate-green" : "badge gate-red" },
         c.gate.verdict === "PASS" ? "gate green" : "gate red") : null,
       c.rebasing ? h("span", { class: "badge rebasing" }, "rebasing") : null,
+      c.answered ? h("span", { class: "badge answered" }, "escalated: answered") : null,
       chip ? h("span", { class: "badge" }, chip) : null),
     h("div", { class: "title" }, c.title.replace(/^\d+\s*—\s*/, "") || c.slug),
     h("div", { class: "meta" }, meta),
@@ -282,7 +286,17 @@ function card(c) {
     factory && c.assumed.length ? h("div", { class: "meta" }, `${c.assumed.length} default(s) assumed`) : null,
     factory ? h("div", { class: "meta" }, money(c.cost)) : null,
     flags,
+    c.needs && c.needs.length ? h("div", { class: "needs" }, `needs you: ${c.needs.join(" · ")}`) : null,
     h("div", { class: "next" }, "next: ", h("code", {}, c.next)));
+}
+
+// A count of seconds as the page shows it, so the render key changes only when what a person
+// sees does: a poll that changes nothing on screen rebuilds nothing, and focus stays put.
+function shownAs(k, v) {
+  if (k === "touched_ago") return ago(v);
+  if (k === "elapsed") return v === null || v === undefined ? v : dur(v);
+  if (k === "fraction") return v === null || v === undefined ? v : Math.round(v * 100);
+  return v;
 }
 
 let last = "";
@@ -292,9 +306,12 @@ function render(st) {
   shown = st;
   $("repo").textContent = `${st.repo} — open changes`;
   document.title = `${st.repo} · board`;
-  const key = JSON.stringify([NARROW.matches, st.changes]);
+  const key = JSON.stringify([NARROW.matches, st.changes], shownAs);
   if (key === last) return;
   last = key;
+  // The card that has focus gets it back once the cards are new nodes.
+  const held = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.change : null;
   changes = st.changes;
   const cols = columnOrder().map((col) => {
     const cards = st.changes.filter((c) => c.column === col.key);
@@ -304,11 +321,22 @@ function render(st) {
       cards.length ? cards.map(card) : h("div", { class: "empty" }, "—"));
   });
   $("board").replaceChildren(...cols);
+  if (held && !open) {
+    const back = document.querySelector(`[data-change="${CSS.escape(held)}"]`);
+    if (back) back.focus();
+  }
   const factory = st.changes.filter((c) => c.mode === "factory");
   const usd = factory.reduce((s, c) => s + (c.cost ? c.cost.usd : 0), 0);
-  const open = st.changes.filter((c) => c.column !== "close").length;
-  $("totals").textContent = `${open} open · ${factory.length} by the factory` +
+  const openCount = st.changes.filter((c) => c.column !== "close").length;
+  $("totals").textContent = `${openCount} open · ${factory.length} by the factory` +
     (factory.length ? ` · $${usd.toFixed(2)} API-equivalent` : "");
+}
+
+// The status line is the page's one live region: its words change only when the board connects,
+// drops, or its Needs you count moves, so a screen reader hears that and nothing each poll.
+function say(text, down) {
+  if ($("status").textContent !== text) $("status").textContent = text;
+  $("status").className = down ? "status down" : "status";
 }
 
 async function poll() {
@@ -317,13 +345,13 @@ async function poll() {
     if (!res.ok) throw new Error(res.status);
     const st = await res.json();
     render(st);
+    const need = st.changes.filter((c) => c.column === "needs-you").length;
     // board.py changed under the server and wouldn't load: what shows is the code it had.
-    $("status").textContent = st.reload_error ? `stale · ${st.reload_error}`
-      : `live · ${new Date().toLocaleTimeString()}`;
-    $("status").className = st.reload_error ? "status down" : "status";
+    say(st.reload_error ? `stale · ${st.reload_error}`
+      : need ? `live · ${need} need${need === 1 ? "s" : ""} you` : "live", Boolean(st.reload_error));
+    $("polled").textContent = new Date().toLocaleTimeString();
   } catch (e) {
-    $("status").textContent = "the board isn't answering: is `sdlc.py board` still running?";
-    $("status").className = "status down";
+    say("the board isn't answering: is `sdlc.py board` still running?", true);
   }
   setTimeout(poll, POLL_MS);
 }

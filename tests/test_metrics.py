@@ -1191,6 +1191,7 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     assert sdlc.FACTORY_STOPPED == factory.STOPPED
     assert sdlc.FACTORY_STEP == factory.STEP
     assert sdlc.FACTORY_AGENT_TIMEOUT == factory.AGENT_TIMEOUT
+    assert sdlc.FACTORY_RECONSIDER == factory.RECONSIDER
 
 
 SUPERSEDED_LEDGER = """\

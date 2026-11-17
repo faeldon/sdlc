@@ -280,19 +280,6 @@ escape rate O6 measures). After the 1.9.0 release.
 Theme: review
 Raised 2026-11-17.
 
-## [2026-11-17-50] [bug] A board poll rebuilds every card, dropping keyboard focus
-
-Found by the review of 099-board-page-fixes. The page's render key holds each change's
-`touched_ago` in whole seconds (`scripts/board.py`, `round(now - touched)`), so it changes on every
-2-second poll and `replaceChildren` rebuilds every card: a keyboard user Tabbed onto a card loses
-focus to `body` before Enter can open it. `#board` is `aria-live="polite"`, so a screen reader is
-handed the whole board again each poll. Rebuild only when what a person sees changes (the
-rendered text, or `ago()`'s minute-level string), and move `aria-live` to the status line.
-
-Severity: med
-Paths: scripts/board.html, scripts/board.py
-Theme: board
-
 ## [2026-11-17-51] [bug] A resolve refuses its own source as a conflict marker
 
 `factory.py resolve --continue` (and `sdlc.py resolve`) refuse "conflict markers left in" any
@@ -405,4 +392,16 @@ Raised 2026-11-17.
 
 Left undone by 106-factory-reviewer-coverage, carried forward when it landed: `tests/test_board.py::test_the_board_fixture_shows_every_card_state` takes about 30s on a cold `uv` cache (two `sdlc.py gate` runs); a `--no-gate` path in `build.sh` isn't worth it yet.
 See .sdlc/work/106-factory-reviewer-coverage/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-69] [idea] Make the board and status read an unreadable stop record the same way
+
+Left undone by 107-board-needs-you, carried forward when it landed: A stop record that won't read reads differently in the two places: the board makes it a problem (`fix: runs/stopped.md doesn't open …`, card `stopped: None`, as 086 pinned), while `status`'s `factory_stop()` keeps it a stop (`stopped: read runs/stopped.md`). Both put it in front of the person; aligning them means changing one of the two pinned behaviours.
+See .sdlc/work/107-board-needs-you/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-70] [idea] Make the board's next step follow what the change needs
+
+Left undone by 107-board-needs-you, carried forward when it landed: `next_action()` is unchanged, as the spec says: an escalation that still needs `decide D2` names `/sdlc:ship, or /sdlc-factory:land …` as its next step, beside its `needs you:` line. A next step that follows the needs would read better.
+See .sdlc/work/107-board-needs-you/notes.md in its commit.
 Raised 2026-11-17.

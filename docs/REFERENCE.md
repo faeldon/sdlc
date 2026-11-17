@@ -479,13 +479,27 @@ factory run its supervisor stopped (`runs/stopped.md`, at `stage: build`) reads 
 of `quiet`, with each problem on a `⚠` line and the step that moves it on, ship it by hand or rerun
 `/sdlc-factory:build NNN`, on a `→` line under its title.
 
+`status` ends with `■ What needs me`: one line per open change waiting on the person, saying what
+it waits for, or `nothing`. The texts are the board's (below), read by the same rules: `fix:` and
+each problem, at any stage; at `build`, `stopped: <way>` (`rerun`, `mend`, `ship`, or `read
+runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
+decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
+approach` (its `decision.md` holds that section) and, with no decision line at all in its ledger,
+`read the escalation`; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
+but whose stage never moved. `status` reads only what it already reads, so a problem only the
+board finds (a reply that isn't a review, a findings file that won't read) is on the board alone.
+
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
 the same open changes as a live page on `127.0.0.1` until it is stopped: one column per stage, then
 **Ready to ship** for a factory change the approver called READY, **Ready to close** for a shipped or
 dropped one whose worktree still stands, and **Needs you** for one with a file that won't read, at
-any stage, or a factory signal at the stage it belongs to: a run that stopped or a blocking decision
-at `build`, an ESCALATE in its `decision.md` at `test`, flagged with the stop's problems and naming
-its way on. The stage is the only mark that the person has answered one, so a change they shipped,
+any stage, or whatever else it needs from the person, each card naming it on a `needs you:` line
+(the texts `/sdlc:status`'s `■ What needs me` gives, above): a run that stopped or a blocking
+decision at `build`, an ESCALATE at `test` while its ledger holds an unticked line, asks to
+reconsider the approach, or holds no decision at all, and a written spec waiting on its approval.
+An escalation whose every ledger line is ticked moves to Ready to ship, badged `escalated:
+answered`; an open `- [ ]` line the ledger can't read is a problem, so it never counts as an
+answer. The stage is the only mark that the person has answered a stop or a blocking decision, so a change they shipped,
 dropped or put back to `build` leaves Needs you for the column that answer leads to, whatever the
 run's files still say; one sent back to the factory keeps its old decision as `decision-<n>.md`, a
 file of its folder, and is in Build again. A change built by hand moves on from its `stage:` line
@@ -511,7 +525,10 @@ and `/file` (one file inside the folder of a change it shows), refuses a request
 and a second `board` on a port a board holds says so rather than starting again. `--port 0` takes
 a port the OS picks, and prints it. A running board serves `board.py` as it is on disk, loading it
 afresh when it changes, so a change to the board that lands needs no restart; a file that won't
-load leaves it serving the code it had, and the page says it is stale.
+load leaves it serving the code it had, and the page says it is stale. The page polls every two
+seconds but rebuilds only when what it shows has changed, and puts focus back on the card that
+held it when it does; its one live region is the status line (`live`, `live · N need you`, or that
+the board isn't answering), with the time of the last poll beside it.
 
 **The gate, run by hand.** `sdlc.py gate NNN` runs the base branch's `[commands] check` (never the
 checkout's, so a change can't edit the gate that judges it) from the change's checkout, for up to

@@ -50,6 +50,12 @@ it already, so it is never the recommendation. A factory run its supervisor stop
 `· stopped, touched 12m ago`, with a `⚠` line per problem and a `→` line, the step that moves it on,
 under its title: it is neither in flight nor merely quiet, but waiting on the person.
 
+**`■ What needs me` is the last section**: each open change waiting on the person, with what it
+waits for (`decide D2, confirm 3 defaults`, `stopped: rerun`, `approve its spec`, `read the
+escalation`, `fix: …`), or `nothing`. It is the answer to "what needs me?": quote it, never
+re-derive it from the lines above. An escalated change it leaves out has had every question
+answered and is ready to ship.
+
 **`■ Next up` is what comes after the open changes**, so you never need `.sdlc/work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
 and orders them by a fixed rule: entries marked `Priority: high` first (`priority high · …`), then

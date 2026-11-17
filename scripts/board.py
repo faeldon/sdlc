@@ -53,6 +53,9 @@ CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+RECONSIDER = "## Reconsider the approach"
+# An open box the ledger can't read: a problem, never an answered decision.
+OPEN_BOX = "- [ ]"
 VERIFIED = "verified.md"
 COSTS = Path("runs") / "costs.jsonl"
 STOPPED = Path("runs") / "stopped.md"
@@ -199,6 +202,11 @@ def _entry(
             )
     entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
     entry["problems"] = problems
+    entry["spec_filled"] = "spec.md" in entry["artifacts"] and "spec.md" not in entry["unfilled"]
+    # What it needs from the person, by the rules `status` reads too, and whether an escalation
+    # is answered: read from its files on every request, never stamped.
+    entry["needs"] = sdlc.needs_of(entry)
+    entry["answered"] = sdlc.answered(entry)
     entry["next"] = next_action(entry)
     entry["column"] = column(entry)
     return entry
@@ -316,24 +324,30 @@ def _factory(folder: Path, problems: list[str]) -> dict:
     built = sorted(
         int(p.stem[6:]) for p in (folder / "build").glob("round-*.md") if p.stem[6:].isdigit()
     )
-    decision = None
+    decision, reconsider = None, False
     path = folder / "decision.md"
     if path.is_file():
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         m = DECISION_RE.match(lines[0]) if lines else None
         decision = m.group(1) if m else None
+        reconsider = RECONSIDER in [line.strip() for line in lines]
         if not m:
             problems.append("decision.md doesn't open with DECISION: READY or ESCALATE")
-    pending, assumed = [], []
+    pending, assumed, ledger_lines, garbled = [], [], 0, False
     path = folder / "decisions.md"
     for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
         m = LEDGER_RE.match(line)
+        ledger_lines += bool(m)
+        garbled = garbled or not m and line.startswith(OPEN_BOX)
         if m and m.group(1) == " ":
             item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
             (pending if m.group(4) == "blocking" else assumed).append(item)
+    if garbled:
+        problems.append(sdlc.GARBLED_LEDGER)
     return {
         "rounds": rounds, "built": built, "decision": decision, "pending": pending,
-        "assumed": assumed, "cost": cost(folder),
+        "assumed": assumed, "cost": cost(folder), "reconsider": reconsider,
+        "ledger_lines": ledger_lines,
     }  # fmt: skip
 
 
@@ -638,20 +652,19 @@ def next_action(entry: dict) -> str:
 
 def column(entry: dict) -> str:
     """The board's column: a file that won't read first, at any stage; then a shipped or dropped
-    change, waiting on close whatever the factory's files still say; then a factory signal, each
-    only at the stage it belongs to (a stop or a blocking decision at `build`, the approver's
-    decision at `test`), since the stage is the only mark the person has answered one; else how
-    far it has got."""
+    change, waiting on close whatever the factory's files still say; then Needs you exactly when
+    `sdlc.needs_of()` names something (a stop or a blocking decision at `build`, an escalation's
+    open ledger at `test`, a written spec whose stage never moved), since a factory signal counts
+    only at the stage it belongs to; then the approver's decision at `test`, an escalation by now
+    answered, as Ready to ship; else how far it has got."""
     stage = entry["stage"]
     if entry["problems"]:
         return "needs-you"
     if stage in CLOSED:
         return "close"
-    if stage == "build" and (entry.get("stopped") or entry.get("pending")):
+    if entry.get("needs"):
         return "needs-you"
-    if stage == "test" and entry.get("decision") == "ESCALATE":
-        return "needs-you"
-    if stage == "test" and entry.get("decision") == "READY":
+    if stage == "test" and entry.get("decision") in ("READY", "ESCALATE"):
         return "ready"
     return entry.get("seen") or stage or "needs-you"
 

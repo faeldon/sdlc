@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -435,6 +436,7 @@ def test_the_factory_parsing_is_a_pinned_copy() -> None:
     for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE"):
         assert getattr(board, name).pattern == getattr(factory, name).pattern, name
     assert board.VERIFIED == factory.VERIFIED and board.COSTS == factory.COSTS
+    assert board.RECONSIDER == factory.RECONSIDER
     assert board.STOPPED == factory.STOPPED
 
 
@@ -920,7 +922,7 @@ def test_needs_you_comes_first_at_phone_width_and_nowhere_else() -> None:
     assert re.search(r":\s*COLUMNS;", body), "stage order otherwise"
     assert body.index('=== "needs-you"') < body.index('!== "needs-you"'), "Needs you first"
     assert "columnOrder().map(" in script and "COLUMNS.map(" not in script
-    assert re.search(r"JSON\.stringify\(\[NARROW\.matches, st\.changes\]\)", script), (
+    assert re.search(r"JSON\.stringify\(\[NARROW\.matches, st\.changes\], shownAs\)", script), (
         "a width change is a change to render"
     )
     assert re.search(r'NARROW\.addEventListener\("change", [^\n]*render\(', script)
@@ -985,18 +987,23 @@ def test_each_factory_signal_counts_only_at_its_stage(repo) -> None:
     _write(pending / "decisions.md", "- [ ] D1 (code round 1, blocking): purge after 30 days?\n")
     at_test = _worktree(repo, "027-pend-test", 1, "test", commit=["src/f.py"], factory=True)
     _write(at_test / "decisions.md", "- [ ] D1 (code round 1, blocking): purge after 30 days?\n")
+    answered = _escalated(repo, "028-esc-answered", "test", commit=["src/g.py"])
+    _write(answered / "decisions.md", TICKED)
     cards = _cards(repo)
     got = {n: (c["column"], c["next"]) for n, c in cards.items() if n >= "020"}
     assert got == {
         "020-esc-shipped": ("close", "/sdlc:close 020"),
         "021-esc-dropped": ("close", "/sdlc:close 021"),
         "022-esc-by-hand": ("needs-you", "/sdlc:ship, or /sdlc-factory:land with the others ready"),
+        "028-esc-answered": ("ready", "/sdlc:ship, or /sdlc-factory:land with the others ready"),
         "023-esc-back": ("build", "the factory is building it: wait for its decision"),
         "024-stop-shipped": ("close", "/sdlc:close 024"),
         "025-pend-shipped": ("close", "/sdlc:close 025"),
         "027-pend-test": ("test", "/sdlc:ship"),
     }
     assert all(cards[n]["problems"] == [] for n in got), "every file read"
+    assert cards["022-esc-by-hand"]["needs"] == ["read the escalation"], "107 R9: no ledger"
+    assert all(cards[n]["needs"] == [] for n in got if cards[n]["column"] != "needs-you")
 
 
 @pytest.mark.portable
@@ -1007,6 +1014,7 @@ def test_a_file_that_wont_read_needs_the_person_at_any_stage(repo) -> None:
     card = _cards(repo)["026-bad-shipped"]
     assert card["column"] == "needs-you"
     assert any("decision.md" in p for p in card["problems"]), card["problems"]
+    assert card["needs"] == [f"fix: {p}" for p in card["problems"]], "107 R8"
 
 
 @pytest.mark.portable
@@ -1253,3 +1261,230 @@ def test_the_board_fixture_shows_every_card_state(tmp_path: Path, monkeypatch) -
     assert gates == {"PASS", "FAIL"}, "a green and a red gate badge"
     assert any(c["problems"] for c in cards.values()), "a file that won't read"
     assert _git(repo, "status", "--porcelain") == "", "the main checkout is left clean"
+
+
+# ---------------------------------------------------------------- what each card needs (107)
+
+TICKED = (
+    "# Decisions\n\n"
+    "- [x] D1 (code round 1, blocking): keep drafts 30 days? → decided: 30\n"
+    "- [x] D2 (builder round 1, default): page at 50 → decided: 50\n"
+    "- [x] R1 (person, restart): try the other store\n"
+)
+
+
+@pytest.mark.portable
+def test_an_answered_escalation_is_ready_to_ship(repo) -> None:
+    """R5: every ledger line ticked and no Reconsider section: Ready to ship, marked answered."""
+    folder = _escalated(repo, "040-esc-done", "test", commit=["src/done.py"])
+    _write(folder / "decisions.md", TICKED)
+    card = _cards(repo)["040-esc-done"]
+    assert (card["column"], card["needs"], card["answered"]) == ("ready", [], True)
+    assert card["problems"] == [] and card["ledger_lines"] == 2, "R1 is no ledger line"
+    _write(
+        folder / "decisions.md",
+        TICKED + "- [ ] D3 (approver, blocking): which store?\n"
+        "- [ ] D4 (builder round 1, default): CSV\n- [ ] D5 (code round 1, default): UTC\n",
+    )
+    card = _cards(repo)["040-esc-done"]
+    assert card["column"] == "needs-you" and card["answered"] is False
+    assert card["needs"] == ["decide D3", "confirm 2 defaults"]
+    _write(folder / "decisions.md", TICKED)
+    _write(
+        folder / "decision.md",
+        "DECISION: ESCALATE\n\nOut of rounds.\n\n"
+        "## Reconsider the approach\n\nThe store is wrong.\n",
+    )
+    card = _cards(repo)["040-esc-done"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["reconsider the approach"])
+    assert card["answered"] is False
+
+
+@pytest.mark.portable
+def test_a_malformed_open_line_keeps_the_escalation(repo) -> None:
+    """R6: an open box the ledger can't read is a problem, never an answer."""
+    folder = _escalated(repo, "041-esc-garbled", "test", commit=["src/garbled.py"])
+    _write(folder / "decisions.md", TICKED + "- [ ] D3 which store, blocking?\n")
+    card = _cards(repo)["041-esc-garbled"]
+    line = "decisions.md: an open line that doesn't read as a decision"
+    assert card["problems"] == [line] and card["column"] == "needs-you"
+    assert card["needs"] == [f"fix: {line}"] and card["answered"] is False
+
+
+@pytest.mark.portable
+def test_a_written_spec_at_plan_needs_the_person(repo) -> None:
+    """R7 on the board: a written spec whose stage never moved; a scaffold stays in Plan."""
+    folder = _change(repo, "042-spec-written", 2, "plan", "Spec written")
+    _write(folder / "spec.md", "# 042 — spec\n\n## Requirements\n\n1. It lists drafts.\n")
+    scaffold = _change(repo, "043-spec-scaffold", 2, "plan", "Spec scaffold")
+    _write(scaffold / "spec.md", "# 043 — spec\n\n<Numbered requirements.>\n<Design.>\n")
+    cards = _cards(repo)
+    assert (cards["042-spec-written"]["column"], cards["042-spec-written"]["needs"]) == (
+        "needs-you",
+        ["approve its spec"],
+    )
+    assert (cards["043-spec-scaffold"]["column"], cards["043-spec-scaffold"]["needs"]) == (
+        "plan",
+        [],
+    )
+    assert cards["003-draft-export"]["needs"] == [] and cards["003-draft-export"]["column"] == (
+        "ready"
+    ), "a READY with an unticked default is not the person's"
+
+
+def _status(root: Path, monkeypatch, capsys) -> tuple[str, dict]:
+    """`sdlc.py status` run in `root`: what it printed, and the records it printed from."""
+    seen = {}
+    real = sdlc.print_status
+
+    def keep(a: dict) -> None:
+        seen["a"] = a
+        real(a)
+
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "status"])
+    monkeypatch.setattr(sdlc, "print_status", keep)
+    capsys.readouterr()
+    assert sdlc.main() == 0
+    return capsys.readouterr().out, seen["a"]
+
+
+def _needs_folders(root: Path) -> None:
+    done = _escalated(root, "040-esc-done", "test", commit=["src/done.py"])
+    _write(done / "decisions.md", TICKED)
+    open_ = _escalated(root, "041-esc-open", "test", commit=["src/open.py"])
+    _write(
+        open_ / "decisions.md",
+        TICKED + "- [ ] D3 (approver, blocking): which store?\n"
+        "- [ ] D4 (builder round 1, default): CSV\n- [ ] D5 (code round 1, default): UTC\n",
+    )
+    _stopped_run(root)
+
+
+@pytest.mark.portable
+def test_status_ends_with_what_needs_me(repo, monkeypatch, capsys) -> None:
+    """R11: the last section, one line per change with needs, as the board reads them."""
+    _needs_folders(repo)
+    out, a = _status(repo, monkeypatch, capsys)
+    heads = [line for line in out.splitlines() if line.startswith("■ ")]
+    assert heads[-1] == "■ What needs me" and heads[-2].startswith("■ Problems"), heads
+    tail = out.split("■ What needs me\n", 1)[1].splitlines()
+    assert tail == [
+        "    004  decide D1",
+        "    013  stopped: rerun",
+        "    041  decide D3, confirm 2 defaults",
+    ], tail
+    assert "  · stopped, touched" in out and "→ " in out, "the stop's own lines stay"
+    cards = _cards(repo)
+    for rec in a["open"]:
+        card = cards[f"{rec['id']}-{rec['slug']}"]
+        # A problem only the board reads (a reply with no VERDICT) is the board's alone.
+        assert rec["needs"] == [n for n in card["needs"] if not n.startswith("fix: ")], rec["id"]
+        assert rec["answered"] == card["answered"], rec["id"]
+    assert {r["id"]: r["answered"] for r in a["open"]}["040"] is True
+
+
+@pytest.mark.portable
+def test_status_says_nothing_needs_me_when_nothing_does(tmp_path, monkeypatch, capsys) -> None:
+    root = tmp_path / "quiet"
+    root.mkdir()
+    _write(root / "README.md", "a repo\n")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    _change(root, "001-reopen-drafts", 1, "plan", "Reopen drafts")
+    out, _ = _status(root, monkeypatch, capsys)
+    assert out.rstrip().endswith("■ What needs me\n    nothing"), out[-200:]
+
+
+@pytest.mark.portable
+def test_status_records_only_gain_keys(repo, monkeypatch, capsys) -> None:
+    """R12: each open record gains `needs` and `answered`, and every other key stays as it was."""
+    _needs_folders(repo)
+    before = {r["dir"]: set(r) for r in sdlc.analyze(repo)["open"]}
+    _, a = _status(repo, monkeypatch, capsys)
+    dispatch = {"behind", "touched_ago", "quiet", "stopped", "gate"}
+    for rec in a["open"]:
+        assert set(rec) == before[rec["dir"]] | dispatch | {"needs", "answered"}, rec["dir"]
+        assert isinstance(rec["needs"], list) and isinstance(rec["answered"], bool)
+
+
+@pytest.mark.portable
+def test_status_reads_a_malformed_open_line_as_a_problem(repo, monkeypatch, capsys) -> None:
+    """R6 in status: the escalation stays the person's."""
+    folder = _escalated(repo, "041-esc-garbled", "test", commit=["src/garbled.py"])
+    _write(folder / "decisions.md", TICKED + "- [ ] D3 which store, blocking?\n")
+    out, a = _status(repo, monkeypatch, capsys)
+    rec = next(r for r in a["open"] if r["id"] == "041")
+    line = "decisions.md: an open line that doesn't read as a decision"
+    assert rec["needs"] == [f"fix: {line}"] and rec["answered"] is False
+    assert f"    041  fix: {line}" in out
+
+
+@pytest.mark.portable
+def test_a_needs_card_names_what_it_needs() -> None:
+    """R10: a line above `next:` names the needs, and an answered escalation is badged, as text."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    _, script = _page_parts()
+    body = re.search(r"function card\(c\) \{(.*?)\n\}", script, re.S).group(1)
+    line = 'h("div", { class: "needs" }, `needs you: ${c.needs.join(" · ")}`)'
+    assert line in body, "built with h(), its text a string"
+    assert body.index(line) < body.index('h("div", { class: "next" }'), "above next:"
+    badge = 'c.answered ? h("span", { class: "badge answered" }, "escalated: answered")'
+    assert badge in body
+    assert '"the approver escalated it to you"' in body and "waits on you: ${d.text}" in body
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML"):
+        assert sink not in page, sink
+    assert '{ key: "needs-you", label: "Needs you", who: "what each card says it needs" }' in script
+
+
+@pytest.mark.portable
+def test_the_render_key_holds_what_is_shown() -> None:
+    """R13 (2026-11-17-50): a poll rebuilds the board only when what a person sees changes, so
+    the key holds seconds as the page renders them, never raw."""
+    _, script = _page_parts()
+    keys = re.findall(r"JSON\.stringify\(([^)]*\]?[^)]*)\)", script)
+    assert keys == ["[NARROW.matches, st.changes], shownAs"], keys
+    shown = re.search(r"function shownAs\(k, v\) \{(.*?)\n\}", script, re.S)
+    assert shown, "the replacer"
+    body = shown.group(1)
+    assert re.search(r'k === "touched_ago"\) return ago\(v\)', body)
+    assert re.search(r'k === "elapsed"\)[^\n]*dur\(v\)', body)
+    assert re.search(r'k === "fraction"\)[^\n]*Math\.round\(v \* 100\)', body)
+    assert "Math.round(p.fraction * 100)" in script, "the same percent the bar draws"
+
+
+@pytest.mark.portable
+def test_a_rebuild_puts_focus_back() -> None:
+    """R14: the card that held focus gets it back after a rebuild, unless the drawer is open."""
+    _, script = _page_parts()
+    render = re.search(r"function render\(st\) \{(.*?)\n\}", script, re.S).group(1)
+    held = render.index("document.activeElement")
+    swap = render.index('$("board").replaceChildren(')
+    back = re.search(r'querySelector\(`\[data-change="\$\{CSS\.escape\(held\)\}"\]`\)', render)
+    assert held < swap < back.start(), "read before, restored after"
+    assert re.search(r"if \(held && !open\)", render), "an open drawer keeps its focus"
+    # `open` there is the drawer's: a local of that name in render() is read before it is set,
+    # and throws whenever a card holds focus (107 round 1).
+    assert not re.search(r"\b(const|let|var)\s+open\b", render), "render() shadows `open`"
+    assert re.search(r"^let open = null;$", script, re.M), "the drawer's, at module level"
+    assert ".focus()" in render[swap:]
+
+
+@pytest.mark.portable
+def test_aria_live_sits_on_the_status_line_alone() -> None:
+    """R15: a screen reader hears the board connect, drop, or its Needs you count change, never
+    the whole board each poll, nor the time."""
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    live = re.findall(r"<[^>]*aria-live[^>]*>", page)
+    assert live == ['<span class="status" id="status" aria-live="polite">'], live
+    assert '<main class="board" id="board">' in page
+    assert re.search(r'<span class="status" id="polled"></span>', page)
+    _, script = _page_parts()
+    assert "toLocaleTimeString()" in script
+    for line in script.splitlines():
+        if "toLocaleTimeString()" in line:
+            assert '$("polled")' in line and '$("status")' not in line, line
+    say = re.search(r"function say\(text, down\) \{(.*?)\n\}", script, re.S)
+    assert say and '$("status").textContent !== text' in say.group(1), "set only when it changes"
+    assert re.search(r"`live · \$\{need\} need", script)

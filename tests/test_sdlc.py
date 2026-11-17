@@ -2540,3 +2540,101 @@ def test_factory_detection_runs_nothing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setattr(subprocess, "Popen", refuse)
     assert sdlc.factory_enabled(tmp_path) == (True, "user")
+
+
+# ---------------------------------------------------------------- what a change needs (107)
+
+
+def _rec(**fields) -> dict:
+    """A record as `needs_of()` reads it: an open change with nothing to say, then `fields`."""
+    rec = {
+        "stage": "build", "tier": 2, "problems": [], "stopped": None, "decision": None,
+        "reconsider": False, "pending": [], "assumed": [], "ledger_lines": 0,
+        "spec_filled": False,
+    }  # fmt: skip
+    return rec | fields
+
+
+def _d(*ids: str) -> list[dict]:
+    return [{"id": i, "by": "code round 1", "text": "which?"} for i in ids]
+
+
+@pytest.mark.portable
+def test_needs_of_reads_nothing() -> None:
+    """R1: the rules are a pure function of the record, so the board and status can't disagree."""
+    reads = []
+
+    def refuse(*args, **kwargs):
+        reads.append(args)
+        raise AssertionError(f"needs_of read something: {args}")
+
+    rec = _rec(stage="test", decision="ESCALATE", pending=_d("D2"), ledger_lines=1)
+    with pytest.MonkeyPatch.context() as mp:
+        for name in ("read_text", "read_bytes", "is_file", "is_dir", "exists", "open", "stat"):
+            mp.setattr(Path, name, refuse)
+        mp.setattr(subprocess, "run", refuse)
+        mp.setattr("builtins.open", refuse)
+        got = (sdlc.needs_of(rec), sdlc.answered(rec))
+    assert reads == [] and got == (["decide D2"], False)
+
+
+@pytest.mark.portable
+def test_a_stop_needs_its_way_on() -> None:
+    """R2: at `build` a stop needs its way on; a record that won't read, to be read; elsewhere
+    nothing."""
+    for way in ("rerun", "mend", "ship"):
+        assert sdlc.needs_of(_rec(stopped={"way": way, "next": "x"})) == [f"stopped: {way}"]
+    assert sdlc.needs_of(_rec(stopped={"way": None, "next": "x"})) == [
+        "stopped: read runs/stopped.md"
+    ]
+    for stage in ("plan", "design", "test"):
+        assert sdlc.needs_of(_rec(stage=stage, stopped={"way": "rerun"})) == [], stage
+
+
+@pytest.mark.portable
+def test_a_blocking_decision_needs_its_id() -> None:
+    """R3: one `decide D<n>` per unticked blocking decision, in ledger order, after the stop."""
+    rec = _rec(stopped={"way": "rerun"}, pending=_d("D3", "D1"), assumed=_d("D2"))
+    assert sdlc.needs_of(rec) == ["stopped: rerun", "decide D3", "decide D1"]
+    assert sdlc.needs_of(_rec(stage="test", pending=_d("D1"))) == [], "no ESCALATE: nothing"
+    assert sdlc.needs_of(_rec(stage="test", decision="READY", pending=_d("D1"))) == []
+
+
+@pytest.mark.portable
+def test_an_escalation_needs_what_its_ledger_holds() -> None:
+    """R4: what the ledger and decision still hold, in order; an empty ledger needs reading."""
+    esc = {"stage": "test", "decision": "ESCALATE"}
+    full = _rec(**esc, pending=_d("D2", "D4"), assumed=_d("D1", "D3", "D5"), ledger_lines=6,
+                reconsider=True)  # fmt: skip
+    assert sdlc.needs_of(full) == ["decide D2", "decide D4", "confirm 3 defaults",
+                                   "reconsider the approach"]  # fmt: skip
+    assert sdlc.needs_of(_rec(**esc, assumed=_d("D1"), ledger_lines=2)) == ["confirm 1 default"]
+    assert sdlc.needs_of(_rec(**esc)) == ["read the escalation"]
+    assert sdlc.needs_of(_rec(**esc, reconsider=True)) == [
+        "reconsider the approach", "read the escalation",
+    ]  # fmt: skip
+    assert sdlc.needs_of(_rec(**esc, ledger_lines=2)) == [], "every line ticked"
+    assert sdlc.answered(_rec(**esc, ledger_lines=2)) is True
+    for rec in (_rec(**esc), _rec(**esc, ledger_lines=2, reconsider=True),
+                _rec(**esc, ledger_lines=2, problems=["x"]), _rec(stage="test", decision="READY"),
+                _rec(stage="build", decision="ESCALATE", ledger_lines=2)):  # fmt: skip
+        assert sdlc.answered(rec) is False, rec
+
+
+@pytest.mark.portable
+def test_a_written_unapproved_spec_needs_approval() -> None:
+    """R7: a Tier 2 at `plan` whose `spec.md` is written but whose stage never moved."""
+    assert sdlc.needs_of(_rec(stage="plan", spec_filled=True)) == ["approve its spec"]
+    assert sdlc.needs_of(_rec(stage="plan", spec_filled=False)) == []
+    assert sdlc.needs_of(_rec(stage="plan", tier=1, spec_filled=True)) == []
+    assert sdlc.needs_of(_rec(stage="design", spec_filled=True)) == []
+
+
+@pytest.mark.portable
+def test_a_problem_needs_fixing_at_any_stage_and_a_closed_change_nothing_more() -> None:
+    """R8: every problem first, at any stage; a shipped or dropped change needs nothing else."""
+    rec = _rec(problems=["decision.md doesn't open"], pending=_d("D1"))
+    assert sdlc.needs_of(rec) == ["fix: decision.md doesn't open", "decide D1"]
+    shipped = _rec(stage="shipped", problems=["p"], decision="ESCALATE")
+    assert sdlc.needs_of(shipped) == ["fix: p"]
+    assert sdlc.needs_of(_rec(stage="dropped", decision="ESCALATE")) == []

@@ -4003,6 +4003,10 @@ FACTORY_STEP = Path("runs") / "step.md"
 FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 FACTORY_AGENT_TIMEOUT = 3 * 3600
+# The heading an escalation a run's rounds ran out on holds, in `decision.md`.
+FACTORY_RECONSIDER = "## Reconsider the approach"
+# An open box the ledger can't read: a problem, never an answered decision.
+GARBLED_LEDGER = "decisions.md: an open line that doesn't read as a decision"
 
 
 def factory_stop(folder: Path) -> dict | None:
@@ -4048,6 +4052,75 @@ def factory_first_build(folder: Path) -> bool:
     first = FACTORY_STEP_RE.match(lines[0]) if lines else None
     rounds = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
     return bool(first) and first.group(1) == "build" and (rounds or [""])[0] in ("", "1")
+
+
+def factory_reading(folder: Path) -> dict:
+    """What `needs_of()` reads from a factory run's folder, as the board reads it: the approver's
+    decision, whether it asks to reconsider the approach, the ledger's open blocking (`pending`)
+    and default (`assumed`) decisions, its count of decision lines, and `problems`: an open box
+    the ledger can't read, or a file that won't. Never raises."""
+    found = {"decision": None, "reconsider": False, "pending": [], "assumed": [],
+             "ledger_lines": 0, "problems": []}  # fmt: skip
+    try:
+        path = folder / "decision.md"
+        if path.is_file():
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            m = FACTORY_DECISION_RE.match(lines[0]) if lines else None
+            found["decision"] = m.group(1) if m else None
+            found["reconsider"] = FACTORY_RECONSIDER in [line.strip() for line in lines]
+        path = folder / "decisions.md"
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except OSError as e:
+        found["problems"].append(str(e))
+        return found
+    garbled = False
+    for line in text.splitlines():
+        m = FACTORY_LEDGER_RE.match(line)
+        found["ledger_lines"] += bool(m)
+        garbled = garbled or not m and line.startswith("- [ ]")
+        if m and m.group(1) == " ":
+            item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
+            found["pending" if m.group(4) == "blocking" else "assumed"].append(item)
+    if garbled:
+        found["problems"].append(GARBLED_LEDGER)
+    return found
+
+
+def needs_of(rec: dict) -> list[str]:
+    """What a change needs from the person, as short texts, from fields already read: `stage`,
+    `tier`, `problems`, `stopped`, `decision`, `reconsider`, `pending`, `assumed`, `ledger_lines`
+    and `spec_filled`. The one place the rules live, so the board and `status` can't disagree;
+    it reads nothing itself. Every problem first, at any stage; a closed change nothing more; at
+    `build` a stop, then each blocking decision; at `test` with an ESCALATE what its ledger and
+    decision still hold, or, with no ledger line at all, the escalation itself; a Tier 2 at `plan`
+    whose `spec.md` is written but whose stage never moved, its approval."""
+    needs = [f"fix: {p}" for p in rec.get("problems") or []]
+    stage = rec.get("stage")
+    if stage in ("shipped", "dropped"):
+        return needs
+    pending = [f"decide {d['id']}" for d in rec.get("pending") or []]
+    if stage == "build":
+        if stop := rec.get("stopped"):
+            way = stop.get("way") or f"read {FACTORY_STOPPED.as_posix()}"
+            needs.append(f"stopped: {way}")
+        needs += pending
+    elif stage == "test" and rec.get("decision") == "ESCALATE":
+        needs += pending
+        if n := len(rec.get("assumed") or []):
+            needs.append(f"confirm {n} default" + ("s" if n > 1 else ""))
+        if rec.get("reconsider"):
+            needs.append("reconsider the approach")
+        if not rec.get("ledger_lines"):
+            needs.append("read the escalation")
+    elif stage == "plan" and rec.get("tier") == 2 and rec.get("spec_filled"):
+        needs.append("approve its spec")
+    return needs
+
+
+def answered(rec: dict) -> bool:
+    """An escalation the person has answered: an ESCALATE at `test` that needs nothing more, which
+    `needs_of()` allows only with a ledger line, every one ticked, and no `Reconsider` section."""
+    return rec.get("stage") == "test" and rec.get("decision") == "ESCALATE" and not needs_of(rec)
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:
@@ -8765,6 +8838,14 @@ def print_status(a: dict) -> None:
     for pr in a["problems"]:
         print(f"    ⚠  {pr['dir']}: {pr['detail']}")
 
+    # Last, so the answer to "what needs me?" is the line the eye ends on.
+    print("\n■ What needs me")
+    waiting = [rec for rec in a["open"] if rec.get("needs")]
+    if not waiting:
+        print("    nothing")
+    for rec in waiting:
+        print(f"    {rec['id']}  {', '.join(rec['needs'])}")
+
 
 def main() -> int:
     _utf8_streams()
@@ -9188,6 +9269,14 @@ def main() -> int:
         # run's gate is its own.
         folder = Path(root, rec["dir"])
         rec["gate"] = None if (folder / "runs").is_dir() else hand_gate(folder, home, a["trunk"])
+        # What it needs from the person, by the rules the board reads (`needs_of()`); a factory
+        # run's decision and ledger only where it ran, and nothing but the two answers kept.
+        seen = factory_reading(folder) if (folder / "runs").is_dir() else {"problems": []}
+        reading = rec | seen | {
+            "problems": rec["errors"] + seen["problems"],
+            "spec_filled": "spec.md" in rec["artifacts"] and "spec.md" not in rec["unfilled"],
+        }  # fmt: skip
+        rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))
