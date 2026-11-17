@@ -445,3 +445,18 @@ read the item's continuation lines, and title a seed with no proposal from its f
 Severity: low
 Paths: plugins/factory/scripts/factory.py
 Theme: landing
+
+## [2026-11-17-79] [bug] A landing's conflict resolution can bring back the seeds its ship deleted
+
+`factory.py land` runs `sdlc.py ship`, which deletes the seeds the change's `idea:` names, then
+rebases; when `.sdlc/work/inbox.md` conflicts, the builder's resolution can keep the change's own
+tagged copies, so the landed commit re-adds them. 104's commit (`f2745b5`) put 2026-11-17-37 and
+-38 back on main tagged `[building]` after 104 built them; `check --strict` flagged them as
+orphans, and `inbox-commit` refuses to retire a `[building]` entry, so they were untagged and
+retired by hand (`06f0d77`). The resolve prompt, or `resolve --continue`, should drop any entry
+the change's `idea:` or `fixes:` names. 100 stops new tags, so it bites only changes opened before
+it.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
+Theme: landing
