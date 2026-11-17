@@ -9,6 +9,7 @@ allowed-tools:
   - AskUserQuestion
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py fresh *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py decisions *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py verdicts *)'
@@ -95,7 +96,9 @@ the full depth, runs full, and a run never lightens. `verdicts` reports it each 
 **The gate is the script's, at either depth.** Before any reviewer reads a build, `factory.py gate`
 runs the base branch's `[commands] check` (never the change's own copy of the config) in the
 change's worktree, and a red one sends the builder back, at most twice a round; a third red gate
-stops the change. `verdicts` reports it (`gate`: its command, this round's fails, and the verdict on
+stops the change. Gates from every worktree share the base branch's `gate_jobs` slots (`config`
+and `start` show it, default 1), so a gate may print that it is waiting for one; its wait is not
+in its time. `verdicts` reports it (`gate`: its command, this round's fails, and the verdict on
 the build as it stands; null, with `gate_why`, when the base branch names no check, and then no
 build is gated). `start` also gives `head`, the commit
 the run starts from, `spec`, true for a Tier 2 at `stage: plan`, whose spec the spec-writer drafts
@@ -110,7 +113,27 @@ round the new build will be (the new run's first, so its round limit and the gat
 from there), `reconsider`, whether the decision has a `## Reconsider the approach` section, and
 `reasons`, its text. Nothing is written yet. A READY decision is refused (it is ship's or land's),
 as is a test change with no decision or one that won't read. **If there are refusals, show them
-and stop.** Keep `head`.
+and stop.** `start` also gives `base`, the branch the change lands on, and `behind`, how many of
+its commits the change lacks.
+
+With no refusals, bring the change up to date before any agent reads it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py fresh <NNN>
+```
+
+`fresh` runs `sdlc.py`'s own `base` in the change's worktree, and its `resolve` when the base
+changed what the change's uncommitted work changes, so the spec-writer drafts and the builder
+builds on current code. It is a write before this skill's WAIT, by a named exception to
+confirm-before-writing, as ship's `base` is: it moves only the change's own branch, never stashes,
+merges the base or forces, and prints the command that undoes it. Its `state`: `current`,
+`fast-forwarded`, `rebased` or `resolved`, each with `from`, `head` and `undo`; `held` for a run that
+stopped part way at `stage: build`, which moves nothing, since its rounds were gated and reviewed on
+the base they had and landing rebases and gates it again; or `refused`, with the worktree as it
+was. A conflict git can't settle is aborted and refused, naming its files: the person resolves it
+with `/sdlc:ship` from the worktree, or `sdlc.py resolve`, never an agent before the run's yes.
+**If `fresh` refuses, show its refusal and stop.** Keep `fresh`'s `head`, not `start`'s: it is
+the `--head` every `verdicts` is given, and a run stops when `HEAD` moves.
 
 ## Step 1 — Show it
 
@@ -140,7 +163,9 @@ answer it before the rebuild); then that `decision.md` will be kept as `archive`
 builder starts afresh at round `round`, told the approver's reasons.
 
 Then show the person, naming the change: the spec draft and its questions, when there is one; the
-change and its tier; the gate command the script will run, from the base branch's
+change and its tier; how far it was behind `base` (`behind`) and what `fresh` did, its state,
+`from` → `head` and its `undo`, or, when it `held`, that the run resumes `<behind>` commits behind
+`<base>`; the gate command the script will run, from the base branch's
 `.sdlc/config.toml`, or that there is none; the agents that will run (builder, each reviewer at
 each depth, the verifier, approver) with each one's model from `models_at`; the round limits; the
 depth rule above; the permission mode; with `[ui]` set, its `serve` and `paths`, since the dev

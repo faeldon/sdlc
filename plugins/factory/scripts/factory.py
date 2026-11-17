@@ -13,11 +13,13 @@ line a step moves.
 
 It never imports `sdlc.py`. Installed from the marketplace, each plugin is cached on its own, so
 it reads the change folder itself, the same way: frontmatter by line, edited by line, never
-round-tripped (`sdlc.py`'s `stamp_shipped` rule). For landing alone it runs the `sdlc.py` of its
-own version, beside it (`sdlc_path()`), so ship, base and close keep one implementation.
+round-tripped (`sdlc.py`'s `stamp_shipped` rule). For `fresh` and landing alone it runs the
+`sdlc.py` of its own version, beside it (`sdlc_path()`), so ship, base, resolve and close keep one
+implementation.
 
     uv run --script factory.py config
     uv run --script factory.py start 008 --for build
+    uv run --script factory.py fresh 008
     uv run --script factory.py decisions 008
     uv run --script factory.py verdicts 008 --head 1a2b3c4 --record
     uv run --script factory.py gate 008
@@ -33,8 +35,11 @@ Every command prints JSON and writes only where its name says: `decisions` to `d
 `verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear) and the
 step it read, with since when, to `runs/step.md`,
 `agent` the reply an agent session returned, and its id and figures under `runs/`. Nothing is
-written outside the change's folder, and nothing under `.git/`, but by the landing: `land` and
-`resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it. A command about
+written outside the change's folder, and nothing under `.git/`, but by the landing and `fresh`:
+`land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands it;
+`fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
+`resolve`, and commits nothing that stays. `gate` also holds a lock on a slot file,
+`sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written. A command about
 one change runs in its worktree, found from the main checkout when the supervisor runs there
 (`change_root()`).
 
@@ -60,7 +65,8 @@ import sys
 import time
 import tomllib
 import uuid
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -93,6 +99,9 @@ DEFAULTS: dict = {
         "serve": None, "url": "http://127.0.0.1:{port}", "pages": ["/"], "paths": [],
         "shoot": None, "widths": [[1280, 800], [390, 844]], "timeout": 60,
     },
+    # The most `factory.py gate` runs at once across every worktree of the repo: one by default,
+    # so parallel runs' gates never fight each other for every core.
+    "gate_jobs": 1,
 }  # fmt: skip
 MAX_ROUNDS = 5
 # The permission modes `claude -p` takes, for the agent sessions the supervisor starts: none of
@@ -290,6 +299,8 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     warnings += land_warnings
     cfg["ui"], ui_warnings = _ui(root)
     warnings += ui_warnings
+    cfg["gate_jobs"], jobs_warnings = _gate_jobs(root)
+    warnings += jobs_warnings
     path = root / CONFIG_FILE
     if not path.is_file():
         return cfg, warnings
@@ -320,6 +331,11 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         warnings.append(
             f"mode is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
             f"{data.get('mode')!r} applies once it lands"
+        )
+    if "gate_jobs" in data and data.get("gate_jobs") != cfg["gate_jobs"]:
+        warnings.append(
+            f"gate_jobs is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
+            f"{data.get('gate_jobs')!r} applies once it lands"
         )
     if "ui" in data and _ui_table(data.get("ui"))[0] != cfg["ui"]:
         warnings.append(
@@ -370,6 +386,16 @@ def _land(root: Path) -> tuple[dict, list[str]]:
         else:
             warnings.append(f"land.{key} must be auto = true|false or batch = a whole number")
     return out, warnings
+
+
+def _gate_jobs(root: Path) -> tuple[int, list[str]]:
+    """`gate_jobs` as the base branch holds it: a change can't give its own gate more room."""
+    jobs = _base_factory(root).get("gate_jobs", DEFAULTS["gate_jobs"])
+    if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
+        return DEFAULTS["gate_jobs"], [
+            f"gate_jobs must be a whole number of 1 or more, so {DEFAULTS['gate_jobs']} runs"
+        ]
+    return jobs, []
 
 
 def _ui(root: Path) -> tuple[dict, list[str]]:
@@ -654,12 +680,20 @@ def cmd_config(root: Path) -> int:
     return emit({"config_file": str(CONFIG_FILE), **cfg, "warnings": warnings})
 
 
+def behind_base(root: Path) -> dict:
+    """`base`, the branch the change lands on, and `behind`, how many of its commits `HEAD`
+    lacks: both None when there is no base branch. Reads only."""
+    base = _base(root)
+    count = _git(root, "rev-list", "--count", f"HEAD..{base}") if base else None
+    return {"base": base, "behind": int(count) if count and count.isdigit() else None}
+
+
 def cmd_start(root: Path, ident: str, purpose: str) -> int:
     """Whether a factory step may start on this change now, and what it will run with."""
     cfg, warnings = load_config(root)
     out: dict = {"change": None, "folder": None, "for": purpose, "tier": None, "stage": None}
     out.update(head=_git(root, "rev-parse", "--short", "HEAD"), **cfg, max_runs=max_runs(cfg))
-    out.update(warnings=warnings, refusals=[])
+    out.update(behind_base(root), warnings=warnings, refusals=[])
     folder, refusal = find_change(root, ident)
     if refusal:
         out["refusals"].append(refusal)
@@ -1502,6 +1536,84 @@ def _placeholders(text: str, root: Path) -> str:
     return text
 
 
+# Each of `gate_jobs` slots is a lock on a file of its own in the git common dir, which every
+# worktree shares and no `git status` shows; never `sdlc.py`'s `sdlc.lock`, which `new` claims
+# numbers under. A lock held on an open descriptor, never a file whose existence is the lock, so
+# the OS frees it when its gate ends, however it ends. The files stay.
+SLOT_NAME = "sdlc-factory-gate-{}.lock"
+SLOT_POLL = 0.25
+
+
+def _slot_dir(root: Path) -> Path | None:
+    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return Path(common) if common else None
+
+
+def _try_lock(fd: int) -> bool:
+    """Take an exclusive lock on `fd` without waiting: True when taken, False when another holds
+    it. Each platform's module is imported here only, never at the top: neither exists on both."""
+    if os.name == "nt":
+        import errno
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError as e:
+            if e.errno in (errno.EACCES, getattr(errno, "EDEADLOCK", 36)):
+                return False
+            raise
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock(fd: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    # Elsewhere, closing the descriptor releases a flock.
+
+
+@contextmanager
+def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, float]]:
+    """Hold one of `jobs` gate slots for the `with` block, waiting until one is free, and yield
+    which (`k`) and how many seconds the wait took (0.0 for none). A wait says so once, on stderr.
+    Outside a git repo there are no slots: `(None, 0.0)`, and the gate runs unlimited."""
+    where = _slot_dir(root)
+    if where is None:
+        yield None, 0.0
+        return
+    start, fds, held = time.monotonic(), [], None
+    try:
+        for k in range(jobs):
+            fds.append(os.open(where / SLOT_NAME.format(k), os.O_RDWR | os.O_CREAT, 0o644))
+        said = False
+        while held is None:
+            held = next((k for k, fd in enumerate(fds) if _try_lock(fd)), None)
+            if held is None:
+                if not said:
+                    print(f"{change}: waiting for a gate slot ({jobs} of {jobs} in use)",
+                          file=sys.stderr, flush=True)  # fmt: skip
+                    said = True
+                time.sleep(SLOT_POLL)
+        waited = round(time.monotonic() - start, 1) if said else 0.0
+        try:
+            yield held, waited
+        finally:
+            _unlock(fds[held])
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
     add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
@@ -1528,25 +1640,27 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
         if n == 0:
             return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
         path, build = gate_path(folder, n), build_hash(folder, n)
-    before = _tree_hashes(root, base)
-    start = time.monotonic()
-    try:
-        done = subprocess.run(
-            _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
-        )  # fmt: skip
-        code, output = done.returncode, done.stdout + done.stderr
-        exit_text = str(code)
-    except subprocess.TimeoutExpired as e:
-        # A timeout's partial output is bytes even in text mode.
-        partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
-                   (e.stdout, e.stderr)]  # fmt: skip
-        code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
-        exit_text = "timeout"
-    except OSError as e:
-        code, output, exit_text = None, f"didn't run: {e}", "didn't run"
-    seconds = round(time.monotonic() - start, 1)
-    after = _tree_hashes(root, base)
+    jobs = load_config(root)[0]["gate_jobs"]
+    with gate_slot(root, jobs, folder.name) as (slot, waited):
+        before = _tree_hashes(root, base)
+        start = time.monotonic()
+        try:
+            done = subprocess.run(
+                _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+                stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
+            )  # fmt: skip
+            code, output = done.returncode, done.stdout + done.stderr
+            exit_text = str(code)
+        except subprocess.TimeoutExpired as e:
+            # A timeout's partial output is bytes even in text mode.
+            partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
+                       (e.stdout, e.stderr)]  # fmt: skip
+            code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
+            exit_text = "timeout"
+        except OSError as e:
+            code, output, exit_text = None, f"didn't run: {e}", "didn't run"
+        seconds = round(time.monotonic() - start, 1)
+        after = _tree_hashes(root, base)
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
     attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
@@ -1565,7 +1679,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
     out = {"change": folder.name, "round": n, "attempt": attempt, "verdict": verdict}
-    out.update(exit=exit_text, seconds=seconds, tree=tree, to=path.relative_to(root).as_posix())
+    out.update(exit=exit_text, seconds=seconds, waited=waited, slot=slot, tree=tree)
+    out["to"] = path.relative_to(root).as_posix()
     return emit(out, 0 if verdict == "PASS" else 1)
 
 
@@ -2286,6 +2401,78 @@ def _sdlc(args: list[str], cwd: Path) -> tuple[int, dict | None, str]:
     except ValueError:
         data = None
     return done.returncode, data if isinstance(data, dict) else None, done.stdout + done.stderr
+
+
+def cmd_fresh(root: Path, ident: str) -> int:
+    """Bring change `ident`'s branch up to date with the base branch before a run starts, through
+    `sdlc.py base` of this factory's own version, and `sdlc.py resolve` when `base` refuses on a
+    conflict it can take on: so `base`'s and `resolve`'s rules (only the change's own branch
+    moves; never a stash, a merge of the base or a force) stay in one implementation. Its `state`:
+    `current`, `fast-forwarded`, `rebased` or `resolved`, each with the `undo`; `held` for a run
+    that stopped part way, whose rounds were gated and reviewed on the base they had; or `refused`,
+    with why, the worktree as `fresh` found it. A real conflict is aborted (`resolve --abort`),
+    left for the person: no agent runs before the run's yes."""
+    out: dict = {"change": None, "state": "refused", **behind_base(root), "from": None}
+    out.update(head=None, undo=None, refusals=[])
+    out["from"] = out["head"] = _git(root, "rev-parse", "--short", "HEAD")
+
+    def refuse(why: str) -> int:
+        out["refusals"].append(why)
+        out["head"] = _git(root, "rev-parse", "--short", "HEAD")
+        return emit(out, 1)
+
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return refuse(refusal)
+    out["change"] = folder.name
+    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
+    stage = meta.get("stage") or None
+    if stage == "build":
+        out.update(state="held", reason=(
+            f"{folder.name} stopped part way at stage: build: its rounds were gated and reviewed "
+            "on the base they had, so it resumes there, and landing rebases and gates it again"
+        ))  # fmt: skip
+        return emit(out)
+    if stage == "test" and tier in (1, 2):
+        restart, why = restart_state(folder)
+        if restart is None:
+            return refuse(why)
+    elif (tier, stage) not in STARTS["build"]:
+        allowed = " or ".join(f"tier {t} at stage: {s}" for t, s in sorted(STARTS["build"]))
+        here = f"{folder.name} is tier {tier} at stage: {stage}"
+        return refuse(f"build starts from {allowed}; {here}")
+    _, based, said = _sdlc(["base", folder.name], root)
+    action = (based or {}).get("action")
+    if based is None:
+        return refuse(f"sdlc.py base didn't run: {said.strip()[-500:]}")
+    if action in ("current", "fast-forwarded", "rebased"):
+        out.update(state=action, undo=based.get("undo"))
+        out["head"] = _git(root, "rev-parse", "--short", "HEAD")
+        return emit(out)
+    reason = str(based.get("reason") or said).strip()
+    if not based.get("resolvable"):
+        return refuse(f"sdlc.py base refused: {reason[-500:]}")
+    _, resolved, said = _sdlc(["resolve", folder.name], root)
+    state = (resolved or {}).get("state")
+    if state in ("clean", "current"):
+        out.update(state="resolved", undo=resolved.get("undo"))
+        out["head"] = _git(root, "rev-parse", "--short", "HEAD")
+        return emit(out)
+    if state != "conflict":
+        why = (resolved or {}).get("reason") or said
+        return refuse(f"sdlc.py resolve refused: {str(why).strip()[-500:]}")
+    files = ", ".join(resolved.get("conflicted") or [])
+    way = (
+        f"{folder.name} conflicts with {out['base']} in {files}: left as it was, for the person to "
+        "resolve with /sdlc:ship from its worktree, or sdlc.py resolve"
+    )
+    _, aborted, said = _sdlc(["resolve", folder.name, "--abort"], root)
+    if (aborted or {}).get("state") != "aborted":
+        why = (aborted or {}).get("reason") or said
+        undo = resolved.get("undo")
+        return refuse(f"{way}; resolve --abort refused ({str(why).strip()[-300:]}): undo: {undo}")
+    return refuse(way)
 
 
 def cmd_sdlc_path() -> int:
@@ -3569,6 +3756,8 @@ def main() -> int:
     p_start = sub.add_parser("start", help="whether a factory step may start on the change")
     p_start.add_argument("id")
     p_start.add_argument("--for", dest="purpose", choices=sorted(STARTS), required=True)
+    p_fresh = sub.add_parser("fresh", help="bring the change's branch up to the base before a run")
+    p_fresh.add_argument("id")
     p_verdicts = sub.add_parser("verdicts", help="the review rounds, the decision, the next step")
     p_verdicts.add_argument("id")
     p_verdicts.add_argument("--head", help="HEAD as `start` printed it; a move is a stop")
@@ -3663,6 +3852,8 @@ def main() -> int:
         return cmd_config(root)
     if args.cmd == "start":
         return cmd_start(root, args.id, args.purpose)
+    if args.cmd == "fresh":
+        return cmd_fresh(root, args.id)
     if args.cmd == "verdicts":
         return cmd_verdicts(root, args.id, args.head, args.record)
     if args.cmd == "decisions":

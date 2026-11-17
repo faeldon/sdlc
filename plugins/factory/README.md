@@ -119,6 +119,13 @@ spec.
 
 ## Rounds that converge
 
+- **Built on current code.** Before its spec-writer or its question, `/sdlc-factory:build NNN`
+  runs `factory.py fresh`, which brings the change's branch up to the base branch through
+  `sdlc`'s own `base` (and its `resolve` when the base changed what the change's uncommitted work
+  changes), and shows how far behind it was, what moved and the undo. Only the change's own branch
+  moves; never a stash, a merge of the base or a force. A real conflict is aborted and left for
+  you (`/sdlc:ship` resolves it), and a run that stopped part way at `stage: build` is held where
+  it was: its rounds were reviewed on that base, and landing rebases and gates it again.
 - **Gated by the script, before any reviewer.** After each builder report, `factory.py gate` runs
   the base branch's `[commands] check` in the change's worktree, never the change's own config, and
   records each attempt in `build/round-<N>.gate.md`. A red gate, or one that changes the tree,
@@ -126,6 +133,10 @@ spec.
   change for you. Light runs are gated like full ones. The gate's command can't be changed by the
   change, but the script it runs (a `check.sh`) is in the change's tree: list it in
   `[review] sensitive` to have an edit to it reviewed at the full depth and named at ship.
+- **One gate at a time, by default.** Gates from every worktree of the repo share `gate_jobs`
+  slots (1 unless the base branch's `factory.toml` says more), so parallel runs' checks don't
+  fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1 of 1 in
+  use)`, and its wait is not in its `Seconds:`.
 - **Verified before reworked.** After each round with a `CHANGES` verdict, the `verifier` checks
   every `- CHANGE:` against the code and keeps or drops it, with why. The builder reworks only what
   it keeps; `/sdlc:ship` shows what it dropped.
@@ -241,6 +252,8 @@ rounds = 2
 mode = "auto"                              # the permission mode agent sessions run in, read from
                                            # the base branch; one of acceptEdits, auto,
                                            # bypassPermissions, manual, dontAsk, plan
+gate_jobs = 1                              # the most gates running at once across every
+                                           # worktree, read from the base branch
 
 [models]                                   # override a role's model (else the rule above)
 # code = "sonnet"
@@ -260,7 +273,7 @@ widths = [[1280, 800], [390, 844]]         # each page at each of these
 timeout = 60                               # seconds the server gets to answer
 ```
 
-`mode`, `[land]` and `[ui]` are read from the base branch's copy of the file, never a change's
+`mode`, `gate_jobs`, `[land]` and `[ui]` are read from the base branch's copy of the file, never a change's
 own, so a change can't widen what its agents may do unasked, or choose the command a UI review
 starts. `serve`, `shoot` and `paths` must all be set for a UI review; the screenshot command is
 yours, so any tool that writes a PNG to `{out}` will do, and Playwright's CLI is one
@@ -282,7 +295,10 @@ stage allows the step, where `HEAD` was, what each review's first line says, the
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `approve`, `done` or `stop`); the gate
 itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
-one place it runs a host's command); each agent session, its
+one place it runs a host's command), each holding one of `gate_jobs` slots, an OS lock on
+`sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends; the
+change brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`);
+each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
 the one place it runs `claude`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
@@ -292,7 +308,7 @@ for the eval and the review, which bugs escaped and through which diff (`escapes
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads
 the register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
-For landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
+For `fresh` and landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
 or the cache's), so ship, base and close have one implementation; another version is refused.
 
 ## License

@@ -13,6 +13,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -144,6 +145,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "mode": "auto",
         "land": {"auto": True, "batch": 5},
         "ui": factory.DEFAULTS["ui"],
+        "gate_jobs": 1,
     }
     assert warnings == []
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
@@ -207,6 +209,33 @@ def test_start_checks_the_tier_and_stage(tmp_path, capsys, tier, stage, purpose,
     assert out["head"] == _git(root, "rev-parse", "--short", "HEAD")
     if ok:
         assert out["change"] == NAME and out["max_runs"] == 26, "2 + 3 rounds × (4 + 2 + 2)"
+
+
+def _main_moves(root: Path, *names: str) -> None:
+    """A commit on `main` for each name, adding that file, then back on the change's branch."""
+    _git(root, "checkout", "-q", "main")
+    for name in names:
+        (root / name).write_text(f"{name}\n", encoding="utf-8")
+        _git(root, "add", name)
+        _git(root, "commit", "-q", "-m", f"main adds {name}")
+    _git(root, "checkout", "-q", NAME)
+
+
+@pytest.mark.parametrize("purpose", ["build", "spec"])
+def test_start_says_how_far_behind_the_base_the_change_is(tmp_path, capsys, purpose) -> None:
+    """101 R1: the base branch and how many of its commits `HEAD` lacks, writing nothing."""
+    root = _change(tmp_path, 2, "plan")
+    _main_moves(root, "one.txt", "two.txt")
+    status = _git(root, "status", "--porcelain")
+    _, out = _run(capsys, factory.cmd_start, root, "008", purpose)
+    assert (out["base"], out["behind"]) == ("main", 2), out
+    assert _git(root, "status", "--porcelain") == status, "start writes nothing"
+    _git(root, "merge", "-q", "--ff-only", "main")
+    _, out = _run(capsys, factory.cmd_start, root, "008", purpose)
+    assert (out["base"], out["behind"]) == ("main", 0)
+    _git(root, "branch", "-q", "-m", "main", "trunk")
+    _, out = _run(capsys, factory.cmd_start, root, "008", purpose)
+    assert (out["base"], out["behind"]) == (None, None), "no base, no count"
 
 
 def test_a_tier_1_spec_is_told_its_approach_is_the_spec(tmp_path, capsys) -> None:
@@ -1311,6 +1340,26 @@ def test_the_agents_mode_is_the_base_branchs(tmp_path) -> None:
     assert factory.load_config(root)[1] == []
 
 
+@pytest.mark.parametrize("bad", ["0", "true", '"two"', "1.5"])
+def test_gate_jobs_is_read_from_the_base_branch_and_checked(tmp_path, capsys, bad) -> None:
+    """101 R7: how many gates run at once is the base branch's to set, never the change's own,
+    and a value that isn't a whole number of 1 or more is a warning that leaves 1."""
+    root = _change(tmp_path)
+    _on_main(root, "gate_jobs = 3\n")
+    (root / ".sdlc" / "factory.toml").write_text("gate_jobs = 8\n", encoding="utf-8")
+    cfg, warnings = factory.load_config(root)
+    assert cfg["gate_jobs"] == 3, "a change can't give itself more gates"
+    assert any("gate_jobs is read from the base branch" in w for w in warnings), warnings
+    _, out = _run(capsys, factory.cmd_start, root, "008", "build")
+    assert out["gate_jobs"] == 3
+    (root / ".sdlc" / "factory.toml").write_text("gate_jobs = 3\n", encoding="utf-8")
+    assert factory.load_config(root)[1] == []
+    (root / ".sdlc" / "factory.toml").unlink()
+    _on_main(root, f"gate_jobs = {bad}\n")
+    cfg, warnings = factory.load_config(root)
+    assert cfg["gate_jobs"] == 1 and any("gate_jobs must be" in w for w in warnings), warnings
+
+
 UI = '[ui]\nserve = "serve {port}"\nshoot = "shoot {url} {out}"\npaths = ["web/"]\n'
 
 
@@ -2408,3 +2457,243 @@ def test_a_restarted_change_is_not_ready(tmp_path, capsys) -> None:
     _run(capsys, factory.cmd_stage, root, "008", "test")
     ready = _run(capsys, factory.cmd_ready, root)[1]["ready"]
     assert [(r["change"], r["decision"]) for r in ready] == [(NAME, "READY")]
+
+
+# ---------------------------------------------------------------- a build starts current (101)
+
+needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do")
+
+
+def _behind(tmp_path: Path, slug: str = "fresh") -> tuple[Path, Path]:
+    """A host repo and a change made by `sdlc.py new --worktree`, its folder uncommitted, as
+    `/sdlc:intent` leaves one: (main checkout, the change's worktree)."""
+    root = tmp_path / "host"
+    root.mkdir(parents=True)
+    (root / "README.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    code, _, said = factory._sdlc(["new", slug, "--tier", "2", "--worktree"], root)
+    assert code == 0, said
+    tree = next(p for p in (root / ".claude" / "worktrees").iterdir() if p.name.endswith(slug))
+    return root, tree
+
+
+def _commit_on_main(root: Path, name: str, text: str) -> None:
+    (root / name).write_text(text, encoding="utf-8")
+    _git(root, "add", name)
+    _git(root, "commit", "-q", "-m", f"main changes {name}")
+
+
+def _files(folder: Path) -> dict[str, bytes]:
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*")
+            if p.is_file()}  # fmt: skip
+
+
+def _no_stash_or_merge(root: Path) -> None:
+    assert _git(root, "stash", "list") == "", "never a stash"
+    assert _git(root, "rev-list", "--merges", "--all") == "", "never a merge"
+
+
+@needs_uv
+def test_fresh_fast_forwards_a_change_behind_the_base(tmp_path, capsys) -> None:
+    """101 R2: a change with no commits of its own, two behind, moves onto `main`'s tip through
+    `sdlc.py base`, its uncommitted folder carried across byte for byte, with the undo."""
+    root, tree = _behind(tmp_path)
+    folder = tree / ".sdlc" / "work" / tree.name
+    _commit_on_main(root, "one.txt", "1\n")
+    _commit_on_main(root, "two.txt", "2\n")
+    before, files = _git(tree, "rev-parse", "HEAD"), _files(folder)
+    code, out = _run(capsys, factory.cmd_fresh, tree, "001")
+    assert (code, out["state"], out["behind"]) == (0, "fast-forwarded", 2), out
+    assert _git(tree, "rev-parse", "HEAD") == _git(root, "rev-parse", "main")
+    assert before.startswith(out["from"]) and out["head"] == _git(tree, "rev-parse", "--short",
+                                                                  "HEAD")  # fmt: skip
+    assert f"reset --keep {before}" in out["undo"] and out["refusals"] == []
+    assert _files(folder) == files, "the change's folder, as it was"
+    _no_stash_or_merge(root)
+    code, out = _run(capsys, factory.cmd_fresh, tree, "001")
+    assert (code, out["state"], out["behind"]) == (0, "current", 0), out
+
+
+def test_fresh_holds_a_run_that_stopped_part_way(tmp_path, capsys, monkeypatch) -> None:
+    """101 R3: at `stage: build` its rounds were gated and reviewed on the base they had, so
+    nothing moves, and `sdlc.py` isn't run at all."""
+    root = _change(tmp_path, 2, "build")
+    _main_moves(root, "one.txt")
+    monkeypatch.setattr(factory, "_sdlc", lambda *a: pytest.fail("held: nothing to run"))
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert (code, out["state"], out["behind"]) == (0, "held", 1), out
+    assert "landing rebases and gates it again" in out["reason"]
+    assert _git(root, "rev-parse", "HEAD") == head and out["head"] == out["from"]
+
+
+def test_fresh_refuses_a_stage_no_fresh_run_starts_from(tmp_path, capsys, monkeypatch) -> None:
+    root = _change(tmp_path, 2, "test")
+    monkeypatch.setattr(factory, "_sdlc", lambda *a: pytest.fail("refused: nothing to run"))
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert (code, out["state"]) == (1, "refused") and "no decision.md" in out["refusals"][0]
+    root = _change(tmp_path / "b", 1, "design")
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert code == 1 and "tier 1 at stage: design" in out["refusals"][0], out
+    root = _change(tmp_path / "c", 2, "test")
+    _escalated(root)
+    ran = []
+    monkeypatch.setattr(factory, "_sdlc", lambda args, cwd: ran.append(args) or (
+        0, {"action": "current", "undo": None}, ""))  # fmt: skip
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert (code, out["state"], ran) == (0, "current", [["base", NAME]]), "a restart starts fresh"
+
+
+@needs_uv
+def test_fresh_resolves_what_git_can_and_stops_on_a_real_conflict(tmp_path, capsys) -> None:
+    """101 R4: (a) uncommitted work `main` then changes differently: `resolve` meets a real
+    conflict, `fresh` aborts it and refuses, the worktree as it found it; (b) a commit of its own
+    and uncommitted work, `main` changing another file: resolved, the work still uncommitted."""
+    root, tree = _behind(tmp_path / "a")
+    folder = tree / ".sdlc" / "work" / tree.name
+    (tree / "README.md").write_text("the change's one\ntwo\nthree\n", encoding="utf-8")
+    _commit_on_main(root, "README.md", "main's one\ntwo\nthree\n")
+    head, files, status = _git(tree, "rev-parse", "HEAD"), _files(folder), _git(tree, "status")
+    code, out = _run(capsys, factory.cmd_fresh, tree, "001")
+    assert (code, out["state"]) == (1, "refused"), out
+    assert "README.md" in out["refusals"][0] and "/sdlc:ship" in out["refusals"][0]
+    assert _git(tree, "rev-parse", "HEAD") == head and out["head"] == out["from"]
+    assert (tree / "README.md").read_text(encoding="utf-8") == "the change's one\ntwo\nthree\n"
+    assert _files(folder) == files and _git(tree, "status") == status
+    _no_stash_or_merge(root)
+
+    root, tree = _behind(tmp_path / "b")
+    (tree / "mine.txt").write_text("a commit of its own\n", encoding="utf-8")
+    _git(tree, "add", "mine.txt")
+    _git(tree, "commit", "-q", "-m", "the change's own")
+    (tree / "README.md").write_text("the change's one\ntwo\nthree\n", encoding="utf-8")
+    _commit_on_main(root, "other.txt", "elsewhere\n")
+    code, out = _run(capsys, factory.cmd_fresh, tree, "001")
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert "--abort" in out["undo"]
+    main = _git(root, "rev-parse", "main")
+    assert _git(tree, "rev-parse", "HEAD^") == main, "its own commit, onto main's tip"
+    assert (tree / "README.md").read_text(encoding="utf-8").startswith("the change's one")
+    assert "README.md" in _git(tree, "status", "--porcelain"), "the work still uncommitted"
+    _no_stash_or_merge(root)
+
+
+def test_fresh_refuses_without_its_own_sdlc(tmp_path, capsys, monkeypatch) -> None:
+    """101 R5: no `sdlc.py` of the factory's version, and nothing moves."""
+    root = _change(tmp_path, 2, "design")
+    _main_moves(root, "one.txt")
+    monkeypatch.setattr(factory, "sdlc_path", lambda *a: (None, "no sdlc 9.9 beside this factory"))
+    head = _git(root, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.cmd_fresh, root, "008")
+    assert (code, out["state"]) == (1, "refused") and "no sdlc 9.9" in out["refusals"][0], out
+    assert _git(root, "rev-parse", "HEAD") == head
+
+
+# ---------------------------------------------------------------- gates share the machine (101)
+
+FACTORY_PY = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+# A gate that stamps when it starts and ends, from the worktree it runs in, and takes a second.
+STAMP = (
+    "import os, sys, time\n"
+    "with open(sys.argv[2], 'a', encoding='utf-8', newline='\\n') as f:\n"
+    "    f.write(f'{os.path.basename(os.getcwd())} {sys.argv[1]} {time.time()}\\n')\n"
+)
+
+
+def _second_change(root: Path, tmp_path: Path) -> Path:
+    """Another change, `009-other`, in its own worktree of `root`'s repo, with a build report."""
+    tree = tmp_path / "other"
+    _git(root, "worktree", "add", "-q", "-b", "009-other", str(tree), "main")
+    folder = tree / ".sdlc" / "work" / "009-other"
+    (folder / "build").mkdir(parents=True)
+    text = INTENT.format(tier=2, stage="build").replace("008", "009")
+    (folder / "intent.md").write_text(text.replace("reopen-drafts", "other"), encoding="utf-8")
+    (folder / "build" / "round-1.md").write_text("Built.\n" + EVIDENCE, encoding="utf-8")
+    return tree
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_two_gates_with_a_limit_of_one_run_one_after_the_other(tmp_path, jobs) -> None:
+    """101 R8, R9: two changes' gates started at once in two worktrees. With `gate_jobs = 1` the
+    second waits for the first's slot, says so, and its wait isn't in its time; with 2 they run
+    side by side, so the limit is what orders them."""
+    root = _change(tmp_path)
+    log, stamp = tmp_path / "stamps.log", tmp_path / "stamp.py"
+    stamp.write_text(STAMP, encoding="utf-8")
+    py = Path(sys.executable).as_posix()
+    run = f'"{py}" "{stamp.as_posix()}" {{}} "{log.as_posix()}"'
+    _gate_config(root, f"{run.format('start')} && sleep 1 && {run.format('end')}")
+    _on_main(root, f"gate_jobs = {jobs}\n")
+    _build_report(root, 1)
+    other = _second_change(root, tmp_path)
+    gates = [
+        subprocess.Popen([sys.executable, str(FACTORY_PY), "gate", ident], cwd=tree,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+        for tree, ident in ((root, "008"), (other, "009"))
+    ]  # fmt: skip
+    done = [g.communicate(timeout=60) for g in gates]
+    assert [g.returncode for g in gates] == [0, 0], done
+    outs = [json.loads(out) for out, _ in done]
+    times: dict[str, dict[str, float]] = {}
+    for line in log.read_text(encoding="utf-8").splitlines():
+        where, what, when = line.split()
+        times.setdefault(where, {})[what] = float(when)
+    (a, b) = times.values()
+    overlap = a["start"] < b["end"] and b["start"] < a["end"]
+    waiting = [err for _, err in done if "waiting for a gate slot" in err]
+    if jobs == 1:
+        assert not overlap, times
+        assert len(waiting) == 1 and "(1 of 1 in use)" in waiting[0], done
+        waited = max(outs, key=lambda o: o["waited"])
+        assert waited["waited"] >= 0.5 and waited["seconds"] < 1.8, outs
+        assert min(o["waited"] for o in outs) == 0.0
+    else:
+        assert overlap, times
+        assert not waiting and [o["waited"] for o in outs] == [0.0, 0.0], done
+
+
+HOLD = """\
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("factory_child", sys.argv[1])
+factory = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(factory)
+with factory.gate_slot(Path(sys.argv[2]), 1, "008-reopen-drafts") as (slot, waited):
+    print(f"held {slot}", flush=True)
+    time.sleep(60)
+"""
+
+
+@pytest.mark.portable
+def test_a_killed_gate_frees_its_slot(tmp_path) -> None:
+    """101 R10: a slot is a lock on an open descriptor, so the OS frees it however its gate ends,
+    and the next gate takes it at once."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    child = subprocess.Popen(
+        [sys.executable, "-c", HOLD, str(FACTORY_PY), str(root)],
+        stdout=subprocess.PIPE, encoding="utf-8",
+    )  # fmt: skip
+    try:
+        assert child.stdout.readline().strip() == "held 0"
+        lock = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        lock = lock / "sdlc-factory-gate-0.lock"
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            assert not factory._try_lock(fd), "held while its gate runs"
+        finally:
+            os.close(fd)
+    finally:
+        child.kill()
+        child.wait()
+    import time
+
+    start = time.monotonic()
+    with factory.gate_slot(root, 1, NAME) as (slot, waited):
+        assert slot == 0
+    assert time.monotonic() - start < 2, "the slot outlived its gate"
+    assert lock.is_file(), "the file stays; only the lock goes"

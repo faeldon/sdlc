@@ -1386,3 +1386,17 @@ def test_no_shipped_text_names_migrate_inbox() -> None:
     ]
     named = [p.name for p in texts if "migrate-inbox" in p.read_text(encoding="utf-8")]
     assert named == []
+
+
+def test_build_brings_the_change_up_to_date_before_its_spec_writer() -> None:
+    """101 R6: Step 0 runs `fresh` once `start` refuses nothing, before the spec-writer or the
+    WAIT, and keeps `fresh`'s `head` for `verdicts`; Step 1 shows what it did."""
+    build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
+    step0 = build.split("## Step 0")[1].split("## Step 1")[0]
+    blocks = re.findall(r"```bash\n(.*?)```", step0, re.S)
+    assert any("factory.py fresh <NNN>" in b for b in blocks), "fresh runs in Step 0's bash"
+    fresh = build.index("factory.py fresh <NNN>")
+    assert fresh < build.index("--task spec") and fresh < build.index("## Step 2 — WAIT")
+    assert "`head`" in step0 and "fresh" in step0.split("Keep")[-1], "fresh's head is kept"
+    step1 = build.split("## Step 1")[1].split("## Step 2")[0]
+    assert "`behind`" in step1 and "`undo`" in step1 and "held" in step1

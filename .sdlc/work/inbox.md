@@ -275,15 +275,6 @@ or at least record on the commit that a hand fix landed unreviewed.
 Theme: landing
 Raised 2026-11-17.
 
-## [2026-11-17-40] [idea] factory.py start brings the change's branch up to date first
-
-Every run on 2026-11-17 started from a worktree branched hours earlier, so the supervisor ran
-`sdlc.py base` (or `resolve`) by hand on each before building, or the builder would have built on
-old code. `start` could report how far behind the change is and the build skill run `base` before
-the first agent.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-41] [idea] Open changes mark their seeds without editing the register
 
 Intent tags a change's seed `[building]` by editing the register on the change's branch, so every
@@ -299,14 +290,6 @@ Raised 2026-11-17.
 `spec.md` out of the text; a draft holding its own code fences was cut short twice on 2026-11-17.
 The command could write the draft to the change's folder (say `runs/spec-draft.md`), which Step 3
 copies after the yes.
-Theme: factory
-Raised 2026-11-17.
-
-## [2026-11-17-43] [idea] Limit how many factory gates run at once
-
-With five runs in parallel on 2026-11-17, a gate that takes 40 s alone took up to 200 s, each
-`pytest -n auto` fighting the others for every core. A small `factory.gate_jobs` limit, or a lock
-the gate waits on, would keep each one near its usual time.
 Theme: factory
 Raised 2026-11-17.
 
@@ -451,4 +434,16 @@ Raised 2026-11-17.
 
 Left undone by 099-board-page-fixes, carried forward when it landed: pre-existing: scripts/board.html:-- (empty columns): an empty column shows only a bare "—" (for example Design, Test, Ready to ship in the desktop shot). Nothing says there is nothing there yet or what puts a change in the column. This is not this change's flow to rework, but a one-line empty-state label would help.
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-63] [idea] `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by the spec's boundary: sharing
+
+Left undone by 101-factory-start-fresh, carried forward when it landed: `sdlc.py gate` (the hand gate) takes no `gate_jobs` slot, by the spec's boundary: sharing
+See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
+Raised 2026-11-17.
+
+## [2026-11-17-64] [idea] `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and
+
+Left undone by 101-factory-start-fresh, carried forward when it landed: `/sdlc-factory:spec` gets `start`'s new `base` and `behind` keys but doesn't show them, and
+See .sdlc/work/101-factory-start-fresh/notes.md in its commit.
 Raised 2026-11-17.
