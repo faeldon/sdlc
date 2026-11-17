@@ -74,8 +74,16 @@ default 3), the light depth's (`factory.light`, default the code reviewer for 2 
 permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
 each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
 opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier, and
-for the other reviewers sonnet on a Tier 2 or a full-depth run, haiku otherwise), and `max_runs`,
-the most agent runs this can take, counted at the full depth.
+for the other reviewers sonnet on a Tier 2 or a full-depth run, haiku otherwise), the base
+branch's `[ui]` (`ui`: the dev server `serve` starts, the screenshot command `shoot`, the `paths`
+that count as UI), and `max_runs`, the most agent runs this can take, counted at the full depth.
+
+**The UI reviewers join on their own.** With `[ui]`'s `serve`, `shoot` and `paths` all set, a round
+whose diff touches one of those paths adds the `ui` and `ux` reviewers at either depth, and keeps
+them in later rounds; `verdicts` lists them in `missing` like any reviewer. Before each of them
+runs, `agent` starts the declared server, screenshots each page at each width under
+`.sdlc/reports/shots/`, and stops the server; a shot that fails refuses that review, so neither
+ever judges a page it couldn't see. Without `[ui]` they never run.
 
 **The depth is set by the diff, after the first build.** With no `[review] sensitive` list in
 the base branch's `.sdlc/config.toml`, every run is full, as it always was. With one, a diff that
@@ -120,7 +128,8 @@ Then show the person, naming the change: the spec draft and its questions, when 
 change and its tier; the gate command the script will run, from the base branch's
 `.sdlc/config.toml`, or that there is none; the agents that will run (builder, each reviewer at
 each depth, the verifier, approver) with each one's model from `models_at`; the round limits; the
-depth rule above; the permission mode; and `max_runs`, the factory's own runs, the builder's fixes
+depth rule above; the permission mode; with `[ui]` set, its `serve` and `paths`, since the dev
+server runs unasked once they agree; and `max_runs`, the factory's own runs, the builder's fixes
 of a red gate included and its sub-agents not, so the cost is in front of them before they agree
 to it. Name the files the run will write, all by `factory.py` in the change's folder: code and
 `plan.md` by the builder; `build/round-<N>.md`, `reviews/round-<N>/<role>.md`,
@@ -137,15 +146,17 @@ without running it, which `/sdlc:ship` does under a prompt.
 
 Ask literally, with a spec draft:
 
-> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
+> `Write this spec and run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / revise a requirement / change the reviewers or rounds / no)`
 
 And without one:
 
-> `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+> `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
 
 Leave out the parenthesis when the base branch's `.sdlc/config.toml` lists no `[review]
 sensitive` paths: every run is then full. When it names no `[commands] check`, the gate clause reads
-`, with no gate configured` instead.
+`, with no gate configured` instead. Leave out `and, on a diff touching <ui paths>, the ui and ux
+reviewers, which start <serve>,` when `start`'s `ui` lacks `serve`, `shoot` or `paths`: no UI
+review can run.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a

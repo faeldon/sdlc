@@ -52,6 +52,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -64,8 +65,15 @@ from pathlib import Path
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # Every role a model can be set for, and the reviewers a repo can choose among.
-ROLES = ("spec-writer", "builder", "code", "security", "test", "behaviour", "verifier", "approver")
-REVIEWERS = ("code", "security", "test", "behaviour")
+ROLES = (
+    "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "verifier",
+    "approver",
+)  # fmt: skip
+REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
+# The reviewers that look at the page a change shows, from `factory.py shots`: never chosen in
+# `reviewers`, they join a round once the base branch's `[ui]` is complete and the diff touches its
+# `paths`, at either depth, and never make a run's depth full.
+UI_REVIEWERS = ("ui", "ux")
 # `reviewers` and `rounds` are the full depth; `light` the one a diff touching no path in the
 # base branch's `[review] sensitive` gets, once a host lists any.
 DEFAULTS: dict = {
@@ -75,7 +83,14 @@ DEFAULTS: dict = {
     "models": {},
     "mode": "auto",
     "land": {"auto": True, "batch": 5},
-}
+    # A repo's front end: the dev server to start (`{port}`), where it answers, the pages to shoot,
+    # the paths that count as UI, the screenshot command (`{url}`, `{width}`, `{height}`, `{out}`),
+    # the window sizes, and how long the server gets to answer. Unset, no UI review runs.
+    "ui": {
+        "serve": None, "url": "http://127.0.0.1:{port}", "pages": ["/"], "paths": [],
+        "shoot": None, "widths": [[1280, 800], [390, 844]], "timeout": 60,
+    },
+}  # fmt: skip
 MAX_ROUNDS = 5
 # The permission modes `claude -p` takes, for the agent sessions the supervisor starts: none of
 # them can answer a prompt, so the mode is chosen before the run, and named at its gate.
@@ -87,7 +102,7 @@ FIXED_MODELS = {
     "spec-writer": "opus", "builder": "opus", "security": "opus", "verifier": "sonnet",
     "approver": "opus",
 }  # fmt: skip
-SCALED = ("code", "test", "behaviour")
+SCALED = ("code", "test", "behaviour", "ui", "ux")
 # The stages a factory step moves a change between. `shipped` stays `sdlc ship`'s alone.
 STAGES = ("plan", "design", "build", "test")
 # What each step may start from. A build left at `stage: build` by a run that stopped resumes; a
@@ -164,7 +179,8 @@ def _utf8_streams() -> None:
 
 
 def _sh(command: str) -> list[str]:
-    """The argv that runs the host's gate through `sh -c` on every platform, as `sdlc.py` runs a
+    """The argv that runs the host's gate, and `[ui]`'s server and screenshots, through `sh -c`
+    on every platform, as `sdlc.py` runs a
     host's commands: `/bin/sh`, and on Windows the `sh` on PATH, Git for Windows', never
     `cmd.exe`. Raises OSError when Windows has none. Copied from `sdlc.py`, pinned by a test."""
     if os.name != "nt":
@@ -252,6 +268,8 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     cfg["mode"], warnings = _mode(root)
     cfg["land"], land_warnings = _land(root)
     warnings += land_warnings
+    cfg["ui"], ui_warnings = _ui(root)
+    warnings += ui_warnings
     path = root / CONFIG_FILE
     if not path.is_file():
         return cfg, warnings
@@ -282,6 +300,11 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         warnings.append(
             f"mode is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
             f"{data.get('mode')!r} applies once it lands"
+        )
+    if "ui" in data and _ui_table(data.get("ui"))[0] != cfg["ui"]:
+        warnings.append(
+            f"ui is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's [ui] "
+            "applies once it lands"
         )
     return cfg, warnings
 
@@ -329,6 +352,50 @@ def _land(root: Path) -> tuple[dict, list[str]]:
     return out, warnings
 
 
+def _ui(root: Path) -> tuple[dict, list[str]]:
+    """`[ui]` as the base branch holds it: the dev server a UI review starts runs unasked once the
+    run is approved, so a change can't name its own."""
+    return _ui_table(_base_factory(root).get("ui", {}))
+
+
+def _ui_table(table: object) -> tuple[dict, list[str]]:
+    """A `[ui]` table over the defaults, each bad value a warning that leaves its default."""
+    out = {k: list(v) if isinstance(v, list) else v for k, v in DEFAULTS["ui"].items()}
+    if not isinstance(table, dict):
+        return out, ["ui must be a table of serve, url, pages, paths, shoot, widths and timeout"]
+    warnings = []
+    for key, value in table.items():
+        texts = isinstance(value, list) and all(isinstance(v, str) for v in value)
+        sizes = isinstance(value, list) and value and all(
+            isinstance(v, list) and len(v) == 2
+            and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in v)
+            for v in value
+        )  # fmt: skip
+        if key in ("serve", "url", "shoot") and isinstance(value, str) and value.strip():
+            out[key] = value
+        elif key in ("pages", "paths") and texts:
+            out[key] = list(value)
+        elif key == "widths" and sizes:
+            out[key] = [list(v) for v in value]
+        elif (
+            key == "timeout"
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            out[key] = value
+        elif key in DEFAULTS["ui"]:
+            warnings.append(f"ui.{key} has the wrong shape, so its default stands")
+        else:
+            warnings.append(f"unknown key ui.{key}")
+    return out, warnings
+
+
+def ui_complete(ui: dict) -> bool:
+    """Whether `[ui]` says enough for a UI review: a server, a screenshot command and its paths."""
+    return bool(ui.get("serve") and ui.get("shoot") and ui.get("paths"))
+
+
 def model_for(role: str, cfg: dict, tier: int | None, level: str) -> str:
     """The model `role` runs on: `factory.models`' entry, else `FIXED_MODELS`, the scaled
     reviewers on `sonnet` for a Tier 2 change or a full-depth run and `haiku` otherwise."""
@@ -346,14 +413,17 @@ def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> Non
     if not isinstance(reviewers, list) or not all(isinstance(r, str) for r in reviewers):
         warnings.append(f"{prefix}reviewers must be a list of names")
     else:
-        unknown = [r for r in reviewers if r not in REVIEWERS]
+        chosen = [r for r in REVIEWERS if r not in UI_REVIEWERS]
+        unknown = [r for r in reviewers if r not in chosen]
         warnings += [
-            f"unknown reviewer {r!r} in {prefix}reviewers: one of {', '.join(REVIEWERS)}"
+            f"{r!r} joins on its own when [ui] is set, never in {prefix}reviewers"
+            if r in UI_REVIEWERS
+            else f"unknown reviewer {r!r} in {prefix}reviewers: one of {', '.join(chosen)}"
             if prefix
-            else f"unknown reviewer {r!r}: one of {', '.join(REVIEWERS)}"
+            else f"unknown reviewer {r!r}: one of {', '.join(chosen)}"
             for r in unknown
         ]
-        known = [r for r in dict.fromkeys(reviewers) if r in REVIEWERS]
+        known = [r for r in dict.fromkeys(reviewers) if r in chosen]
         if known:
             into["reviewers"] = known
         else:
@@ -408,8 +478,10 @@ def max_runs(cfg: dict) -> int:
     """The most agent runs one build can take, at the full depth: the builder, the approver, and
     each round's reviewers, verifier, builder resume and the builder's fixes of a red gate. An
     upper bound to show before a person approves the cost, whatever depth the diff turns out to
-    need."""
-    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + 2 + GATE_FIXES)
+    need. With `[ui]` complete, the UI reviewers are counted in every round, since any round's
+    diff can touch its paths."""
+    ui = len(UI_REVIEWERS) if ui_complete(cfg.get("ui", {})) else 0
+    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + ui + 2 + GATE_FIXES)
 
 
 # The base branch's review lists, read here because the factory's cached copy has no `sdlc.py`.
@@ -489,7 +561,9 @@ def depth(root: Path, cfg: dict, rounds: list[dict]) -> dict:
     hit = risk_paths(changed, listed)
     light = cfg["light"]
     beyond = any(
-        r["round"] > light["rounds"] or set(r["reviews"]) - set(light["reviewers"]) for r in rounds
+        r["round"] > light["rounds"]
+        or set(r["reviews"]) - set(light["reviewers"]) - set(UI_REVIEWERS)
+        for r in rounds
     )
     if not listed:
         level, why = "full", "the base branch lists no [review] sensitive paths"
@@ -649,11 +723,24 @@ def read_verified(path: Path, n: int, reviews: dict) -> tuple[dict | None, list[
     return {"kept": kept, "dropped": dropped}, problems
 
 
+def ui_review(cfg: dict, rounds: list[dict], changed: list[str]) -> bool:
+    """Whether the UI reviewers join: `[ui]` is complete and the diff touches one of its `paths`,
+    or an earlier round already ran them, so a run that looked at the page keeps looking."""
+    ui = cfg.get("ui", {})
+    if not ui_complete(ui):
+        return False
+    ran = any(set(r["reviews"]) & set(UI_REVIEWERS) for r in rounds)
+    return ran or bool(risk_paths(changed, ui["paths"]))
+
+
 def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
     """The rounds, their problems and the run's depth, each round's `complete` judged against the
-    reviewers that depth expects."""
+    reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`)."""
     rounds, problems = read_rounds(folder, cfg["reviewers"])
     run = depth(root, cfg, rounds)
+    run["ui"] = ui_review(cfg, rounds, run["changed"])
+    if run["ui"]:
+        run["reviewers"] += [r for r in UI_REVIEWERS if r not in run["reviewers"]]
     for r in rounds:
         r["complete"] = set(run["reviewers"]) <= set(r["reviews"])
     return rounds, problems, run
@@ -1524,6 +1611,20 @@ def cmd_agent(
     if isinstance(planned, str):
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
+    if role in UI_REVIEWERS and task in ("review", "land-review"):
+        if not ui_complete(cfg["ui"]):
+            return emit({"refusals": ["the base branch's [ui] needs serve, shoot and paths"]}, 1)
+        label = f"round-{state['round']}" if task == "review" else f"land-{land_round(folder)}"
+        paths, record = shots(root, folder, label, cfg["ui"])
+        if record["problem"]:
+            why = f"the screenshots failed, so the {role} review doesn't run blind: "
+            return emit({"refusals": [why + record["problem"]], "shots": record}, 1)
+        base = _base(root)
+        changed = _changed_paths(root, base) if base else []
+        prompt += (
+            f" Screenshots: {', '.join(p.as_posix() for p in paths)}. "
+            f"Changed: {', '.join(changed) or 'nothing'}."
+        )
     sessions = folder / "runs" / f"{agent_name(role)}.sessions"
     resumed = (role == "builder" and task in RESUMES) or bool(
         task == "spec" and (revise or recheck)
@@ -2173,14 +2274,173 @@ def cmd_escapes(root: Path, limit: int) -> int:
                  "unattributed": unattributed, "unknown_change": unknown})  # fmt: skip
 
 
-def cmd_report_dir(root: Path, kind: str) -> int:
-    """A fresh run folder under `.sdlc/reports/`, which ignores itself, for an eval or a review to
-    write into: `<kind>-<date>-<n>/`."""
+def _reports(root: Path) -> Path:
+    """`.sdlc/reports/`, made with the `.gitignore` that keeps everything in it out of git."""
     reports = root / REPORTS
     reports.mkdir(parents=True, exist_ok=True)
     ignore = reports / ".gitignore"
     if not ignore.is_file():
         ignore.write_text("*\n", encoding="utf-8", newline="\n")
+    return reports
+
+
+# ---------------------------------------------------------------- the page a change shows
+#
+# The UI reviewers judge screenshots, never a browser of their own: `shots` starts the dev server
+# the base branch's `[ui]` names, takes each page at each width with its `shoot` command, and stops
+# the server it started, so no agent starts, drives or kills a process. The images go under
+# `.sdlc/reports/shots/`, which ignores itself, so none reaches a commit.
+
+SHOT_TIMEOUT = 120
+STOP_GRACE = 5
+
+
+def _free_port() -> int:
+    """A port nothing on this machine listens on, for one dev server."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _answers(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _fill(command: str, **values: object) -> str:
+    """`command` with each `{key}` named in `values` replaced, and nothing else: a host's shell
+    braces (`${HOME}`) stay as written."""
+    for key, value in values.items():
+        command = command.replace("{" + key + "}", str(value))
+    return command
+
+
+def _page_name(page: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", page.strip("/")).strip("-") or "index"
+
+
+def _stop(proc: subprocess.Popen) -> None:
+    """Stop the process group `shots` started, and only it: its children with it, whatever they
+    are, and never anything found by name or port."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True, encoding="utf-8", errors="replace",
+        )  # fmt: skip
+        with suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=STOP_GRACE)
+        return
+    import signal
+
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGTERM)
+    with suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=STOP_GRACE)
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
+def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], dict]:
+    """Each page of `[ui]` at each width, as PNGs under `.sdlc/reports/shots/<change>/<label>/`,
+    with `shots.json` saying what ran and how it ended: `problem` is None only when every shot was
+    written. A label already shot without a problem is reused, not shot again."""
+    where = _reports(root) / "shots" / folder.name / label
+    record_path = where / "shots.json"
+    want = [
+        (page, w, h, where / f"{_page_name(page)}-{w}x{h}.png")
+        for page in ui["pages"]
+        for w, h in ui["widths"]
+    ]
+    paths = [p for *_, p in want]
+    with suppress(OSError, ValueError):
+        before = json.loads(record_path.read_text(encoding="utf-8"))
+        if before.get("problem") is None and all(p.is_file() for p in paths):
+            return paths, before
+    where.mkdir(parents=True, exist_ok=True)
+    port = _free_port()
+    record: dict = {
+        "serve": _fill(ui["serve"], port=port),
+        "port": port,
+        "shots": [],
+        "problem": None,
+    }
+    log = where / "serve.log"
+    group = (
+        {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    with log.open("wb") as sink:
+        try:
+            proc = subprocess.Popen(
+                _sh(record["serve"]), cwd=root, stdin=subprocess.DEVNULL, stdout=sink,
+                stderr=subprocess.STDOUT, **group,
+            )  # fmt: skip
+        except OSError as e:
+            proc, record["problem"] = None, f"the dev server couldn't be started: {e}"
+        try:
+            deadline = time.monotonic() + ui["timeout"]
+            while proc and record["problem"] is None and not _answers(port):
+                if proc.poll() is not None:
+                    record["problem"] = f"the dev server exited {proc.returncode} before answering"
+                elif time.monotonic() > deadline:
+                    record["problem"] = (
+                        f"the dev server didn't answer on {port} in {ui['timeout']}s"
+                    )
+                else:
+                    time.sleep(0.2)
+            for page, w, h, path in want if record["problem"] is None else []:
+                url = _fill(ui["url"], port=port).rstrip("/") + "/" + page.lstrip("/")
+                # Relative to the checkout, where the command runs: the record names no machine.
+                out = path.relative_to(root).as_posix()
+                command = _fill(ui["shoot"], url=url, width=w, height=h, out=out)
+                try:
+                    done = subprocess.run(
+                        _sh(command), cwd=root, capture_output=True, encoding="utf-8",
+                        errors="replace", stdin=subprocess.DEVNULL, timeout=SHOT_TIMEOUT,
+                    )  # fmt: skip
+                    code, tail = done.returncode, (done.stderr or done.stdout or "").strip()[-500:]
+                except subprocess.TimeoutExpired:
+                    code, tail = 124, f"ran past {SHOT_TIMEOUT}s"
+                except OSError as e:
+                    code, tail = 127, str(e)
+                record["shots"].append({"command": command, "exit": code, "tail": tail})
+                if code or not path.is_file():
+                    record["problem"] = (
+                        f"`{command}` exited {code} and wrote no {path.name}: {tail}"
+                    )
+                    break
+        finally:
+            if proc:
+                _stop(proc)
+    if record["problem"]:
+        served = log.read_text(encoding="utf-8", errors="replace").strip()[-500:]
+        record["server_tail"] = served
+    record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return paths, record
+
+
+def cmd_shots(root: Path, ident: str, n: int) -> int:
+    """Round `n`'s screenshots of the change's pages, for its UI reviewers (`shots()`)."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    ui = load_config(root)[0]["ui"]
+    if not ui_complete(ui):
+        return emit({"refusals": ["the base branch's [ui] needs serve, shoot and paths"]}, 1)
+    paths, record = shots(root, folder, f"round-{n}", ui)
+    out = {"change": folder.name, "shots": [p.relative_to(root).as_posix() for p in paths]}
+    return emit({**out, **record}, 1 if record["problem"] else 0)
+
+
+def cmd_report_dir(root: Path, kind: str) -> int:
+    """A fresh run folder under `.sdlc/reports/`, which ignores itself, for an eval or a review to
+    write into: `<kind>-<date>-<n>/`."""
+    reports = _reports(root)
     stamp = f"{kind}-{date.today().isoformat()}"
     n = 1 + sum(1 for p in reports.glob(f"{stamp}-*") if p.is_dir())
     run = reports / f"{stamp}-{n}"
@@ -2317,6 +2577,9 @@ def main() -> int:
     p_gate = sub.add_parser("gate", help="run the base branch's gate on the newest build")
     p_gate.add_argument("id")
     p_gate.add_argument("--land", action="store_true", help="on the change as a landing rebased it")
+    p_shots = sub.add_parser("shots", help="screenshot the change's pages for its UI reviewers")
+    p_shots.add_argument("id")
+    p_shots.add_argument("--round", dest="round", type=int, required=True)
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
@@ -2387,6 +2650,8 @@ def main() -> int:
         return cmd_snapshot(root, args.id, args.round)
     if args.cmd == "gate":
         return cmd_gate(root, args.id, args.land)
+    if args.cmd == "shots":
+        return cmd_shots(root, args.id, args.round)
     if args.cmd == "escapes":
         return cmd_escapes(root, args.limit)
     if args.cmd == "report-dir":

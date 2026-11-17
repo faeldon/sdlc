@@ -2,8 +2,9 @@
 
 Seeds, not a backlog. `/sdlc:intent` promotes one into a change.
 
-## [2026-10-24-1] [idea] UX and UI reviewers for the factory, and how a repo declares a front end
+## [2026-10-24-1] [building] UX and UI reviewers for the factory, and how a repo declares a front end
 
+Building in .sdlc/work/075-factory-dashboard/.
 The factory ships code, security and test reviewers. The factory it learned from also
 runs UX and UI reviewers against a running app. agent-skills has no such agent, only its
 `frontend-ui-engineering` skill to write them from, and the plugin can't know a repo has a UI: it
@@ -21,8 +22,9 @@ watches. GitHub issues and `work/ideas.md` are already the queue; this is the ru
 Theme: factory
 Priority: low
 
-## [2026-10-24-3] [idea] A factory status board
+## [2026-10-24-3] [building] A factory status board
 
+Building in .sdlc/work/075-factory-dashboard/.
 A page that shows each running change's stage, round and verdicts as they land, from the change
 folders' files, the way the factory it learned from shows a dashboard. Read-only. Raised
 2026-10-24.

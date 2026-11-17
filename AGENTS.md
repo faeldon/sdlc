@@ -211,6 +211,16 @@ and reports format problems rather than raising. The product doc (`docs.product`
 absent) makes every open change carry `serves:`, checked against the doc on the change's own
 branch.
 
+**The board: `scripts/board.py`.** `/sdlc:dashboard` runs `sdlc.py board`, whose code `sdlc.py`
+loads by path and binds as it does `retro.py`, but only in `board`'s dispatch (`_load_board()`), so
+no other command pays for it. It serves `scripts/board.html` and a `/state.json` rebuilt each
+request from `status`'s own readers, on `127.0.0.1` only: three GETs, every other method a 405, a
+request naming another host a 404, and `/file` only inside an open change's own folder. It writes
+nothing, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A
+factory run's files (its rounds, `decision.md`, `decisions.md`, `runs/costs.jsonl`) it reads with
+copies of `factory.py`'s parsing, pinned by `tests/test_board.py`: the core still never imports or
+runs the factory. The page builds every node with `textContent`, never from a string of HTML.
+
 **The inbox: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests, each
 entry `## [YYYY-MM-DD-n] [tag] title` with its kind's facts as `Key: value` body lines
 (`BODY_KEYS`). Every entry is a seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]`. Any
@@ -387,7 +397,11 @@ from the base branch's `factory.toml`), files the reply, and records the session
 `factory.py gate` runs the base branch's `[commands] check` (never the checkout's) in the change's
 worktree, recording each attempt in `build/round-<N>.gate.md`, which `_factory_files()` counts as
 `gate_fail`; a red one is the builder's `fix`, `GATE_FIXES` a round, then a stop, and a reviewed
-round is never gated again. A change ends at "ready to ship"; `factory.py ready` orders them, and the person lands
+round is never gated again. With the base branch's `[ui]` complete, the `ui` and `ux` reviewers
+join a round whose diff touches its `paths` (`ui_review()`), never a run's depth; they have no
+shell, and judge the screenshots `agent` has `shots` take first, from `[ui]`'s own commands,
+stopping only the process group it started. A change ends at "ready to ship"; `factory.py ready`
+orders them, and the person lands
 them: one at a time with `/sdlc:ship`, or as a batch with `/sdlc-factory:land`, from a session of
 its own. **Land is the one place the factory commits, and it does so through `sdlc`'s own code:**
 `factory.py` runs the `sdlc.py` of its own version, beside it (`sdlc_path()`: the clone's, or the

@@ -192,7 +192,7 @@ READS_CONFIG = {
 def test_skills_were_found() -> None:
     """A glob that matches nothing makes every test below vacuously pass."""
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
-    more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea"}
+    more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea", "dashboard"}
     assert {f"sdlc:{n}" for n in names | more} | {
         "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review",
         "sdlc-factory:land",
@@ -941,6 +941,9 @@ AGENT_TOOLS = {
     "reviewer-test": {"Read", "Grep", "Glob", "Bash"},
     # It runs the gate and the spec's path; never checks.md (`accept` does, under a prompt).
     "reviewer-behaviour": {"Read", "Grep", "Glob", "Bash"},
+    # They judge the screenshots `factory.py shots` took: nothing to run, so no Bash at all.
+    "reviewer-ui": {"Read", "Grep", "Glob"},
+    "reviewer-ux": {"Read", "Grep", "Glob"},
     # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
     "verifier": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
@@ -1026,14 +1029,16 @@ def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
     question = " ".join(wait.split())
     assert (
         "<reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to "
-        "<light rounds> when the diff touches no sensitive path), a verifier checks each "
+        "<light rounds> when the diff touches no sensitive path), and, on a diff touching "
+        "<ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each "
         "round's changes, the approver decides, at most <max_runs> agent runs" in question
     )
     assert "Leave out the parenthesis" in wait
+    assert "Leave out `and, on a diff touching <ui paths>" in wait, "unset [ui] asks as before"
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
     assert "build/round-N.gate.md" in builder and "## A red gate" in builder
     assert "- KEPT:" in builder and "`- DROPPED:` line is not yours" in builder
-    for role in ("code", "security", "test"):
+    for role in ("code", "security", "test", "ui", "ux"):
         text = (FACTORY / "agents" / f"reviewer-{role}.md").read_text(encoding="utf-8")
         assert "- PREEXISTING:" in text and "never raise a settled point again" in text, role
     approver = (FACTORY / "agents" / "approver.md").read_text(encoding="utf-8")

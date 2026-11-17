@@ -5745,6 +5745,16 @@ def _load_retro():
 retro = _load_retro()
 
 
+def _load_board():
+    """`scripts/board.py`, the dashboard's server, bound like retro but loaded only when `board`
+    runs: no other command pays for it."""
+    spec = importlib.util.spec_from_file_location("sdlc_board", PLUGIN_DIR / "scripts" / "board.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.sdlc = _Names(globals())
+    return mod
+
+
 def first_paragraph(body: str, heading: str) -> str:
     """The first paragraph under `## <heading>`, on one line; "" when there is none."""
     lines: list[str] = []
@@ -8493,6 +8503,10 @@ def main() -> int:
         "retro-commit",
         help="commit the direction doc, the inbox and the report as `Retrospective <date>`",
     )
+    p_board = sub.add_parser(
+        "board", help="serve the dashboard of every open change on 127.0.0.1; writes nothing"
+    )
+    p_board.add_argument("--port", type=int, default=5170)
 
     # Before parsing: the change's own script may take a flag this copy doesn't know.
     if len(sys.argv) > 1 and sys.argv[1] in OWN_SCRIPT_CMDS and (own := _own_script(repo_root())):
@@ -8605,6 +8619,8 @@ def main() -> int:
         return retro.cmd_retro(root, args.metrics, args.report)
     if args.cmd == "retro-commit":
         return retro.cmd_retro_commit(root)
+    if args.cmd == "board":
+        return _load_board().cmd_board(root, args.port)
     if args.cmd == "sync":
         return cmd_sync(root, args.id)
     if args.cmd == "lookup":

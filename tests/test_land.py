@@ -168,9 +168,9 @@ def test_a_batch_lands_in_order_and_a_conflict_is_resolved_reviewed_and_closed(
     assert "a conflict was resolved while landing" in signals, "the next gate is the person's"
 
     code, out = _run(capsys, factory.cmd_land_verdicts, second, "002")
-    assert out["next"] == "review" and set(out["missing"]) == set(factory.REVIEWERS)
+    assert out["next"] == "review" and set(out["missing"]) == set(factory.DEFAULTS["reviewers"])
     reviews = folder / "reviews" / "land-1"
-    for role in factory.REVIEWERS:
+    for role in factory.DEFAULTS["reviewers"]:
         evidence = "\n\n## Evidence\n$ true\nexit: 0\n" if role == "behaviour" else "\n"
         (reviews / f"{role}.md").write_text(f"VERDICT: PASS{evidence}", encoding="utf-8")
     code, out = _run(capsys, factory.cmd_land_verdicts, second, "002")

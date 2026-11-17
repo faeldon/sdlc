@@ -294,8 +294,8 @@ def test_the_command_tracker_s_shell_is_sdlc_s() -> None:
 
 
 def test_the_factory_s_shell_is_sdlc_s() -> None:
-    """The factory runs the host's gate, and its cached copy has no `sdlc.py`, so it keeps a copy
-    of `_sh`, pinned here."""
+    """The factory runs the host's gate and `[ui]`'s commands, and its cached copy has no
+    `sdlc.py`, so it keeps a copy of `_sh`, pinned here."""
     factory = REPO / "plugins" / "factory" / "scripts" / "factory.py"
     assert _function(factory, "_sh") == _function(SDLC_PY, "_sh")
 

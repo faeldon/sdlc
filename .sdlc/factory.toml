@@ -1,0 +1,9 @@
+# The factory's settings for this repo (plugins/factory/README.md). Only [ui] differs from the
+# defaults: the board `sdlc.py board` serves is this plugin's one front end, so a factory change to
+# it gets the UI and UX reviewers, judging screenshots of the board as that change built it.
+
+[ui]
+serve = "uv run --quiet --script scripts/sdlc.py board --port {port}"
+paths = ["scripts/board.html", "scripts/board.py"]
+# The board fills in from /state.json after it loads: wait for its columns before the shot.
+shoot = "uvx --from playwright playwright screenshot --wait-for-selector '.col' --viewport-size '{width}, {height}' {url} {out}"

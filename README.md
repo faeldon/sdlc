@@ -11,6 +11,7 @@ plan.
 |---|---|
 | `/sdlc:setup` | once per repo, and after each update: set it up, or refresh what the update changed |
 | `/sdlc:status` | any time: where every change stands, and the one thing to do next. Read-only |
+| `/sdlc:dashboard` | to watch it: a live board of every open change in your browser, on localhost. Read-only |
 | `/sdlc:intent` | to start a change: say why, in your words; it gets its own worktree and branch |
 | `/sdlc:spec` | for a substantial (Tier 2) change: numbered requirements and the design |
 | plan mode | to build: Claude reads the code, you approve the plan, then it implements |

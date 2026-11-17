@@ -153,10 +153,21 @@ options and its recommendation. They're gathered into the change's ledger,
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
 | `reviewer-test` | every requirement proven by a test that can fail; reads `checks.md`, never runs it | no |
 | `reviewer-behaviour` | runs the spec's end-to-end path on a gated build; reads `checks.md`, never runs it | no |
+| `reviewer-ui` | how the change looks: theme fit, spacing, contrast, overflow at phone width, from screenshots | no |
+| `reviewer-ux` | how it works for a person: the task, empty, loading and error states, labels, reach | no |
 | `verifier` | keeps or drops each requested change, checked against the code | no |
 | `approver` | READY or ESCALATE, for the person at ship | no |
 
 Only the builder edits. The others return text, and the skill writes it to the change's folder.
+
+**The UI and UX reviewers** run only in a repo that declares a front end (`[ui]`, below), and only
+on a round whose diff touches its `paths`; once one round runs them, the later ones do too. They
+never make a run's depth full. Neither has a shell: before each runs, `factory.py agent` starts
+the dev server `[ui]` names on a free port, takes each page at each width with its screenshot
+command, stops the process group it started, and gives the reviewer the images and the changed
+paths. A shot that fails refuses that review, with what the commands printed, so neither judges a
+page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N>/` with a
+`shots.json` of what ran, a folder that ignores itself, so none is committed.
 
 ## What it leaves in the change's folder
 
@@ -211,16 +222,32 @@ mode = "auto"                              # the permission mode agent sessions 
 [land]                                     # /sdlc-factory:land, read from the base branch
 auto = true                                # a batch with no risk signal lands without asking
 batch = 5                                  # the most changes one landing takes
+
+[ui]                                       # a front end, read from the base branch; unset, no
+                                           # UI review runs
+# serve = "npm run dev -- --port {port}"   # the dev server, on the port shots picks
+url = "http://127.0.0.1:{port}"            # where it answers
+pages = ["/"]                              # the pages to shoot
+# paths = ["web/", "src/components/"]      # the paths that count as UI
+# shoot = "npx playwright screenshot --viewport-size '{width}, {height}' {url} {out}"
+widths = [[1280, 800], [390, 844]]         # each page at each of these
+timeout = 60                               # seconds the server gets to answer
 ```
 
-`mode` is read from the base branch's copy of the file, never a change's own, so a change can't
-widen what its agents may do unasked. An agent session can't answer a tool prompt, so a command its
-mode doesn't allow is refused, and the agent reports it.
+`mode`, `[land]` and `[ui]` are read from the base branch's copy of the file, never a change's
+own, so a change can't widen what its agents may do unasked, or choose the command a UI review
+starts. `serve`, `shoot` and `paths` must all be set for a UI review; the screenshot command is
+yours, so any tool that writes a PNG to `{out}` will do, and Playwright's CLI is one
+(`npx playwright install chromium` once, or `uvx --from playwright playwright …` without Node).
+A page that fills in after it loads needs the command to wait for it (Playwright's
+`--wait-for-selector '<css>'`), or the shot shows it empty.
+An agent session can't answer a tool prompt, so a command its mode doesn't allow is refused, and
+the agent reports it.
 
 A run takes at most `2 + rounds × (reviewers + 4)` agent runs at the full depth (26 with the
 defaults: each round's reviewers, the verifier, the builder's rework and its two fixes of a red
-gate), and the build skill shows the number before you approve it, whatever depth the diff turns
-out to need.
+gate; two more a round with `[ui]` set), and the build skill shows the number before you approve
+it, whatever depth the diff turns out to need.
 
 ## Mechanism
 
@@ -231,7 +258,8 @@ answers, the ledger, the depth the diff calls for, and which step the loop takes
 itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
 one place it runs a host's command); each agent session, its
 prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
-the one place it runs `claude`); the changes ready to ship and their order (`ready`); the landing's
+the one place it runs `claude`); the screenshots a UI review reads, from `[ui]`'s own commands
+(`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
 batch and its signals (`land-check`), each change's landing (`land`, `resolve`, `land-verdicts`);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never

@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "models": {},
         "mode": "auto",
         "land": {"auto": True, "batch": 5},
+        "ui": factory.DEFAULTS["ui"],
     }
     assert warnings == []
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
@@ -1014,6 +1016,76 @@ def test_the_agents_mode_is_the_base_branchs(tmp_path) -> None:
     assert factory.load_config(root)[1] == []
 
 
+UI = '[ui]\nserve = "serve {port}"\nshoot = "shoot {url} {out}"\npaths = ["web/"]\n'
+
+
+def _on_main(root: Path, factory_toml: str) -> None:
+    """Commit `factory_toml` as the base branch's `.sdlc/factory.toml`, back on the change after."""
+    _git(root, "checkout", "-q", "main")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "factory.toml").write_text(factory_toml, encoding="utf-8")
+    _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "-m", "factory")
+    _git(root, "checkout", "-q", NAME)
+
+
+def test_without_a_complete_ui_table_no_ui_review_runs(tmp_path, capsys) -> None:
+    root = _change(tmp_path)
+    _on_main(root, '[ui]\nserve = "serve {port}"\npaths = ["web/"]\n')
+    _touch(root, "web/page.html")
+    _build_report(root, 1)
+    out = _verdicts(root, capsys)
+    assert out["missing"] == FULL, "no shoot command: the run is today's"
+    cfg = factory.load_config(root)[0]
+    assert not factory.ui_complete(cfg["ui"]) and factory.max_runs(cfg) == 26
+
+
+def test_the_ui_reviewers_join_on_a_ui_path_at_either_depth(tmp_path, capsys) -> None:
+    root = _change(tmp_path, config=LISTED)
+    _on_main(root, UI)
+    _touch(root, "src/a.py")
+    _build_report(root, 1)
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["missing"]) == ("light", ["code"]), "no UI path, no UI review"
+    _touch(root, "web/page.html")
+    out = _verdicts(root, capsys)
+    assert (out["depth"], out["missing"]) == ("light", ["code", "ui", "ux"])
+    for role in ("code", "ui", "ux"):
+        _review(root, 1, role, "VERDICT: CHANGES", f"web/page.html:1: {role} fix")
+    _verified(root, 1, kept=[f"{r}: web/page.html:1: {r} fix" for r in ("code", "ui", "ux")])
+    (root / "web" / "page.html").unlink()
+    _build_report(root, 2)
+    out = _verdicts(root, capsys)
+    assert out["depth"] == "light", "UI reviews never make a run full"
+    assert out["missing"] == ["code", "ui", "ux"], "a run that looked at the page keeps looking"
+    # Each round: four reviewers, the two UI ones, the verifier, the rework and two gate fixes.
+    assert factory.max_runs(factory.load_config(root)[0]) == 2 + 3 * (4 + 2 + 2 + 2)
+
+
+def test_ui_reviewers_are_never_chosen_and_the_table_is_the_base_branch_s(tmp_path) -> None:
+    root = _change(tmp_path)
+    _on_main(root, UI)
+    (root / ".sdlc" / "factory.toml").write_text(
+        'reviewers = ["code", "ui"]\n' + UI.replace("web/", "src/"), encoding="utf-8"
+    )
+    cfg, warnings = factory.load_config(root)
+    assert cfg["ui"]["paths"] == ["web/"], "a change can't point the UI review elsewhere"
+    assert cfg["reviewers"] == ["code"]
+    assert any("'ui' joins on its own" in w for w in warnings)
+    assert any("ui is read from the base branch" in w for w in warnings)
+    table, wrong = factory._ui_table({"timeout": "soon", "widths": [[1, 2, 3]], "colour": 1})
+    assert table["timeout"] == 60 and table["widths"] == factory.DEFAULTS["ui"]["widths"]
+    assert len(wrong) == 3 and "unknown key ui.colour" in wrong
+
+
+@pytest.mark.parametrize("role", ["ui", "ux"])
+def test_the_ui_reviewers_scale_like_the_others(role) -> None:
+    cfg = factory.load_config(Path("/nonexistent"))[0]
+    assert factory.model_for(role, cfg, 1, "light") == "haiku"
+    assert factory.model_for(role, cfg, 2, "light") == "sonnet"
+    assert factory.model_for(role, {**cfg, "models": {role: "opus"}}, 1, "light") == "opus"
+
+
 FAKE_CLAUDE = """\
 #!/usr/bin/env python3
 import json, os, sys
@@ -1380,10 +1452,13 @@ def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> No
     runs.mkdir()
     (runs / "builder.sessions").write_text("s-1\ns-2\n", encoding="utf-8")
     (runs / "reviewer-code.sessions").write_text("s-3\n", encoding="utf-8")
+    (runs / "reviewer-ui.sessions").write_text("s-4\n", encoding="utf-8")
+    (runs / "reviewer-ux.sessions").write_text("s-5\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "the run")
     found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
-    assert found == {"s-1": "builder", "s-2": "builder", "s-3": "reviewer-code"}
+    assert found == {"s-1": "builder", "s-2": "builder", "s-3": "reviewer-code",
+                     "s-4": "reviewer-ui", "s-5": "reviewer-ux"}  # fmt: skip
 
 
 def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> None:
@@ -1413,3 +1488,107 @@ def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> 
     first, second = out["ready"]
     assert second["depends_on"] == ["008"] and first["overlaps"] == ["009-second"]
     assert first["cost"]["usd"] == 0.0 and first["cost"]["runs"] == 0, "no runs recorded yet"
+
+
+# A dev server and a screenshot command, as a host's `[ui]` would name them: the server writes its
+# pid, then serves; the shooter writes a PNG to its `out` unless `FAKE_SHOOT_EXIT` says to fail.
+FAKE_SERVE = """\
+import http.server, os, sys
+open(sys.argv[2], "w").write(str(os.getpid()))
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])),
+                                http.server.SimpleHTTPRequestHandler).serve_forever()
+"""
+FAKE_SHOOT = """\
+import os, sys
+code = int(os.environ.get("FAKE_SHOOT_EXIT", "0"))
+if not code:
+    open(sys.argv[2], "wb").write(b"\\x89PNG fake " + sys.argv[1].encode())
+print("shot " + sys.argv[1], file=sys.stderr)
+sys.exit(code)
+"""
+SLEEPER = "import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # A zombie still answers kill(0); `ps` says whether it has gone.
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+    return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
+
+
+def _ui(tmp_path: Path, serve: str | None = None, **more) -> dict:
+    py = sys.executable
+    (tmp_path / "serve.py").write_text(FAKE_SERVE)
+    (tmp_path / "shoot.py").write_text(FAKE_SHOOT)
+    pid = tmp_path / "server.pid"
+    table = {
+        "serve": serve or f'"{py}" "{tmp_path / "serve.py"}" {{port}} "{pid}"',
+        "shoot": f'"{py}" "{tmp_path / "shoot.py"}" "{{url}}" "{{out}}"',
+        "paths": ["web/"], "pages": ["/", "/drafts/"], "timeout": 20, **more,
+    }  # fmt: skip
+    return factory._ui_table(table)[0]
+
+
+def test_shots_start_the_declared_server_shoot_each_page_and_stop_it(tmp_path) -> None:
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    ui = _ui(tmp_path)
+    paths, record = factory.shots(root, folder, "round-1", ui)
+    assert record["problem"] is None, record
+    names = sorted(p.name for p in paths)
+    assert names == ["drafts-1280x800.png", "drafts-390x844.png", "index-1280x800.png",
+                     "index-390x844.png"]  # fmt: skip
+    assert all(p.is_file() for p in paths)
+    where = root / ".sdlc" / "reports" / "shots" / NAME / "round-1"
+    assert paths[0].parent == where and (where / "shots.json").is_file()
+    assert (root / ".sdlc" / "reports" / ".gitignore").read_text() == "*\n"
+    assert _git(root, "status", "--porcelain", "--", ".sdlc/reports") == "", "none reach git"
+    assert not factory._answers(record["port"]), "the server it started is stopped"
+    assert not _alive(int((tmp_path / "server.pid").read_text()))
+    assert any("/drafts/" in s["command"] for s in record["shots"])
+    first = record["shots"][0]["command"]
+    assert first.endswith(f'"{(where / "index-1280x800.png").relative_to(root).as_posix()}"')
+    # A round already shot is reused, never shot again.
+    (tmp_path / "server.pid").unlink()
+    again, record = factory.shots(root, folder, "round-1", ui)
+    assert again == paths and not (tmp_path / "server.pid").exists()
+
+
+def test_a_failed_shot_or_a_silent_server_still_stops_the_server(tmp_path, monkeypatch) -> None:
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_SHOOT_EXIT", "3")
+    paths, record = factory.shots(root, folder, "round-1", _ui(tmp_path))
+    assert "exited 3" in record["problem"] and not any(p.is_file() for p in paths)
+    assert not _alive(int((tmp_path / "server.pid").read_text()))
+    monkeypatch.delenv("FAKE_SHOOT_EXIT")
+    (tmp_path / "sleep.py").write_text(SLEEPER)
+    sleeper = f'"{sys.executable}" "{tmp_path / "sleep.py"}" "{tmp_path / "sleep.pid"}"'
+    paths, record = factory.shots(root, folder, "round-2", _ui(tmp_path, sleeper, timeout=1))
+    assert "didn't answer" in record["problem"]
+    assert not _alive(int((tmp_path / "sleep.pid").read_text())), "never left running"
+
+
+def test_a_ui_review_never_runs_blind(tmp_path, capsys, claude, monkeypatch) -> None:
+    root = _change(tmp_path)
+    ui = _ui(tmp_path)
+    toml = "[ui]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in ui.items())
+    _on_main(root, toml)
+    _touch(root, "web/page.html")
+    _build_report(root, 1)
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_SHOOT_EXIT", "1")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "ui", None)
+    assert code == 1 and "doesn't run blind" in out["refusals"][0] and not claude()
+    assert not (folder / "reviews" / "round-1" / "ui.md").exists()
+    monkeypatch.delenv("FAKE_SHOOT_EXIT")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "ux", None)
+    assert code == 0, out
+    argv = claude()[-1]["argv"]
+    assert argv[3] == "sdlc-factory:reviewer-ux" and "Screenshots: " in argv[1]
+    assert "index-390x844.png" in argv[1] and "web/page.html" in argv[1]
+    assert (folder / "reviews" / "round-1" / "ux.md").is_file()
+    assert (folder / "runs" / "reviewer-ux.sessions").is_file()

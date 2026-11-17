@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change board</title>
+<!--
+  The dashboard `sdlc.py board` serves. Self-contained: no external script, font or stylesheet.
+  It polls /state.json and builds every node with textContent, never by parsing a string as HTML,
+  so nothing a change folder holds can become markup.
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #dde1e6;
+  --accent: #2f5fd0; --pass: #1f7a4a; --pass-bg: #e3f4ea; --changes: #a1520f; --changes-bg: #fcefdf;
+  --stop: #b3261e; --stop-bg: #fbe5e3; --ready-bg: #e6eefc; --chip: #eef0f3;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --panel: #1a1e24; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2c323b;
+    --accent: #7aa2ff; --pass: #6fd39b; --pass-bg: #163325; --changes: #f2b36b; --changes-bg: #3a2a16;
+    --stop: #ff8a80; --stop-bg: #3d1b19; --ready-bg: #1b2a47; --chip: #252b33;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  position: sticky; top: 0; z-index: 2;
+}
+h1 { margin: 0; font-size: 17px; }
+.status { color: var(--muted); font-size: 13px; }
+.status.down { color: var(--stop); }
+main.board {
+  display: grid; grid-template-columns: repeat(6, minmax(168px, 1fr)); gap: 12px;
+  padding: 16px; overflow-x: auto; align-items: start;
+}
+@media (max-width: 760px) {
+  main.board { grid-template-columns: 1fr; overflow-x: visible; }
+}
+.col { min-width: 0; }
+.col-head {
+  display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px; padding: 0 2px;
+}
+.col-head h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+.col-head .who { color: var(--muted); font-size: 12px; }
+.col-head .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+.col.needs-you .col-head h2 { color: var(--stop); }
+.col.ready .col-head h2 { color: var(--accent); }
+.empty { color: var(--muted); padding: 8px 2px; }
+.card {
+  display: block; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 0 0 8px; box-shadow: var(--shadow); cursor: pointer;
+}
+.card:hover, .card:focus-visible { border-color: var(--accent); outline: none; }
+.card.needs-you { border-left: 3px solid var(--stop); }
+.card.ready { border-left: 3px solid var(--accent); background: var(--ready-bg); }
+.card-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.num { font-weight: 600; font-variant-numeric: tabular-nums; }
+.badge {
+  font-size: 11px; padding: 1px 6px; border-radius: 99px; background: var(--chip); color: var(--muted);
+}
+.badge.factory { color: var(--accent); }
+.title { margin: 4px 0 6px; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.next { margin-top: 6px; font-size: 12px; }
+.next code { font-size: 12px; }
+.flag { font-size: 12px; color: var(--stop); margin-top: 6px; overflow-wrap: anywhere; }
+.rounds { margin-top: 6px; display: grid; gap: 4px; }
+.round { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.round .r { color: var(--muted); font-size: 11px; width: 22px; }
+.chip {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--chip);
+  font-variant-numeric: tabular-nums;
+}
+.chip.PASS { background: var(--pass-bg); color: var(--pass); }
+.chip.CHANGES { background: var(--changes-bg); color: var(--changes); }
+.chip.missing { color: var(--muted); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 3; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(880px, 100%); z-index: 4;
+  background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+}
+.d-head { display: flex; gap: 10px; align-items: baseline; padding: 14px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.d-head h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; flex: 1 1 240px; }
+.d-head a { color: var(--accent); }
+.close {
+  font: inherit; font-size: 20px; line-height: 1; background: none; border: 0; color: var(--muted);
+  cursor: pointer; padding: 2px 6px;
+}
+.d-body { display: flex; min-height: 0; flex: 1; }
+.files { width: 220px; flex: none; overflow-y: auto; border-right: 1px solid var(--line); padding: 8px 0; }
+.files button {
+  display: block; width: 100%; text-align: left; font: 12px/1.4 ui-monospace, Menlo, monospace;
+  background: none; border: 0; color: var(--ink); padding: 4px 12px; cursor: pointer; overflow-wrap: anywhere;
+}
+.files button[aria-current="true"] { background: var(--chip); color: var(--accent); }
+.doc { flex: 1; overflow: auto; padding: 12px 16px; margin: 0; }
+.doc pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
+@media (max-width: 760px) {
+  .d-body { flex-direction: column; }
+  .files { width: auto; max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--line); }
+}
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="repo">Change board</h1>
+  <span class="status" id="status">connecting…</span>
+  <span class="status" id="totals"></span>
+</header>
+<main class="board" id="board" aria-live="polite"></main>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" hidden>
+  <div class="d-head">
+    <h3 id="d-title"></h3>
+    <span id="d-links"></span>
+    <button class="close" id="d-close" aria-label="Close">×</button>
+  </div>
+  <div class="d-body">
+    <nav class="files" id="d-files" aria-label="Files"></nav>
+    <div class="doc"><pre id="d-doc"></pre></div>
+  </div>
+</aside>
+<script>
+"use strict";
+const POLL_MS = 2000;
+const COLUMNS = [
+  { key: "plan", label: "Plan", who: "intent" },
+  { key: "design", label: "Design", who: "spec" },
+  { key: "build", label: "Build", who: "plan and code" },
+  { key: "test", label: "Test", who: "the gate and the review" },
+  { key: "ready", label: "Ready to ship", who: "factory: READY" },
+  { key: "needs-you", label: "Needs you", who: "a decision or a problem" },
+];
+const $ = (id) => document.getElementById(id);
+
+// Every node is made here, its text set with textContent: nothing from the state is parsed as HTML.
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else el.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+function ago(seconds) {
+  if (seconds === null || seconds === undefined) return "never touched";
+  const m = Math.max(Math.floor(seconds / 60), 0);
+  if (m < 60) return `touched ${m}m ago`;
+  return m < 1440 ? `touched ${Math.floor(m / 60)}h ago` : `touched ${Math.floor(m / 1440)}d ago`;
+}
+
+function money(cost) {
+  if (!cost) return "cost —";
+  const mins = cost.duration_ms ? ` · ${Math.round(cost.duration_ms / 60000)} min` : "";
+  return `$${cost.usd.toFixed(2)} API-equivalent${mins}`;
+}
+
+function roundRow(r) {
+  const chips = [h("span", { class: "r" }, `R${r.round}`)];
+  chips.push(h("span", { class: "chip", title: "builder report" }, r.built ? "build" : "build …"));
+  for (const [role, v] of Object.entries(r.reviews)) {
+    const text = v.verdict === "CHANGES" ? `${role} ${v.changes}` : role;
+    chips.push(h("span", { class: `chip ${v.verdict}`, title: `${role}: ${v.verdict}` }, text));
+  }
+  if (r.verified) {
+    chips.push(h("span", { class: "chip", title: "the verifier kept / dropped" },
+      `kept ${r.verified.kept} · dropped ${r.verified.dropped}`));
+  }
+  return h("div", { class: "round" }, chips);
+}
+
+function card(c) {
+  const have = c.artifacts.map((a) => a.replace(/\.md$/, "") + (c.unfilled.includes(a) ? "~" : ""));
+  const meta = [
+    c.tier ? `T${c.tier}` : "T?",
+    have.join(" ") || "(empty)",
+    c.open_questions ? `${c.open_questions} open question(s)` : null,
+    c.undone.length ? `${c.undone.length} undone` : null,
+    Object.keys(c.findings).length
+      ? "findings " + Object.entries(c.findings).map(([k, n]) => `${n} ${k}`).join(", ") : null,
+    c.checks ? `${c.checks} check(s)` : null,
+    c.behind ? `behind by ${c.behind}` : null,
+    ago(c.touched_ago),
+  ].filter(Boolean).map((t) => h("span", {}, t));
+  const flags = [];
+  for (const p of c.problems || []) flags.push(h("div", { class: "flag" }, p));
+  for (const d of c.pending || []) flags.push(h("div", { class: "flag" }, `${d.id} waits on you: ${d.text}`));
+  if (c.decision === "ESCALATE") flags.push(h("div", { class: "flag" }, "the approver escalated it to you"));
+  const factory = c.mode === "factory";
+  return h("button", { class: `card ${c.column}`, type: "button", "data-change": c.change },
+    h("div", { class: "card-top" },
+      h("span", { class: "num" }, c.id),
+      h("span", { class: `badge ${c.mode}` }, factory ? "factory" : "by hand"),
+      c.decision ? h("span", { class: "badge" }, c.decision) : null),
+    h("div", { class: "title" }, c.title.replace(/^\d+\s*—\s*/, "") || c.slug),
+    h("div", { class: "meta" }, meta),
+    factory && c.rounds.length ? h("div", { class: "rounds" }, c.rounds.map(roundRow)) : null,
+    factory && c.assumed.length ? h("div", { class: "meta" }, `${c.assumed.length} default(s) assumed`) : null,
+    factory ? h("div", { class: "meta" }, money(c.cost)) : null,
+    flags,
+    h("div", { class: "next" }, "next: ", h("code", {}, c.next)));
+}
+
+let last = "";
+let changes = [];
+function render(st) {
+  $("repo").textContent = `${st.repo} — open changes`;
+  document.title = `${st.repo} · board`;
+  const key = JSON.stringify(st.changes);
+  if (key === last) return;
+  last = key;
+  changes = st.changes;
+  const cols = COLUMNS.map((col) => {
+    const cards = st.changes.filter((c) => c.column === col.key);
+    return h("section", { class: `col ${col.key}`, "aria-label": col.label },
+      h("div", { class: "col-head" }, h("h2", {}, col.label), h("span", { class: "who" }, col.who),
+        h("span", { class: "count" }, cards.length || "")),
+      cards.length ? cards.map(card) : h("div", { class: "empty" }, "—"));
+  });
+  $("board").replaceChildren(...cols);
+  const factory = st.changes.filter((c) => c.mode === "factory");
+  const usd = factory.reduce((s, c) => s + (c.cost ? c.cost.usd : 0), 0);
+  $("totals").textContent = `${st.changes.length} open · ${factory.length} by the factory` +
+    (factory.length ? ` · $${usd.toFixed(2)} API-equivalent` : "");
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/state.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    render(await res.json());
+    $("status").textContent = `live · ${new Date().toLocaleTimeString()}`;
+    $("status").className = "status";
+  } catch (e) {
+    $("status").textContent = "the board isn't answering: is `sdlc.py board` still running?";
+    $("status").className = "status down";
+  }
+  setTimeout(poll, POLL_MS);
+}
+
+let open = null;
+async function show(change, path) {
+  for (const b of $("d-files").children) b.setAttribute("aria-current", String(b.dataset.path === path));
+  $("d-doc").textContent = "…";
+  try {
+    const res = await fetch(`/file?change=${encodeURIComponent(change)}&path=${encodeURIComponent(path)}`,
+      { cache: "no-store" });
+    $("d-doc").textContent = res.ok ? await res.text() : `${path} can't be read (${res.status}).`;
+  } catch (e) {
+    $("d-doc").textContent = `${path} can't be read.`;
+  }
+}
+
+function openDrawer(name) {
+  const c = changes.find((x) => x.change === name);
+  if (!c) return;
+  open = c;
+  $("d-title").textContent = c.title || c.change;
+  $("d-links").replaceChildren(c.issue ? h("a", { href: c.issue, target: "_blank", rel: "noopener" }, "issue") : "");
+  $("d-files").replaceChildren(...c.files.map((f) =>
+    h("button", { type: "button", "data-path": f, "aria-current": "false" }, f)));
+  $("scrim").hidden = $("drawer").hidden = false;
+  const first = c.files.includes("intent.md") ? "intent.md" : c.files[0];
+  if (first) show(c.change, first); else $("d-doc").textContent = "This folder holds no file yet.";
+  $("d-close").focus();
+}
+
+function closeDrawer() {
+  $("scrim").hidden = $("drawer").hidden = true;
+  const back = open && document.querySelector(`[data-change="${CSS.escape(open.change)}"]`);
+  open = null;
+  if (back) back.focus();
+}
+
+$("board").addEventListener("click", (e) => {
+  const b = e.target.closest(".card");
+  if (b) openDrawer(b.dataset.change);
+});
+$("d-files").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b && open) show(open.change, b.dataset.path);
+});
+$("d-close").addEventListener("click", closeDrawer);
+$("scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && open) closeDrawer(); });
+poll();
+</script>
+</body>
+</html>

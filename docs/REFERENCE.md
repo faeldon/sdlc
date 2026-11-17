@@ -444,6 +444,17 @@ Each open change's line ends with when it was last touched: its branch's own las
 newest file its worktree has changed. One untouched for a day is `quiet`, and `/sdlc:status`
 recommends finishing an open change only once it is: one touched since has a session on it.
 
+**The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
+the same open changes as a live page on `127.0.0.1` until it is stopped: one column per stage, then
+**Ready to ship** for a factory change the approver called READY, and **Needs you** for one with a
+blocking decision, an ESCALATE or a file that won't read. Each card gives the change's tier,
+artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
+touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
+each round's verdicts, the verifier's answers, its decisions and what its agents cost. A click opens
+any file in the change's folder. It writes nothing, answers only `GET` for the page, `/state.json`
+and `/file` (one file inside an open change's own folder), refuses a request naming another host,
+and a second `board` on a port a board holds says so rather than starting again.
+
 A change may keep its **acceptance checks** in `.sdlc/work/NNN-slug/checks.md`: proof that only a
 deliberate revert could break, which the suite shouldn't carry forever. Each `## ` section is one
 check holding one `sh` block, which passes when it exits 0 within 300 seconds and leaves the
