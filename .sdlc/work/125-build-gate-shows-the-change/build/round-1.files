@@ -1,4 +1,0 @@
-9af8658a3cee1b213f1f702889846bd8996c5a13f7f16068274fdce4cf791a13  plugins/factory/scripts/factory.py
-18154d64f740c14182746980679cf3cda15885e24377be956a122413fd80e15f  plugins/factory/skills/build/SKILL.md
-efab389f87e3231d60470fd5e4b93df04e7d7fe0d2e017a9be34678f2638b78e  tests/test_factory.py
-ef6a12e43fc6922abdd74c974ae5a9dfbdaf656c2990e328d86da79cefb0e8a3  tests/test_skills.py
