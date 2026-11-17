@@ -216,8 +216,9 @@ takes it first, each lost try in `shots.json`'s `retries`; only a port that alre
 won't bind once the server has exited, is lost, and a server that fails on its own is started
 once), takes each page at each width with its screenshot command, stops the process group it started, and gives the reviewer the images and the changed
 paths. A shot that fails refuses that review, with what the commands printed, so neither judges a
-page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N>/` with a
-`shots.json` of what ran, a folder that ignores itself, so none is committed.
+page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N>/<role>/` with
+a `shots.json` of what ran, a folder that ignores itself, so none is committed. Each reviewer has
+its own folder, fixture copy and server, so a round's two start together.
 
 ## What it leaves in the change's folder
 
@@ -307,7 +308,7 @@ A page that fills in after it loads needs the command to wait for it (Playwright
 A page that shows only what its data holds needs data holding each state a change could add.
 Name it in `fixture`: a file or folder in the checkout, so a change that adds a state adds its
 data in the same diff. Before each shot, `shots` copies it afresh to
-`.sdlc/reports/shots/<change>/<label>/fixture/` and puts that copy's path, relative to the
+`.sdlc/reports/shots/<change>/<label>/<role>/fixture/` and puts that copy's path, relative to the
 checkout, in `serve`'s `{fixture}`, so a server that writes to its data never touches the
 committed fixture or the next shot's. A fixture the checkout lacks refuses the UI review, with no
 server started; seeding a database or building a repo from it is `serve`'s job.

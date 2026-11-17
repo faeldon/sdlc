@@ -1,0 +1,3 @@
+ab9cdf4c8e74ce37aff305fe51b708ce3e8da87ec524abb671ab847842065bd3  plugins/factory/README.md
+852cf5088927f3ba1f171a47aaf308771a8cb678e3d0e81ea5d090b8b5c8f3b5  plugins/factory/scripts/factory.py
+7028d102459d8a93bd2ae054225b6ab8acc895ab15d6b826ff3dbf44d3d98767  tests/test_factory.py

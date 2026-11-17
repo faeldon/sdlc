@@ -228,20 +228,6 @@ Left undone by 110-board-says-it-plainly, carried forward when it landed: pre-ex
 See .sdlc/work/110-board-says-it-plainly/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-85] [bug] The factory's ui and ux reviewers can't run at once
-
-Each of the two reviewers starts the board's dev server through `tests/fixtures/board/serve.sh`,
-which builds the fixture into the same `.sdlc/reports/shots/<change>/round-<n>/fixture` folder.
-So when both start together, as the build skill says to start a round's reviewers, the second is
-refused before it judges anything: "build.sh: …/fixture/drafts already exists; it builds only a
-new repo". Each should get a fixture of its own, or the two should share one built once. Seen on
-110-board-says-it-plainly round 1, 2026-11-17; the supervisor reran ux alone after ui finished.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, tests/fixtures/board/serve.sh, tests/fixtures/board/build.sh
-Introduced by: 106-factory-reviewer-coverage
-Theme: factory
-
 ## [2026-11-17-86] [bug] A landing review reads the base branch's newer commits as the change's deletions
 
 A landing review compares a rebased change against the base branch as it is now, not against the

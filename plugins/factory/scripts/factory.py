@@ -2550,7 +2550,7 @@ def cmd_agent(
         if not ui_complete(cfg["ui"]):
             return emit({"refusals": ["the base branch's [ui] needs serve, shoot and paths"]}, 1)
         label = f"round-{state['round']}" if task == "review" else f"land-{land_round(folder)}"
-        paths, record = shots(root, folder, label, cfg["ui"])
+        paths, record = shots(root, folder, label, cfg["ui"], role)
         if record["problem"]:
             why = f"the screenshots failed, so the {role} review doesn't run blind: "
             return emit({"refusals": [why + record["problem"]], "shots": record}, 1)
@@ -4324,12 +4324,14 @@ def _serve(
     return None, port
 
 
-def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], dict]:
-    """Each page of `[ui]` at each width, as PNGs under `.sdlc/reports/shots/<change>/<label>/`,
-    with `shots.json` saying what ran and how it ended: `problem` is None only when every shot was
-    written. A label already shot without a problem is reused, not shot again. With `fixture` set,
-    the server is given a fresh copy of it (`_fixture_copy()`), or isn't started at all."""
-    where = _reports(root) / "shots" / folder.name / label
+def shots(root: Path, folder: Path, label: str, ui: dict, role: str) -> tuple[list[Path], dict]:
+    """Each page of `[ui]` at each width, as PNGs under
+    `.sdlc/reports/shots/<change>/<label>/<role>/`, with `shots.json` saying what ran and how it
+    ended: `problem` is None only when every shot was written. A label already shot for the role
+    without a problem is reused, not shot again. Each role has its folder, fixture copy and server
+    of its own, so a round's ui and ux reviewers can take theirs at once. With `fixture` set, the
+    server is given a fresh copy of it (`_fixture_copy()`), or isn't started at all."""
+    where = _reports(root) / "shots" / folder.name / label / role
     record_path = where / "shots.json"
     want = [
         (page, w, h, where / f"{_page_name(page)}-{w}x{h}.png")
@@ -4379,15 +4381,15 @@ def shots(root: Path, folder: Path, label: str, ui: dict) -> tuple[list[Path], d
     return paths, record
 
 
-def cmd_shots(root: Path, ident: str, n: int) -> int:
-    """Round `n`'s screenshots of the change's pages, for its UI reviewers (`shots()`)."""
+def cmd_shots(root: Path, ident: str, n: int, role: str) -> int:
+    """Round `n`'s screenshots of the change's pages, for its `role` UI reviewer (`shots()`)."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     ui = load_config(root)[0]["ui"]
     if not ui_complete(ui):
         return emit({"refusals": ["the base branch's [ui] needs serve, shoot and paths"]}, 1)
-    paths, record = shots(root, folder, f"round-{n}", ui)
+    paths, record = shots(root, folder, f"round-{n}", ui, role)
     out = {"change": folder.name, "shots": [p.relative_to(root).as_posix() for p in paths]}
     return emit({**out, **record}, 1 if record["problem"] else 0)
 
@@ -4540,6 +4542,7 @@ def main() -> int:
     p_shots = sub.add_parser("shots", help="screenshot the change's pages for its UI reviewers")
     p_shots.add_argument("id")
     p_shots.add_argument("--round", dest="round", type=int, required=True)
+    p_shots.add_argument("--role", choices=UI_REVIEWERS, required=True)
     p_write = sub.add_parser("write-spec", help="copy runs/spec-draft.md into spec.md, once")
     p_write.add_argument("id")
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
@@ -4637,7 +4640,7 @@ def main() -> int:
     if args.cmd == "gate":
         return cmd_gate(root, args.id, args.land)
     if args.cmd == "shots":
-        return cmd_shots(root, args.id, args.round)
+        return cmd_shots(root, args.id, args.round, args.role)
     if args.cmd == "restart":
         return cmd_restart(root, args.id, args.words)
     if args.cmd == "write-spec":

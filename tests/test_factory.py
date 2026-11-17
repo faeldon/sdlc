@@ -2411,13 +2411,13 @@ def test_shots_start_the_declared_server_shoot_each_page_and_stop_it(tmp_path) -
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     ui = _ui(tmp_path)
-    paths, record = factory.shots(root, folder, "round-1", ui)
+    paths, record = factory.shots(root, folder, "round-1", ui, "ui")
     assert record["problem"] is None, record
     names = sorted(p.name for p in paths)
     assert names == ["drafts-1280x800.png", "drafts-390x844.png", "index-1280x800.png",
                      "index-390x844.png"]  # fmt: skip
     assert all(p.is_file() for p in paths)
-    where = root / ".sdlc" / "reports" / "shots" / NAME / "round-1"
+    where = root / ".sdlc" / "reports" / "shots" / NAME / "round-1" / "ui"
     assert paths[0].parent == where and (where / "shots.json").is_file()
     assert (root / ".sdlc" / "reports" / ".gitignore").read_text() == "*\n"
     assert _git(root, "status", "--porcelain", "--", ".sdlc/reports") == "", "none reach git"
@@ -2428,7 +2428,7 @@ def test_shots_start_the_declared_server_shoot_each_page_and_stop_it(tmp_path) -
     assert first.endswith(f'"{(where / "index-1280x800.png").relative_to(root).as_posix()}"')
     # A round already shot is reused, never shot again.
     (tmp_path / "server.pid").unlink()
-    again, record = factory.shots(root, folder, "round-1", ui)
+    again, record = factory.shots(root, folder, "round-1", ui, "ui")
     assert again == paths and not (tmp_path / "server.pid").exists()
 
 
@@ -2437,7 +2437,7 @@ def test_shots_wait_for_the_server_where_the_url_says(tmp_path) -> None:
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     ui = _ui(tmp_path, url="http://localhost:{port}", pages=["/"], widths=[[390, 844]])
-    paths, record = factory.shots(root, folder, "round-1", ui)
+    paths, record = factory.shots(root, folder, "round-1", ui, "ui")
     assert record["problem"] is None and paths[0].is_file(), record
     assert "http://localhost:" in record["shots"][0]["command"]
 
@@ -2446,13 +2446,13 @@ def test_a_failed_shot_or_a_silent_server_still_stops_the_server(tmp_path, monke
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     monkeypatch.setenv("FAKE_SHOOT_EXIT", "3")
-    paths, record = factory.shots(root, folder, "round-1", _ui(tmp_path))
+    paths, record = factory.shots(root, folder, "round-1", _ui(tmp_path), "ui")
     assert "exited 3" in record["problem"] and not any(p.is_file() for p in paths)
     assert not _alive(int((tmp_path / "server.pid").read_text()))
     monkeypatch.delenv("FAKE_SHOOT_EXIT")
     (tmp_path / "sleep.py").write_text(SLEEPER)
     sleeper = f'"{sys.executable}" "{tmp_path / "sleep.py"}" "{tmp_path / "sleep.pid"}"'
-    paths, record = factory.shots(root, folder, "round-2", _ui(tmp_path, sleeper, timeout=1))
+    paths, record = factory.shots(root, folder, "round-2", _ui(tmp_path, sleeper, timeout=1), "ui")
     assert "didn't answer" in record["problem"]
     assert not _alive(int((tmp_path / "sleep.pid").read_text())), "never left running"
 
@@ -2475,6 +2475,7 @@ def test_a_ui_review_never_runs_blind(tmp_path, capsys, claude, monkeypatch) -> 
     argv = claude()[-1]["argv"]
     assert argv[3] == "sdlc-factory:reviewer-ux" and "Screenshots: " in argv[1]
     assert "index-390x844.png" in argv[1] and "web/page.html" in argv[1]
+    assert f"/shots/{NAME}/round-1/ux/index-390x844.png" in argv[1], "ux's own folder"
     assert (folder / "reviews" / "round-1" / "ux.md").is_file()
     assert (folder / "runs" / "reviewer-ux.sessions").is_file()
 
@@ -2508,9 +2509,9 @@ def test_shots_serve_a_fresh_copy_of_the_fixture(tmp_path) -> None:
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "a fixture")
     ui = _fixture_ui(tmp_path, root)
-    paths, record = factory.shots(root, folder, "round-1", ui)
+    paths, record = factory.shots(root, folder, "round-1", ui, "ui")
     assert record["problem"] is None, record
-    copy = root / ".sdlc" / "reports" / "shots" / NAME / "round-1" / "fixture"
+    copy = root / ".sdlc" / "reports" / "shots" / NAME / "round-1" / "ui" / "fixture"
     assert (copy / "written.txt").read_text() == "x\n", "the server read and wrote its copy"
     assert not (root / "fixtures" / "drafts" / "written.txt").exists()
     assert _git(root, "status", "--porcelain") == "", "the committed fixture is as it was"
@@ -2518,15 +2519,19 @@ def test_shots_serve_a_fresh_copy_of_the_fixture(tmp_path) -> None:
     assert f" {rel} " in record["serve"]
     assert str(root) not in record["serve"], "the record names no machine's checkout"
     # A second label gets a clean copy of its own; a copy a failed attempt left is replaced.
-    stale = root / ".sdlc" / "reports" / "shots" / NAME / "round-2" / "fixture"
+    stale = root / ".sdlc" / "reports" / "shots" / NAME / "round-2" / "ui" / "fixture"
     stale.mkdir(parents=True)
     (stale / "written.txt").write_text("stale\n")
-    _, record = factory.shots(root, folder, "round-2", ui)
+    _, record = factory.shots(root, folder, "round-2", ui, "ui")
     assert record["problem"] is None, record
     assert (stale / "written.txt").read_text() == "x\n"
     # A fixture that is one file is copied into the folder, and `{fixture}` names the file.
-    _, record = factory.shots(root, folder, "round-3", _ui(tmp_path, "true", fixture="README.md"))
-    copied = root / ".sdlc" / "reports" / "shots" / NAME / "round-3" / "fixture" / "README.md"
+    _, record = factory.shots(
+        root, folder, "round-3", _ui(tmp_path, "true", fixture="README.md"), "ui"
+    )
+    copied = (
+        root / ".sdlc" / "reports" / "shots" / NAME / "round-3" / "ui" / "fixture" / "README.md"
+    )
     assert copied.read_text() == "a repo\n"
 
 
@@ -2535,7 +2540,7 @@ def test_a_missing_fixture_refuses_the_ui_review(tmp_path, capsys, claude) -> No
     refused; a `serve` naming `{fixture}` with none set is a config warning."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
-    paths, record = factory.shots(root, folder, "round-1", _fixture_ui(tmp_path, root))
+    paths, record = factory.shots(root, folder, "round-1", _fixture_ui(tmp_path, root), "ui")
     assert "fixtures/drafts" in record["problem"] and "doesn't exist" in record["problem"]
     assert not (tmp_path / "server.pid").exists(), "no server started"
     ui = _fixture_ui(tmp_path, root)
@@ -2547,6 +2552,65 @@ def test_a_missing_fixture_refuses_the_ui_review(tmp_path, capsys, claude) -> No
     assert code == 1 and "doesn't run blind" in out["refusals"][0] and not claude()
     _on_main(root, toml.replace('fixture = "fixtures/drafts"\n', ""))
     assert "ui.serve names {fixture}, but no ui.fixture is set" in factory.load_config(root)[1]
+
+
+# A dev server that builds its data inside the fixture copy and refuses a copy that already holds
+# it, as this repo's `serve.sh` does through `build.sh`.
+BUILDING_SERVE = """\
+import http.server, os, sys
+port, fixture = sys.argv[1:3]
+os.mkdir(os.path.join(fixture, "drafts"))
+http.server.ThreadingHTTPServer(("127.0.0.1", int(port)),
+                                http.server.SimpleHTTPRequestHandler).serve_forever()
+"""
+
+
+def test_the_ui_and_ux_reviews_of_a_round_run_at_once(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """119: the ui and ux reviewers started together each take their shots in a folder of their
+    own, with their own fixture copy and server, so neither's serve finds the other's data."""
+    import threading
+
+    root = _change(tmp_path)
+    _touch(root, "fixtures/drafts/seed.txt")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a fixture")
+    (tmp_path / "building_serve.py").write_text(BUILDING_SERVE)
+    serve = f'"{sys.executable}" "{tmp_path / "building_serve.py"}" {{port}} {{fixture}}'
+    ui = _ui(tmp_path, serve, fixture="fixtures/drafts", pages=["/"], widths=[[390, 844]])
+    toml = "[ui]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in ui.items() if v is not None)
+    _on_main(root, toml)
+    _touch(root, "web/page.html")
+    _build_report(root, 1)
+    # Both copy their fixture before either serves, as two reviewers started together may.
+    together, copy = threading.Barrier(2, timeout=20), factory._fixture_copy
+
+    def held(*args):
+        served = copy(*args)
+        together.wait()
+        return served
+
+    monkeypatch.setattr(factory, "_fixture_copy", held)
+    codes: dict = {}
+
+    def review(role: str) -> None:
+        codes[role] = factory.cmd_agent(root, "008", "review", role, None)
+
+    threads = [threading.Thread(target=review, args=(role,)) for role in ("ui", "ux")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    printed = capsys.readouterr().out
+    assert codes == {"ui": 0, "ux": 0}, printed
+    folder = root / ".sdlc" / "work" / NAME
+    shots = root / ".sdlc" / "reports" / "shots" / NAME / "round-1"
+    for role in ("ui", "ux"):
+        assert (folder / "reviews" / "round-1" / f"{role}.md").is_file()
+        assert (shots / role / "fixture" / "drafts").is_dir()
+        prompt = next(c["argv"][1] for c in claude() if c["argv"][3].endswith(f"-{role}"))
+        assert f"Screenshots: {(shots / role / 'index-390x844.png').as_posix()}." in prompt
 
 
 # ---------------------------------------------------------------- the step record (088)
@@ -3233,7 +3297,7 @@ def test_shots_take_a_new_port_when_theirs_is_lost(tmp_path, monkeypatch) -> Non
     free = iter([*ports, factory._free_port()])
     monkeypatch.setattr(factory, "_free_port", lambda: next(free))
     try:
-        paths, record = factory.shots(root, folder, "round-1", ui)
+        paths, record = factory.shots(root, folder, "round-1", ui, "ui")
         assert record["problem"] is None and paths[0].is_file(), record
         assert [r["port"] for r in record["retries"]] == ports, record
         assert "already answered" in record["retries"][0]["why"], record
@@ -3242,7 +3306,7 @@ def test_shots_take_a_new_port_when_theirs_is_lost(tmp_path, monkeypatch) -> Non
         assert not _alive(int((tmp_path / "server.pid").read_text()))
         monkeypatch.setattr(factory, "_free_port", lambda: ports[0])
         (tmp_path / "server.pid").unlink()
-        _, record = factory.shots(root, folder, "round-2", ui)
+        _, record = factory.shots(root, folder, "round-2", ui, "ui")
         assert len(record["retries"]) == factory.SERVE_TRIES, record
         assert "already answered" in record["problem"], record
         assert not (tmp_path / "server.pid").exists(), "no server started on a port taken"
@@ -3343,7 +3407,7 @@ def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -
     ports = []
     real = factory._free_port
     monkeypatch.setattr(factory, "_free_port", lambda: ports.append(real()) or ports[-1])
-    _, record = factory.shots(root, folder, "round-1", _ui(tmp_path, serve, timeout=5))
+    _, record = factory.shots(root, folder, "round-1", _ui(tmp_path, serve, timeout=5), "ui")
     assert starts.read_text().splitlines() == ["started"], "started once"
     assert len(ports) == 1 and record["retries"] == [], record
     assert "exited 1 before answering" in record["problem"], record
