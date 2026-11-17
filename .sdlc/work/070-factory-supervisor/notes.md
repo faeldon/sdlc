@@ -25,9 +25,9 @@
 
 ## Not verified yet
 
-- [ ] A real supervised run (paid): from the main checkout, `/sdlc-factory:build` on a scratch
+- [x] A real supervised run (paid): from the main checkout, `/sdlc-factory:build` on a scratch
   Tier 2 at `plan`, then a second before the first's draft lands. It is the only check that
   shows `claude -p --agent sdlc-factory:<role>` loads the plugin's agent in a headless session,
   honours the builder's `Agent(Explore, Plan)` allowlist (the docs say so for `claude --agent`,
   and say nothing of `-p` or a plugin-qualified name), runs in `factory.mode`, and that the
-  transcripts land where `measure` reads them.
+  transcripts land where `measure` reads them. → seed: 2026-11-17-7

@@ -1086,6 +1086,30 @@ def test_the_spec_draft_stays_out_of_the_repo_until_the_yes(tmp_path, capsys, cl
     assert "Written." in (root / ".sdlc" / "work" / NAME / "spec.md").read_text(), "untouched"
 
 
+def test_a_revision_reaches_the_same_spec_writer_through_the_ledger(tmp_path, capsys, claude):
+    """A person's words never go in a command line: a revision is a ticked `R<n>` line in
+    `decisions.md`, read by `agent`, and the spec-writer that drafted is resumed with them; a
+    recheck resumes it with fixed text. Neither is a decision the loop waits on."""
+    root = _change(tmp_path, tier=2, stage="plan")
+    folder = root / ".sdlc" / "work" / NAME
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, "R1")
+    assert code == 1 and "R1" in out["refusals"][0], "no spec-writer yet, and no R1 line"
+    _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
+    session = (folder / "runs" / "spec-writer.sessions").read_text().split()
+    words = 'drop R3; it\'s "out of scope" & $(nothing) runs'
+    (folder / "decisions.md").write_text(
+        f"# Decisions\n\n- [x] R1 (person, revise): {words}\n", encoding="utf-8"
+    )
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, "R1")
+    argv = claude()[-1]["argv"]
+    assert code == 0 and argv[1].endswith(words) and argv[-2:] == ["--resume", session[0]]
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, None, True)
+    assert code == 0 and claude()[-1]["argv"][1] == factory.RECHECK
+    assert factory.read_ledger(folder) == [], "a revision is no decision the loop waits on"
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None, None, True)
+    assert code == 1 and "for --task spec" in out["refusals"][0]
+
+
 def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> None:
     root = _change(tmp_path)
     runs = root / ".sdlc" / "work" / NAME / "runs"

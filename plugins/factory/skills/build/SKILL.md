@@ -4,6 +4,7 @@ description: Add one change to the factory's supervisor, this session — the sp
 argument-hint: "[NNN — the change to add]"
 allowed-tools:
   - Read
+  - Write
   - Edit
   - AskUserQuestion
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
@@ -96,9 +97,15 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its `reply`, the
 complete `spec.md` and, after a `---` line, the open questions it resolved and left. Check it
 against `intent.md` before showing it: every `<...>` prompt replaced, requirements numbered and
-each checkable, a **Contracts touched** line for each invariant the change comes near. Run it once
-more if one of those is missing, and say so if the second draft still lacks it. Nothing is written
-yet: the draft is only in the command's output.
+each checkable, a **Contracts touched** line for each invariant the change comes near. If one of
+those is missing, send it back once, to the same spec-writer, which keeps its draft in context, and
+say so if the second draft still lacks it:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --recheck
+```
+
+Nothing is written yet: the draft is only in the command's output.
 
 Then show the person, naming the change: the spec draft and its questions, when there is one; the
 change and its tier; the agents that will run (builder, each reviewer at each depth, the verifier,
@@ -134,9 +141,19 @@ refused is a no. If the tool is unavailable or refused, ask the same text, answe
 parentheses, and stop.
 
 **Do nothing more for this change until the person says yes.** Approval is for this run only.
-`revise a requirement` runs the spec-writer again with their words, and the question is asked
-again on the new draft. Changing the reviewers or rounds is an edit to `.sdlc/factory.toml` and a
-new question.
+`revise a requirement` takes their words to the spec-writer, and the question is asked again on its
+new draft. Words never go in a command line: write them at the end of the change's `decisions.md`
+(`Write` it with a `# Decisions` heading first when it doesn't exist) as a ticked line,
+`- [x] R<n> (person, revise): <their words, as they gave them>`, `<n>` one past the highest `R`
+there. It is the one write before this gate, by a named exception to confirm-before-writing, as
+ship's `findings.md` is: it writes only the change's own uncommitted folder, holds only the
+person's words, and decides nothing. Then, in the background:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task spec --revise <R1>
+```
+
+Changing the reviewers or rounds is an edit to `.sdlc/factory.toml` and a new question.
 
 ## Step 3 — Run it
 
@@ -184,7 +201,8 @@ the next step for that change. A `problem` is a stop, reported for that change a
    - **`build`**: no builder report exists yet (a run that stopped before the first): go back to
      step 1.
    - **`decide`**: a blocking decision is waiting (`pending`). Ask the person with
-     `AskUserQuestion`, one question per pending decision (up to four at once): the change's
+     `AskUserQuestion`, one question per pending decision (up to four at once, all of one change:
+     never two changes' in one dialog): the change's
      `NNN-slug` first, then the question as the agent put it, the options it gave, its
      recommendation first and marked as such, and who raised it in which round. Record each answer
      by `Edit`ing its line in `decisions.md` from `- [ ] D1 (...)` to `- [x] D1 (...)`, with

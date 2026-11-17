@@ -928,6 +928,25 @@ MEND = (
     "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
     "again and reply with it."
 )
+# What a spec draft must have before the person sees it; a draft missing one is sent back once.
+RECHECK = (
+    "Your draft is missing one of these: every <...> prompt replaced, the requirements numbered "
+    "and each checkable, a Contracts touched line for each invariant the change comes near. Draft "
+    "it again with all three."
+)
+# The person's words for a revised spec draft, written to `decisions.md` before the run's gate:
+# the only way free text reaches an agent session, never through a shell argument.
+REVISION_RE = re.compile(r"^- \[x\] (R\d+) \(person, revise\): (.+?)\s*$")
+
+
+def read_revision(folder: Path, ident: str) -> str | None:
+    """The person's words for revision `ident` (`R1`) in `decisions.md`, or None."""
+    path = folder / "decisions.md"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        m = REVISION_RE.match(line)
+        if m and m.group(1) == ident:
+            return m.group(2)
+    return None
 
 
 def agent_name(role: str) -> str:
@@ -960,7 +979,14 @@ def _claude(argv: list[str], cwd: Path) -> tuple[int, str, str | None]:
 
 
 def _task(
-    root: Path, folder: Path, state: dict, task: str, role: str, decided: str | None
+    root: Path,
+    folder: Path,
+    state: dict,
+    task: str,
+    role: str,
+    decided: str | None,
+    revise: str | None = None,
+    recheck: bool = False,
 ) -> tuple[str, Path | None, bool] | str:
     """The prompt a task sends, the file its reply goes to (None for the spec draft, which waits
     for the person's yes), and whether the reply is added to that file: or why it can't run now.
@@ -973,6 +999,13 @@ def _task(
         return f"verdicts says {state['next']!r}, not {step!r}"
     rnd = state["round"]
     reviews_dir = folder / "reviews" / f"round-{rnd}"
+    if task == "spec" and revise:
+        words = read_revision(folder, revise)
+        if words is None:
+            return f"{revise} isn't a `- [x] {revise} (person, revise): …` line in decisions.md"
+        return f"Revise your draft, as the person asks: {words}", None, False
+    if task == "spec" and recheck:
+        return RECHECK, None, False
     if task == "spec":
         return head + "Draft spec.md for this change.", None, False
     if task == "build":
@@ -1048,11 +1081,20 @@ def _task(
     return f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence"
 
 
-def cmd_agent(root: Path, ident: str, task: str, role: str | None, decided: str | None) -> int:
+def cmd_agent(
+    root: Path,
+    ident: str,
+    task: str,
+    role: str | None,
+    decided: str | None,
+    revise: str | None = None,
+    recheck: bool = False,
+) -> int:
     """Run one agent for one step of the change's loop, as a session of its own in the change's
     worktree, and file its reply: the builder resumed with its context for a rework, an answer or
-    a mend, every other agent a fresh session. Writes only in the change's folder: the reply and
-    `runs/<agent>.sessions`. A failed session files nothing, and is reported, never retried."""
+    a mend, the spec-writer for a revision or a recheck of its draft, every other agent a fresh
+    session. Writes only in the change's folder: the reply and `runs/<agent>.sessions`. A failed
+    session files nothing, and is reported, never retried."""
     state, refusal = loop_state(root, ident, None)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1065,15 +1107,21 @@ def cmd_agent(root: Path, ident: str, task: str, role: str | None, decided: str 
         return emit({"refusals": ["mend needs --role: builder or behaviour"]}, 1)
     if task == "decided" and not decided:
         return emit({"refusals": ["decided needs --decision D<n>"]}, 1)
-    planned = _task(root, folder, state, task, role, decided)
+    if (revise or recheck) and task != "spec":
+        return emit({"refusals": ["--revise and --recheck are for --task spec"]}, 1)
+    planned = _task(root, folder, state, task, role, decided, revise, recheck)
     if isinstance(planned, str):
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
     sessions = folder / "runs" / f"{agent_name(role)}.sessions"
-    if role == "builder" and task in ("rework", "decided", "mend"):
+    resumed = (role == "builder" and task in ("rework", "decided", "mend")) or bool(
+        task == "spec" and (revise or recheck)
+    )
+    if resumed:
         ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
         if not ids:
-            return emit({"refusals": ["no builder session to resume: run --task build first"]}, 1)
+            first = "build" if role == "builder" else "spec"
+            return emit({"refusals": [f"no {role} session to resume: run --task {first} first"]}, 1)
         session, how = ids[-1], "--resume"
     else:
         session, how = str(uuid.uuid4()), "--session-id"
@@ -1437,6 +1485,8 @@ def main() -> int:
     p_agent.add_argument("--task", choices=TASKS, required=True)
     p_agent.add_argument("--role", choices=[*REVIEWERS, "builder"])
     p_agent.add_argument("--decision", help="the decided ledger id, for --task decided")
+    p_agent.add_argument("--revise", help="the person's revision in decisions.md (R1), for spec")
+    p_agent.add_argument("--recheck", action="store_true", help="send a spec draft back once")
     sub.add_parser("ready", help="the changes ready to ship, in the order to ship them")
     p_escapes = sub.add_parser("escapes", help="escaped bugs and the diffs that let them in")
     p_escapes.add_argument("--limit", type=int, default=10)
@@ -1452,7 +1502,9 @@ def main() -> int:
     if getattr(args, "id", None):
         root = change_root(root, args.id)
     if args.cmd == "agent":
-        return cmd_agent(root, args.id, args.task, args.role, args.decision)
+        return cmd_agent(
+            root, args.id, args.task, args.role, args.decision, args.revise, args.recheck
+        )
     if args.cmd == "ready":
         return cmd_ready(root)
     if args.cmd == "config":

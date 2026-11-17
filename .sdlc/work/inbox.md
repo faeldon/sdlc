@@ -315,30 +315,6 @@ The script could list the `none` changes by theme in `product`, so the skill doe
 hand. Raised by the retrospective of 2026-11-17.
 Theme: retro
 
-## [2026-11-17-5] [building] A supervisor agent that runs a factory change and calls the person only when needed
-
-Building in .sdlc/work/070-factory-supervisor/.
-
-The factory's agents (builder, reviewers, verifier) are each started by a skill the person runs,
-so every handoff is a stop. A supervisor agent would take one approved intent through build,
-review and verification:
-- it hands each part to the right agent and reads their reports;
-- it settles what the plugin's rules and the risk signals let it settle;
-- it calls the person only for a gate, a blocking decision in `decisions.md` or an ESCALATE.
-
-Its first run is in a pilot project, the plugin's first host besides this repo, and that change's
-`Close` numbers are set beside this repo's manual medians (O6).
-
-The spec decides:
-- whether the supervisor is an agent in `plugins/factory/agents/` or a skill;
-- how it keeps no Write of its own, so nothing that judges also edits;
-- how its calls to the person are recorded as stops.
-
-Gates that pass themselves (2026-11-10-1) come after it. Raised by the retrospective of 2026-11-17.
-Theme: factory
-Priority: high
-
-
 ## [2026-11-17-6] [nit] No skill case runs intent with a product doc
 
 The `intent` case's fixture has no `.sdlc/PRODUCT.md`, so no paid run shows intent proposing
@@ -348,3 +324,14 @@ Paths: evals/intent/, evals/fixtures/
 Cost: M
 Value: med
 Raised by: 069-intent-proposes-serves (correctness)
+
+
+## [2026-11-17-7] [idea] Try the supervisor on a real factory run
+
+The supervisor shipped tested only against a fake `claude`. A paid run from the main checkout,
+`/sdlc-factory:build` on a scratch Tier 2 at `plan` and a second change before the first's draft
+lands, is the only check that a headless `claude -p --agent sdlc-factory:<role>` session loads the
+plugin's agent, holds the builder to `Agent(Explore, Plan)`, runs in `factory.mode`, and leaves
+transcripts where `measure` reads them. See .sdlc/work/070-factory-supervisor/notes.md in 070's
+commit.
+Theme: factory

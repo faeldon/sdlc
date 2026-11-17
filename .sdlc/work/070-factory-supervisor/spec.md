@@ -17,7 +17,8 @@ updated: 2026-11-17
    remaining "chief of staff".
 2. R2. `/sdlc-factory:build NNN` is the supervisor's skill: a long-running session in the main
    checkout, each invocation adding one change to it. It edits no code; its only writes are the
-   spec the person approved and `factory.py` stage moves. Agents' replies are filed by
+   spec the person approved, the person's words in `decisions.md` (a decision's answer, a spec
+   revision's `R<n>` line) and `factory.py` stage moves. Agents' replies are filed by
    `factory.py`, never by the session.
 3. R3. The supervisor never waits on an agent: every agent run is started as a background `Bash`
    command, and the supervisor replies to the person in the same turn ("070: spec-writer
@@ -25,19 +26,22 @@ updated: 2026-11-17
 4. R4. `factory.py start <NNN> --for build` runs from the main checkout or the change's worktree,
    finds the change's worktree itself, and accepts a Tier 2 at `plan` (`spec: true`). Its other
    refusals are unchanged.
-5. R5. `factory.py agent <NNN> <role> [--resume] [--to <file>] [--message <text>]` is the one way
-   the factory runs an agent: `claude -p --agent sdlc-factory:<role> --session-id <id>
-   --permission-mode <factory.mode> --output-format json`, `cwd` the change's worktree, or
-   `--resume <id>` for the role's recorded session. It records each role's session id in
-   `<folder>/runs/<role>`, writes the agent's reply verbatim to `--to` (a path inside the change's
-   folder) when given, and prints `{role, session, to, exit}`; a non-zero exit or a timeout is
-   reported, never retried. The builder is resumed for every rework, as `SendMessage` does today.
+5. R5. `factory.py agent <NNN> --task <task> [--role <role>] [--decision D<n>] [--revise R<n>]
+   [--recheck]` is the one way the factory runs an agent: `claude -p --agent sdlc-factory:<agent>
+   --model <model> --session-id <id> --permission-mode <factory.mode> --output-format json`,
+   `cwd` the change's worktree, or `--resume <id>` for the role's recorded session. It composes
+   the prompt from `verdicts`' state, refuses a task `verdicts` didn't name, records each session
+   id in `<folder>/runs/<agent>.sessions`, files the agent's reply verbatim where the build's rules
+   say (none for the spec draft, printed instead), and prints `{task, role, model, session, to,
+   exit}`; a non-zero exit or a timeout is reported, never retried. No free text goes in its
+   command line: a person's words reach an agent through `decisions.md`. The builder is resumed
+   for every rework, answer and mend, and the spec-writer for a revision or a recheck.
    It is the only place `factory.py` runs `claude`: no shell, `encoding="utf-8"`, its subprocess
    helper pinned to `sdlc.py`'s by a test.
 6. R6. A new `.sdlc/factory.toml` key, `factory.mode` (default `auto`), is the permission mode
    agent sessions run in, read from the base branch so a change can't widen its own.
 7. R7. The spec-writer runs this way, its draft kept in the command's output until the person's
-   yes: nothing in the repo is written before it. The builder plans and builds in its session as
+   yes: nothing in the repo is written before it but the person's own revision words, as R2 says. The builder plans and builds in its session as
    today (`plan.md`, then code). The reviewers, verifier and approver run this way too, each in
    parallel where the loop allows. No agent's tools change but the builder's (R16): none that
    judges gains Write or Edit, and only the builder edits.
@@ -47,7 +51,7 @@ updated: 2026-11-17
    change the reviewers or rounds / no)`; for a Tier 2 at `design` or a Tier 1 at `plan`, the run
    question, at once. Every dialog the supervisor shows names its change in the question.
 9. R9. A blocking decision or an ESCALATE is asked as soon as it is gathered, naming its change,
-   and its answer goes to the builder through `agent … builder --resume --message`. A change that
+   and its answer goes to the builder through `agent … --task decided --decision D<n>`. A change that
    stops (an agent's failure, `HEAD` moving, a refusal) is reported, and the others run on.
 10. R10. When a change's run reaches `done`, the supervisor sets `stage: test` and tells the person
     `NNN-slug is ready to ship (READY|ESCALATE)`, and stops nothing and ships nothing.
