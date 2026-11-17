@@ -237,26 +237,6 @@ out the intake methods core calls when a tracker has them: `mark()`, `unmark()`,
 Theme: docs
 Raised 2026-11-17.
 
-## [2026-11-17-37] [idea] The landing follows main when it moves before the close
-
-Building in .sdlc/work/104-landing-follows-main/.
-When another session lands a change between a landing's review and its close, `land --close`
-refuses (close only fast-forwards) and someone runs `base` by hand, then gates again. The landing
-could loop back to its own rebase step and regate, stopping only on a conflict. Hit by 094 and 095
-on 2026-11-17.
-Theme: landing
-Raised 2026-11-17.
-
-## [2026-11-17-38] [idea] A fix made at landing goes back through review
-
-Building in .sdlc/work/104-landing-follows-main/.
-When the person asks for a fix after the approver (088's plan hint, 094's AGENTS.md line on
-2026-11-17), the supervisor makes it by hand and the change lands `by=person` with no reviewer
-having read the fix. The landing could hand such a fix to the change's builder and its reviewers,
-or at least record on the commit that a hand fix landed unreviewed.
-Theme: landing
-Raised 2026-11-17.
-
 ## [2026-11-17-49] [idea] One review checklist and one findings record for ship and the factory
 
 `/sdlc:ship` and the factory review a change differently, and each misses what the other checks.
