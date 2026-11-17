@@ -13,7 +13,10 @@ part of the record. `read_gate()` reads only lines at the margin.
 loop (072's land, after a rebase) has to be able to run it. Only an attempt on the current build
 moves the loop.
 
-- [ ] R12: `plugins/factory/skills/land/` isn't on `main` while this is built, so 072-factory-land
-  has to make land's post-rebase step run `factory.py gate <NNN>` when it rebases over this change.
-  Its R5 still says "one `reviewer-behaviour` round … which runs the gate", and that reviewer no
-  longer runs the gate.
+R12: 072-factory-land reached `main` while this was built, so this change wired the gate into
+land itself, after rebasing onto it. `factory.py gate <NNN> --land` gates the change as rebased (its
+`Build:` is the commit, `HEAD`, not a report and snapshot), into `build/land-<n>.gate.md`, kept out
+of `reviews/land-<n>/`, which `_land_task`'s verify reads file by file as reviews. `land-verdicts`
+names `gate` before any landing reviewer, and a red gate there is a `stop` with no fix: a landing
+has no builder round, so the person ships the change by hand. The land skill runs it before the
+behaviour check after a clean rebase, and before the reviewers after a resolved conflict.

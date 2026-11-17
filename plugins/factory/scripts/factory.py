@@ -123,7 +123,6 @@ RUNS_THE_CHANGE = ("behaviour",)
 GATE_TIMEOUT = 30 * 60
 GATE_FIXES = 2
 GATE_TAIL = 80
-GATE_RE = re.compile(r"^GATE: (PASS|FAIL)\s*$")
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
@@ -1008,10 +1007,20 @@ def build_hash(folder: Path, n: int) -> str:
     return digest.hexdigest()[:16]
 
 
+def land_gate_path(folder: Path, n: int) -> Path:
+    """The gate on a change rebased while landing, landing round `n`: beside the builder's
+    reports, never under `reviews/land-<n>/`, whose every file the landing reads as a review."""
+    return folder / "build" / f"land-{n}.gate.md"
+
+
 def read_gate(folder: Path, n: int) -> dict | None:
     """`build/round-<N>.gate.md` as its attempts, oldest first, each its verdict and the build it
     ran on, or None when the gate never ran on round `n`."""
-    path = gate_path(folder, n)
+    return read_gate_file(gate_path(folder, n))
+
+
+def read_gate_file(path: Path) -> dict | None:
+    """A gate file's attempts, oldest first, or None when there is none."""
     if not path.is_file():
         return None
     attempts: list[dict] = []
@@ -1045,11 +1054,29 @@ def _gate_state(root: Path, folder: Path, built: int) -> tuple[dict | None, str 
     return out | {"exit": last["exit"] if last else None}, None
 
 
-def cmd_gate(root: Path, ident: str) -> int:
+def landed_build(root: Path) -> str:
+    """The change as a landing gates it: its commit, rebased onto the base branch."""
+    return (_git(root, "rev-parse", "HEAD") or "")[:16]
+
+
+def _land_gate_state(root: Path, folder: Path, n: int) -> dict | None:
+    """The gate on landing round `n`'s rebased change, as `_gate_state` reads a build's: None when
+    the base branch names no check."""
+    base = _base(root)
+    command = _base_check(root, base) if base else None
+    if command is None:
+        return None
+    record = read_gate_file(land_gate_path(folder, n)) or {"attempts": [], "fails": 0}
+    last = record["attempts"][-1] if record["attempts"] else None
+    current = last["verdict"] if last and last["build"] == landed_build(root) else None
+    return {"command": command, "current": current, "exit": last["exit"] if last else None}
+
+
+def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
-    add the attempt to `build/round-<N>.gate.md`. PASS only on exit 0, within `GATE_TIMEOUT`, with
-    the tree as it found it. Any time, not only when `verdicts` says `gate`, so a step after a
-    rebase can run it too. Writes only that file."""
+    add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
+    it, into `build/land-<n>.gate.md`. PASS only on exit 0, within `GATE_TIMEOUT`, with the tree as
+    it found it. Writes only that file."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1060,9 +1087,16 @@ def cmd_gate(root: Path, ident: str) -> int:
     if command is None:
         why = "the base branch's .sdlc/config.toml has no [commands] check"
         return emit({"refusals": [why]}, 1)
-    n = build_round(folder)
-    if n == 0:
-        return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
+    if land:
+        n = land_round(folder)
+        if n == 0:
+            return emit({"refusals": ["no landing round is under way: run land first"]}, 1)
+        path, build = land_gate_path(folder, n), landed_build(root)
+    else:
+        n = build_round(folder)
+        if n == 0:
+            return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
+        path, build = gate_path(folder, n), build_hash(folder, n)
     before = _tree_hashes(root, base)
     start = time.monotonic()
     try:
@@ -1084,14 +1118,13 @@ def cmd_gate(root: Path, ident: str) -> int:
     after = _tree_hashes(root, base)
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
-    path = gate_path(folder, n)
-    attempt = len((read_gate(folder, n) or {"attempts": []})["attempts"]) + 1
+    attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
     tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
     tail = tail or "    (no output)\n"
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
     section = (
         f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
-        f"Build: {build_hash(folder, n)}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
+        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
         f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
     )
     # The first line is the latest verdict; the attempts before it stay as they were.
@@ -1926,10 +1959,12 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
 
 
 def cmd_land_verdicts(root: Path, ident: str) -> int:
-    """The landing review of round `land-<n>`, and the step it takes next: `review` for the
-    `missing` reviewers (behaviour alone after a clean rebase, every reviewer at the run's depth
-    after a resolved conflict), `verify` when one asks for changes, `pass` when none is kept, or
-    `stop`, with why: a kept change, a reply without a verdict, or one without its evidence."""
+    """The landing review of round `land-<n>`, and the step it takes next: `gate` (the script's
+    gate on the change as rebased, before any reviewer, while the base branch names one),
+    `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
+    the run's depth after a resolved conflict), `verify` when one asks for changes, `pass` when
+    none is kept, or `stop`, with why: a red gate, a kept change, a reply without a verdict, or
+    one without its evidence."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -1960,11 +1995,21 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     missing = [r for r in wanted if r not in reviews]
     verified, wrong = read_verified(path / VERIFIED, n, reviews)
     problems += wrong
+    # The rebased change is gated by the script before any reviewer reads it, as each build was.
+    # Red is a stop, never a fix: the landing has no builder round, so the person ships it.
+    gate = _land_gate_state(root, folder, n)
+    if gate and gate["current"] == "FAIL":
+        problems.append(
+            f"the gate failed on the change as rebased (exit {gate['exit']}), in "
+            f"build/land-{n}.gate.md: ship it by hand"
+        )
     out = {"change": folder.name, "round": n, "reviews": reviews, "missing": missing,
-           "resolved": resolved, "problems": problems}  # fmt: skip
+           "resolved": resolved, "gate": gate, "problems": problems}  # fmt: skip
     asks = any(r["verdict"] == "CHANGES" for r in reviews.values())
     if problems:
         out["next"] = "stop"
+    elif gate and gate["current"] is None:
+        out["next"] = "gate"
     elif missing:
         out["next"] = "review"
     elif asks and verified is None:
@@ -2271,6 +2316,7 @@ def main() -> int:
     p_snapshot.add_argument("--round", dest="round", type=int, required=True)
     p_gate = sub.add_parser("gate", help="run the base branch's gate on the newest build")
     p_gate.add_argument("id")
+    p_gate.add_argument("--land", action="store_true", help="on the change as a landing rebased it")
     p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
     p_stage.add_argument("id")
     p_stage.add_argument("stage")
@@ -2340,7 +2386,7 @@ def main() -> int:
     if args.cmd == "snapshot":
         return cmd_snapshot(root, args.id, args.round)
     if args.cmd == "gate":
-        return cmd_gate(root, args.id)
+        return cmd_gate(root, args.id, args.land)
     if args.cmd == "escapes":
         return cmd_escapes(root, args.limit)
     if args.cmd == "report-dir":

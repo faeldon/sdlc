@@ -316,23 +316,6 @@ transcripts where `measure` reads them. See .sdlc/work/070-factory-supervisor/no
 commit.
 Theme: factory
 
-## [2026-11-17-8] [building] A factory gate the script runs, before any reviewer
-
-Building in .sdlc/work/073-factory-script-gate/.
-The factory finds out whether a build works from an agent: `reviewer-behaviour` runs the gate and
-reports it, alongside the other reviewers, so a failing build still costs a full round of reviewer
-runs, and pass or fail rests on a reply's `## Evidence`. The factory it learned from runs the
-repo's checks as a script step first, and spawns no reviewer on a failure.
-
-Make the gate a step of the loop: after each builder report, `verdicts` says `gate`, and
-`factory.py` runs the host's gate command itself in the change's worktree, read from the base
-branch's config so a change can't weaken the check it is judged by, and files the exit and the
-output's tail under the round. A failure resumes the builder with that file (`factory.py agent`,
-as for a rework) and starts no reviewer; a pass goes on to `review`. The behaviour reviewer keeps
-the spec's end-to-end path and stops running the gate. A gate failure counts against the rounds.
-Theme: factory
-Raised 2026-11-17.
-
 ## [2026-11-17-10] [idea] Try the landing on a real factory batch
 
 `/sdlc-factory:land` shipped tested against scratch repos and a fake `claude`. A paid run, two

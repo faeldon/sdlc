@@ -189,6 +189,40 @@ def test_a_batch_lands_in_order_and_a_conflict_is_resolved_reviewed_and_closed(
 
 
 @needs_uv
+def test_a_rebased_change_is_gated_by_the_script_before_its_review(tmp_path, capsys) -> None:
+    """073 R12: the behaviour check no longer runs the gate, so after a rebase the landing runs the
+    base branch's check itself, into `build/land-<n>.gate.md`, before any reviewer; a red gate on
+    the change as rebased is a stop, for the person to ship by hand."""
+    root = _repo(tmp_path)
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "config.toml").write_text(
+        '[commands]\ncheck = "test ! -f broken.txt"\n', encoding="utf-8"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a gate")
+    tree = _ready(root, "gated", "gated's one")
+    # The base branch moves under it, touching nothing the change does: a clean rebase.
+    (root / "elsewhere.txt").write_text("moved on\n", encoding="utf-8")
+    _git(root, "add", "elsewhere.txt")
+    _git(root, "commit", "-q", "-m", "main moves on")
+
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"], out["round"]) == (0, "rebased", 1), out
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "gate" and out["gate"]["command"] == "test ! -f broken.txt", out
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert (code, out["verdict"]) == (0, "PASS") and out["to"].endswith("build/land-1.gate.md")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (out["next"], out["missing"]) == ("review", ["behaviour"]), out
+
+    (tree / "broken.txt").write_text("", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert (code, out["verdict"], out["attempt"]) == (1, "FAIL", 2)
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "stop" and "ship it by hand" in out["problems"][0], out
+
+
+@needs_uv
 def test_a_refused_step_lands_nothing_of_that_change(tmp_path, capsys) -> None:
     """A change the approver proposed no impact for can't be shipped by land: it is refused before
     anything is written, and its folder and worktree stay as they were."""

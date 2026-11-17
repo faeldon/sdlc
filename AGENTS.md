@@ -393,7 +393,9 @@ approval, recorded on the change's commit as `Sdlc-Landed: by=auto` (never a bar
 rounds stand in for ship's review, so a landed commit has no `Sdlc-Findings`. A change with
 undone notes, `checks.md` or skills' cases in scope is left out, for `/sdlc:ship`. A rebase that
 conflicts is the change's builder's to resolve (`resolve`, with `.sdlc/last-id` settled to the
-higher number), reviewed again before close. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
+higher number), reviewed again before close. A rebased change is gated by the script first
+(`gate --land`, into `build/land-<n>.gate.md`, never under `reviews/land-<n>/`, which the landing
+reads as reviews); red there is a stop, never a fix. Decisions that are the person's go through `decisions.md`, asked by the supervisor, naming
 the change, which is how `measure` gives the supervisor's dialogs on `main` to their change
 (`_supervised()`). `sdlc` only reads, at ship, the files a run leaves in the change's folder. A round's `CHANGE:` lines reach the builder only through the
 verifier's `verified.md`, and the run's depth comes from the diff against the base branch's

@@ -2,10 +2,11 @@
 id: 073
 slug: factory-script-gate
 tier: 2
-impact:
-stage: design
+impact: minor
+stage: shipped
 created: 2026-11-17
 updated: 2026-11-17
+shipped: 2026-11-17
 idea: 2026-11-17-8
 depends_on:
 serves: [O6, O5]

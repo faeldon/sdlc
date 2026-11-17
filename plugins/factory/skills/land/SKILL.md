@@ -11,6 +11,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts *)'
 disable-model-invocation: true
 ---
@@ -92,13 +93,19 @@ For each change in the batch, one at a time:
    path staged), commits with the change's composed message, and runs `sdlc.py base`. Its
    `state`: `current` (go to 4), `rebased` (the base moved: 2), `conflict` (3), or a refusal,
    which stops this change and every one after it.
-2. **`rebased`: run the gate and the spec's path again**, on the change as it now stands:
+2. **`rebased`: run the gate and the spec's path again**, on the change as it now stands. The gate
+   is the script's: the base branch's `[commands] check`, recorded in
+   `.sdlc/work/NNN-slug/build/land-<n>.gate.md`, before any reviewer reads the change (when the
+   base branch names no check, `land-verdicts` never asks for it). Then the behaviour check runs
+   the spec's path:
 
    ```bash
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate <NNN> --land && \
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-review --role behaviour
    ```
 
-   Then the landing's verdicts, below.
+   A red gate stops the second command and this change: `land-verdicts` says `stop`, and the
+   person ships it by hand. Then the landing's verdicts, below.
 3. **`conflict`: the builder resolves it.** The rebase is started and left for it; `.sdlc/last-id`
    settles itself (the higher number).
 
@@ -109,7 +116,8 @@ For each change in the batch, one at a time:
    ```
 
    A marker left in a file, or a second conflict (the rebase aborted), stops this change. Then
-   every reviewer at the run's depth reviews the resolution, **in one message**:
+   the script's gate on the resolution, `factory.py gate <NNN> --land` as in 2, and once it is
+   green, every reviewer at the run's depth reviews the resolution, **in one message**:
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-review --role <role>
@@ -125,14 +133,15 @@ For each change in the batch, one at a time:
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts <NNN>
    ```
 
-   Its `next`: `review` (start each `missing` reviewer), `verify` (a reviewer asked for changes):
+   Its `next`: `gate` (the change as it now stands hasn't been gated: `factory.py gate <NNN>
+   --land`), `review` (start each `missing` reviewer), `verify` (a reviewer asked for changes):
 
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-verify
    ```
 
    then read it again; `pass` (go to 4); or `stop`, with its `problems`, which stops this change
-   and every one after it: a kept change is the person's, and `/sdlc:ship` from its worktree
+   and every one after it: a red gate or a kept change is the person's, and `/sdlc:ship` from its worktree
    takes it. Never patch a verdict, and never write a review an agent didn't.
 4. **Close it**, from the main checkout, which merges, archives, removes its folder, worktree and
    branch, and pushes as `git.push` says; the landing's own record is added to its commit first:

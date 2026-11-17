@@ -65,8 +65,9 @@ reviewing, and deciding whether to escalate.
   changes as one batch, in that order, each shipped with the impact its approver proposed,
   committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
   `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
-  copy). A rebase that conflicts goes to the change's own builder, and every reviewer at its depth
-  checks the resolution before it lands. One approval covers the batch, and it **passes itself
+  copy). A change the base branch moved under is gated by the script again, as rebased, before
+  its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
+  change's own builder, and every reviewer at its depth checks the resolution before it lands. One approval covers the batch, and it **passes itself
   when no change in it carries a risk signal** (a sensitive or irreversible path, `impact: major`,
   an ESCALATE, an open decision, an issue someone filed, an earlier resolved conflict), recorded
   as `Sdlc-Landed: by=auto` on the change's commit and never as your review. A change with

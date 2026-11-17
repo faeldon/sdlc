@@ -803,7 +803,8 @@ lines kept, and for the factory its rounds, verdicts and decisions, with an `Sdl
 reviewer: its `CHANGES` verdicts, its requests and, from a run with a verifier, how many of them
 the verifier `dropped`; a run from before that has no `dropped`, read as unknown; and
 `gate_fail`, the red attempts of the factory's script gate, which runs `[commands] check` from the
-base branch's `.sdlc/config.toml` on each build before its review, absent for a run with no gate
+base branch's `.sdlc/config.toml` on each build before its review and on a change a landing
+rebased, absent for a run with no gate
 file and read as unknown). Exploration you
 mean to throw
 away goes under `stage: spike`, which owes no artifact; its cost is reported apart as
