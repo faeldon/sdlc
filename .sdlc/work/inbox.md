@@ -322,3 +322,19 @@ commit's subject.
 Severity: low
 Paths: scripts/sdlc.py
 Theme: inbox
+
+## [2026-11-17-18] [bug] A reviewer's preamble before its VERDICT line stops the factory run
+
+A reviewer that writes a sentence before its `VERDICT:` line stops the run, though its verdict is
+clear: on 2026-11-17, 088's round-2 UI review opened "Both kept changes are in the code. …" with
+`VERDICT: PASS` on line 3, and `verdicts` stopped with "reviews/round-2/ui.md doesn't open with
+VERDICT: PASS or VERDICT: CHANGES". `factory.py` reads only a reply's first line
+(`VERDICT_RE.match(lines[0])`) and no stop but a missing `## Evidence` can be mended, so the only
+ways on are deleting the reply by hand and rerunning, or shipping by hand. It should let the run
+ask the same reviewer once to reply again with its verdict first, as `mend` does for evidence, and
+stop only on a second such reply. To see it: a reviewer reply whose verdict isn't on line 1, then
+`factory.py verdicts NNN --head <h>`.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/skills/build/SKILL.md
+Theme: factory
