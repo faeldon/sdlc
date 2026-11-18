@@ -392,3 +392,11 @@ open the board while `factory.py cases` runs.
 Severity: low
 Paths: plugins/factory/scripts/factory.py, scripts/board.py
 Theme: board
+
+## [2026-11-18-40] [idea] Evaluate the Fable builder experiment
+
+Evaluate the Fable builder experiment: the 139–143 batch ran its builder on claude-fable-5-1
+(329748d). Compare its builds with the 2026-11-18 Opus builds (124–138) on rounds, kept changes,
+landing stops and builder cost, then keep the [models] setting or revert it.
+Theme: factory
+Raised 2026-11-18.
