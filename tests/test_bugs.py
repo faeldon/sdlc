@@ -711,6 +711,7 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         "important_unknown": 0,
         "review_sources": {},
         "review_unknown": 0,
+        "landing_catches": {"caught": 0, "reviewed": 0},
     }
 
 

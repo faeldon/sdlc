@@ -2194,6 +2194,38 @@ def _section(n: int, rank: str, disposition: str, by: str | None = None) -> str:
     )
 
 
+def _caught(n: int, rank: str, where: str, disposition: str, by: str | None = "code") -> str:
+    """A findings.md section whose `Class:` names the round that raised it, `where`."""
+    reason = "Reason: said so\n" if disposition in ("wrong", "minor") else ""
+    return (
+        f"\n## F{n}. [{rank}] [correctness] Finding {n}\n\nEvidence: src/a.py:{n}\n"
+        f"Class: {by or 'ship'} review, {where}\nDisposition: {disposition}\n{reason}"
+        + (f"By: {by}\n" if by else "")
+    )
+
+
+def test_retro_counts_a_landing_catch_once_per_change(tmp_path: Path) -> None:
+    """136 R8: of the window's changes a factory role reviewed, those whose landing kept an
+    important finding, fixed or recorded, each counted once however many it kept; a build round's
+    finding, a landing nit and one answered wrong never count, nor a change no agent reviewed."""
+    root = _repo(tmp_path)
+    head = "# Findings\n\n> Note.\n"
+    texts = {
+        "001-hand": head + _caught(1, "important", "landing round 1", "fixed", None),
+        "002-twice": head + _caught(1, "important", "landing round 1", "fixed")
+        + _caught(2, "important", "landing round 2", "recorded", "behaviour"),
+        "003-built": head + _caught(1, "important", "round 1", "fixed")
+        + _caught(2, "nit", "landing round 1", "recorded"),
+        "004-wrong": head + _caught(1, "important", "landing round 1", "wrong", "ui"),
+    }  # fmt: skip
+    for name, text in texts.items():
+        _close(root, name, texts={f".sdlc/work/{name}/findings.md": text})
+    out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))
+    assert out["bugs"]["landing_catches"] == {"caught": 1, "reviewed": 3}
+    report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 25))
+    assert "Landing catches: 1 of 3 factory-reviewed changes" in report, report
+
+
 def test_review_sources_split_ship_from_the_agents(tmp_path: Path) -> None:
     """114 R12: each change's findings.md counted by who raised each finding, ship's own apart from
     the fresh reviewer's and each factory role's, with how many changes each reviewed; a change

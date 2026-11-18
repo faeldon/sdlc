@@ -129,8 +129,9 @@ MAX_ROUNDS = 5
 # them can answer a prompt, so the mode is chosen before the run, and named at its gate.
 MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
 # The model each role runs on unless `factory.models` sets one: what builds, decides or looks for
-# exploits on the strongest; the other reviewers on `sonnet` for a Tier 2 change or a run at the
-# full depth, `haiku` otherwise. The supervisor is the person's own session, never set here.
+# exploits on the strongest; the other reviewers (`SCALED`) on `sonnet` at either depth and tier,
+# since a light round on `haiku` passed what its landing then kept (README, *Why these defaults*).
+# The supervisor is the person's own session, never set here.
 FIXED_MODELS = {
     "spec-writer": "opus", "builder": "opus", "security": "opus", "verifier": "sonnet",
     "approver": "opus",
@@ -171,6 +172,9 @@ ROLE_PASS = {"security": "contract"}
 # the builder, or dropped with why (after the last ` — `).
 VERIFIED = "verified.md"
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
+# A builder report's requirement no test the repo can run could show, `<requirement>: <why>`: once
+# its round is reviewed and verified, the run goes to the approver, never to another rework.
+UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 DROP_WHY = " — "
 # An answer may open with its change's id, `C<n>`, as the verify prompt numbers them
@@ -583,12 +587,11 @@ def ui_complete(ui: dict) -> bool:
 
 def model_for(role: str, cfg: dict, tier: int | None, level: str) -> str:
     """The model `role` runs on: `factory.models`' entry, else `FIXED_MODELS`, the scaled
-    reviewers on `sonnet` for a Tier 2 change or a full-depth run and `haiku` otherwise."""
+    reviewers on `sonnet`. `tier` and `level` give the same answer at every value today; they are
+    kept so `start`'s `models_at` and the landing name the model a depth runs on, if they part."""
     if role in cfg["models"]:
         return cfg["models"][role]
-    if role in SCALED:
-        return "sonnet" if tier == 2 or level == "full" else "haiku"
-    return FIXED_MODELS[role]
+    return "sonnet" if role in SCALED else FIXED_MODELS[role]
 
 
 def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> bool:
@@ -627,12 +630,15 @@ def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> boo
 
 def light_reviewers(cfg: dict, tier: int | None) -> list[str]:
     """The reviewers the light depth expects of a change at `tier`: `[light] reviewers` as a host
-    set them, at either tier; unset, the default, with the test reviewer added for a Tier 2, whose
-    spec numbers requirements for it to read the tests against, when the full depth runs it too."""
+    set them, at either tier; unset, the default with the behaviour reviewer added at either tier,
+    the landing's own first check, and the test reviewer for a Tier 2, whose spec numbers
+    requirements for it to read the tests against, each only when the full depth runs it too, in
+    `REVIEWERS` order."""
     light = cfg["light"]
-    if light.get("chosen") or tier != 2 or "test" not in cfg["reviewers"]:
+    if light.get("chosen"):
         return list(light["reviewers"])
-    wanted = {*light["reviewers"], "test"}
+    extra = {"behaviour"} | ({"test"} if tier == 2 else set())
+    wanted = {*light["reviewers"], *(extra & set(cfg["reviewers"]))}
     return [r for r in REVIEWERS if r in wanted]
 
 
@@ -1437,7 +1443,8 @@ def decision_preamble(folder: Path) -> bool:
 
 def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, str | None]:
     """The approver's decision, or what's wrong with it. After a run whose rounds ran out with
-    changes still kept, only an ESCALATE that asks the person to reconsider the approach will do."""
+    changes still kept, or that stopped early (`early_stop()`), only an ESCALATE that asks the
+    person to reconsider the approach will do."""
     path = folder / "decision.md"
     if not path.is_file():
         return None, None
@@ -1448,7 +1455,8 @@ def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, st
         return None, NO_DECISION
     if exhausted and (m.group(1) != "ESCALATE" or RECONSIDER not in lines):
         return None, (
-            f"the rounds ran out with changes kept, so decision.md must be ESCALATE with a "
+            f"the run can't converge (its rounds ran out with changes kept, a change was kept "
+            f"twice, or a requirement can't be tested), so decision.md must be ESCALATE with a "
             f"`{RECONSIDER}` section"
         )
     return m.group(1), None
@@ -1877,8 +1885,11 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
       gate is green or the base branch names none (`gate` null, `gate_why`).
     - `verify`: run the verifier on `round`'s changes, before any rework.
     - `rework`: resume the builder with `round`'s kept changes; its report is
-      `build/round-<round+1>.md`.
-    - `approve`: carry what's unresolved to notes.md and run the approver.
+      `build/round-<round+1>.md`. Never when the round stopped the run early (`early_stop()`):
+      `stuck`, the changes its verifier kept two rounds running, or `untestable`, the requirements
+      its builder report says no test can show.
+    - `approve`: carry what's unresolved to notes.md and run the approver; `exhausted` when the
+      rounds ran out with changes kept or the run stopped early, and the approver must escalate.
     - `decide`: a blocking decision in `decisions.md` is waiting for the person (`pending`).
     - `upgrade`: the person answered `upgrading`, a blocking decision, `upgrade to Tier 2`, on a
       Tier 1 change: run `upgrade`. A record left with the tier still 1 names it again, to finish.
@@ -1949,6 +1960,8 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     first = max(restart["round"] if restart else 1, upgrade["round"] if upgrade else 1)
     exhausted = bool(last and last["complete"] and changes and kept)
     exhausted = exhausted and last["round"] - first + 1 >= run["rounds"]
+    stuck, untestable = early_stop(folder, rounds, first)
+    exhausted = exhausted or bool(stuck or untestable)
     decision, problem = read_decision(folder, exhausted)
     problems += [problem] if problem else []
     now = _git(root, "rev-parse", "--short", "HEAD")
@@ -1956,7 +1969,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out: dict = {"change": folder.name, "rounds": rounds, "decision": decision, "head": now}
     out.update(head_moved=moved, problems=problems, warnings=warnings, round=None, missing=[])
     out["mend"] = []
-    out["exhausted"] = False
+    out.update(exhausted=False, stuck=stuck, untestable=untestable)
     out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
     out["limit"] = first - 1 + run["rounds"]
     out["restart"] = restart
@@ -2058,7 +2071,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["missing"] = [r for r in run["reviewers"] if r not in last["reviews"]]
     elif changes and last["verified"] is None:
         out["next"], out["round"] = "verify", last["round"]
-    elif kept and last["round"] - first + 1 < run["rounds"]:
+    elif kept and not stuck and not untestable and last["round"] - first + 1 < run["rounds"]:
         out["next"], out["round"] = "rework", last["round"]
     else:
         out["next"], out["round"], out["exhausted"] = "approve", last["round"], exhausted
@@ -2074,6 +2087,28 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         kept_before = (prev["verified"] or {}).get("kept")
         out["handed"] = [{"role": a, "text": b} for a, b in cheap_nits(prev)] if kept_before else []
     return out, None
+
+
+def early_stop(folder: Path, rounds: list[dict], first: int) -> tuple[list[str], list[str]]:
+    """Why the last round ends the run's rework with rounds still left, from round files alone:
+    `stuck`, each `role: change` its verifier kept that it kept in the round before too, when that
+    round is in this run (at or after `first`, so a restart or an upgrade starts fresh); and
+    `untestable`, its builder report's `- UNTESTABLE:` lines. Each only once the round is complete
+    and verified, or passed with nothing to verify; empty otherwise."""
+    last = rounds[-1] if rounds else None
+    changes = last and any(v["verdict"] == "CHANGES" for v in last["reviews"].values())
+    if not last or not last["complete"] or (changes and last["verified"] is None):
+        return [], []
+    prev = next((r for r in rounds if r["round"] == last["round"] - 1), None)
+    before = set()
+    if prev and prev["round"] >= first and prev["verified"]:
+        before = {(k["role"], k["change"]) for k in prev["verified"]["kept"]}
+    kept = (last["verified"] or {"kept": []})["kept"]
+    stuck = [f"{k['role']}: {k['change']}" for k in kept if (k["role"], k["change"]) in before]
+    report = folder / "build" / f"round-{last['round']}.md"
+    lines = report.read_text(encoding="utf-8").splitlines() if report.is_file() else []
+    untestable = [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m]
+    return stuck, untestable
 
 
 def cmd_carry(root: Path, ident: str) -> int:
@@ -3135,6 +3170,11 @@ def _task(
                 f"{'; '.join(k['role'] + ': ' + k['change'] for k in kept['kept']) or 'none'}. "
                 f"Settled, never raise again: {'; '.join(state['settled']) or 'none'}."
             )
+            if kept["kept"]:
+                prompt += (
+                    " Raise again, word for word, any change kept last round that the rework "
+                    "didn't make."
+                )
         handed = [h["text"] for h in state.get("handed") or [] if h["role"] == role]
         if handed:
             prompt += (
@@ -3175,7 +3215,22 @@ def _task(
                 f" This change was upgraded from Tier 1 to Tier 2 before round {upgrade['round']}, "
                 f"on the person's answer to {upgrade['decision']}: judge it against spec.md."
             )
-        if state["exhausted"]:
+        stuck, untestable = state.get("stuck") or [], state.get("untestable") or []
+        if stuck:
+            prompt += (
+                f" Round {rnd} kept again what round {rnd - 1} kept: {'; '.join(stuck)}; nothing "
+                "a further round does will change it."
+            )
+        if untestable:
+            prompt += (
+                f" The builder reports these requirements can't be tested: {'; '.join(untestable)}."
+            )
+        if stuck or untestable:
+            prompt += (
+                f" Under `{RECONSIDER}`, name the next step you'd take: a requirement to rewrite, "
+                "a model to try, or an approach to change."
+            )
+        elif state["exhausted"]:
             prompt += (
                 " The rounds ran out with changes still kept: say whether the approach should "
                 "be reconsidered."

@@ -165,6 +165,11 @@ count), what changed in `plan.md`, and anything left in `notes.md`. In a rework 
 `- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
 skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.
 
+A requirement no test the repo can run could show (one judged by eye, or one that needs a live
+service the repo can't start) gets one line, `- UNTESTABLE: R<n>: <why>`. Once its round is
+reviewed, the run goes to the approver and then the person rather than to another rework, so the
+only cost of a wrong claim is an escalation. It never stands in for a test you chose not to write.
+
 **End it with `## Evidence`:** every command a claim above rests on (the gate, the tests, anything
 you say passed or failed), each as the command on a `$ ` line, the tail of what it printed, and
 `exit: <n>`:

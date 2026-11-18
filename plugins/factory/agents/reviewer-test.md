@@ -51,9 +51,11 @@ that landed since and aren't the change's.
 
 From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
 (`reworked`), the changes the verifier kept for it, and what is `settled`. Review those paths and
-whether each kept change was done; never raise a settled point again, and never raise something
-new in code an earlier round already passed unless the rework broke it. A round you join for the
-first time, you review the whole change.
+whether each kept change was done; never raise a settled point again, and never raise something new
+in code an earlier round already passed unless the rework broke it. A kept change the rework didn't
+make, raise again word for word, as the prompt quotes it: the run tells a change kept twice by its
+words, and stops for the person rather than rework it a third time. A round you join for the first
+time, you review the whole change.
 
 A problem in code this change didn't touch is not a CHANGE: return it as
 `- PREEXISTING: path/to/file.py:42: what is wrong`, filed for later, never reworked here.

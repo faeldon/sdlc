@@ -75,12 +75,13 @@ Every command about a change runs in its worktree, which `factory.py` finds from
 (`factory.reviewers`, default code, security, test and behaviour, the one that runs the spec's
 end-to-end path) and round limit (`factory.rounds`,
 default 3), the light depth's (`factory.light`, default the code reviewer for 2 rounds, with
-the test reviewer too for a Tier 2 unless the repo sets `[light] reviewers`, so name `start`'s
+the behaviour reviewer, and the test reviewer for a Tier 2, each when the full depth runs it,
+unless the repo sets `[light] reviewers`, so name `start`'s
 `light.reviewers`, which says this change's), the
 permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
 each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
 opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier, and
-for the other reviewers sonnet on a Tier 2 or a full-depth run, haiku otherwise), the base
+for the other reviewers sonnet at either depth), the base
 branch's `[ui]` (`ui`: the dev server `serve` starts, the screenshot command `shoot`, the `paths`
 that count as UI, and the `fixture` data the server is given a fresh copy of), and `max_runs`, the most agent runs this can take, counted at the full depth.
 

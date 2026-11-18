@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import statistics
 import subprocess
 from collections import Counter
@@ -625,6 +626,7 @@ def process_views(
             "trend": (bugs.get("rate") or {}).get("trend"),
         },
         "review_sources": bugs.get("review_sources") or {},
+        "landing_catches": bugs.get("landing_catches"),
         "cycle": None, "time": None, "wip": None, "capacity": None,
     }  # fmt: skip
     if not measured:
@@ -755,15 +757,22 @@ def _spend_text(spend: dict | None, closed: int) -> str:
     ])  # fmt: skip
 
 
-def _sources_text(sources: dict[str, dict]) -> str:
+def _sources_text(sources: dict[str, dict], catches: dict | None = None) -> str:
     """Who found what in the window's reviews, one line per source (`_review_sources()`), after
-    the escapes: ship's own beside the fresh reviewer's and each factory role's."""
+    the escapes: ship's own beside the fresh reviewer's and each factory role's; then how many of
+    the factory-reviewed changes their landing caught out (`_landing_catches()`)."""
     if not sources:
         return ""
-    return "\n\nFindings by who raised them:\n\n" + _table(
+    text = "\n\nFindings by who raised them:\n\n" + _table(
         ["Source", "Changes", "Important", "Nit", "Pre-existing", "Wrong"],
         [[s, *(r[k] for k in ("changes", *REVIEW_KINDS))] for s, r in sources.items()],
     )
+    if catches:
+        text += (
+            f"\n\nLanding catches: {catches['caught']} of {catches['reviewed']} factory-reviewed "
+            "changes"
+        )
+    return text
 
 
 def render_report(template: str, process: dict, spend: dict | None = None) -> str:
@@ -794,7 +803,8 @@ def render_report(template: str, process: dict, spend: dict | None = None) -> st
             ["Reported", "Fixed", "Median days to fix", "Rate", "Previous rate", "Trend"],
             [[process["escapes"][k]
               for k in ("reported", "fixed", "days_to_fix", "rate", "previous", "trend")]],
-        ) + _sources_text(process.get("review_sources") or {}),  # fmt: skip
+        ) + _sources_text(process.get("review_sources") or {},
+                          process.get("landing_catches")),  # fmt: skip
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
     }  # fmt: skip
@@ -1340,6 +1350,7 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
             if f["rank"] == "important"
         ]  # fmt: skip
     sources, review_unknown = _review_sources(changes, review)
+    catches = _landing_catches(changes, review)
 
     def by_severity(rows: list[dict] | list[str]) -> dict[str, int]:
         counts = Counter(r if isinstance(r, str) else r.get("severity") or "unset" for r in rows)
@@ -1374,6 +1385,7 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         "important_unknown": important_unknown,
         "review_sources": sources,
         "review_unknown": review_unknown,
+        "landing_catches": catches,
     }
 
 
@@ -1409,6 +1421,31 @@ def _review_sources(changes: list[dict], review) -> tuple[dict[str, dict], int]:
             row["wrong"] += f["disposition"] == "wrong"
     ranked = [s for s in order if s in rows] + sorted(set(rows) - set(order))
     return {s: rows[s] for s in ranked}, unknown
+
+
+# A finding's `Class:` when a landing round raised it (`factory.py`'s `finding_section()`).
+LANDING_CLASS_RE = re.compile(r"\blanding round \d+$")
+
+
+def _landing_catches(changes: list[dict], review) -> dict[str, int]:
+    """How often a landing caught what a factory run's build rounds passed: `reviewed`, the
+    window's changes whose findings.md holds any finding `By:` a factory role; `caught`, those of
+    them holding an `important` one whose `Class:` names a landing round, `fixed` or `recorded`,
+    each change once. A factory run that left no findings isn't counted, so the rate can only
+    read high, never hide a catch."""
+    reviewed = caught = 0
+    for rec in changes:
+        found = review(rec["name"])["findings"]
+        if not any(f.get("by") in sdlc.AGENT_ROLES for f in found):
+            continue
+        reviewed += 1
+        caught += any(
+            f["rank"] == "important"
+            and LANDING_CLASS_RE.search(f.get("class") or "")
+            and f["disposition"] in ("fixed", "recorded")
+            for f in found
+        )
+    return {"caught": caught, "reviewed": reviewed}
 
 
 def _bug_paths(raw: object) -> list[str] | None:

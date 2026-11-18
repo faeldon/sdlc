@@ -903,6 +903,10 @@ with its `by`. `review_sources` compares the two ways of building from the one r
 source (`ship`, `fresh`, then each factory role) the findings by rank, those answered `wrong`, and
 the changes it reviewed, counted from every `findings.md` in the window; a change with none read
 is in `review_unknown`, never a review that found nothing. The report gives one line per source.
+`landing_catches` says how often a factory change's landing caught what its build rounds passed:
+`reviewed`, the window's changes with any finding a factory role raised, and `caught`, those of
+them with an Important finding a landing round raised, fixed or recorded, each change once. The
+report gives it as `Landing catches: <caught> of <reviewed> factory-reviewed changes`.
 
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.

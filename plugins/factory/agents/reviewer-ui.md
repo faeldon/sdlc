@@ -43,9 +43,11 @@ looks wrong is not this change's.
 ## Later rounds, and what isn't this change's
 
 From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
-(`reworked`), the changes the verifier kept for it, and what is `settled`: check each kept change
-in the new screenshots, and never raise a settled point again. A round you join for the first
-time, you review all of it.
+(`reworked`), the changes the verifier kept for it, and what is `settled`: check each kept change in
+the new screenshots, and never raise a settled point again. A kept change the rework didn't make,
+raise again word for word, as the prompt quotes it: the run tells a change kept twice by its words,
+and stops for the person rather than rework it a third time. A round you join for the first time,
+you review all of it.
 
 A problem in a page or a stylesheet this change didn't touch is not a CHANGE: return it as
 `- PREEXISTING: path/to/file.css:42: what looks wrong`, filed for later, never reworked here.

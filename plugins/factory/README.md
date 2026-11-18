@@ -107,9 +107,9 @@ reviewing, and deciding whether to escalate.
 
 The builder may start read-only `Explore` and `Plan` sub-agents of its own while it plans or
 reworks, to read code across the repo; they never write, so it stays the only editor. Each
-reviewer runs on a model that fits the change: haiku for a Tier 1 at the light depth, sonnet for a
-Tier 2 or a run touching a sensitive path, opus for the security reviewer, the builder and the
-approver. The supervisor runs on whatever model your session does.
+reviewer runs on sonnet at either depth and tier, but the security reviewer, which runs on opus
+like the builder and the approver (*Why these defaults*, below, says why). The supervisor runs on
+whatever model your session does.
 
 Two more skills stand outside any change, each run only when you ask, behind one approval that
 states the most agent runs it takes. Both write only under `.sdlc/reports/`, a folder that ignores
@@ -169,6 +169,13 @@ spec.
   `high` value is carried to `notes.md`, and an unweighed nit is only recorded.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
+- **Stop early when a round can't help.** A run goes to the approver with rounds still left when
+  the verifier keeps the same change, word for word, two rounds running (`stuck`; reviewers raise
+  an undone kept change again in its own words so the script can tell), or when the builder's
+  report says a requirement can't be tested (`- UNTESTABLE: R<n>: <why>`, `untestable`), once its
+  round is reviewed. The approver is told which, and must ESCALATE, naming under `## Reconsider
+  the approach` the next step it would take: a requirement to rewrite, a model to try, or an
+  approach to change. A restart or an upgrade starts the count afresh.
 - **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`
   asks once more, and on your yes (`yes, <words>` adds your own direction) `factory.py restart`
   keeps the old `decision.md` as `decision-<n>.md`, writes `build/round-<R>.restart.md` and sets
@@ -198,9 +205,11 @@ spec.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
   one touching any runs the full depth, and a run never lightens. With no list, every run is full.
-  A Tier 2 change's light rounds add the test reviewer, which reads the tests against the spec's
-  numbered requirements, unless you set `[light] reviewers` yourself; a Tier 1's run the code
-  reviewer alone. The tier picks the reviewers, never the depth.
+  Unless you set `[light] reviewers` yourself, the light rounds add the behaviour reviewer at
+  either tier, the check every landing runs first, and a Tier 2's add the test reviewer too, which
+  reads the tests against the spec's numbered requirements, each only when the full depth runs it:
+  a Tier 1's light rounds run the code and behaviour reviewers. The tier picks the reviewers,
+  never the depth.
 
 ## Decisions that are yours
 
@@ -307,8 +316,9 @@ reviewers = ["code", "security", "test", "behaviour"]   # the full depth: which 
 rounds = 3                                 # review rounds before the approver decides anyway (1-5)
 
 [light]                                    # the depth a diff touching no sensitive path gets
-reviewers = ["code"]                       # unset, a Tier 2 adds "test" when the full depth has
-rounds = 2                                 # it; set, it is used as written at either tier
+reviewers = ["code"]                       # unset, "behaviour" is added, and "test" for a Tier 2,
+rounds = 2                                 # each when the full depth has it; set, it is used as
+                                           # written at either tier
 
 mode = "auto"                              # the permission mode agent sessions run in, read from
                                            # the base branch; one of acceptEdits, auto,
@@ -317,7 +327,7 @@ gate_jobs = 1                              # the most gates running at once acro
                                            # worktree, read from the base branch
 
 [models]                                   # override a role's model (else the rule above)
-# code = "sonnet"
+# code = "haiku"
 
 [land]                                     # /sdlc-factory:land, read from the base branch
 auto = true                                # a batch with no risk signal lands without asking
@@ -357,6 +367,33 @@ A run takes at most `2 + rounds × (reviewers + 4)` agent runs at the full depth
 defaults: each round's reviewers, the verifier, the builder's rework and its two fixes of a red
 gate; two more a round with `[ui]` set), and the build skill shows the number before you approve
 it, whatever depth the diff turns out to need.
+
+### Why these defaults
+
+The light depth's reviewers and the reviewers' model were chosen from what four light factory
+runs' landings caught that their build rounds had passed, read from each change's records (its
+`runs/costs.jsonl` for the models, its `reviews/` for what each round and each landing round kept):
+
+| Change | Tier | Build rounds | Ran in the rounds | The landing kept | A build round would have caught it with |
+|---|---|---|---|---|---|
+| 124 | 1 | 2 | code, ui, ux on haiku | ui: a heading outranking the drawer's title; ux: an unlabelled checkbox | the same ui and ux reviewers, on sonnet |
+| 125 | 1 | 1 | code on haiku | behaviour: "no gate configured" said when no base branch was read | the behaviour reviewer, absent from the light depth |
+| 129 | 2 | 1 | code, test on sonnet | test: no test for a rule the landing's rebase added | none: the code it named came with the rebase |
+| 131 | 1 | 1 | code on haiku | nothing; its landing gate failed on a machine path in a record | none: not a review's miss |
+
+- **The behaviour reviewer joins the light depth**, since 125's miss was its own: the landing runs
+  it after every rebase, so in a build round its catch costs a rework, not a change shipped by
+  hand.
+- **Every scaled reviewer runs on sonnet**, haiku nowhere unless `[models]` names it: 124's ui and
+  ux reviewers were already in its rounds, so only the model could see more.
+- **The test reviewer stays out of a Tier 1's light rounds**: 129's miss came with the landing's
+  rebase, which no build round sees, and a Tier 1 has no numbered requirements to read tests
+  against.
+- **`[light] rounds` stays 2 and `rounds` 3**: each miss came from rounds that passed, not rounds
+  that ran out.
+
+`/sdlc:retro` counts how often this holds, as `Landing catches: k of n factory-reviewed changes`,
+so the next change to these defaults can be decided from a window of runs.
 
 ## Mechanism
 
