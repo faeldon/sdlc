@@ -1,6 +1,6 @@
 ---
 name: land
-description: Land a batch of factory changes that are ready to ship as one train — each one shipped with the impact its approver proposed, its acceptance checks and skills' cases run, its undone notes carried or dropped, its agents' nits filed as [nit] entries, its assumed decisions confirmed and How to recover in its commit, as ship does, then committed, stacked in order on the base branch (a conflict resolved by one landing agent and reviewed again), gated once at the tip (a red tip bisected and the change at fault left out), and closed in order, archived and pushed as git.push says — through sdlc's own ship and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from a session of its own in the main checkout once the supervisor says changes are ready; a rerun resumes the train under way. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one touching an irreversible path its approver proposed no way back for (ship that by hand), and never with --force.
+description: Land a batch of factory changes that are ready to ship as one train — each one shipped with the impact its approver proposed, its acceptance checks and skills' cases run, its undone notes carried or dropped, its agents' nits filed as [nit] entries, its assumed decisions confirmed and How to recover in its commit, as ship does, then committed, stacked in order on the base branch (a conflict resolved by one landing agent and reviewed again), gated once at the tip (a red tip bisected and the change at fault left out), and closed in order, archived and pushed as git.push says — through sdlc's own ship and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from the main checkout once the supervisor says changes are ready; after the one yes the train runs unattended in the background (factory.py train --run), stopping only where the person is needed, and a rerun resumes it past that stop. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one touching an irreversible path its approver proposed no way back for (ship that by hand), and never with --force.
 argument-hint: "[NNN… — the ready changes to land; every one when none is named]"
 allowed-tools:
   - Read
@@ -11,12 +11,6 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py sdlc-path *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-check *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix *)'
 disable-model-invocation: true
 ---
 
@@ -35,7 +29,8 @@ one before it in the batch's order (`factory.py resolve --onto`, its own rebase)
 branch's gate runs once at the stack's tip, and the changes close in order, each by `sdlc.py
 close`'s fast-forward, so the base branch's first-parent line reads as a one-at-a-time landing.
 `factory.py train` reads the train's state (in the git common dir, never in a tree) and names
-each next step; this skill runs it and asks again. Each change's commit carries `Sdlc-Landed: by=person`, or `by=auto` when the
+each next step; after the yes, `factory.py train --run` takes those steps itself, in order, and
+starts the landing's agents, until the batch is landed or a stop needs the person. Each change's commit carries `Sdlc-Landed: by=person`, or `by=auto` when the
 gate passed itself, and no `Sdlc-Findings`, so the retrospective never reads a factory review as
 the person's. What ship asks a person for beyond its review (the acceptance checks, the skills'
 cases, each undone note's disposition, each assumed decision, `How to recover:`) the landing's
@@ -43,8 +38,9 @@ question shows and its yes approves: the approver proposed the dispositions and 
 `factory.py` writes only what was approved. So does each nit its reviewers weighed to file
 (`{<theme> <cost> <value>}` on a `- NIT:` line): the script weighs, the yes files.
 
-**Run it from a session of its own in the main checkout.** Landing takes this session while it
-runs; the supervisor's stays free for the next change.
+**Run it from the main checkout.** After the yes, this session runs nothing but the loop, in the
+background: the turn ends while the train lands, and the session is free (the supervisor's own
+included) until the harness says the loop has exited.
 
 ## Step 0 — The batch (mechanical, no confirmation needed)
 
@@ -61,8 +57,9 @@ a train follows the base branch moving under it before it stops. `sdlc-path` is 
 the landing runs; a refusal there (no `sdlc` installed, or another version) is a stop: say it,
 and stop. `train` says whether a train is **under way** (`under_way`): one is, when an earlier run
 of this skill ended before its train did. Then say so, with its `live`, `landed` and `ejected`
-changes, skip Steps 1 and 2 (its batch was approved when it began), and resume it at Step 3; a
-second train is refused while one is under way. `land-check` lists the changes `ready` would, in its order (a change after what it
+changes, skip Steps 1 and 2 (its batch was approved when it began), and resume it (Step 3,
+*Resuming*); a second train is refused while one is under way. A reading with `running: true` is a
+loop landing it now: say so, that `train --cancel` stops it after the step in flight, and stop. `land-check` lists the changes `ready` would, in its order (a change after what it
 depends on), or those named: `batch`, each with its `intent` (its `title`, `problem` and
 `outcome`, quoted from its `intent.md`), its decision, the impact its approver proposed,
 the others it `overlaps`, its `signals`, and what the yes approves for it: `checks` (each
@@ -133,187 +130,145 @@ batch too, and asks for a fix to one change in it before it closes: take the cha
 person's words for the fix from what they typed in Other, or else ask for both as plain text. That
 is not a second gate, and nothing is written until Step 3. Then Step 3, with `--by person`.
 
-## Step 3 — The train
+## Step 3 — The train, unattended
 
-Begin it over the batch, in `land-check`'s order, with who passed the gate:
+**First, what the yes approved running**, each command named here and never in a rule this skill
+holds, so the harness asks before each run, for each change in the batch in order:
+
+- for a change with `checks`, its acceptance checks, through `sdlc.py accept`, the attempt
+  recorded in `.sdlc/work/NNN-slug/build/land-accept.md`:
+  `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py accept <NNN>`
+- for a change with skills' cases in scope, `sdlc.py run-cases <NNN>` under its own cap, which
+  writes the `Skill evals:` line ship reads (a skipped run says why, and is no stop):
+  `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases <NNN>`
+
+The loop runs neither.
+
+**A fix the person asked for** (`yes, with a fix`), only for the change it named: write their
+words at the end of the change's `decisions.md`, in its folder in its worktree (`Write` it with a
+`# Decisions` heading first when it doesn't exist), as a ticked line, `- [x] R<n> (person, fix):
+<their words, as they gave them>`, `<n>` one past the highest `R` there, and pass
+`--fix <NNN>=R<n>` to `--begin`. The words never go on the command line, only their id.
+
+Then begin the train over the batch, in `land-check`'s order, with who passed the gate (and the
+fix, with `--by person` only):
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train --begin <NNN…> --by <auto or person>
 ```
 
-Then loop: read the train, do the one step it names, read again, until it says `done` or `stop`.
+And start the loop with the Bash tool's `run_in_background`:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train --run
 ```
 
-Each reading names `next`, the `change` it is for (and its `worktree`), the train's `live`,
-`landed` and `ejected` changes, its `moves` out of `limit`, and the `changes` with each one's
-pre-train and stacked commits. The script decides every step; never skip one, reorder them, or
-take one it didn't name. Its `next`:
+Say `landing <NNN-slug, …> in the background` and end the turn. To cancel it, the person runs
+`train --cancel` (it exits after the step in flight, the train still under way), or kills the
+task, the hard stop, which a rerun resumes from too.
 
-- **`commit`**: the change's first half, in its worktree. First, run what the yes approved
-  running, each command named here and never in a rule this skill holds, so the harness asks
-  before each run, as the reading's `before` lists them:
-  - `accept`: `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py accept <NNN>`,
-    which runs its acceptance checks through `sdlc.py accept` and records the attempt in
-    `.sdlc/work/NNN-slug/build/land-accept.md`;
-  - `cases`: `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases <NNN>`,
-    which runs `sdlc.py run-cases <NNN>` under its own cap and writes the `Skill evals:` line
-    ship reads (a skipped run says why, and is no stop).
+**What the loop does.** It reads the train, takes the one step the reading names through the
+command the script pins for it, and reads again, writing each step to the change's
+`runs/land-step.md` for the board. It never commits, rebases or pushes but through those
+commands, and only one loop runs at a time (the run lock). The steps:
 
-  Then:
+- **`commit`**: `land <NNN> --by`, in the change's worktree. It refuses, before writing anything,
+  a change whose checks haven't passed on it as it stands or whose cases haven't run. On `--by
+  person` it writes each disposition (a carried item's seed held in the change's `entries.md`,
+  ticked `→ seed: <id>`; a bug held there with its `Severity:` and `Paths:`, ticked `→ bug: <id>`;
+  a dropped one ticked `→ dropped: <reason>`), files each nit to file as a `[nit]` entry with its
+  `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` lines (its `filed_nits`, ids from the
+  same `next-entry` call; one already filed for the change is never filed twice), and ticks each
+  assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship` (stamped
+  shipped, every path staged), adds a `Retire` line to `entries.md` for each open nit its intent
+  or spec names by id (its `retired_nits`), and commits with the change's composed message
+  (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as ship's). The
+  change's branch never edits the register: close files what `entries.md` holds, and retires the
+  seed, the bugs and the nits, in its `Close` commit.
+- **`stack`**: `resolve <NNN> --onto <onto>`, the change rebased onto the stacked commit of the
+  change before it (the base branch's tip for the first), its records amended in first;
+  `.sdlc/last-id` settles itself (the higher number).
+- **`resolve`**: the stack conflicts. One landing agent, the builder in a fresh session, told
+  every change in the train, its spec and its diff, resolves the files (`agent <NNN> --task
+  train-resolve`); the script stages them with the agent's reply and continues the rebase
+  (`resolve <NNN> --continue`). A resolved conflict is reviewed again by every reviewer at the
+  run's depth, and **a change in a batch that passed itself closes only once that review
+  passes**.
+- **`gate`**: `gate <NNN> --land`, the base branch's `[commands] check`, once at the stack's tip,
+  before any reviewer reads any change, recorded in `.sdlc/work/NNN-slug/build/land-<n>.gate.md`.
+  A red tip is bisected by prefix, at most ⌈log₂ n⌉ more gates, until the change at fault is
+  found.
+- **`eject`** with `cause` `gate`: the change at fault leaves the train, as the yes approved
+  (`train --eject <NNN>`): its branch goes back to its pre-train commit (`git reset --keep`; the
+  `undo` is kept in the loop's output), with the reason and the gate file amended into its
+  commit; the rest re-stack and the new tip is gated again. When the first change is at fault
+  twice in a row, the base branch's own check is the likelier fault: the train stops.
+- **`review`**, **`verify`**, **`mend`**: the change's landing round, as `land-verdicts` reads it:
+  each missing reviewer, started together (`agent <NNN> --task land-review --role <role>`), the
+  verifier when one asks for changes (`--task land-verify`), or each role a mend names, once a
+  round (`--task land-mend --role <role>`).
+- **`fix`**: the stored fix, once, before that change's close: `land-fix <NNN> --ask R<n>`, the
+  change's own builder (`agent <NNN> --task land-fix`), `land-fix <NNN> --commit`; the train then
+  re-stacks what is above it, gates the new tip, and every reviewer at the run's depth reads it.
+  A fix made while landing stays a signal for the change, so a later landing never passes it by
+  itself.
+- **`close`**: `land <NNN> --close`, from the main checkout: its own commits rebased onto the base
+  past the `Close` commits before it, its `runs/land-train.md` and the landing's record amended
+  in, and `sdlc.py close` merges, archives, removes its folder, worktree and branch, and pushes as
+  `git.push` says. When the base branch moved since the train last stacked (`moved`), every change
+  not landed re-stacks and is gated again, up to `land.moves` times.
 
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land <NNN> --by <auto or person>
-  ```
+**It stops at the first of these**, exits, and changes nothing more: an ejection with any other
+`cause` (`review`: a landing review that kept a change, a reply still unreadable after its one
+mend, acceptance checks failing as stacked; `refusal`: a landing command's own), a train `stop`
+(the base branch moved past `land.moves`, the first change at fault twice in a row, a worktree
+gone), `accept` (the checks run again as stacked, behind your prompt), a `commit` whose `before`
+names what hasn't run, a refused push (the change has landed; `/sdlc:publish` pushes it), a
+command that refuses or an agent session that fails, a cancel, or the same step named twice with
+nothing changed.
 
-  It refuses, before writing anything, a change whose checks haven't passed on it as it stands
-  or whose cases haven't run. On `--by person` it writes each disposition (a carried item's seed
-  held in the change's `entries.md`, ticked `→ seed: <id>`; a bug held there with its `Severity:` and `Paths:`,
-  ticked `→ bug: <id>`; a dropped one ticked `→ dropped: <reason>`), files each nit to file as a
-  `[nit]` entry with its `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` lines (its
-  `filed_nits`, ids from the same `next-entry` call; one already filed for the change is never
-  filed twice), and ticks each assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
-  (stamped shipped, every path staged), adds a `Retire` line to `entries.md` for each open
-  nit its intent or spec names by id (its `retired_nits`), and commits with the change's composed
-  message (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as
-  ship's): `state: committed`, its pre-train commit. It never rebases: the train stacks it. The
-  change's branch never edits the register: close files
-  what `entries.md` holds, and retires the seed, the bugs and the nits, in its `Close` commit. A
-  refusal is the change's own failure: the next reading ejects it (`eject`, below) and the rest
-  of the train goes on.
-- **`stack`**: the change rebased onto `onto`, the stacked commit of the change before it (the
-  base branch's tip for the first), by the script's own rebase, from a clean tree, its records
-  amended in first; `.sdlc/last-id` settles itself (the higher number):
+**When the harness says the loop has exited**, read its JSON: `landed`, `live`, `moves`, `gates`,
+`ejected` (each with its `reason` and `cause`), the `undos` of the ejections it made, and either
+`done: true` (go to Step 4) or `stopped`, with its `next`, `change`, `cause`, `reason` and
+`way_on`, each worded by the script. Report a stop as it words it: the change, why, and the way
+on, and that rerunning `/sdlc-factory:land` takes it. Never take the step yourself.
 
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve <NNN> --onto <onto>
-  ```
+### Resuming
 
-  Its `state`: `current` (already there: the first change, when the base hasn't moved),
-  `stacked` (it moved: a landing round opened, to be reviewed as stacked), or `conflict`, with
-  the `conflicted` files, which the next reading names `resolve`.
-- **`resolve`**: the stack conflicts in `files`. One landing agent, the builder in a session of
-  its own, told every change in the train, its spec and its diff, resolves them; the script
-  stages them and continues the rebase:
+A rerun of this skill finds the train under way (Step 0). With `running: true`, a loop is still
+landing it: say so and stop. Otherwise its reading's `next` says what the person's rerun asked
+for, and this skill runs that one command, then the loop again in the background:
 
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task train-resolve && \
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py resolve <NNN> --continue
-  ```
-
-  A marker left in a file, or a second conflict (the rebase aborted), is the change's failure:
-  the next reading ejects it. A resolved conflict is reviewed again by every reviewer at the
-  run's depth, after the tip's gate (`review`, below), and **a change in a batch that passed
-  itself closes only once that review passes**: `land --close` refuses it before.
-- **`gate`**: the base branch's `[commands] check`, run by the script in the named change's
-  worktree, once at the stack's tip (`prefix` of `of`), before any reviewer reads any change,
-  recorded in `.sdlc/work/NNN-slug/build/land-<n>.gate.md`:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate <NNN> --land
-  ```
-
-  A red tip is bisected: the reading then names `gate` on a prefix (the stack up to a change,
-  gated in that change's worktree), at most ⌈log₂ n⌉ more, until the change at fault is found.
-  When the base branch names no check, no gate runs. A train of one whose change didn't move runs
-  none either.
-- **`eject`**: the named change is at fault (`reason`: the gate red on the stack up to it, its
-  acceptance checks failing as stacked, a landing review that kept a change, a reply still
-  unreadable after its one mend, or a refusal of its own) and leaves the train:
+- `eject`, any `cause` but `gate`: the person chose to leave the change out and go on:
 
   ```bash
   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train --eject <NNN>
   ```
 
-  Its branch goes back to its pre-train commit (`git reset --keep`; the `undo` is printed), with
-  the reason and the gate file that shows why amended into its commit, and nothing of it reaches
-  the base branch. The changes after it re-stack, and the new tip is gated again. The person
-  lands it later: `/sdlc-factory:land <NNN>` once fixed, or `/sdlc:ship` from its worktree.
-- **`accept`**: a change with acceptance checks runs them again on its commit as stacked
-  (`factory.py accept <NNN>`, as under `commit`, behind the harness's prompt); the cases are
-  never run again, since each run is paid.
-- **`review`**, **`verify`**, **`mend`**: the named change's landing round, as `land-verdicts`
-  reads it (`verdict`): start each `missing` reviewer (behaviour alone after a clean stack, every
-  reviewer at the run's depth after a resolved conflict or a fix), the verifier when one asks
-  for changes, or each role in `mend` (a behaviour check's missing `## Evidence` or `exit:`,
-  verdict lines that disagree, the verifier's unread answers), each once a round, its new reply
-  written over the old under `reviews/land-<n>/`, **in one message** when several:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-review --role <role>
-  ```
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-verify
-  ```
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-mend --role <role>
-  ```
-
-  Never patch a verdict, and never write a review an agent didn't. The round's own reading,
-  with its `problems`, is always there to look at:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts <NNN> --record
-  ```
-
-  `--record` writes a `stop` to `runs/land-step.md`, which the board's landing track reads, as
-  each landing command records the step it runs; leave that file to the script.
-- **`close`**: the next change in order, from the main checkout. Its own commits are rebased onto
-  the base branch past the `Close` commits before it, its `runs/land-train.md` (its place in the
-  train, what it stacked on, the tip's gate) and the landing's record amended in, and `sdlc.py
-  close` merges, archives, removes its folder, worktree and branch, and pushes as `git.push`
-  says:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land <NNN> --close
-  ```
-
-  **A fix the person asked for** (`yes, with a fix`), only for the change it named, once, comes
-  here, before its close: the script opens a landing round for it, the change's own builder
-  makes it, and the script amends it into the change's commit; the train then re-stacks what is
-  above it, gates the new tip, and every reviewer at the run's depth reads the fix. The person's
-  words never go in a command line: write them at the end of the change's `decisions.md`, in
-  its folder in the worktree the reading names (`Write` it with a `# Decisions` heading first
-  when it doesn't exist), as a ticked line, `- [x] R<n> (person, fix): <their words, as they
-  gave them>`, `<n>` one past the highest `R` there, and pass `--ask R<n>`. The words never go
-  on the command line, only their id:
-
-  ```bash
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix <NNN> --ask <R1> && \
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task land-fix && \
-  uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-fix <NNN> --commit
-  ```
-
-  Then read the train again. A fix made while landing stays a signal for the change, so a later
-  landing never passes it by itself.
-
-  `land --close`'s `state` is `moved` when the base branch moved since the train last stacked
-  (another session's landing, an idea filed): nothing was closed, the move is counted once for
-  the train (up to `land.moves`), every change not yet landed re-stacks onto the base, the new
-  tip is gated again, and each is reviewed as its stack calls for; read the train again. A
-  refused push is `push_failed`, never a failed close: the change has landed, and `/sdlc:publish`
-  pushes it.
-- **`stop`**, with its `reason` (the base branch moved more than `land.moves` times, the first
-  change at fault twice in a row, a worktree gone): every change not landed goes back to its
-  pre-train commit, and the train ends:
+  Its branch goes back to its pre-train commit with the reason amended in; the person lands it
+  later, `/sdlc-factory:land <NNN>` once fixed, or `/sdlc:ship` from its worktree.
+- `stop`: every change not landed goes back to its pre-train commit, and the train ends; then
+  Step 4, without the loop:
 
   ```bash
   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train --stop
   ```
 
-- **`done`**: every change landed or ejected. Step 4.
+- `accept`, or a `commit` whose `before` names `accept` or `cases`: run `factory.py accept <NNN>`
+  (or `cases <NNN>`) as above, behind the harness's prompt; the cases never run again once run,
+  since each run is paid.
+- anything else: the loop takes it.
+
+Then `train --run` with `run_in_background`, as above.
 
 ## Step 4 — Report and stop
 
 Say whether the gate passed itself or the person approved it, how many times the tip was gated
 and the base branch moved. Then each change: landed (its `Close` commit and where it was
-archived), ejected (why, in the script's words, and what the person does next: `/sdlc-factory:land
-NNN` once fixed, or `/sdlc:ship NNN` from its worktree), put back by a stop, excluded, or not
-reached. For a landed change, each acceptance check and its result (and again as stacked), the
+archived), ejected (why, in the script's words; whether the loop made it on a gate fault, its
+`cause` `gate`, with its undo, or the person resumed past it; and what the person does next:
+`/sdlc-factory:land NNN` once fixed, or `/sdlc:ship NNN` from its worktree), put back by a stop,
+excluded, or not reached. For a landed change, each acceptance check and its result (and again as stacked), the
 cases' score or why they were skipped (run before any stack), each undone item's disposition and
 where it went (the seed's id, in the register once it closed), and each decision confirmed. Say
 what was pushed, or that nothing was, and that nothing was tagged.
@@ -327,5 +282,6 @@ what was pushed, or that nothing was, and that nothing was tagged.
   that needs another goes to `/sdlc:ship`.
 - `--force`, a merge that isn't a fast-forward, a stash, or resolving a conflict any way but by
   the train's landing agent, reviewed again.
-- A step the train's reading didn't name, or a second train while one is under way.
+- A step the train's reading didn't name, a step the loop is taking, or a second train or
+  loop while one is under way.
 - Writing or editing a review, a verification or a decision an agent didn't return.

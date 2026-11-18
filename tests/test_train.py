@@ -11,15 +11,20 @@ Nothing here runs an agent: a review or a resolution is written as the agent wou
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
+import re
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
+from train_driver import DRIVER_STEPS, asked, drive_train, fake_claude, verdict, verified
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -310,12 +315,6 @@ def _repo(tmp_path: Path, check: str | None = None) -> Path:
     return root
 
 
-def _verdict(role: str, verdict: str = "PASS", changes: tuple[str, ...] = ()) -> str:
-    lines = [f"VERDICT: {verdict}", *(f"- CHANGE: {c}" for c in changes)]
-    evidence = "\n## Evidence\n$ true\nexit: 0\n" if role in factory.RUNS_THE_CHANGE else ""
-    return "\n".join(lines) + "\n" + evidence
-
-
 def _ready(root: Path, slug: str, edit: dict[str, str], tier: int = 1) -> Path:
     """A change made by `sdlc.py new`, built (each path in `edit` written), at `stage: test` with
     the approver's READY and a minor impact, one build round every reviewer passed, as a factory
@@ -348,7 +347,7 @@ def _ready(root: Path, slug: str, edit: dict[str, str], tier: int = 1) -> Path:
     )
     (folder / "reviews" / "round-1").mkdir(parents=True)
     for role in factory.DEFAULTS["reviewers"]:
-        (folder / "reviews" / "round-1" / f"{role}.md").write_text(_verdict(role), "utf-8")
+        (folder / "reviews" / "round-1" / f"{role}.md").write_text(verdict(factory, role), "utf-8")
     return tree
 
 
@@ -426,105 +425,20 @@ def _begin(root: Path, capsys, by: str = "auto", *idents: str) -> dict:
     return out
 
 
-def _verified(folder: Path, n: int, kept: list[str] = (), dropped: list[str] = ()) -> None:
-    """The verifier's answers, each `<role>: <change>` as the reviewer asked it."""
-    lines = [f"- KEPT: {c}" for c in kept] + [f"- DROPPED: {c}" for c in dropped]
-    (folder / "reviews" / f"land-{n}" / factory.VERIFIED).write_text(
-        "\n".join(lines) + "\n", encoding="utf-8"
-    )
+def _keeping(name: str):
+    """Stand-ins for a landing round in which change `name`'s behaviour check asks for a change
+    and the verifier keeps it; every other reply passes."""
 
+    def review(folder: Path, n: int, role: str) -> None:
+        asks = folder.name == name and role == "behaviour"
+        text = verdict(factory, role, "CHANGES", ("bb.txt:1: say more",)) if asks else None
+        text = text or verdict(factory, role)
+        (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
 
-def _asked(verdict: dict) -> list[str]:
-    """Every change the round's reviewers asked for, as `<role>: <change>`."""
-    return [
-        f"{role}: {c}" for role, r in verdict["reviews"].items()
-        if r["verdict"] == "CHANGES" for c in r["changes"]
-    ]  # fmt: skip
+    def verify(folder: Path, found: dict) -> None:
+        verified(factory, folder, found["round"], kept=asked(found))
 
-
-def _drive(
-    root: Path,
-    capsys,
-    resolve=None,
-    review=None,
-    verify=None,
-    mend=None,
-    limit: int = 80,
-    until=None,
-) -> list[dict]:
-    """Run the train as the land skill does: each reading's step is done by the command it names,
-    agents stood in for by files. `resolve(tree, files)` writes a resolution; `review(folder, n,
-    role)` a verdict (PASS by default); `verify(folder, verdict)` the verifier's answer (every
-    change dropped by default); `mend(folder, n, role)` the role's reply again (a passing one by
-    default), recorded in `runs/mended` as `agent --task land-mend` records it. A `commit` runs
-    what the reading says comes `before` it (`accept`, `cases`). Stops at `done`, at `stop` (after
-    `--stop`), or once `until(reading)` holds. Returns every reading, an `eject`'s with what
-    `--eject` printed as `did`."""
-    readings: list[dict] = []
-    for _ in range(limit):
-        code, out = _run(capsys, factory.cmd_train, root)
-        readings.append(out)
-        nxt = out.get("next")
-        if until is not None and until(out):
-            return readings
-        if nxt in (None, "done"):
-            return readings
-        if nxt == "stop":
-            code, stopped = _run(capsys, factory.cmd_train, root, stop=True)
-            assert code == 0, stopped
-            readings.append(stopped)
-            return readings
-        tree, num = Path(out["worktree"]), out["change"].split("-")[0]
-        folder = _folder(tree)
-        if nxt == "commit":
-            for first in out["before"]:
-                assert _run(capsys, getattr(factory, f"cmd_{first}"), tree, num)[0] == 0
-            code, done = _run(capsys, factory.cmd_land, tree, num, out["by"])
-            assert code == 0, done
-        elif nxt == "stack":
-            code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
-            assert code == 0 and done["state"] in ("current", "stacked", "conflict"), done
-        elif nxt == "resolve":
-            assert resolve is not None, out
-            resolve(tree, out["files"])
-            code, done = _run(capsys, factory.cmd_resolve, tree, num, True)
-            assert code == 0, done
-        elif nxt == "gate":
-            _run(capsys, factory.cmd_gate, tree, num, True)
-        elif nxt == "eject":
-            code, done = _run(capsys, factory.cmd_train, root, eject=out["change"])
-            assert code == 0, done
-            out["did"] = done
-        elif nxt == "accept":
-            _run(capsys, factory.cmd_accept, tree, num)
-        elif nxt == "review":
-            for role in out["verdict"]["missing"]:
-                if review is not None:
-                    review(folder, out["verdict"]["round"], role)
-                else:
-                    reviews = folder / "reviews" / f"land-{out['verdict']['round']}"
-                    (reviews / f"{role}.md").write_text(_verdict(role), encoding="utf-8")
-        elif nxt == "verify":
-            if verify is not None:
-                verify(folder, out["verdict"])
-            else:
-                _verified(folder, out["verdict"]["round"], dropped=_asked(out["verdict"]))
-        elif nxt == "mend":
-            n = out["verdict"]["round"]
-            for role in out["verdict"]["mend"]:
-                if mend is not None:
-                    mend(folder, n, role)
-                else:
-                    reply = folder / "reviews" / f"land-{n}" / f"{role}.md"
-                    reply.write_text(_verdict(role), encoding="utf-8")
-                with (folder / factory.MENDED).open("a", encoding="utf-8") as f:
-                    f.write(f"{role} land-{n}\n")
-        elif nxt == "close":
-            code, done = _run(capsys, factory.cmd_land_close, tree, num)
-            assert code == 0, done
-        else:
-            raise AssertionError(f"the test can't take the step {nxt!r}: {out}")
-    raise AssertionError(f"the train didn't finish in {limit} steps: {readings[-1]}")
+    return review, verify
 
 
 def _three(tmp_path: Path, check: str | None = None) -> tuple[Path, list[Path]]:
@@ -552,7 +466,7 @@ def test_a_train_stacks_each_change_on_the_one_before(tmp_path, capsys) -> None:
     rebased in its own worktree; `<trunk>..<k>` holds exactly changes 1..k's commits."""
     root, trees = _three(tmp_path)
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o.get("next") == "close")
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "close")
     assert readings[-1].get("change") == trees[0].name, readings
     heads = [_git(t, "rev-parse", "HEAD") for t in trees]
     base = _git(root, "rev-parse", "main")
@@ -580,7 +494,7 @@ def test_a_train_of_three_lands_as_three_closes(tmp_path, capsys) -> None:
     root, trees = _three(tmp_path)
     names = [t.name for t in trees]
     _begin(root, capsys)
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     assert readings[-1]["next"] == "done", readings[-1]
     subjects = _first_parent(root)
     closes = [s for s in subjects if s.startswith("Close ")]
@@ -610,11 +524,11 @@ def test_a_rerun_resumes_the_train_and_a_second_refuses(tmp_path, capsys) -> Non
     assert begun["order"] == [t.name for t in trees]
     assert _state_file(root).is_file() and ".git" in _state_file(root).parts, "the common dir"
     assert _git(root, "status", "--porcelain") == "", "the main checkout is untouched"
-    _drive(root, capsys, until=lambda o: o["next"] == "stack")
+    drive_train(factory, root, capsys, until=lambda o: o["next"] == "stack")
     code, again = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person")
     assert code == 1 and "under way" in again["refusals"][0], again
     # A new session: the reading resumes from the state alone.
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     assert readings[-1]["next"] == "done" and readings[-1]["landed"] == [t.name for t in trees]
     assert len([s for s in _first_parent(root) if s.startswith("Close ")]) == 3
 
@@ -627,7 +541,7 @@ def test_a_stopped_train_puts_every_unlanded_change_back(tmp_path, capsys) -> No
     root, trees = _three(tmp_path)
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o["next"] == "close")
+    readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
     pre = {n: c["pre"] for n, c in readings[-1]["changes"].items()}
     code, out = _run(capsys, factory.cmd_train, root, stop=True)
     assert code == 0 and out["state"] == "stopped", out
@@ -691,7 +605,7 @@ def test_a_green_train_of_three_gates_once(tmp_path, capsys) -> None:
     once, at the tip, in change 3's worktree, before any reviewer reads any change."""
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 3, readings[-1]
     steps = [(r["next"], r.get("change")) for r in readings]
     gates = [c for step, c in steps if step == "gate"]
@@ -711,7 +625,7 @@ def test_each_landed_change_records_its_place_in_the_train(tmp_path, capsys) -> 
     on, and the tip's gate: its verdict, commit and the change folder whose gate file holds it."""
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
-    assert _drive(root, capsys)[-1]["next"] == "done"
+    assert drive_train(factory, root, capsys)[-1]["next"] == "done"
     own = _closes(root)
     names = [t.name for t in trees]
     tip_commit = None
@@ -738,7 +652,7 @@ def test_a_red_tip_ejects_the_change_at_fault(tmp_path, capsys) -> None:
     root, trees = _three(tmp_path, check="test ! -f bb.txt")
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     last = readings[-1]
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
@@ -780,15 +694,9 @@ def test_a_kept_landing_change_ejects_only_its_change(tmp_path, capsys) -> None:
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
 
-    def review(folder: Path, n: int, role: str) -> None:
-        asks = folder.name == trees[1].name and role == "behaviour"
-        text = _verdict(role, "CHANGES", ("bb.txt:1: say more",)) if asks else _verdict(role)
-        (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
+    review, verify = _keeping(trees[1].name)
 
-    def verify(folder: Path, verdict: dict) -> None:
-        _verified(folder, verdict["round"], kept=_asked(verdict))
-
-    readings = _drive(root, capsys, review=review, verify=verify)
+    readings = drive_train(factory, root, capsys, review=review, verify=verify)
     last = readings[-1]
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
@@ -806,22 +714,16 @@ def test_a_change_landed_again_by_hand_on_the_base_is_reviewed_afresh(tmp_path, 
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
 
-    def review(folder: Path, n: int, role: str) -> None:
-        asks = folder.name == trees[1].name and role == "behaviour"
-        text = _verdict(role, "CHANGES", ("bb.txt:1: say more",)) if asks else _verdict(role)
-        (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
+    review, verify = _keeping(trees[1].name)
 
-    def verify(folder: Path, verdict: dict) -> None:
-        _verified(folder, verdict["round"], kept=_asked(verdict))
-
-    first = _drive(root, capsys, review=review, verify=verify)[-1]
+    first = drive_train(factory, root, capsys, review=review, verify=verify)[-1]
     assert [e["change"] for e in first["ejected"]] == [trees[1].name], first
     folder = _folder(trees[1])
     ejected_round = factory.land_round(folder)
     code, out, said = factory._sdlc(["resolve", trees[1].name], trees[1])
     assert code == 0 and out["state"] == "clean", said
     _begin(root, capsys, "person", trees[1].name)
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     last = readings[-1]
     assert last["next"] == "done" and last["landed"] == [trees[1].name], last
     assert not last["ejected"], last["ejected"]
@@ -840,7 +742,7 @@ def test_failing_acceptance_checks_as_stacked_eject_only_that_change(tmp_path, c
         encoding="utf-8",
     )
     _begin(root, capsys, "person")
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     last = readings[-1]
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
@@ -864,16 +766,18 @@ def test_a_reply_still_unreadable_after_its_mend_ejects_only_that_change(tmp_pat
     which is a stop for the round and so 2's ejection alone; 1 and 3 land."""
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
-    unreadable = "I ran it first.\n\nVERDICT: CHANGES\n- CHANGE: x\n" + _verdict("behaviour")
+    unreadable = "I ran it first.\n\nVERDICT: CHANGES\n- CHANGE: x\n" + verdict(
+        factory, "behaviour"
+    )
 
     def review(folder: Path, n: int, role: str) -> None:
-        text = unreadable if folder.name == trees[1].name else _verdict(role)
+        text = unreadable if folder.name == trees[1].name else verdict(factory, role)
         (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
 
     def mend(folder: Path, n: int, role: str) -> None:
         (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(unreadable, encoding="utf-8")
 
-    readings = _drive(root, capsys, review=review, mend=mend)
+    readings = drive_train(factory, root, capsys, review=review, mend=mend)
     last = readings[-1]
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
@@ -912,7 +816,9 @@ def test_a_train_resolution_is_reviewed_before_it_closes(tmp_path, capsys) -> No
     the tip's gate passes; `land --close` refuses it while that review is missing."""
     root, trees = _conflicting(tmp_path)
     _begin(root, capsys)
-    readings = _drive(root, capsys, resolve=_resolving, until=lambda o: o.get("next") == "review")
+    readings = drive_train(
+        factory, root, capsys, resolve=_resolving, until=lambda o: o.get("next") == "review"
+    )
     last = readings[-1]
     assert last["change"] == trees[1].name and set(last["verdict"]["missing"]) == set(
         factory.DEFAULTS["reviewers"]
@@ -923,7 +829,7 @@ def test_a_train_resolution_is_reviewed_before_it_closes(tmp_path, capsys) -> No
     code, out = _run(capsys, factory.cmd_land_close, trees[1], "002")
     assert code == 1 and "no landing review has passed it" in out["refusals"][0], out
     assert _git(root, "log", "-1", "--format=%s", "main") == "init", "nothing closed"
-    readings = _drive(root, capsys, resolve=_resolving)
+    readings = drive_train(factory, root, capsys, resolve=_resolving)
     assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
     assert (root / "README.md").read_text(encoding="utf-8").startswith("first's one, and second's")
 
@@ -935,7 +841,7 @@ def test_a_train_conflict_goes_to_one_agent_with_every_change(tmp_path, capsys, 
     session id lands in change 2's `runs/builder.sessions`; the counter still settles itself."""
     root, trees = _conflicting(tmp_path, tier2=True)
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o.get("next") == "resolve")
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
     last = readings[-1]
     assert last["change"] == trees[1].name and last["files"] == ["README.md"], last
     folder = _folder(trees[1])
@@ -973,7 +879,7 @@ def test_a_train_conflict_goes_to_one_agent_with_every_change(tmp_path, capsys, 
     assert not any("builder.sessions" in d for d in dirty), "the session id went into the commit"
     committed = _git(trees[1], "show", f"HEAD:.sdlc/work/{trees[1].name}/runs/builder.sessions")
     assert committed.split()[-1] == session
-    readings = _drive(root, capsys)
+    readings = drive_train(factory, root, capsys)
     assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
 
 
@@ -995,7 +901,7 @@ def test_a_train_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> No
         (tmp_path / sub).mkdir()
     root, _ = _three(tmp_path / "three", check="true")
     _begin(root, capsys)
-    out = _drive(root, capsys, until=lambda r: r.get("next") == "stack")[-1]
+    out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
     tree, num = Path(out["worktree"]), out["change"].split("-")[0]
     (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
     code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
@@ -1013,7 +919,7 @@ def test_a_train_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> No
 
     root, (_, second) = _conflicting(tmp_path / "two")
     _begin(root, capsys)
-    _drive(root, capsys, until=lambda r: r.get("next") == "resolve")
+    drive_train(factory, root, capsys, until=lambda r: r.get("next") == "resolve")
     code, done = _run(capsys, factory.cmd_resolve, second, "002", True)
     assert code == 1 and "conflict markers left" in done["refusals"][0], "not resolved yet"
     plain, raw = stop(second)
@@ -1039,10 +945,10 @@ def test_a_move_mid_train_re_stacks_the_rest_and_counts_once(tmp_path, capsys) -
     root, trees = _three(tmp_path, check="true")
     names = [t.name for t in trees]
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o.get("landed") == names[:1])
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("landed") == names[:1])
     assert readings[-1]["next"] == "close" and readings[-1]["change"] == names[1], readings[-1]
     _file_an_idea(root, capsys, 1)
-    more = _drive(root, capsys)
+    more = drive_train(factory, root, capsys)
     last = more[-1]
     assert last["next"] == "done" and last["landed"] == names, last
     assert last["moves"] == 1, "one move, counted once for the train"
@@ -1078,13 +984,15 @@ def test_a_train_stops_past_land_moves(tmp_path, capsys) -> None:
     names = [t.name for t in trees]
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o.get("landed") == names[:1])
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("landed") == names[:1])
     pre = {n: c["pre"] for n, c in readings[-1]["changes"].items()}
     _file_an_idea(root, capsys, 1)
-    more = _drive(root, capsys, until=lambda o: o.get("next") == "close" and o["moves"] == 1)
+    more = drive_train(
+        factory, root, capsys, until=lambda o: o.get("next") == "close" and o["moves"] == 1
+    )
     assert more[-1]["change"] == names[1], more[-1]
     _file_an_idea(root, capsys, 2)
-    rest = _drive(root, capsys)
+    rest = drive_train(factory, root, capsys)
     assert rest[-2]["next"] == "stop" and "moved 2 times" in rest[-2]["reason"], rest[-2]
     assert rest[-1]["state"] == "stopped"
     assert len([s for s in _first_parent(root) if s.startswith("Close ")]) == 1
@@ -1114,11 +1022,11 @@ def test_a_waiting_change_records_what_it_waits_on(tmp_path, capsys) -> None:
     root, trees = _three(tmp_path)
     names = [t.name for t in trees]
     _begin(root, capsys)
-    readings = _drive(root, capsys, until=lambda o: o.get("next") == "stack")
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "stack")
     assert readings[-1]["change"] == names[1], readings[-1]
     assert _waits(trees[2]) == ("wait", f"stack on {names[1]}")
     assert _waits(trees[0])[0] != "wait", "a change before the one acted on never waits"
-    readings = _drive(root, capsys, until=lambda o: o.get("next") == "close")
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "close")
     assert readings[-1]["change"] == names[0], readings[-1]
     assert _waits(trees[1]) == ("wait", f"close after {names[0]}")
     assert _waits(trees[2]) == ("wait", f"close after {names[1]}")
@@ -1126,7 +1034,501 @@ def test_a_waiting_change_records_what_it_waits_on(tmp_path, capsys) -> None:
         (_folder(trees[2]) / factory.LAND_TIMES).read_text(encoding="utf-8")
     )
     assert any(row["step"] == "wait" for row in times), times
-    _drive(root, capsys)
+    drive_train(factory, root, capsys)
     assert [s for s in _first_parent(root) if s.startswith("Close ")] == [
         f"Close {n}" for n in reversed(names)
     ]
+
+
+# ------------------------------------------------------------- why each ejection (147 R16)
+
+
+@needs_uv
+def test_every_ejection_names_its_cause(tmp_path, capsys) -> None:
+    """147 R16: every `eject` reading carries `cause`: `gate` from a red tip's bisection, `review`
+    from a landing round that stops, `refusal` from a landing command's own refusal; `--eject`
+    keeps it, and the reading's `ejected` list carries it."""
+
+    def ejections(readings: list[dict]) -> list[dict]:
+        found = [r for r in readings if r.get("next") == "eject"]
+        assert found and all(r.get("cause") for r in found), found
+        return found
+
+    (tmp_path / "gate").mkdir()
+    root, trees = _three(tmp_path / "gate", check="test ! -f bb.txt")
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys)
+    assert [r["cause"] for r in ejections(readings)] == ["gate"]
+    assert readings[-1]["ejected"][0]["cause"] == "gate", readings[-1]["ejected"]
+
+    (tmp_path / "review").mkdir()
+    root, trees = _three(tmp_path / "review", check="true")
+    _begin(root, capsys)
+
+    review, verify = _keeping(trees[1].name)
+
+    readings = drive_train(factory, root, capsys, review=review, verify=verify)
+    assert [r["cause"] for r in ejections(readings)] == ["review"]
+    assert readings[-1]["ejected"][0]["cause"] == "review"
+
+    (tmp_path / "refusal").mkdir()
+    root, trees = _three(tmp_path / "refusal", check="true")
+    _begin(root, capsys)
+    out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
+    tree, num = Path(out["worktree"]), out["change"].split("-")[0]
+    (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
+    assert _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])[0] == 1
+    (tree / "stray.txt").unlink()
+    readings = drive_train(factory, root, capsys)
+    assert [r["cause"] for r in ejections(readings)] == ["refusal"]
+    assert readings[-1]["ejected"][0]["cause"] == "refusal"
+    state_ejections = [r["did"] for r in readings if r.get("next") == "eject"]
+    assert state_ejections[0]["cause"] == "refusal", state_ejections
+
+
+# ------------------------------------------------------- a resolution leaves it clean (147 R14)
+
+
+@needs_uv
+def test_a_resolution_leaves_the_worktree_clean(tmp_path, capsys) -> None:
+    """147 R14: after `resolve --continue`, the landing agent's reply and `runs/land-resolved`
+    are in the rebased commit, and the worktree is clean."""
+    root, trees = _conflicting(tmp_path)
+    _begin(root, capsys)
+    out = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")[-1]
+    tree, folder = trees[1], _folder(trees[1])
+    reply = folder / "build" / f"land-{out['round']}.md"
+    reply.parent.mkdir(exist_ok=True)
+    reply.write_text("Kept both lines.\n\n## Evidence\n\n$ true\nexit: 0\n", encoding="utf-8")
+    _resolving(tree, out["files"])
+    code, done = _run(capsys, factory.cmd_resolve, tree, "002", True)
+    assert (code, done["state"]) == (0, "resolved"), done
+    assert _git(tree, "status", "--porcelain") == "", "nothing left uncommitted"
+    rel = f".sdlc/work/{tree.name}"
+    marker = _git(tree, "show", f"HEAD:{rel}/runs/land-resolved")
+    assert marker.splitlines() == [f"land-{out['round']}", "README.md"], marker
+    assert "Kept both lines." in _git(tree, "show", f"HEAD:{rel}/build/land-{out['round']}.md")
+
+
+@needs_uv
+def test_a_failed_resolution_leaves_no_marker(tmp_path, capsys) -> None:
+    """147 R14: a second conflict aborts the rebase, and the abort takes the staged marker with
+    it: the branch is where it was, and no `runs/land-resolved` is left."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "twice", {"README.md": "twice's one\ntwo\nthree\n"})
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "built")
+    (tree / "README.md").write_text("twice's one, again\ntwo\nthree\n", encoding="utf-8")
+    _git(tree, "commit", "-q", "-am", "built again")
+    (root / "README.md").write_text("main's one\ntwo\nthree\n", encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "main moves")
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto="main")
+    assert (code, out["state"]) == (0, "conflict"), out
+    (tree / "README.md").write_text("main's one, and twice's\ntwo\nthree\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", True)
+    assert code == 1 and "second conflict" in out["refusals"][0], out
+    assert _git(tree, "rev-parse", "HEAD") == head, "the abort put the branch back"
+    assert not (_folder(tree) / "runs" / "land-resolved").exists(), "no marker left"
+
+
+# ------------------------------------------------------------- one driver for a train (147 R15)
+
+
+@pytest.mark.portable
+def test_the_train_driver_takes_every_step_a_reading_names() -> None:
+    """147 R15: `TRAIN_STEPS` lists every `next` `_train_reading()` can emit (its own `done()`
+    calls, `_train_gate()`'s and the landing round's, as `land_verdict()` names them), and both
+    the shared test driver and the loop (`RUN_STEPS`, a stop in `RUN_STOPS`, or `done`) take
+    each; no test file keeps a driver of its own."""
+    emitted = set(re.findall(r'done\(\s*"(\w+)"', inspect.getsource(factory._train_reading)))
+    emitted |= set(re.findall(r'"next": "(\w+)"', inspect.getsource(factory._train_gate)))
+    verdicts = inspect.getsource(factory.land_verdict)
+    emitted |= set(re.findall(r'out\["next"\](?:, out\["\w+"\])? = \(?\s*"(\w+)"', verdicts))
+    emitted |= {"eject", "stop"}  # `ejecting()` and `stopping()`
+    emitted.discard("pass")  # a passing round goes on to the next change, never a step
+    assert {"commit", "stack", "gate", "review", "close", "fix", "done"} <= emitted, emitted
+    assert emitted <= set(factory.TRAIN_STEPS), emitted - set(factory.TRAIN_STEPS)
+    assert set(factory.TRAIN_STEPS) <= DRIVER_STEPS
+    covered = set(factory.RUN_STEPS) | set(factory.RUN_STOPS) | {"done"}
+    assert covered == set(factory.TRAIN_STEPS), covered ^ set(factory.TRAIN_STEPS)
+    assert not set(factory.RUN_STEPS) & set(factory.RUN_STOPS)
+    own = [f"def _{name}(" for name in ("drive", "land_train")]  # never this test's own text
+    for path in (ROOT / "tests").glob("test_*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert not any(d in text for d in own), path.name
+
+
+# ------------------------------------------------------------- the loop: train --run (147)
+
+SCRIPT = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+KEEPS = "VERDICT: CHANGES\n- CHANGE: bb.txt:1: say more\n\n## Evidence\n$ true\nexit: 0\n"
+
+
+def _loop(root: Path, capsys) -> tuple[int, dict, str]:
+    """`train --run` in process, its own steps each a subprocess: exit, JSON, progress lines."""
+    capsys.readouterr()
+    code = factory.cmd_train(root, run=True)
+    said = capsys.readouterr()
+    return code, json.loads(said.out), said.err
+
+
+def _committed_step(root: Path, name: str) -> dict:
+    """The `runs/land-step.md` a landed change's own commit holds."""
+    own = _closes(root)[name]
+    return factory.read_land_step(
+        _git(root, "show", f"{own}:.sdlc/work/{name}/{factory.LAND_STEP.as_posix()}")
+    )
+
+
+def _kept_at_two(tmp_path: Path, capsys, monkeypatch) -> tuple[Path, list[Path], dict]:
+    """Three changes whose loop stops at the second: its behaviour check asks for a change and
+    the verifier keeps it. Returns the repo, the worktrees and the loop's JSON."""
+    root, trees = _three(tmp_path, check="true")
+    two = trees[1].name
+    fake_claude(tmp_path, monkeypatch, {
+        f"{two}:reviewer-behaviour": {"reply": KEEPS},
+        f"{two}:verifier": {"reply": "- KEPT: behaviour: bb.txt:1: say more\n"},
+    })  # fmt: skip
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    assert code == 1, out
+    return root, trees, out
+
+
+@needs_uv
+def test_train_run_lands_a_batch_of_three(tmp_path, capsys, monkeypatch) -> None:
+    """147 R1: one `train --run`, its agents stood in for by a fake `claude`, ends `done` with
+    three `Close` commits on the base branch's first-parent line, in order."""
+    root, trees = _three(tmp_path, check="true")
+    calls = fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    names = [t.name for t in trees]
+    assert (code, out.get("done")) == (0, True), out
+    assert out["landed"] == names and out["ejected"] == [] and out["gates"] == 1, out
+    closes = [s for s in _first_parent(root) if s.startswith("Close ")]
+    assert closes == [f"Close {n}" for n in reversed(names)]
+    assert {c["agent"] for c in calls()} == {"reviewer-behaviour"}, "the stacked ones reviewed"
+    assert not _state_file(root).exists()
+
+
+@needs_uv
+def test_train_run_records_each_step(tmp_path, capsys, monkeypatch) -> None:
+    """147 R2: each step the loop takes is recorded by its command in the change's
+    `runs/land-step.md`, which each landed commit holds as `close` with its place in the train;
+    the loop says each step on stderr, one line a step."""
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert code == 0, out
+    lines = err.splitlines()
+    for step, tree in (("commit", trees[0]), ("commit", trees[1]), ("stack", trees[1]),
+                       ("gate", trees[1]), ("review", trees[1]), ("close", trees[0]),
+                       ("close", trees[1])):  # fmt: skip
+        assert any(ln.startswith(f"train: {step} {tree.name}") for ln in lines), (step, err)
+    for k, tree in enumerate(trees, 1):
+        step = _committed_step(root, tree.name)
+        assert step["step"] == "close" and step["train"] == {"k": k, "n": 2}, step
+    review = _git(root, "show", f"{_closes(root)[trees[1].name]}:.sdlc/work/{trees[1].name}/"
+                  "reviews/land-1/behaviour.md")  # fmt: skip
+    assert review.startswith("VERDICT: PASS"), review
+
+
+@pytest.mark.portable
+def test_the_loop_runs_only_its_named_commands() -> None:
+    """147 R3: `RUN_STEPS` names exactly the commands the loop may run; never `accept`, `cases`,
+    `--stop`, and `--eject` only as the gate's step."""
+    commands = {" ".join(argv) for argvs in factory.RUN_STEPS.values() for argv in argvs}
+    assert commands == {
+        "land {change} --by {by}", "resolve {change} --onto {onto}",
+        "agent {change} --task train-resolve", "resolve {change} --continue",
+        "gate {change} --land", "train --eject {change}",
+        "agent {change} --task land-review --role {role}", "agent {change} --task land-verify",
+        "agent {change} --task land-mend --role {role}", "land-fix {change} --ask {ask}",
+        "agent {change} --task land-fix", "land-fix {change} --commit", "land {change} --close",
+    }, commands  # fmt: skip
+    assert factory.RUN_EJECTS == ("gate",)
+    assert set(factory.RUN_STOPS) == {"accept", "stop"}
+
+
+@needs_uv
+def test_train_run_never_runs_a_prompted_command(tmp_path, capsys, monkeypatch) -> None:
+    """147 R3: a change with an acceptance check not yet run stops the loop at its commit, whose
+    `before` names `accept`; the loop never runs it, so `build/land-accept.md` is never written."""
+    root = _repo(tmp_path, check="true")
+    tree = _ready(root, "checked", {"checked.txt": "checked\n"})
+    (_folder(tree) / "checks.md").write_text(
+        "# Checks\n\n> Acceptance checks.\n\n## Its file\n\n```sh\ntest -f checked.txt\n```\n",
+        encoding="utf-8",
+    )
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys, "person")
+    code, out, _ = _loop(root, capsys)
+    assert code == 1 and out["stopped"]["next"] == "commit", out
+    assert out["stopped"]["change"] == tree.name and "accept" in out["stopped"]["way_on"], out
+    assert not (_folder(tree) / "build" / "land-accept.md").exists(), "accept never ran"
+    assert "Sdlc-Landed" not in _git(tree, "log", "-1", "--format=%B"), "nothing committed"
+
+
+@needs_uv
+def test_train_run_stops_at_a_kept_change(tmp_path, capsys, monkeypatch) -> None:
+    """147 R4, R2: the landing reviewer of change two keeps a change: the loop exits naming
+    `eject`, cause `review`, change two, its reason and the way on, recorded as a `stop` in two's
+    `runs/land-step.md`; two is still at its stacked commit, and nothing is closed."""
+    root, trees, out = _kept_at_two(tmp_path, capsys, monkeypatch)
+    two = trees[1].name
+    stopped = out["stopped"]
+    assert (stopped["next"], stopped["cause"], stopped["change"]) == ("eject", "review", two), out
+    assert "kept 1 change" in stopped["reason"], stopped
+    assert "/sdlc-factory:land" in stopped["way_on"] and "train --stop" in stopped["way_on"]
+    reading = _run(capsys, factory.cmd_train, root)[1]
+    assert _git(trees[1], "rev-parse", "HEAD") == reading["changes"][two]["stacked"]
+    assert not [s for s in _first_parent(root) if s.startswith("Close ")], "nothing closed"
+    step = factory.read_land_step(
+        (_folder(trees[1]) / factory.LAND_STEP).read_text(encoding="utf-8")
+    )
+    assert step["step"] == "stop" and step["problems"] == [stopped["reason"], stopped["way_on"]]
+
+
+@needs_uv
+def test_train_run_resumes_after_a_kept_change(tmp_path, capsys, monkeypatch) -> None:
+    """147 R5: after the stop at a kept change, the person's `train --eject <two>`, then
+    `train --run`, lands one and three."""
+    root, trees, out = _kept_at_two(tmp_path, capsys, monkeypatch)
+    code, ejected = _run(capsys, factory.cmd_train, root, eject=trees[1].name)
+    assert code == 0 and ejected["cause"] == "review", ejected
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert out["landed"] == [trees[0].name, trees[2].name]
+    assert [(e["change"], e["cause"]) for e in out["ejected"]] == [(trees[1].name, "review")]
+
+
+@needs_uv
+def test_train_run_stops_at_a_refusal(tmp_path, capsys, monkeypatch) -> None:
+    """147 R4: a step command that refuses stops the loop with its words; the rerun's reading
+    names the change's ejection, cause `refusal`, which the loop leaves to the person."""
+    root, trees = _three(tmp_path, check="true")
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
+    tree = Path(out["worktree"])
+    (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
+    code, out, _ = _loop(root, capsys)
+    assert code == 1 and out["stopped"]["next"] == "stack", out
+    assert out["stopped"]["reason"].startswith("uncommitted outside"), out
+    (tree / "stray.txt").unlink()
+    code, out, _ = _loop(root, capsys)
+    stopped = out["stopped"]
+    assert code == 1 and (stopped["next"], stopped["cause"]) == ("eject", "refusal"), out
+    assert stopped["change"] == tree.name and "/sdlc-factory:land" in stopped["way_on"]
+    assert not out["ejected"], "the loop ejected nothing itself"
+
+
+@needs_uv
+def test_train_run_stops_at_a_refused_push(tmp_path, capsys, monkeypatch) -> None:
+    """147 R4: a close whose push is refused has landed the change, and stops the loop with
+    close's own words."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "config.toml").write_text('[git]\npush = ["close"]\n', encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "push on close")
+    _git(root, "remote", "add", "origin", str(tmp_path / "no-such-remote"))
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    stopped = out["stopped"]
+    assert code == 1 and (stopped["next"], stopped["change"]) == ("close", trees[0].name), out
+    assert "/sdlc:publish" in stopped["way_on"], stopped
+    assert out["landed"] == [trees[0].name], "the change has landed"
+    assert _first_parent(root)[0] == f"Close {trees[0].name}"
+
+
+@needs_uv
+def test_train_run_stops_when_nothing_moves(tmp_path, capsys, monkeypatch) -> None:
+    """147 R4: the same step named for the same change twice in a row, with the train's state
+    unchanged, is a stop: here every step is stood in for by one that does nothing."""
+    root, trees = _three(tmp_path, check="true")
+    _begin(root, capsys)
+    ran: list[list[str]] = []
+
+    def idle(main: Path, group: list[tuple[list[str], Path]]) -> list[dict]:
+        ran.extend(argv for argv, _ in group)
+        return [{"argv": argv, "code": 0, "out": {}, "said": ""} for argv, _ in group]
+
+    monkeypatch.setattr(factory, "_run_group", idle)
+    code, out, _ = _loop(root, capsys)
+    stopped = out["stopped"]
+    assert code == 1 and (stopped["next"], stopped["change"]) == ("commit", trees[0].name), out
+    assert "twice" in stopped["reason"] and "/sdlc-factory:land" in stopped["way_on"], stopped
+    assert ran == [["land", trees[0].name, "--by", "auto"]], "one try, then the stop"
+
+
+@needs_uv
+def test_train_run_ejects_a_gate_fault_and_lands_the_rest(tmp_path, capsys, monkeypatch) -> None:
+    """147 R5: a check that fails whenever change two's file exists: one `train --run` ends
+    `done` with one and three landed; two is back at its pre-train commit, its committed
+    `runs/land-step.md` says `eject` and names its gate file, and the exit JSON lists it under
+    `ejected` with cause `gate` and the undo `--eject` printed."""
+    root, trees = _three(tmp_path, check="test ! -f bb.txt")
+    base = _git(root, "rev-parse", "main")
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert out["landed"] == [trees[0].name, trees[2].name]
+    [ejected] = out["ejected"]
+    assert (ejected["change"], ejected["cause"]) == (trees[1].name, "gate"), ejected
+    assert out["undos"] and out["undos"][0]["undo"].startswith("git reset --keep "), out
+    tree = trees[1]
+    assert _git(tree, "rev-parse", "HEAD^") == base and _git(tree, "status", "--porcelain") == ""
+    rel = f".sdlc/work/{tree.name}"
+    step = factory.read_land_step(_git(tree, "show", f"HEAD:{rel}/{factory.LAND_STEP.as_posix()}"))
+    assert step["step"] == "eject" and f"{tree.name}/build/land-1.gate.md" in step["problems"][0]
+
+
+@needs_uv
+def test_a_second_train_run_refuses_while_one_runs(tmp_path, capsys, monkeypatch) -> None:
+    """147 R6: while the run lock is held, a second `--run`, `--begin`, `--eject` and `--stop`
+    refuse and a plain reading says `running: true`, none of them touching the state file; with
+    the loop's marker set (`TRAIN_RUN_ENV`), each goes ahead."""
+    root, trees = _three(tmp_path)
+    _begin(root, capsys)
+    state = _state_file(root)
+    before = state.read_bytes()
+    monkeypatch.delenv(factory.TRAIN_RUN_ENV, raising=False)
+    with factory.run_lock(root) as held:
+        assert held
+        for kwargs in ({"run": True}, {"begin": ["1"], "by": "auto"}, {"eject": "2"},
+                       {"stop": True}):  # fmt: skip
+            code, out = _run(capsys, factory.cmd_train, root, **kwargs)
+            assert code == 1 and "train --run is under way" in out["refusals"][0], (kwargs, out)
+        code, out = _run(capsys, factory.cmd_train, root)
+        assert code == 0 and out == {"under_way": True, "running": True}, out
+        assert state.read_bytes() == before, "nothing written"
+        monkeypatch.setenv(factory.TRAIN_RUN_ENV, "held")
+        code, out = _run(capsys, factory.cmd_train, root)
+        assert code == 0 and out["next"] == "commit" and "running" not in out, out
+        code, out = _run(capsys, factory.cmd_train, root, eject="2")
+        assert "no fault" in out["refusals"][0], "past the lock, to its own check"
+        code, out = _run(capsys, factory.cmd_train, root, begin=["1"], by="auto")
+        assert "a train is under way" in out["refusals"][0], "past the lock, to its own check"
+        code, out = _run(capsys, factory.cmd_train, root, stop=True)
+        assert code == 0 and out["state"] == "stopped", out
+    with factory.run_lock(root) as held:
+        assert held, "let go when its holder ended"
+
+
+@needs_uv
+def test_train_run_cancels_between_steps(tmp_path, capsys, monkeypatch) -> None:
+    """147 R7: `--cancel` with no loop running refuses; a cancel asked while change two's review
+    runs lets that step finish, then the loop exits `cancel`, removes the file and leaves the
+    train under way; a rerun lands the batch."""
+    root, trees = _three(tmp_path, check="true")
+    code, out = _run(capsys, factory.cmd_train, root, cancel=True)
+    assert code == 1 and "no train --run is under way" in out["refusals"][0], out
+    cancel = [sys.executable, str(SCRIPT), "train", "--cancel"]
+    calls = fake_claude(tmp_path, monkeypatch, {
+        f"{trees[1].name}:reviewer-behaviour": {"run": cancel},
+    })  # fmt: skip
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    assert code == 1 and out["stopped"]["next"] == "cancel", out
+    assert [c["change"] for c in calls()] == [trees[1].name], "the step in flight finished"
+    assert not (_state_file(root).parent / factory.TRAIN_CANCEL).exists()
+    assert factory.read_train(root) is not None, "the train is still under way"
+    assert not [s for s in _first_parent(root) if s.startswith("Close ")]
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert len(out["landed"]) == 3
+
+
+@needs_uv
+def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> None:
+    """147 R9: `--begin … --fix 001=R1` stores the person's fix; the loop makes it once, at
+    change one's close: `land-fix --ask`, the builder, `land-fix --commit`, then the train
+    re-stacks two, gates the new tip, and every reviewer at one's depth reads the fix."""
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    (_folder(trees[0]) / "decisions.md").write_text(
+        "# Decisions\n\n- [x] R1 (person, fix): say it louder\n", encoding="utf-8"
+    )
+    (_folder(trees[0]) / "runs").mkdir()  # the builder's session, as its build left it
+    (_folder(trees[0]) / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    calls = fake_claude(tmp_path, monkeypatch, {
+        f"{trees[0].name}:builder": {"write": {"aa.txt": "AA\n"}},
+    })  # fmt: skip
+    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="auto", fix="1=R1")
+    assert code == 1 and "--by person" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R9")
+    assert code == 1 and "R9" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1")
+    assert code == 0 and out["fix"] == {"change": trees[0].name, "ask": "R1"}, out
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), (out, err)
+    builders = [c for c in calls() if c["agent"] == "builder"]
+    assert len(builders) == 1 and builders[0]["change"] == trees[0].name, "made once"
+    own = _closes(root)
+    assert _git(root, "show", f"{own[trees[0].name]}:aa.txt") == "AA"
+    rel = f".sdlc/work/{trees[0].name}"
+    assert _git(root, "show", f"{own[trees[0].name]}:{rel}/build/land-1.ask.md") == "say it louder"
+    reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
+    assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
+    assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 2
+
+
+@needs_uv
+def test_train_run_starts_a_rounds_reviewers_together(tmp_path, capsys, monkeypatch) -> None:
+    """147 R10: a resolved conflict's landing round needs every reviewer at the run's depth; the
+    loop starts their sessions together, so each starts before any ends."""
+    root, trees = _conflicting(tmp_path)
+    second = trees[1].name
+    resolved = {"README.md": "first's one, and second's\ntwo\nthree\n"}
+    plan = {f"{second}:builder": {"write": resolved}}
+    for role in factory.DEFAULTS["reviewers"]:
+        plan[f"{second}:reviewer-{role}"] = {"sleep": 1}
+    calls = fake_claude(tmp_path, monkeypatch, plan)
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    reviews = [c for c in calls() if c["change"] == second and c["agent"].startswith("reviewer-")]
+    assert len(reviews) == len(factory.DEFAULTS["reviewers"]), reviews
+    assert max(c["start"] for c in reviews) < min(c["end"] for c in reviews), "together"
+    assert (root / "README.md").read_text(encoding="utf-8").startswith("first's one, and second's")
+
+
+@needs_uv
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="kills a process group")
+def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
+    """147 R8: a loop killed while a stand-in reviewer blocks leaves state a second `train --run`
+    resumes from: every change closed once, and no branch carries another change's commit."""
+    root, trees = _three(tmp_path, check="true")
+    flag = tmp_path / "blocked"
+    fake_claude(tmp_path, monkeypatch, {
+        f"{trees[1].name}:reviewer-behaviour": {"block": str(flag)},
+    })  # fmt: skip
+    _begin(root, capsys)
+    loop = subprocess.Popen(
+        [sys.executable, str(SCRIPT), "train", "--run"], cwd=root, start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    started = Path(str(flag) + ".started")
+    for _ in range(600):
+        if started.exists() or loop.poll() is not None:
+            break
+        time.sleep(0.2)
+    assert started.exists(), "the reviewer never started"
+    os.killpg(loop.pid, signal.SIGKILL)
+    loop.wait(30)
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    names = [t.name for t in trees]
+    closes = [s for s in _first_parent(root) if s.startswith("Close ")]
+    assert closes == [f"Close {n}" for n in reversed(names)], closes
+    for name, own in _closes(root).items():
+        touched = _git(root, "show", "--format=", "--name-only", own).splitlines()
+        assert all(not p.startswith(".sdlc/work/") or p.startswith(f".sdlc/work/{name}/")
+                   for p in touched), (name, touched)  # fmt: skip

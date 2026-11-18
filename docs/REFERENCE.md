@@ -609,7 +609,12 @@ landing marked at its step with why, in Landing before its commit and after. Its
 `/sdlc:close` or `/sdlc:ship`, while it runs; once it stops, the card is in Needs you (`landing
 stopped at <step>`), each reason a plain line with the tool's own words under it, and names the way
 on: fix what it names, then `/sdlc-factory:land`, or by hand `/sdlc:ship` before its commit and
-`/sdlc:close` after. A
+`/sdlc:close` after. After the landing's yes no session acts on it: `factory.py train --run`,
+started in the background by `/sdlc-factory:land`, takes each step itself, ejects a change the gate
+found at fault and lands the rest, and stops at any other ejection, a train stop, checks to run
+again as stacked or a refused push, recording the stop and the way on in the change's
+`runs/land-step.md`. One loop runs at a time, under a run lock in the git common dir
+(`sdlc-factory-train-run.lock`), and `train --cancel` stops it after the step in flight. A
 click opens
 any file in the change's folder, a markdown file rendered (its text never parsed as HTML; a link
 followed only to the web, in a new tab, or to another file of the change) with a `Raw` toggle for

@@ -77,7 +77,7 @@ reviewing, and deciding whether to escalate.
   again, rebuild (an answer the build doesn't follow), the hand gate (a `gate` reason not yet
   green on the change as it stands), or ship. It reads
   through `factory.py ask`, which writes nothing, and starts no agent.
-- **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
+- **`/sdlc-factory:land [NNN…]`**, from the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and
   the nits its intent or spec names by id retired, committed, and landed as a **train**, through
   `sdlc`'s own `ship` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it,
@@ -90,7 +90,14 @@ reviewing, and deciding whether to escalate.
   branch. Then the changes close in order, each by close's fast-forward, so the base branch's
   history reads as a one-at-a-time landing. When the base branch moves under the train, every
   change not landed re-stacks onto it and the tip is gated again, up to `[land] moves` times. A
-  rerun resumes a train under way, and the board shows each change's place in it. Answer
+  rerun resumes a train under way, and the board shows each change's place in it. After your
+  yes the skill runs each change's acceptance checks and cases behind their own prompts, then
+  starts `factory.py train --run` in the background and ends its turn: the loop takes every
+  step itself and starts the landing's agents, ejects a change the gate found at fault as your
+  yes approved, and stops only where you're needed (any other ejection, a train stop, checks to
+  run again as stacked, a refused push, a command or agent that fails), naming why and the way
+  on; rerun `/sdlc-factory:land` to go on past it. `train --cancel` stops the loop after the step
+  in flight, and one loop runs at a time, under a run lock in the git common dir. Answer
   `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
   reviewer at its depth reads it before it lands. Your words for it go into the change's
   `decisions.md` as a ticked `(person, fix)` line, never on a command line. A path changed after
@@ -454,7 +461,8 @@ the one place it runs `claude`); an approved spec draft copied into `spec.md` by
 (`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
 batch, its signals and its question (`land-check`), the train and its next step (`train`, with
-`--begin`, `--eject` and `--stop`), each change's landing (`land`, `resolve --onto`, `land-fix`,
+`--begin`, its `--fix`, `--eject` and `--stop`; `train --run`, the loop that takes each step,
+under the run lock, and `--cancel`), each change's landing (`land`, `resolve --onto`, `land-fix`,
 `land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
 the board's landing track (`land-verdicts --record` adds a stop and why, a plain line over the
 tool's words), its acceptance checks and skills' cases (`accept`, `cases`, never

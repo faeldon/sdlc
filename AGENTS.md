@@ -243,7 +243,12 @@ common dir, never in a tree), each change committed by `land` (which no longer r
 stacked on the one before it by the factory's own rebase (`resolve --onto`), the gate run once
 at the tip and a red tip bisected by prefix, the change at fault ejected back to its pre-train
 commit (`--eject`, `reset --keep`), and each closed in order by `land --close`, which rebases
-it onto the base past the `Close` commits before it; `fresh` moves a change's branch onto the base before a build or a spec, through
+it onto the base past the `Close` commits before it; after the yes, `train --run` takes those
+steps itself (`_run_loop()`, each a subprocess of the script, `RUN_STEPS` and no other command),
+ejecting only a gate's fault and stopping at every other ejection, `accept` and a refused push,
+under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
+`TRAIN_RUN_ENV`) that a second `--run`, `--begin`, `--eject` and `--stop` refuse while held, and
+`--cancel` stops it between steps; `fresh` moves a change's branch onto the base before a build or a spec, through
 `sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run, only on the
 person's blocking answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`, once, its
 round counted as a restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots, locks in the git common

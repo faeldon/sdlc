@@ -1397,10 +1397,39 @@ def test_the_land_skill_passes_a_fixs_id_never_its_words() -> None:
     `--words` do."""
     land = frontmatter.load(BY_ID["sdlc-factory:land"])
     assert "Write" in land["allowed-tools"] and "Edit" in land["allowed-tools"]
-    assert "land-fix <NNN> --ask <R1>" in land.content and '--ask "' not in land.content
+    assert "--fix <NNN>=R<n>" in land.content and '--fix "' not in land.content
     flat = " ".join(land.content.split())
     assert "- [x] R<n> (person, fix): <their words, as they gave them>" in flat
     assert "The words never go on the command line, only their id" in flat
+
+
+def test_land_runs_the_train_unattended() -> None:
+    """147 R11, R12: after its question, the land skill runs each change's `accept` and `cases`
+    behind the harness's prompt (named, never in a rule), begins the train, and starts
+    `train --run` in the background; its rules are cut to the four commands it runs itself, and it
+    no longer asks for a session of its own. The docs say how the loop works."""
+    land = frontmatter.load(BY_ID["sdlc-factory:land"])
+    prefix = 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py '
+    assert sorted(_bash_rules(BY_ID["sdlc-factory:land"])) == sorted(
+        f"{prefix}{cmd} *)" for cmd in ("config", "sdlc-path", "land-check", "train")
+    )
+    step3 = land.content.split("## Step 3")[1].split("## Step 4")[0]
+    flat = " ".join(step3.split())
+    blocks = [b.split("```")[0] for b in step3.split("```bash")[1:]]
+    assert any("factory.py train --run" in b for b in blocks), blocks
+    assert "run_in_background" in flat
+    assert flat.index("factory.py accept <NNN>") < flat.index("train --begin")
+    assert flat.index("factory.py cases <NNN>") < flat.index("train --begin")
+    assert flat.index("train --begin") < flat.index("train --run")
+    for word in ("train --cancel", "way_on", "`cause`", "train --eject <NNN>", "train --stop"):
+        assert word in flat, word
+    assert "session of its own" not in land["description"]
+    assert "session of its own" not in land.content
+    for doc in (ROOT / "plugins" / "factory" / "README.md", ROOT / "docs" / "REFERENCE.md",
+                ROOT / "AGENTS.md"):  # fmt: skip
+        text = " ".join(doc.read_text(encoding="utf-8").split())
+        for word in ("train --run", "--cancel", "run lock"):
+            assert word in text, (doc.name, word)
 
 
 def test_the_build_session_brings_the_persons_decisions_to_them() -> None:

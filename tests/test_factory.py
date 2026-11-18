@@ -3017,7 +3017,7 @@ def test_a_cost_line_written_mid_rebase_goes_into_the_resolved_commit(tmp_path, 
     _git(tree, "commit", "-q", "-m", "the change")
     (root / "README.md").write_text("main's line\n", encoding="utf-8")
     _git(root, "commit", "-q", "-am", "main moves")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "008", False)
+    code, out = _run(capsys, factory.cmd_resolve, tree, "008", False, "main")
     assert out["conflicted"] == ["README.md"], out
     with costs.open("a", encoding="utf-8", newline="\n") as f:
         f.write('{"session": "s-2", "role": "builder", "cost_usd": 0.25}\n')

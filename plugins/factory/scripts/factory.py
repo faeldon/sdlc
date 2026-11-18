@@ -33,6 +33,8 @@ close keep one implementation.
     uv run --script factory.py land-check
     uv run --script factory.py train --begin 008 009 --by auto
     uv run --script factory.py train
+    uv run --script factory.py train --run
+    uv run --script factory.py train --cancel
     uv run --script factory.py land 008 --by auto
     uv run --script factory.py resolve 009 --onto <commit>
     uv run --script factory.py train --eject 009
@@ -53,7 +55,10 @@ and `--eject` write the change's place in its train to `runs/land-train.md`.
 Nothing is written outside the change's folder, and nothing under `.git/`, but by the landing and
 `fresh`: `land` commits the change's own branch, the train (`train`, `resolve --onto`, `land
 --close`) rebases it, puts it back (`--eject`, `--stop`) and keeps its state in
-`sdlc-factory-train.json` in the git common dir, and `sdlc.py close` lands it; `fresh`, before a
+`sdlc-factory-train.json` in the git common dir, and `sdlc.py close` lands it; `train --run`
+takes the train's steps itself through those same commands, holding a lock on
+`sdlc-factory-train-run.lock` in the git common dir while it runs, and `train --cancel` writes
+`sdlc-factory-train.cancel` beside it, which the loop removes; `fresh`, before a
 run, moves the change's own branch onto the base through `sdlc.py base` and `resolve`, and
 commits nothing that stays. `gate` also holds a lock on a slot file,
 `sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written; `sdlc.py gate`,
@@ -99,7 +104,7 @@ import time
 import tomllib
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
@@ -5859,6 +5864,7 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
             return emit({**out, "refusals": [why]}, 1)
         if why := _amend_record(root, folder, also=fixed):
             return emit({**out, "refusals": [why]}, 1)
+        _train_fix(root, folder, done=True)
         head = _git(root, "rev-parse", "--short", "HEAD")
         return emit({**out, "round": n, "fixed": fixed, "head": head})
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
@@ -5876,7 +5882,23 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     path = land_ask_path(folder, n + 1)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(words + "\n", encoding="utf-8", newline="\n")
+    _train_fix(root, folder, opened=n + 1)
     return emit({**out, "round": n + 1, "ask": path.relative_to(root).as_posix()})
+
+
+def _train_fix(root: Path, folder: Path, opened: int | None = None, done: bool = False) -> None:
+    """The fix a train stores for change `folder` (R9), marked as `land-fix` takes it: the round
+    `--ask` opened, then done once `--commit` amended it in, so the train's `fix` step is taken
+    once, and a loop killed between the two resumes past the `--ask`."""
+    named = train_names(root, folder)
+    fix = named[0].get("fix") if named else None
+    if not fix or fix["change"] != folder.name:
+        return
+    if opened is not None:
+        fix["round"] = opened
+    if done:
+        fix["done"] = True
+    write_train(root, named[0])
 
 
 # ---------------------------------------------------------------- the landing train
@@ -6066,6 +6088,9 @@ def cmd_train(
     by: str | None = None,
     eject: str | None = None,
     stop: bool = False,
+    run: bool = False,
+    cancel: bool = False,
+    fix: str | None = None,
 ) -> int:
     """The landing train. `--begin <NNN…> --by auto|person` starts one over the named ready
     changes in `ready`'s order, refused while one is under way (R19). The plain reading names the
@@ -6073,16 +6098,30 @@ def cmd_train(
     (`land <NNN> --by`, after `before`'s `accept` or `cases`), `stack` (`resolve <NNN> --onto
     <onto>`), `resolve` (the stack conflicts in `files`: `agent --task train-resolve`, then
     `resolve --continue`), `gate` (`gate <NNN> --land`, at the tip or a bisected prefix),
-    `eject` (`train --eject <NNN>`, with its `reason`), `accept`, `review`, `verify` and `mend`
-    (as `land-verdicts` names them, in `verdict`), `close` (`land <NNN> --close`), `stop`
-    (`train --stop`, with its `reason`) or `done`. `--eject` puts the change at fault back at
-    its pre-train commit, its records and the reason amended in, and the rest re-stack; `--stop`
-    puts every change not landed back and ends the train (R11)."""
+    `eject` (`train --eject <NNN>`, with its `reason` and `cause`: `gate`, `review` or
+    `refusal`), `accept`, `review`, `verify` and `mend` (as `land-verdicts` names them, in
+    `verdict`), `fix` (the person's fix stored at `--begin --fix <NNN>=R<n>`, at that change's
+    close: `land-fix --ask`, unless `asked`, `agent --task land-fix`, `land-fix --commit`),
+    `close` (`land <NNN> --close`), `stop` (`train --stop`, with its `reason`) or `done`.
+    `--eject` puts the change at fault back at its pre-train commit, its records and the reason
+    amended in, and the rest re-stack; `--stop` puts every change not landed back and ends the
+    train (R11). `--run` takes the steps itself until `done` or a stop (`_run_loop()`), holding
+    the run lock; `--cancel` asks a running loop to stop after the step in flight. While a loop
+    runs, `--run`, `--begin`, `--eject` and `--stop` refuse and the plain reading says `running`,
+    writing nothing, but in the loop's own children (`TRAIN_RUN_ENV`)."""
     trees = worktrees(root)
     main = trees[0][0] if trees else root
     cfg, _ = load_config(main)
+    if cancel:
+        return _train_cancel(main)
+    if (run or not os.environ.get(TRAIN_RUN_ENV)) and train_running(main):
+        if begin or eject or stop or run:
+            return emit({"refusals": [RUN_UNDER_WAY]}, 1)
+        return emit({"under_way": read_train(main) is not None, "running": True})
+    if run:
+        return _train_run(main)
     if begin:
-        return _train_begin(main, cfg, begin, by)
+        return _train_begin(main, cfg, begin, by, fix)
     state = read_train(main)
     if state is None:
         if eject or stop:
@@ -6095,7 +6134,9 @@ def cmd_train(
     return _train_reading(main, cfg, state)
 
 
-def _train_begin(main: Path, cfg: dict, idents: list[str], by: str | None) -> int:
+def _train_begin(
+    main: Path, cfg: dict, idents: list[str], by: str | None, fix: str | None = None
+) -> int:
     if (state := read_train(main)) is not None:
         live = ", ".join(train_live(state)) or "nothing left"
         why = (f"a train is under way ({live}): run train to resume it, or train --stop to put "
@@ -6110,6 +6151,23 @@ def _train_begin(main: Path, cfg: dict, idents: list[str], by: str | None) -> in
     unmatched = [i for i in idents if not any(names_change(r["change"], i) for r in picked)]
     if unmatched:
         return emit({"refusals": [f"not ready to land: {', '.join(unmatched)}"]}, 1)
+    stored = None
+    if fix:
+        # The person's fix (R9), by the id of its line in the change's `decisions.md`: made once,
+        # at that change's close, by `train`'s `fix` step. Only the person's yes asks for one.
+        if by != "person":
+            return emit({"refusals": ["train --begin --fix needs --by person: a fix is asked "
+                                      "for in the person's yes"]}, 1)  # fmt: skip
+        ident, _, ask = fix.partition("=")
+        at = next((r for r in picked if names_change(r["change"], ident)), None)
+        if at is None:
+            return emit({"refusals": [f"--fix names {ident}, which isn't in the batch"]}, 1)
+        tree = Path(at["worktree"])
+        if read_fix_words(tree / work_rel(tree) / at["change"], ask) is None:
+            why = (f"{ask} isn't a `- [x] {ask} (person, fix): …` line in {at['change']}'s "
+                   "decisions.md")  # fmt: skip
+            return emit({"refusals": [why]}, 1)
+        stored = {"change": at["change"], "ask": ask, "round": None, "done": False}
     tip = _git(main, "rev-parse", f"refs/heads/{base}") or ""
     # The landing round each change already has, from an earlier train: this train never judges
     # a change by that round's replies (`_fresh_round()` opens a new one).
@@ -6126,10 +6184,13 @@ def _train_begin(main: Path, cfg: dict, idents: list[str], by: str | None) -> in
             for r in picked
         },
         "base_tip": tip, "expected": tip, "moves": 0, "gates": [], "ejections": [],
-        "began": _utc_now(),
+        "began": _utc_now(), "fix": stored,
     }  # fmt: skip
     write_train(main, state)
-    return emit({"state": "begun", "order": state["order"], "by": by, "base": base, "tip": tip})
+    out = {"state": "begun", "order": state["order"], "by": by, "base": base, "tip": tip}
+    if stored:
+        out["fix"] = {"change": stored["change"], "ask": stored["ask"]}
+    return emit(out)
 
 
 def _change_checkouts(main: Path) -> dict[str, Path]:
@@ -6150,9 +6211,10 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         "under_way": True, "next": None, "change": None, "worktree": None, "by": state["by"],
         "base": base, "order": state["order"], "live": train_live(state),
         "landed": [n for n in state["order"] if state["changes"][n].get("landed")],
-        "ejected": [{"change": n, "reason": c["ejected"]} for n, c in state["changes"].items()
-                    if c.get("ejected")],
-        "moves": state["moves"], "limit": cfg["land"]["moves"], "problems": [],
+        "ejected": [{"change": e["change"], "reason": e["reason"],
+                     "cause": e.get("cause") or "refusal"} for e in state["ejections"]],
+        "moves": state["moves"], "limit": cfg["land"]["moves"], "gates": len(state["gates"]),
+        "problems": [],
     }  # fmt: skip
 
     def done(step: str, name: str | None = None, **more) -> int:
@@ -6172,6 +6234,12 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         out["problems"].append(why)
         return done("stop", reason=why)
 
+    def ejecting(name: str, why: str, cause: str) -> int:
+        """The change at fault, and why (R16): `gate`, the first red prefix's last change;
+        `review`, a landing round that stops; `refusal`, a landing command's own."""
+        state["changes"][name].update(fault=why, fault_cause=cause)
+        return done("eject", name, reason=why, cause=cause)
+
     live = train_live(state)
     if not live:
         return done("done")
@@ -6188,14 +6256,12 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         mine["worktree"] = str(tree)
         folder = tree / work_rel(tree) / name
         if mine.get("failed"):
-            mine["fault"] = mine["failed"]
-            return done("eject", name, reason=mine["fault"])
+            return ejecting(name, mine["failed"], "refusal")
         head = _landing_commit(tree, name)
         if head is None:
             ready_ = _land_readiness(tree, folder, state["by"])
             if ready_["refusal"]:
-                mine["fault"] = ready_["refusal"]
-                return done("eject", name, reason=mine["fault"])
+                return ejecting(name, ready_["refusal"], "refusal")
             return done("commit", name, before=ready_["before"])
         if mine.get("pre") is None:
             mine["pre"] = head
@@ -6223,7 +6289,7 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         if gate["next"] == "stop":
             return stopping(gate["reason"])
         if gate["next"] == "eject":
-            state["changes"][gate["change"]]["fault"] = gate["reason"]
+            return ejecting(gate["change"], gate["reason"], "gate")
         return done(gate["next"], gate.get("change"), **{
             k: v for k, v in gate.items() if k not in ("next", "change")
         })  # fmt: skip
@@ -6238,11 +6304,14 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         if verdict["next"] == "pass":
             continue
         if verdict["next"] == "stop":
-            state["changes"][name]["fault"] = "; ".join(verdict["problems"])
-            return done("eject", name, reason=state["changes"][name]["fault"])
+            return ejecting(name, "; ".join(verdict["problems"]), "review")
         return done(verdict["next"], name, verdict=verdict)
-    # 5. Closed in order.
-    return done("close", train_live(state)[0])
+    # 5. Closed in order; a fix the person asked for made first, once, at its change's close.
+    first = train_live(state)[0]
+    fix = state.get("fix")
+    if fix and fix["change"] == first and not fix.get("done"):
+        return done("fix", first, ask=fix["ask"], asked=fix.get("round") is not None)
+    return done("close", first)
 
 
 def _train_waits(state: dict, trees: dict[str, Path], name: str) -> None:
@@ -6349,9 +6418,11 @@ def _train_eject(main: Path, state: dict, ident: str) -> int:
     reason = mine.get("fault") or mine.get("failed")
     if not reason:
         return emit({"refusals": [f"the train names no fault in {name}: run train first"]}, 1)
+    # A fault from a state written before the cause was kept reads as a refusal, which pauses.
+    cause = (mine.get("fault_cause") if mine.get("fault") else None) or "refusal"
     tree = Path(mine["worktree"])
     folder = tree / work_rel(tree) / name
-    out = {"change": name, "state": "ejected", "reason": reason, "undo": None}
+    out = {"change": name, "state": "ejected", "reason": reason, "cause": cause, "undo": None}
     undo, why = _put_back(tree, folder, mine)
     if why:
         return emit(
@@ -6362,8 +6433,9 @@ def _train_eject(main: Path, state: dict, ident: str) -> int:
         _write_train_record(tree, folder, state, name)
         _amend_record(tree, folder)
     first = train_live(state)[0] == name
-    mine.update(ejected=reason, stacked=None, stacking=None, fault=None, failed=None)
-    state["ejections"].append({"change": name, "reason": reason, "first": first})
+    mine.update(ejected=reason, stacked=None, stacking=None, fault=None, fault_cause=None,
+                failed=None)  # fmt: skip
+    state["ejections"].append({"change": name, "reason": reason, "cause": cause, "first": first})
     write_train(main, state)
     out.update(undo=undo, head=(_git(tree, "rev-parse", "HEAD") or "")[:12])
     return emit(out)
@@ -6390,6 +6462,293 @@ def _train_stop(main: Path, state: dict) -> int:
                          "head": (_git(tree, "rev-parse", "HEAD") or "")[:12]})  # fmt: skip
     write_train(main, None)
     return emit({"state": "stopped", "reason": reason, "put_back": put_back, "problems": problems})
+
+
+# ---------------------------------------------------------------- the loop: train --run
+#
+# `train --run` takes the steps `train` names, each through the command the land skill ran, until
+# `done` or the first stop that is the person's (147). The loop is this script, never an agent:
+# it commits nothing itself, and each step is a subprocess of this script, so the step is the
+# command the tests pin, several agents run at once without sharing stdout, and the next reading
+# alone decides. It holds `TRAIN_RUN_LOCK` for its whole life, on an open descriptor, so the OS
+# frees it however the loop ends; its children are told by `TRAIN_RUN_ENV`, as `sdlc.py`'s
+# `LOCK_HELD_ENV` tells a handed-off close. `--cancel` writes `TRAIN_CANCEL`, read between steps.
+
+TRAIN_RUN_LOCK = "sdlc-factory-train-run.lock"
+TRAIN_CANCEL = "sdlc-factory-train.cancel"
+TRAIN_RUN_ENV = "SDLC_FACTORY_TRAIN_RUN"
+RUN_UNDER_WAY = "a train --run is under way: wait for it to end, or train --cancel"
+# Every `next` a train's reading can name.
+TRAIN_STEPS = (
+    "commit", "stack", "resolve", "gate", "eject", "accept", "review", "verify", "mend", "fix",
+    "close", "stop", "done",
+)  # fmt: skip
+# The commands the loop runs for each step, and no others (R3): `{role}` is each role the round
+# names, started together (R10); `fix`'s `--ask` is skipped once `asked`.
+RUN_STEPS = {
+    "commit": (("land", "{change}", "--by", "{by}"),),
+    "stack": (("resolve", "{change}", "--onto", "{onto}"),),
+    "resolve": (
+        ("agent", "{change}", "--task", "train-resolve"), ("resolve", "{change}", "--continue"),
+    ),
+    "gate": (("gate", "{change}", "--land"),),
+    "eject": (("train", "--eject", "{change}"),),
+    "review": (("agent", "{change}", "--task", "land-review", "--role", "{role}"),),
+    "verify": (("agent", "{change}", "--task", "land-verify"),),
+    "mend": (("agent", "{change}", "--task", "land-mend", "--role", "{role}"),),
+    "fix": (
+        ("land-fix", "{change}", "--ask", "{ask}"), ("agent", "{change}", "--task", "land-fix"),
+        ("land-fix", "{change}", "--commit"),
+    ),
+    "close": (("land", "{change}", "--close"),),
+}  # fmt: skip
+# The one ejection the loop makes itself: a gate's fault, which the person's yes approved leaving
+# out ("the change at fault left out with why and the rest landed"). Every other cause pauses.
+RUN_EJECTS = ("gate",)
+# The steps that are always the person's: checks run again as stacked, behind their prompt, and a
+# train that stops.
+RUN_STOPS = ("accept", "stop")
+RERUN = "rerun /sdlc-factory:land"
+PUT_BACK = "train --stop to put every change not landed back"
+
+
+@contextmanager
+def run_lock(root: Path) -> Iterator[bool]:
+    """Try the run lock for the `with` block without waiting: True when this process holds it,
+    False when another does. Outside a git repo there is none to take: True."""
+    where = _slot_dir(root)
+    if where is None:
+        yield True
+        return
+    fd = os.open(where / TRAIN_RUN_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        held = _try_lock(fd)
+        try:
+            yield held
+        finally:
+            if held:
+                _unlock(fd)
+    finally:
+        os.close(fd)
+
+
+def train_running(root: Path) -> bool:
+    """Whether a `train --run` holds the run lock now."""
+    with run_lock(root) as held:
+        return not held
+
+
+def _train_cancel(main: Path) -> int:
+    """Ask the running loop to stop after the step in flight (R7): it reads the file between
+    steps, removes it and exits `cancel`, the train still under way."""
+    where = _slot_dir(main)
+    if where is None or not train_running(main):
+        return emit({"refusals": ["no train --run is under way: nothing to cancel"]}, 1)
+    (where / TRAIN_CANCEL).write_text("cancel\n", encoding="utf-8", newline="\n")
+    return emit({"state": "cancelling", "after": "the step in flight"})
+
+
+def _train_run(main: Path) -> int:
+    if read_train(main) is None:
+        return emit({"refusals": ["no train is under way: run train --begin first"]}, 1)
+    with run_lock(main) as held:
+        if not held:
+            return emit({"refusals": [RUN_UNDER_WAY]}, 1)
+        return _run_loop(main)
+
+
+def _run_env(main: Path) -> dict[str, str]:
+    where = _slot_dir(main)
+    return {**os.environ, TRAIN_RUN_ENV: str(where / TRAIN_RUN_LOCK) if where else "held"}
+
+
+def _run_one(main: Path, argv: list[str], cwd: Path) -> tuple[int, dict | None, str]:
+    """One command of this script, as a subprocess: its exit, its JSON, its stderr."""
+    done = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), *argv], cwd=cwd, env=_run_env(main),
+        capture_output=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        data = None
+    return done.returncode, data if isinstance(data, dict) else None, done.stderr or done.stdout
+
+
+def _run_group(main: Path, group: list[tuple[list[str], Path]]) -> list[dict]:
+    """Commands of this script started together and waited for, each a subprocess writing to a
+    file of its own (R10): each one's `argv`, exit (`code`), JSON (`out`) and stderr (`said`)."""
+    results = []
+    with ExitStack() as files:
+        started = []
+        for argv, cwd in group:
+            out_f = files.enter_context(tempfile.TemporaryFile())
+            err_f = files.enter_context(tempfile.TemporaryFile())
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), *argv], cwd=cwd,
+                env=_run_env(main), stdin=subprocess.DEVNULL, stdout=out_f, stderr=err_f,
+            )  # fmt: skip
+            started.append((argv, proc, out_f, err_f))
+        for argv, proc, out_f, err_f in started:
+            code = proc.wait()
+            texts = []
+            for f in (out_f, err_f):
+                f.seek(0)
+                texts.append(f.read().decode("utf-8", "replace"))
+            try:
+                data = json.loads(texts[0])
+            except ValueError:
+                data = None
+            results.append({"argv": argv, "code": code, "said": texts[1],
+                            "out": data if isinstance(data, dict) else None})  # fmt: skip
+    return results
+
+
+def _run_plan(main: Path, reading: dict) -> tuple[list | None, dict | None]:
+    """The groups of commands the reading's step takes, each group started together; or, for a
+    step that is the person's (R4), the stop: `next`, `change`, `cause`, `reason`, `way_on`."""
+    nxt, name = reading.get("next"), reading.get("change")
+    num = name.split("-")[0] if name else ""
+
+    def stop(reason: str, way_on: str) -> tuple[None, dict]:
+        return None, {"next": nxt, "change": name, "cause": reading.get("cause"),
+                      "reason": reason, "way_on": way_on, "record": True}  # fmt: skip
+
+    if nxt == "stop":
+        return stop(reading.get("reason") or "the train stopped", f"{PUT_BACK}, then {RERUN}")
+    if nxt == "accept":
+        return stop(
+            f"{name}'s acceptance checks run again on it as stacked, behind your prompt",
+            f"factory.py accept {num}, then {RERUN}",
+        )
+    if nxt == "commit" and reading.get("before"):
+        firsts = reading["before"]
+        return stop(
+            f"{name} needs {' and '.join(firsts)} run before its commit, behind your prompt",
+            ", ".join(f"factory.py {b} {num}" for b in firsts) + f", then {RERUN}",
+        )
+    if nxt == "resolve" and not reading.get("files"):
+        return stop(
+            f"a rebase is under way in {name}'s worktree with no conflicted file",
+            f"run git status in its worktree, then {RERUN}",
+        )
+    if nxt == "eject" and reading.get("cause") not in RUN_EJECTS:
+        return stop(
+            reading.get("reason") or f"the train names a fault in {name}",
+            f"{RERUN} to leave {num} out and go on, or {PUT_BACK}",
+        )
+    if nxt not in RUN_STEPS or not name or not reading.get("worktree"):
+        return stop(f"the loop can't take the step {nxt!r}", f"run train, then {RERUN} by hand")
+    templates = list(RUN_STEPS[nxt])
+    if nxt == "fix" and reading.get("asked"):
+        templates = templates[1:]
+    verdict = reading.get("verdict") or {}
+    roles = verdict.get("missing") if nxt == "review" else verdict.get("mend")
+    fill = {"change": name, "by": reading.get("by"), "onto": reading.get("onto"),
+            "ask": reading.get("ask")}  # fmt: skip
+    groups = []
+    for template in templates:
+        cwd = main if template[0] == "train" or "--close" in template else Path(reading["worktree"])
+        each = roles or [] if "{role}" in template else [None]
+        groups.append([
+            ([part.format(**fill, role=role) for part in template], cwd) for role in each
+        ])  # fmt: skip
+    return groups, None
+
+
+def _run_end(main: Path, reading: dict, undos: list[dict], stopped: dict | None = None) -> int:
+    """The loop's exit JSON: the train as it now stands (`landed`, `live`, `moves`, `gates`,
+    `ejected` with each one's `reason` and `cause`), the undo of each ejection it made, and `done`
+    or `stopped`. A stop that names a change is recorded in its `runs/land-step.md` (R2), with
+    its reason and the way on, unless the command that failed recorded its own."""
+    state = read_train(main)
+    if state is not None:
+        summary = {
+            "landed": [n for n in state["order"] if state["changes"][n].get("landed")],
+            "live": train_live(state), "moves": state["moves"], "gates": len(state["gates"]),
+            "ejected": [{"change": e["change"], "reason": e["reason"],
+                         "cause": e.get("cause") or "refusal"} for e in state["ejections"]],
+        }  # fmt: skip
+    else:
+        summary = {k: reading.get(k) for k in ("landed", "live", "moves", "gates", "ejected")}
+    out = {**summary, "undos": undos}
+    if stopped is None:
+        return emit({**out, "done": True})
+    record = stopped.pop("record", False)
+    tree = Path(reading["worktree"]) if reading.get("worktree") else None
+    if record and stopped.get("change") and tree is not None:
+        folder = tree / work_rel(tree) / stopped["change"]
+        if folder.is_dir():
+            _record_land(tree, folder, "stop", [stopped["reason"], stopped["way_on"]])
+    print(f"train: stopped at {stopped['next']}: {stopped['reason']}", file=sys.stderr, flush=True)
+    return emit({**out, "stopped": stopped}, 1)
+
+
+def _run_loop(main: Path) -> int:
+    """Read the train, take the step it names, read again: until `done`, or the first stop
+    (R4), a cancel between steps (R7), or the same step named twice with nothing changed."""
+    where = _slot_dir(main)
+    cancel = where / TRAIN_CANCEL if where else None
+    if cancel is not None:
+        cancel.unlink(missing_ok=True)  # one no loop read: the loop it was for is gone
+    undos: list[dict] = []
+    reading: dict = {}
+    last = None
+    while True:
+        if cancel is not None and cancel.is_file():
+            cancel.unlink(missing_ok=True)
+            return _run_end(main, reading, undos, {
+                "next": "cancel", "change": None, "cause": None,
+                "reason": "cancelled by train --cancel, after the step in flight",
+                "way_on": f"{RERUN} to go on, or {PUT_BACK}",
+            })  # fmt: skip
+        code, found, said = _run_one(main, ["train"], main)
+        if found is None or code or found.get("refusals"):
+            why = "; ".join((found or {}).get("refusals") or []) or said.strip()[-300:]
+            return _run_end(main, reading, undos, {
+                "next": "train", "change": None, "cause": None,
+                "reason": why or f"train exited {code}", "way_on": f"run train, then {RERUN}",
+            })  # fmt: skip
+        reading = found
+        nxt, name = reading.get("next"), reading.get("change")
+        if nxt == "done":
+            return _run_end(main, reading, undos)
+        path = train_path(main)
+        key = (nxt, name, path.read_bytes() if path and path.is_file() else None)
+        if key == last:
+            return _run_end(main, reading, undos, {
+                "next": nxt, "change": name, "cause": reading.get("cause"), "record": True,
+                "reason": f"train named {nxt} for {name} twice in a row with nothing changed: "
+                          "the step didn't take",
+                "way_on": f"run train to see where it stands, then {RERUN} by hand",
+            })  # fmt: skip
+        last = key
+        print(f"train: {nxt} {name or ''}".rstrip(), file=sys.stderr, flush=True)
+        groups, stopped = _run_plan(main, reading)
+        if stopped is not None:
+            return _run_end(main, reading, undos, stopped)
+        for group in groups:
+            for result in _run_group(main, group):
+                out = result["out"] or {}
+                if result["argv"][-1] == "--close" and out.get("push_failed"):
+                    return _run_end(main, reading, undos, {
+                        "next": nxt, "change": name, "cause": None,
+                        "reason": f"{name} landed, but its push was refused",
+                        "way_on": out["push_failed"],
+                    })  # fmt: skip
+                failed = result["code"] and result["argv"][0] != "gate"
+                if failed or out.get("problem") or out.get("refusals"):
+                    why = out.get("problem") or "; ".join(out.get("refusals") or [])
+                    why = why or result["said"].strip()[-300:] or f"exit {result['code']}"
+                    return _run_end(main, reading, undos, {
+                        "next": nxt, "change": name, "cause": None, "reason": why,
+                        "way_on": f"fix what it says in {name}'s worktree, then {RERUN}; or "
+                                  f"{PUT_BACK}",
+                    })  # fmt: skip
+                if result["argv"][:2] == ["train", "--eject"]:
+                    undos.append({"change": name, "undo": out.get("undo")})
+                    print(f"train: ejected {name} ({reading.get('cause')}): undo with "
+                          f"{out.get('undo')}", file=sys.stderr, flush=True)  # fmt: skip
 
 
 def _conflicted(root: Path) -> list[str]:
@@ -6434,22 +6793,50 @@ def _settle_counter(root: Path) -> None:
     _git(root, "add", "--", COUNTER)
 
 
+def _rebase_settling(
+    root: Path, onto: str, upstream: str, env: dict
+) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """`git rebase --onto <onto> <upstream>`, the one rebase `resolve` runs: when only
+    `.sdlc/last-id` conflicts, it settles itself (`_settle_counter()`) and the rebase goes on, a
+    commit at a time, up to `RESOLVE_STEPS`. Returns git's last result and the files left
+    conflicted for the builder."""
+    done = subprocess.run(["git", "-C", str(root), "rebase", "-q", "--onto", onto, upstream],
+                          capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+    _settle_counter(root)
+    files = _conflicted(root)
+    for _ in range(RESOLVE_STEPS):
+        if not (done.returncode and not files and _rebasing(root)):
+            break
+        done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
+                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+        _settle_counter(root)
+        files = _conflicted(root)
+    return done, files
+
+
 def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> int:
-    """A rebase that conflicts, left for the builder: `resolve` starts it and lists the conflicted
-    files (or finds none, `clean`, and it is done: `.sdlc/last-id` alone settles itself);
-    `--continue` checks no conflict marker is left in them, stages them and continues, aborting
-    the rebase on a second conflict. With `--onto <commit>`, the train's stack: the change's own
-    commits (from `on`, where the train found them) rebased onto `onto`, the commit of the change
-    before it or the base's tip, its dirty records amended in first, a landing round opened when
-    it moves: `current` (already there), `stacked`, or `conflict`, for `agent --task
-    train-resolve`. Without `--onto` the rebase is onto the base branch, as `fresh` needs it.
+    """A rebase that conflicts, left for the builder: exactly one of `--onto` and `--continue`.
+    `--onto <commit>` in a train is the train's stack: the change's own commits (from `on`, where
+    the train found them) rebased onto `onto`, the commit of the change before it or the base's
+    tip, its dirty records amended in first, a landing round opened when it moves: `current`
+    (already there), `stacked`, or `conflict`, for `agent --task train-resolve`. Outside a train
+    `--onto` takes only the base branch, by name or by its tip: the change's own commits, from
+    their merge base with it, rebased onto it, with no train state and no landing round: `current`,
+    `stacked` or `conflict`. Either way `.sdlc/last-id` settles itself (`_rebase_settling()`).
+    `--continue` checks no conflict marker is left in the conflicted files, writes
+    `runs/land-resolved`, stages the files, the marker, the landing agent's reply and the other
+    records (`RESOLVE_RECORDS`), and continues, so the rebased commit holds them and the worktree is
+    clean; on a second conflict it aborts, which takes the staged marker with it.
     Every git step is this script's: the builder only edits the files it is given. A conflicted
     register loses, before it is staged, every entry the landing deleted from it, whatever the
     builder kept: the change's `idea:` and `fixes:` entries and the nits it retired, each by id
-    (`dropped`). A finished
-    resolution leaves `runs/land-resolved`: `land-<n>`, the round under way, then the files. It is
+    (`dropped`). The marker reads `land-<n>`, the round under way, then the files. It is
     a resolved conflict no reviewer has seen until round `n`'s review passes
     (`resolution_signals()`)."""
+    if cont == (onto is not None):
+        return emit(
+            {"refusals": ["resolve takes exactly one of --onto <commit> and --continue"]}, 1
+        )
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -6459,9 +6846,29 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         return _land_refused(root, folder, {}, why)
     env = {**os.environ, "GIT_EDITOR": "true"}
     named = train_names(root, folder)
-    if onto is not None and not cont:
-        if named is None:
-            return emit({"refusals": [f"no train names {folder.name}: run train --begin first"]}, 1)
+    if onto is not None and named is None:
+        tip = _git(root, "rev-parse", f"refs/heads/{base}") or ""
+        if not tip or (onto != base and _git(root, "rev-parse", "--verify", "-q", onto) != tip):
+            why = (f"outside a train, resolve --onto takes only the base branch ({base}), by name "
+                   "or by its tip")  # fmt: skip
+            return emit({"refusals": [why]}, 1)
+        if _rebasing(root):
+            return emit({"refusals": ["a rebase is under way: resolve --continue"]}, 1)
+        head = _git(root, "rev-parse", "HEAD") or ""
+        upstream = _git(root, "merge-base", "HEAD", tip) or ""
+        if upstream == tip:
+            return emit({"change": folder.name, "state": "current", "head": head[:12]})
+        done, files = _rebase_settling(root, tip, upstream, env)
+        if done.returncode and not files:
+            why = f"git rebase failed: {done.stderr.strip()[-300:]}"
+            plain = f"the rebase onto {base} failed: run git status in its worktree to see why"
+            return _land_refused(root, folder, {}, why, plain)
+        if files:
+            return emit({"change": folder.name, "state": "conflict", "conflicted": files,
+                         "onto": base})  # fmt: skip
+        return emit({"change": folder.name, "state": "stacked", "onto": base,
+                     "head": (_git(root, "rev-parse", "HEAD") or "")[:12]})  # fmt: skip
+    if onto is not None:
         state, mine = named
         if not mine.get("on"):
             return emit({"refusals": [f"{folder.name} isn't committed yet: run land first"]}, 1)
@@ -6479,18 +6886,7 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
         mine["stacking"] = onto
         write_train(root, state)
-        upstream = mine["on"]
-        done = subprocess.run(["git", "-C", str(root), "rebase", "-q", "--onto", onto, upstream],
-                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
-        _settle_counter(root)
-        files = _conflicted(root)
-        for _ in range(RESOLVE_STEPS):
-            if not (done.returncode and not files and _rebasing(root)):
-                break
-            done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
-                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
-            _settle_counter(root)
-            files = _conflicted(root)
+        done, files = _rebase_settling(root, onto, mine["on"], env)
         if done.returncode and not files:
             _git(root, "rebase", "--abort")
             mine["stacking"] = None
@@ -6510,27 +6906,6 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         return emit({"change": folder.name, "state": "stacked", "onto": onto,
                      "head": (_git(root, "rev-parse", "HEAD") or "")[:12],
                      "round": land_round(folder)})  # fmt: skip
-    if not cont:
-        done = subprocess.run(["git", "-C", str(root), "rebase", "-q", base], capture_output=True,
-                              encoding="utf-8", env=env)  # fmt: skip
-        _settle_counter(root)
-        files = _conflicted(root)
-        # Only the counter conflicted, and it settled itself: nothing is left for the builder,
-        # so the rebase goes on, a commit at a time, as long as that is all a commit conflicts on.
-        for _ in range(RESOLVE_STEPS):
-            if not (done.returncode and not files and _rebasing(root)):
-                break
-            done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
-                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
-            _settle_counter(root)
-            files = _conflicted(root)
-        if done.returncode and not files:
-            why = f"git rebase failed: {done.stderr.strip()[-300:]}"
-            plain = f"the rebase onto {base} failed: run git status in its worktree to see why"
-            return _land_refused(root, folder, {}, why, plain)
-        return emit(
-            {"change": folder.name, "conflicted": files, "state": "conflict" if files else "clean"}
-        )
     files = _conflicted(root)
     marked = [
         f for f in files
@@ -6554,10 +6929,17 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         dropped = drop_entries(root, [*ids, *named_nits(root, folder)])
     for f in files:
         _git(root, "add", "--", f)
+    # The resolution's marker, written before the rebase goes on, so it goes into the rebased
+    # commit with the landing agent's reply and the worktree is left clean (R14); an abort below
+    # takes the staged marker with it.
+    n = land_round(folder)
+    marker = folder / "runs" / "land-resolved"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(f"land-{n}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n")
     # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
     # own record, so it goes into the rebased commit, or `--continue` refuses on it.
     # So did the builder's step, `resolve`, in the landing's step record.
-    for record in RESOLVE_RECORDS:
+    for record in (*RESOLVE_RECORDS, marker.relative_to(folder), Path("build") / f"land-{n}.md"):
         if (folder / record).is_file():
             _git(root, "add", "--", (folder / record).relative_to(root).as_posix())
     done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
@@ -6576,11 +6958,6 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         return _land_refused(root, folder, {}, why, plain)
     if named is not None and named[1].get("stacking"):
         _stacked_now(root, folder, named[0], named[1])
-    marker = folder / "runs" / "land-resolved"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(
-        f"land-{land_round(folder)}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n"
-    )
     head = _git(root, "rev-parse", "--short", "HEAD")
     return emit({"change": folder.name, "resolved": files, "state": "resolved",
                  "dropped": dropped, "head": head})  # fmt: skip
@@ -7299,13 +7676,19 @@ def main() -> int:
     p_land.add_argument("--close", action="store_true", help="close it, from the main checkout")
     p_resolve = sub.add_parser("resolve", help="leave a conflicting rebase for the builder")
     p_resolve.add_argument("id")
-    p_resolve.add_argument("--continue", dest="cont", action="store_true")
-    p_resolve.add_argument("--onto", help="the train's stack: onto this commit")
+    resolve_how = p_resolve.add_mutually_exclusive_group(required=True)
+    resolve_how.add_argument("--continue", dest="cont", action="store_true")
+    resolve_how.add_argument(
+        "--onto", help="the train's stack onto this commit; outside a train, the base branch"
+    )
     p_train = sub.add_parser("train", help="the landing train: what it does next")
     p_train.add_argument("--begin", nargs="+", metavar="NNN", help="start one over these changes")
     p_train.add_argument("--by", choices=("auto", "person"), help="who passed the batch's gate")
     p_train.add_argument("--eject", metavar="NNN", help="put the change at fault back, and go on")
     p_train.add_argument("--stop", action="store_true", help="put every unlanded change back")
+    p_train.add_argument("--run", action="store_true", help="take every step until done or a stop")
+    p_train.add_argument("--cancel", action="store_true", help="stop a running loop between steps")
+    p_train.add_argument("--fix", metavar="NNN=R<n>", help="with --begin: the person's fix to make")
     p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
     p_lv.add_argument("id")
     p_lv.add_argument(
@@ -7354,7 +7737,9 @@ def main() -> int:
     if args.cmd == "resolve":
         return cmd_resolve(root, args.id, args.cont, args.onto)
     if args.cmd == "train":
-        return cmd_train(root, args.begin, args.by, args.eject, args.stop)
+        return cmd_train(
+            root, args.begin, args.by, args.eject, args.stop, args.run, args.cancel, args.fix
+        )
     if args.cmd == "land-verdicts":
         return cmd_land_verdicts(root, args.id, args.record)
     if args.cmd == "accept":

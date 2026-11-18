@@ -487,7 +487,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ready
 Show each change in its order, a change after what it `depends_on`, with its decision, its
 `cost`'s `usd` (the same API-equivalent figure) and the others it `overlaps` (changes touching
 the same paths, which ship more easily one after the other), and how to land them:
-`/sdlc-factory:land`, from a session of its own in the main checkout, takes them as one batch in
+`/sdlc-factory:land`, from the main checkout, takes them as one batch in
 this order, or `cd <worktree> && claude`, then `/sdlc:ship NNN`, one at a time. Never start either
 yourself.
 

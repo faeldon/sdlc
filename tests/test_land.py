@@ -12,9 +12,11 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from train_driver import drive_train
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1593,55 +1595,6 @@ def _stack(root: Path, tree: Path, capsys, by: str = "auto") -> dict:
     return out
 
 
-def _land_train(root: Path, capsys, trees: list[Path], by: str = "auto", limit: int = 60) -> list:
-    """Run a train over `trees` to its end as the skill does, agents stood in for by passing
-    verdicts; a `commit` step runs what the reading says comes `before` it. Returns the readings."""
-    _train(root, capsys, trees, by)
-    readings = []
-    for _ in range(limit):
-        code, out = _run(capsys, factory.cmd_train, root)
-        readings.append(out)
-        nxt = out["next"]
-        if nxt == "done":
-            return readings
-        tree, num = Path(out["worktree"]), out["change"].split("-")[0]
-        if nxt == "commit":
-            for first in out["before"]:
-                assert _run(capsys, getattr(factory, f"cmd_{first}"), tree, num)[0] == 0
-            code, done = _run(capsys, factory.cmd_land, tree, num, out["by"])
-            assert code == 0, done
-        elif nxt == "stack":
-            code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
-            assert code == 0 and done["state"] in ("current", "stacked"), done
-        elif nxt == "gate":
-            assert _run(capsys, factory.cmd_gate, tree, num, True)[1]["verdict"] == "PASS"
-        elif nxt == "accept":
-            assert _run(capsys, factory.cmd_accept, tree, num)[0] == 0
-        elif nxt == "review":
-            _review_passes(capsys, tree)
-        elif nxt == "close":
-            code, done = _run(capsys, factory.cmd_land_close, tree, num)
-            assert code == 0 and "merge" in done["done"], done
-        else:
-            raise AssertionError(f"the test can't take {nxt!r}: {out}")
-    raise AssertionError(f"the train didn't finish: {readings[-1]}")
-
-
-def _review_passes(capsys, tree: Path) -> None:
-    """A rebased change's landing round, run as the agents would reply: its behaviour check
-    passes, and `land-verdicts` says `pass`."""
-    code, out = _run(capsys, factory.cmd_land_verdicts, tree, tree.name.split("-")[0])
-    if out["next"] == "pass":
-        return
-    assert out["next"] == "review", out
-    for role in out["missing"]:
-        (_folder(tree) / "reviews" / f"land-{out['round']}" / f"{role}.md").write_text(
-            "VERDICT: PASS\n\n## Evidence\n$ true\nexit: 0\n", encoding="utf-8"
-        )
-    code, out = _run(capsys, factory.cmd_land_verdicts, tree, tree.name.split("-")[0])
-    assert out["next"] == "pass", out
-
-
 @needs_uv
 def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_factory_alone(
     tmp_path, capsys
@@ -1677,7 +1630,7 @@ def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_facto
     # The person's yes; then the train, as the skill's Step 3 runs it: the checks first, each
     # change committed, stacked (each numbered locally conflicts on `.sdlc/last-id` alone, which
     # settles itself), reviewed as stacked, and closed in order.
-    readings = _land_train(root, capsys, [checked, noted, deployed], "person")
+    readings = drive_train(factory, root, capsys, [checked, noted, deployed], "person", strict=True)
     assert readings[0]["next"] == "commit" and readings[0]["before"] == ["accept"], readings[0]
 
     log = _git(root, "log", "--format=%s", "--first-parent", "main").splitlines()
@@ -1745,8 +1698,8 @@ def _resolving(tmp_path: Path, capsys, edit: tuple[str, str]) -> tuple[Path, Pat
     code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
     assert (code, out["state"]) == (0, "committed"), out
     (_folder(tree) / "reviews" / "land-1").mkdir(parents=True)
-    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False)
-    assert ".sdlc/work/inbox.md" in out["conflicted"], out
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto="main")
+    assert out["state"] == "conflict" and ".sdlc/work/inbox.md" in out["conflicted"], out
     (tree / ".sdlc" / "work" / "inbox.md").write_text(OWN.replace(*edit), encoding="utf-8")
     return root, tree
 
@@ -1796,6 +1749,45 @@ def test_a_resolution_drops_entries_by_id_alone(tmp_path) -> None:
     assert factory.drop_entries(tmp_path, ["2026-11-17-6"]) == ["2026-11-17-6"]
     after = register.read_text(encoding="utf-8")
     assert "## [2026-11-17-6] [idea] an example" in after and "own seed" not in after
+
+
+def test_resolve_needs_onto_or_continue(tmp_path, capsys) -> None:
+    """147 R13: the bare `resolve <NNN>` is gone: it takes exactly one of `--onto` and
+    `--continue`, from the command line and from the function alike."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "lone", "lone's one")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False)
+    assert code == 1 and "--onto" in out["refusals"][0] and "--continue" in out["refusals"][0]
+    script = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+    for args in (["resolve", "001"], ["resolve", "001", "--onto", "main", "--continue"]):
+        done = subprocess.run([sys.executable, str(script), *args], cwd=tree,
+                              capture_output=True, encoding="utf-8")  # fmt: skip
+        assert done.returncode == 2, (args, done.stdout, done.stderr)
+
+
+@needs_uv
+def test_resolve_onto_the_base_outside_a_train(tmp_path, capsys) -> None:
+    """147 R13: outside a train, `--onto` takes the base branch alone, by name or by its tip, and
+    rebases the change's own commits from their merge base: `stacked`, then `current`; it writes
+    no train state and opens no landing round; any other commit is refused."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "lone", "lone's one")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"]) == (0, "committed"), out
+    (root / "elsewhere.txt").write_text("moved on\n", encoding="utf-8")
+    _git(root, "add", "elsewhere.txt")
+    _git(root, "commit", "-q", "-m", "main moves on")
+    tip = _git(root, "rev-parse", "main")
+    old = _git(tree, "rev-parse", "HEAD^")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto=old)
+    assert code == 1 and "only the base branch" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto="main")
+    assert (code, out["state"]) == (0, "stacked"), out
+    assert _git(tree, "rev-parse", "HEAD^") == tip
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto=tip)
+    assert (code, out["state"]) == (0, "current"), out
+    assert factory.read_train(root) is None, "no train state written"
+    assert not list((_folder(tree) / "reviews").glob("land-*")), "no landing round opened"
 
 
 # A command that is not a read, with its output and no exit: 123 moved it off `head`, which a
@@ -2041,11 +2033,11 @@ def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) ->
     assert out["next"] == "pass", out
 
 
-def test_the_land_skill_names_its_mend() -> None:
-    """109 R14: the land skill runs `land-mend` for each role `land-verdicts` names."""
-    text = (ROOT / "plugins" / "factory" / "skills" / "land" / "SKILL.md").read_text("utf-8")
-    blocks = text.split("```bash")[1:]
-    assert any("--task land-mend --role <role>" in b.split("```")[0] for b in blocks)
+def test_the_landing_loop_names_its_mend() -> None:
+    """109 R14, 147: the landing's loop runs `land-mend` for each role `land-verdicts` names."""
+    assert factory.RUN_STEPS["mend"] == (
+        ("agent", "{change}", "--task", "land-mend", "--role", "{role}"),
+    )
 
 
 def _move(root: Path, n: int) -> None:
@@ -2700,7 +2692,7 @@ def test_two_factory_landings_never_conflict_on_the_register(tmp_path, capsys) -
         (folder / "notes.md").write_text(f"# Notes\n\n- [ ] Carry {slug}'s rest\n")
         trees.append(tree)
     for n, tree in enumerate(trees, 1):
-        _land_train(root, capsys, [tree], "person")
+        drive_train(factory, root, capsys, [tree], "person", strict=True)
         if n == 1:
             register = root / ".sdlc" / "work" / "inbox.md"
             register.write_text(
