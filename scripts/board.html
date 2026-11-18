@@ -452,6 +452,7 @@ function progressRow(p) {
     parts.push(h("div", { class: "meta" }, `${dur(p.elapsed)} so far`));
   }
   if (p.plan) parts.push(h("div", { class: "meta" }, `plan: ${p.plan.touched} of ${p.plan.named} files touched`));
+  if (land && p.train) parts.push(h("div", { class: "meta" }, `${p.train} in a train`));
   if (land && p.moves) parts.push(h("div", { class: "meta" }, `base moved ${p.moves} of ${p.limit || "?"} times`));
   for (const why of p.problems || []) parts.push(h("div", { class: "flag" }, `landing stopped: ${why}`));
   return h("div", { class: "progress" }, parts);

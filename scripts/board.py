@@ -73,6 +73,7 @@ AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 LAND_STEP = Path("runs") / "land-step.md"
 MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
+TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
 
@@ -86,14 +87,17 @@ PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its six positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The builder resolving a conflict or
-# making the person's fix sits at the rebase, a mend at the review, each with its own label. A
-# `stop` marks the step it stopped after. Only the steps history can time are timed.
+# making the person's fix sits at the rebase, as does a train stacking the change, a mend at the
+# review, each with its own label. A `stop`, and a train's `eject`, mark the step it stopped
+# after (an `eject` naming none sits at the gate, where most come from). Only the steps history
+# can time are timed.
 LAND_TRACK = ("ship", "rebase", "gate", "review", "verify", "close")
 LAND_AT = {
-    "ship": 0, "rebase": 1, "resolve": 1, "fix": 1, "gate": 2, "review": 3, "mend": 3,
-    "verify": 4, "close": 5,
+    "ship": 0, "rebase": 1, "stack": 1, "resolve": 1, "fix": 1, "gate": 2, "review": 3,
+    "mend": 3, "verify": 4, "close": 5, "eject": 2,
 }  # fmt: skip
-LAND_LABEL = {"resolve": "resolving", "fix": "fixing", "mend": "mending"}
+LAND_LABEL = {"resolve": "resolving", "fix": "fixing", "mend": "mending", "stack": "stacking"}
+LAND_STOPS = ("stop", "eject")
 LAND_TIMED = ("gate", "review", "verify")
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
 # only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
@@ -481,11 +485,13 @@ def read_land_step(text: str) -> dict | None:
         return found[0] if found else None
 
     rnd, moves, limit = field(ROUND_RE), field(MOVES_RE), field(LIMIT_RE)
+    train = next((m for m in map(TRAIN_RE.match, lines) if m), None)
     return {
         "step": step.group(1), "round": int(rnd) if rnd else None,
         "moves": int(moves) if moves else None, "limit": int(limit) if limit else None,
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
+        "train": {"k": int(train.group(1)), "n": int(train.group(2))} if train else None,
     }  # fmt: skip
 
 
@@ -493,17 +499,18 @@ def _land_progress(
     entry: dict, folder: Path, problems: list[str], history: dict | None, now: float
 ) -> dict | None:
     """A landing's track, from the step its last command recorded (`runs/land-step.md`): the
-    landing round, the base branch's moves followed out of `[land] moves`, the current step's time
-    against the typical one where history has it, and on a stop the step it stopped after and its
-    problems. None for a step this board doesn't know; a record that won't read is a problem."""
+    landing round, the base branch's moves followed out of `[land] moves`, the change's place in
+    a train (`k of n`), the current step's time against the typical one where history has it, and
+    on a stop (a train's `eject` too) the step it stopped after and its problems. None for a step
+    this board doesn't know; a record that won't read is a problem."""
     path = folder / LAND_STEP
     rec = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
     if rec is None:
         problems.append(f"{LAND_STEP.as_posix()} doesn't open with STEP:")
         return None
     step = rec["step"]
-    stopped = step == "stop"
-    at = LAND_AT.get(rec["after"] or "", 0) if stopped else LAND_AT.get(step)
+    stopped = step in LAND_STOPS
+    at = LAND_AT.get(rec["after"] or "", LAND_AT.get(step, 0)) if stopped else LAND_AT.get(step)
     if at is None:
         return None
     named = rec["after"] if stopped else step
@@ -523,6 +530,7 @@ def _land_progress(
     return {
         "kind": "land", "steps": steps, "round": rec["round"], "limit": rec["limit"],
         "moves": rec["moves"], "step": step, "after": rec["after"] if stopped else None,
+        "train": f"{rec['train']['k']} of {rec['train']['n']}" if rec["train"] else None,
         "paused": False, "stopped": stopped,
         "problems": rec["problems"], "elapsed": elapsed,
         "typical": typical if fraction is not None else None, "fraction": fraction,

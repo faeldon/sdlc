@@ -115,7 +115,11 @@ where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 a rerun resumes where a failed step stopped. A refused push is `push_failed` and a failed cleanup
 `cleanup_failed`, never a failed close: the change has landed. The `Close` commit removes the
 folder and, in the same commit, files and retires the change's register entries
-(`_close_commit()`, `register_plan()`), so its first parent is still the change's commit. The host's `close_cleanup` is read
+(`_close_commit()`, `register_plan()`), so its first parent is still the change's commit. Close
+holds `_main_lock()` from its merge to that commit (reentrant within a thread, `_lock_depth()`;
+a handoff inherits it through `LOCK_HELD_ENV`), so no `File` commit comes between the two, and
+refuses a branch carrying another change's commits (`_carries_others()`), which a stopped train
+leaves. The host's `close_cleanup` is read
 from the base branch's config as it was before the merge (`_config_at()`), so a change can't turn
 on its own, and it is the one thing close deletes beyond the change's own folder, worktree and
 branch, only behind the question's yes. In this repo, close hands itself to `main`'s script and
@@ -225,8 +229,13 @@ copies of its parsing (`risk_paths()` and the regexes included), pinned by tests
 judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`), and no
 agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
 gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
-the one place it commits, through `sdlc`'s own `ship`, `base` and `close` of its own version
-(`sdlc_path()`), and `fresh` moves a change's branch onto the base before a build or a spec, through
+the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
+(`sdlc_path()`): a batch lands as a train (`cmd_train()`, its state `TRAIN_STATE` in the git
+common dir, never in a tree), each change committed by `land` (which no longer runs `base`),
+stacked on the one before it by the factory's own rebase (`resolve --onto`), the gate run once
+at the tip and a red tip bisected by prefix, the change at fault ejected back to its pre-train
+commit (`--eject`, `reset --keep`), and each closed in order by `land --close`, which rebases
+it onto the base past the `Close` commits before it; `fresh` moves a change's branch onto the base before a build or a spec, through
 `sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run, only on the
 person's blocking answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`, once, its
 round counted as a restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots, locks in the git common

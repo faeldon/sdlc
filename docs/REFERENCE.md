@@ -1018,7 +1018,9 @@ own (`runs/<agent>.sessions` in the change's folder; its permission mode is `.sd
 read-only sub-agents as runs of theirs, never as the person's stages. A change `/sdlc-factory:land`
 landed owes `land` in place of `ship` and `close`: one gate per batch, which passes itself on a
 batch with no risk signal (`[land] auto` in `.sdlc/factory.toml`, read from the base branch, default
-on; `[land] batch`, default 5). Its commit says who passed it, `Sdlc-Landed: by=person|auto`; a pass
+on; `[land] batch`, default 5). The batch lands as a train: stacked in order, the base branch's
+check run once at the tip, each change closed in order by close's fast-forward, so the base
+branch's first-parent line reads as it does for changes landed one at a time. Its commit says who passed it, `Sdlc-Landed: by=person|auto`; a pass
 nobody gave is `auto=1` on `Sdlc-Totals`, never a stop, and its ship and close read `auto` on
 `Sdlc-Happy`, which no first-time rate counts. A change landed with paths that changed after its
 last review round (a hand edit after the approver) says how many on the same line,

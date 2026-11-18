@@ -204,23 +204,25 @@ def test_a_close_rerun_files_each_entry_once(tmp_path, capsys, monkeypatch) -> N
 
 
 def test_close_and_inbox_commit_keep_both_entries(tmp_path, capsys, monkeypatch) -> None:
-    """R7: close writes the register under `_main_lock()`, rereading it there, so an idea filed
-    between close's check and its write is kept beside what close files."""
+    """R7: close writes the register under `_main_lock()`, rereading it there, so an idea written
+    between close's check and its write is kept beside what close files. Since close holds the
+    lock from its merge (139 R13), the idea is written before the lock, as `/sdlc:idea` writes
+    the file before its `inbox-commit` waits for it (139 R15); that commit then finds nothing
+    left to record, since the `Close` commit carries the entry."""
     root = _repo(tmp_path)
     tree, folder = _open(root, "reopen", "2026-10-01-2")
     _held(folder, _entry("2026-10-02-1", "Page the drafts"))
     _ship(root, tree, folder)
     monkeypatch.chdir(root)
-    real = sdlc.fix_trailers
+    real = sdlc._push_plan
 
-    def file_an_idea(main, branch):
-        # What /sdlc:idea does in another session while this close is between its steps.
+    def write_an_idea(home, cfg, point):
+        # What /sdlc:idea does in another session after close's check of the register and before
+        # close takes the lock.
         (root / INBOX).write_text(_register(root) + "\n" + _entry("2026-10-03-1", "Late"), "utf-8")
-        assert sdlc.cmd_inbox_commit(root) == 0
-        assert json.loads(capsys.readouterr().out)["refusals"] == []
-        return real(main, branch)
+        return real(home, cfg, point)
 
-    monkeypatch.setattr(sdlc, "fix_trailers", file_an_idea)
+    monkeypatch.setattr(sdlc, "_push_plan", write_an_idea)
     capsys.readouterr()
     code = sdlc.cmd_close(root, "001")
     out = capsys.readouterr().out
@@ -229,6 +231,9 @@ def test_close_and_inbox_commit_keep_both_entries(tmp_path, capsys, monkeypatch)
     assert text.count("[2026-10-03-1] [idea] Late") == 1
     assert text.count("[2026-10-02-1] [idea] Page the drafts") == 1
     assert "Reopen drafts" not in text
+    assert _git(root, "show", f"HEAD:{INBOX}") == text.rstrip("\n"), "kept in the Close commit"
+    assert sdlc.cmd_inbox_commit(root) == 1
+    assert "nothing to record" in json.loads(capsys.readouterr().out)["refusals"][0]
 
 
 def test_drop_refuses_while_the_change_holds_entries(tmp_path, capsys) -> None:

@@ -55,12 +55,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 import unicodedata
 from collections import Counter
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from datetime import UTC, date, datetime
 from datetime import time as dtime
 from pathlib import Path
@@ -2066,22 +2067,63 @@ def _lock_path(home: Path) -> Path:
     return Path(common) / "sdlc.lock" if common else main_root(home) / ".sdlc" / "lock"
 
 
+# How deep each thread holds each lock file: only the outermost hold takes the OS lock, so a
+# hold can nest (`_close_commit()` inside close's) and never waits on itself, while another thread
+# or process still waits. A close handed off (`_handoff()`) tells its child the parent holds it,
+# through `LOCK_HELD_ENV`, naming the lock file; the child takes none for that file.
+_LOCK_DEPTH = threading.local()
+LOCK_HELD_ENV = "SDLC_LOCK_HELD"
+
+
+def _lock_depth() -> dict[str, int]:
+    held = getattr(_LOCK_DEPTH, "held", None)
+    if held is None:
+        held = _LOCK_DEPTH.held = {}
+    return held
+
+
 @contextmanager
 def _main_lock(home: Path) -> Iterator[None]:
     """An exclusive lock on `_lock_path()`, which every worktree shares, held for the `with`
-    block: what `claim()` takes a number under, and `inbox-commit` the register. The file stays
-    after: removing it would let a waiter hold a lock on a name the next caller makes anew."""
+    block: what `claim()` takes a number under, `inbox-commit` the register, and `close` its
+    span from its merge to its `Close` commit. Reentrant within a thread (`_lock_depth()`): a
+    nested `with` counts, and the OS lock is taken once, by the outermost. The file stays after:
+    removing it would let a waiter hold a lock on a name the next caller makes anew."""
     lock = _lock_path(home)
+    depth, key = _lock_depth(), str(lock)
+    if depth.get(key, 0):
+        depth[key] += 1
+        try:
+            yield
+        finally:
+            depth[key] -= 1
+        return
     lock.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         _lock(fd)
+        depth[key] = 1
         try:
             yield
         finally:
+            depth[key] = 0
             _unlock(fd)
     finally:
         os.close(fd)  # and with it a flock
+
+
+def _inherit_lock(home: Path, held: str | None) -> bool:
+    """The hold a parent process passed down: with `held` naming this repo's lock file (the
+    value of `LOCK_HELD_ENV`, popped by the caller before any other process starts), every
+    `_main_lock()` of this thread nests on it and takes no OS lock, since the parent holds it and
+    waits on this process, for the life of the process: a handed-off close is a process of its
+    own. Anything else is no hold. True when inherited."""
+    key = str(_lock_path(home))
+    if held != key:
+        return False
+    depth = _lock_depth()
+    depth[key] = max(depth.get(key, 0), 1)
+    return True
 
 
 def cmd_new(
@@ -4910,11 +4952,15 @@ def _handoff(main: Path, argv: list[str], ran: str, report: dict) -> int:
     second one finds what this one did and carries on. If it prints no report (it didn't start),
     say so in `report` and stop: never carry on with the code this process loaded."""
     script = main / "scripts" / "sdlc.py"
+    # After the merge this process holds `_main_lock()` (`cmd_close()`), and waits here: the
+    # child is told so, and takes none of its own, or the two would deadlock on the one file.
+    lock = str(_lock_path(main))
+    passed = {LOCK_HELD_ENV: lock} if _lock_depth().get(lock) else {}
     made = subprocess.run(
         [*_script_cmd(), str(script), "close", *argv],
         capture_output=True,
         encoding="utf-8",
-        env=os.environ | {HANDOFF_ENV: ran},
+        env=os.environ | {HANDOFF_ENV: ran} | passed,
     )
     try:
         out = json.loads(made.stdout)
@@ -4956,6 +5002,21 @@ def _cleanup_plan(cfg: dict | None, fallback: dict, number: str) -> dict | None:
     return plan
 
 
+def _carries_others(main: Path, branch: str, trunk: str) -> list[str]:
+    """The other changes whose folders a commit in `<trunk>..<branch>` adds or changes: a branch
+    stacked on another change's commit by a landing train that didn't finish."""
+    names = _git(main, "log", "--format=", "--name-only", f"{trunk}..{branch}") or ""
+    prefix = work_rel(main) + "/"
+    found = set()
+    for line in names.splitlines():
+        if not line.startswith(prefix):
+            continue
+        head = line[len(prefix) :].split("/", 1)[0]
+        if head != branch and DIR_RE.match(head):
+            found.add(head)
+    return sorted(found)
+
+
 def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     """Land a shipped change, mirror it, remove its folder, its worktree and its branch; or, for
     a dropped one, mirror it, record it on main in a `Drop` commit, and remove its worktree and
@@ -4983,8 +5044,23 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
     With `commands.close_cleanup_runs`, the host's `close_cleanup` runs last, once all of that
     and the push are done, read from the base branch's config before the merge
-    (`_cleanup_plan()`). A failure is `cleanup_failed`, never a failed close: it has landed."""
+    (`_cleanup_plan()`). A failure is `cleanup_failed`, never a failed close: it has landed.
+
+    `_main_lock()` is held from before the merge until `_close_commit()` has committed (the
+    `record` step, for a drop), and let go before the issues are told, the worktree's removal,
+    the push and the cleanup: no `File` commit can come between the change's commit and its
+    `Close`, where `closed_changes()` reads the `Close`'s first parent as the change. A rerun that
+    finds the change merged takes it before its `remove folder` step. A close handed off after
+    its merge runs under the parent's hold (`_inherit_lock()`), told by `LOCK_HELD_ENV`, which
+    is cleared here before any other process starts.
+
+    A branch carrying another change's commits (`_carries_others()`: a train that stopped part
+    way leaves one stacked) is refused before anything is written: its fast-forward would put the
+    other change on the base branch with no `Close`."""
+    # Before `main_root()`'s own git: no process this close starts carries the variable.
+    held = os.environ.pop(LOCK_HELD_ENV, None)
     main = main_root(root)
+    _inherit_lock(main, held)
     own = _own_repo(main)
     if own and PLUGIN_DIR.resolve() != main.resolve() and not os.environ.get(HANDOFF_ENV):
         argv = [*([ident] if ident else []), *(["--check"] if check_only else [])]
@@ -5063,6 +5139,12 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         report["refusals"].append(
             f"{trunk} has moved past {branch}'s base, so it can't fast-forward; rebase {branch} "
             f"onto {trunk} in its worktree and ship again"
+        )
+    elif not landed and (others := _carries_others(main, branch, trunk)):
+        report["refusals"].append(
+            f"{branch} carries another change's commits ({', '.join(others)}): a landing train "
+            f"left it stacked. Put it back with git reset --keep <its commit before the train> "
+            "in its worktree, or finish the train with /sdlc-factory:land"
         )
     # What the `Close` commit does to the register, checked before anything is written: against
     # the base's register now, and again under the lock when it is written.
@@ -5170,16 +5252,19 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             report["fixes"] = fixes
         at = _git(main, "rev-parse", "--verify", "-q", start)
         based = [f"{BASE_KEY}: {at}"] if at else []
-        err = _close_commit(main, branch, sha, where, captured + based + fixes, closes)
-        if err is None and not unavailable:
-            # The entries the change brought to main, a seed split off at ship among them, are
-            # committed now, so their issues are told where to follow. Never a refusal.
-            found = tracker(main, cfg)
-            if hasattr(found, "mark"):
-                marked = mark_issues(main, found)
-                if marked["done"] or marked["failed"]:
-                    report["intake"] = marked
-        return err
+        return _close_commit(main, branch, sha, where, captured + based + fixes, closes)
+
+    def tell_issues() -> None:
+        # The entries the change brought to main, a seed split off at ship among them, are
+        # committed now, so their issues are told where to follow. Never a refusal, and after the
+        # lock is let go: the tracker's calls are no part of the span it guards.
+        if unavailable:
+            return
+        found = tracker(main, cfg)
+        if hasattr(found, "mark"):
+            marked = mark_issues(main, found)
+            if marked["done"] or marked["failed"]:
+                report["intake"] = marked
 
     def record() -> str | None:
         if _drop_commit(main, branch, trunk):
@@ -5259,26 +5344,37 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
 
     inside = Path.cwd().resolve().is_relative_to(tree.resolve())
     before = _git(main, "rev-parse", trunk)
-    for i, (name, step) in enumerate(steps):
-        if name == "remove worktree" and inside:
-            report["skipped"] = [n for n, _ in steps[i:]]
-            report["refusals"].append(
-                f"worktree kept: this process runs inside {tree}. Run /sdlc:close "
-                f"{branch.split('-')[0]} from the main checkout to finish."
-            )
-            return emit(3)
-        if name == "archive" and unavailable:
-            continue
-        err = step()
-        if err:
-            report["skipped"] = [n for n, _ in steps[i:]]
-            report["refusals"].append(f"{name} failed: {err}")
-            return emit(1)
-        report["done"].append(name)
-        if name == "merge" and own and _merged_scripts(main, before, trunk):
-            # The rest runs as the code this merge brought.
-            report["skipped"] = [n for n, _ in steps[i + 1 :]]
-            return _handoff(main, [branch], "merged", report)
+    # The lock, from the first landing step (the merge) until the `Close` or `Drop` commit is
+    # made: let go once the folder is removed, before the worktree, the push and the cleanup. A
+    # handoff after the merge runs inside it, so the child's commit is still under this hold.
+    with ExitStack() as hold:
+        for i, (name, step) in enumerate(steps):
+            if i == 0:
+                hold.enter_context(_main_lock(main))
+            if name == "remove worktree":
+                hold.close()
+            if name == "remove worktree" and inside:
+                report["skipped"] = [n for n, _ in steps[i:]]
+                report["refusals"].append(
+                    f"worktree kept: this process runs inside {tree}. Run /sdlc:close "
+                    f"{branch.split('-')[0]} from the main checkout to finish."
+                )
+                return emit(3)
+            if name == "archive" and unavailable:
+                continue
+            err = step()
+            if err:
+                report["skipped"] = [n for n, _ in steps[i:]]
+                report["refusals"].append(f"{name} failed: {err}")
+                return emit(1)
+            report["done"].append(name)
+            if name == "remove folder":
+                hold.close()
+                tell_issues()
+            if name == "merge" and own and _merged_scripts(main, before, trunk):
+                # The rest runs as the code this merge brought.
+                report["skipped"] = [n for n, _ in steps[i + 1 :]]
+                return _handoff(main, [branch], "merged", report)
     if plan["on"]:
         push()
     elif nudge := _nudge(main, cfg):

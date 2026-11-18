@@ -31,7 +31,12 @@ close keep one implementation.
     uv run --script factory.py agent 008 --task review --role code
     uv run --script factory.py ready
     uv run --script factory.py land-check
+    uv run --script factory.py train --begin 008 009 --by auto
+    uv run --script factory.py train
     uv run --script factory.py land 008 --by auto
+    uv run --script factory.py resolve 009 --onto <commit>
+    uv run --script factory.py train --eject 009
+    uv run --script factory.py land 008 --close
 
 Every command prints JSON and writes only where its name says: `decisions` to `decisions.md`,
 `carry` to `notes.md`, `stage` to `intent.md`, `write-spec` the approved draft to `spec.md`,
@@ -42,12 +47,15 @@ stage to `intent.md` and the scaffolds a Tier 2 owes),
 `agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
 questions to `runs/spec-questions.md`, never to `spec.md`), and its id and figures under `runs/`.
 The landing's commands (`land`, `land --close`, `resolve`, `gate --land`, `agent` on a landing
-task, and `land-verdicts --record` on a stop) each write the step they take to
-`runs/land-step.md` (`_record_land()`), for the board's landing track.
+task, `train --eject` and `--stop`, and `land-verdicts --record` on a stop) each write the step
+they take to `runs/land-step.md` (`_record_land()`), for the board's landing track; `land --close`
+and `--eject` write the change's place in its train to `runs/land-train.md`.
 Nothing is written outside the change's folder, and nothing under `.git/`, but by the landing and
-`fresh`: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands
-it; `fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
-`resolve`, and commits nothing that stays. `gate` also holds a lock on a slot file,
+`fresh`: `land` commits the change's own branch, the train (`train`, `resolve --onto`, `land
+--close`) rebases it, puts it back (`--eject`, `--stop`) and keeps its state in
+`sdlc-factory-train.json` in the git common dir, and `sdlc.py close` lands it; `fresh`, before a
+run, moves the change's own branch onto the base through `sdlc.py base` and `resolve`, and
+commits nothing that stays. `gate` also holds a lock on a slot file,
 `sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written; `sdlc.py gate`,
 the gate run by hand, takes the same lock files while this plugin is enabled. A command about
 one change runs in its worktree, found from the main checkout when the supervisor runs there
@@ -2028,11 +2036,13 @@ def read_land_step(text: str) -> dict | None:
         return found[0] if found else None
 
     rnd, moves, limit = field(ROUND_RE), field(MOVES_RE), field(LIMIT_RE)
+    train = next((m for m in map(TRAIN_RE.match, lines) if m), None)
     return {
         "step": step.group(1), "round": int(rnd) if rnd else None,
         "moves": int(moves) if moves else None, "limit": int(limit) if limit else None,
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
+        "train": {"k": int(train.group(1)), "n": int(train.group(2))} if train else None,
     }  # fmt: skip
 
 
@@ -2040,12 +2050,15 @@ def land_step_text(
     out: dict, since: str, after: str | None = None, problems: list[str] = ()
 ) -> str:
     """`runs/land-step.md`'s text: the step, the landing round, the moves followed and their
-    bound, since when, and on a stop the step it stopped after and why, each problem one line."""
+    bound, since when, the change's place in a train (`TRAIN: k of n`, when `out` has `train`),
+    and on a stop the step it stopped after and why, each problem one line."""
     rnd = "" if out.get("round") is None else str(out["round"])
     lines = [
         f"STEP: {out['step']}", f"ROUND: {rnd}", f"MOVES: {out.get('moves') or 0}",
         f"LIMIT: {out.get('limit') or ''}", f"SINCE: {since}",
     ]  # fmt: skip
+    if train := out.get("train"):
+        lines.append(f"TRAIN: {train['k']} of {train['n']}")
     if after:
         lines.append(f"AFTER: {after}")
     lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
@@ -2054,8 +2067,9 @@ def land_step_text(
 
 def _record_land(root: Path, folder: Path, step: str, problems: list[str] = ()) -> None:
     """Write `runs/land-step.md` for landing step `step`, keeping `SINCE:` while the step and
-    round hold (the reviewers started together share one start); a `stop` records the step it
-    stopped after, the one the record named, and `problems`. For the board alone."""
+    round hold (the reviewers started together share one start); a `stop` or an `eject` records
+    the step it stopped after, the one the record named, and `problems`; a change a train names
+    carries its place, `TRAIN: k of n`, and the train's moves. For the board alone."""
     path = folder / LAND_STEP
     try:
         old = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
@@ -2067,11 +2081,15 @@ def _record_land(root: Path, folder: Path, step: str, problems: list[str] = ()) 
         "moves": len(moves.read_text(encoding="utf-8").splitlines()) if moves.is_file() else 0,
         "limit": load_config(root)[0]["land"]["moves"],
     }  # fmt: skip
+    train = read_train(root)
+    if train and folder.name in train["order"]:
+        out["moves"] = train["moves"]
+        out["train"] = {"k": train["order"].index(folder.name) + 1, "n": len(train["order"])}
     same = old and old["step"] == step and old["round"] == out["round"]
     since = old["since"] if same and old["since"] else _utc_now()
     after = None
-    if step == "stop" and old:
-        after = old["after"] if old["step"] == "stop" else old["step"]
+    if step in ("stop", "eject") and old:
+        after = old["after"] if old["step"] in ("stop", "eject") else old["step"]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(land_step_text(out, since, after, problems), encoding="utf-8", newline="\n")
 
@@ -2082,8 +2100,10 @@ SHIP_REFUSED = "sdlc.py ship refused to ship it: run /sdlc:ship {id} by hand to 
 
 def _land_refused(root: Path, folder: Path, out: dict, why: str, plain: str | None = None) -> int:
     """A refusal that stops a landing under way: recorded as its `stop`, then emitted. `plain`
-    is what the board shows when `why` is a tool's raw output: what failed and how to see why."""
+    is what the board shows when `why` is a tool's raw output: what failed and how to see why. A
+    train that names the change is told (`_train_fail()`), and ejects it."""
     _record_land(root, folder, "stop", [plain or why])
+    _train_fail(root, folder, plain or why)
     return emit({**out, "refusals": [why]}, 1)
 
 
@@ -2643,11 +2663,21 @@ def landed_build(root: Path) -> str:
 def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) -> dict | None:
     """The gate on landing round `n`'s rebased change, as `_gate_state` reads a build's: None when
     the base branch names no check. `settled` reads a round already reviewed: its last attempt's
-    verdict stands whatever `HEAD` is now, which the landing's own record and later rebases move."""
+    verdict stands whatever `HEAD` is now, which the landing's own record and later rebases move.
+    In a train, the tip's PASS covers every change stacked under it (`train_names()`)."""
     base = _base(root)
     command = _base_check(root, base) if base else None
     if command is None:
         return None
+    # In a train the tip's gate stands in for each change's own: a PASS on a commit that has the
+    # change's stacked commit as an ancestor gated this change as it stands in the stack.
+    named = train_names(root, folder)
+    if named is not None:
+        state, mine = named
+        stacked = mine.get("stacked")
+        for g in reversed(state["gates"]):
+            if g["verdict"] == "PASS" and _is_ancestor(root, stacked, g["commit"]):
+                return {"command": command, "current": "PASS", "exit": g["exit"]}
     record = read_gate_file(land_gate_path(folder, n)) or {"attempts": [], "fails": 0}
     last = record["attempts"][-1] if record["attempts"] else None
     ran_on = last and (settled or last["build"] == landed_build(root))
@@ -2769,6 +2799,10 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
         return emit({"refusals": [why]}, 1)
     if land:
         n = land_round(folder)
+        # In a train, bisection may gate a change that never moved and so opened no round: its
+        # record goes where round 1's would.
+        if n == 0 and train_names(root, folder) is not None:
+            n = 1
         if n == 0:
             return emit({"refusals": ["no landing round is under way: run land first"]}, 1)
         path, build = land_gate_path(folder, n), landed_build(root)
@@ -3009,14 +3043,20 @@ AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 # (`- PROBLEM:` lines). Beside `runs/step.md`, whose shape stays the build's.
 LAND_STEP = Path("runs") / "land-step.md"
 MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
-# The steps a landing records: `ship` (its commit), `rebase` (a landing again), `resolve` (the
-# builder on a conflict), `fix` (the builder on the person's fix), `gate`, `review`, `mend`,
-# `verify`, `close`, and `stop`.
-LAND_STEPS = ("ship", "rebase", "resolve", "fix", "gate", "review", "mend", "verify", "close")
+# The change's place in a landing train, `TRAIN: <k> of <n>`, on a record of a change a train names.
+TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
+# The steps a landing records: `ship` (its commit), `rebase` (a landing again), `stack` (the
+# train stacking it), `resolve` (the builder on a conflict), `fix` (the builder on the person's
+# fix), `gate`, `review`, `mend`, `verify`, `close`, `eject` (the train put it back, a stop with
+# its reason) and `stop`.
+LAND_STEPS = (
+    "ship", "rebase", "stack", "resolve", "fix", "gate", "review", "mend", "verify", "close",
+    "eject",
+)  # fmt: skip
 # The landing tasks `agent` runs, and the step each records as it starts.
 LAND_TASK_STEP = {
-    "resolve": "resolve", "land-fix": "fix", "land-review": "review", "land-verify": "verify",
-    "land-mend": "mend",
+    "resolve": "resolve", "train-resolve": "resolve", "land-fix": "fix", "land-review": "review",
+    "land-verify": "verify", "land-mend": "mend",
 }  # fmt: skip
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
 # decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
@@ -3048,22 +3088,25 @@ USAGE_FIELDS = {
     "in": "input_tokens", "out": "output_tokens",
     "cache_create": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens",
 }  # fmt: skip
-TASKS = ("spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve",
-         "resolve", "land-fix", "land-review", "land-verify", "land-mend")  # fmt: skip
+TASKS = (
+    "spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
+    "train-resolve", "land-fix", "land-review", "land-verify", "land-mend",
+)  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
     "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
     "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
-    "land-fix": "builder", "land-verify": "verifier",
+    "train-resolve": "builder", "land-fix": "builder", "land-verify": "verifier",
 }  # fmt: skip
 # The landing's tasks: the builder resolving a rebase's conflicts or making a fix the person asked
 # for, the review of the change as it now stands on the base branch, and the mend of a landing
 # reply `land-verdicts` names. Never steps of the build's loop, so `verdicts` names none.
-LAND_TASKS = ("resolve", "land-fix", "land-review", "land-verify", "land-mend")
+LAND_TASKS = ("resolve", "train-resolve", "land-fix", "land-review", "land-verify", "land-mend")
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
 TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
              "rework": "rework", "approve": "approve"}  # fmt: skip
-# What the builder resumes on when a task carries on its own session.
+# What the builder resumes on when a task carries on its own session. Never `train-resolve`: the
+# landing agent is a session of its own, with every change in the train, not one change's builder.
 RESUMES = ("fix", "rework", "decided", "mend", "resolve", "land-fix")
 MEND = (
     "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
@@ -3526,7 +3569,9 @@ def _task(
 
 def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Path, bool] | str:
     """The landing's prompts: the builder, resumed, resolving the files a rebase left conflicted,
-    or making the fix the person asked for at landing (`build/land-<n>.ask.md`); a reviewer
+    or making the fix the person asked for at landing (`build/land-<n>.ask.md`); the builder in a
+    fresh session as the train's one landing agent (`train-resolve`), told every change in the
+    train, its spec and its diff, for a conflict while stacking; a reviewer
     reading the change's diff from the commit the round rebased it onto (`_land_diff()`); the
     verifier on what they asked for, against that diff. Each reply goes under
     `reviews/land-<n>/`, the builder's to `build/land-<n>.md`."""
@@ -3558,6 +3603,40 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
                 )
         return (
             prompt,
+            folder / "build" / f"land-{n}.md",
+            False,
+        )
+    if task == "train-resolve":
+        files = _conflicted(root)
+        if not files:
+            return "no conflicted file: run resolve --onto first"
+        named = train_names(root, folder)
+        if named is None:
+            return f"no train names {folder.name}: run train --begin first"
+        state, _ = named
+        listed = []
+        for name in state["order"]:
+            each = state["changes"][name]
+            if each.get("ejected") or not each.get("pre"):
+                continue
+            rel_each = f"{work_rel(root)}/{name}"
+            intent = _git(root, "show", f"{each['pre']}:{rel_each}/intent.md") or ""
+            title = next(
+                (ln[2:].strip() for ln in intent.splitlines() if ln.startswith("# ")), name
+            )
+            spec = "spec.md" if frontmatter(intent).get("tier") == "2" else "intent.md"
+            this = " (this change)" if name == folder.name else ""
+            listed.append(
+                f"- {name}{this}: {title}. Its spec: `git show {each['pre']}:{rel_each}/{spec}`; "
+                f"its diff: `git show {each['pre']}`."
+            )
+        return (
+            head + f"A landing train stacks {len(listed)} changes on {base} in this order, and "
+            f"stacking {folder.name} onto the change before it conflicts in: {', '.join(files)}. "
+            "Resolve each so every change in the train keeps what it was built to do: read each "
+            "change's spec and diff with git show (reads only), edit only those files, run no "
+            "other git command, then report what you kept from each side, ending with "
+            "## Evidence.\n" + "\n".join(listed),
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -3637,6 +3716,12 @@ def _land_diff(root: Path, base: str) -> str | None:
     the branch's tip, where a commit that landed since reads as one the change deleted: None when
     there is no merge base, for the caller to refuse (`_NO_FORK`)."""
     fork = _git(root, "merge-base", base, "HEAD")
+    named = read_train(root)
+    stacked_on = ((named or {}).get("changes") or {}).get(current_branch(root), {}).get("on")
+    if named and stacked_on and current_branch(root) in train_live(named):
+        # In a train the round stacked the change on the one before it, whose own changes are
+        # never this change's to review: the diff starts where its own commits do.
+        fork = stacked_on
     if not fork:
         return None
     return (
@@ -3826,9 +3911,10 @@ def ready(root: Path) -> list[dict]:
 
 # ---------------------------------------------------------------- landing, through sdlc's own code
 #
-# `/sdlc-factory:land` lands a batch of ready changes: each one shipped, committed, brought up to
-# date with the base branch and closed, by `sdlc.py`'s own `ship`, `base` and `close`, never a copy
-# of them. The two plugins always release as one version, so the `sdlc.py` this runs is the one of
+# `/sdlc-factory:land` lands a batch of ready changes as a train: each one shipped and committed,
+# stacked on the one before it, gated once at the tip, and closed, by `sdlc.py`'s own `ship` and
+# `close`, never a copy of them (the train's own rebase stacks; `base` is `fresh`'s, before a run).
+# The two plugins always release as one version, so the `sdlc.py` this runs is the one of
 # its own version, beside it: the clone's, read in place, or the marketplace cache's. It is run,
 # never imported, and only for landing. The batch's one gate passes itself when no change in it
 # carries a risk signal (`land-check`), recorded on each change's commit as `Sdlc-Landed: by=auto`.
@@ -4380,7 +4466,9 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
     """The batch's question, worded here so the skill never words its own: a clause for the checks
     and cases, for the dispositions and confirmations, for the agents' nits to file, and for `How
     to recover:`, each only when some change in the batch has one, and the cases' total ceiling,
-    the cap per change with any; the most times the landing follows `base` moving
+    the cap per change with any; what the train does (stacked in this order, gated once at the
+    tip, a red tip bisected and the change at fault left out, a conflict resolved by one landing
+    agent and reviewed again, closed in order); the most times it follows `base` moving
     (`land.moves`); and its four answers, `yes, with a fix` among them."""
     n = len(batch)
     names = ", ".join(c["change"] for c in batch)
@@ -4408,9 +4496,11 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
         parts.append("with how to recover shown")
     return (
         f"Land {n} change{'s' if n != 1 else ''} in this order, {names}, {', '.join(parts)}, "
-        f"committed, brought up to date with {base} as often as it moves while landing, up to "
-        f"{moves} times (a conflict resolved by its builder and reviewed again), and closed, "
-        "pushed as git.push says? (yes / yes, with a fix / leave one out / no)"
+        f"committed, stacked in this order on {base}, gated once at the tip (a red tip bisected, "
+        "the change at fault left out with why and the rest landed; a conflict resolved by one "
+        f"landing agent and reviewed again), brought up to date as often as {base} moves while "
+        f"landing, up to {moves} times, and closed in order, pushed as git.push says? "
+        "(yes / yes, with a fix / leave one out / no)"
     )
 
 
@@ -4866,49 +4956,78 @@ def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None
     return filed, None
 
 
+def _land_readiness(root: Path, folder: Path, by: str) -> dict:
+    """Whether `land --by` can take change `folder`, read before anything is written: `refusal`,
+    why it can't at all (not ready, `ship it by hand`, or `the gate is the person's` for `auto`
+    with a signal standing), else None; `before`, what the skill runs first at `stage: test`
+    (`accept`, `cases`); and what the landing reads on the way (`meta`, `impact`, `pre`,
+    `unreviewed`). The gate's rule is the script's, never only the skill's: a change only a
+    person can ship is refused whoever passed the gate. The train's reading asks the same
+    question before it names `commit`."""
+    out: dict = {"refusal": None, "before": [], "pre": None, "unreviewed": (), "impact": None}
+    out["meta"] = meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
+    out["impact"] = impact = read_impact(folder)
+    decision = read_decision(folder)[0]
+    if meta.get("stage") not in ("test", "shipped") or decision is None:
+        return {**out, "refusal": f"{folder.name} isn't ready: stage test with a decision"}
+    if (
+        meta.get("stage") == "shipped"
+        and not _commit_failed(root, folder)
+        and (f"\n{LANDED}: " not in "\n" + (_git(root, "log", "-1", "--format=%B") or ""))
+    ):
+        # A commit a person made, `stage: shipped` in it: never amended into or committed over.
+        return {**out, "refusal": (
+            f"HEAD isn't the landing's commit: {folder.name} was shipped by hand, so /sdlc:close "
+            "closes it"
+        )}  # fmt: skip
+    cfg, _ = load_config(root)
+    pre, said = _preflight(folder, root)
+    if pre is None:
+        return {**out, "refusal": f"preflight couldn't be read: {said.strip()[-300:]}"}
+    out["pre"] = pre
+    out["unreviewed"] = unreviewed = _unreviewed_at_test(root, folder, cfg)
+    signals, excluded = land_signals(folder, root, decision, cfg, pre, unreviewed=unreviewed)
+    if excluded:
+        return {**out, "refusal": f"ship it by hand: {'; '.join(excluded)}"}
+    if by == "auto" and signals:
+        return {**out, "refusal": f"the gate is the person's: {'; '.join(signals)}"}
+    if meta.get("stage") == "test":
+        if impact is None:
+            return {**out, "refusal": "no impact to set: decision.md has no - IMPACT:"}
+        if (pre.get("checks") or {}).get("checks") and _accept_state(root, folder) != "PASS":
+            out["before"].append("accept")
+        if (pre.get("cases") or {}).get("scope") and not _note_says(folder, CASES_RE):
+            out["before"].append("cases")
+    return out
+
+
 def cmd_land(root: Path, ident: str, by: str) -> int:
     """Land change `ident`'s first half, in its worktree: the approver's impact on `intent.md`,
-    `sdlc.py ship` (stamped, every path staged; the seed is retired at close), the commit with
-    `land_message()`, then `sdlc.py base`; `filed_nits`, the `[nit]` entries the person's yes filed
-    (`_dispose()`). Its `state`: `current` (nothing to review again),
-    `rebased` (the base moved: the gate and the spec's path run again before close), `conflict`
-    (the rebase was aborted: `resolve` takes it), or `refused`, with why."""
+    `sdlc.py ship` (stamped, every path staged; the seed is retired at close) and the commit with
+    `land_message()`; `filed_nits`, the `[nit]` entries the person's yes filed (`_dispose()`). It
+    stops there, `state: committed`, the commit the train's pre-train commit: bringing the change
+    up to date is the train's (`cmd_train()`, `resolve --onto`), never a rebase here. A change
+    landed before, its commit made, is `committed` again with nothing written. Or `refused`,
+    with why."""
     folder, refusal = find_change(root, ident)
     out: dict = {"change": None, "state": "refused", "refusals": [], "filed_nits": []}
     if refusal:
         return emit({**out, "refusals": [refusal]}, 1)
     out["change"] = folder.name
-    meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
-    impact = read_impact(folder)
     nits: list[str] = []
-    decision = read_decision(folder)[0]
-    if meta.get("stage") not in ("test", "shipped") or decision is None:
-        return emit(
-            {**out, "refusals": [f"{folder.name} isn't ready: stage test with a decision"]}, 1
-        )
-    # The gate's rule is the script's, never only the skill's: a change only a person can ship is
-    # refused whoever passed the gate, and `auto` is refused while any risk signal stands.
-    cfg, _ = load_config(root)
-    pre, said = _preflight(folder, root)
-    if pre is None:
-        return emit({**out, "refusals": [f"preflight couldn't be read: {said.strip()[-300:]}"]}, 1)
-    unreviewed = _unreviewed_at_test(root, folder, cfg)
-    signals, excluded = land_signals(folder, root, decision, cfg, pre, unreviewed=unreviewed)
-    if excluded:
-        return emit({**out, "refusals": [f"ship it by hand: {'; '.join(excluded)}"]}, 1)
-    if by == "auto" and signals:
-        return emit({**out, "refusals": [f"the gate is the person's: {'; '.join(signals)}"]}, 1)
+    ready_ = _land_readiness(root, folder, by)
+    if ready_["refusal"]:
+        return emit({**out, "refusals": [ready_["refusal"]]}, 1)
+    meta, impact, pre, unreviewed = (ready_[k] for k in ("meta", "impact", "pre", "unreviewed"))
     if meta.get("stage") == "test":
         # Every refusal before the first write: what the person's yes approved running has run,
         # on the change as it stands.
-        if impact is None:
-            return emit({**out, "refusals": ["no impact to set: decision.md has no - IMPACT:"]}, 1)
         num = folder.name.split("-")[0]
-        if (pre.get("checks") or {}).get("checks") and _accept_state(root, folder) != "PASS":
+        if "accept" in ready_["before"]:
             why = (f"its acceptance checks haven't passed on the change as it stands: run "
                    f"factory.py accept {num}")  # fmt: skip
             return emit({**out, "refusals": [why]}, 1)
-        if (pre.get("cases") or {}).get("scope") and not _note_says(folder, CASES_RE):
+        if "cases" in ready_["before"]:
             why = f"its skills' cases haven't run: run factory.py cases {num}"
             return emit({**out, "refusals": [why]}, 1)
         if not _set_impact(folder / "intent.md", impact):
@@ -4952,33 +5071,9 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         if why := _land_commit(root, folder, by, nits, unreviewed):
             plain = "its commit failed: the landing's output gives git's words; rerun it once fixed"
             return _land_refused(root, folder, out, why, plain)
-    else:
-        # Landed before, and the base moved again: the earlier landing's record, this step's
-        # with it, goes into the change's commit first, or `base` refuses on a branch with a
-        # commit and uncommitted work.
-        _record_land(root, folder, "rebase")
-        if why := _amend_record(root, folder):
-            return _land_refused(root, folder, out, why)
-    code, based, said = _sdlc(["base", folder.name], root)
-    action = (based or {}).get("action")
-    reason = str((based or {}).get("reason") or said)
-    out.update(head=_git(root, "rev-parse", "--short", "HEAD"), base=based, retired_nits=nits)
-    if action in ("current", "fast-forwarded"):
-        out["state"] = "current"
-    elif action == "rebased":
-        out["state"] = "rebased"
-    elif action == "refused" and "conflict" in reason:
-        out["state"] = "conflict"
-    else:
-        why = f"sdlc.py base refused: {reason.strip()[-500:]}"
-        plain = (
-            "bringing it up to date with the base branch failed: rerun /sdlc-factory:land, or "
-            f"run sdlc.py base {folder.name} in its worktree to see why"
-        )
-        return _land_refused(root, folder, out, why, plain)
-    if out["state"] != "current":
-        (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
-    out["round"] = land_round(folder) or None
+    # Else landed before, its commit made: it stands, and the train stacks it.
+    out.update(head=_git(root, "rev-parse", "--short", "HEAD"), retired_nits=nits)
+    out.update(state="committed", round=land_round(folder) or None)
     return emit(out)
 
 
@@ -5069,13 +5164,31 @@ def _close_stopped(root: Path, folder: Path, why: str, plain: list[str] | None =
     return emit({"refusals": [why]}, 1)
 
 
+def _train_moved(root: Path, folder: Path, state: dict, tip: str) -> int:
+    """The base moved under the train: every change not landed re-stacks onto its new tip, is
+    gated again at the new tip, and the move counts once for the train (`state: moved`)."""
+    state["moves"] += 1
+    state["base_tip"] = state["expected"] = tip
+    for name in train_live(state):
+        state["changes"][name]["stacked"] = None
+    write_train(root, state)  # before the record, which reads the train's moves from it
+    _record_land(root, folder, "stack")
+    if why := _amend_record(root, folder):
+        return _close_stopped(root, folder, why)
+    return emit({"change": folder.name, "state": "moved", "moves": state["moves"]})
+
+
 def cmd_land_close(root: Path, ident: str) -> int:
     """Land change `ident`'s second half: `sdlc.py close` run from the main checkout (from inside
     the change's worktree it would keep the worktree), which merges, archives, removes the folder,
-    the worktree and the branch, and pushes as `git.push` says. Its JSON passes through. When the
-    base branch has moved since the change was gated (`_behind()`), before the close or racing it,
-    no close lands: the move is recorded in `runs/land-moves`, amended in with the record, and the
-    state is `moved`, for `land` to rebase again, up to the base branch's `[land] moves`."""
+    the worktree and the branch, and pushes as `git.push` says. Its JSON passes through. In a
+    train (`train_names()`), only the next change to close: the base's tip is checked against the
+    tip the train expects (another tip is a move: counted once for the train, every change not
+    landed unstacked to stack on the base anew, `state: moved`, nothing closed), the change's own
+    commits are rebased onto the base past the `Close` commits before it (`--onto <base> <on>`),
+    its `runs/land-train.md` and record amended in, and after the close the train records it
+    landed and the new tip it expects. Outside a train a base that moved is a stop: the train is
+    what brings a change up to date."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -5104,26 +5217,60 @@ def cmd_land_close(root: Path, ident: str) -> int:
         r["complete"] = bool(r["reviews"])
     if any(r["complete"] for r in landing):
         write_findings(folder, _rounds_at_depth(root, folder, cfg)[0] + landing)
-    moved = _behind(root) > 0
-    if moved and (why := _record_move(root, folder, cfg)):
-        return _close_stopped(root, folder, why)
-    if moved:
-        # Back to its rebase, the move counted: the record says so, in the commit it amends.
-        _record_land(root, folder, "rebase")
-    if why := _amend_record(root, folder):
-        return _close_stopped(root, folder, why)
-    if moved:
-        return emit(_moved(folder))
     main = worktrees(root)[0][0] if worktrees(root) else root
-    code, closed, said = _sdlc(["close", ident], main)
-    # A move racing the close: read from the base, never from close's words.
-    if code and not (closed or {}).get("done") and _behind(root) > 0:
-        if why := _record_move(root, folder, cfg):
+    named = train_names(root, folder)
+    if named is None:
+        # Outside a train nothing rebases: a base that moved since the change was gated is the
+        # train's to follow, never this command's.
+        if _behind(root) > 0:
+            base = _base(root) or "the base branch"
+            why = (f"{base} moved since {folder.name} was gated: run /sdlc-factory:land again, "
+                   "which stacks it on the base anew")  # fmt: skip
             return _close_stopped(root, folder, why)
-        _record_land(root, folder, "rebase")
         if why := _amend_record(root, folder):
             return _close_stopped(root, folder, why)
-        return emit(_moved(folder))
+    else:
+        state, mine = named
+        if (first := train_live(state)[0]) != folder.name:
+            why = f"{folder.name} isn't the next change to close: {first} is"
+            return emit({"change": folder.name, "refusals": [why]}, 1)
+        base = state["base"]
+        tip = _git(root, "rev-parse", f"refs/heads/{base}") or ""
+        head = _git(root, "rev-parse", "HEAD") or ""
+        _write_train_record(root, folder, state, folder.name)
+        merged = _is_ancestor(root, head, tip)  # a close that stopped after its merge, rerun
+        if tip != state["expected"] and not merged:
+            return _train_moved(root, folder, state, tip)
+        if why := _amend_record(root, folder):
+            return _close_stopped(root, folder, why)
+        if not merged and mine.get("on") and mine["on"] != tip:
+            # Past the `Close` commits of the changes before it: its own commits, replayed onto
+            # the base, whose tree differs from what it sat on only under the change folders.
+            onto = f"refs/heads/{base}"
+            done = subprocess.run(
+                ["git", "-C", str(root), "rebase", "-q", "--onto", onto, mine["on"]],
+                capture_output=True, encoding="utf-8", env={**os.environ, "GIT_EDITOR": "true"},
+            )  # fmt: skip
+            if done.returncode:
+                _git(root, "rebase", "--abort")
+                said = (done.stderr or done.stdout).strip()[-300:]
+                why = f"rebasing {folder.name} onto {base} past the Close commits failed: {said}"
+                return _close_stopped(root, folder, why)
+            mine["on"] = tip
+            write_train(root, state)
+    code, closed, said = _sdlc(["close", ident], main)
+    if named is not None:
+        # Landed once the base's tip is this change's `Close`; the next change's close expects
+        # that tip, and stacks on this change's stacked commit as it did.
+        state, mine = named
+        tip = _git(main, "rev-parse", f"refs/heads/{state['base']}") or ""
+        if tip and _git(main, "log", "-1", "--format=%s", tip) == f"Close {folder.name}":
+            mine["landed"] = state["expected"] = tip
+            state["base_tip"] = mine["stacked"]
+            write_train(main, state)
+        elif code and not (closed or {}).get("done") and tip != state["expected"]:
+            # A move racing the close, read from the base, never from close's words.
+            return _train_moved(root, folder, state, tip)
     if code and not (closed or {}).get("done") and folder.is_dir():
         plain = (closed or {}).get("refusals") or [
             f"sdlc.py close failed: run /sdlc:close {ident} by hand to see why"
@@ -5212,8 +5359,508 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     return emit({**out, "round": n + 1, "ask": path.relative_to(root).as_posix()})
 
 
+# ---------------------------------------------------------------- the landing train
+#
+# `/sdlc-factory:land` lands its batch as a train: each change committed in its worktree (`land`),
+# then stacked on the one before it in `land-check`'s order (`resolve --onto`), the base branch's
+# gate run once at the tip (`gate --land`), a red tip bisected by prefix and the change at fault
+# ejected (`train --eject`), each moved change's landing round reviewed as today (`land-verdicts`),
+# and the changes closed in order (`land --close`, which rebases each onto the base past the
+# `Close` commits before it and runs `sdlc.py close`). `train` is the one reader of the train's
+# state, `TRAIN_STATE` in the git common dir, never in a tree: each reading names the next step and
+# writes the state file alone, with what it derived (a change's pre-train commit, a gate's record,
+# a stacked tree that changed). Branches move only by `resolve --onto`, `land --close`, `--eject`
+# and `--stop`, each printing its undo.
+
+TRAIN_STATE = "sdlc-factory-train.json"
+LAND_TRAIN = Path("runs") / "land-train.md"
+
+
+def train_path(root: Path) -> Path | None:
+    where = _slot_dir(root)
+    return where / TRAIN_STATE if where else None
+
+
+def read_train(root: Path) -> dict | None:
+    """The train under way, or None: no file, or one that won't read."""
+    path = train_path(root)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    ok = isinstance(data, dict) and isinstance(data.get("order"), list)
+    return data if ok and isinstance(data.get("changes"), dict) else None
+
+
+def write_train(root: Path, state: dict | None) -> None:
+    """Write the train's state, or remove it (None): the train is over."""
+    path = train_path(root)
+    if path is None:
+        return
+    if state is None:
+        path.unlink(missing_ok=True)
+        return
+    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
+def train_live(state: dict) -> list[str]:
+    """The changes still in the train, in its order: neither ejected nor landed."""
+    return [
+        n for n in state["order"]
+        if not state["changes"][n].get("ejected") and not state["changes"][n].get("landed")
+    ]  # fmt: skip
+
+
+def train_onto(state: dict, name: str) -> str | None:
+    """What change `name` stacks on: the stacked commit of the live change before it, or, first
+    in the train as it stands, `base_tip` (the base's tip at the start, the last landed change's
+    stacked commit, or the base's tip after a move)."""
+    live = train_live(state)
+    before = live[: live.index(name)] if name in live else []
+    return state["changes"][before[-1]]["stacked"] if before else state["base_tip"]
+
+
+def _stacked(state: dict, name: str) -> bool:
+    """Whether `name` sits where the train wants it: stacked, and on what it should stack on."""
+    mine = state["changes"][name]
+    onto = train_onto(state, name)
+    return bool(mine.get("stacked")) and onto is not None and mine.get("on") == onto
+
+
+def train_names(root: Path, folder: Path) -> tuple[dict, dict] | None:
+    """The train under way and change `folder`'s entry in it, while it is live; else None."""
+    state = read_train(root)
+    if state is None or folder.name not in train_live(state):
+        return None
+    return state, state["changes"][folder.name]
+
+
+def _train_fail(root: Path, folder: Path, why: str) -> None:
+    """A landing command's refusal, told to the train that names the change: its next reading
+    ejects the change, and the rest of the train goes on (R8)."""
+    named = train_names(root, folder)
+    if named is None:
+        return
+    state, mine = named
+    mine["failed"] = why
+    write_train(root, state)
+
+
+def _stacked_now(root: Path, folder: Path, state: dict, mine: dict) -> None:
+    """A stack that finished: the change sits on what it was stacking onto."""
+    mine["on"], mine["stacking"] = mine["stacking"], None
+    mine["stacked"] = _git(root, "rev-parse", "HEAD")
+    write_train(root, state)
+
+
+def _is_ancestor(root: Path, older: str, newer: str) -> bool:
+    return (
+        bool(older and newer)
+        and _git(root, "merge-base", "--is-ancestor", older, newer) is not None
+    )
+
+
+def _tree_changed(root: Path, a: str, b: str) -> bool:
+    """Whether commits `a` and `b` differ outside `.sdlc/work/`: a fix amended into a stacked
+    change, which what is above it must re-stack on; never the records, nor the `Close` commits'
+    removals, which a rebase past them brings."""
+    done = subprocess.run(
+        ["git", "-C", str(root), "diff", "--quiet", a, b, "--", ".", f":(exclude){work_rel(root)}"],
+        capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    return done.returncode == 1
+
+
+def _train_took_part(root: Path, state: dict, name: str) -> list[dict]:
+    """The train's gates change `name` took part in: those whose gated commit has its stacked
+    commit as an ancestor, itself included."""
+    stacked = state["changes"][name].get("stacked")
+    return [g for g in state["gates"] if stacked and _is_ancestor(root, stacked, g["commit"])]
+
+
+def train_record(state: dict, name: str, gates: list[dict]) -> str:
+    """`runs/land-train.md`: the change's place in the train, what it stacked on, the tip's gate
+    (verdict, commit, the change folder whose gate file holds it) and each gate it took part in."""
+    order = state["order"]
+    k, n = order.index(name) + 1, len(order)
+    before = [c for c in order[: k - 1] if not state["changes"][c].get("ejected")]
+    lines = [f"# {name} — landing train", "", f"TRAIN: {k} of {n}"]
+    lines.append(f"STACKED ON: {before[-1] if before else state['base']}")
+    tip = next((g for g in reversed(gates) if g["verdict"] == "PASS"), None)
+    if tip:
+        lines.append(f"TIP GATE: PASS {tip['commit'][:12]} {tip['file']}")
+    lines += [f"GATE: {g['prefix']} {g['verdict']} {g['commit'][:12]} {g['file']}" for g in gates]
+    return "\n".join(lines) + "\n"
+
+
+def _write_train_record(root: Path, folder: Path, state: dict, name: str) -> None:
+    text = train_record(state, name, _train_took_part(root, state, name))
+    (folder / LAND_TRAIN).parent.mkdir(parents=True, exist_ok=True)
+    (folder / LAND_TRAIN).write_text(text, encoding="utf-8", newline="\n")
+
+
+def _landing_commit(tree: Path, name: str) -> str | None:
+    """The branch's tip when it is the landing's commit (`Sdlc-Landed:` on it, its intent
+    shipped), else None."""
+    head = _git(tree, "rev-parse", f"refs/heads/{name}")
+    if not head:
+        return None
+    body = _git(tree, "log", "-1", "--format=%B", head) or ""
+    if f"\n{LANDED}: " not in "\n" + body:
+        return None
+    intent = _git(tree, "show", f"{head}:{work_rel(tree)}/{name}/intent.md") or ""
+    return head if frontmatter(intent).get("stage") == "shipped" else None
+
+
+def _put_back(tree: Path, folder: Path, mine: dict) -> tuple[str | None, str | None]:
+    """A change's branch back at its pre-train commit, `git reset --keep`, its records from the
+    train's attempt (the gate files, its landing round, its steps) checked out into its folder
+    for the caller to record over and amend in: the undo, and why it couldn't."""
+    if _rebasing(tree):
+        _git(tree, "rebase", "--abort")
+    head = _git(tree, "rev-parse", "HEAD") or ""
+    if not mine.get("pre") or head == mine["pre"]:
+        return None, None
+    _amend_record(tree, folder)  # dirty records into the stacked commit, so the reset is clean
+    kept = _git(tree, "rev-parse", "HEAD") or head
+    done = subprocess.run(
+        ["git", "-C", str(tree), "reset", "-q", "--keep", mine["pre"]],
+        capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    if done.returncode:
+        return None, f"git reset --keep {mine['pre'][:12]} refused: {done.stderr.strip()[-300:]}"
+    _git(tree, "checkout", "-q", kept, "--", folder.relative_to(tree).as_posix())
+    marker = folder / "runs" / "land-resolved"
+    if marker.is_file():
+        first = marker.read_text(encoding="utf-8").splitlines()[:1]
+        if first == [f"land-{land_round(folder)}"]:
+            marker.unlink()  # the resolution it names went with the stacked commit
+    return f"git reset --keep {kept}", None
+
+
+def cmd_train(
+    root: Path,
+    begin: list[str] | None = None,
+    by: str | None = None,
+    eject: str | None = None,
+    stop: bool = False,
+) -> int:
+    """The landing train. `--begin <NNN…> --by auto|person` starts one over the named ready
+    changes in `ready`'s order, refused while one is under way (R19). The plain reading names the
+    step the skill takes next and the change it is for, writing the state file alone: `commit`
+    (`land <NNN> --by`, after `before`'s `accept` or `cases`), `stack` (`resolve <NNN> --onto
+    <onto>`), `resolve` (the stack conflicts in `files`: `agent --task train-resolve`, then
+    `resolve --continue`), `gate` (`gate <NNN> --land`, at the tip or a bisected prefix),
+    `eject` (`train --eject <NNN>`, with its `reason`), `accept`, `review`, `verify` and `mend`
+    (as `land-verdicts` names them, in `verdict`), `close` (`land <NNN> --close`), `stop`
+    (`train --stop`, with its `reason`) or `done`. `--eject` puts the change at fault back at
+    its pre-train commit, its records and the reason amended in, and the rest re-stack; `--stop`
+    puts every change not landed back and ends the train (R11)."""
+    trees = worktrees(root)
+    main = trees[0][0] if trees else root
+    cfg, _ = load_config(main)
+    if begin:
+        return _train_begin(main, cfg, begin, by)
+    state = read_train(main)
+    if state is None:
+        if eject or stop:
+            return emit({"refusals": ["no train is under way: run train --begin first"]}, 1)
+        return emit({"under_way": False, "next": None})
+    if eject:
+        return _train_eject(main, state, eject)
+    if stop:
+        return _train_stop(main, state)
+    return _train_reading(main, cfg, state)
+
+
+def _train_begin(main: Path, cfg: dict, idents: list[str], by: str | None) -> int:
+    if (state := read_train(main)) is not None:
+        live = ", ".join(train_live(state)) or "nothing left"
+        why = (f"a train is under way ({live}): run train to resume it, or train --stop to put "
+               "its changes back")  # fmt: skip
+        return emit({"refusals": [why]}, 1)
+    if by not in ("auto", "person"):
+        return emit({"refusals": ["train --begin needs --by auto|person"]}, 1)
+    base = _base(main)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    picked = [r for r in ready(main) if any(names_change(r["change"], i) for i in idents)]
+    unmatched = [i for i in idents if not any(names_change(r["change"], i) for r in picked)]
+    if unmatched:
+        return emit({"refusals": [f"not ready to land: {', '.join(unmatched)}"]}, 1)
+    tip = _git(main, "rev-parse", f"refs/heads/{base}") or ""
+    state = {
+        "base": base, "by": by, "order": [r["change"] for r in picked],
+        "changes": {
+            r["change"]: {"worktree": r["worktree"], "pre": None, "on": None, "stacked": None,
+                          "stacking": None, "landed": None, "ejected": None, "failed": None,
+                          "fault": None}
+            for r in picked
+        },
+        "base_tip": tip, "expected": tip, "moves": 0, "gates": [], "ejections": [],
+        "began": _utc_now(),
+    }  # fmt: skip
+    write_train(main, state)
+    return emit({"state": "begun", "order": state["order"], "by": by, "base": base, "tip": tip})
+
+
+def _change_checkouts(main: Path) -> dict[str, Path]:
+    """Each change's checkout by its branch, one mid-rebase included (its HEAD detached, its
+    branch read from the rebase's own state, `current_branch()`), which `worktrees()` leaves out."""
+    found = {}
+    for path in _all_checkouts(main):
+        branch = current_branch(path)
+        if DIR_RE.match(branch):
+            found[branch] = path
+    return found
+
+
+def _train_reading(main: Path, cfg: dict, state: dict) -> int:
+    base = state["base"]
+    trees = _change_checkouts(main)
+    out: dict = {
+        "under_way": True, "next": None, "change": None, "worktree": None, "by": state["by"],
+        "base": base, "order": state["order"], "live": train_live(state),
+        "landed": [n for n in state["order"] if state["changes"][n].get("landed")],
+        "ejected": [{"change": n, "reason": c["ejected"]} for n, c in state["changes"].items()
+                    if c.get("ejected")],
+        "moves": state["moves"], "limit": cfg["land"]["moves"], "problems": [],
+    }  # fmt: skip
+
+    def done(step: str, name: str | None = None, **more) -> int:
+        tree = trees.get(name) if name else None
+        out.update(next=step, change=name, worktree=str(tree) if tree else None, **more)
+        out["changes"] = {
+            n: {k: c.get(k) for k in ("pre", "on", "stacked", "landed", "ejected", "failed")}
+            for n, c in state["changes"].items()
+        }
+        write_train(main, None if step == "done" else state)
+        return emit(out)
+
+    def stopping(why: str) -> int:
+        state["stop_reason"] = why
+        out["problems"].append(why)
+        return done("stop", reason=why)
+
+    live = train_live(state)
+    if not live:
+        return done("done")
+    if state["moves"] > cfg["land"]["moves"]:
+        return stopping(
+            f"{base} moved {state['moves']} times while the train landed, past [land] moves = "
+            f"{cfg['land']['moves']}: run /sdlc-factory:land again"
+        )
+    # 1. Every change committed, in order, each in its worktree.
+    for name in live:
+        mine, tree = state["changes"][name], trees.get(name)
+        if tree is None:
+            return stopping(f"{name}'s worktree is gone: close or drop it by hand")
+        mine["worktree"] = str(tree)
+        folder = tree / work_rel(tree) / name
+        if mine.get("failed"):
+            mine["fault"] = mine["failed"]
+            return done("eject", name, reason=mine["fault"])
+        head = _landing_commit(tree, name)
+        if head is None:
+            ready_ = _land_readiness(tree, folder, state["by"])
+            if ready_["refusal"]:
+                mine["fault"] = ready_["refusal"]
+                return done("eject", name, reason=mine["fault"])
+            return done("commit", name, before=ready_["before"])
+        if mine.get("pre") is None:
+            mine["pre"] = head
+            mine["on"] = _git(tree, "merge-base", f"refs/heads/{base}", head)
+    # 2. Each stacked on the one before it.
+    for name in live:
+        mine, tree = state["changes"][name], trees[name]
+        if _rebasing(tree):
+            return done("resolve", name, files=_conflicted(tree), round=land_round(
+                tree / work_rel(tree) / name))  # fmt: skip
+        onto = train_onto(state, name)
+        head = _git(tree, "rev-parse", f"refs/heads/{name}") or ""
+        if not _stacked(state, name):
+            if mine.get("on") == onto and not mine.get("stacked"):
+                mine["stacked"] = head  # already there: it never moved
+            else:
+                return done("stack", name, onto=onto)
+        elif head != mine["stacked"] and _tree_changed(tree, mine["stacked"], head):
+            mine["stacked"] = head  # a fix amended in: what is above re-stacks on it
+    # 3. The gate, once at the tip; a red tip bisected.
+    gate = _train_gate(main, cfg, state, trees)
+    write_train(main, state)  # the gates read, for `_land_gate_state()` under `land_verdict()`
+    if gate is not None:
+        if gate["next"] == "stop":
+            return stopping(gate["reason"])
+        if gate["next"] == "eject":
+            state["changes"][gate["change"]]["fault"] = gate["reason"]
+        return done(gate["next"], gate.get("change"), **{
+            k: v for k, v in gate.items() if k not in ("next", "change")
+        })  # fmt: skip
+    # 4. Each moved change's landing round, as `land-verdicts` reads it.
+    for name in train_live(state):
+        tree = trees[name]
+        folder = tree / work_rel(tree) / name
+        n = land_round(folder)
+        if not n:
+            continue
+        verdict = land_verdict(tree, folder, cfg, n)
+        if verdict["next"] == "pass":
+            continue
+        if verdict["next"] == "stop":
+            state["changes"][name]["fault"] = "; ".join(verdict["problems"])
+            return done("eject", name, reason=state["changes"][name]["fault"])
+        return done(verdict["next"], name, verdict=verdict)
+    # 5. Closed in order.
+    return done("close", train_live(state)[0])
+
+
+def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> dict | None:
+    """The gate's step, or None when the tip is green or no gate is due: `gate` at the tip (no
+    attempt on the stack as it stands), `gate` at a bisected prefix, `eject` of the change at
+    fault (the last of the first red prefix), or `stop` when the first change is ejected twice
+    in a row, the base's own check being the likelier fault. The green prefix `g` and red prefix
+    `r` come from the recorded gates still valid for the stack: each prefix's gated commit is its
+    change's stacked commit."""
+    base = state["base"]
+    if _base_check(main, base) is None:
+        return None
+    live = train_live(state)
+    m = len(live)
+    tip = state["changes"][live[-1]]
+    if m == 1 and tip.get("stacked") == tip.get("pre"):
+        return None  # a train of one that never moved: gated as its build was
+    _read_gates(main, state, trees)
+    verdicts: dict[int, dict] = {}
+    for i, name in enumerate(live):
+        stacked = state["changes"][name].get("stacked")
+        for g in state["gates"]:
+            if g["change"] == name and g["commit"] == stacked:
+                verdicts[i + 1] = g  # newest last
+    green = max([0, *(p for p, g in verdicts.items() if g["verdict"] == "PASS")])
+    reds = [p for p, g in verdicts.items() if g["verdict"] != "PASS" and p > green]
+    red = min(reds) if reds else None
+    if red is None:
+        if green == m:
+            return None
+        return {"next": "gate", "change": live[m - 1], "prefix": m, "of": m}
+    if red == green + 1:
+        fault = live[red - 1]
+        g = verdicts[red]
+        reason = (f"the gate failed on the stack up to {fault} (exit {g['exit']}), in "
+                  f"{g['file']}")  # fmt: skip
+        last = state["ejections"][-1:]
+        if red == 1 and last and last[0].get("first") and last[0]["change"] != fault:
+            return {
+                "next": "stop",
+                "reason": (
+                    f"the first change is at fault twice in a row ({last[0]['change']}, then "
+                    f"{fault}): {base}'s own check is the likelier fault; {reason}"
+                ),
+            }
+        return {"next": "eject", "change": fault, "reason": reason, "prefix": red}
+    p = (green + red) // 2
+    return {"next": "gate", "change": live[p - 1], "prefix": p, "of": m, "green": green, "red": red}
+
+
+def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
+    """Every attempt in the live changes' current gate files that gated a stacked commit of the
+    train, recorded once each in the state (`gates`), oldest first."""
+    seen = {(g["change"], g["commit"], g["attempt"]) for g in state["gates"]}
+    for name in train_live(state):
+        tree = trees[name]
+        folder = tree / work_rel(tree) / name
+        path = land_gate_path(folder, land_round(folder) or 1)
+        record = read_gate_file(path)
+        if record is None:
+            continue
+        stacked = state["changes"][name].get("stacked") or ""
+        for i, attempt in enumerate(record["attempts"], 1):
+            if not attempt["build"] or not stacked.startswith(attempt["build"]):
+                continue
+            if (name, stacked, i) in seen:
+                continue
+            seen.add((name, stacked, i))
+            state["gates"].append({
+                "change": name, "commit": stacked, "attempt": i, "verdict": attempt["verdict"],
+                "exit": attempt["exit"], "prefix": train_live(state).index(name) + 1,
+                "file": f"{name}/{path.relative_to(folder).as_posix()}",
+            })  # fmt: skip
+
+
+def _train_eject(main: Path, state: dict, ident: str) -> int:
+    name = next((n for n in state["order"] if names_change(n, ident)), None)
+    if name is None or name not in train_live(state):
+        return emit({"refusals": [f"{ident} isn't a live change of the train"]}, 1)
+    mine = state["changes"][name]
+    reason = mine.get("fault") or mine.get("failed")
+    if not reason:
+        return emit({"refusals": [f"the train names no fault in {name}: run train first"]}, 1)
+    tree = Path(mine["worktree"])
+    folder = tree / work_rel(tree) / name
+    out = {"change": name, "state": "ejected", "reason": reason, "undo": None}
+    undo, why = _put_back(tree, folder, mine)
+    if why:
+        return emit(
+            {**out, "state": "refused", "refusals": [f"couldn't put {name} back: {why}"]}, 1
+        )
+    if mine.get("pre"):
+        _record_land(tree, folder, "eject", [f"ejected from the train: {reason}"])
+        _write_train_record(tree, folder, state, name)
+        _amend_record(tree, folder)
+    first = train_live(state)[0] == name
+    mine.update(ejected=reason, stacked=None, stacking=None, fault=None, failed=None)
+    state["ejections"].append({"change": name, "reason": reason, "first": first})
+    write_train(main, state)
+    out.update(undo=undo, head=(_git(tree, "rev-parse", "HEAD") or "")[:12])
+    return emit(out)
+
+
+def _train_stop(main: Path, state: dict) -> int:
+    reason = state.get("stop_reason") or "the train was stopped"
+    put_back, problems = [], []
+    for name in train_live(state):
+        mine = state["changes"][name]
+        tree = Path(mine["worktree"] or "")
+        if not tree.is_dir():
+            problems.append(f"{name}'s worktree is gone")
+            continue
+        folder = tree / work_rel(tree) / name
+        undo, why = _put_back(tree, folder, mine)
+        if why:
+            problems.append(f"couldn't put {name} back: {why}")
+            continue
+        if mine.get("pre"):
+            _record_land(tree, folder, "stop", [f"the train stopped: {reason}"])
+            _amend_record(tree, folder)
+        put_back.append({"change": name, "undo": undo,
+                         "head": (_git(tree, "rev-parse", "HEAD") or "")[:12]})  # fmt: skip
+    write_train(main, None)
+    return emit({"state": "stopped", "reason": reason, "put_back": put_back, "problems": problems})
+
+
 def _conflicted(root: Path) -> list[str]:
     return (_git(root, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+
+
+def _rebasing(root: Path) -> bool:
+    """Whether a rebase is under way in `root`, stopped at a conflict: git keeps its state in
+    `rebase-merge/` (or `rebase-apply/`) until it ends. Never `REBASE_HEAD`, which outlives it."""
+    for name in ("rebase-merge", "rebase-apply"):
+        where = _git(root, "rev-parse", "--git-path", name)
+        path = Path(where) if where else None
+        if path is not None and not path.is_absolute():
+            path = root / path
+        if path is not None and path.is_dir():
+            return True
+    return False
+
+
+# The change's own records a builder's resolve run writes mid-rebase (its cost line, its step, a
+# fresh session's id): staged by `--continue`, so they go into the rebased commit and the rebase
+# never refuses on them.
+RESOLVE_RECORDS = (COSTS, LAND_STEP, Path("runs") / "builder.sessions")
 
 
 COUNTER = ".sdlc/last-id"
@@ -5235,11 +5882,15 @@ def _settle_counter(root: Path) -> None:
     _git(root, "add", "--", COUNTER)
 
 
-def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
-    """A rebase onto the base branch that conflicts, left for the builder: `resolve` starts it and
-    lists the conflicted files (or finds none, `clean`, and it is done: `.sdlc/last-id` alone
-    settles itself); `--continue` checks no conflict
-    marker is left in them, stages them and continues, aborting the rebase on a second conflict.
+def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> int:
+    """A rebase that conflicts, left for the builder: `resolve` starts it and lists the conflicted
+    files (or finds none, `clean`, and it is done: `.sdlc/last-id` alone settles itself);
+    `--continue` checks no conflict marker is left in them, stages them and continues, aborting
+    the rebase on a second conflict. With `--onto <commit>`, the train's stack: the change's own
+    commits (from `on`, where the train found them) rebased onto `onto`, the commit of the change
+    before it or the base's tip, its dirty records amended in first, a landing round opened when
+    it moves: `current` (already there), `stacked`, or `conflict`, for `agent --task
+    train-resolve`. Without `--onto` the rebase is onto the base branch, as `fresh` needs it.
     Every git step is this script's: the builder only edits the files it is given. A conflicted
     register loses, before it is staged, every entry the landing deleted from it, whatever the
     builder kept: the change's `idea:` and `fixes:` entries and the nits it retired, each by id
@@ -5255,6 +5906,52 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         why = "no base branch: set [git] base in .sdlc/config.toml"
         return _land_refused(root, folder, {}, why)
     env = {**os.environ, "GIT_EDITOR": "true"}
+    named = train_names(root, folder)
+    if onto is not None and not cont:
+        if named is None:
+            return emit({"refusals": [f"no train names {folder.name}: run train --begin first"]}, 1)
+        state, mine = named
+        if not mine.get("on"):
+            return emit({"refusals": [f"{folder.name} isn't committed yet: run land first"]}, 1)
+        if _rebasing(root):
+            return emit({"refusals": ["a rebase is under way: resolve --continue"]}, 1)
+        if why := _amend_record(root, folder):
+            return _land_refused(root, folder, {}, why)
+        head = _git(root, "rev-parse", "HEAD") or ""
+        if mine["on"] == onto:
+            mine["stacked"], mine["stacking"] = head, None
+            write_train(root, state)
+            return emit({"change": folder.name, "state": "current", "head": head[:12]})
+        (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
+        mine["stacking"] = onto
+        write_train(root, state)
+        upstream = mine["on"]
+        done = subprocess.run(["git", "-C", str(root), "rebase", "-q", "--onto", onto, upstream],
+                              capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+        _settle_counter(root)
+        files = _conflicted(root)
+        for _ in range(RESOLVE_STEPS):
+            if not (done.returncode and not files and _rebasing(root)):
+                break
+            done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
+                                  capture_output=True, encoding="utf-8", env=env)  # fmt: skip
+            _settle_counter(root)
+            files = _conflicted(root)
+        if done.returncode and not files:
+            _git(root, "rebase", "--abort")
+            mine["stacking"] = None
+            write_train(root, state)
+            why = f"git rebase --onto {onto[:12]} failed: {done.stderr.strip()[-300:]}"
+            return _land_refused(root, folder, {}, why)
+        if files:
+            _record_land(root, folder, "stack")
+            return emit({"change": folder.name, "state": "conflict", "conflicted": files,
+                         "onto": onto, "round": land_round(folder)})  # fmt: skip
+        _stacked_now(root, folder, state, mine)
+        _record_land(root, folder, "stack")
+        return emit({"change": folder.name, "state": "stacked", "onto": onto,
+                     "head": (_git(root, "rev-parse", "HEAD") or "")[:12],
+                     "round": land_round(folder)})  # fmt: skip
     if not cont:
         done = subprocess.run(["git", "-C", str(root), "rebase", "-q", base], capture_output=True,
                               encoding="utf-8", env=env)  # fmt: skip
@@ -5263,8 +5960,7 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         # Only the counter conflicted, and it settled itself: nothing is left for the builder,
         # so the rebase goes on, a commit at a time, as long as that is all a commit conflicts on.
         for _ in range(RESOLVE_STEPS):
-            stopped = _git(root, "rev-parse", "-q", "--verify", "REBASE_HEAD")
-            if not (done.returncode and not files and stopped):
+            if not (done.returncode and not files and _rebasing(root)):
                 break
             done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"],
                                   capture_output=True, encoding="utf-8", env=env)  # fmt: skip
@@ -5296,15 +5992,20 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
     # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
     # own record, so it goes into the rebased commit, or `--continue` refuses on it.
     # So did the builder's step, `resolve`, in the landing's step record.
-    for record in (COSTS, LAND_STEP):
+    for record in RESOLVE_RECORDS:
         if (folder / record).is_file():
             _git(root, "add", "--", (folder / record).relative_to(root).as_posix())
     done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
                           encoding="utf-8", env=env)  # fmt: skip
     if done.returncode:
         _git(root, "rebase", "--abort")
+        if named is not None:
+            named[1]["stacking"] = None
+            write_train(root, named[0])
         why = "a second conflict: the rebase was aborted, ship it by hand"
         return _land_refused(root, folder, {}, why)
+    if named is not None and named[1].get("stacking"):
+        _stacked_now(root, folder, named[0], named[1])
     marker = folder / "runs" / "land-resolved"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(
@@ -6025,6 +6726,12 @@ def main() -> int:
     p_resolve = sub.add_parser("resolve", help="leave a conflicting rebase for the builder")
     p_resolve.add_argument("id")
     p_resolve.add_argument("--continue", dest="cont", action="store_true")
+    p_resolve.add_argument("--onto", help="the train's stack: onto this commit")
+    p_train = sub.add_parser("train", help="the landing train: what it does next")
+    p_train.add_argument("--begin", nargs="+", metavar="NNN", help="start one over these changes")
+    p_train.add_argument("--by", choices=("auto", "person"), help="who passed the batch's gate")
+    p_train.add_argument("--eject", metavar="NNN", help="put the change at fault back, and go on")
+    p_train.add_argument("--stop", action="store_true", help="put every unlanded change back")
     p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
     p_lv.add_argument("id")
     p_lv.add_argument(
@@ -6071,7 +6778,9 @@ def main() -> int:
             return emit({"refusals": ["land needs --by auto|person, or --close"]}, 1)
         return cmd_land(root, args.id, args.by)
     if args.cmd == "resolve":
-        return cmd_resolve(root, args.id, args.cont)
+        return cmd_resolve(root, args.id, args.cont, args.onto)
+    if args.cmd == "train":
+        return cmd_train(root, args.begin, args.by, args.eject, args.stop)
     if args.cmd == "land-verdicts":
         return cmd_land_verdicts(root, args.id, args.record)
     if args.cmd == "accept":

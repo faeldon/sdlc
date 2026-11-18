@@ -77,15 +77,18 @@ reviewing, and deciding whether to escalate.
   through `factory.py ask`, which writes nothing, and starts no agent.
 - **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and
-  the nits its intent or spec names by id retired, committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
-  `base` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it, never a
-  copy). A change the base branch moved under is gated by the script again, as rebased, before
-  its review; a red gate stops it, for you to ship by hand. A rebase that conflicts goes to the
-  change's own builder, and every reviewer at its depth checks the resolution before it lands;
-  what the landing deleted from the register (the change's own seeds, the bugs it fixes, the nits
-  it retired) stays deleted whatever the resolution kept.
-  When the base branch moves again before a change closes, the landing goes back to that change's
-  rebase, gates and reviews it as it now stands, and closes it, up to `[land] moves` times. Answer
+  the nits its intent or spec names by id retired, committed, and landed as a **train**, through
+  `sdlc`'s own `ship` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it,
+  never a copy). The train stacks each change on the one before it, in order, on the base
+  branch; a stack that conflicts goes to one landing agent, the builder given every change's
+  spec and diff, and every reviewer at that change's depth checks the resolution before it
+  lands. The base branch's gate runs once, at the stack's tip; a red tip is bisected by prefix
+  and the change at fault is ejected, back to its commit as it was before the train with the
+  reason and the gate file in its commit, while the rest land; nothing of it reaches the base
+  branch. Then the changes close in order, each by close's fast-forward, so the base branch's
+  history reads as a one-at-a-time landing. When the base branch moves under the train, every
+  change not landed re-stacks onto it and the tip is gated again, up to `[land] moves` times. A
+  rerun resumes a train under way, and the board shows each change's place in it. Answer
   `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
   reviewer at its depth reads it before it lands. Your words for it go into the change's
   `decisions.md` as a ticked `(person, fix)` line, never on a command line. A path changed after
@@ -433,8 +436,9 @@ prompt, model and reply's file, and the session ids under `runs/` that measuring
 the one place it runs `claude`); an approved spec draft copied into `spec.md` byte for byte
 (`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
-batch, its signals and its question (`land-check`), each change's landing (`land`, `resolve`,
-`land-fix`, `land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
+batch, its signals and its question (`land-check`), the train and its next step (`train`, with
+`--begin`, `--eject` and `--stop`), each change's landing (`land`, `resolve --onto`, `land-fix`,
+`land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
 the board's landing track (`land-verdicts --record` adds a stop and why), its acceptance checks and skills' cases (`accept`, `cases`, never
 pre-approved);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of

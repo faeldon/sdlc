@@ -1983,9 +1983,14 @@ LANDS = {
     "mend": ["done", "done", "done", "current", "todo", "todo"],
     "verify": ["done", "done", "done", "done", "current", "todo"],
     "close": ["done", "done", "done", "done", "done", "current"],
+    # 139: a train's steps. `stack` sits at the rebase; `eject` is a stop, at the gate when the
+    # record names no step it stopped after.
+    "stack": ["done", "current", "todo", "todo", "todo", "todo"],
+    "eject": ["done", "done", "stopped", "todo", "todo", "todo"],
 }
 LABELS = {"resolve": ("rebase", "resolving"), "fix": ("rebase", "fixing"),
-          "mend": ("review", "mending")}  # fmt: skip
+          "mend": ("review", "mending"), "stack": ("rebase", "stacking")}  # fmt: skip
+STOPS = ("eject",)
 
 
 @pytest.mark.portable
@@ -2001,7 +2006,10 @@ def test_a_landing_card_shows_its_landing_track(repo, step) -> None:
     assert [s["name"] for s in progress["steps"]] == list(board.LAND_TRACK)
     assert [s["state"] for s in progress["steps"]] == LANDS[step]
     assert (progress["round"], progress["moves"], progress["limit"]) == (1, 1, 3)
-    assert progress["elapsed"] > 0 and progress["problems"] == []
+    if step in STOPS:
+        assert progress["stopped"] is True and progress["elapsed"] is None
+    else:
+        assert progress["elapsed"] > 0 and progress["problems"] == []
     labels = {s["name"]: s["label"] for s in progress["steps"]}
     if step in LABELS:
         assert labels[LABELS[step][0]] == LABELS[step][1]
@@ -2053,16 +2061,49 @@ def test_a_landing_record_counts_only_at_a_landing_stage(repo) -> None:
 @pytest.mark.portable
 def test_the_landing_step_record_is_a_pinned_copy() -> None:
     """133: the board's copies are `factory.py`'s, and its writer reads back through the board."""
-    for name in ("MOVES_RE", "PROBLEM_RE"):
+    for name in ("MOVES_RE", "PROBLEM_RE", "TRAIN_RE"):
         assert getattr(board, name).pattern == getattr(factory, name).pattern, name
     assert board.LAND_STEP == factory.LAND_STEP
     assert set(board.LAND_AT) == set(factory.LAND_STEPS)
     for out, after, problems in (
         ({"step": "review", "round": 2, "moves": 1, "limit": 3}, None, []),
         ({"step": "stop", "round": None, "moves": 0, "limit": 2}, "ship", ["it broke"]),
-    ):
+        ({"step": "stack", "round": 1, "moves": 0, "limit": 3, "train": {"k": 2, "n": 3}}, None,
+         []),
+        ({"step": "eject", "round": 1, "moves": 0, "limit": 3, "train": {"k": 2, "n": 3}}, "gate",
+         ["ejected from the train: the gate failed"]),
+    ):  # fmt: skip
         text = factory.land_step_text(out, "2026-11-18T10:00:00Z", after, problems)
         assert board.read_land_step(text) == factory.read_land_step(text)
+        assert board.read_land_step(text)["train"] == out.get("train")
+
+
+@pytest.mark.portable
+def test_a_train_member_shows_its_place_and_an_ejection(repo) -> None:
+    """139 R18: a change in a train shows `k of n in a train`, `stack` at the rebase position as
+    stacking, and `eject` as a stop at the step it stopped after, with its reason."""
+    folder = _landing_at(repo, "stack")
+    out = {"step": "stack", "round": 1, "moves": 0, "limit": 3, "train": {"k": 2, "n": 3}}
+    _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2000-01-01T00:00:00Z"))
+    progress = _cards(repo)["030-draft-land"]["progress"]
+    assert progress["train"] == "2 of 3" and progress["stopped"] is False
+    assert [s["state"] for s in progress["steps"]] == LANDS["stack"]
+    assert {s["name"]: s["label"] for s in progress["steps"]}["rebase"] == "stacking"
+    why = "ejected from the train: the gate failed on the stack up to 030-draft-land (exit 1)"
+    out = {"step": "eject", "round": 1, "moves": 0, "limit": 3, "train": {"k": 2, "n": 3}}
+    _write(folder / factory.LAND_STEP,
+           factory.land_step_text(out, "2000-01-01T00:00:00Z", "gate", [why]))  # fmt: skip
+    card = _cards(repo)["030-draft-land"]
+    progress = card["progress"]
+    assert progress["stopped"] is True and progress["after"] == "gate"
+    assert [s["state"] for s in progress["steps"]] == ["done", "done", "stopped", "todo", "todo",
+                                                      "todo"]  # fmt: skip
+    assert progress["problems"] == [why] and progress["train"] == "2 of 3"
+    assert "the landing stopped at gate" in card["next"], card["next"]
+    html = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert "in a train" in html and "p.train" in html, "the page shows the place"
+    _landing_at(repo, "gate", name="031-draft-plain")
+    assert _cards(repo)["031-draft-plain"]["progress"]["train"] is None
 
 
 @pytest.mark.portable

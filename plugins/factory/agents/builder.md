@@ -160,10 +160,12 @@ gate runs again. Two fixes a round; a third red gate stops the change for the pe
 
 ## A conflict, while landing
 
-When `/sdlc-factory:land` resumes you because the base branch moved and rebasing onto it
-conflicts, the prompt names the conflicted files. Resolve each so both sides' intent survives:
-what the base branch now holds, and what this change was built to do. Edit only those files,
-removing every conflict marker, and run no git command: `factory.py` stages them and continues the
+When `/sdlc-factory:land` starts you as its one landing agent because stacking a change on the
+one before it conflicts, the prompt names the conflicted files and every change in the train: its
+title, its spec (`git show <commit>:…/spec.md`, or `intent.md` at Tier 1) and its diff (`git show
+<commit>`). Read those with `git show`, a read, to see what each change was built to do, then
+resolve each file so every change in the train keeps its intent. Edit only those files, removing
+every conflict marker, and run no other git command: `factory.py` stages them and continues the
 rebase, and reviewers check your resolution before the change lands. Run the tests and the gate on
 the result, and report what you kept from each side, ending with its `## Evidence`.
 
