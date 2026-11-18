@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -248,23 +249,31 @@ def test_the_copies_are_the_factorys() -> None:
     """R3: the record's regexes and figures are `factory.py`'s."""
     for name in ("ATTEMPT_VERDICT_RE", "BUILD_RE", "SECONDS_RE"):
         assert getattr(sdlc, name).pattern == getattr(factory, name).pattern, name
-    for name in ("GATE_TAIL", "GATE_TIMEOUT", "CLONE_MARK", "HOME_MARK"):
+    for name in ("GATE_TAIL", "GATE_TIMEOUT", "CLONE_MARK", "HOME_MARK", "TMP_MARK", "USER_MARK"):
         assert getattr(sdlc, name) == getattr(factory, name), name
 
 
 def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
-    """R5: the main checkout, then the change's checkout, then home, from inside a worktree."""
+    """R5: the main checkout, then the change's checkout, then home, then the temp directory and
+    the login name inside a marked path, from inside a worktree."""
     monkeypatch.setenv("HOME", str(repo.parent))
+    temp = repo.parent / "T"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    for name in ("LOGNAME", "USER", "LNAME", "USERNAME"):
+        monkeypatch.setenv(name, "drafter")
     tree = repo / ".claude" / "worktrees" / "009-elsewhere"
     _git(repo, "worktree", "add", "-q", "-b", "009-elsewhere", str(tree), "main")
     outside = repo.parent / "cache" / "venv"
     text = (
         f"{repo}/x and {tree}/y and {outside} and {tree.resolve().as_posix()}/z\n"
         f"{repo.resolve()}/w\n"
+        f"{temp}/pytest-of-drafter/x, as drafter said, not /var{temp}/q or {temp}foo\n"
     )
     ours = sdlc._hand_placeholders(text, tree)
     assert ours == factory._placeholders(text, tree)
     assert str(repo) not in ours and f"{sdlc.HOME_MARK}/cache/venv" in ours
+    assert "pytest-of-drafter" not in ours and "as drafter said" in ours
 
 
 @pytest.mark.parametrize(

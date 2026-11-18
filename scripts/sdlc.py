@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import getpass
 import hashlib
 import importlib.util
 import json
@@ -55,6 +56,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -2818,6 +2820,8 @@ GATE_TIMEOUT = 30 * 60
 GATE_TAIL = 80
 CLONE_MARK = "<path-to-clone>"
 HOME_MARK = "<home>"
+TMP_MARK = "<tmp>"
+USER_MARK = "<user>"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
@@ -2863,13 +2867,25 @@ def hand_build(checkout: Path, trunk: str) -> str:
     return _hand_hash(fork, _hand_digests(checkout, paths))
 
 
+def _hand_login() -> str | None:
+    """The login name, as pytest names its temp folder by it; None when the platform can't say.
+    A copy of `factory.py`'s `_login()`."""
+    try:
+        return getpass.getuser() or None
+    except (OSError, KeyError, ImportError):
+        return None
+
+
 def _hand_placeholders(text: str, root: Path) -> str:
     """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
-    `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
-    the home directory reads `<path-to-clone>/…`, never `<home>/…`. Each path is matched as
-    given and resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too. A
-    copy of `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed
-    with the change, and a machine's layout never reaches its history."""
+    `CLONE_MARK`, then the home directory as `HOME_MARK` and the temp directory as `TMP_MARK`: in
+    that order, so a checkout under the home directory reads `<path-to-clone>/…`, never
+    `<home>/…`, and a home under the temp directory `<home>/…`. Each path is matched as given and
+    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
+    path: never inside a longer one. Then the login name, where no letter or digit borders it
+    inside a path a mark begins, is `USER_MARK`, and never in prose. A copy of `factory.py`'s
+    `_placeholders()`, pinned to it by a test: the record is committed with the change, and a
+    machine's layout never reaches its history."""
     listed = _git(root, "worktree", "list", "--porcelain") or ""
     checkouts = [Path(line[len("worktree ") :]) for line in listed.splitlines()
                  if line.startswith("worktree ")]  # fmt: skip
@@ -2877,10 +2893,15 @@ def _hand_placeholders(text: str, root: Path) -> str:
         (checkouts[0] if checkouts else root, CLONE_MARK),
         (root, CLONE_MARK),
         (Path.home(), HOME_MARK),
+        (Path(tempfile.gettempdir()), TMP_MARK),
     ):
         forms = {str(path), path.as_posix(), str(path.resolve()), path.resolve().as_posix()}
         for form in sorted(forms - {"", "/", "."}, key=len, reverse=True):
-            text = text.replace(form, mark)
+            text = re.sub(rf"(?<![\w.-]){re.escape(form)}(?![\w-])", mark, text)
+    if login := _hand_login():
+        name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
+        marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
+        text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
     return text
 
 

@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -3213,6 +3214,33 @@ def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch)
     ]
 
 
+def test_the_gate_records_no_temp_path_or_user_name(tmp_path, capsys, monkeypatch) -> None:
+    """A failing test's `tmp_path` sits under the temp directory, in pytest's `pytest-of-<login>`:
+    the record reads `<tmp>`, and the login name `<user>` inside a marked path, while the same
+    word in prose stays as it was printed."""
+    temp = tmp_path / "T"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for name in ("LOGNAME", "USER", "LNAME", "USERNAME"):
+        monkeypatch.setenv(name, "drafter")
+    monkeypatch.setenv("FAKE_TMP_PATH", f"{temp}/pytest-of-drafter/popen-gw4/test_x0")
+    root = _change(tmp_path)
+    _gate_config(
+        root,
+        'echo "tmp_path = PosixPath(\'$FAKE_TMP_PATH\')"; echo "drafter said hi"; exit 1',
+    )
+    _build_report(root, 1)
+    code, out = _gate(root, capsys)
+    assert code == 1 and out["verdict"] == "FAIL"
+    record = (root / ".sdlc" / "work" / NAME / "build" / "round-1.gate.md").read_text("utf-8")
+    assert "    tmp_path = PosixPath('<tmp>/pytest-of-<user>/popen-gw4/test_x0')" in record
+    assert "    drafter said hi" in record
+    for path in {str(temp), str(temp.resolve()), "pytest-of-drafter"}:
+        assert path not in record, path
+    assert factory.is_read("ls <tmp>/pytest-of-<user>/x")
+
+
 def _forbidden_shapes() -> re.Pattern:
     """`tests/test_nothing_local.py`'s `PATTERNS`, the shapes the gate refuses in any record."""
     scan = _load("nothing_local_for_factory", ROOT / "tests" / "test_nothing_local.py")
@@ -3234,6 +3262,19 @@ def test_a_path_under_home_is_filed_in_a_form_the_scan_accepts(tmp_path, monkeyp
     assert str(tmp_path) not in filed and str(tmp_path.resolve()) not in filed
     assert f"{factory.HOME_MARK}/projects/other/x.py" in filed
     assert _forbidden_shapes().search(filed) is None, filed
+
+
+def test_a_path_is_marked_only_as_a_whole_path(tmp_path, monkeypatch) -> None:
+    """A temp directory as short as Linux's `/tmp` is a substring of `/var/tmp` and `/tmpfoo`:
+    each is left as printed, and only the temp directory itself, whole, reads `<tmp>`."""
+    temp = tmp_path / "t"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    root = _change(tmp_path)
+    text = f"{temp}/x and {temp}, then /var{temp}/y and {temp}foo/z\n"
+    filed = factory._placeholders(text, root)
+    assert filed == f"<tmp>/x and <tmp>, then /var{temp}/y and {temp}foo/z\n", filed
 
 
 def test_every_reply_is_filed_without_this_machine_s_paths(

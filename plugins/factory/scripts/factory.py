@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import getpass
 import hashlib
 import json
 import os
@@ -93,6 +94,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 import uuid
@@ -257,10 +259,13 @@ RUNS_THE_CHANGE = ("behaviour",)
 GATE_TIMEOUT = 30 * 60
 GATE_FIXES = 2
 GATE_TAIL = 80
-# What the recorded output says in place of the main checkout's root and the home directory: the
-# record is committed with the change, and a machine's layout never reaches its history.
+# What the recorded output says in place of the main checkout's root, the home directory, the temp
+# directory and, inside a path one of those begins, the login name (pytest's `pytest-of-<login>`):
+# the record is committed with the change, and a machine's layout never reaches its history.
 CLONE_MARK = "<path-to-clone>"
 HOME_MARK = "<home>"
+TMP_MARK = "<tmp>"
+USER_MARK = "<user>"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # How long an attempt ran, which the board reads from a closed change's history for its estimates.
@@ -1394,7 +1399,9 @@ def is_read(command: str) -> bool:
         return False
     # A filed reply names this machine's paths by the marks (`_placeholders()`), whose `<` and `>`
     # are part of a word there, never a redirect.
-    command = command.replace(HOME_MARK, "HOME").replace(CLONE_MARK, "CLONE")
+    for mark, word in ((HOME_MARK, "HOME"), (CLONE_MARK, "CLONE"), (TMP_MARK, "TMP"),
+                       (USER_MARK, "USER")):  # fmt: skip
+        command = command.replace(mark, word)
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split, lexer.commenters = True, ""
     try:
@@ -2685,20 +2692,37 @@ def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) ->
     return {"command": command, "current": current, "exit": last["exit"] if last else None}
 
 
+def _login() -> str | None:
+    """The login name, as pytest names its temp folder by it; None when the platform can't say."""
+    try:
+        return getpass.getuser() or None
+    except (OSError, KeyError, ImportError):
+        return None
+
+
 def _placeholders(text: str, root: Path) -> str:
     """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
-    `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
-    the home directory reads `<path-to-clone>/…`, never `<home>/…`. Each path is matched as
-    given and resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too."""
+    `CLONE_MARK`, then the home directory as `HOME_MARK` and the temp directory as `TMP_MARK`: in
+    that order, so a checkout under the home directory reads `<path-to-clone>/…`, never
+    `<home>/…`, and a home under the temp directory `<home>/…`. Each path is matched as given and
+    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
+    path: never inside a longer one, so `/tmp` leaves `/var/tmp` and `/tmpfoo` as they are. Then
+    the login name, where no letter or digit borders it inside a path a mark begins, is
+    `USER_MARK`, and never in prose, where a short name can be an ordinary word."""
     checkouts = _all_checkouts(root)
     for path, mark in (
         (checkouts[0] if checkouts else root, CLONE_MARK),
         (root, CLONE_MARK),
         (Path.home(), HOME_MARK),
+        (Path(tempfile.gettempdir()), TMP_MARK),
     ):
         forms = {str(path), path.as_posix(), str(path.resolve()), path.resolve().as_posix()}
         for form in sorted(forms - {"", "/", "."}, key=len, reverse=True):
-            text = text.replace(form, mark)
+            text = re.sub(rf"(?<![\w.-]){re.escape(form)}(?![\w-])", mark, text)
+    if login := _login():
+        name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
+        marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
+        text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
     return text
 
 
