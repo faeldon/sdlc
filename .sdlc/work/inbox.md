@@ -142,34 +142,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-18-2] [idea] Ship's security pass at the factory's depth
-
-Left undone by 114-one-review, carried forward when it shipped: gap: security: ship checks only secrets, plus the fresh reviewer on a sensitive path; it has no security pass at the depth of the factory's `reviewer-security`.
-See .sdlc/work/114-one-review/notes.md in its commit.
-Raised 2026-11-18.
-
-
-## [2026-11-18-3] [idea] Ship runs the spec's path end to end
-
-Left undone by 114-one-review, carried forward when it shipped: gap: end-to-end: ship never runs the spec's path end to end, as the factory's `reviewer-behaviour` does at landing.
-See .sdlc/work/114-one-review/notes.md in its commit.
-Raised 2026-11-18.
-
-
-## [2026-11-18-4] [idea] Ship's UI review for changes that render a page
-
-Left undone by 114-one-review, carried forward when it shipped: gap: ui: ship has no UI review of a change that renders a page, where the factory runs `reviewer-ui` when `[ui]` is set.
-See .sdlc/work/114-one-review/notes.md in its commit.
-Raised 2026-11-18.
-
-
-## [2026-11-18-5] [idea] Ship's UX review when `[ui]` is set
-
-Left undone by 114-one-review, carried forward when it shipped: gap: ux: ship has no UX review, where the factory runs `reviewer-ux` when `[ui]` is set.
-See .sdlc/work/114-one-review/notes.md in its commit.
-Raised 2026-11-18.
-
-
 ## [2026-11-18-17] [idea] Move a stopped landing's card to Needs you
 
 Left undone by 133-board-tracks-landing, carried forward when it landed: A stopped landing shows on its card but keeps its column; moving it to Needs you would mean `sdlc.needs_of()` (shared with `status`) reading `runs/land-step.md`.
@@ -349,3 +321,29 @@ Paths: tests/test_factory.py
 Cost: S
 Value: low
 Raised by: 142-pay-down-todays-nits (correctness)
+
+## [2026-11-18-57] [idea] Tell a hand-built change how to take screenshots for ship's UI review
+
+Left undone by 143-ship-review-parity, carried forward when it landed: Say in `ui.md`, or in `passes.ui.why` when `sdlc-factory` is enabled, how a hand-built change takes its screenshots (`factory.py shots`), once the person decides whether ship should point at a command that starts a dev server.
+See .sdlc/work/143-ship-review-parity/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-58] [nit] the line says "whose own behaviour reviewer ran" and security.md and ui.md say the same of their factory reviewers.
+
+Raised by the code review of 143-ship-review-parity, round 1: skills/ship/behaviour.md:3: the line says "whose own behaviour reviewer ran" and security.md and ui.md say the same of their factory reviewers. Only the factory case is meant, so "a factory run, whose own reviewers ran" would match `_passes_report()`'s wording.
+
+Theme: docs
+Paths: skills/ship/behaviour.md
+Cost: S
+Value: low
+Raised by: 143-ship-review-parity (correctness)
+
+## [2026-11-18-59] [nit] it says the pass applies when the diff touches a `review.sensitive` path.
+
+Raised by the code review of 143-ship-review-parity, round 1: skills/ship/security.md:3: it says the pass applies when the diff touches a `review.sensitive` path. The script keys on `risk.deep`, so the sentence is only as exact as `deep` is. Say "a deep diff" to follow R2.
+
+Theme: docs
+Paths: skills/ship/security.md
+Cost: S
+Value: low
+Raised by: 143-ship-review-parity (correctness)
