@@ -237,3 +237,11 @@ Raised 2026-11-18.
 Left undone by 128-unmark-withdrawn-issues, carried forward when it landed: `skills/triage/SKILL.md`'s `dangling` bullet offers every dangling issue for triage again, one an unpushed commit closes included: it could say that one waits on the push.
 See .sdlc/work/128-unmark-withdrawn-issues/notes.md in its commit.
 Raised 2026-11-18.
+
+## [2026-11-18-13] [idea] The approver weighs assumed defaults, and shows alternatives for the ones it escalates
+
+The approver escalates for every assumed default, but confirming one offers no alternatives, so it's
+hard to judge. Have the approver weigh the defaults itself and escalate only what it can't decide;
+for those, show the default beside the alternatives that were considered, with pros and cons.
+Theme: factory
+Raised 2026-11-18.
