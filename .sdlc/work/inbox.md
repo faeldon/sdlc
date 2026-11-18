@@ -24,15 +24,18 @@ Raised 2026-10-25.
 Theme: docs
 Priority: low
 
-## [2026-10-25-3] [idea] A glossary of the process's terms
+## [2026-10-25-3] [idea] A feature map of what hosts get, with its vocabulary
 
-The plugin's words (change, tier, stage, gate, WAIT, stop, seed, nit, finding, impact, landed,
-retro, direction, outcome, drift…) are defined only where they're used, and someone new meets them
-in skill prompts long before SDLC.md. A `docs/GLOSSARY.md`, linked from the README, gives each a
-line and points at where it's specified, with a test that fails when a term the code fixes
-(`STAGES`, tiers, impacts, nit costs and values, review passes) has no entry. Hosts read it on
-GitHub; a copy from setup is a later, Tier 2 question. Pairs with the process map, whose labels
-should use its terms. Raised 2026-10-25.
+One docs/FEATURES.md that maps every user-facing feature a host gets — skills and commands, the
+stages and gates, the board and its components (columns, cards, step track, drawer), the tracking
+documents (intent, spec, plan, decisions, findings, notes, the register, the direction and product
+docs), the trailers and the retro's metrics — each with a one-line definition in the plugin's
+standard vocabulary (the glossary this entry first proposed: change, tier, stage, gate, WAIT, stop,
+seed, nit, finding, impact, landed, retro, direction, outcome, drift…), where it's specified, and
+which features it depends on, drawn as a Mermaid graph GitHub renders. A test fails when a term the
+code fixes (STAGES, tiers, impacts, nit costs and values, review passes, skills) has no entry. It
+gives the scorecard's S5 (feature inventory) its list, and the process map's (2026-10-25-1) labels
+its words. Raised 2026-10-25.
 Theme: docs
 Priority: low
 
