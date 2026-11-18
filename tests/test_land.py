@@ -414,6 +414,12 @@ def test_land_check_shows_each_changes_checks_cases_notes_decisions_and_recovery
     assert by[full.name]["assumed"] == [{"id": "D1", "text": "Page at 50? Going with 50."}]
     assert by[full.name]["recover"] == ["deploy/: fix forward: a release without deploy/run.sh"]
     assert "skills' cases in scope: 1" in by[full.name]["signals"]
+    intent = factory.intent_parts(folder)
+    assert by[full.name]["intent"] == intent and intent["title"], "131: what the change is"
+    for said in (f"{full.name} — {intent['title']}", "- Page the list → seed: Page the list",
+                 "- Rename the flag → dropped: the flag went away in round 2",
+                 "- D1: Page at 50? Going with 50.", f"{plain.name} — "):  # fmt: skip
+        assert said in batch["shown"], batch["shown"]
     # The stand-in gives every change a scope; the plain one's other parts are empty.
     assert [by[plain.name][k] for k in ("checks", "undone", "assumed", "recover")] == [[]] * 4
     assert "(at most $10)" in batch["question"], "two changes with cases, $5 each"
@@ -468,6 +474,84 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     decided = factory.land_question([_entry("001-a", assumed=[{"id": "D1", "text": "t"}])], "main")
     assert "its assumed decisions confirmed as shown," in decided and "undone" not in decided
     assert "recover" not in decided
+
+
+INTENT = """---
+id: 007
+slug: page-drafts
+tier: 1
+stage: test
+---
+
+# 007 — Drafts are paged
+
+> Stage 1: why this change is worth making.
+
+## Problem
+
+The drafts list loads every draft.
+It is slow past a hundred.
+
+## Outcome
+
+- The list shows 50 at a time.
+
+## Affected
+
+- **Area:** drafts.
+"""
+
+
+def test_intent_parts_quote_the_title_problem_and_outcome(tmp_path) -> None:
+    """131: the landing quotes what each change is from its intent, never a summary of it."""
+    folder = tmp_path / "007-page-drafts"
+    folder.mkdir()
+    (folder / "intent.md").write_text(INTENT, encoding="utf-8")
+    assert factory.intent_parts(folder) == {
+        "title": "Drafts are paged",
+        "problem": "The drafts list loads every draft.\nIt is slow past a hundred.",
+        "outcome": "- The list shows 50 at a time.",
+    }
+    assert factory.intent_parts(tmp_path) == {"title": "", "problem": "", "outcome": ""}
+
+
+def test_the_dialog_shows_each_disposition_and_assumed_decision() -> None:
+    """131: what the question calls `as shown` is in the text the dialog shows: each change by its
+    title, each undone note with its disposition, each assumed decision, check, case and recovery,
+    and a change with none of them by its title alone."""
+    title = {"title": "Drafts are paged", "problem": "p", "outcome": "o"}
+    bug = "filed as a bug, med: The second line is never read (README.md, docs/a.md)"
+    shown = factory.land_shown([
+        _entry(
+            "007-page-drafts", intent=title,
+            checks=[{"name": "It runs", "command": "true"}],
+            cases={"scope": ["ship-basic"], "cap_usd": 5},
+            undone=[
+                {"line": 3, "text": "Page the list", "seed": "Page the list"},
+                {"line": 4, "text": "pre-existing: README.md:2: two", "bug": {}, "shown": bug},
+                {"line": 5, "text": "Rename the flag", "dropped": "the flag went away"},
+            ],
+            assumed=[{"id": "D1", "text": "Page at 50? Going with 50."}],
+            recover=["deploy/: fix forward"],
+        ),
+        _entry("008-plain", intent={"title": "Plain", "problem": "", "outcome": ""}),
+    ])  # fmt: skip
+    assert shown == (
+        "007-page-drafts — Drafts are paged\n"
+        "  Acceptance checks:\n"
+        "  - It runs: true\n"
+        "  Skills' cases (at most $5): ship-basic\n"
+        "  Undone notes:\n"
+        "  - Page the list → seed: Page the list\n"
+        "  - pre-existing: README.md:2: two → " + bug + "\n"
+        "  - Rename the flag → dropped: the flag went away\n"
+        "  Assumed decisions to confirm:\n"
+        "  - D1: Page at 50? Going with 50.\n"
+        "  How to recover:\n"
+        "  - deploy/: fix forward\n"
+        "\n"
+        "008-plain — Plain"
+    )
 
 
 @needs_uv
@@ -1188,6 +1272,7 @@ def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
     [entry] = batch["batch"]
     assert entry["undone"][0]["shown"].startswith("filed as a bug, med: The second line")
     assert "filed as bugs" in batch["question"]
+    assert f"- {PRE} → filed as a bug, med: The second line" in batch["shown"], batch["shown"]
 
     (folder / "findings.md").write_text(OPEN_FINDING, encoding="utf-8")
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")

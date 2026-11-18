@@ -3842,6 +3842,51 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
     }  # fmt: skip
 
 
+def intent_parts(folder: Path) -> dict:
+    """What change `folder` is, quoted from its `intent.md`, never summarised: its `# ` title less
+    its `NNN — ` number, and its Problem and Outcome as written; each empty when it has none."""
+    path = folder / "intent.md"
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    title = next((ln[2:].strip() for ln in text.splitlines() if ln.startswith("# ")), "")
+    return {
+        "title": re.sub(r"^\d+\s+—\s+", "", title),
+        "problem": _section(text, "## Problem").strip(),
+        "outcome": _section(text, "## Outcome").strip(),
+    }
+
+
+def land_shown(batch: list[dict]) -> str:
+    """What the batch's question calls `as shown`, for the dialog to show beside its yes: each
+    change by its name and intent's title, then each part `land_parts()` gives it, only those it
+    has: its checks, its cases and their cap, each undone note with its disposition, each assumed
+    decision, its `How to recover:` lines and the agents' nits to file, by their `shown` line."""
+
+    def listed(head: str, items: list[str]) -> list[str]:
+        return [f"  {head}:", *(f"  - {i}" for i in items)] if items else []
+
+    blocks = []
+    for c in batch:
+        title = (c.get("intent") or {}).get("title")
+        lines = [f"{c['change']} — {title}" if title else c["change"]]
+        lines += listed("Acceptance checks", [f"{k['name']}: {k['command']}" for k in c["checks"]])
+        if c["cases"]:
+            scope = ", ".join(c["cases"]["scope"])
+            lines.append(f"  Skills' cases (at most ${c['cases']['cap_usd']}): {scope}")
+        disposed = [
+            f"{u['text']} → {u['shown']}" if "bug" in u
+            else f"{u['text']} → seed: {u['seed']}" if "seed" in u
+            else f"{u['text']} → dropped: {u['dropped']}"
+            for u in c["undone"]
+        ]  # fmt: skip
+        lines += listed("Undone notes", disposed)
+        lines += listed("Assumed decisions to confirm",
+                        [f"{d['id']}: {d['text']}" for d in c["assumed"]])  # fmt: skip
+        lines += listed("How to recover", c["recover"])
+        lines += listed("Agents' nits to file", [n["shown"] for n in c.get("nits") or []])
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def land_unreviewed(root: Path, folder: Path, cfg: dict) -> list[str] | None:
     """The paths the change touches that hash otherwise than in the newest complete build round's
     snapshot, whose reviewers read exactly that content: changed since its last review, by hand or
@@ -3978,8 +4023,9 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
 
 def cmd_land_check(root: Path, idents: list[str]) -> int:
     """The batch: the ready changes in `ready`'s order (or those named), at most `land.batch`, each
-    with its signals, what the yes approves for it (`land_parts()`) and why any is left out, the
-    question to ask (`land_question()`), and `clear`: true when no change in it has a signal, so
+    with its signals, what it is (`intent_parts()`), what the yes approves for it (`land_parts()`)
+    and why any is left out, the question to ask (`land_question()`), the text the dialog shows
+    beside it (`land_shown()`), and `clear`: true when no change in it has a signal, so
     the gate passes itself. Read-only."""
     cfg, warnings = load_config(root)
     picked = [
@@ -3999,7 +4045,7 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         entry = {
             "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
             "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
-            **land_parts(folder, pre or {}, worktree, cfg),
+            "intent": intent_parts(folder), **land_parts(folder, pre or {}, worktree, cfg),
         }  # fmt: skip
         if excluded:
             left_out.append({**entry, "excluded": excluded})
@@ -4012,7 +4058,8 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
     question = land_question(batch, base, cfg["land"]["moves"]) if batch else None
     return emit({
         "batch": batch, "excluded": left_out, "over_limit": over, "clear": clear,
-        "question": question, "auto": cfg["land"]["auto"], "limit": cfg["land"]["batch"],
+        "question": question, "shown": land_shown(batch) if batch else None,
+        "auto": cfg["land"]["auto"], "limit": cfg["land"]["batch"],
         "warnings": warnings,
     })  # fmt: skip
 

@@ -53,7 +53,8 @@ lands without asking, `batch`, the most changes one landing takes, and `land.mov
 a landing follows the base branch moving under a change before it closes. `sdlc-path` is the `sdlc.py`
 the landing runs; a refusal there (no `sdlc` installed, or another version) is a stop: say it,
 and stop. `land-check` lists the changes `ready` would, in its order (a change after what it
-depends on), or those named: `batch`, each with its decision, the impact its approver proposed,
+depends on), or those named: `batch`, each with its `intent` (its `title`, `problem` and
+`outcome`, quoted from its `intent.md`), its decision, the impact its approver proposed,
 the others it `overlaps`, its `signals`, and what the yes approves for it: `checks` (each
 acceptance check's `name` and `command`), `cases` (the skills' cases in `scope`, with `cap_usd`,
 the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title, the
@@ -65,13 +66,17 @@ change, with its `title`, `text`, `theme`, `paths`, `cost`, `value`, `pass`, `ro
 `/sdlc:ship` can land, and why (an irreversible path with no `- RECOVER:` line in `decision.md`,
 or a bug proposed on a severity that isn't the process doc's, with no paths, or on an item that
 isn't `pre-existing:`); `over_limit`, those past `batch`; `question`, the batch's question, worded
-by the script; and `clear`, true when no change in the batch has a signal.
+by the script; `shown`, what that question calls `as shown`, rendered by the script for the dialog
+(each change by its title, then its checks, cases, undone notes with their dispositions, assumed
+decisions and `How to recover:` lines); and `clear`, true when no change in the batch has a
+signal.
 
 ## Step 1 — Show it
 
-Show the batch in its order: each change, its decision, its impact, the changes it overlaps (where
-a rebase may conflict), and each signal. Under each change, what the yes approves for it, each
-part only when it has one: each acceptance check's name and its command, as written; the skills'
+Show the batch in its order. Open each change with what it is, its `intent` quoted as the script
+gives it, never summarised: its name and `title`, then its Problem and its Outcome. Then its
+decision, its impact, the changes it overlaps (where a rebase may conflict), and each signal.
+Under each change, what the yes approves for it, each part only when it has one: each acceptance check's name and its command, as written; the skills'
 cases in scope and their cap (`at most $<cap_usd>`, a paid run); each undone item and its
 disposition (`→ seed: <title>`, `→ dropped: <reason>`, or a bug's `shown` line, `filed as a bug,
 <severity>: <title> (<paths>)`); each assumed decision by id, with what the build assumed; each
@@ -104,10 +109,12 @@ names:
 `<moves>` is `config`'s `land.moves`.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
+them an option in that order, labelled as written, `header` the skill's name, and `land-check`'s
+`shown`, as printed, the `preview` of the `yes` and `yes, with a fix` options, so what the yes
+files and confirms is in the dialog itself, not only above it. Only a
 chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
 refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+parentheses, right after `shown`, and stop.
 
 **Do nothing until the person says yes.** Approval is for this batch only. `leave one out` is
 the person naming which: run Step 0 again with the rest, and ask again. To change a proposed
