@@ -193,23 +193,6 @@ See .sdlc/work/114-one-review/notes.md in its commit.
 Raised 2026-11-18.
 
 
-## [2026-11-18-13] [idea] The approver weighs assumed defaults, and shows alternatives for the ones it escalates
-
-The approver escalates for every assumed default, but confirming one offers no alternatives, so it's
-hard to judge. Have the approver weigh the defaults itself and escalate only what it can't decide;
-for those, show the default beside the alternatives that were considered, with pros and cons.
-Theme: factory
-Raised 2026-11-18.
-
-## [2026-11-18-15] [idea] A factory skill that walks the person through one change's open decisions
-
-A factory skill (/sdlc-factory:decide, not "resolve", which already means rebase conflicts) that
-walks the person through one change's open decisions and confirmations one at a time: the
-background, the default, the alternatives and why the default was chosen, so escalations across
-changes are decided quickly and with context.
-Theme: factory
-Raised 2026-11-18.
-
 ## [2026-11-18-17] [idea] Move a stopped landing's card to Needs you
 
 Left undone by 133-board-tracks-landing, carried forward when it landed: A stopped landing shows on its card but keeps its column; moving it to Needs you would mean `sdlc.needs_of()` (shared with `status`) reading `runs/land-step.md`.
