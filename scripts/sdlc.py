@@ -1192,18 +1192,32 @@ FINDING_KEYS = ("Evidence", "Class", "Disposition", "Reason", "By", "Fix")
 FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
 # And, in this plugin's repo, whether a diff that reaches a skill with cases ran them.
 CASES_RE = re.compile(r"^>?\s*Skill evals:\s*(ran|skipped)\b,?\s*(.*)$")
+# And, for each of ship's passes that applies (`_passes_report()`), whether it ran: `ui` is said
+# as two lines, the UI and the UX review.
+SECURITY_RE = re.compile(r"^>?\s*Security review:\s*(ran|skipped)\b,?\s*(.*)$")
+BEHAVIOUR_RE = re.compile(r"^>?\s*Behaviour check:\s*(ran|skipped)\b,?\s*(.*)$")
+UI_RE = re.compile(r"^>?\s*UI review:\s*(ran|skipped)\b,?\s*(.*)$")
+UX_RE = re.compile(r"^>?\s*UX review:\s*(ran|skipped)\b,?\s*(.*)$")
+PASS_LINES = {"security": SECURITY_RE, "behaviour": BEHAVIOUR_RE, "ui": UI_RE, "ux": UX_RE}
+# The behaviour check's evidence, the file's last section: each `$ <command>` line, the tail of
+# its output, then `exit: <n>`. Read as evidence, never as a finding.
+EVIDENCE_HEADING = "## Evidence"
+EVIDENCE_EXIT_RE = re.compile(r"^exit:\s*(-?\d+)\s*$")
 # Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
-# a deep diff gets (`agents/reviewer.md`), or a factory reviewer, whose findings `factory.py
+# a deep diff gets (`agents/reviewer.md`); one of ship's own further passes (`SHIP_PASSES`: its
+# security, ui and ux agents, and the behaviour check it runs itself), prefixed so it never
+# reads as the factory role of the same word; or a factory reviewer, whose findings `factory.py
 # carry` writes. `AGENT_ROLES` is a copy of `factory.py`'s `REVIEWERS`, pinned by a test.
+SHIP_PASSES = ("ship-security", "ship-behaviour", "ship-ui", "ship-ux")
 AGENT_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
-FINDING_BY = ("fresh", *AGENT_ROLES)
+FINDING_BY = ("fresh", *SHIP_PASSES, *AGENT_ROLES)
 
 
 def ship_findings(entries: list[dict]) -> list[dict]:
-    """The findings ship's own review raised (no `By:`, or `By: fresh`), never an agent's: the ones
-    the `Sdlc-Findings` trailer and `findings`' counts are of, so a factory review is never
-    counted as the person's."""
-    return [e for e in entries if e.get("by") in (None, "fresh")]
+    """The findings ship's own review raised (no `By:`, `By: fresh`, or one of `SHIP_PASSES`),
+    never a factory agent's: the ones the `Sdlc-Findings` trailer and `findings`' counts are of,
+    so a factory review is never counted as the person's."""
+    return [e for e in entries if e.get("by") in (None, "fresh", *SHIP_PASSES)]
 
 
 def findings_entries(folder: Path) -> dict:
@@ -1212,7 +1226,8 @@ def findings_entries(folder: Path) -> dict:
     one is left out of the entries."""
     path = folder / FINDINGS
     out: dict = {"path": FINDINGS, "exists": path.is_file(), "entries": [], "open": [],
-                 "fix": [], "fresh": None, "cases": None, "problems": []}  # fmt: skip
+                 "fix": [], "fresh": None, "cases": None, "passes": dict.fromkeys(PASS_LINES),
+                 "evidence": [], "problems": []}  # fmt: skip
     if not out["exists"]:
         return out
     try:
@@ -1228,7 +1243,51 @@ def findings_entries(folder: Path) -> dict:
     out["fix"] = [e["id"] for e in out["entries"] if e["disposition"] == "fix"]
     out["fresh"] = findings_fresh(text)
     out["cases"] = _note_says(text, CASES_RE)
+    out["passes"] = {name: _note_says(text, line_re) for name, line_re in PASS_LINES.items()}
+    out["evidence"], wrong = findings_evidence(text)
+    out["problems"] += wrong
+    if (out["passes"]["behaviour"] or {}).get("ran") and not out["evidence"]:
+        out["problems"].append(
+            f"{FINDINGS}: its note says `Behaviour check: ran`, and its `{EVIDENCE_HEADING}` "
+            "section holds no `$ <command>` with its `exit:`"
+        )
     return out
+
+
+def findings_evidence(text: str) -> tuple[list[dict], list[str]]:
+    """The behaviour check's evidence in findings.md's `## Evidence` section, as `{"command",
+    "exit"}` in order, and a problem for each `$` line with no `exit:` before the next or the
+    section's end. Fenced output is skipped, as everywhere in the file."""
+    evidence: list[dict] = []
+    problems: list[str] = []
+    inside = fenced = False
+    command: str | None = None
+
+    def unfinished() -> None:
+        if command is not None:
+            problems.append(f"{FINDINGS}: {EVIDENCE_HEADING}: `$ {command}` has no `exit:` line")
+
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("## "):
+            unfinished()
+            command = None
+            inside = line.strip() == EVIDENCE_HEADING
+            continue
+        if not inside:
+            continue
+        if line.startswith("$ "):
+            unfinished()
+            command = line[2:].strip()
+        elif command is not None and (m := EVIDENCE_EXIT_RE.match(line.strip())):
+            evidence.append({"command": command, "exit": int(m.group(1))})
+            command = None
+    unfinished()
+    return evidence, problems
 
 
 def _finding_number(ident: str) -> int | None:
@@ -1271,15 +1330,22 @@ def _findings_from_text(text: str) -> tuple[list[dict], list[str]]:
     entries: list[dict] = []
     problems: list[str] = []
     sections: list[tuple[str, dict]] = []
-    fenced = False
+    fenced = evidence = False
     for line in text.splitlines():
         if FENCE_RE.match(line):
             fenced = not fenced
             continue
         if fenced:
             continue
+        # The behaviour check's evidence is read by `findings_evidence()`, never as a finding.
+        if line.strip() == EVIDENCE_HEADING:
+            evidence = True
+            continue
         if line.startswith("## "):
+            evidence = False
             sections.append((line.strip(), {}))
+            continue
+        if evidence:
             continue
         m = re.match(rf"^({'|'.join(FINDING_KEYS)}):\s*(.*)$", line)
         if m and sections and m.group(1) not in sections[-1][1]:
@@ -1332,7 +1398,9 @@ def findings_trailer(entries: list[dict]) -> str:
     has always written it, then each disposition but `open` as its count by pass
     (`fixed=correctness:2,context:1`), or `0`, then how many the fresh reviewer raised and how
     many of those were answered `wrong`, then `agents=`, how many findings the factory's agents
-    left in the file, counted in no other key (`ship_findings()`). Old keys keep their meaning;
+    left in the file, counted in no other key (`ship_findings()`), then `passes=`, each of ship's
+    own passes' counts (`security:1,ui:2`, or `0`), and `passes_wrong=`, how many of those were
+    answered `wrong`. Old keys keep their meaning;
     retro reads a trailer without dispositions, or without `fresh`, as one whose answers are
     unknown there."""
     agents = len(entries) - len(ship_findings(entries))
@@ -1348,6 +1416,11 @@ def findings_trailer(entries: list[dict]) -> str:
     words.append(f"fresh={len(fresh)}")
     words.append(f"fresh_wrong={sum(e['disposition'] == 'wrong' for e in fresh)}")
     words.append(f"agents={agents}")
+    by_pass = {p: [e for e in entries if e.get("by") == p] for p in SHIP_PASSES}
+    shown = [f"{p.removeprefix('ship-')}:{len(found)}" for p, found in by_pass.items() if found]
+    words.append("passes=" + (",".join(shown) or "0"))
+    wrong = sum(e["disposition"] == "wrong" for found in by_pass.values() for e in found)
+    words.append(f"passes_wrong={wrong}")
     return "Sdlc-Findings: " + " ".join(words)
 
 
@@ -2936,6 +3009,95 @@ def _gate_jobs_at(home: Path, trunk: str) -> int:
     return jobs
 
 
+# The base branch's `[ui]`, as far as ship's UI review reads it: whether it is complete and the
+# pages, widths and paths its screenshots cover. Copies of `factory.py`'s (`DEFAULTS["ui"]`'s
+# keys here, `_ui_table()`'s checks of them, `ui_complete()`, `_page_name()`), pinned to it by
+# `tests/test_hand_gate.py`. Ship never takes a screenshot: it reads the sets `factory.py shots`
+# left under `.sdlc/reports/shots/<change>/<label>/<role>/`.
+UI_DEFAULTS = {"serve": None, "shoot": None, "pages": ["/"], "paths": [],
+               "widths": [[1280, 800], [390, 844]]}  # fmt: skip
+UI_ROLES = ("ui", "ux")
+NO_SHOTS = "no screenshots of this change"
+
+
+def _ui_complete(ui: dict) -> bool:
+    """Whether `[ui]` says enough for a UI review: a server, a screenshot command and its paths."""
+    return bool(ui.get("serve") and ui.get("shoot") and ui.get("paths"))
+
+
+def _ui_page_name(page: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", page.strip("/")).strip("-") or "index"
+
+
+def _ui_at(home: Path, trunk: str | None) -> dict:
+    """`[ui]` as the base branch's `factory.toml` holds it, never the checkout's, so a change can't
+    turn its own UI review off: `UI_DEFAULTS` with each value the factory would take, and
+    `complete`. A missing file, one that won't parse, or a bad value leaves the default, as the
+    factory does; `factory.py config` is what warns of one."""
+    text = _git(home, "show", f"refs/heads/{trunk}:{FACTORY_CONFIG.as_posix()}") if trunk else ""
+    try:
+        table = tomllib.loads(text or "").get("ui", {})
+    except tomllib.TOMLDecodeError:
+        table = {}
+    out = json.loads(json.dumps(UI_DEFAULTS))
+    for key, value in table.items() if isinstance(table, dict) else ():
+        texts = isinstance(value, list) and all(isinstance(v, str) for v in value)
+        sizes = isinstance(value, list) and value and all(
+            isinstance(v, list) and len(v) == 2
+            and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in v)
+            for v in value
+        )  # fmt: skip
+        if key in ("serve", "shoot") and isinstance(value, str) and value.strip():
+            out[key] = value
+        elif key in ("pages", "paths") and texts:
+            out[key] = list(value)
+        elif key == "widths" and sizes:
+            out[key] = [list(v) for v in value]
+    out["complete"] = _ui_complete(out)
+    return out
+
+
+def _current_shots(checkout: Path, change: str, ui: dict, changed: list[str]) -> tuple[list, str]:
+    """The newest screenshot set of `change` that a UI review can read, as repo-relative paths,
+    and None; or no paths and why none can. A set is one `<label>/<role>/` folder: it counts when
+    its `shots.json` parses with `problem: null`, every PNG `[ui]`'s pages and widths name is
+    there, and the record is newer than every `changed` path under `[ui] paths`, so a page edited
+    after its screenshots is never judged from them. Reads files only."""
+    where = checkout / REPORTS / "shots" / change
+    records = [r for role in UI_ROLES for r in where.glob(f"*/{role}/shots.json")]
+    if not records:
+        return [], NO_SHOTS
+    names = [f"{_ui_page_name(page)}-{w}x{h}.png" for page in ui["pages"] for w, h in ui["widths"]]
+    touched = [p for p in risk_paths(changed, ui["paths"]) if (checkout / p).is_file()]
+
+    def stamp(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    why = None
+    for record in sorted(records, key=stamp, reverse=True):
+        try:
+            data = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            data = {"problem": "its shots.json can't be read"}
+        problem = data.get("problem", "no record") if isinstance(data, dict) else "no record"
+        missing = [n for n in names if not (record.parent / n).is_file()]
+        newer = [p for p in touched if stamp(checkout / p) >= stamp(record)]
+        if problem is not None:
+            wrong = f"screenshots that didn't finish: {problem}"
+        elif missing:
+            wrong = f"screenshots missing {missing[0]}"
+        elif newer:
+            wrong = f"screenshots older than {newer[0]}"
+        else:
+            shown = [(record.parent / n).relative_to(checkout).as_posix() for n in names]
+            return shown, None
+        why = why or wrong
+    return [], why
+
+
 def _try_lock(fd: int) -> bool:
     """`_lock()` without waiting: True when taken, False when another holds it."""
     if os.name == "nt":
@@ -3476,6 +3638,20 @@ def cmd_ship(
             f"⚠  {path.name} touches a sensitive path, and its {FINDINGS} doesn't say whether the "
             "fresh review ran: add `Fresh review: ran`, or `Fresh review: skipped, <why>`, to its "
             "note and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
+    # Nor does any of ship's passes that applies: run again, since the diff may have moved since
+    # preflight.
+    passes = _passes_report(root, path, risk)
+    unsaid = [PASS_SAID[line] for name, line in PASS_OF if passes[name]["applies"]
+              and found["passes"][line] is None]  # fmt: skip
+    if unsaid:
+        lines = _and([f"`{s}: ran`, or `{s}: skipped, <why>`" for s in unsaid])
+        print(
+            f"⚠  {path.name}'s {FINDINGS} doesn't say whether {_and(unsaid)} ran, and "
+            f"{'they apply' if len(unsaid) > 1 else 'it applies'}: add {lines}, to its note and "
+            "re-run. Not stamping.",
             file=sys.stderr,
         )
         return 1
@@ -7928,6 +8104,92 @@ def cmd_intake(root: Path) -> int:
     return 0
 
 
+# Ship's own passes beyond its four, which a hand-built change gets as the factory's reviewers
+# would review it: each `preflight`'s `passes` part says applies, from the diff, the change's
+# tier and spec, and the base branch's `[ui]`, never the skill. A factory run (a `decision.md`)
+# gets none: its own reviewers ran. `ui` is the UI and the UX review, which share one set of
+# screenshots.
+PASS_NAMES = ("security", "behaviour", "ui")
+
+
+def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
+    """Which of ship's passes apply to change `path`, each `{"applies", "why"}`, `ui` with the
+    `shots` it can read (`_current_shots()`): `security` on a deep diff (`risk`), `behaviour` on a
+    Tier 2 with a filled spec, `ui` when the base branch's `[ui]` is complete and the diff touches
+    its paths. `why` says why one doesn't apply, or why `ui` has no shots. Writes nothing."""
+    home = main_root(root)
+    trunk = load_config(home)[0]["git"]["base"]
+
+    def no(why: str) -> dict:
+        return {"applies": False, "why": why}
+
+    yes = {"applies": True, "why": None}
+    if (path / "decision.md").exists():
+        return {name: no("a factory run: its own reviewers ran") for name in PASS_NAMES}
+    out: dict = {}
+    if risk is None:
+        out["security"] = no(f"no merge base with {trunk!r}")
+    else:
+        out["security"] = dict(yes) if risk["deep"] else no("the diff touches no sensitive path")
+    spec = path / "spec.md"
+    if load_change(path, home)["tier"] != 2:
+        out["behaviour"] = no("not a Tier 2 change")
+    elif not spec.is_file() or is_unfilled(spec):
+        out["behaviour"] = no("no filled spec.md")
+    else:
+        out["behaviour"] = dict(yes)
+    ui = _ui_at(home, trunk)
+    found = changed_paths(checkout_of(path), trunk) if trunk else None
+    changed = list(
+        dict.fromkeys(p for _, p_, to in (found or (None, []))[1] for p in (p_, to) if p)
+    )
+    if not ui["complete"]:
+        out["ui"] = no(f"the base branch's {FACTORY_CONFIG.as_posix()} has no complete [ui]")
+    elif not risk_paths(changed, ui["paths"]):
+        out["ui"] = no("the diff touches no [ui] path")
+    else:
+        shots, why = _current_shots(checkout_of(path), path.name, ui, changed)
+        if why == NO_SHOTS and not factory_enabled(home)[0]:
+            why = f"{why}: sdlc-factory isn't enabled, so none can be taken"
+        out["ui"] = {"applies": True, "why": why, "shots": shots}
+    return out
+
+
+# Each pass's note lines (`PASS_LINES`), and how ship's refusal and question name each.
+PASS_OF = (("security", "security"), ("behaviour", "behaviour"), ("ui", "ui"), ("ui", "ux"))
+PASS_SAID = {"security": "Security review", "behaviour": "Behaviour check", "ui": "UI review",
+             "ux": "UX review"}  # fmt: skip
+
+
+def _passes_said(passes: dict, said: dict) -> dict:
+    """What findings.md's note says (`said`) of each note line whose pass applies (`passes`),
+    for ship's question: a line unsaid is left out, as ship refuses it anyway."""
+    return {line: said[line] for name, line in PASS_OF
+            if passes[name]["applies"] and said.get(line) is not None}  # fmt: skip
+
+
+def _passes_clauses(passes: dict) -> list[str]:
+    """Ship's question's clauses for its passes: the ones that ran in one, `after the security
+    review, the behaviour check and the UI and UX reviews`, then each skip with why."""
+    ran = [line for line in PASS_SAID if (passes.get(line) or {}).get("ran")]
+    names = {"security": "the security review", "behaviour": "the behaviour check"}
+    shown = [names[line] for line in ran if line in names]
+    pages = [line.upper() for line in ("ui", "ux") if line in ran]
+    if pages:
+        shown.append(f"the {' and '.join(pages)} review{'s' if len(pages) > 1 else ''}")
+    clauses = [f"after {_and(shown)}"] if shown else []
+    for line, said in PASS_SAID.items():
+        note = passes.get(line)
+        if note and not note["ran"]:
+            clauses.append(f"without the {said[0].lower() + said[1:] if line in names else said} "
+                           f"({note['why'] or 'no reason given'})")  # fmt: skip
+    return clauses
+
+
+def _pass_applies(parts: dict, name: str) -> bool:
+    return bool(((parts.get("passes") or {}).get(name) or {}).get("applies"))
+
+
 # Ship's rare branches: each file beside skills/ship/SKILL.md, in the order ship reads them, and
 # when it applies, from preflight's parts and the change's folder. Ship reads only the files this
 # names, so whether a branch applies is the script's call, never the skill's.
@@ -7937,6 +8199,9 @@ SHIP_BRANCHES = {
     "closes.md": lambda parts, path: bool(parts["closes"]["closes"]),
     "recover.md": lambda parts, path: bool((parts["risk"] or {}).get("irreversible")),
     "fresh.md": lambda parts, path: bool((parts["risk"] or {}).get("deep")),
+    "security.md": lambda parts, path: _pass_applies(parts, "security"),
+    "behaviour.md": lambda parts, path: _pass_applies(parts, "behaviour"),
+    "ui.md": lambda parts, path: _pass_applies(parts, "ui"),
     "cases.md": lambda parts, path: bool(
         parts["cases"].get("available") and parts["cases"].get("scope")
     ),
@@ -7974,6 +8239,7 @@ def cmd_preflight(root: Path, ident: str) -> int:
         "context": _context_report(checkout, trunk),
         "cases": _cases_report(root, path),
     }
+    parts["passes"] = _passes_report(root, path, parts["risk"])
     parts["branches"] = ship_branches(parts, path)
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
     for name in ("nits", "checks", "findings"):
@@ -8041,6 +8307,7 @@ def ship_question(
     findings: list[dict] | None = None,
     cases: dict | None = None,
     conflicts: list[str] | None = None,
+    passes: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
@@ -8048,7 +8315,8 @@ def ship_question(
     `findings` (`_question_head()`). A question that commits has each clause only when its fact
     is: the sensitive paths the diff touches, the files a conflict with the base was resolved in
     (`conflicts`, from the change's conflicts.md), a fresh review that didn't run (`fresh`, from
-    findings.md's note), skill evals that didn't run (`cases`, from the same note), how to
+    findings.md's note), skill evals that didn't run (`cases`, from the same note), ship's passes
+    that ran and those skipped (`passes`, each applying pass's note line, `_passes_said()`), how to
     recover what a revert can't undo, the context update shown, the
     nits recorded in `register`, the pre-existing findings filed there as bugs, the issues closed
     and split off, and the issue update unless `archive.target` is `none`."""
@@ -8080,6 +8348,7 @@ def ship_question(
         clauses.append(f"without the fresh review ({fresh['why'] or 'no reason given'})")
     if cases and not cases["ran"]:
         clauses.append(f"without the skill evals ({cases['why'] or 'no reason given'})")
+    clauses += _passes_clauses(passes or {})
     if irreversible:
         clauses.append("with how to recover it shown")
     if context:
@@ -8120,12 +8389,14 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
             file=sys.stderr,
         )
         return 1
-    risk = _risk_report(root, path) or {"sensitive": [], "irreversible": []}
+    found_risk = _risk_report(root, path)
+    risk = found_risk or {"sensitive": [], "irreversible": []}
+    passes = _passes_said(_passes_report(root, path, found_risk), found["passes"])
     question, why = ship_question(
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
         risk["sensitive"], bool(risk["irreversible"]), found["fresh"], found["entries"],
-        found["cases"], conflicts_resolved(path),
+        found["cases"], conflicts_resolved(path), passes,
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)

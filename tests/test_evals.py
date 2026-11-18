@@ -48,7 +48,8 @@ SCAFFOLDS = [
 # The cases that stop at their skill's WAIT, and the commands each must never have run before it.
 STOP_CASES = {
     "intent": ["new"], "intent-product": ["new"], "spec": [], "ship": ["ship"],
-    "ship-open-finding": ["ship"], "close": ["close"], "idea": ["inbox-commit"],
+    "ship-open-finding": ["ship"], "ship-behaviour": ["ship"], "close": ["close"],
+    "idea": ["inbox-commit"],
 }  # fmt: skip
 
 
@@ -279,3 +280,20 @@ def test_a_host_has_no_cases(tmp_path: Path) -> None:
     (tmp_path / "evals" / "x").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
     assert sdlc._cases_report(tmp_path, None) == {"available": False}
+
+
+def test_the_behaviour_case_reads_its_branch_and_says_it_ran() -> None:
+    """143 R23: a Tier 2 change with a filled spec reads `behaviour.md` and says in its note
+    whether the check ran; the plain ship case still reads no branch file."""
+    graders = _graders("ship-behaviour")
+    reads = re.compile(graders["reads-behaviour"]["input_match"])
+    assert graders["reads-behaviour"]["min"] == 1
+    assert reads.search('"file_path": "/plug/skills/ship/behaviour.md"')
+    assert not reads.search('"file_path": "/plug/skills/ship/SKILL.md"')
+    says = re.compile(graders["says-the-behaviour-check"]["input_match"])
+    assert says.search('{"file_path": "/w/.sdlc/work/002-rename-drafts/findings.md", '
+                       '"content": "> Behaviour check: ran"}')  # fmt: skip
+    assert "never-reads-a-branch" in _graders("ship")
+    spec = EVALS / "fixtures" / "built-tier2" / "change" / ".sdlc" / "work" / "002-rename-drafts"
+    assert not sdlc.is_unfilled(spec / "spec.md")
+    assert sdlc.load_change(spec, ROOT)["tier"] == 2

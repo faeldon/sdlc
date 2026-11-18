@@ -2232,7 +2232,8 @@ def test_review_sources_split_ship_from_the_agents(tmp_path: Path) -> None:
     with no file is unknown, never a review that found nothing."""
     root = _repo(tmp_path)
     hand = "# Findings\n\n> Note.\n" + _section(1, "important", "fixed") + _section(
-        2, "nit", "recorded") + _section(3, "important", "wrong", "fresh")  # fmt: skip
+        2, "nit", "recorded") + _section(3, "important", "wrong", "fresh") + _section(
+        4, "important", "fixed", "ship-security")  # fmt: skip
     built = "# Findings\n\n> Note.\n" + "".join([
         _section(1, "important", "fixed", "code"), _section(2, "important", "wrong", "security"),
         _section(3, "pre-existing", "recorded", "test"), _section(4, "nit", "minor", "test"),
@@ -2244,12 +2245,21 @@ def test_review_sources_split_ship_from_the_agents(tmp_path: Path) -> None:
     row = lambda c, i, n, p, w: {"changes": c, "important": i, "nit": n, "preexisting": p,  # noqa: E731
                                  "wrong": w}  # fmt: skip
     assert out["review_sources"] == {
-        "ship": row(1, 1, 1, 0, 0), "fresh": row(1, 1, 0, 0, 1), "code": row(1, 1, 0, 0, 0),
+        "ship": row(1, 1, 1, 0, 0), "fresh": row(1, 1, 0, 0, 1),
+        "ship-security": row(1, 1, 0, 0, 0), "code": row(1, 1, 0, 0, 0),
         "security": row(1, 1, 0, 0, 1), "test": row(1, 0, 1, 1, 0),
     }  # fmt: skip
+    assert list(out["review_sources"]) == [
+        "ship",
+        "fresh",
+        "ship-security",
+        "code",
+        "security",
+        "test",
+    ], "ship's passes before the factory's roles"
     assert out["review_unknown"] == 1
     assert [(i["change"], i["id"], i["by"]) for i in out["important"]] == [
-        ("001-hand", "F1", None), ("001-hand", "F3", "fresh"),
+        ("001-hand", "F1", None), ("001-hand", "F3", "fresh"), ("001-hand", "F4", "ship-security"),
         ("002-built", "F1", "code"), ("002-built", "F2", "security"),
     ]  # fmt: skip
     report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 25))

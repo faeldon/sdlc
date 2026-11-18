@@ -199,7 +199,13 @@ PLAIN = {
     "closes": {"closes": []},
     "risk": {"sensitive": [], "irreversible": [], "deep": False},
     "cases": {"available": False},
+    "passes": {name: {"applies": False, "why": "x"} for name in ("security", "behaviour", "ui")},
 }
+
+
+def _passes(*names: str) -> dict:
+    """The `passes` part with `names` applying."""
+    return {n: {"applies": n in names, "why": None} for n in ("security", "behaviour", "ui")}
 
 
 @pytest.mark.parametrize(
@@ -214,6 +220,11 @@ PLAIN = {
         ("risk", None, []),
         ("cases", {"available": True, "cases": {}, "scope": ["ship"]}, ["cases.md"]),
         ("cases", {"available": True, "cases": {}, "scope": []}, []),
+        ("passes", _passes("security"), ["security.md"]),
+        ("passes", _passes("behaviour"), ["behaviour.md"]),
+        ("passes", _passes("ui"), ["ui.md"]),
+        ("passes", _passes("ui", "security", "behaviour"),
+         ["security.md", "behaviour.md", "ui.md"]),
     ],
 )  # fmt: skip
 def test_ship_branches_condition(tmp_path: Path, part, value, expected) -> None:
@@ -422,3 +433,218 @@ def test_the_command_reads_findings_md_for_the_recommendation_and_the_fresh_revi
 
 def test_preflight_and_nits_are_allowed_without_a_prompt() -> None:
     assert {"preflight", "nits", "findings"} <= set(sdlc.READ_ONLY)
+
+
+# ---------------------------------------------------------------- ship's passes (143)
+
+SPEC = """\
+---
+id: 001
+slug: reopen-drafts
+kind: spec
+created: 2026-10-01
+updated: 2026-10-01
+---
+
+# 001 — Reopen drafts · spec
+
+## Requirements
+
+R1. A saved draft reopens with its text, and `test_reopen` fails if it doesn't.
+
+## Verification
+
+```bash
+python -c "import drafts"
+```
+"""
+
+UI = """\
+[ui]
+serve = "python -m http.server {port}"
+shoot = "shoot {url} {out}"
+paths = ["web/"]
+pages = ["/", "/drafts"]
+widths = [[1280, 800]]
+"""
+
+
+def _on_main(root: Path, files: dict[str, str | None]) -> None:
+    """Commit `files` (None: remove one) on `main`, then rebase the change's branch onto it, as
+    `sdlc.py base` would: `[review]` is read from the checkout's copy of the base branch."""
+    _git(root, "checkout", "-q", "main")
+    for rel, text in files.items():
+        if text is None:
+            _git(root, "rm", "-q", "--ignore-unmatch", rel)
+            continue
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+        _git(root, "add", rel)
+    _git(root, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(root, "checkout", "-q", "001-reopen-drafts")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "rebase", "-q", "main")
+
+
+def _passes_of(capsys, root: Path) -> dict:
+    sdlc.cmd_preflight(root, "001")
+    return json.loads(capsys.readouterr().out)
+
+
+def test_preflight_passes_security(change, capsys) -> None:
+    """R2: a deep diff with no decision.md gets the security pass; shallow, or a factory run,
+    doesn't."""
+    root, folder = change
+    out = _passes_of(capsys, root)
+    assert out["passes"]["security"]["applies"] is False and "security.md" not in out["branches"]
+    _on_main(root, {".sdlc/config.toml": '[review]\nsensitive = ["scripts/"]\n'})
+    out = _passes_of(capsys, root)
+    assert out["risk"]["deep"] and out["passes"]["security"] == {"applies": True, "why": None}
+    assert "security.md" in out["branches"]
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    out = _passes_of(capsys, root)
+    assert out["passes"]["security"]["applies"] is False
+    assert "factory" in out["passes"]["security"]["why"]
+
+
+def test_preflight_passes_behaviour(change, capsys) -> None:
+    """R3: Tier 2 with a filled spec and no decision.md; never Tier 1, an unfilled spec or a
+    factory run."""
+    root, folder = change
+    out = _passes_of(capsys, root)
+    assert out["passes"]["behaviour"]["applies"] is False, "no spec.md"
+    (folder / "spec.md").write_text(
+        "# Spec\n\n## Requirements\n\n<one>\n\n<two>\n\n<three>\n\n<four>\n", encoding="utf-8"
+    )
+    assert sdlc.is_unfilled(folder / "spec.md")
+    assert _passes_of(capsys, root)["passes"]["behaviour"]["applies"] is False, "unfilled"
+    (folder / "spec.md").write_text(SPEC, encoding="utf-8")
+    out = _passes_of(capsys, root)
+    assert out["passes"]["behaviour"] == {"applies": True, "why": None}
+    assert "behaviour.md" in out["branches"]
+    intent = folder / "intent.md"
+    intent.write_text(INTENT.replace("tier: 2", "tier: 1"), encoding="utf-8")
+    assert _passes_of(capsys, root)["passes"]["behaviour"]["applies"] is False, "Tier 1"
+    intent.write_text(INTENT, encoding="utf-8")
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    assert _passes_of(capsys, root)["passes"]["behaviour"]["applies"] is False, "factory"
+
+
+def test_preflight_names_none_of_the_passes_on_a_factory_run(change, capsys) -> None:
+    """R19: a deep, Tier 2, [ui]-touching factory run reads factory.md, never a new branch."""
+    root, folder = change
+    _on_main(root, {".sdlc/config.toml": '[review]\nsensitive = ["web/"]\n',
+                    ".sdlc/factory.toml": UI})  # fmt: skip
+    (root / "web").mkdir()
+    (root / "web" / "drafts.css").write_text("a {}\n", encoding="utf-8")
+    (folder / "spec.md").write_text(SPEC, encoding="utf-8")
+    out = _passes_of(capsys, root)
+    assert {"security.md", "behaviour.md", "ui.md"} <= set(out["branches"])
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    out = _passes_of(capsys, root)
+    assert not {"security.md", "behaviour.md", "ui.md"} & set(out["branches"])
+    assert not any(p["applies"] for p in out["passes"].values())
+
+
+def _web(root: Path) -> Path:
+    (root / "web").mkdir(exist_ok=True)
+    css = root / "web" / "drafts.css"
+    css.write_text("a {}\n", encoding="utf-8")
+    return css
+
+
+def test_preflight_passes_ui(change, capsys) -> None:
+    """R4: only a complete [ui] on the base branch, a diff touching its paths, and no
+    decision.md."""
+    root, folder = change
+    _web(root)
+    assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is False, "no factory.toml"
+    _on_main(root, {".sdlc/factory.toml": UI.replace('shoot = "shoot {url} {out}"\n', "")})
+    assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is False, "no shoot"
+    _on_main(root, {".sdlc/factory.toml": UI.replace('["web/"]', '["app/"]')})
+    out = _passes_of(capsys, root)["passes"]["ui"]
+    assert out["applies"] is False and "no [ui] path" in out["why"], "untouched"
+    _on_main(root, {".sdlc/factory.toml": UI})
+    out = _passes_of(capsys, root)
+    assert out["passes"]["ui"]["applies"] is True and "ui.md" in out["branches"]
+    assert out["passes"]["ui"]["shots"] == []
+    assert out["passes"]["ui"]["why"].startswith("no screenshots of this change")
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is False, "factory"
+
+
+def test_ui_is_read_from_the_base_branch(change, capsys) -> None:
+    """R4: a change that removes or narrows [ui] in its own checkout keeps its UI review."""
+    root, _ = change
+    _on_main(root, {".sdlc/factory.toml": UI})
+    _web(root)
+    toml = root / ".sdlc" / "factory.toml"
+    toml.write_text(UI.replace('["web/"]', '["app/"]'), encoding="utf-8")
+    assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is True, "narrowed"
+    toml.unlink()
+    assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is True, "removed"
+
+
+def _shoot(root: Path, label: str, role: str = "ui", problem: str | None = None,
+           skip: str | None = None, when: float = 2_000_000_000.0) -> Path:  # fmt: skip
+    """A screenshot set as `factory.py shots` leaves one, its record stamped `when`."""
+    import os
+
+    where = root / ".sdlc" / "reports" / "shots" / "001-reopen-drafts" / label / role
+    where.mkdir(parents=True)
+    for name in ("index-1280x800.png", "drafts-1280x800.png"):
+        if name != skip:
+            (where / name).write_bytes(b"\x89PNG\r\n\x1a\n")
+    record = where / "shots.json"
+    record.write_text(json.dumps({"problem": problem, "shots": []}), encoding="utf-8")
+    os.utime(record, (when, when))
+    return record
+
+
+def test_current_shots_are_listed_newest_first(change, capsys) -> None:
+    """R6: the newest set that finished, with every PNG, newer than every changed [ui] path."""
+    import os
+
+    root, _ = change
+    _on_main(root, {".sdlc/factory.toml": UI})
+    css = _web(root)
+    os.utime(css, (1_000_000_000, 1_000_000_000))
+    _shoot(root, "round-1", when=1_500_000_000)
+    _shoot(root, "round-2", "ux", when=1_600_000_000)
+    out = _passes_of(capsys, root)["passes"]["ui"]
+    shots = ".sdlc/reports/shots/001-reopen-drafts/round-2/ux"
+    assert out["shots"] == [f"{shots}/index-1280x800.png", f"{shots}/drafts-1280x800.png"]
+    assert out["why"] is None
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        ({"problem": "the dev server came up on none of 3 ports"}, "didn't finish: the dev server"),
+        ({"skip": "drafts-1280x800.png"}, "screenshots missing drafts-1280x800.png"),
+    ],
+    ids=["problem", "missing-png"],
+)
+def test_a_set_that_didn_t_finish_is_never_listed(change, capsys, kw, why) -> None:
+    import os
+
+    root, _ = change
+    _on_main(root, {".sdlc/factory.toml": UI})
+    os.utime(_web(root), (1_000_000_000, 1_000_000_000))
+    _shoot(root, "round-1", **kw)
+    out = _passes_of(capsys, root)["passes"]["ui"]
+    assert out["shots"] == [] and why in out["why"]
+
+
+def test_stale_shots_are_not_current(change, capsys) -> None:
+    """R6: a changed [ui] path touched after the shots leaves them unlisted, saying which."""
+    import os
+
+    root, _ = change
+    _on_main(root, {".sdlc/factory.toml": UI})
+    css = _web(root)
+    os.utime(css, (1_000_000_000, 1_000_000_000))
+    _shoot(root, "round-1", when=1_500_000_000)
+    assert _passes_of(capsys, root)["passes"]["ui"]["shots"], "current before the edit"
+    os.utime(css, (1_700_000_000, 1_700_000_000))
+    out = _passes_of(capsys, root)["passes"]["ui"]
+    assert out["shots"] == [] and out["why"] == "screenshots older than web/drafts.css"

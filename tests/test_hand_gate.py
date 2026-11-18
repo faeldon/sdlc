@@ -533,6 +533,38 @@ def test_the_slot_copies_are_the_factorys() -> None:
     assert sdlc.SLOT_WAIT == sdlc.GATE_TIMEOUT
 
 
+UI_TABLES = [
+    None,
+    "",
+    "ui = 3\n",
+    "[ui]\n",
+    '[ui]\nserve = "s {port}"\nshoot = "t {url} {out}"\npaths = ["web/"]\n',
+    '[ui]\nserve = "s"\nshoot = "  "\npaths = ["web/"]\n',
+    '[ui]\nserve = "s"\nshoot = "t"\npaths = []\npages = ["/", "/a b/"]\n',
+    '[ui]\nserve = "s"\nshoot = "t"\npaths = ["web/", 3]\nwidths = [[390, 844]]\n',
+    '[ui]\nserve = "s"\nshoot = "t"\npaths = ["web/"]\nwidths = [[0, 1]]\npages = "/"\n',
+    '[ui]\nserve = "s"\nshoot = "t"\npaths = ["web/"]\nwidths = [[1, true]]\nurl = "u"\n',
+    "[ui\n",
+]
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("text", UI_TABLES)
+def test_the_ui_copies_are_the_factorys(repo, text) -> None:
+    """143 R5: what ship's UI review reads of `[ui]` (complete, pages, widths, paths) is what
+    the factory makes of the same base-branch table, and the page names its PNGs are under."""
+    _on_main(repo, text)
+    _write(repo / ".sdlc" / "factory.toml", '[ui]\nserve = "x"\nshoot = "y"\npaths = ["z/"]\n')
+    ours = sdlc._ui_at(repo, "main")
+    theirs = factory._ui(repo)[0]
+    assert ours["complete"] == factory.ui_complete(theirs), text
+    for key in ("pages", "widths", "paths", "serve", "shoot"):
+        assert ours[key] == theirs[key], (text, key)
+    assert set(sdlc.UI_DEFAULTS) <= set(factory.DEFAULTS["ui"])
+    for page in ["/", "/drafts", "/a b/c", "", "?x=1", "../up"]:
+        assert sdlc._ui_page_name(page) == factory._page_name(page), page
+
+
 def test_the_hand_gate_reads_gate_jobs_as_the_factory_does(repo) -> None:
     """R3: from the base branch, never the checkout, a value the factory refuses giving 1."""
     seen = []

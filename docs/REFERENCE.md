@@ -128,10 +128,31 @@ names. `sdlc.py preflight NNN` reports what the change's diff touches of each as
 read from the base branch's checkout, so a change can't lighten its own review by editing them. A
 diff touching a `sensitive` path is `deep`: `/sdlc:ship` runs `commands.build` whatever
 `build_when` says, has the plugin's `sdlc:reviewer` agent review the diff in a fresh context (its
-findings marked `By: fresh` in `findings.md`), and its question names the paths. One touching an
+findings marked `By: fresh` in `findings.md`) and its `sdlc:security` agent review it for
+security beside it (`By: ship-security`), and its question names the paths. One touching an
 `irreversible` path carries a `How to recover:` paragraph in its commit: for each, the command that
 reverses it, or the fix forward. Risk never changes a change's tier. With neither set, every change
 ships alike.
+
+`preflight`'s `passes` part says which of ship's further passes apply, each with `applies` and
+`why`, and none applies to a factory run (a change with a `decision.md`), whose own reviewers ran:
+
+- **`security`**: a deep diff, as above.
+- **`behaviour`**: a Tier 2 change with a filled `spec.md`. Ship runs the spec's path end to end
+  itself, leaving out the gate and the change's acceptance checks, each command behind the
+  person's prompt. Each failure is a finding marked `By: ship-behaviour`, and the commands run are
+  its evidence.
+- **`ui`**: the base branch's `.sdlc/factory.toml` holds a complete `[ui]` (`serve`, `shoot` and
+  `paths`), and the diff touches its `paths`. It is read from the base branch, never the change's
+  checkout, so a change can't turn its own UI review off. The `sdlc:ui` and `sdlc:ux` agents
+  review the screenshots `factory.py shots` left under `.sdlc/reports/shots/<change>/`, marked
+  `By: ship-ui` and `By: ship-ux`. `shots` lists the newest set that finished (`problem: null`),
+  has every page at every width, and is newer than every changed path under `[ui] paths`. With
+  none, `why` says which failed, and both reviews are skipped with it. Ship never takes a
+  screenshot.
+
+Each pass that applies says in `findings.md`'s note that it ran, or was skipped and why; `sdlc.py
+ship` refuses a note that says neither, and the question names each.
 
 ### The base branch: `[git] base`
 
@@ -621,15 +642,21 @@ when ship recommends fixing it before the commit (a change of cost S in files th
 touches, said on a `Fix:` line), then `fixed`, `recorded` (as a nit or a bug), or `wrong`,
 `intentional` or `minor` with a `Reason:`. A rerun keeps each id, marks one the diff no longer
 shows `fixed`, and never raises again one the person dismissed. On a diff that touches a sensitive
-path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. A finding's `By:`
-line names who raised it: none on ship's own, `fresh` for the fresh-context reviewer, or a factory
-role (`code`, `security`, `test`, `behaviour`, `ui`, `ux`). A factory run writes its agents'
+path, the file's note says `Fresh review: ran` or `Fresh review: skipped, <why>`. Each of ship's
+further passes that applies (*Risky paths*) adds its own line, `ran` or `skipped, <why>`:
+`Security review:`, `Behaviour check:`, `UI review:` and `UX review:`. A behaviour check that ran
+ends the file with an `## Evidence` section: each command on a `$ ` line, the tail of its output,
+then `exit: <n>`. `sdlc.py findings` reads it as evidence, never as a finding, and reports a
+command without its `exit:`, or `Behaviour check: ran` with no command. A finding's `By:` line names
+who raised it: none on ship's own, `fresh` for the fresh-context reviewer, `ship-security`,
+`ship-behaviour`, `ship-ui` or `ship-ux` for ship's further passes, or a factory role (`code`,
+`security`, `test`, `behaviour`, `ui`, `ux`). A factory run writes its agents'
 findings into the same file (`factory.py carry`, at its approve step, and its landing's review
 rounds at `land --close`), each with its role's `By:`, and ship keeps those sections as they are
 and numbers its own after them. `sdlc.py findings NNN`
 reads it and prints the counts of ship's own, the agents' as `agents`, and the `Sdlc-Findings`
-line the commit carries; `sdlc.py ship` refuses while a finding is `open` or `fix`, and a deep
-diff whose note says neither. The file reaches history and the change's issue with the folder.
+line the commit carries; `sdlc.py ship` refuses while a finding is `open` or `fix`, a deep
+diff whose note says neither, and a pass that applies whose line is missing. The file reaches history and the change's issue with the folder.
 
 The guide's *Review dimensions* list what a review covers and who covers each in a ship and in a
 factory run, a way that leaves one uncovered saying so.
@@ -1064,9 +1091,11 @@ commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and
 each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
 then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of
 those were answered `wrong`, then `agents`: how many findings a factory run's agents left in the
-file. Every other key counts ship's own alone (no `By:`, or `By: fresh`), so an agent's finding is
-never counted as the person's review; a factory landing writes no `Sdlc-Findings` at all. A
-trailer from before dispositions, `fresh` or `agents` keeps its counts, and `/sdlc:retro` reads
+file, then `passes`, each of ship's further passes' count (`security:1,ui:2`, or `0`), and
+`passes_wrong`, how many of those were answered `wrong`. Every other key counts ship's own alone
+(no `By:`, `By: fresh`, or a `ship-*` pass), so an agent's finding is never counted as the
+person's review; a factory landing writes no `Sdlc-Findings` at all. A
+trailer from before dispositions, `fresh`, `agents` or `passes` keeps its counts, and `/sdlc:retro` reads
 what it lacks as unknown.
 
 Close also records whether the change went through first time: `Sdlc-Happy` says, per stage, yes,

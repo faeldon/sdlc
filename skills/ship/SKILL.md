@@ -108,8 +108,8 @@ Keep its output in view; the steps below read its parts by name, and run none of
 - **`cases`**: in this plugin's own repo, the skills' cases this diff calls for (`scope`), which
   Step 1 runs; `available: false` everywhere else, and then nothing below mentions them.
 - **`branches`**: the files beside this skill this change calls for: `factory.md` (a change built
-  by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, `cases.md`,
-  `conflict.md`.
+  by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, then
+  `security.md`, `behaviour.md` and `ui.md` as `passes` applies, `cases.md`, `conflict.md`.
 
 Empty is the usual answer for the first three, and for `branches`. A non-empty `problems` names the
 part that has one; a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
@@ -225,13 +225,14 @@ it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.
 is cheap and worth it (S and med) is the one to recommend fixing now, as `fix` below. The rest are
 proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
-**On a deep diff, a fresh-context review too,** in `fresh.md`, which `branches` names then; and
-**the skills' cases' line in the note,** in `cases.md`.
+**On a deep diff, a fresh-context review too,** in `fresh.md`, which `branches` names then, and
+the security review in `security.md`; the spec's path run end to end in `behaviour.md`; the UI and
+UX reviews in `ui.md`; and **the skills' cases' line in the note,** in `cases.md`, each when named.
 
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or
 `pre-existing`; `correctness`, `contract`, `cost` or `context`), with its `Evidence:`, `Class:` and
-`Disposition:` lines, and `By: fresh` on the fresh reviewer's. This is one of the writes beside `base` and `resolve` this skill makes before its WAIT, by a
+`Disposition:` lines, and the `By:` line a branch file names on its reviewer's. This is one of the writes beside `base` and `resolve` this skill makes before its WAIT, by a
 named exception to confirm-before-writing, on every run, a run that stops included: it writes
 only the change's own uncommitted folder, decides nothing (the WAIT approves every disposition
 in it), and the next run rewrites it. It is how a finding fixed between two runs is counted.
@@ -453,10 +454,9 @@ so rather than commit it.
 ## Step 7 — Report and stop
 
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
-name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the fixes made inside the yes and what the rerun said of them, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), the bugs filed by id, which context docs were updated (or
-that none needed it), the release impact recorded, each undone
-item and where it went (the seed's title, or dropped and why), the nits recorded and retired by
-id, and anything else deliberately
+name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the fixes made inside the yes and what the rerun said of them, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), which passes `branches` named (security, behaviour, UI, UX) ran or were skipped and why, the bugs filed by id, which context docs were updated (or
+that none needed it), the release impact recorded, each undone item and where it went (the seed's
+title, or dropped and why), the nits recorded and retired by id, and anything else deliberately
 deferred. Be explicit that nothing was pushed and nothing was deployed.
 
 Say what ran and what didn't. A report that implies more was verified than was is worse than

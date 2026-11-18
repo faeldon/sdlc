@@ -1372,7 +1372,7 @@ def test_carry_writes_each_agent_finding_once_by_its_role(tmp_path, capsys) -> N
     assert "Disposition: recorded\nTheme: tests\nCost: M\nValue: low\nBy: test\n" in f6
     assert "{tests M low}" not in text, "the weights are read off the nit's text"
     assert "Theme:" not in text.split("## F6.", 1)[0], "only a nit to file has them"
-    assert sdlc.findings_trailer(entries).endswith(" agents=6")
+    assert sdlc.findings_trailer(entries).endswith(" agents=6 passes=0 passes_wrong=0")
     assert "fixed=0" in sdlc.findings_trailer(entries), "an agent's nit is never ship's count"
 
 

@@ -1054,10 +1054,12 @@ def _manifest(root: Path) -> dict:
 def test_sdlc_loads_nothing_from_plugins() -> None:
     """`sdlc`'s source is the repo root, so `plugins/factory/` travels in its cached copy. It stays
     unread only while `sdlc` keeps its default scans: skills from `skills/`, and agents from
-    `agents/`, which holds `sdlc`'s own reviewer and none of the factory's."""
+    `agents/`, which holds `sdlc`'s own reviewer and ship's pass agents, none of the factory's."""
     sdlc = _manifest(ROOT)
     assert not {"skills", "agents", "commands", "hooks"} & set(sdlc), "a manifest key widens a scan"
-    assert {p.name for p in (ROOT / "agents").iterdir()} == {"reviewer.md"}
+    assert {p.name for p in (ROOT / "agents").iterdir()} == {
+        f"{name}.md" for name in ("reviewer", *SHIP_AGENTS)
+    }
     assert not (ROOT / "commands").exists()
     assert not (ROOT / "hooks").exists()
 
@@ -1134,15 +1136,63 @@ def test_sdlc_s_reviewer_reads_and_nothing_more() -> None:
     assert "fresh-context review too,** in `fresh.md`" in ship.content
 
 
-def test_adapted_agents_keep_the_notice() -> None:
-    """MIT asks for the notice wherever the material goes: the NOTICE file holds it, and each
-    adapted agent names its source on the line after its heading."""
-    notice = (FACTORY / "NOTICE").read_text(encoding="utf-8")
+# The core plugin's agents that adapt that material: its NOTICE is at the plugin's root (143).
+CORE_ADAPTED = {"security"}
+
+
+@pytest.mark.parametrize("plugin, adapted", [(FACTORY, ADAPTED), (ROOT, CORE_ADAPTED)],
+                         ids=["sdlc-factory", "sdlc"])  # fmt: skip
+def test_adapted_agents_keep_the_notice(plugin: Path, adapted: set[str]) -> None:
+    """MIT asks for the notice wherever the material goes: each plugin's NOTICE file holds it,
+    and each adapted agent names its source on the line after its heading."""
+    notice = (plugin / "NOTICE").read_text(encoding="utf-8")
     assert "MIT License" in notice and "Copyright (c) 2025 Addy Osmani" in notice
-    for name in ADAPTED:
-        text = (FACTORY / "agents" / f"{name}.md").read_text(encoding="utf-8")
+    for name in adapted:
+        text = (plugin / "agents" / f"{name}.md").read_text(encoding="utf-8")
         assert "Adapted from addyosmani/agent-skills (MIT)" in text, name
         assert f"agents/{name}.md" in notice, f"NOTICE doesn't list {name}"
+
+
+# Ship's own pass agents (143), and the `By:` each returns.
+SHIP_AGENTS = {"security": "ship-security", "ui": "ship-ui", "ux": "ship-ux"}
+
+
+@pytest.mark.parametrize("name, by", SHIP_AGENTS.items())
+def test_ship_s_agents_read_and_nothing_more(name: str, by: str) -> None:
+    """143 R8: each of ship's pass agents reads and returns text in findings.md's shape, its `By:`
+    one of ship's passes; nothing that writes or runs."""
+    post = frontmatter.load(ROOT / "agents" / f"{name}.md")
+    assert post["name"] == name and len(post["description"]) > 80
+    assert "Not for" in post["description"]
+    assert {t.strip() for t in str(post["tools"]).split(",")} == {"Read", "Grep", "Glob"}
+    assert f"By: {by}" in post.content and by in sdlc.SHIP_PASSES
+    assert "Disposition: open" in post.content and "never" in post.content
+
+
+@pytest.mark.parametrize(
+    "file, agents", [("security.md", ["sdlc:security"]), ("ui.md", ["sdlc:ui", "sdlc:ux"])]
+)
+def test_ship_s_pass_files_spawn_their_agents(file: str, agents: list[str]) -> None:
+    """143 R16: each pass file spawns its agents by name, with nothing of the session's reasoning,
+    and never drops what they return."""
+    text = " ".join((ROOT / "skills" / "ship" / file).read_text(encoding="utf-8").split())
+    for agent in agents:
+        assert f'subagent_type: "{agent}"' in text, (file, agent)
+    assert "Nothing of this session's reasoning" in text and "Never drop one" in text
+    assert "skipped, <why>" in text
+
+
+def test_behaviour_check_never_runs_checks() -> None:
+    """143 R15: the behaviour check is the session's, each command behind its prompt: no bash
+    block a rule would cover, never `accept` or `run-cases` as its own, never checks.md's."""
+    text = (ROOT / "skills" / "ship" / "behaviour.md").read_text(encoding="utf-8")
+    assert not _block_commands(text)
+    assert "sdlc.py accept" not in text and "run-cases" not in text
+    flat = " ".join(text.split())
+    assert "never run one here" in flat and "`checks.md`" in flat
+    assert "No rule in this skill covers these commands" in flat
+    assert "By: ship-behaviour" in text and "## Evidence" in text
+    assert "--leave <path>" in text, "what the path leaves is never committed unasked"
 
 
 def test_judging_agents_return_text_the_skill_writes() -> None:

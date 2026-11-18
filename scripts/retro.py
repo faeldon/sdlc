@@ -1396,12 +1396,12 @@ REVIEW_KINDS = ("important", "nit", "preexisting", "wrong")
 
 
 def _review_sources(changes: list[dict], review) -> tuple[dict[str, dict], int]:
-    """Per source (`ship`, `fresh`, then each factory role, in that order, only those that
-    counted any), the window's findings by rank, the ones answered `wrong`, and the changes the
-    source reviewed: one whose findings.md holds a finding of its, and for ship any change whose
-    commit carries `Sdlc-Findings` too. A change whose findings.md wasn't read is counted in
-    `unknown`, never as a review that found nothing."""
-    order = ("ship", "fresh", *sdlc.AGENT_ROLES)
+    """Per source (`ship`, `fresh`, ship's own passes, then each factory role, in that order, only
+    those that counted any), the window's findings by rank, the ones answered `wrong`, and the
+    changes the source reviewed: one whose findings.md holds a finding of its, and for ship any
+    change whose commit carries `Sdlc-Findings` too. A change whose findings.md wasn't read is
+    counted in `unknown`, never as a review that found nothing."""
+    order = ("ship", "fresh", *sdlc.SHIP_PASSES, *sdlc.AGENT_ROLES)
     rows: dict[str, dict] = {}
     unknown = 0
     for rec in changes:

@@ -206,8 +206,11 @@ run stay in `SKILL.md`. Ship, the factory's `carry`, and its `land --close` writ
 and `sdlc.py` only reads it (`findings_entries()`); `fix` never reaches a commit. `[review]
 sensitive` and `irreversible` are matched by the script (`risk_paths()`), never judged by a skill,
 and read from the base branch's config, so a change can't lighten its own review; risk never
-changes a tier. The fresh review is `agents/reviewer.md` (`sdlc:reviewer`), the core plugin's one
-agent, with `Read`, `Grep` and `Glob` and nothing that writes. Acceptance checks (`acceptance()`)
+changes a tier. The fresh review is `agents/reviewer.md` (`sdlc:reviewer`). The further passes
+`preflight`'s `passes` part names (`_passes_report()`, never on a factory run) are three more core
+agents, `sdlc:security`, `sdlc:ui` and `sdlc:ux`, and the behaviour check, which is ship's own
+session running each command behind the person's prompt. Every core agent has `Read`, `Grep` and
+`Glob` and nothing that writes. Acceptance checks (`acceptance()`)
 run only through `accept`, and are never rerun by a later change. REFERENCE.md, *`.sdlc/work/` and
 worktrees* and *Risky paths*.
 
@@ -223,8 +226,10 @@ README and `factory.py`'s docstring describe it. `sdlc`'s cached copy carries th
 loads it (`test_sdlc_loads_nothing_from_plugins`), and knows only whether it is enabled, from
 Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing run), for intent's
 `yes, for the factory` and the hand gate. `factory.py` never imports `sdlc.py`, and
-`sdlc` only reads the files a run leaves in a change's folder, and the base branch's `gate_jobs`
-and the gate slots' lock files, for the hand gate (`_hand_slot()`): each reads the other's files with
+`sdlc` only reads the files a run leaves in a change's folder, the base branch's `gate_jobs`
+and the gate slots' lock files, for the hand gate (`_hand_slot()`), and the base branch's `[ui]`
+and the screenshot sets under `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`,
+`_current_shots()`), never running `factory.py`: each reads the other's files with
 copies of its parsing (`risk_paths()` and the regexes included), pinned by tests. Agents that
 judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`), and no
 agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py

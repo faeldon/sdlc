@@ -11,7 +11,11 @@
 > ship's own alone into the `Sdlc-Findings` trailer (its `agents=` says how many it left out),
 > words ship's question from the ones proposed `fix`, and `ship` refuses while one is still `open`
 > or `fix`. On a diff that touches a sensitive path, this note also says `Fresh review: ran`, or
-> `Fresh review: skipped, <why>`.
+> `Fresh review: skipped, <why>`. Each of ship's further passes that applies says the same on a
+> line of its own: `Security review:`, `Behaviour check:`, `UI review:` and `UX review:`, and
+> their findings' `By:` is `ship-security`, `ship-behaviour`, `ship-ui` or `ship-ux`, counted as
+> ship's own (`passes=` says how many). A behaviour check that ran ends the file with an
+> `## Evidence` section: each command on a `$ ` line, the tail of its output, then `exit: <n>`.
 
 ## F1. [<important|nit|pre-existing>] [<correctness|contract|cost|context>] <what's wrong>
 

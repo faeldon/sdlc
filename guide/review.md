@@ -26,18 +26,22 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
   correctness pass reads them. Factory: `reviewer-code` reads them. Pass: correctness.
 - **contract**: the policy doc's invariants the diff comes near. Ship: the contract pass.
   Factory: `reviewer-code`. Pass: contract.
-- **security**: secrets, injection, trust boundaries. Ship: secrets in the contract pass, and the
-  fresh reviewer on a sensitive path. Factory: `reviewer-security`. Pass: contract.
+- **security**: secrets, injection, trust boundaries. Ship: secrets in the contract pass, and
+  `sdlc:security` beside the fresh reviewer on a sensitive path. Factory: `reviewer-security`.
+  Pass: contract.
 - **cost**: reuse, nothing speculative, waste. Ship: the cost pass. Factory: `reviewer-code`.
   Pass: cost.
 - **context**: the docs a session reads for its context still tell the truth. Ship: the context
   pass. Factory: `reviewer-code`'s context pass. Pass: context.
-- **end-to-end**: the spec's path run through, as a user would. Ship: not covered. Factory:
+- **end-to-end**: the spec's path run through, as a user would. Ship: the behaviour check on a
+  Tier 2 change with a spec, each command behind the person's prompt. Factory:
   `reviewer-behaviour`. Pass: correctness.
-- **ui**: the page a change renders, looked at. Ship: not covered. Factory: `reviewer-ui`, when
-  the factory's UI review is set up. Pass: correctness.
-- **ux**: whether a person can use that page. Ship: not covered. Factory: `reviewer-ux`, when the
+- **ui**: the page a change renders, looked at. Ship: `sdlc:ui`, when the factory's `[ui]` is set
+  and current screenshots exist, otherwise skipped with why. Factory: `reviewer-ui`, when the
   factory's UI review is set up. Pass: correctness.
+- **ux**: whether a person can use that page. Ship: `sdlc:ux`, on the same condition as `sdlc:ui`,
+  otherwise skipped with why. Factory: `reviewer-ux`, when the factory's UI review is set up.
+  Pass: correctness.
 - **false-positives**: a finding checked against the code before anyone acts on it. Ship: the
   person answers each finding. Factory: the verifier keeps or drops each required change.
 - **pre-existing**: a fault the diff didn't make, filed rather than fixed. Ship: proposed as a
@@ -46,7 +50,8 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
   Factory: each reviewer weighs its own; the cheap ones go to a rework that runs anyway, and the
   rest are filed as nit entries at landing, on the person's yes.
 - **fresh-eyes**: a reviewer that never saw the session that built it. Ship: the fresh reviewer
-  on a sensitive path. Factory: every agent.
+  and `sdlc:security` on a sensitive path, and `sdlc:ui` and `sdlc:ux` on a page with current
+  screenshots. Factory: every agent.
 - **acceptance**: the change's acceptance checks run. Ship: its checks step. Factory: the
   landing runs them.
 - **recovery**: how to undo what a revert can't. Ship: `How to recover:`. Factory: the approver's
