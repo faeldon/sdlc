@@ -496,16 +496,6 @@ Cost: S
 Value: low
 Raised by: 160-command-registry (correctness)
 
-## [2026-11-19-1] [nit] `lead_time()` returns `{}` when `opened` is after `closed`, and the code files that as `lead=bad-opened`.
-
-Raised by the code review of 162-lead-time, round 1: scripts/closing.py:474: `lead_time()` returns `{}` when `opened` is after `closed`, and the code files that as `lead=bad-opened`. That word is meant for an unparsable `opened:`. A clock that ran backwards is a different case; a distinct word such as `lead=clock` would say which one it was.
-
-Theme: docs
-Paths: scripts/closing.py
-Cost: S
-Value: low
-Raised by: 162-lead-time (correctness)
-
 ## [2026-11-19-2] [nit] a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`).
 
 Raised by the code review of 162-lead-time, round 1: scripts/closing.py:431: a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`). R10's "no transcripts" case says `lead`, `ready_wait` and `landing` are kept. The code is reasonable, because there is no approver row to read `ready` from. The spec could say so, or `ready` could fall back to the tip's author date for a factory change too.
@@ -551,26 +541,6 @@ Raised by: 164-prompts-in-files (correctness)
 Agent-written code tends to over-comment (RealHumanEval: about 2x the comments; it narrates when unsure), while too few comments make complex code unauditable, and comment text is roughly 30% of what agents read in this repo's scripts. No research gives one right ratio (open-source norm about 19% of lines, Arafat & Riehle 2009), so measure four signals rather than one: per-file density as a band (flag <0.10 or >0.40) and its trend across the window; docstring coverage of long (>=30 lines) and hot functions; the share of narration comments that restate their line; and the comment share of agent input tokens. Ship it as an indicator script beside .sdlc/function-heat.py (this repo's, Python), reported through retro.indicators in the Quality pillar with Cost as its guardrail. Follows S8 (structured indicators) in docs/RETRO-SCORECARD.md.
 Theme: retro
 Raised 2026-11-19.
-
-## [2026-11-19-5] [nit] the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
-
-Raised by the code review of 163-factory-records-reader, round 1: AGENTS.md:68: the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
-
-Theme: docs
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 163-factory-records-reader (correctness)
-
-## [2026-11-19-6] [nit] the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable.
-
-Raised by the code review of 163-factory-records-reader, round 1: tests/test_board.py: the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable. It was a comparison of two copies, and with one copy it would compare the module with itself. `LAND_STOPS` still has no factory twin, so nothing checks it against the factory. It is only pinned against `LAND_STEPS` through the board's `LAND_AT` test.
-
-Theme: tests
-Paths: tests/test_board.py
-Cost: S
-Value: low
-Raised by: 163-factory-records-reader (correctness)
 
 ## [2026-11-19-7] [nit] a few helper names such as `_reached` and `_named` have no docstring
 
