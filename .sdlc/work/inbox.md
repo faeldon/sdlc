@@ -193,13 +193,6 @@ See .sdlc/work/114-one-review/notes.md in its commit.
 Raised 2026-11-18.
 
 
-## [2026-11-18-6] [idea] Factory weighs its agents' nits and files them as `[nit]`
-
-Left undone by 114-one-review, carried forward when it shipped: gap: nits: the factory records its agents' `- NIT:` lines in `findings.md` but never weighs them (theme, cost, value) or files them as `[nit]` entries, as ship does.
-See .sdlc/work/114-one-review/notes.md in its commit.
-Raised 2026-11-18.
-
-
 ## [2026-11-18-11] [idea] findings.md template note names the landing as a writer
 
 Left undone by 127-landing-rounds-in-findings, carried forward when it landed: `templates/findings.md`'s note (and its copy `FINDINGS_HEAD`) still says only "the factory's `carry` writes its agents' findings into it"; it could name the landing too. Left out: the note is pinned to the template, ships to hosts, and needs `sdlc.py record`.

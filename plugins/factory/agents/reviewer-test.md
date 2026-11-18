@@ -78,6 +78,16 @@ after the colon (`- CHANGE: [cost] tests/test_drafts.py:9: …`), as may a `- PR
 `- NIT:` line.
 
 Then `## Notes`: lower-priority gaps, its nits (at most five) each on a line of its own as
-`- NIT: path/to/file.py:42: what` (never a reason for CHANGES, never reworked: recorded in the
-change's `findings.md`), what is well covered, each check in `checks.md` and what you expect of
-it, and the test command you ran with its count.
+`- NIT: path/to/file.py:42: what {<theme> <cost> <value>}` (never a reason for CHANGES, never
+verified: recorded in the change's `findings.md`), what is well covered, each check in
+`checks.md` and what you expect of it, and the test command you ran with its count.
+
+Weigh each nit by the Nits rubric in the repo's process doc (`docs.process` in
+`.sdlc/config.toml`, else the plugin's process guide) and end its line with the weights, `{<theme>
+<cost> <value>}`: a one-word theme (`docs`, `refactor`, `robustness`, `tests`, `style`, or one of
+the doc's own), cost `S`, `M` or `L`, value `high`, `med` or `low`, as in `- NIT:
+src/a.py:9: a long line {style S low}`. The script, never you, turns the weights into what happens
+to it: an `S` with `med` value goes to the builder with the round's rework when one runs (raise it
+again, word for word, if the rework didn't make it), any other `S` or `M` is filed as a `[nit]`
+entry when the change lands, on the person's yes, and an `L` (an idea) or a `high` value (never a
+nit) is carried to the change's notes. A nit without weights is only recorded.

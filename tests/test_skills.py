@@ -693,6 +693,37 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
     assert "never this skill's" in " ".join(text["retro"].split())
 
 
+def test_ship_files_the_agents_recorded_nits() -> None:
+    """129 R12: a factory change shipped by hand files its agents' weighed nits, as the entries
+    their weights and evidence give, ids in Step 4's one `next-entry` call, never re-disposing an
+    agent's section. R13: the land skill says what its yes files."""
+    factory_md = " ".join((ROOT / "skills" / "ship" / "factory.md").read_text().split())
+    step4 = factory_md.split("## Step 4")[1]
+    for said in ("`recorded`", "`Theme:`", "`Cost:`", "`Value:`", "`Evidence:`", "[nit]",
+                 "`next-entry`", "`--nits`"):  # fmt: skip
+        assert said in step4, said
+    assert "never re-disposition" in factory_md.split("## Step 3")[1].split("## Step 4")[0]
+    land = " ".join(
+        (ROOT / "plugins" / "factory" / "skills" / "land" / "SKILL.md").read_text().split()
+    )
+    description = land.split("description: ", 1)[1].split(" argument-hint:", 1)[0]
+    assert "its agents' nits filed" in description
+    assert "its agents' nits filed as shown" in land.split("## Step 2")[1].split("## Step 3")[0]
+    assert "`nits`" in land.split("## Step 0")[1].split("## Step 1")[0]
+    assert "`filed_nits`" in land.split("## Step 3")[1]
+
+
+def test_the_factory_reviewers_weigh_their_nits() -> None:
+    """129 R1: the code, security and test reviewers end each nit with its weights, by the process
+    doc's rubric, in the shape `read_nit()` reads."""
+    for role in ("code", "security", "test"):
+        text = " ".join(
+            (ROOT / "plugins" / "factory" / "agents" / f"reviewer-{role}.md").read_text().split()
+        )
+        assert "{<theme> <cost> <value>}" in text, role
+        assert "`docs.process`" in text, role
+
+
 def test_bug_files_by_the_script_and_never_writes_introduced_by_unasked() -> None:
     """A bug's id comes from `next-entry`, its commit from `inbox-commit`, and its `Introduced by:`
     only from a person's word: retro counts escapes by it."""

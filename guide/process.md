@@ -59,7 +59,7 @@ kind, which says where it came from:
 |---|---|---|
 | `[idea]` | a change someone proposes: something new, or something better | `/sdlc:idea`, `/sdlc:retro`, `/sdlc:ship` carrying a note |
 | `[bug]` | something already shipped that is broken | `/sdlc:bug` |
-| `[nit]` | a finding `/sdlc:ship` approved unfixed | `/sdlc:ship` |
+| `[nit]` | a finding approved unfixed | `/sdlc:ship`, or the factory's landing |
 
 An open change's `idea:` line marks the seed it builds as taken, and its `fixes:` line each bug it
 fixes; nothing edits the register for it. `[building]` is the tag older versions wrote on an idea

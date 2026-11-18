@@ -2,8 +2,8 @@
 
 > Where change requests arrive, before anyone decides to act on them. Every entry is a **seed**,
 > something a change may grow from, and its tag is its kind: `[idea]` a change someone proposes,
-> `[bug]` something already shipped that is broken, `[nit]` a finding `/sdlc:ship` approved
-> unfixed. Each is a `## [YYYY-MM-DD-n] [idea] <title>` heading, its id the day it came in and a
+> `[bug]` something already shipped that is broken, `[nit]` a finding `/sdlc:ship` (or the
+> factory's landing) approved unfixed. Each is a `## [YYYY-MM-DD-n] [idea] <title>` heading, its id the day it came in and a
 > count from `sdlc.py next-entry`, then a few lines on why and where it came from. A `[bug]` has
 > `Severity:` (a word from the process doc), `Paths:` and, once confirmed, `Introduced by:
 > NNN-slug` lines; a `[nit]` has `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug

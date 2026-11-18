@@ -87,7 +87,8 @@ reviewing, and deciding whether to escalate.
   One approval covers the batch, and it **passes itself when no change in it carries a risk
   signal** (a sensitive or irreversible path, `impact: major`, an ESCALATE, an open or assumed
   decision, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
-  read, a fix made while landing, acceptance checks, skills' cases in scope, undone notes),
+  read, a fix made while landing, acceptance checks, skills' cases in scope, undone notes, nits
+  to file),
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
   its one question shows what your yes approves, for each change: each acceptance check's name
   and command and the skills' cases with their cost cap, each run then through `factory.py
@@ -95,8 +96,9 @@ reviewing, and deciding whether to escalate.
   after it, and a rebased change runs its checks again); each undone note carried to the
   register as a seed or dropped, as its approver proposed, and a `pre-existing:` one it proposed
   as a bug filed as a `[bug]` with its severity and paths (`filed as a bug, <severity>: <title>
-  (<paths>)`); each assumed decision confirmed; and the `How to recover:` its commit carries for
-  an irreversible path. A change touching an irreversible path its approver proposed no way back
+  (<paths>)`); each nit its agents weighed to file, as a `[nit]` entry with its theme, paths,
+  cost and value (`[nit] <title> (<theme>, <cost>, <value>; <paths>)`); each assumed decision
+  confirmed; and the `How to recover:` its commit carries for an irreversible path. A change touching an irreversible path its approver proposed no way back
   for, or with a bug proposed on a severity that isn't one of the process doc's words (`sdlc.py
   bugs`), with no paths or on any other item, is left for `/sdlc:ship`, which also stays the way
   to land a change by hand.
@@ -160,8 +162,11 @@ spec.
   touch as `- PREEXISTING:`, carried to `notes.md` for ship, never reworked here. A finding may
   open with its pass (`[correctness]`, `[contract]`, `[cost]` or `[context]`; without one, the
   security reviewer's is contract and every other's correctness), and the code, security and test
-  reviewers list their nits as `- NIT:` lines under `## Notes`, recorded but never verified or
-  reworked.
+  reviewers list their nits as `- NIT:` lines under `## Notes`, never verified, each weighed
+  `{<theme> <cost> <value>}` by the process doc's rubric. The script disposes of each by its
+  weights: an `S` with `med` value goes to the builder with a rework that runs anyway (never one
+  of its own), any other `S` or `M` is filed at landing, at most five a change, an `L` or a
+  `high` value is carried to `notes.md`, and an unweighed nit is only recorded.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
 - **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`
@@ -261,8 +266,8 @@ its own folder, fixture copy and server, so a round's two start together.
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
   findings.md                   every agent finding of every complete round, the landing's too,
                                 once, By: its role, as fixed, recorded, wrong (the verifier's
-                                drop) or a nit: the same record ship writes, counted apart from
-                                ship's own
+                                drop) or a nit, a nit to file with its Theme:, Cost: and Value::
+                                the same record ship writes, counted apart from ship's own
   runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
                                 spec.md after your yes
   runs/spec-questions.md        the open questions it resolved and left, after the draft's ---

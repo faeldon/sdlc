@@ -366,7 +366,7 @@ changes they become" says what each is, and the change types they grow into). An
 as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good.
 It was `.sdlc/work/ideas.md` before 1.2.0; since 1.4.0 that file, and a host template
 `.sdlc/templates/ideas.md`, are not read at all. `sdlc.py config`'s `work.register` names the
-inbox, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship` approved unfixed are entries there too,
+inbox, and every skill that writes an entry writes there, never a second file. The findings `/sdlc:ship`, or the factory's landing, approved unfixed are entries there too,
 tagged `[nit]`, each with `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by: NNN-slug (pass)`
 lines under the process doc's rubric, offered by `/sdlc:intent` and `/sdlc:spec` to a change on
 the same paths, retired by the ship whose diff fixes it, and counted by theme and age by

@@ -40,3 +40,11 @@ with why. Then the agents' findings in `findings.md` (each section whose `By:` n
 role), under the verdicts and counted apart from ship's own: `findings`' `agents` count, never in
 its `counts` or the trailer's keys. The decision informs the person's approval and never stands in
 for it.
+
+**The agents' nits.** An agent's section that is `recorded` and holds `Theme:`, `Cost:` and
+`Value:` lines is a nit its reviewer weighed, which a factory landing would file. Propose each as
+the `[nit]` entry they give, shown as **Nits** shows one: the section's title, its line, `Theme:`,
+`Cost:` and `Value:` as written, `Paths:` the path its `Evidence:` names (without the line), and
+`Raised by: <NNN-slug> (<pass>)` with its heading's pass. Its id comes in the same `next-entry`
+call as every other entry, and the question is asked with `--nits`. The section itself stays as
+written: filing it re-dispositions nothing.

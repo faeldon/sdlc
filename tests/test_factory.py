@@ -979,10 +979,11 @@ def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
     [r1], problems = factory.read_rounds(folder, FULL)
     assert problems == []
     assert r1["reviews"]["code"]["changes"] == ["src/a.py:2: name it"]
-    assert r1["reviews"]["code"]["nits"] == ["src/a.py:9: a long line"]
+    unweighed = {"theme": None, "cost": None, "value": None}
+    assert r1["reviews"]["code"]["nits"] == [{"text": "src/a.py:9: a long line", **unweighed}]
     assert r1["reviews"]["security"] == {
         "verdict": "PASS", "changes": [], "preexisting": [],
-        "nits": ["[cost] src/b.py:1: a helper with one caller"],
+        "nits": [{"text": "[cost] src/b.py:1: a helper with one caller", **unweighed}],
     }  # fmt: skip
     state, _ = factory.loop_state(root, "008", None)
     prompt, _, _ = factory._task(root, folder, state, "verify", "verifier", None)
@@ -990,6 +991,38 @@ def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
     assert [line for line in prompt.splitlines() if line.startswith("- ")] == [
         "- C1: code: src/a.py:2: name it"
     ]
+
+
+def test_a_nit_is_read_with_its_weights(tmp_path) -> None:
+    """129 R1: a nit's trailing `{theme cost value}` is read as its weights and taken off its
+    text; a line without them, or with words the rubric doesn't have, is read as it is."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1)
+    _review(root, 1, "code", "VERDICT: PASS")
+    review = folder / "reviews" / "round-1" / "code.md"
+    review.write_text(
+        review.read_text()
+        + "- NIT: src/a.py:9: a long line {style S low}\n"
+        + "- NIT: [cost] src/b.py:1: one caller  {refactor M med}  \n"
+        + "- NIT: src/c.py:2: no weights\n"
+        + "- NIT: src/d.py:3: odd {style XL low}\n"
+    )
+    [r1], problems = factory.read_rounds(folder, ["code"])
+    assert problems == []
+    assert r1["reviews"]["code"]["nits"] == [
+        {"text": "src/a.py:9: a long line", "theme": "style", "cost": "S", "value": "low"},
+        {"text": "[cost] src/b.py:1: one caller", "theme": "refactor", "cost": "M",
+         "value": "med"},
+        {"text": "src/c.py:2: no weights", "theme": None, "cost": None, "value": None},
+        {"text": "src/d.py:3: odd {style XL low}", "theme": None, "cost": None, "value": None},
+    ]  # fmt: skip
+
+
+def test_the_nit_words_are_sdlcs() -> None:
+    """129: the cost and value words a filed nit may hold are copies of `sdlc.py`'s."""
+    assert factory.NIT_COSTS == sdlc.NIT_COSTS
+    assert factory.NIT_VALUES == sdlc.NIT_VALUES
 
 
 def _two_rounds(root: Path) -> Path:
@@ -1023,8 +1056,10 @@ def test_carry_writes_each_agent_finding_once_by_its_role(tmp_path, capsys) -> N
     disposed by what became of it, in a findings.md core reads with no problem."""
     root = _change(tmp_path)
     folder = _two_rounds(root)
+    test2 = folder / "reviews" / "round-2" / "test.md"
+    test2.write_text(test2.read_text() + "- NIT: src/t.py:4: a vague name {tests M low}\n")
     code, out = _run(capsys, factory.cmd_carry, root, "008")
-    assert code == 0 and out["findings"] == 5
+    assert code == 0 and out["findings"] == 6
     text = (folder / "findings.md").read_text(encoding="utf-8")
     assert text.startswith(factory.FINDINGS_HEAD)
     found = sdlc.findings_entries(folder)
@@ -1039,12 +1074,191 @@ def test_carry_writes_each_agent_finding_once_by_its_role(tmp_path, capsys) -> N
         ("F4", "preexisting", "correctness", "recorded", "test", "src/old.py:3",
          "test review, round 1"),
         ("F5", "nit", "correctness", "minor", "test", "src/a.py:9", "test review, round 1"),
+        ("F6", "nit", "correctness", "recorded", "test", "src/t.py:4", "test review, round 2"),
     ]  # fmt: skip
     entries = found["entries"]
     assert entries[2]["reason"] == "not in the code"
     assert entries[4]["reason"] == "raised by an agent; not weighed or filed"
     assert text.count("says the old flag") == 2, "its heading and body once: round 2 repeats it"
-    assert sdlc.findings_trailer(entries).endswith(" agents=5")
+    # 129 R7: a nit to file carries its weights, which core's parser passes over.
+    f6 = text.split("## F6.", 1)[1]
+    assert "Disposition: recorded\nTheme: tests\nCost: M\nValue: low\nBy: test\n" in f6
+    assert "{tests M low}" not in text, "the weights are read off the nit's text"
+    assert "Theme:" not in text.split("## F6.", 1)[0], "only a nit to file has them"
+    assert sdlc.findings_trailer(entries).endswith(" agents=6")
+    assert "fixed=0" in sdlc.findings_trailer(entries), "an agent's nit is never ship's count"
+
+
+def _nits(root: Path, n: int, role: str, *nits: str) -> None:
+    """Add `- NIT:` lines to round `n`'s `role` review."""
+    path = root / ".sdlc" / "work" / NAME / "reviews" / f"round-{n}" / f"{role}.md"
+    path.write_text(path.read_text() + "".join(f"- NIT: {x}\n" for x in nits))
+
+
+def _reworked(root: Path, *nits: str) -> Path:
+    """Round 1: code asks for a change the verifier keeps and raises `nits`; round 2, the rework,
+    every reviewer passes and raises none."""
+    _round(root, 1, code="CHANGES")
+    _nits(root, 1, "code", *nits)
+    _verified(root, 1, kept=["code: code fix 1"])
+    _round(root, 2)
+    return root / ".sdlc" / "work" / NAME
+
+
+def _rows(folder: Path) -> list[tuple]:
+    found = sdlc.findings_entries(folder)
+    assert found["problems"] == [], found["problems"]
+    return [(e["rank"], e["disposition"], e["evidence"], e["reason"]) for e in found["entries"]]
+
+
+def test_carry_disposes_each_nit_by_its_weights(tmp_path, capsys) -> None:
+    """129 R2: the script, never a model, turns each nit's weights into its disposition: `S` with
+    `med` handed to the rework and not raised again is fixed, any other `S`/`M` with `med`/`low`
+    recorded to file, `high` value an important finding and `L` cost an idea, both carried to
+    notes.md, and a nit without weights minor, as before."""
+    root = _change(tmp_path)
+    folder = _reworked(
+        root,
+        "src/a.py:1: cheap and worth it {style S med}",
+        "src/b.py:2: rename it {refactor M low}",
+        "src/c.py:3: users hit it {robustness S high}",
+        "src/d.py:4: rethink the module {design L med}",
+        "src/e.py:5: no weights",
+    )
+    code, out = _run(capsys, factory.cmd_carry, root, "008")
+    assert code == 0
+    assert _rows(folder) == [
+        ("important", "fixed", "reviews/round-1/code.md", None),
+        ("nit", "fixed", "src/a.py:1", factory.HANDED_REASON),
+        ("nit", "recorded", "src/b.py:2", None),
+        ("important", "recorded", "src/c.py:3", factory.HIGH_REASON),
+        ("nit", "recorded", "src/d.py:4", factory.IDEA_REASON),
+        ("nit", "minor", "src/e.py:5", factory.NIT_REASON),
+    ]  # fmt: skip
+    assert out["added"] == [
+        "code: src/c.py:3: users hit it",
+        "code: src/d.py:4: rethink the module",
+    ]
+    notes = (folder / "notes.md").read_text(encoding="utf-8")
+    assert "- [ ] code: src/c.py:3: users hit it\n" in notes and "{" not in notes
+    filed = [i["file"]["text"] for i in factory.agent_findings(_carried_rounds(root)) if i["file"]]
+    assert filed == ["src/b.py:2: rename it"], "only an S/M, med/low nit is filed"
+
+
+def _carried_rounds(root: Path) -> list[dict]:
+    cfg, _ = factory.load_config(root)
+    return factory._rounds_at_depth(root, root / ".sdlc" / "work" / NAME, cfg)[0]
+
+
+def test_carry_never_leaves_a_fix_for_ship_to_refuse(tmp_path, capsys) -> None:
+    """129 R3: a cheap nit no rework was handed, or one the round after the rework raises again,
+    is recorded to file, so `sdlc.py ship` never finds an agent's `fix` or `open`."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    _nits(root, 1, "code", "src/a.py:1: cheap {style S med}")
+    _run(capsys, factory.cmd_carry, root, "008")
+    found = sdlc.findings_entries(folder)
+    assert (found["fix"], found["open"]) == ([], [])
+    assert _rows(folder) == [("nit", "recorded", "src/a.py:1", None)], "never handed on"
+
+    root = _change(tmp_path / "again")
+    folder = _reworked(root, "src/a.py:1: cheap {style S med}")
+    _nits(root, 2, "code", "src/a.py:1: cheap {style S med}")
+    _run(capsys, factory.cmd_carry, root, "008")
+    found = sdlc.findings_entries(folder)
+    assert (found["fix"], found["open"]) == ([], [])
+    assert _rows(folder)[1] == ("nit", "recorded", "src/a.py:1", None), "raised again: not made"
+
+
+def test_a_nit_not_raised_again_is_still_filed(tmp_path, capsys) -> None:
+    """129 R5: only a cheap nit handed to the builder is fixed by a later round's silence; one
+    recorded, or a cheap one a restart's first round never handed on, is still filed."""
+    root = _change(tmp_path)
+    folder = _reworked(root, "src/b.py:2: rename it {refactor M low}")
+    _run(capsys, factory.cmd_carry, root, "008")
+    assert _rows(folder)[1] == ("nit", "recorded", "src/b.py:2", None)
+
+    rounds = _carried_rounds(root)
+    rounds[0]["reviews"]["code"]["nits"] = [factory.read_nit("src/a.py:1: cheap {style S med}")]
+    assert [i["disposition"] for i in factory.agent_findings(rounds) if i["rank"] == "nit"] == [
+        "fixed"
+    ]
+    rounds[1]["start"] = True
+    assert [i["disposition"] for i in factory.agent_findings(rounds) if i["rank"] == "nit"] == [
+        "recorded"
+    ], "a restart's first round was handed nothing"
+
+
+def test_carry_caps_the_nits_it_files_at_five(tmp_path, capsys) -> None:
+    """129 R6: a change files at most five nits, the first five in order; past them, and any nit
+    that names no path, is minor, with why."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    _nits(root, 1, "code", "src/a1.py:1: one {style M low}", "the names are long {style M low}",
+          *(f"src/a{i}.py:{i}: number {i} {{style M low}}" for i in range(2, 6)))  # fmt: skip
+    _nits(root, 1, "test", "tests/t.py:1: six {tests S low}", "tests/u.py:2: seven {tests M med}")
+    _run(capsys, factory.cmd_carry, root, "008")
+    rows = _rows(folder)
+    assert [r[1] for r in rows] == ["recorded", "minor", *["recorded"] * 4, "minor", "minor"]
+    assert rows[1][3] == factory.NO_PATH_REASON
+    assert rows[6][3] == rows[7][3] == factory.CAP_REASON
+    assert factory.CAP_REASON == "past the cap of 5 nits a change files"
+    assert factory.NO_PATH_REASON == "names no path, so it can't be filed as a nit"
+
+
+def test_rework_hands_the_builder_its_cheap_nits(tmp_path, capsys) -> None:
+    """129 R4: a rework round N lists round N's `S` `med` nits after its kept changes, in the
+    reviewers' words; round N+1's review names to each role the ones it raised, to raise again any
+    the rework didn't make."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1, code="CHANGES")
+    _nits(root, 1, "code", "src/a.py:1: cheap {style S med}", "src/b.py:2: later {style M low}")
+    _nits(root, 1, "test", "[cost] tests/t.py:3: one fixture {tests S med}")
+    _verified(root, 1, kept=["code: code fix 1"])
+    state, _ = factory.loop_state(root, "008", None)
+    assert state["next"] == "rework"
+    assert state["handed"] == [
+        {"role": "code", "text": "src/a.py:1: cheap"},
+        {"role": "test", "text": "[cost] tests/t.py:3: one fixture"},
+    ]
+    prompt, _, _ = factory._task(root, folder, state, "rework", "builder", None)
+    assert prompt.endswith(
+        "- code: code fix 1\nAlso make these nits, each weighed cheap and worth it:\n"
+        "- code: src/a.py:1: cheap\n- test: [cost] tests/t.py:3: one fixture"
+    )
+    assert "later" not in prompt, "an M nit is filed, never handed on"
+    _build_report(root, 2)
+    state, _ = factory.loop_state(root, "008", None)
+    assert (state["next"], state["round"]) == ("review", 2)
+    prompt, _, _ = factory._task(root, folder, state, "review", "code", None)
+    assert (
+        " Nits handed to the builder last round: src/a.py:1: cheap; raise again, word for word "
+        "with its weights, any the rework didn't make." in prompt
+    )
+    prompt, _, _ = factory._task(root, folder, state, "review", "security", None)
+    assert "Nits handed" not in prompt, "security raised none"
+
+
+def test_a_round_with_only_nits_is_never_reworked(tmp_path, capsys) -> None:
+    """129 R4: cheap nits and no kept change go to the approver, never to a rework; and a
+    restart's first round starts fresh, handed nothing."""
+    root = _change(tmp_path)
+    _round(root, 1)
+    _nits(root, 1, "code", "src/a.py:1: cheap {style S med}")
+    state, _ = factory.loop_state(root, "008", None)
+    assert (state["next"], state["handed"]) == ("approve", [])
+    assert all(r["verdict"] == "PASS" for r in state["rounds"][0]["reviews"].values())
+
+    root = _change(tmp_path / "restarted", 2, "test")
+    _escalated(root)
+    _nits(root, 3, "code", "src/a.py:1: cheap {style S med}")
+    assert _restart(root, capsys)[0] == 0
+    _build_report(root, 4)
+    state, _ = factory.loop_state(root, "008", None)
+    assert (state["next"], state["round"], state["handed"]) == ("review", 4, [])
 
 
 def test_carry_with_no_complete_round_writes_the_note_alone(tmp_path, capsys) -> None:

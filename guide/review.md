@@ -43,7 +43,8 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
 - **pre-existing**: a fault the diff didn't make, filed rather than fixed. Ship: proposed as a
   bug. Factory: carried to the change's notes, and proposed as a bug when it lands.
 - **nits**: the small things, weighed and filed. Ship: weighed and proposed as nit entries.
-  Factory: recorded in `findings.md`, never weighed or filed.
+  Factory: each reviewer weighs its own; the cheap ones go to a rework that runs anyway, and the
+  rest are filed as nit entries at landing, on the person's yes.
 - **fresh-eyes**: a reviewer that never saw the session that built it. Ship: the fresh reviewer
   on a sensitive path. Factory: every agent.
 - **acceptance**: the change's acceptance checks run. Ship: its checks step. Factory: the

@@ -420,7 +420,7 @@ def test_land_check_shows_each_changes_checks_cases_notes_decisions_and_recovery
 
 
 def _entry(name: str, **parts) -> dict:
-    empty = {"checks": [], "cases": {}, "undone": [], "assumed": [], "recover": []}
+    empty = {"checks": [], "cases": {}, "undone": [], "assumed": [], "recover": [], "nits": []}
     return {"change": name, **empty, **parts}
 
 
@@ -1217,6 +1217,130 @@ def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
     body = _git(tree, "log", "-1", "--format=%B")
     assert "Carried forward:\n- Page the list →" in body
     assert "second line" not in body, "a bug is in neither Carried forward nor Dropped"
+
+
+# ---------------------------------------------------------------- the agents' nits (129)
+
+TERSE = "README.md:1: terse wording. Say what it is {docs S low}"
+TERSE_FILED = {
+    "title": "terse wording.", "text": "README.md:1: terse wording. Say what it is",
+    "theme": "docs", "paths": ["README.md"], "cost": "S", "value": "low",
+    "pass": "correctness", "role": "code", "round": 1,
+    "shown": "[nit] terse wording. (docs, S, low; README.md)",
+}  # fmt: skip
+
+
+def _nit(folder: Path, role: str, *nits: str) -> None:
+    """Add `- NIT:` lines to the build round's `role` review."""
+    path = folder / "reviews" / "round-1" / f"{role}.md"
+    path.write_text(path.read_text() + "".join(f"- NIT: {n}\n" for n in nits))
+
+
+@needs_uv
+def test_land_check_shows_the_nits_it_would_file(tmp_path, capsys) -> None:
+    """129 R8: each change carries the nits `carry` records to file, from the same reading, and the
+    question says they are filed as shown."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    _nit(folder, "code", TERSE, "the names are long {style M low}")
+    _nit(folder, "test", "README.md:3: a third line {tests L med}")
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    [entry] = batch["batch"]
+    assert entry["nits"] == [TERSE_FILED]
+    assert "nits to file: 1" in entry["signals"]
+    assert "its agents' nits filed as shown" in batch["question"]
+    rounds = factory._rounds_at_depth(tree, folder, factory.load_config(tree)[0])[0]
+    carried = [i["file"] for i in factory.agent_findings(rounds) if i["file"]]
+    assert [{k: v for k, v in n.items() if k != "shown"} for n in entry["nits"]] == carried
+
+
+def test_land_question_names_the_nits() -> None:
+    """129 R8: the clause is there when some change in the batch files a nit, and only then."""
+    plain = factory.land_question([_entry("001-a"), _entry("002-b")], "main")
+    assert "nits" not in plain
+    one = factory.land_question([_entry("001-a"), _entry("002-b", nits=[TERSE_FILED])], "main")
+    assert one == plain.replace(
+        "each shipped with its approver's impact, ",
+        "each shipped with its approver's impact, its agents' nits filed as shown, ",
+    )
+    notes = factory.land_question(
+        [_entry("001-a", nits=[TERSE_FILED], undone=[{"line": 1, "text": "t", "seed": "t"}],
+                recover=["a/: b"])], "main",
+    )  # fmt: skip
+    assert (
+        "its undone notes carried or dropped as shown, its agents' nits filed as shown, " in notes
+    )
+    assert notes.index("nits filed") < notes.index("with how to recover shown")
+
+
+@needs_uv
+def test_nits_to_file_keep_the_gate_the_persons(tmp_path, capsys) -> None:
+    """129 R9: a nit to file is a signal, saying how many fell past the cap: the batch isn't clear,
+    and `land --by auto` refuses it before writing anything."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    assert _run(capsys, factory.cmd_land_check, root, [])[1]["clear"] is True
+    _nit(folder, "code", *(f"README.md:{i}: wording {i} {{docs M low}}" for i in range(1, 8)))
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    assert batch["clear"] is False
+    assert batch["batch"][0]["signals"] == ["nits to file: 5, 2 past the cap of 5"]
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert code == 1 and "the gate is the person's: nits to file: 5" in out["refusals"][0]
+    assert _git(tree, "log", "-1", "--format=%s") == "init", "nothing committed"
+    assert not (tree / ".sdlc" / "work" / "inbox.md").exists(), "nothing filed"
+
+
+@needs_uv
+def test_a_landing_files_the_nits_sdlc_reads(tmp_path, capsys) -> None:
+    """129 R10: the person's yes files each nit as a `[nit]` entry `sdlc.py` reads with no
+    problem, its id from the one `next-entry` call the seeds and bugs take theirs from, in the
+    change's own commit, and `land` reports the ids."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    (folder / "notes.md").write_text(f"# Notes\n\n- [ ] {PRE}\n- [ ] Page the list\n")
+    (folder / "decision.md").write_text(
+        "DECISION: READY\n\nFine.\n\n- IMPACT: minor — a test change\n" + BUG
+    )
+    _nit(folder, "code", TERSE)
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    nits, problems = sdlc.nit_entries(tree)
+    assert problems == [] and len(nits) == 1
+    [nit] = nits
+    assert out["filed_nits"] == [nit["id"]]
+    assert (nit["title"], nit["theme"], nit["paths"], nit["cost"], nit["value"]) == (
+        "terse wording.", "docs", ["README.md"], "S", "low",
+    )  # fmt: skip
+    assert (nit["by"], nit["pass"]) == (tree.name, "correctness")
+    assert nit["text"].startswith(
+        f"Raised by the code review of {tree.name}, round 1: README.md:1: terse wording. Say what"
+    )
+    [bug] = sdlc.bug_entries(tree)[0]
+    seeds = [e["id"] for e in sdlc.inbox_entries(tree) if e["status"] == "idea"]
+    assert len({nit["id"], bug["id"], *seeds}) == 3, "one next-entry call, three ids"
+    assert ".sdlc/work/inbox.md" in _git(tree, "show", "--name-only", "--format=").splitlines()
+
+
+@needs_uv
+def test_a_landing_rerun_files_each_nit_once(tmp_path, capsys) -> None:
+    """129 R11: a rerun of the yes's writes skips a nit the register already holds for this change,
+    matched by its `Raised by:` and its text, never by its title alone."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    _nit(folder, "code", TERSE, "README.md:2: terse wording. Another one {docs M low}")
+    pre, _ = factory._preflight(folder, tree)
+    filed, refused = factory._dispose(tree, folder, pre)
+    assert refused is None and len(filed) == 2
+    register = tree / ".sdlc" / "work" / "inbox.md"
+    once = register.read_text(encoding="utf-8")
+    assert once.count("] [nit] terse wording.") == 2, "one title, two nits: both filed"
+    assert factory._dispose(tree, folder, pre) == ([], None)
+    assert register.read_text(encoding="utf-8") == once
+    assert len(sdlc.nit_entries(tree)[0]) == 2
 
 
 @needs_uv

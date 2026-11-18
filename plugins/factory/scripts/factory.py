@@ -150,6 +150,14 @@ PREEXISTING_RE = re.compile(r"^\s*- PREEXISTING:\s*(.+?)\s*$")
 # A reviewer's nit, under its `## Notes`: recorded in findings.md, never verified or reworked.
 # (`NIT_RE` is the register's `[nit]` heading.)
 FINDING_NIT_RE = re.compile(r"^\s*- NIT:\s*(.+?)\s*$")
+# A nit's weights, which its reviewer writes at its end by the process doc's rubric: `{<theme>
+# <cost> <value>}`, one word each. Read off the nit's text; a nit without them, or with a word the
+# rubric doesn't have, keeps its text whole and is never weighed. `NIT_COSTS` and `NIT_VALUES` are
+# what a filed `[nit]` may hold, copies of `sdlc.py`'s, pinned by a test: `L` cost is an idea and
+# `high` value is never a nit, so neither is filed.
+NIT_WEIGHT_RE = re.compile(r"^(.*?)\s*\{([a-z][a-z0-9-]*)\s+(S|M|L)\s+(high|med|low)\}$")
+NIT_COSTS = ("S", "M")
+NIT_VALUES = ("med", "low")
 # The pass a finding opens with, `[context] docs/a.md:3: …`: one of the four `sdlc.py` counts
 # (`FINDING_PASSES`). Without one, or with another word, its role's pass (`ROLE_PASS`, else
 # correctness), and an unknown tag stays in the text.
@@ -277,6 +285,13 @@ FINDINGS_HEAD = """\
 # and a nit's `Reason:` says no one weighed it.
 FINDING_HEAD_RE = re.compile(r"^## F(\d+)\.")
 NIT_REASON = "raised by an agent; not weighed or filed"
+# What a weighed nit's `Reason:` says when it isn't filed as one (`agent_findings()`).
+HANDED_REASON = "weighed S med: handed to the builder's rework, and not raised again"
+HIGH_REASON = "weighed high value: never a nit; carried to notes.md"
+IDEA_REASON = "weighed L cost: an idea, not a nit; carried to notes.md"
+NIT_CAP = 5
+CAP_REASON = f"past the cap of {NIT_CAP} nits a change files"
+NO_PATH_REASON = "names no path, so it can't be filed as a nit"
 LEAD_RE = re.compile(r"^`?([^\s:`]*[./][^\s:`]*?)(?::(\d+(?:[-–]\d+)?))?`?:\s+(.+)$")
 CONFIG_FILE = Path(".sdlc") / "factory.toml"
 
@@ -989,7 +1004,7 @@ def read_rounds(
                 )
                 continue
             preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, lines[1:]) if c]
-            nits = [c.group(1) for c in map(FINDING_NIT_RE.match, lines[1:]) if c]
+            nits = [read_nit(c.group(1)) for c in map(FINDING_NIT_RE.match, lines[1:]) if c]
             reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting,
                              "nits": nits}  # fmt: skip
         verified, wrong = read_verified(
@@ -1000,6 +1015,15 @@ def read_rounds(
         found.append({"round": n, "kind": kind, "reviews": reviews, "complete": complete,
                       "verified": verified})  # fmt: skip
     return found, problems
+
+
+def read_nit(line: str) -> dict:
+    """A `- NIT:` line's text and its weights (`NIT_WEIGHT_RE`): `theme`, `cost` and `value`, each
+    None when the line has none the rubric reads, its text then as written."""
+    m = NIT_WEIGHT_RE.match(line)
+    if not m:
+        return {"text": line, "theme": None, "cost": None, "value": None}
+    return {"text": m.group(1), "theme": m.group(2), "cost": m.group(3), "value": m.group(4)}
 
 
 def _no_verdict(n: int, role: str, kind: str = "round") -> str:
@@ -1117,14 +1141,17 @@ def ui_review(cfg: dict, rounds: list[dict], changed: list[str]) -> bool:
 def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
     """The rounds, their problems and the run's depth, each round's `complete` judged against the
     reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`), and
-    the newest restart (`restart`, or None) and the upgrade (`upgrade`, or None), whose round
-    starts the run, the newer of the two."""
+    its `start` whether a restart or the upgrade starts a run there; and the newest restart
+    (`restart`, or None) and the upgrade (`upgrade`, or None), whose round starts the run, the
+    newer of the two."""
     rounds, problems = read_rounds(folder, cfg["reviewers"])
     restarts, wrong = read_restarts(folder)
     problems += wrong
     upgrade, wrong = read_upgrade(folder)
     problems += wrong
     starts = [r["round"] for r in restarts] + ([upgrade["round"]] if upgrade else [])
+    for r in rounds:
+        r["start"] = r["round"] in starts
     run = depth(root, cfg, rounds, starts, change_tier(folder))
     run["restart"] = restarts[-1] if restarts else None
     run["upgrade"] = upgrade
@@ -1793,7 +1820,10 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
     changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
     raised again), and for the verifier, `repeats` (a change raised again) and `untouched` (one on
-    a path the change doesn't touch: pre-existing, never reworked).
+    a path the change doesn't touch: pre-existing, never reworked); and `handed`, the cheap nits
+    (`cheap_nits()`) a `rework` gives the builder beside its kept changes, or that the `review`
+    after it names to the roles that raised them. Nits never make a step: a round with nits and no
+    kept change goes to `approve`.
     """
     if record and not head:
         why = "--record needs --head: without it a stop for HEAD moving would be removed"
@@ -1944,15 +1974,27 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["next"], out["round"] = "rework", last["round"]
     else:
         out["next"], out["round"], out["exhausted"] = "approve", last["round"], exhausted
+    # The cheap nits a rework is handed, the round's own (`cheap_nits()`), and the ones the round
+    # after it reviews: none when it starts a restarted or upgraded run, which starts fresh.
+    out["handed"] = []
+    rnd = out["round"]
+    prev = next((r for r in rounds if r["round"] == (rnd or 0) - 1), None)
+    fresh = {(restart or {}).get("round"), (upgrade or {}).get("round")}
+    if out["next"] == "rework":
+        out["handed"] = [{"role": a, "text": b} for a, b in cheap_nits(last)]
+    elif out["next"] == "review" and prev and prev["complete"] and rnd not in fresh:
+        kept_before = (prev["verified"] or {}).get("kept")
+        out["handed"] = [{"role": a, "text": b} for a, b in cheap_nits(prev)] if kept_before else []
     return out, None
 
 
 def cmd_carry(root: Path, ident: str) -> int:
     """Each change the last complete round still asks for and the verifier kept (every one, in a
-    round from before there was a verifier), and every pre-existing problem a reviewer found, as an
-    unticked `- [ ]` line in notes.md, so `/sdlc:ship` must give each a disposition. Once only: a
-    line already there, ticked or not, isn't added again. Then the record: every agent finding of
-    every complete round, in `findings.md` beside notes.md (`write_findings()`)."""
+    round from before there was a verifier), every pre-existing problem a reviewer found, and each
+    nit weighed `high` or `L` (`agent_findings()`'s `note`), as an unticked `- [ ]` line in
+    notes.md, so `/sdlc:ship` must give each a disposition. Once only: a line already there,
+    ticked or not, isn't added again. Then the record: every agent finding of every complete
+    round, in `findings.md` beside notes.md (`write_findings()`)."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -1971,6 +2013,8 @@ def cmd_carry(root: Path, ident: str) -> int:
     for r in rounds:
         for review in r["reviews"].values():
             wanted += [f"pre-existing: {text}" for text in review["preexisting"]]
+    # A nit weighed `high` or `L` is no nit: left undone, for the approver to propose like any.
+    wanted += [f"{i['role']}: {i['text']}" for i in agent_findings(rounds) if i["note"]]
     wanted = list(dict.fromkeys(wanted))
     notes = folder / "notes.md"
     text = notes.read_text(encoding="utf-8") if notes.is_file() else ""
@@ -1986,15 +2030,46 @@ def cmd_carry(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "notes": str(notes), "added": added, "findings": findings})
 
 
+def cheap_nits(r: dict) -> list[tuple[str, str]]:
+    """Round `r`'s nits weighed `S` and `med`, worth fixing before the commit that found them, as
+    `(role, text)`, each once, in `REVIEWERS` order: what a rework of the round is handed."""
+    return list(dict.fromkeys(
+        (role, n["text"])
+        for role in REVIEWERS if role in r["reviews"]
+        for n in r["reviews"][role].get("nits") or []
+        if (n["cost"], n["value"]) == ("S", "med")
+    ))  # fmt: skip
+
+
+def reworked_round(rounds: list[dict], n: int) -> bool:
+    """Whether round `n`'s rework ran, read from the rounds alone: its verifier kept a change, and
+    round `n + 1` was built, but not as a restart's or an upgrade's first round, which starts
+    fresh. Its cheap nits (`cheap_nits()`) were handed to the builder then."""
+    this = next((r for r in rounds if r["round"] == n), None)
+    after = next((r for r in rounds if r["round"] == n + 1), None)
+    kept = this and (this["verified"] or {}).get("kept")
+    return bool(kept and after and not after.get("start"))
+
+
 def agent_findings(rounds: list[dict]) -> list[dict]:
     """Every distinct `(role, text)` the complete `rounds` raised, as the record's findings, in
     round order (the build's rounds, then the landing's), then `REVIEWERS` order, then each file's
     order (its changes, its pre-existing problems, its nits): a change the verifier kept is
     `fixed`, or `recorded` while the last complete build round still carries it to notes.md, or
     the last landing round kept it and no later one followed; one it dropped is `wrong` with its
-    why; a pre-existing problem `recorded`; a nit `minor`. In a round from before there was a
-    verifier, every change counts as kept. A change asked under a `PASS` verdict was never asked.
-    The same `(role, text)` in a build round and a landing round is one finding, the first."""
+    why; a pre-existing problem `recorded`. In a round from before there was a verifier, every
+    change counts as kept. A change asked under a `PASS` verdict was never asked. The same
+    `(role, text)` in a build round and a landing round is one finding, the first.
+
+    A nit is keyed by its text without its weights, which the latest complete build round that
+    raised it gives, and disposed of by them, never by a model: without weights it is `minor`;
+    `high` value is never a nit but an `important` finding, and `L` cost an idea, each `recorded`
+    and `note`d for notes.md; `S` with `med` is `fixed` when a rework was handed it
+    (`reworked_round()`) and a later complete build round of its role doesn't raise it again;
+    every other is `recorded`, to file as a `[nit]` entry (`file`), but one naming no path, and
+    any past the first `NIT_CAP`, `minor`. Only the build's rounds are weighed, so what the
+    landing filed is what the record says: a nit only a landing round raised, after the filing,
+    is `minor`."""
     done = [r for r in rounds if r["complete"]]
 
     def kept_of(r: dict) -> list[tuple[str, str]]:
@@ -2010,21 +2085,26 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
     why = {(d["role"], d["change"]): d["why"] for r in done
            for d in (r["verified"] or {"dropped": []})["dropped"]}  # fmt: skip
     found: dict[tuple[str, str], dict] = {}
+    latest: dict[tuple[str, str], tuple[int, dict]] = {}
     for r in done:
         for role in [x for x in REVIEWERS if x in r["reviews"]]:
             review = r["reviews"][role]
             asked = review["changes"] if review["verdict"] == "CHANGES" else []
+            nits = review.get("nits") or []
+            for nit in nits if r.get("kind", "round") == "round" else ():
+                latest[(role, nit["text"])] = (r["round"], nit)
             for kind, texts in (("change", asked), ("pre-existing", review["preexisting"]),
-                                ("nit", review.get("nits") or [])):  # fmt: skip
+                                ("nit", [n["text"] for n in nits])):  # fmt: skip
                 for text in texts:
                     if (role, text) in found:
                         continue
                     item = {"role": role, "text": text, "round": r["round"], "reason": None,
-                            "kind": r.get("kind", "round")}  # fmt: skip
+                            "kind": r.get("kind", "round"), "file": None,
+                            "note": False}  # fmt: skip
                     if kind == "pre-existing":
                         item.update(rank="pre-existing", disposition="recorded")
                     elif kind == "nit":
-                        item.update(rank="nit", disposition="minor", reason=NIT_REASON)
+                        item.update(rank="nit")
                     elif (role, text) in carried:
                         item.update(rank="important", disposition="recorded")
                     elif (role, text) in kept:
@@ -2034,6 +2114,41 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
                     else:
                         continue
                     found[(role, text)] = item
+    built = [r for r in rounds if r.get("kind", "round") == "round"]
+    filed = 0
+    for (role, text), item in found.items():
+        if item["rank"] != "nit":
+            continue
+        if (role, text) not in latest:
+            item.update(disposition="minor", reason=NIT_REASON)
+            continue
+        last, nit = latest[(role, text)]
+        later = [r for r in built if r["complete"] and r["round"] > last and role in r["reviews"]]
+        if nit["cost"] is None:
+            item.update(disposition="minor", reason=NIT_REASON)
+            continue
+        item.update(theme=nit["theme"], cost=nit["cost"], value=nit["value"])
+        if nit["value"] == "high":
+            item.update(rank="important", disposition="recorded", reason=HIGH_REASON, note=True)
+        elif nit["cost"] == "L":
+            item.update(disposition="recorded", reason=IDEA_REASON, note=True)
+        elif (nit["cost"], nit["value"]) == ("S", "med") and reworked_round(built, last) and later:
+            item.update(disposition="fixed", reason=HANDED_REASON)
+        else:
+            pass_, said = finding_pass(role, text)
+            m = LEAD_RE.match(said)
+            if not m:
+                item.update(disposition="minor", reason=NO_PATH_REASON)
+            elif filed >= NIT_CAP:
+                item.update(disposition="minor", reason=CAP_REASON)
+            else:
+                filed += 1
+                item.update(disposition="recorded")
+                item["file"] = {
+                    "title": first_sentence(m.group(3)).strip() or said, "text": said,
+                    "theme": nit["theme"], "paths": [m.group(1)], "cost": nit["cost"],
+                    "value": nit["value"], "pass": pass_, "role": role, "round": item["round"],
+                }  # fmt: skip
     return list(found.values())
 
 
@@ -2051,6 +2166,8 @@ def finding_section(n: int, item: dict) -> str:
     lines = [f"## F{n}. [{item['rank']}] [{pass_}] {title}", "", text, "",
              f"Evidence: {evidence}", f"Class: {item['role']} review, {which} {item['round']}",
              f"Disposition: {item['disposition']}"]  # fmt: skip
+    if item.get("file"):
+        lines += [f"Theme: {item['theme']}", f"Cost: {item['cost']}", f"Value: {item['value']}"]
     if item["reason"]:
         lines.append(f"Reason: {item['reason']}")
     lines.append(f"By: {item['role']}")
@@ -2912,6 +3029,12 @@ def _task(
                 f"{'; '.join(k['role'] + ': ' + k['change'] for k in kept['kept']) or 'none'}. "
                 f"Settled, never raise again: {'; '.join(state['settled']) or 'none'}."
             )
+        handed = [h["text"] for h in state.get("handed") or [] if h["role"] == role]
+        if handed:
+            prompt += (
+                f" Nits handed to the builder last round: {'; '.join(handed)}; raise again, word "
+                "for word with its weights, any the rework didn't make."
+            )
         return prompt, reviews_dir / f"{role}.md", False
     if task == "verify":
         current = next(r for r in state["rounds"] if r["round"] == rnd)
@@ -2929,13 +3052,16 @@ def _task(
         # verifier's line is its own summary, by id.
         current = next(r for r in state["rounds"] if r["round"] == rnd)
         kept = (current["verified"] or {"kept": []})["kept"]
-        return (
+        prompt = (
             f"Round {rnd}'s changes are verified in {rel}/reviews/round-{rnd}/{VERIFIED}. Address "
             "every KEPT line, then report. The kept changes, in the reviewers' words:\n"
-            + "\n".join(f"- {k['role']}: {k['change']}" for k in kept),
-            folder / "build" / f"round-{rnd + 1}.md",
-            False,
+            + "\n".join(f"- {k['role']}: {k['change']}" for k in kept)
         )
+        if state.get("handed"):
+            prompt += "\nAlso make these nits, each weighed cheap and worth it:\n" + "\n".join(
+                f"- {h['role']}: {h['text']}" for h in state["handed"]
+            )
+        return prompt, folder / "build" / f"round-{rnd + 1}.md", False
     if task == "approve":
         prompt = head + "Decide."
         if upgrade:
@@ -3667,13 +3793,20 @@ def first_sentence(text: str) -> str:
     return re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0] if text else ""
 
 
-def land_parts(folder: Path, pre: dict) -> dict:
+def nit_findings(root: Path, folder: Path, cfg: dict) -> list[dict]:
+    """The agents' findings of change `folder`, as `carry` writes them (`agent_findings()` of the
+    rounds at the run's depth): the one reading the landing files nits from."""
+    return agent_findings(_rounds_at_depth(root, folder, cfg)[0])
+
+
+def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | None = None) -> dict:
     """What the batch's yes approves for change `folder`, each part empty when it has none: its
     acceptance checks, its skills' cases with the cap, its undone notes, each with its whole text
     (`note_items()`) and the disposition the approver proposed for its first line or its whole
     text (a seed titled by the note's first sentence when none was; a bug with what the question
-    shows of it), its assumed decisions, and
-    the `How to recover:` lines its commit will carry."""
+    shows of it), its assumed decisions, the `How to recover:` lines its commit will carry, and,
+    read from its worktree `root` with `cfg`, the agents' nits to file as `[nit]` entries
+    (`nit_findings()`'s `file`, with the line the question shows of each)."""
     proposed, recover = read_proposals(folder)
     notes = note_items(folder)
     undone = []
@@ -3691,6 +3824,12 @@ def land_parts(folder: Path, pre: dict) -> dict:
             part["seed" if kind == "seed" else "dropped"] = said[0]
         undone.append(part)
     scope = (pre.get("cases") or {}).get("scope") or []
+    found = nit_findings(root, folder, cfg) if root is not None and cfg is not None else []
+    nits = [
+        {**n, "shown": f"[nit] {n['title']} ({n['theme']}, {n['cost']}, {n['value']}; "
+                       f"{', '.join(n['paths'])})"}
+        for n in (i["file"] for i in found) if n
+    ]  # fmt: skip
     return {
         "checks": [{"name": c["name"], "command": c["command"]}
                    for c in (pre.get("checks") or {}).get("checks") or []],
@@ -3699,6 +3838,7 @@ def land_parts(folder: Path, pre: dict) -> dict:
         "assumed": [{"id": d["id"], "text": d["text"]} for d in read_ledger(folder)
                     if not d["decided"] and d["kind"] == "default"],
         "recover": [f"{subject}: {way}" for subject, way in recover],
+        "nits": nits,
     }  # fmt: skip
 
 
@@ -3733,7 +3873,8 @@ def land_signals(
     notes, its checks, its skills' cases and its issues, and what the run left in its folder,
     a resolved conflict no reviewer has seen among it (`resolution_signals()`). The exclusions
     are an irreversible path the approver proposed no way back for, and a bug it proposed that
-    `bad_bugs()` refuses. `unreviewed` is
+    `bad_bugs()` refuses. A nit to file is a signal, so no agent's nit is filed without the
+    person's yes. `unreviewed` is
     `land_unreviewed()` as the caller read it at `stage: test`: paths, or None for no snapshot."""
     signals, excluded = [], []
     if pre is None:
@@ -3751,7 +3892,8 @@ def land_signals(
                 f"decision.md proposes no How to recover for {', '.join(missing[:5])}: "
                 "ship it by hand"
             )
-    undone = land_parts(folder, pre)["undone"]
+    parts = land_parts(folder, pre, worktree, cfg)
+    undone = parts["undone"]
     if any("bug" in u for u in undone):
         words, said = severity_words(worktree)
         if words is None:
@@ -3788,15 +3930,20 @@ def land_signals(
         signals.append(f"acceptance checks to run: {n}")
     if n := len((pre.get("cases") or {}).get("scope") or []):
         signals.append(f"skills' cases in scope: {n}")
+    if n := len(parts["nits"]):
+        past = sum(i["reason"] == CAP_REASON for i in nit_findings(worktree, folder, cfg))
+        signals.append(
+            f"nits to file: {n}" + (f", {past} past the cap of {NIT_CAP}" if past else "")
+        )
     return signals, excluded
 
 
 def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["moves"]) -> str:
     """The batch's question, worded here so the skill never words its own: a clause for the checks
-    and cases, for the dispositions and confirmations, and for `How to recover:`, each only when
-    some change in the batch has one, and the cases' total ceiling, the cap per change with any;
-    the most times the landing follows `base` moving (`land.moves`); and its four answers, `yes,
-    with a fix` among them."""
+    and cases, for the dispositions and confirmations, for the agents' nits to file, and for `How
+    to recover:`, each only when some change in the batch has one, and the cases' total ceiling,
+    the cap per change with any; the most times the landing follows `base` moving
+    (`land.moves`); and its four answers, `yes, with a fix` among them."""
     n = len(batch)
     names = ", ".join(c["change"] for c in batch)
     parts = ["each shipped with its approver's impact"]
@@ -3817,6 +3964,8 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
         parts.append(f"{notes} as shown")
     elif assumed:
         parts.append("its assumed decisions confirmed as shown")
+    if any(c.get("nits") for c in batch):
+        parts.append("its agents' nits filed as shown")
     if any(c["recover"] for c in batch):
         parts.append("with how to recover shown")
     return (
@@ -3850,7 +3999,7 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         entry = {
             "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
             "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
-            **land_parts(folder, pre or {}),
+            **land_parts(folder, pre or {}, worktree, cfg),
         }  # fmt: skip
         if excluded:
             left_out.append({**entry, "excluded": excluded})
@@ -4146,34 +4295,62 @@ def land_round(folder: Path) -> int:
     return max((int(n) for n in found if n.isdigit()), default=0)
 
 
-def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
-    """What the person's yes approved for change `folder`'s undone notes and assumed decisions,
-    written in its worktree before `sdlc.py ship`, every edit by line: each carried item appended
-    to the register as an `[idea]` seed and each approved bug as a `[bug]` with its `Severity:`
-    and `Paths:` and no `Introduced by:` (ids from one `next-entry` call; the register created
-    from its template when missing), ticked `→ seed: <id>` or `→ bug: <id>`, each dropped one
-    ticked `→ dropped: <reason>`, and each assumed decision ticked as confirmed. What a rerun
-    finds ticked it never writes again. None, or why nothing was written."""
-    parts = land_parts(folder, pre)
+def filed_nit(text: str, change: str, nit: dict) -> bool:
+    """Whether the register `text` already holds `nit` for `change`: a `[nit]` entry whose
+    `Raised by:` names the change and whose body holds the nit's text. Never by title alone."""
+    entry, fenced = None, False
+    for line in [*text.splitlines(), "## end"]:
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        if fenced or not line.startswith("## "):
+            if entry is not None:
+                entry.append(line)
+            continue
+        if entry is not None:
+            body = "\n".join(entry)
+            raised = re.search(rf"^Raised by: {re.escape(change)}\b", body, re.M)
+            if raised and nit["text"] in body:
+                return True
+        entry = [] if NIT_RE.match(line) else None
+    return False
+
+
+def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None]:
+    """What the person's yes approved for change `folder`'s undone notes, its agents' nits and its
+    assumed decisions, written in its worktree before `sdlc.py ship`, every edit by line: each
+    carried item appended to the register as an `[idea]` seed, each approved bug as a `[bug]` with
+    its `Severity:` and `Paths:` and no `Introduced by:`, and each nit to file (`land_parts()`'s
+    `nits`) as a `[nit]` with its `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` (ids from
+    one `next-entry` call; the register created from its template when missing), each item ticked
+    `→ seed: <id>` or `→ bug: <id>`, each dropped one ticked `→ dropped: <reason>`, and each
+    assumed decision ticked as confirmed. What a rerun finds ticked, or filed (`filed_nit()`), it
+    never writes again. The ids of the nits it filed, and None or why nothing was
+    written."""
+    cfg, _ = load_config(root)
+    parts = land_parts(folder, pre, root, cfg)
     seeds = [u for u in parts["undone"] if "seed" in u or "bug" in u]
-    notes, ids = folder / "notes.md", []
-    if seeds:
+    notes, ids, filed = folder / "notes.md", [], []
+    nits = parts["nits"]
+    if seeds or nits:
         _, config, said = _sdlc(["config"], root)
         register = ((config or {}).get("work") or {}).get("register")
         template = (((config or {}).get("templates") or {}).get("inbox.md") or {}).get("path")
         if not register:
-            return f"sdlc.py config names no register: {said.strip()[-300:]}"
+            return [], f"sdlc.py config names no register: {said.strip()[-300:]}"
         register = Path(register)
         if not register.is_file() and not (template and Path(template).is_file()):
-            return f"no register at {register.name}, and no template to start one from"
-        code, _, said = _sdlc(["next-entry", "--count", str(len(seeds))], root)
-        ids = [w for w in said.split() if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d+", w)]
-        if code or len(ids) != len(seeds):
-            return f"sdlc.py next-entry gave no ids: {said.strip()[-300:]}"
+            return [], f"no register at {register.name}, and no template to start one from"
         text = (register.read_text(encoding="utf-8") if register.is_file()
                 else Path(template).read_text(encoding="utf-8"))  # fmt: skip
+        nits = [n for n in nits if not filed_nit(text, folder.name, n)]
+    if seeds or nits:
+        want = len(seeds) + len(nits)
+        code, _, said = _sdlc(["next-entry", "--count", str(want)], root)
+        ids = [w for w in said.split() if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d+", w)]
+        if code or len(ids) != want:
+            return [], f"sdlc.py next-entry gave no ids: {said.strip()[-300:]}"
         rel = folder.relative_to(root).as_posix()
-        for entry_id, item in zip(ids, seeds, strict=True):
+        for entry_id, item in zip(ids, seeds, strict=False):
             if bug := item.get("bug"):
                 text = text.rstrip("\n") + (
                     f"\n\n## [{entry_id}] [bug] {bug['title']}\n\nFound by the review of "
@@ -4186,6 +4363,14 @@ def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
                 f"carried forward when it landed: {item['text']}\nSee {rel}/notes.md in its "
                 f"commit.\nRaised {entry_id[:10]}.\n"
             )
+        for entry_id, nit in zip(ids[len(seeds) :], nits, strict=True):
+            text = text.rstrip("\n") + (
+                f"\n\n## [{entry_id}] [nit] {nit['title']}\n\nRaised by the {nit['role']} "
+                f"review of {folder.name}, round {nit['round']}: {nit['text']}\n\n"
+                f"Theme: {nit['theme']}\nPaths: {', '.join(nit['paths'])}\nCost: {nit['cost']}\n"
+                f"Value: {nit['value']}\nRaised by: {folder.name} ({nit['pass']})\n"
+            )
+            filed.append(entry_id)
         register.parent.mkdir(parents=True, exist_ok=True)
         register.write_text(text, encoding="utf-8", newline="\n")
     if parts["undone"]:
@@ -4207,17 +4392,18 @@ def _dispose(root: Path, folder: Path, pre: dict) -> str | None:
             if m and m.group(1) == " " and m.group(4) == "default":
                 lines[i] = "- [x]" + line.rstrip()[5:] + DECIDED + CONFIRMED
         ledger.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-    return None
+    return filed, None
 
 
 def cmd_land(root: Path, ident: str, by: str) -> int:
     """Land change `ident`'s first half, in its worktree: the approver's impact on `intent.md`,
     `sdlc.py ship` (stamped, the seed dropped, every path staged), the commit with
-    `land_message()`, then `sdlc.py base`. Its `state`: `current` (nothing to review again),
+    `land_message()`, then `sdlc.py base`; `filed_nits`, the `[nit]` entries the person's yes filed
+    (`_dispose()`). Its `state`: `current` (nothing to review again),
     `rebased` (the base moved: the gate and the spec's path run again before close), `conflict`
     (the rebase was aborted: `resolve` takes it), or `refused`, with why."""
     folder, refusal = find_change(root, ident)
-    out: dict = {"change": None, "state": "refused", "refusals": []}
+    out: dict = {"change": None, "state": "refused", "refusals": [], "filed_nits": []}
     if refusal:
         return emit({**out, "refusals": [refusal]}, 1)
     out["change"] = folder.name
@@ -4256,8 +4442,10 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
             return emit({**out, "refusals": [why]}, 1)
         if not _set_impact(folder / "intent.md", impact):
             return emit({**out, "refusals": ["no impact to set: intent.md has no impact: line"]}, 1)
-        if by == "person" and (refused := _dispose(root, folder, pre)):
-            return emit({**out, "refusals": [refused]}, 1)
+        if by == "person":
+            out["filed_nits"], refused = _dispose(root, folder, pre)
+            if refused:
+                return emit({**out, "refusals": [refused]}, 1)
         if (pre.get("risk") or {}).get("deep") and not _note_says(folder, FRESH_RE):
             _note_line(folder, FRESH_RE, FRESH_SKIPPED)
         nits = named_nits(root, folder)

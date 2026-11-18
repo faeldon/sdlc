@@ -1,6 +1,6 @@
 ---
 name: land
-description: Land a batch of factory changes that are ready to ship — each one shipped with the impact its approver proposed, its acceptance checks and skills' cases run, its undone notes carried or dropped, its assumed decisions confirmed and How to recover in its commit, as ship does, then committed, brought up to date with the base branch (a conflict resolved by its own builder and reviewed again), and closed, archived and pushed as git.push says — through sdlc's own ship, base and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from a session of its own in the main checkout once the supervisor says changes are ready. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one touching an irreversible path its approver proposed no way back for (ship that by hand), and never with --force.
+description: Land a batch of factory changes that are ready to ship — each one shipped with the impact its approver proposed, its acceptance checks and skills' cases run, its undone notes carried or dropped, its agents' nits filed as [nit] entries, its assumed decisions confirmed and How to recover in its commit, as ship does, then committed, brought up to date with the base branch (a conflict resolved by its own builder and reviewed again), and closed, archived and pushed as git.push says — through sdlc's own ship, base and close, behind one approval for the whole batch, which passes itself when no change in it carries a risk signal. Use from a session of its own in the main checkout once the supervisor says changes are ready. Not for a change built by hand (/sdlc:ship and /sdlc:close), not for one touching an irreversible path its approver proposed no way back for (ship that by hand), and never with --force.
 argument-hint: "[NNN… — the ready changes to land; every one when none is named]"
 allowed-tools:
   - Read
@@ -34,7 +34,8 @@ gate passed itself, and no `Sdlc-Findings`, so the retrospective never reads a f
 the person's. What ship asks a person for beyond its review (the acceptance checks, the skills'
 cases, each undone note's disposition, each assumed decision, `How to recover:`) the landing's
 question shows and its yes approves: the approver proposed the dispositions and the recovery, and
-`factory.py` writes only what was approved.
+`factory.py` writes only what was approved. So does each nit its reviewers weighed to file
+(`{<theme> <cost> <value>}` on a `- NIT:` line): the script weighs, the yes files.
 
 **Run it from a session of its own in the main checkout.** Landing takes this session while it
 runs; the supervisor's stays free for the next change.
@@ -57,8 +58,10 @@ the others it `overlaps`, its `signals`, and what the yes approves for it: `chec
 acceptance check's `name` and `command`), `cases` (the skills' cases in `scope`, with `cap_usd`,
 the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title, the
 `dropped` reason or, for a `pre-existing:` item, the `bug` its approver proposed, with its
-`shown` line), `assumed` (each assumed decision, by `id`) and `recover` (the `How to recover:`
-lines its commit will carry), each empty when it has none; `excluded`, the changes only
+`shown` line), `assumed` (each assumed decision, by `id`), `recover` (the `How to recover:`
+lines its commit will carry) and `nits` (each agent nit `carry` recorded to file, at most five a
+change, with its `title`, `text`, `theme`, `paths`, `cost`, `value`, `pass`, `role`, `round` and
+`shown` line), each empty when it has none; `excluded`, the changes only
 `/sdlc:ship` can land, and why (an irreversible path with no `- RECOVER:` line in `decision.md`,
 or a bug proposed on a severity that isn't the process doc's, with no paths, or on an item that
 isn't `pre-existing:`); `over_limit`, those past `batch`; `question`, the batch's question, worded
@@ -71,7 +74,8 @@ a rebase may conflict), and each signal. Under each change, what the yes approve
 part only when it has one: each acceptance check's name and its command, as written; the skills'
 cases in scope and their cap (`at most $<cap_usd>`, a paid run); each undone item and its
 disposition (`→ seed: <title>`, `→ dropped: <reason>`, or a bug's `shown` line, `filed as a bug,
-<severity>: <title> (<paths>)`); each assumed decision by id, with what the build assumed; and the
+<severity>: <title> (<paths>)`); each assumed decision by id, with what the build assumed; each
+nit to file, its `shown` line, `[nit] <title> (<theme>, <cost>, <value>; <paths>)`; and the
 `How to recover:` lines. Then the changes `excluded`, each with why and that `/sdlc:ship` from its
 worktree lands it, and any `over_limit`, which the next landing takes.
 With an empty batch, say why and stop.
@@ -81,7 +85,8 @@ asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's ru
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
 decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
 reviewer has seen, a path changed since the last review round's snapshot (or no snapshot), a fix
-made while landing, acceptance checks, skills' cases in scope, undone notes, or `land.auto` off. A
+made while landing, acceptance checks, skills' cases in scope, undone notes, nits to file (and
+how many fell past the cap of 5), or `land.auto` off. A
 change landed with paths no review read says so on its commit (`Sdlc-Landed: by=person
 unreviewed=<n>`). A conflict resolved while landing is seen once every reviewer at the run's depth
 passed its landing round; one `sdlc.py resolve` recorded in `conflicts.md`, once the newest
@@ -94,7 +99,7 @@ Only when the batch isn't clear. Ask `land-check`'s `question` literally, as pri
 your own. Its fullest form, each clause there only when some change in the batch has what it
 names:
 
-> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, with how to recover shown, committed, brought up to date with <base> as often as it moves while landing, up to <moves> times (a conflict resolved by its builder and reviewed again), and closed, pushed as git.push says? (yes / yes, with a fix / leave one out / no)`
+> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, its agents' nits filed as shown, with how to recover shown, committed, brought up to date with <base> as often as it moves while landing, up to <moves> times (a conflict resolved by its builder and reviewed again), and closed, pushed as git.push says? (yes / yes, with a fix / leave one out / no)`
 
 `<moves>` is `config`'s `land.moves`.
 
@@ -135,8 +140,10 @@ For each change in the batch, one at a time:
    It refuses, before writing anything, a change whose checks haven't passed on it as it stands
    or whose cases haven't run. On `--by person` it writes each disposition (a carried item's seed
    in the register, ticked `→ seed: <id>`; a bug filed there with its `Severity:` and `Paths:`,
-   ticked `→ bug: <id>`; a dropped one ticked `→ dropped: <reason>`) and ticks each assumed
-   decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
+   ticked `→ bug: <id>`; a dropped one ticked `→ dropped: <reason>`), files each nit to file as a
+   `[nit]` entry with its `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` lines (its
+   `filed_nits`, ids from the same `next-entry` call; one already filed for the change is never
+   filed twice), and ticks each assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
    (stamped shipped, its seed dropped, every path staged), deletes from the register each open
    nit its intent or spec names by id (its `retired_nits`), commits with the change's composed
    message (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as

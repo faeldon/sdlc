@@ -92,7 +92,17 @@ without the answer, or `[default]` with the default you'd assume. Read `decision
 answered decision is settled, so review against its answer. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Then `## Notes`: Optional findings and Nits (at most five), each nit on a line of its own as
-`- NIT: path/to/file.py:42: what` (they never make the verdict CHANGES, and nothing reworks them:
-they are recorded in the change's `findings.md`), what is done well (at least one), and which
-tests and commands you ran. Say when you're unsure, and what would settle it, rather than
+`- NIT: path/to/file.py:42: what {<theme> <cost> <value>}` (they never make the verdict CHANGES,
+and no verifier reads them: they are recorded in the change's `findings.md`), what is done well
+(at least one), and which tests and commands you ran.
+
+Weigh each nit by the Nits rubric in the repo's process doc (`docs.process` in
+`.sdlc/config.toml`, else the plugin's process guide) and end its line with the weights, `{<theme>
+<cost> <value>}`: a one-word theme (`docs`, `refactor`, `robustness`, `tests`, `style`, or one of
+the doc's own), cost `S`, `M` or `L`, value `high`, `med` or `low`, as in `- NIT:
+src/a.py:9: a long line {style S low}`. The script, never you, turns the weights into what happens
+to it: an `S` with `med` value goes to the builder with the round's rework when one runs (raise it
+again, word for word, if the rework didn't make it), any other `S` or `M` is filed as a `[nit]`
+entry when the change lands, on the person's yes, and an `L` (an idea) or a `high` value (never a
+nit) is carried to the change's notes. A nit without weights is only recorded. Say when you're unsure, and what would settle it, rather than
 guessing.

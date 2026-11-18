@@ -51,12 +51,12 @@
     "process": {
       "path": ".sdlc/SDLC.md",
       "layout": "answers",
-      "guide": "sha256:b730ed36940bd3db"
+      "guide": "sha256:7f1fc51cd91712e4"
     },
     "review": {
       "path": ".sdlc/REVIEW.md",
       "layout": "answers",
-      "guide": "sha256:46cec6fcd02386f1"
+      "guide": "sha256:c1d0706be581c1de"
     },
     "product": {
       "path": ".sdlc/PRODUCT.md",
@@ -75,7 +75,7 @@
     "checks.md": "sha256:d4ba97e6351ca8b5",
     "direction.md": "sha256:c5ad891b8c064f84",
     "findings.md": "sha256:8b169d02874239a3",
-    "inbox.md": "sha256:5fd3e606e689ccc6",
+    "inbox.md": "sha256:77c328fccf86dfd3",
     "intent.md": "sha256:bfb0464c4b5e5f71",
     "issue.md": "sha256:8244f74828b145b1",
     "notes.md": "sha256:b7a4be5bca95078c",
