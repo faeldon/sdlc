@@ -388,3 +388,9 @@ Five changes' Important findings share one class: a context or reference doc sti
 - **A doc's claim the change made false.** A sentence in `AGENTS.md`, `docs/REFERENCE.md`, `docs/CONTRIBUTING.md` or a README that names the function, the command or the rule this diff changed, and still says what it did before. Grep the docs for each name the diff touches.
 Theme: review
 Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-94] [idea] Close records lead time and ready-wait, and retro reports them
+
+Close records each change's lead time (from new to Close) and how long it sat ready before landing, as trailers, and retro reports their medians beside elapsed. Today's elapsed leaves out queue and ready-wait: for 139–148 it was 43.5 min against a real median turnaround of 250, half of factory lead time is a ready change waiting.
+Theme: metrics
+Raised 2026-11-18.
