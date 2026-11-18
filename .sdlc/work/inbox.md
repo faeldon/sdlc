@@ -142,14 +142,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-18-40] [idea] Evaluate the Fable builder experiment
-
-Evaluate the Fable builder experiment: the 139–143 batch ran its builder on claude-fable-5-1
-(329748d). Compare its builds with the 2026-11-18 Opus builds (124–138) on rounds, kept changes,
-landing stops and builder cost, then keep the [models] setting or revert it.
-Theme: factory
-Raised 2026-11-18.
-
 ## [2026-11-18-41] [bug] factory.py reads [models] from the change's own worktree, not the base branch
 
 factory.py reads [models] from the change's own worktree, while mode, [land], [ui] and gate_jobs
