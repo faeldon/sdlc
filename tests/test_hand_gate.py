@@ -269,11 +269,19 @@ def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
         f"{repo}/x and {tree}/y and {outside} and {tree.resolve().as_posix()}/z\n"
         f"{repo.resolve()}/w\n"
         f"{temp}/pytest-of-drafter/x, as drafter said, not /var{temp}/q or {temp}foo\n"
+        "a fixture's work/"
+        "046*, /Users/"
+        "someone/x, /home/"
+        "someone/x and ~/"
+        "code/x\n"
     )
     ours = sdlc._hand_placeholders(text, tree)
     assert ours == factory._placeholders(text, tree)
     assert str(repo) not in ours and f"{sdlc.HOME_MARK}/cache/venv" in ours
     assert "pytest-of-drafter" not in ours and "as drafter said" in ours
+    assert "work/<046>*, /Users/<name>/x, /home/<name>/x and ~/<dir>/x" in ours
+    shapes = [shape for shape, _ in sdlc.HAND_DEFUSE]
+    assert shapes == [shape for shape, _ in factory.DEFUSE]
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 # Notes
 
-- [x] A gate record that quotes a line in a shape `test_nothing_local` refuses keeps every later → seed: 2026-11-18-61
+- [x] A gate record that quotes a line in a shape `test_nothing_local` refuses keeps every later → dropped: done by the fix shipped with this change
   gate red: `factory.py gate` files the output's tail into `build/round-<N>.gate.md`, which the next
   run's scan reads. Seen on this change's round 1, where the builder's report quoted a red test's
   output holding the fixture's `work/<number>*` glob and the gate's record quoted the scan's

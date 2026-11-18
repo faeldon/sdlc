@@ -62,7 +62,7 @@ Last 80 lines of its output:
     >       assert forbidden(ROOT, main_checkout() / LOCAL) == []
     E       AssertionError: assert ['.sdlc/work/...x/build', ...] == []
     E         
-    E         Left contains 12 more items, first extra item: '.sdlc/work/144-factory-records-and-models/entries.md:9: ## [2026-11-18-62] [nit] `work/008*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`.'
+    E         Left contains 12 more items, first extra item: '.sdlc/work/144-factory-records-and-models/entries.md:9: ## [2026-11-18-62] [nit] `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`.'
     E         Use -v to get more diff
     
     tests/test_nothing_local.py:112: AssertionError

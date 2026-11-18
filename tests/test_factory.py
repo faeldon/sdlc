@@ -3621,11 +3621,72 @@ def test_a_reply_citing_its_own_change_by_number_is_filed_by_its_full_name(
     assert f"$ ls .sdlc/{w}{NAME}/build\n" in filed
     assert f"$ cat .sdlc/{w}{NAME}/intent.md\n" in filed
     assert f"Seen in {w}{NAME}, and in {w}{NAME} too.\n" in filed
-    assert f"Already whole: {w}{NAME}/plan.md, {w}{n}9, {w}009 and {w}{n}-*.\n" in filed
+    assert f"Already whole: {w}{NAME}/plan.md, {w}<{n}9>, {w}<009> and {w}{n}-*.\n" in filed
     assert "Built it.\n\n## Evidence\n" in filed and "round-1.md\nexit: 0\n" in filed
-    own = [line for line in filed.splitlines() if not line.startswith("Already whole")]
-    assert _forbidden_shapes().search("\n".join(own)) is None, filed
+    assert _forbidden_shapes().search(filed) is None, filed
     assert (folder / "build" / "round-1.md").is_file()
+
+
+def test_the_shapes_the_factory_defuses_are_the_scan_s() -> None:
+    """`DEFUSE` holds `tests/test_nothing_local.py`'s `PATTERNS`, in order: a shape the scan
+    gains is one the factory writes as a placeholder too."""
+    scan = _load("nothing_local_for_defuse", ROOT / "tests" / "test_nothing_local.py")
+    assert [shape for shape, _ in factory.DEFUSE] == scan.PATTERNS
+
+
+def test_a_record_quoting_the_tests_fixtures_is_filed_in_a_form_the_scan_accepts(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """A reply quoting a test's output names the fixtures' changes and homes, which the scan
+    refuses in any committed record: each is filed as its placeholder, and the gate's own copy of
+    a failing test's output too, so a red gate never makes the next one red."""
+    root = _change(tmp_path)
+    w = "work/"
+    quoted = (
+        f"E  assert '$ ls .sdlc/{w}046*/build' in report\n"
+        "Cloned to /Users/"
+        "someone/code/x, /home/"
+        "someone/code/x and ~/"
+        "code/x.\n"
+        "Kept: ~/.claude/plugins/ and /Users/<name>/.\n"
+    )
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "Built it.\n\n" + quoted)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    filed = (root / out["to"]).read_text(encoding="utf-8")
+    assert f"$ ls .sdlc/{w}<046>*/build" in filed
+    assert "/Users/<name>/code/x, /home/<name>/code/x and ~/<dir>/x" in filed
+    assert "Kept: ~/.claude/plugins/ and /Users/<name>/." in filed
+    assert _forbidden_shapes().search(filed) is None, filed
+    (root / "quoted.txt").write_text(quoted, encoding="utf-8")
+    _gate_config(root, "cat quoted.txt; exit 1")
+    _gate(root, capsys)
+    record = factory.gate_path(root / ".sdlc" / "work" / NAME, 1).read_text(encoding="utf-8")
+    assert f"{w}<046>*" in record and _forbidden_shapes().search(record) is None, record
+
+
+def test_an_approver_s_decision_stops_on_a_folder_the_scan_would_refuse(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """The approver ends a build: a line the scan refuses anywhere in the folder, written by
+    hand or filed before the rule, stops the change then, naming the file and line and the
+    command that rewrites it, never at the landing's gate."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    (folder / "notes.md").write_text("Seen in work/" + "046 first.\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "DECISION: READY\n\n**Why.** Fine.\n")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)
+    assert code == 1 and "notes.md:1" in out["problem"], out
+    assert "factory.py defuse 008" in out["problem"] and "046" not in out["problem"]
+    assert (folder / "decision.md").is_file()
+    code, out = _run(capsys, factory.cmd_defuse, root, "008")
+    assert code == 0 and out["changed"] == ["notes.md"] and out["left"] == [], out
+    assert (folder / "notes.md").read_text(encoding="utf-8") == "Seen in work/<046> first.\n"
+    assert factory.forbidden_lines(folder) == []
+    (folder / "decision.md").unlink()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)
+    assert code == 0 and "problem" not in out, out
 
 
 def test_a_third_red_gate_in_a_round_is_a_stop(tmp_path, capsys) -> None:

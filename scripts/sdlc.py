@@ -2956,7 +2956,8 @@ def _hand_placeholders(text: str, root: Path) -> str:
     `<home>/…`, and a home under the temp directory `<home>/…`. Each path is matched as given and
     resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
     path: never inside a longer one. Then the login name, where no letter or digit borders it
-    inside a path a mark begins, is `USER_MARK`, and never in prose. A copy of `factory.py`'s
+    inside a path a mark begins, is `USER_MARK`, and never in prose. Last, each shape the repo's
+    scan refuses is its placeholder (`HAND_DEFUSE`). A copy of `factory.py`'s
     `_placeholders()`, pinned to it by a test: the record is committed with the change, and a
     machine's layout never reaches its history."""
     listed = _git(root, "worktree", "list", "--porcelain") or ""
@@ -2975,7 +2976,19 @@ def _hand_placeholders(text: str, root: Path) -> str:
         name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
         marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
         text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
+    for shape, mark in HAND_DEFUSE:
+        text = re.sub(shape, mark, text, flags=re.IGNORECASE)
     return text
+
+
+# The shapes the repo's own scan refuses, each with the placeholder a filed record writes
+# instead. A copy of `factory.py`'s `DEFUSE`, pinned to it by `tests/test_hand_gate.py`.
+HAND_DEFUSE = (
+    (r"\bwork/\d{3,}\b(?!-)", lambda m: f"{m[0][:5]}<{m[0][5:]}>"),
+    (r"/Users/[\w.-]+/", "/Users/<name>/"),
+    (r"/home/[\w.-]+/", "/home/<name>/"),
+    (r"~/[\w-]+/", "~/<dir>/"),
+)
 
 
 # The factory's gate slots, which a hand gate shares while `sdlc-factory` is enabled, so the two

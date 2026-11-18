@@ -333,6 +333,12 @@ rewritten by a rerun, which replaces only the sections a factory role raised; `l
 its landing rounds' findings the same way, each `Class:` naming its landing round, and commits it
 with no `Sdlc-Findings` trailer, so `/sdlc:retro` compares the two ways of building from one
 record without counting the agents' review as yours.
+Since it is public, every record is filed in a form the repo's own scan accepts: this machine's
+paths as marks (`<path-to-clone>`, `<home>`), the change's own folder by its full name, and any
+other shape the scan refuses, such as a test fixture's change cited by its bare number in
+quoted output, as a placeholder (the number in `<` and `>`). The approver's step stops the change when its folder still holds such
+a line (one written by hand, or filed before this rule), naming the file and line;
+`factory.py defuse NNN` rewrites it the same way.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
 `CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at
 ship), so a factory change and one built by hand are measured the same way.

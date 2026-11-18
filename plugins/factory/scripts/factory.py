@@ -2796,7 +2796,8 @@ def _placeholders(text: str, root: Path) -> str:
     resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
     path: never inside a longer one, so `/tmp` leaves `/var/tmp` and `/tmpfoo` as they are. Then
     the login name, where no letter or digit borders it inside a path a mark begins, is
-    `USER_MARK`, and never in prose, where a short name can be an ordinary word."""
+    `USER_MARK`, and never in prose, where a short name can be an ordinary word. Last, each shape
+    the repo's scan refuses is its placeholder (`_defused()`)."""
     checkouts = _all_checkouts(root)
     for path, mark in (
         (checkouts[0] if checkouts else root, CLONE_MARK),
@@ -2811,7 +2812,64 @@ def _placeholders(text: str, root: Path) -> str:
         name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
         marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
         text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
+    return _defused(text)
+
+
+# The shapes `tests/test_nothing_local.py` refuses anywhere in the repo (its `PATTERNS`, pinned
+# to them by a test), each with the form a filed record writes instead: a change cited by a bare
+# number as that number in `<` and `>`, and another machine's home as its placeholder. A record
+# quotes test output, and the tests' fixtures hold these shapes on purpose.
+DEFUSE = (
+    (r"\bwork/\d{3,}\b(?!-)", lambda m: f"{m[0][:5]}<{m[0][5:]}>"),
+    (r"/Users/[\w.-]+/", "/Users/<name>/"),
+    (r"/home/[\w.-]+/", "/home/<name>/"),
+    (r"~/[\w-]+/", "~/<dir>/"),
+)
+
+
+def _defused(text: str) -> str:
+    """`text` with each shape the repo's own scan refuses (`DEFUSE`) written as its placeholder,
+    so a record the factory files, a gate's output, an agent's reply or a nit taken from one,
+    never fails the gate it is committed under."""
+    for shape, mark in DEFUSE:
+        text = re.sub(shape, mark, text, flags=re.IGNORECASE)
     return text
+
+
+def forbidden_lines(folder: Path) -> list[str]:
+    """Each line of a file in the change's folder that a shape in `DEFUSE` matches, as
+    `<path>:<line>`, the text never quoted: what the repo's scan would refuse once it is
+    committed."""
+    pattern = re.compile("|".join(shape for shape, _ in DEFUSE), re.IGNORECASE)
+    found = []
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        rel = path.relative_to(folder).as_posix()
+        found += [f"{rel}:{n}" for n, line in enumerate(lines, 1) if pattern.search(line)]
+    return found
+
+
+def cmd_defuse(root: Path, ident: str) -> int:
+    """Rewrite each line in the change's folder that `forbidden_lines()` names, through
+    `_own_folder()` and `_defused()`, as the factory would have filed it: a record filed before
+    the rule, or by hand. Writes only those files, and only those shapes; prints what it changed
+    and what is still refused (none, unless a file isn't text)."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    changed = []
+    for rel in sorted({line.rsplit(":", 1)[0] for line in forbidden_lines(folder)}):
+        path = folder / rel
+        text = path.read_text(encoding="utf-8")
+        new = _defused(_own_folder(text, folder.name))
+        if new != text:
+            path.write_text(new, encoding="utf-8", newline="\n")
+            changed.append(rel)
+    left = forbidden_lines(folder)
+    return emit({"change": folder.name, "changed": changed, "left": left}, 1 if left else 0)
 
 
 def _own_folder(text: str, name: str) -> str:
@@ -4034,9 +4092,9 @@ def cmd_agent(
     # answered after the verdict never replaces it (`holds()`).
     reply = next((r for r in reversed(replies) if holds(role, r)), replies[-1])
     # The reply is committed with the change: an agent quoting a command's output never files
-    # this machine's paths, only the marks (`_placeholders()`), and cites its own change's folder
-    # by its full name (`_own_folder()`).
-    reply = _own_folder(_placeholders(reply, root), folder.name)
+    # this machine's paths, only the marks (`_placeholders()`), cites its own change's folder by
+    # its full name (`_own_folder()`), and holds no shape the repo's scan refuses (`_defused()`).
+    reply = _placeholders(_own_folder(reply, folder.name), root)
     if task == "spec":
         return emit({**out, **_file_draft(root, folder, reply)})
     text = reply if reply.endswith("\n") else reply + "\n"
@@ -4048,6 +4106,15 @@ def cmd_agent(
         rnd = mend_round(state, role) if task == "mend" else f"land-{land_round(folder)}"
         with (folder / MENDED).open("a", encoding="utf-8", newline="\n") as f:
             f.write(f"{role} {rnd}\n")
+    # The approver's decision ends the build: a line the repo's scan would refuse, anywhere in
+    # the folder the change will commit, is said now, not first at the landing's gate.
+    if task == "approve" and (lines := forbidden_lines(folder)):
+        why = f"the folder holds lines the repo's scan refuses: {', '.join(lines[:5])}"
+        more = f" and {len(lines) - 5} more" if len(lines) > 5 else ""
+        return emit(
+            {**out, "problem": why + more + f"; factory.py defuse {folder.name.split('-', 1)[0]}"},
+            1,
+        )
     return emit(out)
 
 
@@ -6943,6 +7010,8 @@ def main() -> int:
     p_ask.add_argument("--answered", help="the ids just answered, comma-separated: says `next`")
     p_carry = sub.add_parser("carry", help="unresolved changes to notes.md as `- [ ]` items")
     p_carry.add_argument("id")
+    p_defuse = sub.add_parser("defuse", help="rewrite the refused shapes in a change's records")
+    p_defuse.add_argument("id")
     p_snapshot = sub.add_parser("snapshot", help="hash what a round's build left, for the next")
     p_snapshot.add_argument("id")
     p_snapshot.add_argument("--round", dest="round", type=int, required=True)
@@ -7060,6 +7129,8 @@ def main() -> int:
         return cmd_ask(root, args.id, args.answered)
     if args.cmd == "carry":
         return cmd_carry(root, args.id)
+    if args.cmd == "defuse":
+        return cmd_defuse(root, args.id)
     if args.cmd == "snapshot":
         return cmd_snapshot(root, args.id, args.round)
     if args.cmd == "gate":

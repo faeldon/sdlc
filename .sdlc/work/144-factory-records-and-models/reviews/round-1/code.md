@@ -15,7 +15,7 @@ The gate record `build/round-1.gate.md` is green: attempt 1 failed, attempt 2 pa
 **Context.** I found no context doc that now says something false. AGENTS.md's mention of `[models]` only appears in the factory README, which the diff updates.
 
 ## Notes
-- NIT: plugins/factory/scripts/factory.py:2822: `work/008*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`. The shape is unrealistic, but `(?![\w-])` after an optional `\*?` could be made possessive or tightened {robustness S low}
+- NIT: plugins/factory/scripts/factory.py:2822: `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`. The shape is unrealistic, but `(?![\w-])` after an optional `\*?` could be made possessive or tightened {robustness S low}
 - NIT: plugins/factory/README.md:383: the re-wrapped paragraph leaves one over-long line (`serve`, `shoot` and `paths` …) {docs S low}
 
 **Done well**
