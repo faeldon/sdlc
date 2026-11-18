@@ -380,3 +380,15 @@ matching build/round-<n> and reviews/land-<n>; display labels only, nothing writ
 changes.
 Theme: board
 Raised 2026-11-18.
+
+## [2026-11-18-39] [bug] The board's landing track shows nothing while a landing runs its checks or cases
+
+The board's landing track shows nothing while a landing runs its acceptance checks or skills'
+cases: `factory.py accept` and `cases` record no step in `runs/land-step.md`, so the card still
+shows the build track until `land` ships it (134 and 137, 2026-11-18). They should record a
+`checks`/`cases` step before `ship`. To see it: land a change with skills' cases in scope, and
+open the board while `factory.py cases` runs.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py, scripts/board.py
+Theme: board
