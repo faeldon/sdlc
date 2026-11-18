@@ -2314,9 +2314,9 @@ def test_a_fix_asked_at_landing_is_built_gated_and_reviewed_at_depth(
 
 @needs_uv
 def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
-    """R8, R10: a fix is asked only of a shipped change whose landing round passed or none is
-    open; `--commit` amends nothing in a round with no ask, or with nothing the builder edited.
-    The builder's task refuses with no ask."""
+    """R8, R10: a fix is asked only of a shipped change whose landing round passed, no reviewer
+    has answered yet (154), or none is open; `--commit` amends nothing in a round with no ask, or
+    with nothing the builder edited. The builder's task refuses with no ask."""
     root = _repo(tmp_path)
     tree = _ready(root, "asked", "asked's one")
     folder = tree / ".sdlc" / "work" / tree.name
@@ -2335,11 +2335,13 @@ def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
     assert code == 1 and "no fix was asked" in out["refusals"][0], out
     code, out = _run(capsys, factory.cmd_land_fix, tree, "001", None, True)
     assert code == 1 and "no fix was asked" in out["refusals"][0], "a round, but no ask"
+    reply = folder / "reviews" / "land-1" / "behaviour.md"
+    reply.write_text("VERDICT: CHANGES\n- CHANGE: README.md:1: say more\n", encoding="utf-8")
     code, out = _run(capsys, factory.cmd_land_fix, tree, "001", _asked(folder), False)
     assert code == 1 and "landing round 1 hasn't passed" in out["refusals"][0], out
-    (folder / "reviews" / "land-1").rmdir()
+    reply.unlink()
     code, out = _run(capsys, factory.cmd_land_fix, tree, "001", _asked(folder), False)
-    assert (code, out["round"]) == (0, 1), out
+    assert (code, out["round"]) == (0, 1), "a round no reviewer has answered takes the fix (154)"
     code, out = _run(capsys, factory.cmd_land_fix, tree, "001", None, True)
     assert code == 1 and "changed nothing" in out["refusals"][0], out
     assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"

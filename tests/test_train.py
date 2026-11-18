@@ -1448,9 +1448,10 @@ def test_train_run_cancels_between_steps(tmp_path, capsys, monkeypatch) -> None:
 
 @needs_uv
 def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> None:
-    """147 R9: `--begin … --fix 001=R1` stores the person's fix; the loop makes it once, at
-    change one's close: `land-fix --ask`, the builder, `land-fix --commit`, then the train
-    re-stacks two, gates the new tip, and every reviewer at one's depth reads the fix."""
+    """147 R9: `--begin … --fix 001=R1` stores the person's fix; the loop makes it once, as
+    soon as change one sits in the stack (154): `land-fix --ask`, the builder, `land-fix
+    --commit`, then the train stacks two on it, gates the tip once, and every reviewer at one's
+    depth reads the fix."""
     root = _repo(tmp_path, check="true")
     trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
     (_folder(trees[0]) / "decisions.md").write_text(
@@ -1477,7 +1478,44 @@ def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> N
     assert _git(root, "show", f"{own[trees[0].name]}:{rel}/build/land-1.ask.md") == "say it louder"
     reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
     assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
-    assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 2
+    assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 1
+
+
+@needs_uv
+def test_a_fix_the_gate_needs_is_made_before_the_gate(tmp_path, capsys, monkeypatch) -> None:
+    """154: a check that fails until change one's file says `AA`, and the person's fix that
+    makes it so: the reading names `fix` for one as soon as it is stacked, before any gate, so
+    the tip's first gate is green and both land, none ejected, the fix in one's own commit."""
+    root = _repo(tmp_path, check="grep -qx AA aa.txt")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    (_folder(trees[0]) / "decisions.md").write_text(
+        "# Decisions\n\n- [x] R1 (person, fix): make the gate green\n", encoding="utf-8"
+    )
+    (_folder(trees[0]) / "runs").mkdir()
+    (_folder(trees[0]) / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    fake_claude(tmp_path, monkeypatch, {
+        f"{trees[0].name}:builder": {"write": {"aa.txt": "AA\n"}},
+    })  # fmt: skip
+    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1")
+    assert code == 0, out
+    steps = []
+    while (out := _run(capsys, factory.cmd_train, root)[1])["next"] in ("commit", "stack"):
+        steps.append((out["next"], out["change"]))
+        if out["next"] == "commit":
+            code, said = _run(capsys, factory.cmd_land, Path(out["worktree"]), out["change"][:3],
+                              "person")  # fmt: skip
+        else:
+            code, said = _run(capsys, factory.cmd_resolve, Path(out["worktree"]),
+                              out["change"][:3], False, onto=out["onto"])  # fmt: skip
+        assert code == 0, said
+    assert (out["next"], out["change"]) == ("fix", trees[0].name), (steps, out)
+    assert not factory.read_train(root)["gates"], "no gate before the fix"
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), (out, err)
+    assert out["ejected"] == [] and len(out["landed"]) == 2, out
+    assert _git(root, "show", f"{_closes(root)[trees[0].name]}:aa.txt") == "AA"
+    gates = [ln for ln in err.splitlines() if ln.startswith("train: gate ")]
+    assert len(gates) == 1, gates
 
 
 @needs_uv

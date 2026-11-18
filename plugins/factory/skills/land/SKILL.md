@@ -126,7 +126,7 @@ parentheses, right after `shown`, and stop.
 **Do nothing until the person says yes.** Approval is for this batch only. `leave one out` is
 the person naming which: run Step 0 again with the rest, and ask again. To change a proposed
 disposition, leave that change out and ship it with `/sdlc:ship`. `yes, with a fix` approves the
-batch too, and asks for a fix to one change in it before it closes: take the change and the
+batch too, and asks for a fix to one change in it before it is gated: take the change and the
 person's words for the fix from what they typed in Other, or else ask for both as plain text. That
 is not a second gate, and nothing is written until Step 3. Then Step 3, with `--by person`.
 
@@ -207,9 +207,10 @@ commands, and only one loop runs at a time (the run lock). The steps:
   each missing reviewer, started together (`agent <NNN> --task land-review --role <role>`), the
   verifier when one asks for changes (`--task land-verify`), or each role a mend names, once a
   round (`--task land-mend --role <role>`).
-- **`fix`**: the stored fix, once, before that change's close: `land-fix <NNN> --ask R<n>`, the
-  change's own builder (`agent <NNN> --task land-fix`), `land-fix <NNN> --commit`; the train then
-  re-stacks what is above it, gates the new tip, and every reviewer at the run's depth reads it.
+- **`fix`**: the stored fix, once, as soon as that change sits in the stack (after its conflict's
+  resolution, if it had one), before any gate: `land-fix <NNN> --ask R<n>`, the change's own
+  builder (`agent <NNN> --task land-fix`), `land-fix <NNN> --commit`; the train then stacks what
+  is above it on the fixed commit, so the tip's gate and every reviewer at the run's depth read it.
   A fix made while landing stays a signal for the change, so a later landing never passes it by
   itself.
 - **`close`**: `land <NNN> --close`, from the main checkout: its own commits rebased onto the base

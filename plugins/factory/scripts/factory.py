@@ -5841,8 +5841,9 @@ def _moved(folder: Path) -> dict:
 def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     """A fix the person asked for at landing, after the change's commit. `ask`: the id (`R3`) of
     the person's ticked `(person, fix)` line in `decisions.md`, never their words; on a shipped
-    change whose landing round under way passed, or none is open, open round `land-<n+1>` and
-    copy the line's words to `build/land-<n+1>.ask.md`, for the builder (`agent --task
+    change whose landing round under way no reviewer has answered, take that round `land-<n>`,
+    or, when it passed or none is open, open round `land-<n+1>`, and copy the line's words to
+    `build/land-<round>.ask.md`, for the builder (`agent --task
     land-fix`) and then every reviewer at the run's depth. `commit`: amend what the builder
     changed outside the folder (`fixed`) into the change's commit through `_amend_record()`, so
     the new `HEAD` is gated again before its review."""
@@ -5875,15 +5876,20 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
         why = f"{ask} isn't a `- [x] {ask} (person, fix): …` line in decisions.md"
         return emit({**out, "refusals": [why]}, 1)
     cfg, _ = load_config(root)
-    if n and land_verdict(root, folder, cfg, n)["next"] != "pass":
+    # A round a stack opened, which no reviewer has answered yet, takes the fix itself, so its
+    # review reads it at the run's depth (154); one answered takes it only once it has passed.
+    answered = n and any((folder / "reviews" / f"land-{n}").iterdir())
+    untouched = n and land_ask(folder, n) is None and not answered
+    if n and not untouched and land_verdict(root, folder, cfg, n)["next"] != "pass":
         why = f"landing round {n} hasn't passed: a fix is asked only after it does"
         return emit({**out, "refusals": [why]}, 1)
-    (folder / "reviews" / f"land-{n + 1}").mkdir(parents=True, exist_ok=True)
-    path = land_ask_path(folder, n + 1)
+    k = n if untouched else n + 1
+    (folder / "reviews" / f"land-{k}").mkdir(parents=True, exist_ok=True)
+    path = land_ask_path(folder, k)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(words + "\n", encoding="utf-8", newline="\n")
-    _train_fix(root, folder, opened=n + 1)
-    return emit({**out, "round": n + 1, "ask": path.relative_to(root).as_posix()})
+    _train_fix(root, folder, opened=k)
+    return emit({**out, "round": k, "ask": path.relative_to(root).as_posix()})
 
 
 def _train_fix(root: Path, folder: Path, opened: int | None = None, done: bool = False) -> None:
@@ -6100,8 +6106,9 @@ def cmd_train(
     `resolve --continue`), `gate` (`gate <NNN> --land`, at the tip or a bisected prefix),
     `eject` (`train --eject <NNN>`, with its `reason` and `cause`: `gate`, `review` or
     `refusal`), `accept`, `review`, `verify` and `mend` (as `land-verdicts` names them, in
-    `verdict`), `fix` (the person's fix stored at `--begin --fix <NNN>=R<n>`, at that change's
-    close: `land-fix --ask`, unless `asked`, `agent --task land-fix`, `land-fix --commit`),
+    `verdict`), `fix` (the person's fix stored at `--begin --fix <NNN>=R<n>`, once that change
+    sits in the stack, before any gate: `land-fix --ask`, unless `asked`, `agent --task
+    land-fix`, `land-fix --commit`),
     `close` (`land <NNN> --close`), `stop` (`train --stop`, with its `reason`) or `done`.
     `--eject` puts the change at fault back at its pre-train commit, its records and the reason
     amended in, and the rest re-stack; `--stop` puts every change not landed back and ends the
@@ -6154,7 +6161,8 @@ def _train_begin(
     stored = None
     if fix:
         # The person's fix (R9), by the id of its line in the change's `decisions.md`: made once,
-        # at that change's close, by `train`'s `fix` step. Only the person's yes asks for one.
+        # as soon as that change is stacked, before the gate, by `train`'s `fix` step. Only the
+        # person's yes asks for one.
         if by != "person":
             return emit({"refusals": ["train --begin --fix needs --by person: a fix is asked "
                                       "for in the person's yes"]}, 1)  # fmt: skip
@@ -6266,7 +6274,9 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         if mine.get("pre") is None:
             mine["pre"] = head
             mine["on"] = _git(tree, "merge-base", f"refs/heads/{base}", head)
-    # 2. Each stacked on the one before it.
+    # 2. Each stacked on the one before it; a fix the person asked for made once its change sits
+    # there (its conflict resolved), before any gate, so the gate and the review read it (154).
+    fix = state.get("fix")
     for name in live:
         mine, tree = state["changes"][name], trees[name]
         if _rebasing(tree):
@@ -6282,6 +6292,8 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
                 return done("stack", name, onto=onto)
         elif head != mine["stacked"] and _tree_changed(tree, mine["stacked"], head):
             mine["stacked"] = head  # a fix amended in: what is above re-stacks on it
+        if fix and fix["change"] == name and not fix.get("done"):
+            return done("fix", name, ask=fix["ask"], asked=fix.get("round") is not None)
     # 3. The gate, once at the tip; a red tip bisected.
     gate = _train_gate(main, cfg, state, trees)
     write_train(main, state)  # the gates read, for `_land_gate_state()` under `land_verdict()`
@@ -6306,12 +6318,8 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         if verdict["next"] == "stop":
             return ejecting(name, "; ".join(verdict["problems"]), "review")
         return done(verdict["next"], name, verdict=verdict)
-    # 5. Closed in order; a fix the person asked for made first, once, at its change's close.
-    first = train_live(state)[0]
-    fix = state.get("fix")
-    if fix and fix["change"] == first and not fix.get("done"):
-        return done("fix", first, ask=fix["ask"], asked=fix.get("round") is not None)
-    return done("close", first)
+    # 5. Closed in order.
+    return done("close", train_live(state)[0])
 
 
 def _train_waits(state: dict, trees: dict[str, Path], name: str) -> None:
