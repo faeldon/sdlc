@@ -7,3 +7,11 @@ Build: e4b57742ff2de7f2
 
 - The docs name the factory's landing as a source of nits: exit 0, passed
     (no output)
+
+## Attempt 2
+
+Verdict: PASS
+Build: 1e962240b7967cc0
+
+- The docs name the factory's landing as a source of nits: exit 0, passed
+    (no output)

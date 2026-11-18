@@ -8,6 +8,7 @@ with its folder, as `/sdlc:intent` leaves one, so nothing here runs an agent.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import inspect
 import json
@@ -1188,6 +1189,32 @@ def test_a_nit_not_raised_again_is_still_filed(tmp_path, capsys) -> None:
     assert [i["disposition"] for i in factory.agent_findings(rounds) if i["rank"] == "nit"] == [
         "recorded"
     ], "a restart's first round was handed nothing"
+
+
+def test_a_landing_round_never_changes_the_nits_filed(tmp_path, capsys) -> None:
+    """129, at its landing: only the build's rounds are weighed, since the landing files its nits
+    before a landing round reaches the record. A landing round that raises a handed cheap nit again
+    leaves it fixed, and a nit only a landing round raised is minor, never one to file."""
+    root = _change(tmp_path)
+    _reworked(root, "src/a.py:1: cheap {style S med}", "src/b.py:2: rename it {refactor M low}")
+    rounds = _carried_rounds(root)
+
+    def nits(rs: list[dict]) -> list[tuple]:
+        found = factory.agent_findings(rs)
+        return [(i["text"], i["disposition"], bool(i["file"])) for i in found if i["rank"] == "nit"]
+
+    before = nits(rounds)
+    assert before == [
+        ("src/a.py:1: cheap", "fixed", False),
+        ("src/b.py:2: rename it", "recorded", True),
+    ]
+    land = copy.deepcopy(rounds[-1])
+    land.update(kind="land", round=1)
+    land["reviews"]["code"]["nits"] = [
+        factory.read_nit(x)
+        for x in ("src/a.py:1: cheap {style S med}", "src/c.py:3: landing only {style M low}")
+    ]
+    assert nits([*rounds, land]) == [*before, ("src/c.py:3: landing only", "minor", False)]
 
 
 def test_carry_caps_the_nits_it_files_at_five(tmp_path, capsys) -> None:
