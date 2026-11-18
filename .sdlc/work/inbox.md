@@ -63,19 +63,6 @@ record from before this change reads as (`base: none`, so `differs`, never propo
 Theme: setup
 Priority: low
 
-## [2026-10-25-24] [idea] Record each change's type, and let the host decide where it shows
-
-The process doc names the types a seed grows into (`feature`, `fix`, `refactor`, `perf`, `docs`,
-`test`, `chore`), but nothing records which one a change is. Give the intent a `type:` key that
-intent proposes from the seed's kind (a `[bug]` suggests `fix`) and `check` validates against the
-process doc's list, so a host can add its own words. Where it shows is the host's choice, said in
-config: a subject prefix (`fix: …`, Conventional Commits) for a repo that uses one, an
-`Sdlc-Type:` trailer on the `Close` commit beside `Sdlc-Fixes:`, or nowhere. Retro can then count
-changes by type, and release can group its notes by it. Tier 2: a new intent key and what
-`sdlc.py` writes in a host. Raised 2026-10-25, from 025's vocabulary.
-Theme: intent
-Priority: low
-
 ## [2026-10-26-10] [idea] Setup fits the GitHub intake to a host's own issue templates
 
 Setup offers the two issue forms whenever `archive.target` is GitHub, and counts one as the host's
