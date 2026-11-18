@@ -1339,6 +1339,9 @@ READS = [
     "git diff",
     "git diff --text --no-ext-diff --no-textconv",
     "git log -p --exit-code",
+    "git log --format='%H %s'",
+    "git show HEAD",
+    "git log --no-show-signature -1",
 ]
 NON_READS = [
     "./check.sh",
@@ -1376,6 +1379,17 @@ NON_READS = [
     "git -C . blame --textc a",
     "git cat-file --textconv HEAD:a",
     "git -c diff.external=./x diff",
+    "git log --show-signature",
+    "git show --show-signature HEAD",
+    "git -C . log -1 --show-signature --oneline",
+    "git log --format=%G?",
+    "git log --pretty=format:'%h %GS'",
+    "git log --pretty=tformat:%GK",
+    "git show -s --format='%GG' HEAD",
+    "git shortlog --format=%GS",
+    "git log --format %G?",
+    "git log --pretty %GF",
+    "git -c log.showSignature=true log",
 ]
 
 

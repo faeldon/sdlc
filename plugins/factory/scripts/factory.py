@@ -205,9 +205,18 @@ GIT_READS = frozenset(
     {"show", "diff", "log", "status", "rev-parse", "ls-files", "ls-tree", "cat-file", "grep"}
     | {"blame", "merge-base", "shortlog", "describe"}
 )
-# git's options that run an external program from a read (`git diff --ext-diff`), each with the
-# length of its shortest abbreviation git takes: `--text` is a read, `--textc` is `--textconv`.
-GIT_RUNS = (("--ext-diff", len("--ext")), ("--textconv", len("--textc")))
+# git's options that run another program from a read, each with the length of its shortest
+# abbreviation git takes: a diff driver (`--ext-diff`), a textconv filter (`--textc` is
+# `--textconv`, `--text` a read), and gpg (`--show-signature`, which git takes whole). A pretty
+# format with a `%G` placeholder (`--format=%G?`) runs gpg too (`GIT_FORMATS`). What git config
+# turns on with no option, `log.showSignature` or a `diff.<driver>.textconv`, a command can't
+# show, so it is not covered; `-c` before the subcommand is never a read.
+GIT_RUNS = (
+    ("--ext-diff", len("--ext")),
+    ("--textconv", len("--textc")),
+    ("--show-signature", len("--show-signature")),
+)
+GIT_FORMATS = ("--format", "--pretty")
 FIND_REFUSED = ("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fls")
 # The reviewers whose replies owe evidence too: the ones that run the change.
 RUNS_THE_CHANGE = ("behaviour",)
@@ -1244,7 +1253,8 @@ def _sed_reads(args: list[str]) -> bool:
 
 
 def _git_reads(args: list[str]) -> bool:
-    """git changes nothing in a subcommand that only shows, with no option that writes a file."""
+    """git changes nothing in a subcommand that only shows, with no option that writes a file
+    or runs another program (`GIT_RUNS`, `GIT_FORMATS`)."""
     i = 0
     while i < len(args) and args[i].startswith("-"):
         if args[i] == "-C" and i + 1 < len(args):
@@ -1255,12 +1265,18 @@ def _git_reads(args: list[str]) -> bool:
             return False
     if i >= len(args) or args[i] not in GIT_READS:
         return False
-    for arg in args[i + 1 :]:
+    rest = args[i + 1 :]
+    for k, arg in enumerate(rest):
         name = arg.split("=", 1)[0]
         if name in ("--output", "--open-files-in-pager") or arg.startswith("-O"):
             return False
         if any(len(name) >= n and option.startswith(name) for option, n in GIT_RUNS):
             return False
+        # A format's value, after `=` or as the next word, holding a `%G` placeholder runs gpg.
+        if name in GIT_FORMATS:
+            value = arg.split("=", 1)[1] if "=" in arg else " ".join(rest[k + 1 : k + 2])
+            if "%G" in value:
+                return False
     return True
 
 
