@@ -113,6 +113,76 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 from urllib.parse import urlparse
 
+
+# The registry: each command declares its own parser and its adapter, beside its handler, with
+# `@command`, and `main` builds the parsers from it (`_parser()`) and runs the adapter it names, so
+# adding or changing a command never edits `main`. `HELP_ORDER` pins the order `--help` lists them
+# in; a command it doesn't name follows, in the order it registered. A copy of these is in each of
+# `sdlc.py` and `factory.py`, which never imports the other, pinned by a test.
+class UsageError(Exception):
+    """A command line the parser took but an adapter refuses: `main` prints it as the parser's own
+    usage error, and exits 2."""
+
+
+class Command:
+    """One registered command: the adapter `main` runs, its help line, and its arguments."""
+
+    def __init__(self, run, about: str, specs: tuple) -> None:
+        self.run, self.about, self.specs = run, about, specs
+
+
+COMMANDS: dict[str, Command] = {}
+
+
+def arg(*names: str, **kwargs) -> tuple:
+    """One `add_argument` call, recorded for `_parser()` to make."""
+    return ("arg", names, kwargs)
+
+
+def exclusive(*args: tuple, required: bool = False) -> tuple:
+    """A mutually exclusive group of `arg()`s, recorded for `_parser()` to make."""
+    return ("group", required, args)
+
+
+def command(name: str, about: str, *specs: tuple):
+    """Register the decorated adapter as command `name`, with its help line and its arguments in
+    the order its parser takes them. A name registered twice is refused as the script loads."""
+
+    def register(run):
+        if name in COMMANDS:
+            raise ValueError(f"command {name!r} is registered twice")
+        COMMANDS[name] = Command(run, about, specs)
+        return run
+
+    return register
+
+
+def _parser(description: str, required: bool) -> argparse.ArgumentParser:
+    """The script's parser, one subparser a registered command, in `HELP_ORDER` then the rest: the
+    one place a parser is built."""
+    ap = argparse.ArgumentParser(description=description)
+    sub = ap.add_subparsers(dest="cmd", required=required)
+    for name in [*HELP_ORDER, *(n for n in COMMANDS if n not in HELP_ORDER)]:
+        entry = COMMANDS[name]
+        p = sub.add_parser(name, help=entry.about)
+        for spec in entry.specs:
+            if spec[0] == "group":
+                group = p.add_mutually_exclusive_group(required=spec[1])
+                for _, names, kwargs in spec[2]:
+                    group.add_argument(*names, **kwargs)
+            else:
+                p.add_argument(*spec[1], **spec[2])
+    return ap
+
+
+HELP_ORDER = (
+    "config", "start", "fresh", "verdicts", "decisions", "ask", "carry", "defuse", "snapshot",
+    "gate", "check", "shots", "write-spec", "stage", "restart", "upgrade", "agent", "sdlc-path",
+    "land-check", "land", "resolve", "train", "land-verdicts", "accept", "cases", "land-fix",
+    "ready", "escapes", "report-dir", "score", "slice",
+)  # fmt: skip
+
+
 # The change-folder names `sdlc.py` gives: three digits at least, then the slug.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 # A conflict marker as git writes it, a whole line: never a run of the signs quoted mid-line, as
@@ -921,6 +991,14 @@ def cmd_config(root: Path) -> int:
     return emit({"config_file": str(CONFIG_FILE), **cfg, "warnings": warnings})
 
 
+@command(
+    "config",
+    f"{CONFIG_FILE} over the defaults, as JSON",
+)
+def cli_config(root: Path, args) -> int:
+    return cmd_config(root)
+
+
 def behind_base(root: Path) -> dict:
     """`base`, the branch the change lands on, and `behind`, how many of its commits `HEAD`
     lacks: both None when there is no base branch. Reads only."""
@@ -1057,6 +1135,16 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         base = out["base"]
         out["question"] = build_question(out, _base_check(root, base), _sensitive(root, base))
     return emit(out, 1 if out["refusals"] else 0)
+
+
+@command(
+    "start",
+    "whether a factory step may start on the change",
+    arg("id"),
+    arg("--for", dest="purpose", choices=sorted(STARTS), required=True),
+)
+def cli_start(root: Path, args) -> int:
+    return cmd_start(root, args.id, args.purpose)
 
 
 def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
@@ -2013,6 +2101,15 @@ def cmd_decisions(root: Path, ident: str) -> int:
     )
 
 
+@command(
+    "decisions",
+    "the agents' decisions into decisions.md",
+    arg("id"),
+)
+def cli_decisions(root: Path, args) -> int:
+    return cmd_decisions(root, args.id)
+
+
 def reply_path(source: str) -> str | None:
     """The reply a ledger line's `source` names, relative to the change folder: `builder round 3`
     is `build/round-3.md`, `code round 2` is `reviews/round-2/code.md`; None for any other."""
@@ -2087,6 +2184,16 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
         else:
             out["next"] = "ship"
     return emit(out)
+
+
+@command(
+    "ask",
+    "what the person has to decide on a change, read-only",
+    arg("id"),
+    arg("--answered", help="the ids just answered, comma-separated: says `next`"),
+)
+def cli_ask(root: Path, args) -> int:
+    return cmd_ask(root, args.id, args.answered)
 
 
 def stop_text(
@@ -2282,6 +2389,10 @@ def _record_land(
     path.write_text(land_step_text(out, since, after, problems), encoding="utf-8", newline="\n")
 
 
+# A stopped run's record (`STOPPED_RE` reads its line): here, above `verdicts`, whose help names it.
+STOPPED = Path("runs") / "stopped.md"
+
+
 def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
@@ -2352,6 +2463,19 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
             path.unlink(missing_ok=True)
         _record_step(folder, out)
     return emit(out)
+
+
+@command(
+    "verdicts",
+    "the review rounds, the decision, the next step",
+    arg("id"),
+    arg("--head", help="HEAD as `start` printed it; a move is a stop"),
+    arg(
+        "--record", action="store_true", help=f"write a stop to {STOPPED.as_posix()}, or remove it"
+    ),
+)
+def cli_verdicts(root: Path, args) -> int:
+    return cmd_verdicts(root, args.id, args.head, args.record)
 
 
 def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | None]:
@@ -2564,6 +2688,15 @@ def cmd_carry(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "notes": str(notes), "added": added, "findings": findings})
 
 
+@command(
+    "carry",
+    "unresolved changes to notes.md as `- [ ]` items",
+    arg("id"),
+)
+def cli_carry(root: Path, args) -> int:
+    return cmd_carry(root, args.id)
+
+
 def cheap_nits(r: dict) -> list[tuple[str, str]]:
     """Round `r`'s nits weighed `S` and `med`, worth fixing before the commit that found them, as
     `(role, text)`, each once, in `REVIEWERS` order: what a rework of the round is handed."""
@@ -2769,6 +2902,16 @@ def cmd_snapshot(root: Path, ident: str, n: int) -> int:
     path.write_text("".join(lines), encoding="utf-8", newline="\n")
     rel = path.relative_to(root).as_posix()
     return emit({"change": folder.name, "snapshot": rel, "paths": len(lines)})
+
+
+@command(
+    "snapshot",
+    "hash what a round's build left, for the next",
+    arg("id"),
+    arg("--round", dest="round", type=int, required=True),
+)
+def cli_snapshot(root: Path, args) -> int:
+    return cmd_snapshot(root, args.id, args.round)
 
 
 def gate_path(folder: Path, n: int) -> Path:
@@ -3041,6 +3184,15 @@ def cmd_defuse(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "changed": changed, "left": left}, 1 if left else 0)
 
 
+@command(
+    "defuse",
+    "rewrite the refused shapes in a change's records",
+    arg("id"),
+)
+def cli_defuse(root: Path, args) -> int:
+    return cmd_defuse(root, args.id)
+
+
 def _own_folder(text: str, name: str) -> str:
     """`text` with each citation of the change's own folder by its bare number, `work/NNN`,
     `work/NNN/…` or the glob `work/NNN*`, written as its full name `work/NNN-slug`, which the
@@ -3169,6 +3321,15 @@ def cmd_check(root: Path, ident: str) -> int:
     return 1
 
 
+@command(
+    "check",
+    "the base branch's check, in a gate slot, recording nothing",
+    arg("id"),
+)
+def cli_check(root: Path, args) -> int:
+    return cmd_check(root, args.id)
+
+
 def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
     add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
@@ -3242,6 +3403,16 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     return emit(out, 0 if verdict == "PASS" else 1)
 
 
+@command(
+    "gate",
+    "run the base branch's gate on the newest build",
+    arg("id"),
+    arg("--land", action="store_true", help="on the change as a landing rebased it"),
+)
+def cli_gate(root: Path, args) -> int:
+    return cmd_gate(root, args.id, args.land)
+
+
 def set_stage(text: str, stage: str, today: str) -> tuple[str, list[str]]:
     """`text` with its frontmatter's `stage:` and `updated:` lines set, every other line as it
     was, and the keys it couldn't find. Edited by line, never round-tripped through YAML, which
@@ -3277,6 +3448,16 @@ def cmd_stage(root: Path, ident: str, stage: str) -> int:
     if stage == "test":
         out["cost"] = run_cost(folder)
     return emit(out)
+
+
+@command(
+    "stage",
+    "set the intent's stage: line, in place",
+    arg("id"),
+    arg("stage"),
+)
+def cli_stage(root: Path, args) -> int:
+    return cmd_stage(root, args.id, args.stage)
 
 
 # `sdlc.py`'s scaffold rule, copied (never imported) and pinned by `tests/test_factory.py`: a file
@@ -3319,6 +3500,15 @@ def cmd_write_spec(root: Path, ident: str) -> int:
     return emit({"change": folder.name, "to": spec.relative_to(root).as_posix()})
 
 
+@command(
+    "write-spec",
+    "copy runs/spec-draft.md into spec.md, once",
+    arg("id"),
+)
+def cli_write_spec(root: Path, args) -> int:
+    return cmd_write_spec(root, args.id)
+
+
 def cmd_upgrade(root: Path, ident: str) -> int:
     """Upgrade a Tier 1 change to Tier 2 during its run, once the person's answer to a blocking
     decision said so: refused unless `verdicts` names `upgrade`. Writes
@@ -3351,6 +3541,15 @@ def cmd_upgrade(root: Path, ident: str) -> int:
         return emit({**out, "refusals": [f"sdlc.py upgrade refused: {why}"]}, 1)
     out.update({k: data.get(k) for k in ("tier", "stage", "created", "kept")})
     return emit({**out, "refusals": []})
+
+
+@command(
+    "upgrade",
+    "make a Tier 1 change Tier 2 on the person's answer",
+    arg("id"),
+)
+def cli_upgrade(root: Path, args) -> int:
+    return cmd_upgrade(root, args.id)
 
 
 def cmd_restart(root: Path, ident: str, words: str | None) -> int:
@@ -3394,6 +3593,16 @@ def cmd_restart(root: Path, ident: str, words: str | None) -> int:
     return emit(out | {"record": restart["record"], "words": words, "stage": "build"})
 
 
+@command(
+    "restart",
+    "send an escalated change back for another build",
+    arg("id"),
+    arg("--words", help="the person's words in decisions.md (R1), if any"),
+)
+def cli_restart(root: Path, args) -> int:
+    return cmd_restart(root, args.id, args.words)
+
+
 # ---------------------------------------------------------------- the agents, as sessions
 #
 # The supervisor starts each agent as a headless session of its own in the change's worktree, in
@@ -3407,7 +3616,6 @@ AGENT_TIMEOUT = 3 * 3600
 COSTS = Path("runs") / "costs.jsonl"
 # A stopped run's record, written and removed only by `verdicts --record`, read by the board and
 # `sdlc.py status` (each with its own copies of these, pinned by tests), never by the loop.
-STOPPED = Path("runs") / "stopped.md"
 STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
@@ -4358,6 +4566,20 @@ def cmd_agent(
     return emit(out)
 
 
+@command(
+    "agent",
+    "run one agent session for a step, and file its reply",
+    arg("id"),
+    arg("--task", choices=TASKS, required=True),
+    arg("--role", choices=[*REVIEWERS, "builder", "approver", "verifier", "resolver"]),
+    arg("--decision", help="the decided ledger id, for --task decided"),
+    arg("--revise", help="the person's revision in decisions.md (R1), for spec"),
+    arg("--recheck", action="store_true", help="send a spec draft back once"),
+)
+def cli_agent(root: Path, args) -> int:
+    return cmd_agent(root, args.id, args.task, args.role, args.decision, args.revise, args.recheck)
+
+
 def _waits(change: dict, names: list[str]) -> bool:
     """Whether a ready change depends on another of `names` that hasn't shipped yet."""
     others = [n for n in names if n != change["change"]]
@@ -4371,6 +4593,14 @@ def cmd_ready(root: Path) -> int:
     person ships, each from its own worktree, or `/sdlc-factory:land` lands them as a batch, in
     this order."""
     return emit({"ready": [{k: v for k, v in r.items() if k != "paths"} for r in ready(root)]})
+
+
+@command(
+    "ready",
+    "the changes ready to ship, in the order to ship them",
+)
+def cli_ready(root: Path, args) -> int:
+    return cmd_ready(root)
 
 
 def ready(root: Path) -> list[dict]:
@@ -4605,11 +4835,28 @@ def cmd_fresh(root: Path, ident: str) -> int:
     return refuse(way)
 
 
+@command(
+    "fresh",
+    "bring the change's branch up to the base before a run",
+    arg("id"),
+)
+def cli_fresh(root: Path, args) -> int:
+    return cmd_fresh(root, args.id)
+
+
 def cmd_sdlc_path() -> int:
     path, why = sdlc_path()
     return emit(
         {"sdlc": str(path) if path else None, "refusals": [why] if why else []}, 0 if path else 1
     )
+
+
+@command(
+    "sdlc-path",
+    "the sdlc.py of this factory's own version, which land runs",
+)
+def cli_sdlc_path(root: Path, args) -> int:
+    return cmd_sdlc_path()
 
 
 def land_ask_path(folder: Path, n: int) -> Path:
@@ -4742,6 +4989,15 @@ def cmd_accept(root: Path, ident: str) -> int:
     return emit(out, 0 if verdict == "PASS" else 1)
 
 
+@command(
+    "accept",
+    "run a change's acceptance checks through sdlc.py accept; never pre-approved",
+    arg("id"),
+)
+def cli_accept(root: Path, args) -> int:
+    return cmd_accept(root, args.id)
+
+
 def _before_commit(folder: Path) -> bool:
     """Whether the landing hasn't committed the change yet: it is still at `stage: test`."""
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
@@ -4806,6 +5062,16 @@ def cmd_cases(root: Path, ident: str, skip: str | None = None) -> int:
         return emit({**out, "note": None, "refusals": [why]}, 1)
     _note_line(folder, CASES_RE, note)
     return emit({**out, "note": note}, 1 if code else 0)
+
+
+@command(
+    "cases",
+    "run a change's skills' cases through sdlc.py run-cases; paid, never allowed",
+    arg("id"),
+    arg("--skip", metavar="WHY", help="the person declined the paid run: write why, run nothing"),
+)
+def cli_cases(root: Path, args) -> int:
+    return cmd_cases(root, args.id, args.skip)
 
 
 def land_round(folder: Path) -> int:
@@ -5031,6 +5297,15 @@ def cmd_escapes(root: Path, limit: int) -> int:
     found.sort(key=lambda e: str(e.get("reported") or ""), reverse=True)
     return emit({"escapes": found[:limit], "listed": len(found), "limit": limit,
                  "unattributed": unattributed, "unknown_change": unknown})  # fmt: skip
+
+
+@command(
+    "escapes",
+    "escaped bugs and the diffs that let them in",
+    arg("--limit", type=int, default=10),
+)
+def cli_escapes(root: Path, args) -> int:
+    return cmd_escapes(root, args.limit)
 
 
 def _reports(root: Path) -> Path:
@@ -5306,6 +5581,17 @@ def cmd_shots(root: Path, ident: str, n: int, role: str) -> int:
     return emit({**out, **record}, 1 if record["problem"] else 0)
 
 
+@command(
+    "shots",
+    "screenshot the change's pages for its UI reviewers",
+    arg("id"),
+    arg("--round", dest="round", type=int, required=True),
+    arg("--role", choices=UI_REVIEWERS, required=True),
+)
+def cli_shots(root: Path, args) -> int:
+    return cmd_shots(root, args.id, args.round, args.role)
+
+
 def cmd_report_dir(root: Path, kind: str) -> int:
     """A fresh run folder under `.sdlc/reports/`, which ignores itself, for an eval or a review to
     write into: `<kind>-<date>-<n>/`."""
@@ -5315,6 +5601,15 @@ def cmd_report_dir(root: Path, kind: str) -> int:
     run = reports / f"{stamp}-{n}"
     run.mkdir()
     return emit({"run": run.relative_to(root).as_posix()})
+
+
+@command(
+    "report-dir",
+    "a fresh run folder under .sdlc/reports/",
+    arg("--kind", choices=REPORT_KINDS, required=True),
+)
+def cli_report_dir(root: Path, args) -> int:
+    return cmd_report_dir(root, args.kind)
 
 
 def _run_order(path: Path) -> tuple[str, int]:
@@ -5375,6 +5670,15 @@ def cmd_score(root: Path, run_rel: str) -> int:
     return emit({"report": report.relative_to(root).as_posix(), "reviewers": scores, "bugs": bugs})
 
 
+@command(
+    "score",
+    "score an eval's run against the last one",
+    arg("run"),
+)
+def cli_score(root: Path, args) -> int:
+    return cmd_score(root, args.run)
+
+
 def _open_change_paths(root: Path, base: str) -> set[str]:
     """Every path an open change's worktree touches: a review of old code leaves them alone."""
     listing = _git(root, "worktree", "list", "--porcelain") or ""
@@ -5425,6 +5729,16 @@ def cmd_slice(root: Path, paths: list[str], limit: int) -> int:
                  "left_out": left_out, "limit": limit})  # fmt: skip
 
 
+@command(
+    "slice",
+    "the code a review of old code looks at",
+    arg("--paths", nargs="*", default=[]),
+    arg("--limit", type=int, default=10),
+)
+def cli_slice(root: Path, args) -> int:
+    return cmd_slice(root, args.paths, args.limit)
+
+
 class _Names:
     """This module's own names, read when landing.py uses them, so a test's stand-in reaches it.
     The factory's own, as `sdlc.py`'s is its: the factory never imports `sdlc.py`."""
@@ -5449,190 +5763,96 @@ def _load_landing():
 landing = _load_landing()
 
 
+@command(
+    "land-check",
+    "the batch to land, its signals, and whether clear",
+    arg("ids", nargs="*"),
+)
+def cli_land_check(root: Path, args) -> int:
+    return landing.cmd_land_check(root, args.ids)
+
+
+@command(
+    "land",
+    "ship, commit and rebase a change; or close it",
+    arg("id"),
+    arg("--by", choices=("auto", "person")),
+    arg("--close", action="store_true", help="close it, from the main checkout"),
+)
+def cli_land(root: Path, args) -> int:
+    if args.close:
+        return landing.cmd_land_close(root, args.id)
+    if not args.by:
+        return emit({"refusals": ["land needs --by auto|person, or --close"]}, 1)
+    return landing.cmd_land(root, args.id, args.by)
+
+
+@command(
+    "resolve",
+    "leave a conflicting rebase for the builder",
+    arg("id"),
+    exclusive(
+        arg("--continue", dest="cont", action="store_true"),
+        arg("--onto", help="the train's stack onto this commit; outside a train, the base branch"),
+        required=True,
+    ),
+)
+def cli_resolve(root: Path, args) -> int:
+    return landing.cmd_resolve(root, args.id, args.cont, args.onto)
+
+
+@command(
+    "train",
+    "the landing train: what it does next",
+    arg("--begin", nargs="+", metavar="NNN", help="start one over these changes"),
+    arg("--by", choices=("auto", "person"), help="who passed the batch's gate"),
+    arg("--eject", metavar="NNN", help="put the change at fault back, and go on"),
+    arg("--stop", action="store_true", help="put every unlanded change back"),
+    arg("--run", action="store_true", help="take every step until done or a stop"),
+    arg("--cancel", action="store_true", help="stop a running loop between steps"),
+    arg("--fix", metavar="NNN=R<n>", help="with --begin: the person's fix to make"),
+)
+def cli_train(root: Path, args) -> int:
+    return landing.cmd_train(
+        root, args.begin, args.by, args.eject, args.stop, args.run, args.cancel, args.fix
+    )
+
+
+@command(
+    "land-verdicts",
+    "the landing review, and its next step",
+    arg("id"),
+    arg("--record", action="store_true", help=f"write a stop to {LAND_STEP.as_posix()}"),
+)
+def cli_land_verdicts(root: Path, args) -> int:
+    return landing.cmd_land_verdicts(root, args.id, args.record)
+
+
+@command(
+    "land-fix",
+    "a fix the person asked for at landing",
+    arg("id"),
+    exclusive(
+        arg("--ask", help="the person's fix in decisions.md (R1): open its round"),
+        arg("--commit", action="store_true", help="amend the builder's fix in"),
+        required=True,
+    ),
+)
+def cli_land_fix(root: Path, args) -> int:
+    return landing.cmd_land_fix(root, args.id, args.ask, args.commit)
+
+
 def main() -> int:
     _utf8_streams()
-    ap = argparse.ArgumentParser(description="The sdlc-factory layer's mechanism.")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("config", help=f"{CONFIG_FILE} over the defaults, as JSON")
-    p_start = sub.add_parser("start", help="whether a factory step may start on the change")
-    p_start.add_argument("id")
-    p_start.add_argument("--for", dest="purpose", choices=sorted(STARTS), required=True)
-    p_fresh = sub.add_parser("fresh", help="bring the change's branch up to the base before a run")
-    p_fresh.add_argument("id")
-    p_verdicts = sub.add_parser("verdicts", help="the review rounds, the decision, the next step")
-    p_verdicts.add_argument("id")
-    p_verdicts.add_argument("--head", help="HEAD as `start` printed it; a move is a stop")
-    p_verdicts.add_argument(
-        "--record", action="store_true", help=f"write a stop to {STOPPED.as_posix()}, or remove it"
-    )
-    p_decisions = sub.add_parser("decisions", help="the agents' decisions into decisions.md")
-    p_decisions.add_argument("id")
-    p_ask = sub.add_parser("ask", help="what the person has to decide on a change, read-only")
-    p_ask.add_argument("id")
-    p_ask.add_argument("--answered", help="the ids just answered, comma-separated: says `next`")
-    p_carry = sub.add_parser("carry", help="unresolved changes to notes.md as `- [ ]` items")
-    p_carry.add_argument("id")
-    p_defuse = sub.add_parser("defuse", help="rewrite the refused shapes in a change's records")
-    p_defuse.add_argument("id")
-    p_snapshot = sub.add_parser("snapshot", help="hash what a round's build left, for the next")
-    p_snapshot.add_argument("id")
-    p_snapshot.add_argument("--round", dest="round", type=int, required=True)
-    p_gate = sub.add_parser("gate", help="run the base branch's gate on the newest build")
-    p_gate.add_argument("id")
-    p_gate.add_argument("--land", action="store_true", help="on the change as a landing rebased it")
-    p_run = sub.add_parser(
-        "check", help="the base branch's check, in a gate slot, recording nothing"
-    )
-    p_run.add_argument("id")
-    p_shots = sub.add_parser("shots", help="screenshot the change's pages for its UI reviewers")
-    p_shots.add_argument("id")
-    p_shots.add_argument("--round", dest="round", type=int, required=True)
-    p_shots.add_argument("--role", choices=UI_REVIEWERS, required=True)
-    p_write = sub.add_parser("write-spec", help="copy runs/spec-draft.md into spec.md, once")
-    p_write.add_argument("id")
-    p_stage = sub.add_parser("stage", help="set the intent's stage: line, in place")
-    p_stage.add_argument("id")
-    p_stage.add_argument("stage")
-    p_restart = sub.add_parser("restart", help="send an escalated change back for another build")
-    p_restart.add_argument("id")
-    p_restart.add_argument("--words", help="the person's words in decisions.md (R1), if any")
-    p_upgrade = sub.add_parser("upgrade", help="make a Tier 1 change Tier 2 on the person's answer")
-    p_upgrade.add_argument("id")
-    p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
-    p_agent.add_argument("id")
-    p_agent.add_argument("--task", choices=TASKS, required=True)
-    p_agent.add_argument(
-        "--role", choices=[*REVIEWERS, "builder", "approver", "verifier", "resolver"]
-    )
-    sub.add_parser("sdlc-path", help="the sdlc.py of this factory's own version, which land runs")
-    p_check = sub.add_parser("land-check", help="the batch to land, its signals, and whether clear")
-    p_check.add_argument("ids", nargs="*")
-    p_land = sub.add_parser("land", help="ship, commit and rebase a change; or close it")
-    p_land.add_argument("id")
-    p_land.add_argument("--by", choices=("auto", "person"))
-    p_land.add_argument("--close", action="store_true", help="close it, from the main checkout")
-    p_resolve = sub.add_parser("resolve", help="leave a conflicting rebase for the builder")
-    p_resolve.add_argument("id")
-    resolve_how = p_resolve.add_mutually_exclusive_group(required=True)
-    resolve_how.add_argument("--continue", dest="cont", action="store_true")
-    resolve_how.add_argument(
-        "--onto", help="the train's stack onto this commit; outside a train, the base branch"
-    )
-    p_train = sub.add_parser("train", help="the landing train: what it does next")
-    p_train.add_argument("--begin", nargs="+", metavar="NNN", help="start one over these changes")
-    p_train.add_argument("--by", choices=("auto", "person"), help="who passed the batch's gate")
-    p_train.add_argument("--eject", metavar="NNN", help="put the change at fault back, and go on")
-    p_train.add_argument("--stop", action="store_true", help="put every unlanded change back")
-    p_train.add_argument("--run", action="store_true", help="take every step until done or a stop")
-    p_train.add_argument("--cancel", action="store_true", help="stop a running loop between steps")
-    p_train.add_argument("--fix", metavar="NNN=R<n>", help="with --begin: the person's fix to make")
-    p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
-    p_lv.add_argument("id")
-    p_lv.add_argument(
-        "--record", action="store_true", help=f"write a stop to {LAND_STEP.as_posix()}"
-    )
-    p_accept = sub.add_parser(
-        "accept", help="run a change's acceptance checks through sdlc.py accept; never pre-approved"
-    )
-    p_accept.add_argument("id")
-    p_cases = sub.add_parser(
-        "cases", help="run a change's skills' cases through sdlc.py run-cases; paid, never allowed"
-    )
-    p_cases.add_argument("id")
-    p_cases.add_argument(
-        "--skip", metavar="WHY", help="the person declined the paid run: write why, run nothing"
-    )
-    p_fix = sub.add_parser("land-fix", help="a fix the person asked for at landing")
-    p_fix.add_argument("id")
-    fix_how = p_fix.add_mutually_exclusive_group(required=True)
-    fix_how.add_argument("--ask", help="the person's fix in decisions.md (R1): open its round")
-    fix_how.add_argument("--commit", action="store_true", help="amend the builder's fix in")
-    p_agent.add_argument("--decision", help="the decided ledger id, for --task decided")
-    p_agent.add_argument("--revise", help="the person's revision in decisions.md (R1), for spec")
-    p_agent.add_argument("--recheck", action="store_true", help="send a spec draft back once")
-    sub.add_parser("ready", help="the changes ready to ship, in the order to ship them")
-    p_escapes = sub.add_parser("escapes", help="escaped bugs and the diffs that let them in")
-    p_escapes.add_argument("--limit", type=int, default=10)
-    p_report = sub.add_parser("report-dir", help="a fresh run folder under .sdlc/reports/")
-    p_report.add_argument("--kind", choices=REPORT_KINDS, required=True)
-    p_score = sub.add_parser("score", help="score an eval's run against the last one")
-    p_score.add_argument("run")
-    p_slice = sub.add_parser("slice", help="the code a review of old code looks at")
-    p_slice.add_argument("--paths", nargs="*", default=[])
-    p_slice.add_argument("--limit", type=int, default=10)
+    ap = _parser("The sdlc-factory layer's mechanism.", True)
     args = ap.parse_args()
     root = repo_root()
     if getattr(args, "id", None):
         root = change_root(root, args.id)
-    if args.cmd == "sdlc-path":
-        return cmd_sdlc_path()
-    if args.cmd == "land-check":
-        return landing.cmd_land_check(root, args.ids)
-    if args.cmd == "land" and args.close:
-        return landing.cmd_land_close(root, args.id)
-    if args.cmd == "land":
-        if not args.by:
-            return emit({"refusals": ["land needs --by auto|person, or --close"]}, 1)
-        return landing.cmd_land(root, args.id, args.by)
-    if args.cmd == "resolve":
-        return landing.cmd_resolve(root, args.id, args.cont, args.onto)
-    if args.cmd == "train":
-        return landing.cmd_train(
-            root, args.begin, args.by, args.eject, args.stop, args.run, args.cancel, args.fix
-        )
-    if args.cmd == "land-verdicts":
-        return landing.cmd_land_verdicts(root, args.id, args.record)
-    if args.cmd == "accept":
-        return cmd_accept(root, args.id)
-    if args.cmd == "cases":
-        return cmd_cases(root, args.id, args.skip)
-    if args.cmd == "land-fix":
-        return landing.cmd_land_fix(root, args.id, args.ask, args.commit)
-    if args.cmd == "agent":
-        return cmd_agent(
-            root, args.id, args.task, args.role, args.decision, args.revise, args.recheck
-        )
-    if args.cmd == "ready":
-        return cmd_ready(root)
-    if args.cmd == "config":
-        return cmd_config(root)
-    if args.cmd == "start":
-        return cmd_start(root, args.id, args.purpose)
-    if args.cmd == "fresh":
-        return cmd_fresh(root, args.id)
-    if args.cmd == "verdicts":
-        return cmd_verdicts(root, args.id, args.head, args.record)
-    if args.cmd == "decisions":
-        return cmd_decisions(root, args.id)
-    if args.cmd == "ask":
-        return cmd_ask(root, args.id, args.answered)
-    if args.cmd == "carry":
-        return cmd_carry(root, args.id)
-    if args.cmd == "defuse":
-        return cmd_defuse(root, args.id)
-    if args.cmd == "snapshot":
-        return cmd_snapshot(root, args.id, args.round)
-    if args.cmd == "gate":
-        return cmd_gate(root, args.id, args.land)
-    if args.cmd == "check":
-        return cmd_check(root, args.id)
-    if args.cmd == "shots":
-        return cmd_shots(root, args.id, args.round, args.role)
-    if args.cmd == "restart":
-        return cmd_restart(root, args.id, args.words)
-    if args.cmd == "upgrade":
-        return cmd_upgrade(root, args.id)
-    if args.cmd == "write-spec":
-        return cmd_write_spec(root, args.id)
-    if args.cmd == "escapes":
-        return cmd_escapes(root, args.limit)
-    if args.cmd == "report-dir":
-        return cmd_report_dir(root, args.kind)
-    if args.cmd == "score":
-        return cmd_score(root, args.run)
-    if args.cmd == "slice":
-        return cmd_slice(root, args.paths, args.limit)
-    return cmd_stage(root, args.id, args.stage)
+    try:
+        return COMMANDS[args.cmd].run(root, args)
+    except UsageError as e:
+        ap.error(str(e))
 
 
 if __name__ == "__main__":

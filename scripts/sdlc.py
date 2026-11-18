@@ -69,6 +69,77 @@ from pathlib import Path
 import frontmatter
 import yaml
 
+
+# The registry: each command declares its own parser and its adapter, beside its handler, with
+# `@command`, and `main` builds the parsers from it (`_parser()`) and runs the adapter it names, so
+# adding or changing a command never edits `main`. `HELP_ORDER` pins the order `--help` lists them
+# in; a command it doesn't name follows, in the order it registered. A copy of these is in each of
+# `sdlc.py` and `factory.py`, which never imports the other, pinned by a test.
+class UsageError(Exception):
+    """A command line the parser took but an adapter refuses: `main` prints it as the parser's own
+    usage error, and exits 2."""
+
+
+class Command:
+    """One registered command: the adapter `main` runs, its help line, and its arguments."""
+
+    def __init__(self, run, about: str, specs: tuple) -> None:
+        self.run, self.about, self.specs = run, about, specs
+
+
+COMMANDS: dict[str, Command] = {}
+
+
+def arg(*names: str, **kwargs) -> tuple:
+    """One `add_argument` call, recorded for `_parser()` to make."""
+    return ("arg", names, kwargs)
+
+
+def exclusive(*args: tuple, required: bool = False) -> tuple:
+    """A mutually exclusive group of `arg()`s, recorded for `_parser()` to make."""
+    return ("group", required, args)
+
+
+def command(name: str, about: str, *specs: tuple):
+    """Register the decorated adapter as command `name`, with its help line and its arguments in
+    the order its parser takes them. A name registered twice is refused as the script loads."""
+
+    def register(run):
+        if name in COMMANDS:
+            raise ValueError(f"command {name!r} is registered twice")
+        COMMANDS[name] = Command(run, about, specs)
+        return run
+
+    return register
+
+
+def _parser(description: str, required: bool) -> argparse.ArgumentParser:
+    """The script's parser, one subparser a registered command, in `HELP_ORDER` then the rest: the
+    one place a parser is built."""
+    ap = argparse.ArgumentParser(description=description)
+    sub = ap.add_subparsers(dest="cmd", required=required)
+    for name in [*HELP_ORDER, *(n for n in COMMANDS if n not in HELP_ORDER)]:
+        entry = COMMANDS[name]
+        p = sub.add_parser(name, help=entry.about)
+        for spec in entry.specs:
+            if spec[0] == "group":
+                group = p.add_mutually_exclusive_group(required=spec[1])
+                for _, names, kwargs in spec[2]:
+                    group.add_argument(*names, **kwargs)
+            else:
+                p.add_argument(*spec[1], **spec[2])
+    return ap
+
+
+HELP_ORDER = (
+    "status", "new", "check", "ship", "next", "undone", "bugs", "inbox-commit", "intake",
+    "closes", "preflight", "mark-triaged", "needs-info", "next-entry", "nits", "groups", "checks",
+    "findings", "accept", "gate", "cases", "run-cases", "drop", "upgrade", "base", "resolve",
+    "close", "sync", "lookup", "config", "readiness", "drift", "record", "reset", "uninstall",
+    "context", "unreleased", "release", "publish", "retro", "retro-commit", "board",
+)  # fmt: skip
+
+
 # Stage 6 is "maintain", which loops back to a new intent rather than being a stage a folder sits
 # in — so it has no entry here. `dropped` is terminal and exempt from artifact checks. `spike` is
 # exploration meant to be thrown away: entered from any stage, left by setting the stage it left,
@@ -658,6 +729,11 @@ def cmd_config(root: Path) -> int:
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0 if parsed else 1
+
+
+@command("config", "the host's .sdlc/config.toml, resolved, as JSON; writes nothing")
+def cli_config(root: Path, home: Path, args) -> int:
+    return cmd_config(root)
 
 
 def repo_root() -> Path:
@@ -2022,6 +2098,21 @@ def next_id(home: Path) -> str:
     return f"{max(seeds) + 1:03d}"
 
 
+@command("next", "the id `new` would allocate now; writes nothing")
+def cli_next(root: Path, home: Path, args) -> int:
+    cfg = load_config(home)[0]
+    if ids_mode(home, cfg) == "github":
+        numbering = None if archive_unavailable(home, cfg) else tracker(home, cfg)
+        guess = numbering.next_guess() if numbering else None
+        if guess is None:
+            print("⚠  couldn't ask GitHub for its next issue number", file=sys.stderr)
+            return 1
+        print(f"{guess:03d}")
+    else:
+        print(next_id(home))
+    return 0
+
+
 def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
     """The next `count` register ids for entries dated `day` (`YYYY-MM-DD-n`): one past the highest
     `n` that day in the register of every checkout of the repo, uncommitted edits included, and in
@@ -2045,6 +2136,17 @@ def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
     used = [int(m.group(1)) for t in texts for line in t.splitlines() if (m := heading.match(line))]
     top = max(used, default=0)
     return [f"{day}-{top + k}" for k in range(1, count + 1)]
+
+
+@command(
+    "next-entry",
+    "the id the next inbox entry would take today; writes nothing",
+    arg("--count", type=int, default=1, help="this many ids, one per line"),
+)
+def cli_next_entry(root: Path, home: Path, args) -> int:
+    for entry_id in next_entry_ids(home, date.today().isoformat(), max(args.count, 1)):
+        print(entry_id)
+    return 0
 
 
 def _add_worktree(home: Path, name: str, base: str) -> tuple[Path | None, str | None]:
@@ -2190,6 +2292,29 @@ def cmd_new(
     return 0
 
 
+@command(
+    "new",
+    "scaffold the next change folder",
+    arg("slug", help="kebab-case name, e.g. reopen-drafts"),
+    arg(
+        "--tier",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="1 = intent only (default), 2 = intent + spec + plan",
+    ),
+    arg("--title", help="H1 for the artifacts (default: the slug, de-hyphenated)"),
+    arg(
+        "--worktree",
+        action="store_true",
+        help="create the change in its own worktree and branch, .claude/worktrees/NNN-slug",
+    ),
+    arg("--base", help="what --worktree branches from (git.base)"),
+)
+def cli_new(root: Path, home: Path, args) -> int:
+    return cmd_new(root, args.slug, args.tier, args.title, args.worktree, args.base)
+
+
 def render_template(
     home: Path, name: str, nid: str, slug: str, stamp: str, heading: str
 ) -> tuple[str, str]:
@@ -2285,6 +2410,15 @@ def cmd_upgrade(root: Path, ident: str) -> int:
     intent.write_text(stamped, encoding="utf-8", newline="\n")
     report.update(tier=2, stage="plan")
     return emit(0)
+
+
+@command(
+    "upgrade",
+    "make this checkout's Tier 1 change a Tier 2, its spec and plan scaffolded",
+    arg("id", help="the change, e.g. 023"),
+)
+def cli_upgrade(root: Path, home: Path, args) -> int:
+    return cmd_upgrade(root, args.id)
 
 
 def _report_drop(issue: str, err: str | None) -> None:
@@ -2393,6 +2527,15 @@ def cmd_sync(root: Path, ident: str | None) -> int:
     return 1 if report.get("error") else 0
 
 
+@command(
+    "sync",
+    "rewrite the change's tracker issue from its artifacts as they are now",
+    arg("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)"),
+)
+def cli_sync(root: Path, home: Path, args) -> int:
+    return cmd_sync(root, args.id)
+
+
 def cmd_lookup(root: Path, names: list[str]) -> int:
     """The values each issue field the project doc turns on can take, as JSON, for /sdlc:intent to
     offer and nothing else. Writes nothing: a tracker's list is read, a fixed list is echoed, and
@@ -2439,6 +2582,15 @@ def cmd_lookup(root: Path, names: list[str]) -> int:
     return 1 if unknown or (problems and not fields) else 0
 
 
+@command(
+    "lookup",
+    "the values the project doc's issue fields can take, as JSON; writes nothing",
+    arg("field", nargs="*", help="milestone, project, assignees (default: all on)"),
+)
+def cli_lookup(root: Path, home: Path, args) -> int:
+    return cmd_lookup(root, args.field)
+
+
 def _undone_report(root: Path, path: Path) -> dict:
     """A change's undone notes.md items, for `undone` and `preflight`."""
     return {
@@ -2455,6 +2607,15 @@ def cmd_undone(root: Path, ident: str) -> int:
         return 1
     print(json.dumps(_undone_report(root, path), indent=2, ensure_ascii=False))
     return 0
+
+
+@command(
+    "undone",
+    "a change's unticked `- [ ]` items in notes.md, as JSON; writes nothing",
+    arg("id", help="the 3-digit id, e.g. 025"),
+)
+def cli_undone(root: Path, home: Path, args) -> int:
+    return cmd_undone(root, args.id)
 
 
 # How many sensitive paths ship's question names before it says how many more.
@@ -2527,6 +2688,16 @@ def cmd_nits(root: Path, touching: list[str] | None, change: str | None) -> int:
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 1 if out["problems"] else 0
+
+
+@command(
+    "nits",
+    "the open [nit] entries in the inbox, as JSON; writes nothing",
+    arg("--touching", nargs="*", help="only those these paths touch"),
+    arg("--change", help="only those this change's diff against main touches"),
+)
+def cli_nits(root: Path, home: Path, args) -> int:
+    return cmd_nits(root, args.touching, args.change)
 
 
 GROUP_KEYS = ("as", "tier", "after")
@@ -2649,6 +2820,15 @@ def cmd_groups(root: Path, texts: list[str]) -> int:
     return 1 if refusals else 0
 
 
+@command(
+    "groups",
+    "a batch of changes for /sdlc:intent, read and ordered, as JSON; writes nothing",
+    arg("group", nargs="+", help='one group each: "<id> … as <slug> tier <n>"'),
+)
+def cli_groups(root: Path, home: Path, args) -> int:
+    return cmd_groups(root, args.group)
+
+
 def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | None) -> int:
     """The open bugs, the register's `[bug]` entries, as JSON with their age and the process
     doc's severity words. `--touching` keeps those the given paths touch; `--introduced` names, for
@@ -2673,6 +2853,16 @@ def cmd_bugs(root: Path, touching: list[str] | None, introduced: list[str] | Non
     return 1 if problems else 0
 
 
+@command(
+    "bugs",
+    "the open [bug] entries in the inbox, as JSON",
+    arg("--touching", nargs="*", help="only those these paths touch"),
+    arg("--introduced", nargs="*", help="for each path, the closed change that last touched it"),
+)
+def cli_bugs(root: Path, home: Path, args) -> int:
+    return cmd_bugs(root, args.touching, args.introduced)
+
+
 def cmd_checks(root: Path, ident: str) -> int:
     """A change's acceptance checks as JSON, for /sdlc:ship to show before it runs them. Runs
     nothing and writes nothing, so it is allowed without a prompt; `accept` is not."""
@@ -2682,6 +2872,15 @@ def cmd_checks(root: Path, ident: str) -> int:
     found = _checks_report(path)
     print(json.dumps(found, indent=2, ensure_ascii=False))
     return 1 if found["problems"] else 0
+
+
+@command(
+    "checks",
+    "a change's acceptance checks in checks.md, as JSON; runs nothing",
+    arg("id", help="the 3-digit id, e.g. 025"),
+)
+def cli_checks(root: Path, home: Path, args) -> int:
+    return cmd_checks(root, args.id)
 
 
 def _checks_report(path: Path) -> dict:
@@ -2711,6 +2910,15 @@ def cmd_findings(root: Path, ident: str) -> int:
     found = _findings_report(path)
     print(json.dumps(found, indent=2, ensure_ascii=False))
     return 1 if found["problems"] or found["open"] else 0
+
+
+@command(
+    "findings",
+    "a change's review findings in findings.md, as JSON; writes nothing",
+    arg("id", help="the 3-digit id, e.g. 025"),
+)
+def cli_findings(root: Path, home: Path, args) -> int:
+    return cmd_findings(root, args.id)
 
 
 def _status_lines(checkout: Path) -> set[str]:
@@ -2770,6 +2978,15 @@ def cmd_accept(root: Path, ident: str) -> int:
     report = {"change": path.name, "checks": results, "passed": passed}
     print(json.dumps({**report, "problems": found["problems"]}, indent=2, ensure_ascii=False))
     return 0 if passed else 1
+
+
+@command(
+    "accept",
+    "run a change's acceptance checks from its checkout; never pre-approved",
+    arg("id", help="the 3-digit id, e.g. 025"),
+)
+def cli_accept(root: Path, home: Path, args) -> int:
+    return cmd_accept(root, args.id)
 
 
 # ---------------------------------------------------------------- the gate, run by hand
@@ -3179,6 +3396,15 @@ def cmd_gate(root: Path, ident: str) -> int:
     out["to"] = path.relative_to(checkout).as_posix()
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0 if verdict == "PASS" else 1
+
+
+@command(
+    "gate",
+    "run the base branch's check on a change built by hand, into build/gate.md; never pre-approved",
+    arg("id", help="the 3-digit id, e.g. 025"),
+)
+def cli_gate(root: Path, home: Path, args) -> int:
+    return cmd_gate(root, args.id)
 
 
 def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
@@ -3643,6 +3869,20 @@ def cmd_cases_compare(root: Path, run: str) -> int:
     return 0 if found["passed"] else 1
 
 
+@command(
+    "cases",
+    "the skills' cases in evals/, and a change's scope of them; writes nothing",
+    arg("id", nargs="?", help="a change's id for its scope, or `compare` to compare a run"),
+    arg("run", nargs="?", help="with `compare`: the run's folder"),
+)
+def cli_cases(root: Path, home: Path, args) -> int:
+    if args.id == "compare":
+        if not args.run:
+            raise UsageError("cases compare needs the run's folder")
+        return cmd_cases_compare(root, args.run)
+    return cmd_cases(root, args.id)
+
+
 def _case_run_dir(home: Path) -> Path:
     """A fresh `cases-<date>-<n>` under `.sdlc/reports/`, which ignores itself, as `factory.py`'s
     `cmd_report_dir` makes its own (`test_the_report_folder_matches_the_factorys`)."""
@@ -3780,6 +4020,24 @@ def cmd_run_cases(root: Path, ident: str | None, keep: bool = False) -> int:
            "cost_usd": round(spent, 6)}  # fmt: skip
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 1 if lists["failed"] else 0
+
+
+@command(
+    "run-cases",
+    "run the skills' cases through plugin eval; paid, never pre-approved",
+    exclusive(
+        arg("id", nargs="?", help="a change's id: the cases its diff calls for"),
+        arg("--full", action="store_true", help="every case"),
+        required=True,
+    ),
+    arg(
+        "--keep",
+        action="store_true",
+        help="keep each run's workspace, to debug a case (a failed run's trace is always kept)",
+    ),
+)
+def cli_run_cases(root: Path, home: Path, args) -> int:
+    return cmd_run_cases(root, None if args.full else args.id, args.keep)
 
 
 def cmd_ship(
@@ -3992,6 +4250,26 @@ def cmd_ship(
     if not paths:
         print("  staged nothing: the checkout has nothing uncommitted")
     return 0
+
+
+@command(
+    "ship",
+    "stamp the change shipped, in place",
+    arg("id", help="the 3-digit id, e.g. 001"),
+    arg(
+        "--leave", action="append", default=[], metavar="PATH",
+        help="a path not to stage, to commit apart; repeatable",
+    ),
+    arg(
+        "--fixed",
+        metavar="IDS",
+        help="the findings a yes approved fixing, `F2,F4`: each must read fixed",
+    ),
+    arg("--through", metavar="ID", help="the highest finding id the question was asked over"),
+)  # fmt: skip
+def cli_ship(root: Path, home: Path, args) -> int:
+    fixed = [f.strip() for f in (args.fixed or "").split(",") if f.strip()]
+    return cmd_ship(root, args.id, args.leave, fixed, args.through)
 
 
 def _seed_title(text: str) -> str:
@@ -4254,6 +4532,16 @@ def cmd_drop(root: Path, ident: str | None, check_only: bool = False) -> int:
     return emit(0)
 
 
+@command(
+    "drop",
+    "stamp the change dropped and commit its folder on its branch, for close",
+    arg("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)"),
+    arg("--check", action="store_true", help="preconditions only, write nothing"),
+)
+def cli_drop(root: Path, home: Path, args) -> int:
+    return cmd_drop(root, args.id, args.check)
+
+
 def worktrees(root: Path) -> list[tuple[Path, str]]:
     """(path, branch) for every checkout of this repo with a branch out, the main one included."""
     out = _git(root, "worktree", "list", "--porcelain") or ""
@@ -4460,6 +4748,15 @@ def cmd_base(root: Path, ident: str | None) -> int:
         report["action"] = "fast-forwarded"
     report.update(to=_git(tree, "rev-parse", "HEAD"), undo=f"git -C {tree} reset --keep {before}")
     return emit(0)
+
+
+@command(
+    "base",
+    "bring a change's branch up to date with main in its worktree, or refuse",
+    arg("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)"),
+)
+def cli_base(root: Path, home: Path, args) -> int:
+    return cmd_base(root, args.id)
 
 
 # What a resolution keeps, each under the change's branch name, in refs every worktree shares:
@@ -4732,6 +5029,23 @@ def cmd_resolve(root: Path, ident: str | None, mode: str = "start") -> int:
             _git(tree, "update-ref", "-d", ref[kind])
         return refuse(f"rebasing onto {trunk} failed before any conflict: {err}")
     return step()
+
+
+@command(
+    "resolve",
+    "bring a change's branch up to date when base refused on a conflict, file by file",
+    arg("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)"),
+    exclusive(
+        arg(
+            "--continue", dest="cont", action="store_true",
+            help="go on once the conflicted files hold no markers",
+        ),
+        arg("--abort", action="store_true", help="put the worktree back where resolve found it"),
+    ),
+)  # fmt: skip
+def cli_resolve(root: Path, home: Path, args) -> int:
+    mode = "continue" if args.cont else "abort" if args.abort else "start"
+    return cmd_resolve(root, args.id, mode)
 
 
 # The factory's file formats, copied from `plugins/factory/scripts/factory.py` (never imported or
@@ -6106,6 +6420,18 @@ def cmd_unreleased(root: Path, metrics: bool = False) -> int:
     return 0 if parsed else 1
 
 
+METRICS_HELP = "each change's measured numbers too, from its Close commit's trailers"
+
+
+@command(
+    "unreleased",
+    "the changes landed since the last release tag, as JSON; writes nothing",
+    arg("--metrics", action="store_true", help=METRICS_HELP),
+)
+def cli_unreleased(root: Path, home: Path, args) -> int:
+    return cmd_unreleased(root, args.metrics)
+
+
 def cmd_release(
     root: Path, check_only: bool = False, version: str | None = None, metrics: bool = False
 ) -> int:
@@ -6336,6 +6662,17 @@ def cmd_release(
     return emit(0)
 
 
+@command(
+    "release",
+    "bump the version files, commit `Release X.Y.Z` and tag it, locally",
+    arg("--check", action="store_true", help="the plan only, write nothing"),
+    arg("--version", help="release as X.Y.Z instead of the computed version"),
+    arg("--metrics", action="store_true", help=METRICS_HELP),
+)
+def cli_release(root: Path, home: Path, args) -> int:
+    return cmd_release(root, args.check, args.version, args.metrics)
+
+
 def _remote_sha(home: Path, remote: str, ref: str) -> str | None:
     out = _git(home, "ls-remote", remote, ref)
     return out.split()[0] if out else None
@@ -6547,6 +6884,15 @@ def cmd_publish(root: Path, check_only: bool = False) -> int:
     return emit(0)
 
 
+@command(
+    "publish",
+    "push main and the release tag, then run release.publish",
+    arg("--check", action="store_true", help="preconditions only, push nothing"),
+)
+def cli_publish(root: Path, home: Path, args) -> int:
+    return cmd_publish(root, args.check)
+
+
 # ---------------------------------------------------------------- retro
 #
 # The outermost loop: /sdlc:retro looks across the changes and releases since the last
@@ -6617,6 +6963,44 @@ def _load_board():
     spec.loader.exec_module(mod)
     mod.sdlc = _Names(globals())
     return mod
+
+
+@command(
+    "close",
+    "land a shipped change on main, or record a dropped one there; mirror it, remove its "
+    "folder, worktree and branch",
+    arg("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)"),
+    arg("--check", action="store_true", help="preconditions only, write nothing"),
+)
+def cli_close(root: Path, home: Path, args) -> int:
+    return closing.cmd_close(root, args.id, args.check)
+
+
+@command(
+    "retro",
+    "what the retrospective counts since the last one, as JSON; writes nothing",
+    arg("--metrics", action="store_true", help=METRICS_HELP),
+    arg("--report", action="store_true", help="the report retro-commit would write, as Markdown"),
+)
+def cli_retro(root: Path, home: Path, args) -> int:
+    return retro.cmd_retro(root, args.metrics, args.report)
+
+
+@command(
+    "retro-commit",
+    "commit the direction doc, the inbox and the report as `Retrospective <date>`",
+)
+def cli_retro_commit(root: Path, home: Path, args) -> int:
+    return retro.cmd_retro_commit(root)
+
+
+@command(
+    "board",
+    "serve the dashboard of every open change on 127.0.0.1; writes nothing",
+    arg("--port", type=int, default=5170),
+)
+def cli_board(root: Path, home: Path, args) -> int:
+    return _load_board().cmd_board(root, args.port)
 
 
 def first_paragraph(body: str, heading: str) -> str:
@@ -7284,6 +7668,23 @@ def cmd_inbox_commit(
         return emit(_inbox_commit(root, home, state, report))
 
 
+@command(
+    "inbox-commit",
+    "commit the inbox alone, as File, Retire or Update <id>",
+    arg("ids", nargs="*", help="from a change's worktree, the entries to file on the base branch"),
+    arg("--reason", action="append", default=[], help="<id>=<word>, for each entry removed"),
+    arg(
+        "--triaged",
+        action="append",
+        default=[],
+        help="<N>=<verdict>[:<ref>], for each issue triage closes: " + "|".join(TRIAGE_VERDICTS),
+    ),
+    arg("--why", action="append", default=[], help="<N>=<one line>, the reason a verdict gives"),
+)
+def cli_inbox_commit(root: Path, home: Path, args) -> int:
+    return cmd_inbox_commit(root, args.ids, args.reason, args.triaged, args.why)
+
+
 def _open_claims(home: Path) -> list[tuple[str, str]]:
     """(reference, change) for each entry an open change builds or fixes, from its `idea:` and
     `fixes:` lines, which are all that mark an entry taken: nothing edits the register for it, so
@@ -7641,6 +8042,11 @@ def cmd_intake(root: Path) -> int:
     return 0
 
 
+@command("intake", "the open issues triage has to read, as JSON; writes nothing")
+def cli_intake(root: Path, home: Path, args) -> int:
+    return cmd_intake(root)
+
+
 # Ship's own passes beyond its four, which a hand-built change gets as the factory's reviewers
 # would review it: each `preflight`'s `passes` part says applies, from the diff, the change's
 # tier and spec, and the base branch's `[ui]`, never the skill. A factory run (a `decision.md`)
@@ -7947,6 +8353,41 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
     return 0
 
 
+@command(
+    "preflight",
+    "everything ship looks up about a change, as JSON; writes nothing",
+    arg("id", help="the 3-digit id, e.g. 025"),
+    arg("--question", action="store_true", help="print ship's WAIT question instead, from:"),
+    arg("--context", action="store_true", help="a context update was proposed"),
+    arg("--nits", action="store_true", help="nits are added or retired"),
+    arg("--bugs", action="store_true", help="pre-existing findings are filed"),
+    arg(
+        "--closing", action="append", type=int, default=[], metavar="N",
+        help="an issue on closes: this change resolved; repeatable",
+    ),
+    arg(
+        "--split", action="append", type=int, default=[], metavar="N",
+        help="an issue on closes: split off as a seed; repeatable",
+    ),
+)  # fmt: skip
+def cli_preflight(root: Path, home: Path, args) -> int:
+    if args.question:
+        return cmd_ship_question(
+            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
+        )
+    given = [
+        f"--{name}" for name in ("context", "nits", "bugs", "closing", "split")
+        if getattr(args, name)
+    ]  # fmt: skip
+    if given:
+        print(
+            f"⚠  preflight: {', '.join(given)} only word ship's question; add --question.",
+            file=sys.stderr,
+        )
+        return 1
+    return cmd_preflight(root, args.id)
+
+
 def cmd_closes(root: Path, ident: str) -> int:
     """The issues a change's `closes:` line names, each with its title and state, as JSON, for
     /sdlc:ship to ask about one by one. Writes nothing."""
@@ -7955,6 +8396,15 @@ def cmd_closes(root: Path, ident: str) -> int:
         return 1
     print(json.dumps(_closes_report(root, path), indent=2, ensure_ascii=False))
     return 0
+
+
+@command(
+    "closes",
+    "the issues a change's closes: line names, with titles; writes nothing",
+    arg("id"),
+)
+def cli_closes(root: Path, home: Path, args) -> int:
+    return cmd_closes(root, args.id)
 
 
 def _closes_report(root: Path, path: Path) -> dict:
@@ -8153,6 +8603,11 @@ def cmd_mark_triaged(root: Path) -> int:
     return 1 if report["failed"] else 0
 
 
+@command("mark-triaged", "label, comment on and relate each open issue the repo records, from main")
+def cli_mark_triaged(root: Path, home: Path, args) -> int:
+    return cmd_mark_triaged(root)
+
+
 NEEDS_INFO_LEAD = "Needs more detail before this can be triaged:"
 
 
@@ -8182,6 +8637,16 @@ def cmd_needs_info(root: Path, number: int, questions_file: str) -> int:
         report["done"].append(f"#{number}: asked")
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 1 if err else 0
+
+
+@command(
+    "needs-info",
+    "ask an issue's author for more detail",
+    arg("number", type=int),
+    arg("--questions-file", required=True, help="the approved questions"),
+)
+def cli_needs_info(root: Path, home: Path, args) -> int:
+    return cmd_needs_info(root, args.number, args.questions_file)
 
 
 # ---------------------------------------------------------------- readiness
@@ -8496,6 +8961,11 @@ def cmd_readiness(root: Path) -> int:
     return 0
 
 
+@command("readiness", "whether this repo is set up for the plugin, as JSON; writes nothing")
+def cli_readiness(root: Path, home: Path, args) -> int:
+    return cmd_readiness(root)
+
+
 # Setup's life after the first run. A host owns the docs setup copied from `defaults/`, so a newer
 # plugin can't just overwrite them; `record` keeps a hash of each block of each default as it was
 # copied, and `drift` compares three ways (the default now, that hash, the host's text) to tell
@@ -8645,6 +9115,18 @@ def cmd_record(root: Path, created: list[str], gitignore_line: bool) -> int:
     )
     print(f"  wrote  {MANIFEST}  (plugin {manifest['version']}, {len(docs)} doc(s))")
     return 0
+
+
+@command(
+    "record",
+    "write .sdlc/setup.json: the defaults setup offered, for the next drift",
+    arg("--created", nargs="*", default=[], help="the paths setup created"),
+    arg(
+        "--gitignore-line", action="store_true", help=f"setup added {WORKTREES_LINE} to .gitignore"
+    ),
+)
+def cli_record(root: Path, home: Path, args) -> int:
+    return cmd_record(root, args.created, args.gitignore_line)
 
 
 def _classify(
@@ -8968,6 +9450,11 @@ def cmd_drift(root: Path) -> int:
     return 0
 
 
+@command("drift", "what changed under this repo's setup since it ran, as JSON; writes nothing")
+def cli_drift(root: Path, home: Path, args) -> int:
+    return cmd_drift(root)
+
+
 def setup_nudge(root: Path) -> str | None:
     """One line for status when setup hasn't seen this plugin version; None when it has, or the
     repo isn't set up."""
@@ -9008,6 +9495,16 @@ def cmd_reset(root: Path, name: str, check_only: bool = False) -> int:
     if not check_only:
         (root / rel).unlink()
     return 0
+
+
+@command(
+    "reset",
+    "delete one .sdlc/templates/ override",
+    arg("name", help="the template's file name, e.g. intent.md"),
+    arg("--check", action="store_true", help="preconditions only, write nothing"),
+)
+def cli_reset(root: Path, home: Path, args) -> int:
+    return cmd_reset(root, args.name, args.check)
 
 
 def uninstall_plan(root: Path) -> dict:
@@ -9154,6 +9651,15 @@ def cmd_uninstall(root: Path, check_only: bool = False) -> int:
     return 0
 
 
+@command(
+    "uninstall",
+    "remove what setup wrote, refusing while any change is live",
+    arg("--check", action="store_true", help="the plan only, write nothing"),
+)
+def cli_uninstall(root: Path, home: Path, args) -> int:
+    return cmd_uninstall(root, args.check)
+
+
 def changed_paths(root: Path, base: str) -> tuple[str, list[tuple[str, str, str | None]]] | None:
     """The merge base with `base`, and (status, path, renamed to) for everything this checkout
     changes since it: committed, uncommitted and untracked, since /sdlc:ship asks before the
@@ -9196,6 +9702,15 @@ def cmd_context(root: Path, base: str | None = None) -> int:
         return 1
     print(json.dumps(out, indent=2, ensure_ascii=False))
     return 0
+
+
+@command(
+    "context",
+    "the context docs this checkout's diff could have made wrong, as JSON",
+    arg("--base", help="what the diff is taken against (git.base)"),
+)
+def cli_context(root: Path, home: Path, args) -> int:
+    return cmd_context(root, args.base)
 
 
 def _context_report(root: Path, base: str | None) -> dict | None:
@@ -9479,415 +9994,13 @@ def print_status(a: dict) -> None:
         print(STATUS_TILDE)
 
 
-def main() -> int:
-    _utf8_streams()
-    ap = argparse.ArgumentParser(
-        description="Track the change artifacts under .sdlc/work/ (see the repo's process doc)."
-    )
-    sub = ap.add_subparsers(dest="cmd")
-
-    p_status = sub.add_parser("status", help="what's open, at what stage (the default)")
-    p_status.add_argument(
-        "--all", action="store_true", help="every candidate in Next up, grouped by theme"
-    )
-
-    p_new = sub.add_parser("new", help="scaffold the next change folder")
-    p_new.add_argument("slug", help="kebab-case name, e.g. reopen-drafts")
-    p_new.add_argument(
-        "--tier",
-        type=int,
-        choices=[1, 2],
-        default=1,
-        help="1 = intent only (default), 2 = intent + spec + plan",
-    )
-    p_new.add_argument("--title", help="H1 for the artifacts (default: the slug, de-hyphenated)")
-    p_new.add_argument(
-        "--worktree",
-        action="store_true",
-        help="create the change in its own worktree and branch, .claude/worktrees/NNN-slug",
-    )
-    p_new.add_argument("--base", help="what --worktree branches from (git.base)")
-
-    p_check = sub.add_parser("check", help="audit artifacts against declared tier/stage")
-    p_check.add_argument("--strict", action="store_true", help="exit 1 if any problem is found")
-
-    p_ship = sub.add_parser("ship", help="stamp the change shipped, in place")
-    p_ship.add_argument("id", help="the 3-digit id, e.g. 001")
-    p_ship.add_argument(
-        "--leave", action="append", default=[], metavar="PATH",
-        help="a path not to stage, to commit apart; repeatable",
-    )  # fmt: skip
-    p_ship.add_argument(
-        "--fixed",
-        metavar="IDS",
-        help="the findings a yes approved fixing, `F2,F4`: each must read fixed",
-    )
-    p_ship.add_argument(
-        "--through", metavar="ID", help="the highest finding id the question was asked over"
-    )
-
-    sub.add_parser("next", help="the id `new` would allocate now; writes nothing")
-
-    p_undone = sub.add_parser(
-        "undone", help="a change's unticked `- [ ]` items in notes.md, as JSON; writes nothing"
-    )
-    p_undone.add_argument("id", help="the 3-digit id, e.g. 025")
-
-    p_bugs = sub.add_parser("bugs", help="the open [bug] entries in the inbox, as JSON")
-    p_bugs.add_argument("--touching", nargs="*", help="only those these paths touch")
-    p_bugs.add_argument(
-        "--introduced", nargs="*", help="for each path, the closed change that last touched it"
-    )
-    p_inboxc = sub.add_parser(
-        "inbox-commit", help="commit the inbox alone, as File, Retire or Update <id>"
-    )
-    p_inboxc.add_argument(
-        "ids", nargs="*", help="from a change's worktree, the entries to file on the base branch"
-    )
-    p_inboxc.add_argument(
-        "--reason", action="append", default=[], help="<id>=<word>, for each entry removed"
-    )
-    p_inboxc.add_argument(
-        "--triaged",
-        action="append",
-        default=[],
-        help="<N>=<verdict>[:<ref>], for each issue triage closes: " + "|".join(TRIAGE_VERDICTS),
-    )
-    p_inboxc.add_argument(
-        "--why", action="append", default=[], help="<N>=<one line>, the reason a verdict gives"
-    )
-
-    sub.add_parser("intake", help="the open issues triage has to read, as JSON; writes nothing")
-    p_closes = sub.add_parser(
-        "closes", help="the issues a change's closes: line names, with titles; writes nothing"
-    )
-    p_closes.add_argument("id")
-    p_pre = sub.add_parser(
-        "preflight", help="everything ship looks up about a change, as JSON; writes nothing"
-    )
-    p_pre.add_argument("id", help="the 3-digit id, e.g. 025")
-    p_pre.add_argument(
-        "--question", action="store_true", help="print ship's WAIT question instead, from:"
-    )
-    p_pre.add_argument("--context", action="store_true", help="a context update was proposed")
-    p_pre.add_argument("--nits", action="store_true", help="nits are added or retired")
-    p_pre.add_argument("--bugs", action="store_true", help="pre-existing findings are filed")
-    p_pre.add_argument(
-        "--closing", action="append", type=int, default=[], metavar="N",
-        help="an issue on closes: this change resolved; repeatable",
-    )  # fmt: skip
-    p_pre.add_argument(
-        "--split", action="append", type=int, default=[], metavar="N",
-        help="an issue on closes: split off as a seed; repeatable",
-    )  # fmt: skip
-    sub.add_parser(
-        "mark-triaged",
-        help="label, comment on and relate each open issue the repo records, from main",
-    )
-    p_info = sub.add_parser("needs-info", help="ask an issue's author for more detail")
-    p_info.add_argument("number", type=int)
-    p_info.add_argument("--questions-file", required=True, help="the approved questions")
-
-    p_entry = sub.add_parser(
-        "next-entry", help="the id the next inbox entry would take today; writes nothing"
-    )
-    p_entry.add_argument("--count", type=int, default=1, help="this many ids, one per line")
-
-    p_nits = sub.add_parser(
-        "nits", help="the open [nit] entries in the inbox, as JSON; writes nothing"
-    )
-    p_nits.add_argument("--touching", nargs="*", help="only those these paths touch")
-    p_nits.add_argument("--change", help="only those this change's diff against main touches")
-
-    p_groups = sub.add_parser(
-        "groups",
-        help="a batch of changes for /sdlc:intent, read and ordered, as JSON; writes nothing",
-    )
-    p_groups.add_argument("group", nargs="+", help='one group each: "<id> … as <slug> tier <n>"')
-
-    p_checks = sub.add_parser(
-        "checks", help="a change's acceptance checks in checks.md, as JSON; runs nothing"
-    )
-    p_checks.add_argument("id", help="the 3-digit id, e.g. 025")
-
-    p_findings = sub.add_parser(
-        "findings", help="a change's review findings in findings.md, as JSON; writes nothing"
-    )
-    p_findings.add_argument("id", help="the 3-digit id, e.g. 025")
-
-    p_accept = sub.add_parser(
-        "accept", help="run a change's acceptance checks from its checkout; never pre-approved"
-    )
-    p_accept.add_argument("id", help="the 3-digit id, e.g. 025")
-
-    p_gate = sub.add_parser(
-        "gate",
-        help="run the base branch's check on a change built by hand, into build/gate.md; "
-        "never pre-approved",
-    )
-    p_gate.add_argument("id", help="the 3-digit id, e.g. 025")
-
-    p_cases = sub.add_parser(
-        "cases", help="the skills' cases in evals/, and a change's scope of them; writes nothing"
-    )
-    p_cases.add_argument(
-        "id", nargs="?", help="a change's id for its scope, or `compare` to compare a run"
-    )
-    p_cases.add_argument("run", nargs="?", help="with `compare`: the run's folder")
-    p_run_cases = sub.add_parser(
-        "run-cases", help="run the skills' cases through plugin eval; paid, never pre-approved"
-    )
-    run_scope = p_run_cases.add_mutually_exclusive_group(required=True)
-    run_scope.add_argument("id", nargs="?", help="a change's id: the cases its diff calls for")
-    run_scope.add_argument("--full", action="store_true", help="every case")
-    p_run_cases.add_argument(
-        "--keep",
-        action="store_true",
-        help="keep each run's workspace, to debug a case (a failed run's trace is always kept)",
-    )
-
-    p_drop = sub.add_parser(
-        "drop", help="stamp the change dropped and commit its folder on its branch, for close"
-    )
-    p_drop.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
-    p_drop.add_argument("--check", action="store_true", help="preconditions only, write nothing")
-
-    p_upgrade = sub.add_parser(
-        "upgrade", help="make this checkout's Tier 1 change a Tier 2, its spec and plan scaffolded"
-    )
-    p_upgrade.add_argument("id", help="the change, e.g. 023")
-
-    p_base = sub.add_parser(
-        "base", help="bring a change's branch up to date with main in its worktree, or refuse"
-    )
-    p_base.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
-
-    p_resolve = sub.add_parser(
-        "resolve",
-        help="bring a change's branch up to date when base refused on a conflict, file by file",
-    )
-    p_resolve.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
-    p_resolve_mode = p_resolve.add_mutually_exclusive_group()
-    p_resolve_mode.add_argument(
-        "--continue", dest="cont", action="store_true",
-        help="go on once the conflicted files hold no markers",
-    )  # fmt: skip
-    p_resolve_mode.add_argument(
-        "--abort", action="store_true", help="put the worktree back where resolve found it"
-    )
-
-    p_close = sub.add_parser(
-        "close",
-        help="land a shipped change on main, or record a dropped one there; mirror it, remove its "
-        "folder, worktree and branch",
-    )
-    p_close.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
-    p_close.add_argument("--check", action="store_true", help="preconditions only, write nothing")
-
-    p_sync = sub.add_parser(
-        "sync", help="rewrite the change's tracker issue from its artifacts as they are now"
-    )
-    p_sync.add_argument("id", nargs="?", help="the change, e.g. 023 (default: this checkout's)")
-
-    p_lookup = sub.add_parser(
-        "lookup", help="the values the project doc's issue fields can take, as JSON; writes nothing"
-    )
-    p_lookup.add_argument(
-        "field", nargs="*", help="milestone, project, assignees (default: all on)"
-    )
-
-    sub.add_parser("config", help="the host's .sdlc/config.toml, resolved, as JSON; writes nothing")
-    sub.add_parser(
-        "readiness", help="whether this repo is set up for the plugin, as JSON; writes nothing"
-    )
-
-    sub.add_parser(
-        "drift", help="what changed under this repo's setup since it ran, as JSON; writes nothing"
-    )
-    p_record = sub.add_parser(
-        "record", help="write .sdlc/setup.json: the defaults setup offered, for the next drift"
-    )
-    p_record.add_argument("--created", nargs="*", default=[], help="the paths setup created")
-    p_record.add_argument(
-        "--gitignore-line", action="store_true", help=f"setup added {WORKTREES_LINE} to .gitignore"
-    )
-    p_reset = sub.add_parser("reset", help="delete one .sdlc/templates/ override")
-    p_reset.add_argument("name", help="the template's file name, e.g. intent.md")
-    p_reset.add_argument("--check", action="store_true", help="preconditions only, write nothing")
-    p_uninstall = sub.add_parser(
-        "uninstall", help="remove what setup wrote, refusing while any change is live"
-    )
-    p_uninstall.add_argument("--check", action="store_true", help="the plan only, write nothing")
-
-    p_context = sub.add_parser(
-        "context", help="the context docs this checkout's diff could have made wrong, as JSON"
-    )
-    p_context.add_argument("--base", help="what the diff is taken against (git.base)")
-
-    metrics_help = "each change's measured numbers too, from its Close commit's trailers"
-    p_unrel = sub.add_parser(
-        "unreleased", help="the changes landed since the last release tag, as JSON; writes nothing"
-    )
-    p_unrel.add_argument("--metrics", action="store_true", help=metrics_help)
-    p_release = sub.add_parser(
-        "release", help="bump the version files, commit `Release X.Y.Z` and tag it, locally"
-    )
-    p_release.add_argument("--check", action="store_true", help="the plan only, write nothing")
-    p_release.add_argument("--version", help="release as X.Y.Z instead of the computed version")
-    p_release.add_argument("--metrics", action="store_true", help=metrics_help)
-    p_publish = sub.add_parser(
-        "publish", help="push main and the release tag, then run release.publish"
-    )
-    p_publish.add_argument("--check", action="store_true", help="preconditions only, push nothing")
-    p_retro = sub.add_parser(
-        "retro", help="what the retrospective counts since the last one, as JSON; writes nothing"
-    )
-    p_retro.add_argument("--metrics", action="store_true", help=metrics_help)
-    p_retro.add_argument(
-        "--report", action="store_true", help="the report retro-commit would write, as Markdown"
-    )
-    sub.add_parser(
-        "retro-commit",
-        help="commit the direction doc, the inbox and the report as `Retrospective <date>`",
-    )
-    p_board = sub.add_parser(
-        "board", help="serve the dashboard of every open change on 127.0.0.1; writes nothing"
-    )
-    p_board.add_argument("--port", type=int, default=5170)
-
-    # Before parsing: the change's own script may take a flag this copy doesn't know.
-    if len(sys.argv) > 1 and sys.argv[1] in OWN_SCRIPT_CMDS and (own := _own_script(repo_root())):
-        code = _run_own(own, sys.argv[1:])
-        if code is not None:
-            return code
-    args = ap.parse_args()
-    root = repo_root()
-    # State, the lock and the worktree list belong to the main checkout; change folders are found
-    # from here in every checkout (`change_dirs`). `config` reads this checkout's .sdlc/, which a
-    # change's branch may be editing.
-    home = main_root(root)
-    if args.cmd == "config":
-        return cmd_config(root)
-    if args.cmd == "context":
-        return cmd_context(root, args.base)
-    if args.cmd == "readiness":
-        return cmd_readiness(root)
-    if args.cmd == "drift":
-        return cmd_drift(root)
-    if args.cmd == "record":
-        return cmd_record(root, args.created, args.gitignore_line)
-    if args.cmd == "reset":
-        return cmd_reset(root, args.name, args.check)
-    if args.cmd == "uninstall":
-        return cmd_uninstall(root, args.check)
-    if args.cmd == "new":
-        return cmd_new(root, args.slug, args.tier, args.title, args.worktree, args.base)
-    if args.cmd == "ship":
-        fixed = [f.strip() for f in (args.fixed or "").split(",") if f.strip()]
-        return cmd_ship(root, args.id, args.leave, fixed, args.through)
-    if args.cmd == "next":
-        cfg = load_config(home)[0]
-        if ids_mode(home, cfg) == "github":
-            numbering = None if archive_unavailable(home, cfg) else tracker(home, cfg)
-            guess = numbering.next_guess() if numbering else None
-            if guess is None:
-                print("⚠  couldn't ask GitHub for its next issue number", file=sys.stderr)
-                return 1
-            print(f"{guess:03d}")
-        else:
-            print(next_id(home))
-        return 0
-    if args.cmd == "bugs":
-        return cmd_bugs(root, args.touching, args.introduced)
-    if args.cmd == "inbox-commit":
-        return cmd_inbox_commit(root, args.ids, args.reason, args.triaged, args.why)
-    if args.cmd == "intake":
-        return cmd_intake(root)
-    if args.cmd == "closes":
-        return cmd_closes(root, args.id)
-    if args.cmd == "preflight" and args.question:
-        return cmd_ship_question(
-            root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
-        )
-    if args.cmd == "preflight":
-        given = [
-            f"--{name}" for name in ("context", "nits", "bugs", "closing", "split")
-            if getattr(args, name)
-        ]  # fmt: skip
-        if given:
-            print(
-                f"⚠  preflight: {', '.join(given)} only word ship's question; add --question.",
-                file=sys.stderr,
-            )
-            return 1
-        return cmd_preflight(root, args.id)
-    if args.cmd == "mark-triaged":
-        return cmd_mark_triaged(root)
-    if args.cmd == "needs-info":
-        return cmd_needs_info(root, args.number, args.questions_file)
-    if args.cmd == "next-entry":
-        for entry_id in next_entry_ids(home, date.today().isoformat(), max(args.count, 1)):
-            print(entry_id)
-        return 0
-    if args.cmd == "undone":
-        return cmd_undone(root, args.id)
-    if args.cmd == "nits":
-        return cmd_nits(root, args.touching, args.change)
-    if args.cmd == "groups":
-        return cmd_groups(root, args.group)
-    if args.cmd == "checks":
-        return cmd_checks(root, args.id)
-    if args.cmd == "findings":
-        return cmd_findings(root, args.id)
-    if args.cmd == "accept":
-        return cmd_accept(root, args.id)
-    if args.cmd == "gate":
-        return cmd_gate(root, args.id)
-    if args.cmd == "cases":
-        if args.id == "compare":
-            if not args.run:
-                ap.error("cases compare needs the run's folder")
-            return cmd_cases_compare(root, args.run)
-        return cmd_cases(root, args.id)
-    if args.cmd == "run-cases":
-        return cmd_run_cases(root, None if args.full else args.id, args.keep)
-    if args.cmd == "drop":
-        return cmd_drop(root, args.id, args.check)
-    if args.cmd == "base":
-        return cmd_base(root, args.id)
-    if args.cmd == "upgrade":
-        return cmd_upgrade(root, args.id)
-    if args.cmd == "resolve":
-        mode = "continue" if args.cont else "abort" if args.abort else "start"
-        return cmd_resolve(root, args.id, mode)
-    if args.cmd == "close":
-        return closing.cmd_close(root, args.id, args.check)
-    if args.cmd == "unreleased":
-        return cmd_unreleased(root, args.metrics)
-    if args.cmd == "release":
-        return cmd_release(root, args.check, args.version, args.metrics)
-    if args.cmd == "publish":
-        return cmd_publish(root, args.check)
-    if args.cmd == "retro":
-        return retro.cmd_retro(root, args.metrics, args.report)
-    if args.cmd == "retro-commit":
-        return retro.cmd_retro_commit(root)
-    if args.cmd == "board":
-        return _load_board().cmd_board(root, args.port)
-    if args.cmd == "sync":
-        return cmd_sync(root, args.id)
-    if args.cmd == "lookup":
-        return cmd_lookup(root, args.field)
-
+@command(
+    "status",
+    "what's open, at what stage (the default)",
+    arg("--all", action="store_true", help="every candidate in Next up, grouped by theme"),
+)
+def cli_status(root: Path, home: Path, args) -> int:
     a = analyze(root)
-    if args.cmd == "check":
-        print(f"■ Problems: {len(a['problems'])}")
-        for pr in a["problems"]:
-            print(f"    ⚠  {pr['dir']}: {pr['detail']}")
-        if not a["problems"]:
-            print("    none ✅")
-        return 1 if (args.strict and a["problems"]) else 0
-
     a["ready"] = ready_to_close(root) + held_by_rebase(home)
     # Unconfigured, status shows only a count, so the intents behind it aren't read.
     cfg = load_config(home)[0]
@@ -9955,6 +10068,44 @@ def main() -> int:
     a["setup"] = setup_nudge(root)
     print_status(a)
     return 0
+
+
+@command(
+    "check",
+    "audit artifacts against declared tier/stage",
+    arg("--strict", action="store_true", help="exit 1 if any problem is found"),
+)
+def cli_check(root: Path, home: Path, args) -> int:
+    a = analyze(root)
+    print(f"■ Problems: {len(a['problems'])}")
+    for pr in a["problems"]:
+        print(f"    ⚠  {pr['dir']}: {pr['detail']}")
+    if not a["problems"]:
+        print("    none ✅")
+    return 1 if (args.strict and a["problems"]) else 0
+
+
+def main() -> int:
+    _utf8_streams()
+    ap = _parser(
+        "Track the change artifacts under .sdlc/work/ (see the repo's process doc).", False
+    )
+    # Before parsing: the change's own script may take a flag this copy doesn't know.
+    if len(sys.argv) > 1 and sys.argv[1] in OWN_SCRIPT_CMDS and (own := _own_script(repo_root())):
+        code = _run_own(own, sys.argv[1:])
+        if code is not None:
+            return code
+    args = ap.parse_args()
+    root = repo_root()
+    # State, the lock and the worktree list belong to the main checkout; change folders are found
+    # from here in every checkout (`change_dirs`). `config` reads this checkout's .sdlc/, which a
+    # change's branch may be editing.
+    home = main_root(root)
+    run = COMMANDS[args.cmd].run if args.cmd else cli_status
+    try:
+        return run(root, home, args)
+    except UsageError as e:
+        ap.error(str(e))
 
 
 if __name__ == "__main__":
