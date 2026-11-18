@@ -448,16 +448,6 @@ Cost: S
 Value: low
 Raised by: 156-cases-that-tell (correctness)
 
-## [2026-11-18-102] [nit] the comment now runs as one long sentence with several clauses.
-
-Raised by the code review of 158-list-risky-modules, round 1: .sdlc/config.toml:26: the comment now runs as one long sentence with several clauses. It could be split into a sentence per group.
-
-Theme: style
-Paths: .sdlc/config.toml
-Cost: S
-Value: low
-Raised by: 158-list-risky-modules (correctness)
-
 ## [2026-11-18-103] [bug] A second repo's dashboard reports another repo's board as its own
 
 A second repo's /sdlc:dashboard reports "serving: already" on 5170 when another repo's board holds it: _is_board() (scripts/board.py:1015) checks only state.json's "board": "sdlc" marker, never which repo the board shows, so a host's dashboard points at another repo's board. Expected: "already" only for the same repo root; another repo's board is a refusal naming the port, and the skill starts on another --port. To see it: start a board in one repo with `sdlc.py board --port 5170`, then run /sdlc:dashboard in another.
@@ -494,3 +484,13 @@ Raised 2026-11-18.
 Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: the skills' cases are this repo's only, so nothing about them is in a host's scorecard, and a host with no factory gets the by-hand view: mode comparison and pipeline health say "no factory changes" rather than show zeros.
 See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
 Raised 2026-11-18.
+
+## [2026-11-18-108] [nit] `heat()` ignores the `--root` blame edge when a file was created after the boundary.
+
+Raised by the code review of 161-function-heat, round 1: `.sdlc/function-heat.py:123`: `heat()` ignores the `--root` blame edge when a file was created after the boundary. A commit that only added the whole file counts as 1, which is correct, but a one-line comment would say so
+
+Theme: docs
+Paths: .sdlc/function-heat.py
+Cost: S
+Value: low
+Raised by: 161-function-heat (correctness)
