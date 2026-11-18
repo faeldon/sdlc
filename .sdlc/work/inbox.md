@@ -142,34 +142,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-18-41] [bug] factory.py reads [models] from the change's own worktree, not the base branch
-
-factory.py reads [models] from the change's own worktree, while mode, [land], [ui] and gate_jobs
-come from the base branch (`_base_factory()`): a change only gets a [models] setting committed on
-main once its branch includes it, and a change can pick its own agents' models by editing its own
-.sdlc/factory.toml. Seen 2026-11-18: builder = "claude-fable-5-1" committed on main (329748d) left
-140's and 143's builders on Opus. [models] should be read from the base branch like the rest, or
-the README should say it isn't.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py, plugins/factory/README.md
-Theme: factory
-
-## [2026-11-18-42] [bug] An agent's record can cite a change by its bare number and fail the gate
-
-An agent's record can cite a change by its bare number and fail the gate: 140's behaviour check
-ran `ls` on its own folder as a glob, `.sdlc/work/NNN*/…` with the number in place of NNN, and
-filed it in its ## Evidence, which matches test_nothing_local's `work/\d{3,}\b(?!-)` rule; the
-approver's decision and the code and test reviews then quoted the same glob while describing the
-failure, so the record kept re-committing it (2026-11-18, 7 lines in 4 files fixed by hand). The
-gate ran before the behaviour check wrote it, so only the reviewers' own suite runs saw it. When
-factory.py files any agent's reply it should write a change's own folder glob or bare number
-(`work/NNN*`, `work/NNN/`) as its full NNN-slug, as _placeholders() does for machine paths.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py
-Theme: factory
-
 ## [2026-11-18-43] [idea] Move close, push, the lock and the landing into modules the deep review can name
 
 Move close, push and the main lock out of scripts/sdlc.py, and the landing out of
@@ -309,3 +281,32 @@ Needs you), so the board and status use one vocabulary. Raised by 145-escalation
 whose spec left status as it is: it reshapes status's output for every host, a change of its own.
 Theme: board
 Raised 2026-11-18.
+
+## [2026-11-18-62] [nit] `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`.
+
+Raised by the code review of 144-factory-records-and-models, round 1: plugins/factory/scripts/factory.py:2822: `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`. The shape is unrealistic, but `(?![\w-])` after an optional `\*?` could be made possessive or tightened
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 144-factory-records-and-models (correctness)
+
+## [2026-11-18-63] [nit] the re-wrapped paragraph leaves one over-long line (`serve`, `shoot` and `paths` …)
+
+Raised by the code review of 144-factory-records-and-models, round 1: plugins/factory/README.md:383: the re-wrapped paragraph leaves one over-long line (`serve`, `shoot` and `paths` …)
+
+Theme: docs
+Paths: plugins/factory/README.md
+Cost: S
+Value: low
+Raised by: 144-factory-records-and-models (correctness)
+
+## [2026-11-18-72] [nit] A record quoting a term from .sdlc/terms.local is still filed as written
+
+DEFUSE covers the scan's PATTERNS only; the scan also refuses each regex in the main checkout's gitignored terms file, so a reply quoting one still reaches a landing's gate as written.
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: M
+Value: low
+Raised by: 144-factory-records-and-models (correctness)
