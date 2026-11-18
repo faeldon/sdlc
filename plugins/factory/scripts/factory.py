@@ -6768,10 +6768,10 @@ def _rebasing(root: Path) -> bool:
     return False
 
 
-# The change's own records a builder's resolve run writes mid-rebase (its cost line, its step, a
-# fresh session's id): staged by `--continue`, so they go into the rebased commit and the rebase
-# never refuses on them.
-RESOLVE_RECORDS = (COSTS, LAND_STEP, Path("runs") / "builder.sessions")
+# The change's own records a builder's resolve run writes mid-rebase (its cost line, its step and
+# the time of the step it left, `_record_land()`'s `LAND_TIMES`, a fresh session's id): staged by
+# `--continue`, so they go into the rebased commit and the rebase never refuses on them.
+RESOLVE_RECORDS = (COSTS, LAND_STEP, LAND_TIMES, Path("runs") / "builder.sessions")
 
 
 COUNTER = ".sdlc/last-id"
