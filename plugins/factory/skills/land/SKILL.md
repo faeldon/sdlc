@@ -68,7 +68,7 @@ or a bug proposed on a severity that isn't the process doc's, with no paths, or 
 isn't `pre-existing:`); `over_limit`, those past `batch`; `question`, the batch's question, worded
 by the script; `shown`, what that question calls `as shown`, rendered by the script for the dialog
 (each change by its title, then its checks, cases, undone notes with their dispositions, assumed
-decisions and `How to recover:` lines); and `clear`, true when no change in the batch has a
+decisions, `How to recover:` lines and agents' nits to file); and `clear`, true when no change in the batch has a
 signal.
 
 ## Step 1 — Show it

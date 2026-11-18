@@ -39,7 +39,7 @@ tail: `Ask it with AskUserQuestion: ... and land-check's shown, as printed, the 
 exit: 0
 
 $ sed -n 3876,3897p plugins/factory/scripts/factory.py ; git worktree list
-tail: `/Users/jafaeldon/projects-personal/sdlc                                                  12a2c3d [main]` … `.../131-land-gate-shows-the-change  72356d0 [131-land-gate-shows-the-change]`
+tail: `<path-to-clone>                                                  12a2c3d [main]` … `.../131-land-gate-shows-the-change  72356d0 [131-land-gate-shows-the-change]`
 exit: 0
 
 $ UV_CACHE_DIR=/tmp/r131-uvcache UV_PROJECT_ENVIRONMENT=/tmp/r131-venv PYTHONDONTWRITEBYTECODE=1 uv run --group dev pytest -q -p no:cacheprovider tests/test_land.py tests/test_skills.py -k "intent or dialog or shows_each or bug or question or skill or wait or push"

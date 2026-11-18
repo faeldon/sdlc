@@ -517,8 +517,8 @@ def test_intent_parts_quote_the_title_problem_and_outcome(tmp_path) -> None:
 
 def test_the_dialog_shows_each_disposition_and_assumed_decision() -> None:
     """131: what the question calls `as shown` is in the text the dialog shows: each change by its
-    title, each undone note with its disposition, each assumed decision, check, case and recovery,
-    and a change with none of them by its title alone."""
+    title, each undone note with its disposition, each assumed decision, check, case, recovery and
+    agent nit to file, and a change with none of them by its title alone."""
     title = {"title": "Drafts are paged", "problem": "p", "outcome": "o"}
     bug = "filed as a bug, med: The second line is never read (README.md, docs/a.md)"
     shown = factory.land_shown([
@@ -533,6 +533,7 @@ def test_the_dialog_shows_each_disposition_and_assumed_decision() -> None:
             ],
             assumed=[{"id": "D1", "text": "Page at 50? Going with 50."}],
             recover=["deploy/: fix forward"],
+            nits=[{"shown": "[nit] Rename x (naming, S, low; a.py)"}],
         ),
         _entry("008-plain", intent={"title": "Plain", "problem": "", "outcome": ""}),
     ])  # fmt: skip
@@ -549,6 +550,8 @@ def test_the_dialog_shows_each_disposition_and_assumed_decision() -> None:
         "  - D1: Page at 50? Going with 50.\n"
         "  How to recover:\n"
         "  - deploy/: fix forward\n"
+        "  Agents' nits to file:\n"
+        "  - [nit] Rename x (naming, S, low; a.py)\n"
         "\n"
         "008-plain — Plain"
     )
