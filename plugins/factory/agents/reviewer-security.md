@@ -24,6 +24,15 @@ A landing round's change is committed: read the diff its prompt names, from the 
 round rebased it onto, never one against the base branch as it is now, which may hold commits
 that landed since and aren't the change's.
 
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md` (a landing round's is `build/land-N.gate.md`), green or
+no review would have started. Read it for the gate's result and its test count; never run the
+gate yourself.
+
+Run nothing in the background. A background task's notice wakes your session after your
+reply, to answer it again. A test you run to check a claim is a named one, run in the foreground.
+
 ## How to review
 
 Start from the **trust boundaries** the diff touches: where untrusted data enters (user input, a

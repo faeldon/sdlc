@@ -22,6 +22,15 @@ Tier 1): who uses this, and what they should be able to do. Then read the change
 states the screenshots can't show: what renders while loading, when there is nothing, and when
 something fails.
 
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md` (a landing round's is `build/land-N.gate.md`), green or
+no review would have started. Read it for the gate's result and its test count; never run the
+gate yourself.
+
+You run no command at all, so nothing in the background either: a background task's notice
+would wake your session after your reply, to answer it again.
+
 ## What to look for
 
 - **The task.** Walk the path the spec describes as the person would: is each step there, in an

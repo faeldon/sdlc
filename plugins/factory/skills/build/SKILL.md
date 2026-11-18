@@ -430,14 +430,15 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    - **`done`**: the decision is in and readable. Go to step 3.
    - **`stop`**: report its `problems` for the change, and leave it. It stays at `stage: build`,
-     and the other changes run on. A reviewer reply that doesn't open with a verdict, a decision
-     that doesn't open with one, a third red gate in a round, or `HEAD` moving (an agent
-     committed) is a stop: never patch a verdict in, and never reset a commit. **A stop whose
+     and the other changes run on. A reviewer reply with no verdict the script reads, a decision
+     with none, a third red gate in a round, or `HEAD` moving (an agent committed) is a stop:
+     never patch a verdict in, and never reset a commit. **A stop whose
      `way` is `mend` is the one kind this run can mend itself,** once for each role its `mend`
      names: a missing `## Evidence` (the builder resumed, or a new behaviour check for that
-     round, asked to run what its claims rest on again), a reviewer's verdict written after a
-     preamble (that reviewer resumed, asked to reply again with its `VERDICT:` line first), the
-     approver's decision written after one (`approver`, resumed for its `DECISION:` line first),
+     round, asked to run what its claims rest on again), a reviewer's verdict lines that
+     disagree, none of them first (that reviewer resumed, asked to reply again with one
+     `VERDICT:` line first), the approver's decision lines that disagree (`approver`, resumed for
+     one `DECISION:` line first),
      or answers in `verified.md` the script couldn't read (`verifier`, resumed with what the
      script found). Each reply is written over the old one.
 

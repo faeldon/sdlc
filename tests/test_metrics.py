@@ -1198,6 +1198,27 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     assert sdlc.FACTORY_SETTLED == factory.SETTLED
 
 
+def test_sdlcs_opening_is_a_pinned_copy_of_the_factorys() -> None:
+    """140 R8: the metrics read a decision and each round's verdicts as `factory.opening()`
+    does, case for case over the shared table."""
+
+    def load(path: Path, name: str):
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    sdlc = load(ROOT / "scripts" / "sdlc.py", "sdlc_for_opening")
+    factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_opening")
+    cases = json.loads((ROOT / "tests" / "fixtures" / "opening-cases.json").read_text("utf-8"))
+    for case in cases:
+        regex = {"verdict": factory.VERDICT_RE, "decision": factory.DECISION_RE}[case["kind"]]
+        mine = sdlc._factory_opening(case["lines"], regex)
+        theirs = factory.opening(case["lines"], regex)
+        got = [mine[0], mine[1].group(1)] if mine else None
+        assert got == ([theirs[0], theirs[1].group(1)] if theirs else None) == case["answer"], case
+
+
 SUPERSEDED_LEDGER = """\
 # Decisions
 
@@ -1232,6 +1253,39 @@ def test_a_superseded_default_is_counted_but_not_open(tmp_path: Path) -> None:
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
     found = sdlc._factory_files(tmp_path, name)
     assert (found["blocking"], found["defaults"], found["defaults_open"]) == (1, 3, 1)
+
+
+def test_the_metrics_read_a_verdict_and_a_decision_after_prose(tmp_path: Path) -> None:
+    """140 R8: `_factory_files()` counts a round's verdict and changes, and the decision, where
+    each follows prose, as `verdicts` reads them; a reply whose verdicts disagree counts none."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    spec = importlib.util.spec_from_file_location("sdlc_prose", ROOT / "scripts" / "sdlc.py")
+    sdlc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sdlc)
+    name = "008-reopen-drafts"
+    git("init", "-q", "-b", "main")
+    (tmp_path / "README.md").write_text("a repo\n", encoding="utf-8")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+    git("checkout", "-q", "-b", name)
+    folder = tmp_path / ".sdlc" / "work" / name
+    (folder / "reviews" / "round-1").mkdir(parents=True)
+    (folder / "decision.md").write_text("I read every round.\n\nDECISION: READY\n", "utf-8")
+    (folder / "reviews" / "round-1" / "code.md").write_text(
+        "Status: read.\nVERDICT: CHANGES\n- CHANGE: src/drafts.py:3: saves twice\n", "utf-8"
+    )
+    (folder / "reviews" / "round-1" / "test.md").write_text(
+        "Hmm.\nVERDICT: PASS\nVERDICT: CHANGES\n- CHANGE: tests/x.py: one\n", "utf-8"
+    )
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
+    found = sdlc._factory_files(tmp_path, name)
+    assert found["decision"] == "READY"
+    assert found["reviews"]["code"] == {"changes": 1, "requests": 1}
+    assert found["reviews"]["test"]["changes"] == 0
 
 
 def test_a_settled_default_is_counted_apart(tmp_path: Path) -> None:

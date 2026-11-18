@@ -17,11 +17,20 @@ you ask for in the next round. You never commit, push, merge, switch branch or e
 
 The change folder and round in the prompt. Read `spec.md` (Tier 2) or the intent's Approach
 (Tier 1), `plan.md`'s Tests section, and the diff (`git diff`, `git status`). Read the repo's
-`CLAUDE.md` for how its tests run and what a healthy run looks like, and run them.
+`CLAUDE.md` for how its tests run and what a healthy run looks like.
 
 A landing round's change is committed: read the diff its prompt names, from the commit the
 round rebased it onto, never one against the base branch as it is now, which may hold commits
 that landed since and aren't the change's.
+
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md` (a landing round's is `build/land-N.gate.md`), green or
+no review would have started. Read it for the gate's result and its test count; never run the
+gate yourself.
+
+Run nothing in the background. A background task's notice wakes your session after your
+reply, to answer it again. A test you run to check a claim is a named one, run in the foreground.
 
 ## What to check
 
@@ -45,7 +54,8 @@ that landed since and aren't the change's.
   only at real boundaries (network, clock), not between the change's own functions.
 - **Independence and names.** No shared mutable state between tests; each name reads as the
   behaviour it proves.
-- **The run.** Run the repo's tests. Report the count and any failure verbatim.
+- **The run.** Read the gate's record for the count and any failure, quoted verbatim. Run only
+  the tests a claim needs, each named, in the foreground.
 
 ## Later rounds, and what isn't this change's
 

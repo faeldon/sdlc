@@ -1846,7 +1846,7 @@ def _replies(monkeypatch, reply: str) -> list[list[str]]:
 
     def fake(argv: list[str], cwd: Path):
         calls.append(argv)
-        return 0, reply, None, None
+        return 0, [reply], None, None
 
     monkeypatch.setattr(factory, "_claude", fake)
     return calls
@@ -1913,11 +1913,15 @@ def test_a_landing_review_missing_an_exit_is_mended_not_stopped(tmp_path, capsys
 
 
 @needs_uv
-def test_a_landing_verdict_after_a_preamble_is_mended(tmp_path, capsys) -> None:
-    """109 R2: a landing reply holding its verdict after other lines is a mend for its role."""
+def test_a_landing_verdict_that_disagrees_is_mended(tmp_path, capsys) -> None:
+    """109 R2, 140 R6–R7: a landing reply whose verdict follows prose is read where it stands;
+    one whose verdict lines disagree, none of them first, is a mend for its role."""
     root, tree = _landing(tmp_path, capsys)
     reviews = _folder(tree) / "reviews" / "land-1"
     (reviews / "behaviour.md").write_text("I ran it.\n\n" + PASSED, encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "pass" and not out["problems"], out
+    (reviews / "behaviour.md").write_text("I ran it.\nVERDICT: CHANGES\n" + PASSED, "utf-8")
     code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
     assert (out["next"], out["mend"]) == ("mend", ["behaviour"]), out
     (reviews / "behaviour.md").write_text("I couldn't run it.\n", encoding="utf-8")
@@ -1969,17 +1973,17 @@ def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) ->
     root, tree = _landing(tmp_path, capsys)
     folder = _folder(tree)
     reviews = folder / "reviews" / "land-1"
-    (reviews / "behaviour.md").write_text("Ran it.\n\n" + PASSED, encoding="utf-8")
+    (reviews / "behaviour.md").write_text("Ran it.\nVERDICT: CHANGES\n" + PASSED, "utf-8")
     (folder / "runs").mkdir(exist_ok=True)
     (folder / "runs" / "mended").write_text("behaviour 1\n", encoding="utf-8")
     (folder / "runs" / "reviewer-behaviour.sessions").write_text("s-b\n", encoding="utf-8")
-    calls = _replies(monkeypatch, "Ran it again.\n\n" + PASSED)
+    calls = _replies(monkeypatch, "Ran it again.\nVERDICT: CHANGES\n" + PASSED)
     code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "behaviour", None)
     assert code == 0, "a build round's mend leaves the landing's"
     assert calls[0][-2:] == ["--resume", "s-b"], "the reviewer resumed to put its verdict first"
     assert factory.mended(folder) == {("behaviour", 1)}, "and the landing's leaves the build's"
     code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
-    assert out["next"] == "stop", "still a preamble after its one mend"
+    assert out["next"] == "stop", "still disagreeing after its one mend"
     code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "behaviour", None)
     assert code == 1 and "not a mend for behaviour" in out["refusals"][0], out
     assert len(calls) == 1, "refused before any session"
@@ -2227,7 +2231,7 @@ def _builder_edits(tree: Path, captured: dict):
     def fake(argv: list[str], cwd: Path):
         captured["argv"] = argv
         (tree / "README.md").write_text("fixed's one\nTWO\nthree\n", encoding="utf-8")
-        return 0, "Kept TWO.\n\n## Evidence\n$ true\nexit: 0\n", None, None
+        return 0, ["Kept TWO.\n\n## Evidence\n$ true\nexit: 0\n"], None, None
 
     return fake
 

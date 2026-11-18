@@ -249,8 +249,9 @@ dir, never `sdlc.lock`; its gate passes itself only when no change carries a ris
 `verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder
 report and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its
 `exit:` but a read that shows its output, which only the script judges (`is_read()`); a reply
-missing it, holding its verdict or decision after a preamble (`preamble()`, `decision_preamble()`), or a
-`verified.md` the script can't read, is the one stop a run mends, once a round for each role, a
+missing it, holding verdict or decision lines that disagree, none of them first (`opening()`,
+`preamble()`, `decision_preamble()`), or a `verified.md` the script can't read, is the one stop a
+run mends, once a round for each role, a
 landing round counting as its own (`agent --task mend` or `--task land-mend`, recorded in
 `runs/mended`). No agent but the builder runs
 `checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever

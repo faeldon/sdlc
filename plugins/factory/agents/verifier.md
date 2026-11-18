@@ -24,13 +24,21 @@ A landing round's change is committed: read the diff its prompt names, from the 
 round rebased it onto, never one against the base branch as it is now, which may hold commits
 that landed since and aren't the change's.
 
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md` (a landing round's is `build/land-N.gate.md`), green or
+no review would have started. Read it for the gate's result and its test count; never run the
+gate yourself.
+
+Run nothing in the background. A background task's notice wakes your session after your
+reply, to answer it again. A test you run to check a claim is a named one, run in the foreground.
+
 ## How to judge each change
 
 Keep a change only when the code shows it: the defect is there at the line named, or a requirement
-it names really has no code or no test. You may run the repo's tests to settle a claim, but never
-a `checks.md` section's commands, which only `sdlc.py accept` runs, under a person's prompt: settle
-a claim about a check by reading it. Drop it,
-with why, when:
+it names really has no code or no test. You may run a named test, in the foreground, to settle a
+claim, but never a `checks.md` section's commands, which only `sdlc.py accept` runs, under a
+person's prompt: settle a claim about a check by reading it. Drop it, with why, when:
 
 - the code doesn't do what it says, or already does what it asks;
 - it's a matter of style or taste, not a defect, a broken invariant or a missing requirement;

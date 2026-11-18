@@ -237,8 +237,8 @@ take one it didn't name. Its `next`:
 - **`review`**, **`verify`**, **`mend`**: the named change's landing round, as `land-verdicts`
   reads it (`verdict`): start each `missing` reviewer (behaviour alone after a clean stack, every
   reviewer at the run's depth after a resolved conflict or a fix), the verifier when one asks
-  for changes, or each role in `mend` (a behaviour check's missing `## Evidence` or `exit:`, a
-  verdict after a preamble, the verifier's unread answers), each once a round, its new reply
+  for changes, or each role in `mend` (a behaviour check's missing `## Evidence` or `exit:`,
+  verdict lines that disagree, the verifier's unread answers), each once a round, its new reply
   written over the old under `reviews/land-<n>/`, **in one message** when several:
 
   ```bash

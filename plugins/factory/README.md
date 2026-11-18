@@ -206,10 +206,13 @@ spec.
   each command run as `$ <command>`, the tail of its output, and `exit: <n>`. Only a read that
   shows its output may leave its exit off, and the script alone judges a read (`is_read()`): a
   short allowlist of programs that change nothing, each stage of a pipeline among them, writing
-  nowhere. A test run, a gate or a script always owes its exit. A reply without its evidence, or
-  holding its answer after a preamble (a verdict, the approver's decision, or a verifier's answers
-  the script can't read), goes back to the agent that wrote it once a round, a landing
-  round included, and its new reply is written over the old; a second stops the run. The gate
+  nowhere. A test run, a gate or a script always owes its exit. A verdict or decision that
+  follows prose is read where it stands (`opening()`). A reply without its evidence, or holding
+  answers the script can't read (verdict or decision lines that disagree, none of them first, or
+  a verifier's answers in another shape), goes back to the agent that wrote it once a round, a
+  landing round included, and its new reply is written over the old; a second stops the run.
+  `agent` files the last of a session's replies that holds its answer, so a background task's
+  notice answered after a verdict never replaces it. The gate
   itself is the script's, so "the gate passes" is never taken on an agent's word.
 - **Depth follows risk.** With `[review] sensitive` set in the base branch's
   `.sdlc/config.toml`, a diff touching none of those paths runs the light depth (`[light]` below);
@@ -421,7 +424,7 @@ so the next change to these defaults can be decided from a window of runs.
 ## Mechanism
 
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
-stage allows the step, where `HEAD` was, what each review's first line says, the verifier's
+stage allows the step, where `HEAD` was, what verdict each review holds, the verifier's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
 `stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own

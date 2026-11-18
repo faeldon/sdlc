@@ -828,11 +828,12 @@ def test_failing_acceptance_checks_as_stacked_eject_only_that_change(tmp_path, c
 
 @needs_uv
 def test_a_reply_still_unreadable_after_its_mend_ejects_only_that_change(tmp_path, capsys):
-    """R8: change 2's behaviour check puts its verdict after a preamble; mended once, it does so
-    again, which is a stop for the round and so 2's ejection alone; 1 and 3 land."""
+    """R8: change 2's behaviour check gives verdict lines that disagree, none of them first (a
+    verdict after a preamble alone is read, as `opening()` says); mended once, it does so again,
+    which is a stop for the round and so 2's ejection alone; 1 and 3 land."""
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
-    unreadable = "I ran it first.\n\n" + _verdict("behaviour")
+    unreadable = "I ran it first.\n\nVERDICT: CHANGES\n- CHANGE: x\n" + _verdict("behaviour")
 
     def review(folder: Path, n: int, role: str) -> None:
         text = unreadable if folder.name == trees[1].name else _verdict(role)

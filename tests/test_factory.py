@@ -2651,9 +2651,16 @@ import json, os, sys
 with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
 code = int(os.environ.get("FAKE_CLAUDE_EXIT", "0"))
-print(json.dumps({"type": "result", "is_error": code != 0,
-                  "result": os.environ.get("FAKE_CLAUDE_REPLY", ""),
-                  **json.loads(os.environ.get("FAKE_CLAUDE_FIGURES", "{}"))}))
+replies = json.loads(os.environ.get("FAKE_CLAUDE_REPLIES") or "null")
+replies = replies or [os.environ.get("FAKE_CLAUDE_REPLY", "")]
+figures = json.loads(os.environ.get("FAKE_CLAUDE_FIGURES", "{}"))
+# As `--output-format stream-json --verbose` prints a session: each reply an assistant event and
+# the result event after it, one JSON object a line.
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "s"}))
+for reply in replies:
+    content = [{"type": "text", "text": reply}] if reply else []
+    print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": content}}))
+    print(json.dumps({"type": "result", "is_error": code != 0, "result": reply, **figures}))
 sys.exit(code)
 """
 
@@ -2671,6 +2678,7 @@ def claude(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_REPLY", "the report\n\n## Evidence\n$ ./check.sh\nok\nexit: 0")
     monkeypatch.delenv("FAKE_CLAUDE_EXIT", raising=False)
     monkeypatch.delenv("FAKE_CLAUDE_FIGURES", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_REPLIES", raising=False)
     return lambda: [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
 
 
@@ -2737,6 +2745,220 @@ def test_a_run_reporting_no_cost_or_failing_still_counts(tmp_path, capsys, claud
     assert factory.run_cost(folder)["unknown"] == 2
 
 
+class _Done:
+    """What `subprocess.run` returns, for `_claude()` read without a process."""
+
+    def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+        self.stdout, self.returncode, self.stderr = stdout, returncode, stderr
+
+
+def _stream(monkeypatch, stdout: str, returncode: int = 0) -> None:
+    monkeypatch.setattr(factory.subprocess, "run", lambda *a, **k: _Done(stdout, returncode))
+
+
+def _event(kind: str, text: str | None = None, **fields) -> str:
+    if kind == "assistant":
+        message = {"role": "assistant", "content": [{"type": "text", "text": text}]}
+        return json.dumps({"type": "assistant", "message": message})
+    return json.dumps({"type": "result", "is_error": False, "result": text, **fields})
+
+
+@pytest.mark.portable
+def test_claude_returns_every_reply_in_order(tmp_path, monkeypatch) -> None:
+    """140 R1: each assistant event's text and each result's, a result that repeats the reply
+    before it counted once, in the order the session gave them."""
+    lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        _event("assistant", "VERDICT: PASS\n\nFine."),
+        _event("result", "VERDICT: PASS\n\nFine."),
+        "not json",
+        "[1, 2]",
+        _event("assistant", "My verdict stands."),
+        _event("result", "My verdict stands."),
+    ]
+    _stream(monkeypatch, "\n".join(lines) + "\n")
+    code, replies, problem, _ = factory._claude(["claude"], tmp_path)
+    assert (code, problem) == (0, None)
+    assert replies == ["VERDICT: PASS\n\nFine.", "My verdict stands."]
+    # A result that differs from its assistant text is a reply of its own, after it.
+    _stream(monkeypatch, "\n".join([_event("assistant", "one"), _event("result", "one\ntwo")]))
+    assert factory._claude(["claude"], tmp_path)[1] == ["one", "one\ntwo"]
+
+
+@pytest.mark.portable
+def test_a_recorded_stream_with_two_replies_reads_both(tmp_path, monkeypatch) -> None:
+    """140 R3: a real session's stream (`tests/fixtures/stream-two-replies.jsonl`): a reviewer
+    that started a background task, replied with its verdict, and was woken by the task's notice
+    to reply again. The verdict is among the replies, and it is the one a reviewer's holds."""
+    text = (Path(__file__).parent / "fixtures" / "stream-two-replies.jsonl").read_text("utf-8")
+    _stream(monkeypatch, text)
+    code, replies, problem, figures = factory._claude(["claude"], tmp_path)
+    assert (code, problem) == (0, None)
+    assert replies[0] == "VERDICT: PASS\nThe draft reopens.", replies
+    assert len(replies) == 2 and replies[1].startswith("The background command finished")
+    assert [r for r in replies if factory.holds("code", r)] == [replies[0]]
+    assert figures["cost_usd"] == 0.00477998, "the session's total, the last result's"
+    assert figures["turns"] == 3 and figures["duration_ms"] == 2322 + 954
+
+
+@pytest.mark.portable
+def test_a_stream_without_a_result_or_with_an_error_fails(tmp_path, monkeypatch) -> None:
+    """140 R4: no result event, an error on the last one, no reply's text, or a non-zero exit is
+    a failed session: no reply, only its figures."""
+    figures = {"total_cost_usd": 0.1, "num_turns": 1}
+    cases = {
+        "no result": ([_event("assistant", "VERDICT: PASS")], 0),
+        "last result errs": (
+            [
+                _event("result", "VERDICT: PASS"),
+                json.dumps({"type": "result", "is_error": True, "result": "", **figures}),
+            ],
+            0,
+        ),
+        "no text": ([_event("result", "  ", **figures)], 0),
+        "exit": ([_event("result", "VERDICT: PASS", **figures)], 2),
+        "nothing": (["garbage"], 0),
+    }
+    for name, (lines, exit_code) in cases.items():
+        _stream(monkeypatch, "\n".join(lines) + "\n", exit_code)
+        code, replies, problem, got = factory._claude(["claude"], tmp_path)
+        assert code != 0 and replies == [] and problem, name
+        if name in ("last result errs", "exit"):
+            assert got and got["cost_usd"] == 0.1, name
+
+
+@pytest.mark.portable
+def test_figures_sum_a_session_s_turns_and_take_its_last_cost() -> None:
+    """140 R5: `total_cost_usd` is the session's total so far, so the last result's; each
+    result's usage, duration and turns are its own turn's, so they are summed."""
+    usage = {"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 100,
+             "cache_read_input_tokens": 1000}  # fmt: skip
+    first = {"total_cost_usd": 0.4, "duration_ms": 100, "num_turns": 2, "usage": usage}
+    second = {"total_cost_usd": 0.5, "duration_ms": 50, "num_turns": 1, "usage": usage}
+    figures = factory._figures([first, second])
+    assert figures == {"cost_usd": 0.5, "duration_ms": 150, "turns": 3, "in": 20, "out": 10,
+                       "cache_create": 200, "cache_read": 2000}  # fmt: skip
+    assert factory._figures([{"result": "x"}]) is None
+    one = factory._figures([{"usage": {"input_tokens": 3}}])
+    assert one["in"] == 3 and one["cost_usd"] is None and one["out"] is None
+
+
+def test_a_second_reply_never_replaces_the_verdict(tmp_path, capsys, claude, monkeypatch):
+    """140 R2, bug 2026-11-18-26: a reviewer that replies with its verdict, then is woken by a
+    background task's notice and replies again, has its verdict filed, never the note."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1)
+    for role in FULL[1:]:
+        _review(root, 1, role, "VERDICT: PASS")
+    verdict = "VERDICT: PASS\n\n## Notes\n\nEach requirement has its code."
+    monkeypatch.setenv("FAKE_CLAUDE_REPLIES", json.dumps([verdict, "My verdict stands."]))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    filed = (folder / "reviews" / "round-1" / "code.md").read_text(encoding="utf-8")
+    assert filed == verdict + "\n"
+    assert _verdicts(root, capsys)["next"] == "approve"
+
+    # The last reply that holds one wins: a verdict the reviewer changed on waking is its latest.
+    changed = "VERDICT: CHANGES\n- CHANGE: src/drafts.py:3: the check I waited on failed"
+    monkeypatch.setenv("FAKE_CLAUDE_REPLIES", json.dumps([verdict, changed, "Done."]))
+    (folder / "reviews" / "round-1" / "code.md").unlink()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    assert (
+        (folder / "reviews" / "round-1" / "code.md")
+        .read_text(encoding="utf-8")
+        .startswith("VERDICT: CHANGES")
+    )
+
+    # No reply holds a verdict: the last is filed, and it stops the run as it would have.
+    monkeypatch.setenv("FAKE_CLAUDE_REPLIES", json.dumps(["Reading the diff.", "I ran out."]))
+    (folder / "reviews" / "round-1" / "code.md").unlink()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    filed = (folder / "reviews" / "round-1" / "code.md").read_text(encoding="utf-8")
+    assert filed == "I ran out.\n"
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun"), out
+
+
+@pytest.mark.portable
+def test_holds_picks_each_role_s_answer() -> None:
+    """140 R2: what each role's reply must hold for `agent` to file it over a later one."""
+    assert factory.holds("behaviour", "Ran it.\nVERDICT: PASS")
+    assert not factory.holds("code", "My verdict stands: PASS.")
+    assert factory.holds("approver", "DECISION: READY") and not factory.holds("approver", "Ready.")
+    assert factory.holds("verifier", "- KEPT: code: C1: real")
+    assert factory.holds("verifier", "- DROPPED: code: C1: x — not there")
+    assert not factory.holds("verifier", "Nothing to keep.")
+    assert factory.holds("builder", "Built.\n\n## Evidence\n$ ./check.sh\nexit: 0")
+    assert not factory.holds("builder", "Built.")
+    assert factory.holds("spec-writer", "---\nid: 008\n---\n# 008")
+    assert not factory.holds("spec-writer", "Here is my thinking.")
+
+
+@pytest.mark.portable
+def test_no_reviewer_runs_the_gate_or_waits_in_the_background() -> None:
+    """140 R9: every reviewer and the verifier is told the gate is the script's, where its record
+    is, and to start nothing in the background, whose notice wakes the session after its reply;
+    none is told to run the gate."""
+    agents = Path(__file__).parents[1] / "plugins" / "factory" / "agents"
+    files = [*sorted(agents.glob("reviewer-*.md")), agents / "verifier.md"]
+    assert len(files) == len(factory.REVIEWERS) + 1
+    runs_gate = re.compile(r"(?<!never )\brun (?:the repo's )?(?:tests or )?(?:the )?gate\b", re.I)
+    for path in files:
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        assert "`[commands] check`" in text and "gate.md" in text, path.name
+        assert "background" in text, path.name
+        assert not runs_gate.search(text), (path.name, runs_gate.search(text))
+        assert "Run the repo's tests" not in text, path.name
+
+
+OPENING_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "opening-cases.json").read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("case", OPENING_CASES, ids=[c["name"] for c in OPENING_CASES])
+def test_opening_reads_the_answer_line(case) -> None:
+    """140 R6: the first line when it matches; else the first matching line when every matching
+    line names the same answer; else none. `board.py` and `sdlc.py` pin their copies to this
+    same table."""
+    regex = {"verdict": factory.VERDICT_RE, "decision": factory.DECISION_RE}[case["kind"]]
+    found = factory.opening(case["lines"], regex)
+    got = [found[0], found[1].group(1)] if found else None
+    assert got == case["answer"]
+
+
+def test_a_verdict_after_prose_is_read(tmp_path, capsys) -> None:
+    """140 R6: `preamble()`'s cases as they stood, each read as its answer where it stands, the
+    prose kept in the file, with no mend; a reply with no verdict is still a stop."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1)
+    reply = folder / "reviews" / "round-1" / "code.md"
+    text = "Both kept changes are in the code.\n\nVERDICT: PASS\n"
+    reply.write_text(text, encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert out["next"] == "approve" and not out["problems"], out
+    assert reply.read_text(encoding="utf-8") == text, "read in place, never rewritten"
+    reply.write_text("Status: reviewed\nVERDICT: CHANGES\n- CHANGE: code fix 1\n", "utf-8")
+    out = _verdicts(root, capsys)
+    assert out["next"] == "verify" and out["rounds"][0]["reviews"]["code"]["changes"] == [
+        "code fix 1"
+    ], out
+    reply.write_text("VERDICT: PASS\n", encoding="utf-8")
+    decision = folder / "decision.md"
+    decision.write_text("I read every round.\n\nDECISION: READY\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["decision"]) == ("done", "READY"), out
+    decision.unlink()
+    reply.write_text("I couldn't review it.\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"]) == ("stop", "rerun"), out
+
+
 def test_a_cost_line_written_mid_rebase_goes_into_the_resolved_commit(tmp_path, capsys) -> None:
     """The builder's resolve run appends to the change's committed `runs/costs.jsonl` while the
     landing's rebase is stopped: `resolve --continue` stages it, or git refuses to continue."""
@@ -2792,9 +3014,11 @@ def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
     assert Path(call["cwd"]).resolve() == tree.resolve()
     argv = call["argv"]
     assert argv[0] == "-p" and argv[1].startswith("Change folder: .sdlc/work/")
-    pairs = dict(zip(argv[2::2], argv[3::2], strict=True))
+    assert argv.count("--verbose") == 1, "stream-json needs it in print mode"
+    flags = [a for a in argv[2:] if a != "--verbose"]
+    pairs = dict(zip(flags[::2], flags[1::2], strict=True))
     assert pairs["--agent"] == "sdlc-factory:builder" and pairs["--model"] == "opus"
-    assert pairs["--permission-mode"] == "auto" and pairs["--output-format"] == "json"
+    assert pairs["--permission-mode"] == "auto" and pairs["--output-format"] == "stream-json"
     assert pairs["--session-id"] == session[0] == out["session"]
 
     # A mend resumes the same builder, with its context, and writes over the report it mends:
@@ -2805,17 +3029,20 @@ def test_an_agent_runs_as_its_own_session_in_the_worktree_and_files_its_reply(
     assert (folder / "runs" / "builder.sessions").read_text().split() == session
 
 
-def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
+DISAGREEING = "Both kept changes are in the code.\n\nVERDICT: CHANGES\n\nVERDICT: PASS\n"
+
+
+def test_a_reviewer_s_disagreeing_verdicts_are_mended_by_the_same_reviewer(
     tmp_path, capsys, claude, monkeypatch
 ) -> None:
-    """Bug 2026-11-17-18: a reply whose verdict comes after a sentence is a stop the run mends,
-    asking the reviewer that wrote it, in its own session, to reply again with its verdict first,
-    written over the old reply. The first-line rule stands: the reply is never read as it was."""
+    """Bug 2026-11-17-18, 140 R7: a reply whose verdict lines disagree, none of them first, is a
+    stop the run mends, asking the reviewer that wrote it, in its own session, to reply again
+    with one verdict first, written over the old reply. It is never read as either verdict."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     _round(root, 1)
     reply = folder / "reviews" / "round-1" / "code.md"
-    reply.write_text("Both kept changes are in the code.\n\nVERDICT: PASS\n", encoding="utf-8")
+    reply.write_text(DISAGREEING, encoding="utf-8")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["code"]), out
     assert out["problems"] == [
@@ -2838,8 +3065,8 @@ def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
     code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "security", None)
     assert code == 1 and "not a mend for security" in out["refusals"][0]
 
-    # Once: a second preamble from the same reviewer in the same round is a stop like any other.
-    reply.write_text("Still fine.\n\nVERDICT: PASS\n", encoding="utf-8")
+    # Once: a second such reply from the same reviewer in the same round is a stop like any other.
+    reply.write_text("Still.\n\nVERDICT: PASS\nVERDICT: CHANGES\n", encoding="utf-8")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"], out["mend"]) == ("stop", "rerun", []), out
     calls = len(claude())
@@ -2847,16 +3074,17 @@ def test_a_reviewer_s_preamble_is_mended_by_the_same_reviewer(
     assert code == 1 and "mended once" in out["refusals"][0] and len(claude()) == calls
 
 
-def test_an_approver_s_preamble_is_mended_by_the_approver(
+def test_an_approver_s_disagreeing_decisions_are_mended_by_the_approver(
     tmp_path, capsys, claude, monkeypatch
 ) -> None:
-    """109 R10: a decision.md holding its DECISION: line after other lines is a stop the run
-    mends once, resuming the approver's own session and writing its whole new reply over the old."""
+    """109 R10, 140 R7: a decision.md whose DECISION: lines disagree, none of them first, is a
+    stop the run mends once, resuming the approver's own session and writing its whole new reply
+    over the old."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     _round(root, 1)
     decision = folder / "decision.md"
-    decision.write_text("I read every round.\n\nDECISION: READY\n", encoding="utf-8")
+    decision.write_text("So:\n\nDECISION: ESCALATE\nDECISION: READY\n", encoding="utf-8")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["approver"]), out
     (folder / "runs").mkdir()
@@ -2869,10 +3097,10 @@ def test_an_approver_s_preamble_is_mended_by_the_approver(
     assert "DECISION:" in argv[1] and "first line" in argv[1]
     assert decision.read_text(encoding="utf-8") == "DECISION: READY\n\nFine.\n"
     assert _verdicts(root, capsys)["next"] == "done"
-    decision.write_text("Again.\n\nDECISION: READY\n", encoding="utf-8")
+    decision.write_text("Again.\n\nDECISION: READY\nDECISION: ESCALATE\n", encoding="utf-8")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"]) == ("stop", "rerun"), "once a round"
-    # No DECISION: line at all is not a preamble: nothing to put first.
+    # No DECISION: line at all is nothing to mend: there is no answer to put first.
     decision.write_text("I couldn't decide.\n", encoding="utf-8")
     (folder / "runs" / "mended").unlink()
     assert _verdicts(root, capsys)["way"] == "rerun"

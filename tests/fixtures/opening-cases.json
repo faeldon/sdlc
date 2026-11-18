@@ -1,0 +1,15 @@
+[
+  {"name": "first line", "kind": "verdict", "lines": ["VERDICT: PASS", "", "Fine."], "answer": [0, "PASS"]},
+  {"name": "after prose", "kind": "verdict", "lines": ["Both kept changes are in the code.", "", "VERDICT: PASS"], "answer": [2, "PASS"]},
+  {"name": "after a status line", "kind": "verdict", "lines": ["Status: reviewed", "VERDICT: CHANGES", "- CHANGE: src/drafts.py:3: saves twice"], "answer": [1, "CHANGES"]},
+  {"name": "twice, agreeing", "kind": "verdict", "lines": ["Read it.", "VERDICT: PASS", "VERDICT: PASS"], "answer": [1, "PASS"]},
+  {"name": "first line wins a later disagreement", "kind": "verdict", "lines": ["VERDICT: PASS", "VERDICT: CHANGES"], "answer": [0, "PASS"]},
+  {"name": "disagreeing, neither first", "kind": "verdict", "lines": ["Hmm.", "VERDICT: CHANGES", "VERDICT: PASS"], "answer": null},
+  {"name": "none", "kind": "verdict", "lines": ["I couldn't run it."], "answer": null},
+  {"name": "empty", "kind": "verdict", "lines": [], "answer": null},
+  {"name": "not at a line's start", "kind": "verdict", "lines": ["My VERDICT: PASS"], "answer": null},
+  {"name": "decision first", "kind": "decision", "lines": ["DECISION: READY"], "answer": [0, "READY"]},
+  {"name": "decision after prose", "kind": "decision", "lines": ["I read every round.", "", "DECISION: ESCALATE"], "answer": [2, "ESCALATE"]},
+  {"name": "decisions disagreeing", "kind": "decision", "lines": ["So:", "DECISION: READY", "DECISION: ESCALATE"], "answer": null},
+  {"name": "a verdict is no decision", "kind": "decision", "lines": ["VERDICT: PASS"], "answer": null}
+]

@@ -24,6 +24,9 @@ ran it on this build before any reviewer, and its record is
 `.sdlc/work/NNN-slug/build/round-N.gate.md`, green or no review would have started. Read it; never
 run the gate again yourself.
 
+Run nothing in the background. A background task's notice wakes your session after your
+reply, to answer it again. Everything you run, you run in the foreground.
+
 ## What to run
 
 - **The end-to-end path** the spec or Approach describes: the command a person would run, the

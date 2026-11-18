@@ -491,6 +491,41 @@ def test_the_factory_parsing_is_a_pinned_copy() -> None:
 
 
 @pytest.mark.portable
+def test_the_boards_opening_is_a_pinned_copy() -> None:
+    """140 R8: the board reads a round's verdicts and the decision as `factory.opening()` does,
+    case for case over the shared table."""
+    cases = json.loads((ROOT / "tests" / "fixtures" / "opening-cases.json").read_text("utf-8"))
+    for case in cases:
+        regex = {"verdict": factory.VERDICT_RE, "decision": factory.DECISION_RE}[case["kind"]]
+        mine, theirs = board.opening(case["lines"], regex), factory.opening(case["lines"], regex)
+        got = [mine[0], mine[1].group(1)] if mine else None
+        assert got == ([theirs[0], theirs[1].group(1)] if theirs else None) == case["answer"], case
+
+
+@pytest.mark.portable
+def test_the_board_reads_a_verdict_and_a_decision_after_prose(tmp_path) -> None:
+    """140 R8: a round's reply and a decision whose answer follows prose read on the board as
+    `verdicts` reads them, never as a problem."""
+    folder = tmp_path / "008-reopen-drafts"
+    (folder / "reviews" / "round-1").mkdir(parents=True)
+    (folder / "build").mkdir()
+    (folder / "build" / "round-1.md").write_text("Built.\n", encoding="utf-8")
+    (folder / "reviews" / "round-1" / "code.md").write_text(
+        "Read it all.\n\nVERDICT: CHANGES\n- CHANGE: src/drafts.py:3: saves twice\n", "utf-8"
+    )
+    (folder / "reviews" / "round-1" / "test.md").write_text(
+        "Hmm.\nVERDICT: PASS\nVERDICT: CHANGES\n", encoding="utf-8"
+    )
+    (folder / "decision.md").write_text("I read every round.\n\nDECISION: READY\n", "utf-8")
+    problems: list[str] = []
+    found = board._factory(folder, problems)
+    assert found["rounds"][0]["reviews"]["code"] == {"verdict": "CHANGES", "changes": 1}
+    assert found["decision"] == "READY"
+    assert problems == ["reviews/round-1/test.md doesn't open with a VERDICT line"], problems
+    assert board._reviewed(folder, 1) == 1
+
+
+@pytest.mark.portable
 def test_a_change_s_issue_link_is_built_from_the_remote_only_when_github_numbers_it(
     repo, monkeypatch
 ) -> None:

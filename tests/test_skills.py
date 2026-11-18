@@ -1293,7 +1293,7 @@ def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None
     build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
     stop = " ".join(build.split("**`stop`**")[1].split("3. **Hand it back.**")[0].split())
     assert "is the one kind this run can mend itself,** once" in stop
-    assert "a missing `## Evidence`" in stop and "a reviewer's verdict written after a" in stop
+    assert "a missing `## Evidence`" in stop and "a reviewer's verdict lines that disagree" in stop
     assert "Never write the evidence or the verdict yourself" in stop, (
         "the agent re-runs; the session never fakes it"
     )

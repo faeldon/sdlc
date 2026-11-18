@@ -8,8 +8,8 @@
 The factory's skills hand a change's spec, plan, build and review to agents, inside the change
 loop the `sdlc` plugin runs. This script does what must not be left to a model's reading: which
 change a session is in and whether its stage lets a step start, where `HEAD` was when a run began,
-what each review file's first line says, which step the loop takes next, and the one frontmatter
-line a step moves.
+what verdict each review file holds (`opening()`), which step the loop takes next, and the one
+frontmatter line a step moves.
 
 It never imports `sdlc.py`. Installed from the marketplace, each plugin is cached on its own, so
 it reads the change folder itself, the same way: frontmatter by line, edited by line, never
@@ -1026,13 +1026,27 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     return emit(out, 1 if out["refusals"] else 0)
 
 
+def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
+    """A reply's answer line, `(index, match)`, or None: its first line when that matches;
+    otherwise the first line that does, when every line that matches names the same answer, the
+    prose before it kept where it stands; otherwise (none, or lines that disagree) no answer. The
+    one reader of a verdict or a decision: `board.py` and `sdlc.py` read with copies, pinned by
+    a shared table of cases (`tests/fixtures/opening-cases.json`)."""
+    if lines and (m := regex.match(lines[0])):
+        return 0, m
+    found = [(i, m) for i, line in enumerate(lines) if (m := regex.match(line))]
+    if found and len({m.group(1) for _, m in found}) == 1:
+        return found[0]
+    return None
+
+
 def read_rounds(
     folder: Path, reviewers: list[str], kind: str = "round"
 ) -> tuple[list[dict], list[str]]:
     """Every `reviews/round-<N>/`, in order (the landing's `reviews/land-<n>/` with `kind`
     `land`): each reviewer's verdict, the changes it asks for, the pre-existing problems it found
     and its nits, the verifier's answer when there is one, and whether the round is complete for
-    `reviewers`, the ones the run's depth expects. A file whose first line isn't a verdict is a
+    `reviewers`, the ones the run's depth expects. A file with no verdict `opening()` reads is a
     problem, never a guess."""
     base = folder / "reviews"
     found = []
@@ -1047,11 +1061,13 @@ def read_rounds(
             if not file.is_file():
                 continue
             lines = file.read_text(encoding="utf-8").splitlines()
-            m = VERDICT_RE.match(lines[0]) if lines else None
-            if not m:
+            answer = opening(lines, VERDICT_RE)
+            if not answer:
                 problems.append(_no_verdict(n, role, kind))
                 continue
-            changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
+            at, m = answer
+            after = lines[at + 1 :]
+            changes = [c.group(1) for c in map(CHANGE_RE.match, after) if c]
             if m.group(1) == "CHANGES" and not changes:
                 # Nothing to verify or rework: a malformed reply, refused like one with no verdict.
                 problems.append(
@@ -1059,8 +1075,8 @@ def read_rounds(
                     "line"
                 )
                 continue
-            preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, lines[1:]) if c]
-            nits = [read_nit(c.group(1)) for c in map(FINDING_NIT_RE.match, lines[1:]) if c]
+            preexisting = [c.group(1) for c in map(PREEXISTING_RE.match, after) if c]
+            nits = [read_nit(c.group(1)) for c in map(FINDING_NIT_RE.match, after) if c]
             reviews[role] = {"verdict": m.group(1), "changes": changes, "preexisting": preexisting,
                              "nits": nits}  # fmt: skip
         verified, wrong = read_verified(
@@ -1083,18 +1099,22 @@ def read_nit(line: str) -> dict:
 
 
 def _no_verdict(n: int, role: str, kind: str = "round") -> str:
-    """The problem a round's reply that doesn't open with its verdict is, word for word as the
+    """The problem a round's reply with no verdict `opening()` reads is, word for word as the
     board and status show it."""
     return f"reviews/{kind}-{n}/{role}.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
 
 
 def preamble(path: Path) -> bool:
-    """Whether a reply holds its verdict, but not on its first line: something written before it,
-    which the run may mend once by asking again. Never read as a verdict where it stands."""
+    """Whether a reply holds verdict lines but `opening()` reads none: lines that disagree, none
+    of them first, which the run may mend once by asking again. Never read as either verdict."""
+    return _disagrees(path, VERDICT_RE)
+
+
+def _disagrees(path: Path, regex: re.Pattern) -> bool:
     if not path.is_file():
         return False
     lines = path.read_text(encoding="utf-8").splitlines()
-    return bool(lines) and not VERDICT_RE.match(lines[0]) and any(map(VERDICT_RE.match, lines))
+    return any(map(regex.match, lines)) and opening(lines, regex) is None
 
 
 def asked_changes(reviews: dict) -> list[tuple[str, str, str]]:
@@ -1470,13 +1490,9 @@ NO_DECISION = "decision.md doesn't open with DECISION: READY or DECISION: ESCALA
 
 
 def decision_preamble(folder: Path) -> bool:
-    """Whether `decision.md` holds its `DECISION:` line, but not first: `preamble()`'s rule for the
-    approver's reply, which the run may mend once by asking again."""
-    path = folder / "decision.md"
-    if not path.is_file():
-        return False
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return bool(lines) and not DECISION_RE.match(lines[0]) and any(map(DECISION_RE.match, lines))
+    """Whether `decision.md` holds `DECISION:` lines that disagree, none of them first:
+    `preamble()`'s rule for the approver's reply, which the run may mend once by asking again."""
+    return _disagrees(folder / "decision.md", DECISION_RE)
 
 
 def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, str | None]:
@@ -1488,9 +1504,10 @@ def read_decision(folder: Path, exhausted: bool = False) -> tuple[str | None, st
         return None, None
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    m = DECISION_RE.match(lines[0]) if lines else None
-    if not m:
+    found = opening(lines, DECISION_RE)
+    if not found:
         return None, NO_DECISION
+    m = found[1]
     if exhausted and (m.group(1) != "ESCALATE" or RECONSIDER not in lines):
         return None, (
             f"the run can't converge (its rounds ran out with changes kept, a change was kept "
@@ -2149,8 +2166,8 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     an answer the person gave, so no build reaches the approver unreviewed.
 
     A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
-    missing `## Evidence`, a verdict after a preamble in the last round (`preamble()`), the
-    verifier's unread answers in the last round, or a decision after a preamble
+    missing `## Evidence`, verdict lines that disagree in the last round (`preamble()`), the
+    verifier's unread answers in the last round, or decision lines that disagree
     (`decision_preamble()`), with the roles to mend in `mend`, `rerun` otherwise. A role is mended
     once a round: one `runs/mended` names for that round no longer counts as mendable.
 
@@ -2246,7 +2263,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     # With no base branch nothing is known to be touched, so nothing is called untouched.
     out["untouched"] = [a for a in asked if _untouched(root, a.split(": ", 1)[1], run["changed"])]
     # Kept apart as they're added, so a stop knows whether a mend alone can move it on: a missing
-    # `## Evidence`, or a verdict after a preamble in the last round, each by the role that mends.
+    # `## Evidence`, or verdict lines that disagree in the last round, each by the role that mends.
     mendable: dict[str, list[str]] = {}
     if built:
         report = folder / "build" / f"round-{built}.md"
@@ -2264,7 +2281,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         if preamble(folder / "reviews" / f"round-{last['round']}" / f"{role}.md"):
             mendable.setdefault(role, []).append(_no_verdict(last["round"], role))
     # The verifier's answers in the last round the script couldn't read, and the approver's
-    # decision after a preamble: each its own agent's to give again.
+    # decision lines that disagree: each its own agent's to give again.
     if last:
         path = folder / "reviews" / f"round-{last['round']}" / VERIFIED
         _, wrong = read_verified(path, last["round"], last["reviews"])
@@ -3102,7 +3119,7 @@ WAYS_WHY = {
     "ship": "An agent committed, which no agent may: read the commit, then ship it by hand with"
     " /sdlc:ship {id}.",
     "mend": (
-        "A reply lacked its ## Evidence, or held its answer after a preamble. Rerunning"
+        "A reply lacked its ## Evidence, or held answers that disagree. Rerunning"
         " /sdlc-factory:build {id} asks an agent again, once, for the reply in its shape; if that"
         " reply still lacks it, ship it by hand with /sdlc:ship {id}."
     ),
@@ -3143,12 +3160,12 @@ MEND = (
 # The mends `agent` has filed, `<role> <round>` a line: the record that holds each to once a round.
 MENDED = Path("runs") / "mended"
 VERDICT_MEND = (
-    "Your reply didn't open with its verdict. Reply again, the whole reply, with its VERDICT: line "
-    "as the first line and nothing before it."
+    "Your reply holds VERDICT: lines that disagree, so the script can't read your verdict. Reply "
+    "again, the whole reply, with one VERDICT: line as the first line and nothing before it."
 )
 DECISION_MEND = (
-    "Your reply didn't open with its decision. Reply again, the whole reply, with its DECISION: "
-    "line as the first line and nothing before it."
+    "Your reply holds DECISION: lines that disagree, so the script can't read your decision. Reply "
+    "again, the whole reply, with one DECISION: line as the first line and nothing before it."
 )
 VERIFY_MEND = (
     "The script couldn't read your answers: {problems}. Reply again, the whole reply, answering "
@@ -3249,7 +3266,7 @@ def land_mended(folder: Path, n: int) -> set[str]:
 
 def verdict_mend(folder: Path, state: dict, role: str | None) -> bool:
     """Whether `mend` for `role` resumes that agent's own session to answer in its shape: a
-    reviewer whose reply in the last round holds its verdict after a preamble, the approver, or
+    reviewer whose reply in the last round holds verdict lines that disagree, the approver, or
     the verifier. A behaviour check owing evidence runs afresh instead."""
     if role in ("approver", "verifier"):
         return True
@@ -3263,49 +3280,107 @@ def agent_name(role: str) -> str:
     return f"reviewer-{role}" if role in REVIEWERS else role
 
 
-def _figures(data: dict) -> dict | None:
-    """A run's figures from its `--output-format json` result, numbers only, or None when it
-    holds none. `usage` and `duration_ms` are the run's own; `total_cost_usd` is the session's
-    total so far, which on a `--resume` includes the runs before it, so `run_cost()` takes a
-    session's last one. A field missing or not a number is None."""
+def _figures(results: list[dict]) -> dict | None:
+    """A session's figures from its `result` events, numbers only, or None when they hold none.
+    Each result's `usage`, `duration_ms` and `num_turns` are its own turn's, so they are summed;
+    `total_cost_usd` is the session's total so far, the last result's, which on a `--resume`
+    includes the runs before it, so `run_cost()` takes a session's last one. A field no result
+    holds as a number is None."""
 
     def num(value: object) -> int | float | None:
         return value if isinstance(value, int | float) and not isinstance(value, bool) else None
 
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    def total(values: list) -> int | float | None:
+        found = [v for v in map(num, values) if v is not None]
+        return sum(found) if found else None
+
+    usages = [r["usage"] if isinstance(r.get("usage"), dict) else {} for r in results]
     figures = {
-        "cost_usd": num(data.get("total_cost_usd")),
-        "duration_ms": num(data.get("duration_ms")),
-        "turns": num(data.get("num_turns")),
-        **{key: num(usage.get(field)) for key, field in USAGE_FIELDS.items()},
+        "cost_usd": num(results[-1].get("total_cost_usd")) if results else None,
+        "duration_ms": total([r.get("duration_ms") for r in results]),
+        "turns": total([r.get("num_turns") for r in results]),
+        **{key: total([u.get(field) for u in usages]) for key, field in USAGE_FIELDS.items()},
     }
     return figures if any(v is not None for v in figures.values()) else None
 
 
-def _claude(argv: list[str], cwd: Path) -> tuple[int, str, str | None, dict | None]:
-    """Run one headless agent session and return its exit, its reply (the JSON's `result`), what
-    went wrong, and its figures (`_figures()`), a failed session's included. Text mode in UTF-8
-    whatever the locale, no shell, nothing read from stdin."""
+def _stream(stdout: str) -> tuple[list[str], list[dict]]:
+    """A session's replies and its `result` events, in order, from `--output-format stream-json
+    --verbose`: one JSON object a line, a line that isn't one skipped. A reply is an `assistant`
+    event's text blocks joined, or a `result` event's `result` unless it repeats the reply
+    before it. A background task's notice wakes a session after its reply, adding a reply and a
+    result of its own (`tests/fixtures/stream-two-replies.jsonl`)."""
+    replies: list[str] = []
+    results: list[dict] = []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        text = None
+        if event.get("type") == "assistant":
+            message = event.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            blocks = [
+                b["text"]
+                for b in (content if isinstance(content, list) else [])
+                if isinstance(b, dict)
+                and b.get("type") == "text"
+                and isinstance(b.get("text"), str)
+            ]
+            text = "\n\n".join(blocks).strip()
+        elif event.get("type") == "result":
+            results.append(event)
+            result = event.get("result")
+            text = result.strip() if isinstance(result, str) else None
+            if replies and text == replies[-1]:
+                continue
+        if text:
+            replies.append(text)
+    return replies, results
+
+
+def _claude(argv: list[str], cwd: Path) -> tuple[int, list[str], str | None, dict | None]:
+    """Run one headless agent session and return its exit, its replies in order (`_stream()`),
+    what went wrong, and its figures (`_figures()`), a failed session's included. A session
+    fails on a non-zero exit, no `result` event, an error on the last one, or no reply with any
+    text, and then returns no reply. Text mode in UTF-8 whatever the locale, no shell, nothing
+    read from stdin."""
     try:
         done = subprocess.run(
             argv, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace",
             stdin=subprocess.DEVNULL, timeout=AGENT_TIMEOUT,
         )  # fmt: skip
     except subprocess.TimeoutExpired:
-        return 124, "", f"the agent ran past {AGENT_TIMEOUT // 60} minutes", None
+        return 124, [], f"the agent ran past {AGENT_TIMEOUT // 60} minutes", None
     except OSError as e:
-        return 127, "", f"claude couldn't be run: {e}", None
-    try:
-        data = json.loads(done.stdout)
-    except ValueError:
-        data = {}
-    data = data if isinstance(data, dict) else {}
-    figures = _figures(data)
-    reply = data.get("result") if isinstance(data.get("result"), str) else ""
-    if done.returncode or data.get("is_error") or not reply.strip():
+        return 127, [], f"claude couldn't be run: {e}", None
+    replies, results = _stream(done.stdout or "")
+    figures = _figures(results)
+    if done.returncode or not results or results[-1].get("is_error") or not replies:
         tail = (done.stderr or done.stdout or "").strip()[-500:]
-        return done.returncode or 1, "", f"the agent session failed: {tail or 'no reply'}", figures
-    return 0, reply, None, figures
+        return done.returncode or 1, [], f"the agent session failed: {tail or 'no reply'}", figures
+    return 0, replies, None, figures
+
+
+def holds(role: str, reply: str) -> bool:
+    """Whether a reply holds what `role` is asked to give: a reviewer's `VERDICT:` line, the
+    approver's `DECISION:` line, the verifier's `- KEPT:` or `- DROPPED:` line, the builder's
+    `## Evidence`, or the spec-writer's draft (a bare `---`, its frontmatter's opening, as
+    `split_draft()` finds it). It only picks which of a session's replies `agent` files, never
+    what the reply says: `verdicts` and `land-verdicts` still read the file."""
+    lines = reply.splitlines()
+    if role in REVIEWERS:
+        return any(map(VERDICT_RE.match, lines))
+    if role == "approver":
+        return any(map(DECISION_RE.match, lines))
+    if role == "verifier":
+        return any(KEPT_RE.match(line) or DROPPED_RE.match(line) for line in lines)
+    if role == "spec-writer":
+        return any(line.rstrip("\r\n") == "---" for line in lines)
+    return EVIDENCE in [line.strip() for line in lines]
 
 
 def record_cost(folder: Path, session: str, role: str, model: str, figures: dict) -> None:
@@ -3562,8 +3637,8 @@ def _task(
             prompt += f" Round {reviewed}'s reviews are in {rel}/reviews/round-{reviewed}/."
         target = folder / "build" / f"round-{reviewed + 1}.md"
         return prompt, target, target.is_file() and state["built"] == reviewed + 1
-    # mend: the stops a run mends itself, once each: a reviewer resumed to put its verdict first,
-    # the approver its decision, the verifier resumed to answer in its shape, the builder resumed
+    # mend: the stops a run mends itself, once each: a reviewer resumed to give one verdict first,
+    # the approver one decision, the verifier resumed to answer in its shape, the builder resumed
     # for its evidence, or a new behaviour check for its own.
     if role == "approver":
         return DECISION_MEND, folder / "decision.md", False
@@ -3718,9 +3793,10 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     reviews = {}
     for file in where.glob("*.md"):
         lines = file.read_text(encoding="utf-8").splitlines()
-        m = VERDICT_RE.match(lines[0]) if file.name != VERIFIED and lines else None
-        if m:
-            changes = [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c]
+        found = opening(lines, VERDICT_RE) if file.name != VERIFIED else None
+        if found:
+            at, m = found
+            changes = [c.group(1) for c in map(CHANGE_RE.match, lines[at + 1 :]) if c]
             reviews[file.stem] = {"verdict": m.group(1), "changes": changes}
     asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(reviews)]
     if not asked:
@@ -3864,9 +3940,9 @@ def cmd_agent(
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     model = model_for(role, cfg, tier, state["depth"])
     argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{agent_name(role)}"]
-    argv += ["--model", model, "--permission-mode", cfg["mode"], "--output-format", "json"]
-    argv += [how, session]
-    code, reply, problem, figures = _claude(argv, root)
+    argv += ["--model", model, "--permission-mode", cfg["mode"]]
+    argv += ["--output-format", "stream-json", "--verbose", how, session]
+    code, replies, problem, figures = _claude(argv, root)
     if figures:
         record_cost(folder, session, role, model, figures)
     out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
@@ -3874,6 +3950,9 @@ def cmd_agent(
     if problem:
         return emit({**out, "problem": problem}, 1)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # The last reply that holds the role's answer, else the last: a background task's notice
+    # answered after the verdict never replaces it (`holds()`).
+    reply = next((r for r in reversed(replies) if holds(role, r)), replies[-1])
     # The reply is committed with the change: an agent quoting a command's output never files
     # this machine's paths, only the marks (`_placeholders()`).
     reply = _placeholders(reply, root)
@@ -6052,10 +6131,11 @@ def cmd_land_verdicts(root: Path, ident: str, record: bool = False) -> int:
     `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
     the run's depth after a resolved conflict or a fix the person asked for, `fixed`), `verify`
     when one asks for changes, `pass` when none is kept, `mend` when every problem is one the
-    agent that wrote it can answer again (a behaviour check's missing `## Evidence` or `exit:`, a
-    verdict after a preamble, the verifier's unread answers), with the roles in `mend`, each once a
-    landing round (`land_mended()`), or `stop`, with why: a red gate or check, a kept change, a
-    reply without a verdict, or a mendable problem beside one of those or after its one mend.
+    agent that wrote it can answer again (a behaviour check's missing `## Evidence` or `exit:`,
+    verdict lines that disagree, the verifier's unread answers), with the roles in `mend`, each
+    once a landing round (`land_mended()`), or `stop`, with why: a red gate or check, a kept
+    change, a reply without a verdict, or a mendable problem beside one of those or after its one
+    mend.
     It writes nothing but with `record`, which the land skill passes: then a `stop` is written to
     `runs/land-step.md` with its problems, for the board."""
     cfg, _ = load_config(root)
@@ -6082,23 +6162,24 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     wanted = list(run["reviewers"]) if resolved or fixed else ["behaviour"]
     reviews, problems = {}, []
     # Kept apart as they're added, by the role that mends each, as `loop_state()` keeps them: a
-    # missing `## Evidence`, a verdict after a preamble, the verifier's unread answers.
+    # missing `## Evidence`, verdict lines that disagree, the verifier's unread answers.
     mendable: dict[str, list[str]] = {}
     for role in wanted:
         file = path / f"{role}.md"
         if not file.is_file():
             continue
         lines = file.read_text(encoding="utf-8").splitlines()
-        m = VERDICT_RE.match(lines[0]) if lines else None
-        if not m:
+        found = opening(lines, VERDICT_RE)
+        if not found:
             problem = f"reviews/land-{n}/{role}.md doesn't open with a VERDICT"
             problems.append(problem)
             if preamble(file):
                 mendable.setdefault(role, []).append(problem)
             continue
+        at, m = found
         reviews[role] = {
             "verdict": m.group(1),
-            "changes": [c.group(1) for c in map(CHANGE_RE.match, lines[1:]) if c],
+            "changes": [c.group(1) for c in map(CHANGE_RE.match, lines[at + 1 :]) if c],
         }
         if role in RUNS_THE_CHANGE:
             found = read_evidence("\n".join(lines), f"reviews/land-{n}/{role}.md")

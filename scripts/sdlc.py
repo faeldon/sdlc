@@ -4587,6 +4587,19 @@ FACTORY_LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|defau
 FACTORY_SETTLED = " → settled by the approver: "
 FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
+
+
+def _factory_opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
+    """A factory reply's answer line, `(index, match)`, or None: a copy of `factory.py`'s
+    `opening()`, pinned to it by `tests/test_metrics.py` over a shared table of cases."""
+    if lines and (m := regex.match(lines[0])):
+        return 0, m
+    found = [(i, m) for i, line in enumerate(lines) if (m := regex.match(line))]
+    if found and len({m.group(1) for _, m in found}) == 1:
+        return found[0]
+    return None
+
+
 # A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
 FACTORY_GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
 # A stopped run's record, which `factory.py verdicts --record` writes and removes; status reads it.
@@ -4702,8 +4715,8 @@ def factory_reading(folder: Path) -> dict:
         path = folder / "decision.md"
         if path.is_file():
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            m = FACTORY_DECISION_RE.match(lines[0]) if lines else None
-            found["decision"] = m.group(1) if m else None
+            answer = _factory_opening(lines, FACTORY_DECISION_RE)
+            found["decision"] = answer[1].group(1) if answer else None
             found["reconsider"] = FACTORY_RECONSIDER in [line.strip() for line in lines]
         path = folder / "decisions.md"
         text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
@@ -4781,8 +4794,8 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     decision = _git(main, "show", f"{branch}:{folder}/decision.md")
     if decision is None:
         return None
-    first = decision.splitlines()[0] if decision else ""
-    m = FACTORY_DECISION_RE.match(first)
+    answer = _factory_opening(decision.splitlines(), FACTORY_DECISION_RE)
+    m = answer[1] if answer else None
     listed = _git(main, "ls-tree", "-r", "--name-only", branch, f"{folder}/reviews") or ""
     rounds: set[str] = set()
     reviews: dict[str, dict] = {}
@@ -4798,10 +4811,11 @@ def _factory_files(main: Path, branch: str) -> dict | None:
                 r = reviews.setdefault(m.group(1), {"changes": 0, "requests": 0})
                 r["dropped"] = r.get("dropped", 0) + 1
             continue
-        verdict = FACTORY_VERDICT_RE.match(lines[0]) if lines else None
+        answer = _factory_opening(lines, FACTORY_VERDICT_RE)
+        at, verdict = answer if answer else (0, None)
         r = reviews.setdefault(parts[2].removesuffix(".md"), {"changes": 0, "requests": 0})
         r["changes"] += int(bool(verdict) and verdict.group(1) == "CHANGES")
-        r["requests"] += sum(1 for line in lines[1:] if FACTORY_CHANGE_RE.match(line))
+        r["requests"] += sum(1 for line in lines[at + 1 :] if FACTORY_CHANGE_RE.match(line))
     if any(p.endswith("/verified.md") for p in listed.splitlines()):
         # A run with a verifier says `dropped` for every reviewer, 0 included; one from before
         # it says nothing, so its trailer reads as unknown there, never as nothing dropped.

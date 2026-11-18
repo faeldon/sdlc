@@ -31,6 +31,15 @@ that landed since and aren't the change's.
 
 Read the tests before the code; they show what the builder meant.
 
+The repo's gate, the base branch's `[commands] check`, is the script's, not yours: `factory.py`
+ran it on this build before any reviewer, and its record is
+`.sdlc/work/NNN-slug/build/round-N.gate.md` (a landing round's is `build/land-N.gate.md`), green or
+no review would have started. Read it for the gate's result and its test count; never run the
+gate yourself.
+
+Run nothing in the background. A background task's notice wakes your session after your
+reply, to answer it again. A test you run to check a claim is a named one, run in the foreground.
+
 ## The passes
 
 1. **Correctness.** Walk the requirements one at a time and find the code for each. A requirement
@@ -56,7 +65,8 @@ Read the tests before the code; they show what the builder meant.
      of the code.
    - Anything else gets no line.
 
-You may run the repo's tests or gate to check a claim. Run nothing that writes.
+You may run a named test, in the foreground, to check a claim; never the gate, and nothing that
+writes.
 
 ## Later rounds, and what isn't this change's
 

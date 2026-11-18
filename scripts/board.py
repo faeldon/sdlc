@@ -77,6 +77,18 @@ TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
 
+
+def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
+    """A reply's answer line, `(index, match)`, or None: a copy of `factory.py`'s `opening()`,
+    pinned to it by a test over a shared table of cases."""
+    if lines and (m := regex.match(lines[0])):
+        return 0, m
+    found = [(i, m) for i, line in enumerate(lines) if (m := regex.match(line))]
+    if found and len({m.group(1) for _, m in found}) == 1:
+        return found[0]
+    return None
+
+
 # A factory card's step track: the six positions of a round, and where each step the record names
 # sits on it (`fix` is the gate, fixing). A pause (`PAUSES`, `factory.py`'s, pinned by a test)
 # keeps the position it paused at; `done` is past them all. An estimate never fills its bar past
@@ -327,11 +339,12 @@ def _factory(folder: Path, problems: list[str]) -> dict:
             if file.name == VERIFIED:
                 continue
             lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
-            m = VERDICT_RE.match(lines[0]) if lines else None
-            if not m:
+            answer = opening(lines, VERDICT_RE)
+            if not answer:
                 problems.append(f"reviews/round-{n}/{file.name} doesn't open with a VERDICT line")
                 continue
-            changes = sum(1 for line in lines[1:] if CHANGE_RE.match(line))
+            at, m = answer
+            changes = sum(1 for line in lines[at + 1 :] if CHANGE_RE.match(line))
             reviews[file.stem] = {"verdict": m.group(1), "changes": changes}
         verified = None
         if (path / VERIFIED).is_file():
@@ -349,7 +362,8 @@ def _factory(folder: Path, problems: list[str]) -> dict:
     path = folder / "decision.md"
     if path.is_file():
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        m = DECISION_RE.match(lines[0]) if lines else None
+        answer = opening(lines, DECISION_RE)
+        m = answer[1] if answer else None
         decision = m.group(1) if m else None
         reconsider = RECONSIDER in [line.strip() for line in lines]
         if not m:
@@ -539,13 +553,14 @@ def _land_progress(
 
 
 def _reviewed(folder: Path, n: int) -> int:
-    """How many replies in `reviews/round-<n>/` open with a `VERDICT:` line, `verified.md` aside."""
+    """How many replies in `reviews/round-<n>/` hold a verdict `opening()` reads, `verified.md`
+    aside."""
     count = 0
     for file in (folder / "reviews" / f"round-{n}").glob("*.md"):
         if file.name == VERIFIED:
             continue
         lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
-        count += bool(lines and VERDICT_RE.match(lines[0]))
+        count += opening(lines, VERDICT_RE) is not None
     return count
 
 
