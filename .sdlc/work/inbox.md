@@ -2,15 +2,6 @@
 
 Seeds, not a backlog. `/sdlc:intent` promotes one into a change.
 
-## [2026-10-24-2] [idea] A factory queue
-
-A queue (`/sdlc-factory:next` over seeds or open intents) would let ideas move while nobody
-watches: the supervisor (070) already runs several changes at once, one per worktree, but the
-person still starts each. The register and GitHub issues are already the queue; this is the
-runner. Raised 2026-10-24.
-Theme: factory
-Priority: low
-
 ## [2026-10-24-6] [idea] Landing changes through pull requests, for teams
 
 Close lands a change by fast-forwarding `main` locally, and only publish pushes. A team that
