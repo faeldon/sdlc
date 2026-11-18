@@ -258,3 +258,15 @@ reviewer at the run's depth to read it; check mechanically that both sides' entr
 skip the reviewers.
 Theme: landing
 Raised 2026-11-18.
+
+## [2026-11-18-21] [idea] A landing train: one integration of the batch, one gate, one conflict resolution
+
+A landing train: /sdlc-factory:land stacks the batch on a landing branch in order, one landing
+agent (opus, with every change's spec and diff) resolves conflicts once across the batch, the gate
+runs once at the tip, failures are bisected to eject the change at fault, and main is
+fast-forwarded with each change's own commit and Close commit kept on its first-parent line.
+Evidence 2026-11-18: four landing conflicts, two moves, and 131 re-conflicting in factory.py
+against 129 after a move. Weigh it at the retro once the register fix has landed and the remaining
+conflicts are counted.
+Theme: landing
+Raised 2026-11-18.
