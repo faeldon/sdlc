@@ -194,16 +194,6 @@ Left undone by 133-board-tracks-landing, carried forward when it landed: ux: the
 See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-25] [nit] the new *Closing* lines and the *The register* paragraph (around line 166) run past the file's ~100-column wrap, so reflow them
-
-Raised by the code review of 134-register-never-conflicts, round 1: AGENTS.md:118-119: the new *Closing* lines and the *The register* paragraph (around line 166) run past the file's ~100-column wrap, so reflow them
-
-Theme: style
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 134-register-never-conflicts (correctness)
-
 ## [2026-11-18-26] [bug] A factory agent's late reply overwrites its verdict
 
 136's code and test reviewers (round 1, 2026-11-18) each started their own background wait on
@@ -239,91 +229,11 @@ pre-existing: scripts/board.py:626: a card reads "decide D1 in the factory's sup
 Severity: low
 Paths: scripts/board.py
 
-## [2026-11-18-28] [nit] the `# fmt: skip` on the `out["dangling"]` comprehension looks unneeded, since `ruff format --check` passes without it.
-
-Raised by the code review of 138-board-drawer-and-loose-ends, round 1: scripts/sdlc.py:7620: the `# fmt: skip` on the `out["dangling"]` comprehension looks unneeded, since `ruff format --check` passes without it. Remove it if the formatter agrees.
-
-Theme: style
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 138-board-drawer-and-loose-ends (correctness)
-
-## [2026-11-18-29] [nit] the Step 6 paragraph is now one 168-character line, where the rest of the file wraps near 100.
-
-Raised by the code review of 138-board-drawer-and-loose-ends, round 2: skills/triage/SKILL.md:58: the Step 6 paragraph is now one 168-character line, where the rest of the file wraps near 100. Rewrap it at the same point as its neighbours.
-
-Theme: style
-Paths: skills/triage/SKILL.md
-Cost: S
-Value: low
-Raised by: 138-board-drawer-and-loose-ends (correctness)
-
-## [2026-11-18-30] [nit] the docstrings cite "138 C1" and "138 C2", which a reader can't resolve, since those labels exist only in this round's review.
-
-Raised by the code review of 138-board-drawer-and-loose-ends, round 2: tests/test_board.py:1886-1915: the docstrings cite "138 C1" and "138 C2", which a reader can't resolve, since those labels exist only in this round's review. Say what they refer to, or cite the change's own rule.
-
-Theme: docs
-Paths: tests/test_board.py
-Cost: S
-Value: low
-Raised by: 138-board-drawer-and-loose-ends (correctness)
-
-## [2026-11-18-31] [nit] `test_no_build_question_for_a_refusal_or_a_spec` now checks only a Tier 1 spec refusal, since the Tier 2 spec does get a question.
-
-Raised by the code review of 138-board-drawer-and-loose-ends, round 3: tests/test_factory.py:4437: `test_no_build_question_for_a_refusal_or_a_spec` now checks only a Tier 1 spec refusal, since the Tier 2 spec does get a question. The name still promises "a spec" with no question. Rename it to say a Tier 1 spec, or drop "spec" from the name.
-
-Theme: tests
-Paths: tests/test_factory.py
-Cost: S
-Value: low
-Raised by: 138-board-drawer-and-loose-ends (correctness)
-
 ## [2026-11-18-33] [idea] Show an early stop's reason (stuck/untestable) on the board's card and in runs/stopped.md
 
 Left undone by 136-factory-rounds-that-catch-enough, carried forward when it landed: The board's step track and `runs/stopped.md` don't show `stuck` or `untestable`: an early stop reads on the board as a plain `approve`. Worth a line on the card once the retro's counts show how often it happens.
 See .sdlc/work/136-factory-rounds-that-catch-enough/notes.md in its commit.
 Raised 2026-11-18.
-
-## [2026-11-18-34] [nit] this line still describes `exhausted` only as "rounds ran out".
-
-Raised by the code review of 136-factory-rounds-that-catch-enough, round 1: plugins/factory/skills/build/SKILL.md:416: this line still describes `exhausted` only as "rounds ran out". It is now also true for a `stuck` or `untestable` stop. Add a clause saying the approver is told which.
-
-Theme: docs
-Paths: plugins/factory/skills/build/SKILL.md
-Cost: S
-Value: med
-Raised by: 136-factory-rounds-that-catch-enough (correctness)
-
-## [2026-11-18-35] [nit] its diff is 5 lines, against 8 for the other reviewers.
-
-Raised by the code review of 136-factory-rounds-that-catch-enough, round 1: plugins/factory/agents/reviewer-ux.md: its diff is 5 lines, against 8 for the other reviewers. Check that the word-for-word re-raise sentence reads the same there.
-
-Theme: docs
-Paths: plugins/factory/agents/reviewer-ux.md
-Cost: S
-Value: low
-Raised by: 136-factory-rounds-that-catch-enough (correctness)
-
-## [2026-11-18-36] [nit] R6's README table of changes 124, 125, 129 and 131 has no test.
-
-Raised by the test review of 136-factory-rounds-that-catch-enough, round 1: tests/test_factory.py:1676: R6's README table of changes 124, 125, 129 and 131 has no test. It cannot be checked mechanically, so a person should confirm it against each change's `Close` commit.
-
-Theme: tests
-Paths: tests/test_factory.py
-Cost: S
-Value: low
-Raised by: 136-factory-rounds-that-catch-enough (correctness)
-
-## [2026-11-18-37] [nit] the R3 test has no case where round N-1 has no `verified.md`, which the code handles.
-
-Raised by the test review of 136-factory-rounds-that-catch-enough, round 1: tests/test_factory.py:1358: the R3 test has no case where round N-1 has no `verified.md`, which the code handles. A one-line fixture would pin that branch.
-
-Theme: tests
-Paths: tests/test_factory.py
-Cost: S
-Value: low
-Raised by: 136-factory-rounds-that-catch-enough (correctness)
 
 ## [2026-11-18-38] [idea] The board labels build rounds B1, B2, not R1, R2
 
@@ -411,3 +321,31 @@ Raised 2026-11-18.
 Left undone by 139-landing-train, carried forward when it landed: `tests/test_train.py`'s `_drive()` and `tests/test_land.py`'s `_land_train()` both drive a train as the skill does; one helper in a shared test module would do.
 See .sdlc/work/139-landing-train/notes.md in its commit.
 Raised 2026-11-18.
+
+## [2026-11-18-53] [idea] Reflow AGENTS.md's remaining lines past 100 columns
+
+Left undone by 142-pay-down-todays-nits, carried forward when it landed: `AGENTS.md` has other lines past 100 columns (12, 29, 34, the *Writes before a WAIT* paragraph at 109-110, 223, 232-233, 238, 255, 276, 314), outside 2026-11-18-25's scope.
+See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-54] [idea] Replace the "111 C1" review label in test_a_server_that_fails_on_its_own_is_started_once with the rule it pins
+
+Left undone by 142-pay-down-todays-nits, carried forward when it landed: `tests/test_factory.py`'s `test_a_server_that_fails_on_its_own_is_started_once` docstring cites "111 C1", another review-only label no reader can resolve.
+See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-55] [idea] Wrap the supersedes sentence in reviewer-code.md and reviewer-ux.md
+
+Left undone by 142-pay-down-todays-nits, carried forward when it landed: `plugins/factory/agents/reviewer-code.md:94` and `reviewer-ux.md:67`, the `supersedes` sentence, are single long lines.
+See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-56] [nit] the new "unverified" case asserts only `stuck == []`.
+
+Raised by the code review of 142-pay-down-todays-nits, round 1: tests/test_factory.py:1676: the new "unverified" case asserts only `stuck == []`. Also asserting `next == "rework"` would pin the full outcome, as the neighbouring cases do.
+
+Theme: tests
+Paths: tests/test_factory.py
+Cost: S
+Value: low
+Raised by: 142-pay-down-todays-nits (correctness)
