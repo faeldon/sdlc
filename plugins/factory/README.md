@@ -377,7 +377,8 @@ the one place it runs `claude`); an approved spec draft copied into `spec.md` by
 (`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
 (`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
 batch, its signals and its question (`land-check`), each change's landing (`land`, `resolve`,
-`land-fix`, `land-verdicts`), its acceptance checks and skills' cases (`accept`, `cases`, never
+`land-fix`, `land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
+the board's landing track (`land-verdicts --record` adds a stop and why), its acceptance checks and skills' cases (`accept`, `cases`, never
 pre-approved);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never

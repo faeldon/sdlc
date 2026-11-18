@@ -259,6 +259,30 @@ skip the reviewers.
 Theme: landing
 Raised 2026-11-18.
 
+## [2026-11-18-17] [idea] Move a stopped landing's card to Needs you
+
+Left undone by 133-board-tracks-landing, carried forward when it landed: A stopped landing shows on its card but keeps its column; moving it to Needs you would mean `sdlc.needs_of()` (shared with `status`) reading `runs/land-step.md`.
+See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-18] [idea] Record a landing step for factory.py accept
+
+Left undone by 133-board-tracks-landing, carried forward when it landed: `factory.py accept` during a landing records no step: the track shows the gate's position until review starts.
+See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-19] [idea] A stopped landing at shipped names /sdlc:close by hand, not /sdlc:ship
+
+Left undone by 133-board-tracks-landing, carried forward when it landed: ui: scripts/board.py:731: a landing that stopped at `close` on a card already at `shipped` reads `or /sdlc:ship 012 by hand`. That change is already committed, so `/sdlc:ship` is the wrong step. The by-hand way on for a shipped card is `/sdlc:close NNN`. Use `/sdlc:close` when the stage is in `CLOSED`, and `/sdlc:ship` otherwise. The stop at `close` is recorded in `factory.py:4515` after the ship commit, so this case is reachable. No screenshot shows a stopped landing, so this is from the code, not the image.
+See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-20] [idea] Plain words for every landing stop reason on the board
+
+Left undone by 133-board-tracks-landing, carried forward when it landed: ux: the stop reasons are still raw git or tool text on the landing paths. They reach the card as `landing stopped: …` without plain words: factory.py:4449 (`git status couldn't be read`), :4453 (`uncommitted outside the change's folder: <paths>`), :4456 (`HEAD isn't the landing's commit, so its record has nothing to be amended into`), :4459, :4483 and :4486 (`landed by=auto, and …`, where `by=auto` is jargon), and the `_amend_record` text passed at :4362, :4498 and :4509. Give each a `plain` line that says what failed and what to do, as `SHIP_REFUSED` and the commit-failed line already do, and keep the raw words in the output.
+See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
+Raised 2026-11-18.
+
 ## [2026-11-18-21] [idea] A landing train: one integration of the batch, one gate, one conflict resolution
 
 A landing train: /sdlc-factory:land stacks the batch on a landing branch in order, one landing

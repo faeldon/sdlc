@@ -12,7 +12,9 @@ runs the factory. A run the factory stopped (`runs/stopped.md`, at `stage: build
 person, with the record's problems and its way on, read by `sdlc.factory_stop()` as `status`
 reads it. Its card's step track is the step the
 supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
-factory runs, read from history once per base-branch tip and kept in memory. Nothing here
+factory runs, read from history once per base-branch tip and kept in memory. A change landing (at
+`test` or `shipped` with a `runs/land-step.md`) shows the landing's track instead, from the step
+its last landing command recorded, a stop with its problems. Nothing here
 writes: three GET routes, every other method refused, and `/file` serves only a file inside an
 open change's own folder.
 
@@ -68,6 +70,9 @@ REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
+LAND_STEP = Path("runs") / "land-step.md"
+MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
+PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
 
 # A factory card's step track: the six positions of a round, and where each step the record names
@@ -78,6 +83,17 @@ TRACK = ("build", "gate", "review", "verify", "rework", "approve")
 AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
 PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
+# A landing's track, from `runs/land-step.md`: its six positions, and where each step the record
+# names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The builder resolving a conflict or
+# making the person's fix sits at the rebase, a mend at the review, each with its own label. A
+# `stop` marks the step it stopped after. Only the steps history can time are timed.
+LAND_TRACK = ("ship", "rebase", "gate", "review", "verify", "close")
+LAND_AT = {
+    "ship": 0, "rebase": 1, "resolve": 1, "fix": 1, "gate": 2, "review": 3, "mend": 3,
+    "verify": 4, "close": 5,
+}  # fmt: skip
+LAND_LABEL = {"resolve": "resolving", "fix": "fixing", "mend": "mending"}
+LAND_TIMED = ("gate", "review", "verify")
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
 # only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
 WINDOW = 20
@@ -196,7 +212,7 @@ def _entry(
         entry["progress"] = read(
             "runs/step.md", lambda: _progress(entry, folder, problems, history, now), None
         )
-        if entry["progress"]:
+        if entry["progress"] and entry["progress"]["kind"] == "build":
             entry["progress"]["plan"] = read(
                 "plan.md", lambda: _plan_hint(entry, folder, home, trunk), None
             )
@@ -394,6 +410,10 @@ def _progress(
     way (`runs/builder.sessions`, no builder report yet)."""
     if entry.get("stopped") or ((folder / STOPPED).is_file() and entry["stage"] == "build"):
         return None
+    # A landing's record is the track from its first step, before its commit, until close removes
+    # the folder: at any other stage it is history, and read past.
+    if entry["stage"] in ("test", "shipped") and (folder / LAND_STEP).is_file():
+        return _land_progress(entry, folder, problems, history, now)
     path = folder / STEP
     # The approver's decision is the run's end only at the stages it belongs to, as in `column()`:
     # a change put back to `build` is building again, whatever `decision.md` still says.
@@ -439,10 +459,73 @@ def _progress(
     if typical and elapsed is not None:
         fraction = round(min(elapsed / typical, CAP), 3)
     return {
-        "steps": steps, "round": rnd, "limit": rec["limit"], "step": step, "paused": paused,
+        "kind": "build", "steps": steps, "round": rnd, "limit": rec["limit"], "step": step,
+        "paused": paused, "stopped": False, "problems": [], "moves": None,
         "elapsed": elapsed, "typical": typical if fraction is not None else None,
         "fraction": fraction, "samples": found["samples"] if fraction is not None else None,
         "plan": None,
+    }  # fmt: skip
+
+
+def read_land_step(text: str) -> dict | None:
+    """`runs/land-step.md`'s fields, as `factory.py`'s `read_land_step()` reads them (a test pins
+    the two), or None when it doesn't open with a `STEP:` line."""
+    lines = text.splitlines()
+    step = STEP_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    rnd, moves, limit = field(ROUND_RE), field(MOVES_RE), field(LIMIT_RE)
+    return {
+        "step": step.group(1), "round": int(rnd) if rnd else None,
+        "moves": int(moves) if moves else None, "limit": int(limit) if limit else None,
+        "since": field(SINCE_RE), "after": field(AFTER_RE),
+        "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
+    }  # fmt: skip
+
+
+def _land_progress(
+    entry: dict, folder: Path, problems: list[str], history: dict | None, now: float
+) -> dict | None:
+    """A landing's track, from the step its last command recorded (`runs/land-step.md`): the
+    landing round, the base branch's moves followed out of `[land] moves`, the current step's time
+    against the typical one where history has it, and on a stop the step it stopped after and its
+    problems. None for a step this board doesn't know; a record that won't read is a problem."""
+    path = folder / LAND_STEP
+    rec = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
+    if rec is None:
+        problems.append(f"{LAND_STEP.as_posix()} doesn't open with STEP:")
+        return None
+    step = rec["step"]
+    stopped = step == "stop"
+    at = LAND_AT.get(rec["after"] or "", 0) if stopped else LAND_AT.get(step)
+    if at is None:
+        return None
+    named = rec["after"] if stopped else step
+    steps = []
+    for i, name in enumerate(LAND_TRACK):
+        state = "done" if i < at else "todo" if i > at else "stopped" if stopped else "current"
+        label = LAND_LABEL.get(named or "", name) if i == at else name
+        steps.append({"name": name, "state": state, "label": label})
+    start = _since(rec["since"])
+    elapsed = max(0, round(now - start)) if not stopped and start is not None else None
+    timed = step in LAND_TIMED and not stopped
+    found = (history or {}).get(f"land-{step}/{entry['tier']}") if timed else None
+    typical = found["seconds"] if found else None
+    fraction = None
+    if typical and elapsed is not None:
+        fraction = round(min(elapsed / typical, CAP), 3)
+    return {
+        "kind": "land", "steps": steps, "round": rec["round"], "limit": rec["limit"],
+        "moves": rec["moves"], "step": step, "after": rec["after"] if stopped else None,
+        "paused": False, "stopped": stopped,
+        "problems": rec["problems"], "elapsed": elapsed,
+        "typical": typical if fraction is not None else None, "fraction": fraction,
+        "samples": found["samples"] if fraction is not None else None, "plan": None,
     }  # fmt: skip
 
 
@@ -512,27 +595,37 @@ def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, l
                 or [""])[0]  # fmt: skip
         if costs is None or not tier.isdigit():
             continue
-        gates = []
+        gates: dict[str, list[float]] = {"round-": [], "land-": []}
         for gate in (sdlc._git(home, "ls-tree", "--name-only", f"{at}/build") or "").splitlines():
-            if gate.startswith("round-") and gate.endswith(".gate.md"):
+            kind = next((k for k in gates if gate.startswith(k)), None)
+            if kind and gate.endswith(".gate.md"):
                 text = sdlc._git(home, "show", f"{at}/build/{gate}") or ""
-                gates += [float(m.group(1)) for m in map(SECONDS_RE.match, text.splitlines()) if m]
-        for step, values in step_samples(costs, gates).items():
+                lines = text.splitlines()
+                gates[kind] += [float(m.group(1)) for m in map(SECONDS_RE.match, lines) if m]
+        for step, values in step_samples(costs, gates["round-"], gates["land-"]).items():
             if values:
                 found.setdefault((step, int(tier)), {})[name] = values
     return found
 
 
-def step_samples(costs: str, gates: list[float]) -> dict[str, list[float]]:
+def step_samples(
+    costs: str, gates: list[float], land_gates: list[float] = ()
+) -> dict[str, list[float]]:
     """One run's seconds by step, from its `costs.jsonl` rows in the order its sessions ended: the
     first builder's is the build, every later one before the approver a rework (a gate fix among
     them); each run of reviewer rows one review round, as long as its slowest, since they run
     together; each verifier's a verification; the first approver's the approval. What follows the
-    approver is the landing's, and a row without an integer `duration_ms` is skipped."""
+    approver is the landing's: its review rounds and verifications as `land-review` and
+    `land-verify`, its gates (`land_gates`) as `land-gate`, and its builder rows (a resolve or a
+    fix, which the rows can't tell apart) not at all. A row without an integer `duration_ms` is
+    skipped."""
     out: dict[str, list[float]] = {s: [] for s in TRACK}
+    out.update({f"land-{s}": [] for s in LAND_TIMED})
     out["gate"] = list(gates)
+    out["land-gate"] = list(land_gates)
     together: list[float] = []
-    built = False
+    built = approved = False
+    pre = ""
     for line in costs.splitlines():
         try:
             row = json.loads(line)
@@ -546,18 +639,18 @@ def step_samples(costs: str, gates: list[float]) -> dict[str, list[float]]:
             together.append(seconds)
             continue
         if together:
-            out["review"].append(max(together))
+            out[f"{pre}review"].append(max(together))
             together = []
-        if role == "builder":
+        if role == "builder" and not approved:
             out["rework" if built else "build"].append(seconds)
             built = True
         elif role == "verifier":
-            out["verify"].append(seconds)
-        elif role == "approver":
+            out[f"{pre}verify"].append(seconds)
+        elif role == "approver" and not approved:
             out["approve"].append(seconds)
-            break
+            approved, pre = True, "land-"
     if together:
-        out["review"].append(max(together))
+        out[f"{pre}review"].append(max(together))
     return out
 
 
@@ -603,7 +696,8 @@ def next_action(entry: dict) -> str:
     decision and the decisions its `needs` still holds (`sdlc.needs_of()`, so the step follows the
     card's `needs you:` line): the step `status` and each skill's report name. The first state a
     card holds names it, highest first: a stopped rebase, a missing stage, any other problem (with
-    a decision that still waits named before it), shipped or dropped, a factory stop, a decision
+    a decision that still waits named before it), a stopped landing, a landing under way, shipped
+    or dropped, a factory stop, a decision
     still to make, the approver's decision, a factory build, a red gate, then the stage's own step
     (`PRECEDENCE` and `BOTH` in `tests/test_board.py` pin every pair)."""
     stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
@@ -628,6 +722,20 @@ def next_action(entry: dict) -> str:
     # A problem is the card's column at any stage (`column()`), so it is the next step too.
     if entry["problems"]:
         return f"{decide}, and fix what its problems name" if ids else "fix what its problems name"
+    # A landing under way is the factory's, before its commit and after: never the hand-run
+    # close or ship, until it stops, when the person takes it on.
+    landing = entry.get("progress") or {}
+    if landing.get("kind") == "land" and landing.get("stopped"):
+        ident = entry["id"]
+        return (
+            f"the landing stopped at {landing.get('after') or 'a step'}: fix what it names, then "
+            f"/sdlc-factory:land {ident}, or /sdlc:ship {ident} by hand"
+        )
+    if landing.get("kind") == "land":
+        return (
+            f"the factory is landing it, at {landing.get('step')}: wait for it, or "
+            f"/sdlc-factory:land {entry['id']} if its session ended"
+        )
     if stage in CLOSED:
         return f"/sdlc:close {entry['id']}"
     if entry.get("stopped"):

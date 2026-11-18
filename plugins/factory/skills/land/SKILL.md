@@ -205,8 +205,11 @@ For each change in the batch, one at a time:
    **The landing's verdicts**, after 2 or 3:
 
    ```bash
-   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts <NNN>
+   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py land-verdicts <NNN> --record
    ```
+
+   `--record` writes a `stop` to `runs/land-step.md`, which the board's landing track reads, as
+   each landing command records the step it runs; leave that file to the script.
 
    Its `next`: `gate` (the change as it now stands hasn't been gated: `factory.py gate <NNN>
    --land`), `accept` (its acceptance checks haven't run on it as it now stands: `factory.py

@@ -2315,3 +2315,160 @@ def test_a_conflict_marker_is_matched_only_as_a_whole_line() -> None:
             assert not mod.CONFLICT_MARKER_RE.search(text), (mod.__name__, text[:60])
         for text in real:
             assert mod.CONFLICT_MARKER_RE.search(text), (mod.__name__, text)
+
+
+# ---------------------------------------------------------------- the landing's step record (133)
+
+
+def _land_step(folder: Path) -> dict | None:
+    path = folder / factory.LAND_STEP
+    return factory.read_land_step(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def _committed_step(tree: Path, folder: Path, rev: str = "HEAD") -> dict | None:
+    rel = (folder / factory.LAND_STEP).relative_to(tree).as_posix()
+    return factory.read_land_step(_git(tree, "show", f"{rev}:{rel}"))
+
+
+@needs_uv
+def test_a_landing_records_each_step_it_takes(tmp_path, capsys, monkeypatch) -> None:
+    """133: each landing command writes the step it runs to `runs/land-step.md` as it starts, its
+    round and the moves so far beside it, and `land`'s and `close`'s own go into the change's
+    commit, so `sdlc.py base` and `close` still find the tree clean."""
+    root = _gated(tmp_path)
+    tree = _ready(root, "tracked", "tracked's one")
+    folder = _folder(tree)
+    _move(root, 1)
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"]) == (0, "rebased"), out
+    shipped = _committed_step(tree, folder)
+    assert shipped["step"] == "ship" and shipped["since"], "the ship step, in the commit"
+    assert _git(tree, "status", "--porcelain") == "", "the record left nothing uncommitted"
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert out["verdict"] == "PASS", out
+    gate = _land_step(folder)
+    assert (gate["step"], gate["round"], gate["moves"], gate["limit"]) == ("gate", 1, 0, 3)
+    _replies(monkeypatch, _verdict("behaviour"))
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-review", "behaviour", None)
+    assert code == 0, out
+    assert _land_step(folder)["step"] == "review"
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001", True)
+    assert out["next"] == "pass" and _land_step(folder)["step"] == "review", "pass writes nothing"
+
+    _move(root, 2)
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert (code, out["state"]) == (0, "moved"), out
+    moved = _committed_step(tree, folder)
+    assert (moved["step"], moved["moves"]) == ("rebase", 1), "back to its rebase, the move counted"
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert (code, out["state"], out["round"]) == (0, "rebased", 2), out
+    again = _committed_step(tree, folder)
+    assert (again["step"], again["round"], again["moves"]) == ("rebase", 1, 1), again
+    assert _git(tree, "status", "--porcelain") == ""
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    _pass_behaviour(folder, 2)
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert code == 0 and "merge" in out["done"], out
+    rel = f".sdlc/work/{tree.name}/{factory.LAND_STEP.as_posix()}"
+    landed = factory.read_land_step(_git(root, "show", f"main~1:{rel}"))
+    assert (landed["step"], landed["round"]) == ("close", 2), landed
+
+
+@needs_uv
+def test_a_resolving_landing_records_the_builder_in_the_rebased_commit(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """133: the builder's resolve is recorded mid-rebase and goes into the rebased commit with its
+    costs line, so `--continue` finds nothing unstaged; the gate records itself next."""
+    root, tree = _resolving(tmp_path, capsys, ("A nit no change names", "A nit nobody names"))
+    folder = _folder(tree)
+    (folder / "runs").mkdir(exist_ok=True)
+    (folder / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    _replies(monkeypatch, "Resolved.\n\n## Evidence\n\n$ true\nexit: 0\n")
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "resolve", None, None)
+    assert code == 0, out
+    assert _land_step(folder)["step"] == "resolve"
+    code, out = _run(capsys, factory.cmd_resolve, tree, "001", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert _committed_step(tree, folder)["step"] == "resolve", "staged with the resolution"
+
+
+@needs_uv
+def test_a_stopped_landing_records_why(tmp_path, capsys) -> None:
+    """133: `land-verdicts --record` writes a stop with its problems and the step it stopped
+    after; without `--record` it writes nothing. A refused close records its refusal."""
+    root = _gated(tmp_path)
+    (root / ".sdlc" / "config.toml").write_text(
+        '[commands]\ncheck = "test ! -f broken.txt"\n', encoding="utf-8"
+    )
+    _git(root, "commit", "-q", "-am", "a gate that can fail")
+    tree = _ready(root, "stops", "stops' one")
+    folder = _folder(tree)
+    _move(root, 1)
+    assert _run(capsys, factory.cmd_land, tree, "001", "auto")[1]["state"] == "rebased"
+    (tree / "broken.txt").write_text("", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert out["verdict"] == "FAIL", out
+    before = (folder / factory.LAND_STEP).read_text(encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001")
+    assert (
+        out["next"] == "stop" and (folder / factory.LAND_STEP).read_text(encoding="utf-8") == before
+    ), "a reading alone writes nothing"
+    code, out = _run(capsys, factory.cmd_land_verdicts, tree, "001", True)
+    stop = _land_step(folder)
+    assert (stop["step"], stop["after"], stop["round"]) == ("stop", "gate", 1), stop
+    assert stop["problems"] == out["problems"] and "ship it by hand" in stop["problems"][0]
+
+
+@needs_uv
+def test_a_landing_past_its_moves_records_the_stop(tmp_path, capsys) -> None:
+    root = _repo(tmp_path)
+    _bound(root, 1)
+    tree = _ready(root, "bounded", "bounded's one")
+    folder = _folder(tree)
+    assert _run(capsys, factory.cmd_land, tree, "001", "auto")[1]["state"] == "current"
+    _move(root, 1)
+    assert _run(capsys, factory.cmd_land_close, tree, "001")[1]["state"] == "moved"
+    moved = _land_step(folder)
+    assert (moved["step"], moved["moves"], moved["limit"]) == ("rebase", 1, 1), moved
+    assert _committed_step(tree, folder) == moved, "in the commit the move was found on"
+    assert _run(capsys, factory.cmd_land, tree, "001", "auto")[1]["state"] == "rebased"
+    _pass_behaviour(folder, 1)
+    _move(root, 2)
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert code == 1, out
+    stop = _land_step(folder)
+    assert (stop["step"], stop["after"], stop["moves"]) == ("stop", "close", 1), stop
+    assert stop["problems"] == out["refusals"]
+
+
+@pytest.mark.portable
+def test_the_landing_step_record_reads_back_what_it_writes() -> None:
+    out = {"step": "review", "round": 2, "moves": 1, "limit": 3}
+    text = factory.land_step_text(out, "2026-11-18T10:00:00Z")
+    assert factory.read_land_step(text) == {
+        "step": "review", "round": 2, "moves": 1, "limit": 3,
+        "since": "2026-11-18T10:00:00Z", "after": None, "problems": [],
+    }  # fmt: skip
+    stop = {"step": "stop", "round": None, "moves": 0, "limit": 3}
+    text = factory.land_step_text(stop, "2026-11-18T10:00:00Z", "ship", ["it broke\nbadly"])
+    read = factory.read_land_step(text)
+    assert (read["round"], read["after"], read["problems"]) == (None, "ship", ["it broke badly"])
+    assert factory.read_land_step("STEP: review\n") is not None
+    assert factory.read_land_step("landing, probably\n") is None
+
+
+@needs_uv
+def test_a_landing_stopped_by_a_tool_records_plain_words(tmp_path, capsys) -> None:
+    """133 round 1: the record a person reads on the board says what failed and how to see why;
+    the tool's own words stay in the landing's output."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "hooked", "hooked's one")
+    _hook(root, "hook says no")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert code == 1 and "hook says no" in out["refusals"][0], out
+    stop = _land_step(_folder(tree))
+    assert (stop["step"], stop["after"]) == ("stop", "ship"), stop
+    assert stop["problems"] == [
+        "its commit failed: the landing's output gives git's words; rerun it once fixed"
+    ]

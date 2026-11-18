@@ -40,6 +40,9 @@ stage to `intent.md` and the scaffolds a Tier 2 owes),
 (or removes it once the run is clear) and the step it read, with since when, to `runs/step.md`,
 `agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
 questions to `runs/spec-questions.md`, never to `spec.md`), and its id and figures under `runs/`.
+The landing's commands (`land`, `land --close`, `resolve`, `gate --land`, `agent` on a landing
+task, and `land-verdicts --record` on a stop) each write the step they take to
+`runs/land-step.md` (`_record_land()`), for the board's landing track.
 Nothing is written outside the change's folder, and nothing under `.git/`, but by the landing and
 `fresh`: `land` and `resolve` commit and rebase the change's own branch, and `sdlc.py close` lands
 it; `fresh`, before a run, moves the change's own branch onto the base through `sdlc.py base` and
@@ -1777,6 +1780,77 @@ def _record_step(folder: Path, out: dict) -> None:
     path.write_text(step_text(out, since, after), encoding="utf-8", newline="\n")
 
 
+def read_land_step(text: str) -> dict | None:
+    """`runs/land-step.md`'s fields, or None when it doesn't open with a `STEP:` line."""
+    lines = text.splitlines()
+    step = STEP_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    rnd, moves, limit = field(ROUND_RE), field(MOVES_RE), field(LIMIT_RE)
+    return {
+        "step": step.group(1), "round": int(rnd) if rnd else None,
+        "moves": int(moves) if moves else None, "limit": int(limit) if limit else None,
+        "since": field(SINCE_RE), "after": field(AFTER_RE),
+        "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
+    }  # fmt: skip
+
+
+def land_step_text(
+    out: dict, since: str, after: str | None = None, problems: list[str] = ()
+) -> str:
+    """`runs/land-step.md`'s text: the step, the landing round, the moves followed and their
+    bound, since when, and on a stop the step it stopped after and why, each problem one line."""
+    rnd = "" if out.get("round") is None else str(out["round"])
+    lines = [
+        f"STEP: {out['step']}", f"ROUND: {rnd}", f"MOVES: {out.get('moves') or 0}",
+        f"LIMIT: {out.get('limit') or ''}", f"SINCE: {since}",
+    ]  # fmt: skip
+    if after:
+        lines.append(f"AFTER: {after}")
+    lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
+    return "\n".join(line.rstrip() for line in lines) + "\n"
+
+
+def _record_land(root: Path, folder: Path, step: str, problems: list[str] = ()) -> None:
+    """Write `runs/land-step.md` for landing step `step`, keeping `SINCE:` while the step and
+    round hold (the reviewers started together share one start); a `stop` records the step it
+    stopped after, the one the record named, and `problems`. For the board alone."""
+    path = folder / LAND_STEP
+    try:
+        old = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        old = None
+    moves = folder / LAND_MOVES
+    out = {
+        "step": step, "round": land_round(folder) or None,
+        "moves": len(moves.read_text(encoding="utf-8").splitlines()) if moves.is_file() else 0,
+        "limit": load_config(root)[0]["land"]["moves"],
+    }  # fmt: skip
+    same = old and old["step"] == step and old["round"] == out["round"]
+    since = old["since"] if same and old["since"] else _utc_now()
+    after = None
+    if step == "stop" and old:
+        after = old["after"] if old["step"] == "stop" else old["step"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(land_step_text(out, since, after, problems), encoding="utf-8", newline="\n")
+
+
+# What the board shows for a stop `sdlc.py ship` caused, whose own words are its stderr.
+SHIP_REFUSED = "sdlc.py ship refused to ship it: run /sdlc:ship {id} by hand to see why"
+
+
+def _land_refused(root: Path, folder: Path, out: dict, why: str, plain: str | None = None) -> int:
+    """A refusal that stops a landing under way: recorded as its `stop`, then emitted. `plain`
+    is what the board shows when `why` is a tool's raw output: what failed and how to see why."""
+    _record_land(root, folder, "stop", [plain or why])
+    return emit({**out, "refusals": [why]}, 1)
+
+
 def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
@@ -2435,6 +2509,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
         if n == 0:
             return emit({"refusals": ["no landing round is under way: run land first"]}, 1)
         path, build = land_gate_path(folder, n), landed_build(root)
+        # Before the tree is hashed, so the gate finds it as the record leaves it.
+        _record_land(root, folder, "gate")
     else:
         n = build_round(folder)
         if n == 0:
@@ -2663,6 +2739,22 @@ LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
 REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
+# The step a landing is at, and since when: written by each landing command as it starts the step
+# (`_record_land()`), read by the board (with its own copies, pinned by a test), never by the
+# landing. `ROUND:` is the landing round, `MOVES:` the base branch's moves followed so far,
+# `LIMIT:` its `[land] moves`; a `stop` names the step it stopped after (`AFTER:`) and why
+# (`- PROBLEM:` lines). Beside `runs/step.md`, whose shape stays the build's.
+LAND_STEP = Path("runs") / "land-step.md"
+MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
+# The steps a landing records: `ship` (its commit), `rebase` (a landing again), `resolve` (the
+# builder on a conflict), `fix` (the builder on the person's fix), `gate`, `review`, `mend`,
+# `verify`, `close`, and `stop`.
+LAND_STEPS = ("ship", "rebase", "resolve", "fix", "gate", "review", "mend", "verify", "close")
+# The landing tasks `agent` runs, and the step each records as it starts.
+LAND_TASK_STEP = {
+    "resolve": "resolve", "land-fix": "fix", "land-review": "review", "land-verify": "verify",
+    "land-mend": "mend",
+}  # fmt: skip
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
 # decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
 PAUSES = ("decide", "upgrade", "spec")
@@ -3368,6 +3460,9 @@ def cmd_agent(
         sessions.parent.mkdir(parents=True, exist_ok=True)
         with sessions.open("a", encoding="utf-8", newline="\n") as f:
             f.write(session + "\n")
+    # Once nothing is left to refuse it, the landing's step this session takes.
+    if task in LAND_TASK_STEP:
+        _record_land(root, folder, LAND_TASK_STEP[task])
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     model = model_for(role, cfg, tier, state["depth"])
@@ -4496,30 +4591,42 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         if (pre.get("risk") or {}).get("deep") and not _note_says(folder, FRESH_RE):
             _note_line(folder, FRESH_RE, FRESH_SKIPPED)
         nits = named_nits(root, folder)
+        # Before ship stages every path, so the step goes into the change's commit.
+        _record_land(root, folder, "ship")
         code, _, said = _sdlc(["ship", folder.name], root)
         if code:
-            return emit({**out, "refusals": [f"sdlc.py ship refused: {said.strip()[-500:]}"]}, 1)
+            why = f"sdlc.py ship refused: {said.strip()[-500:]}"
+            plain = SHIP_REFUSED.format(id=folder.name.split("-")[0])
+            return _land_refused(root, folder, out, why, plain)
         # The nits the change took in leave the register in its own commit, as ship's skill
         # deletes them: after ship, so every refusal of its comes before this write.
         if nits:
             retire_nits(root, nits)
             _git(root, "add", "--", INBOX.as_posix())
         if why := _land_commit(root, folder, by, nits, unreviewed):
-            return emit({**out, "refusals": [why]}, 1)
+            plain = "its commit failed: the landing's output gives git's words; rerun it once fixed"
+            return _land_refused(root, folder, out, why, plain)
     elif _commit_failed(root, folder):
         # Shipped, but its commit never made: ship again (a rerun is harmless) and commit what
         # the first run would have. Its disposals, checks and impact ran before ship stamped it.
+        _record_land(root, folder, "ship")
         code, _, said = _sdlc(["ship", folder.name], root)
         if code:
-            return emit({**out, "refusals": [f"sdlc.py ship refused: {said.strip()[-500:]}"]}, 1)
+            why = f"sdlc.py ship refused: {said.strip()[-500:]}"
+            plain = SHIP_REFUSED.format(id=folder.name.split("-")[0])
+            return _land_refused(root, folder, out, why, plain)
         before = _git(root, "show", f"HEAD:{INBOX.as_posix()}")
         nits = [n for n in named_nits(root, folder, before) if n not in named_nits(root, folder)]
         if why := _land_commit(root, folder, by, nits, unreviewed):
-            return emit({**out, "refusals": [why]}, 1)
-    # Landed before, and the base moved again: the earlier landing's record goes into the
-    # change's commit first, or `base` refuses on a branch with a commit and uncommitted work.
-    elif why := _amend_record(root, folder):
-        return emit({**out, "refusals": [why]}, 1)
+            plain = "its commit failed: the landing's output gives git's words; rerun it once fixed"
+            return _land_refused(root, folder, out, why, plain)
+    else:
+        # Landed before, and the base moved again: the earlier landing's record, this step's
+        # with it, goes into the change's commit first, or `base` refuses on a branch with a
+        # commit and uncommitted work.
+        _record_land(root, folder, "rebase")
+        if why := _amend_record(root, folder):
+            return _land_refused(root, folder, out, why)
     code, based, said = _sdlc(["base", folder.name], root)
     action = (based or {}).get("action")
     reason = str((based or {}).get("reason") or said)
@@ -4531,7 +4638,12 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     elif action == "refused" and "conflict" in reason:
         out["state"] = "conflict"
     else:
-        return emit({**out, "refusals": [f"sdlc.py base refused: {reason.strip()[-500:]}"]}, 1)
+        why = f"sdlc.py base refused: {reason.strip()[-500:]}"
+        plain = (
+            "bringing it up to date with the base branch failed: rerun /sdlc-factory:land, or "
+            f"run sdlc.py base {folder.name} in its worktree to see why"
+        )
+        return _land_refused(root, folder, out, why, plain)
     if out["state"] != "current":
         (folder / "reviews" / f"land-{land_round(folder) + 1}").mkdir(parents=True, exist_ok=True)
     out["round"] = land_round(folder) or None
@@ -4625,6 +4737,8 @@ def cmd_land_close(root: Path, ident: str) -> int:
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
+    # Before the amend, so the step is in the commit close merges.
+    _record_land(root, folder, "close")
     # A batch that passed itself closes a change resolved while landing only once its review
     # passed: the script's rule, never only the skill's. Read before the amend moves `HEAD`. Only
     # the landing's signal: `land` read the rest before it committed, and its own rebase can move
@@ -4633,11 +4747,10 @@ def cmd_land_close(root: Path, ident: str) -> int:
         cfg, _ = load_config(root)
         if LANDING_RESOLVED in resolution_signals(root, folder, cfg):
             why = f"landed by=auto, and {LANDING_RESOLVED}: no landing review has passed it"
-            return emit({"refusals": [why]}, 1)
+            return _land_refused(root, folder, {}, why)
         if list(folder.glob("build/land-*.ask.md")):
-            return emit(
-                {"refusals": [f"landed by=auto, and {LANDING_FIXED}: the gate is the person's"]}, 1
-            )
+            why = f"landed by=auto, and {LANDING_FIXED}: the gate is the person's"
+            return _land_refused(root, folder, {}, why)
     # The base branch moved since the change was gated and reviewed: close would only refuse (it
     # fast-forwards), so the landing goes back to its rebase, `land` again, with the move
     # recorded before the amend so the commit it was found on carries it.
@@ -4651,18 +4764,29 @@ def cmd_land_close(root: Path, ident: str) -> int:
         write_findings(folder, _rounds_at_depth(root, folder, cfg)[0] + landing)
     moved = _behind(root) > 0
     if moved and (why := _record_move(root, folder, cfg)):
-        return emit({"refusals": [why]}, 1)
+        return _land_refused(root, folder, {}, why)
+    if moved:
+        # Back to its rebase, the move counted: the record says so, in the commit it amends.
+        _record_land(root, folder, "rebase")
     if why := _amend_record(root, folder):
-        return emit({"refusals": [why]}, 1)
+        return _land_refused(root, folder, {}, why)
     if moved:
         return emit(_moved(folder))
     main = worktrees(root)[0][0] if worktrees(root) else root
     code, closed, said = _sdlc(["close", ident], main)
     # A move racing the close: read from the base, never from close's words.
     if code and not (closed or {}).get("done") and _behind(root) > 0:
-        if why := _record_move(root, folder, cfg) or _amend_record(root, folder):
-            return emit({"refusals": [why]}, 1)
+        if why := _record_move(root, folder, cfg):
+            return _land_refused(root, folder, {}, why)
+        _record_land(root, folder, "rebase")
+        if why := _amend_record(root, folder):
+            return _land_refused(root, folder, {}, why)
         return emit(_moved(folder))
+    if code and not (closed or {}).get("done") and folder.is_dir():
+        plain = (closed or {}).get("refusals") or [
+            f"sdlc.py close failed: run /sdlc:close {ident} by hand to see why"
+        ]
+        _record_land(root, folder, "stop", plain)
     return emit(closed or {"refusals": [said.strip()[-500:]]}, code)
 
 
@@ -4785,7 +4909,8 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         return emit({"refusals": [refusal]}, 1)
     base = _base(root)
     if base is None:
-        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+        why = "no base branch: set [git] base in .sdlc/config.toml"
+        return _land_refused(root, folder, {}, why)
     env = {**os.environ, "GIT_EDITOR": "true"}
     if not cont:
         done = subprocess.run(["git", "-C", str(root), "rebase", "-q", base], capture_output=True,
@@ -4803,7 +4928,9 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
             _settle_counter(root)
             files = _conflicted(root)
         if done.returncode and not files:
-            return emit({"refusals": [f"git rebase failed: {done.stderr.strip()[-300:]}"]}, 1)
+            why = f"git rebase failed: {done.stderr.strip()[-300:]}"
+            plain = f"the rebase onto {base} failed: run git status in its worktree to see why"
+            return _land_refused(root, folder, {}, why, plain)
         return emit(
             {"change": folder.name, "conflicted": files, "state": "conflict" if files else "clean"}
         )
@@ -4813,7 +4940,7 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         if CONFLICT_MARKER_RE.search((root / f).read_text(encoding="utf-8", errors="replace"))
     ]  # fmt: skip
     if marked:
-        return emit({"refusals": [f"conflict markers left in: {', '.join(marked)}"]}, 1)
+        return _land_refused(root, folder, {}, f"conflict markers left in: {', '.join(marked)}")
     # What the landing deleted from the register stays deleted, whatever the builder kept: the
     # change's own seeds and the bugs it fixes, by id, and the nits it retired (`named_nits()`).
     dropped: list[str] = []
@@ -4825,13 +4952,16 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
         _git(root, "add", "--", f)
     # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
     # own record, so it goes into the rebased commit, or `--continue` refuses on it.
-    if (folder / COSTS).is_file():
-        _git(root, "add", "--", (folder / COSTS).relative_to(root).as_posix())
+    # So did the builder's step, `resolve`, in the landing's step record.
+    for record in (COSTS, LAND_STEP):
+        if (folder / record).is_file():
+            _git(root, "add", "--", (folder / record).relative_to(root).as_posix())
     done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
                           encoding="utf-8", env=env)  # fmt: skip
     if done.returncode:
         _git(root, "rebase", "--abort")
-        return emit({"refusals": ["a second conflict: the rebase was aborted, ship it by hand"]}, 1)
+        why = "a second conflict: the rebase was aborted, ship it by hand"
+        return _land_refused(root, folder, {}, why)
     marker = folder / "runs" / "land-resolved"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(
@@ -4842,7 +4972,7 @@ def cmd_resolve(root: Path, ident: str, cont: bool) -> int:
                  "dropped": dropped, "head": head})  # fmt: skip
 
 
-def cmd_land_verdicts(root: Path, ident: str) -> int:
+def cmd_land_verdicts(root: Path, ident: str, record: bool = False) -> int:
     """The landing review of round `land-<n>`, and the step it takes next: `gate` (the script's
     gate on the change as rebased, before any reviewer, while the base branch names one),
     `accept` (a change with acceptance checks runs them again on its commit as rebased, through
@@ -4853,7 +4983,9 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     agent that wrote it can answer again (a behaviour check's missing `## Evidence` or `exit:`, a
     verdict after a preamble, the verifier's unread answers), with the roles in `mend`, each once a
     landing round (`land_mended()`), or `stop`, with why: a red gate or check, a kept change, a
-    reply without a verdict, or a mendable problem beside one of those or after its one mend."""
+    reply without a verdict, or a mendable problem beside one of those or after its one mend.
+    It writes nothing but with `record`, which the land skill passes: then a `stop` is written to
+    `runs/land-step.md` with its problems, for the board."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -4861,7 +4993,10 @@ def cmd_land_verdicts(root: Path, ident: str) -> int:
     n = land_round(folder)
     if not n:
         return emit({"change": folder.name, "round": None, "next": "pass", "missing": []})
-    return emit(land_verdict(root, folder, cfg, n))
+    out = land_verdict(root, folder, cfg, n)
+    if record and out["next"] == "stop":
+        _record_land(root, folder, "stop", out["problems"])
+    return emit(out)
 
 
 def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = False) -> dict:
@@ -5546,6 +5681,9 @@ def main() -> int:
     p_resolve.add_argument("--continue", dest="cont", action="store_true")
     p_lv = sub.add_parser("land-verdicts", help="the landing review, and its next step")
     p_lv.add_argument("id")
+    p_lv.add_argument(
+        "--record", action="store_true", help=f"write a stop to {LAND_STEP.as_posix()}"
+    )
     p_accept = sub.add_parser(
         "accept", help="run a change's acceptance checks through sdlc.py accept; never pre-approved"
     )
@@ -5589,7 +5727,7 @@ def main() -> int:
     if args.cmd == "resolve":
         return cmd_resolve(root, args.id, args.cont)
     if args.cmd == "land-verdicts":
-        return cmd_land_verdicts(root, args.id)
+        return cmd_land_verdicts(root, args.id, args.record)
     if args.cmd == "accept":
         return cmd_accept(root, args.id)
     if args.cmd == "cases":

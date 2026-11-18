@@ -807,15 +807,18 @@ RUN = [
 ]  # fmt: skip
 
 
-def _closed(root: Path, name: str, tier: int, rows=RUN, gates=(5.0, 6.0)) -> None:
+def _closed(root: Path, name: str, tier: int, rows=RUN, gates=(5.0, 6.0), land_gates=()) -> None:
     """A factory change closed on `main`: its folder committed with the rows `factory.py`'s own
-    `record_cost()` writes and its gate file, then removed by a `Close` commit."""
+    `record_cost()` writes and its gate files, then removed by a `Close` commit."""
     folder = _change(root, name, tier, "shipped", name.split("-", 1)[1])
     for i, (role, figures) in enumerate(rows):
         factory.record_cost(folder, f"s-{i}", role, "opus", figures)
-    attempts = "".join(f"## Attempt {k}\n\nVerdict: PASS\nSeconds: {s}\n\n"
-                       for k, s in enumerate(gates, 1))  # fmt: skip
-    _write(folder / "build" / "round-1.gate.md", f"GATE: PASS\n\n{attempts}")
+    for file, seconds in (("round-1", gates), ("land-1", land_gates)):
+        if not seconds:
+            continue
+        attempts = "".join(f"## Attempt {k}\n\nVerdict: PASS\nSeconds: {s}\n\n"
+                           for k, s in enumerate(seconds, 1))  # fmt: skip
+        _write(folder / "build" / f"{file}.gate.md", f"GATE: PASS\n\n{attempts}")
     _git(root, "add", "-A", str(folder))
     _git(root, "commit", "-q", "-m", f"Ship {name}")
     _git(root, "rm", "-rq", str(folder))
@@ -955,7 +958,7 @@ def test_a_step_s_state_is_in_its_text_and_the_bar_is_hidden_from_assistive_tech
     script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
     words = re.search(r"const STEP_WORDS = \{(.*?)\};", script, re.S)
     assert words, "each state has its own words"
-    for state in ("done", "current", "paused"):
+    for state in ("done", "current", "paused", "stopped"):
         assert re.search(rf'\b{state}: "[^"]+"', words.group(1)), state
     assert "progressbar" not in script
     assert re.search(r'class: "bar", "aria-hidden": "true"', script)
@@ -1131,6 +1134,12 @@ PRECEDENCE = [
      "fix intent.md's frontmatter"),
     ("problems", {"problems": ["findings.md couldn't be read: conflict"]},
      "fix what its problems name"),
+    ("landing stopped", {"progress": {"kind": "land", "stopped": True, "after": "gate"}},
+     "the landing stopped at gate: fix what it names, then /sdlc-factory:land 016, or "
+     "/sdlc:ship 016 by hand"),
+    ("landing", {"progress": {"kind": "land", "stopped": False, "step": "review"}},
+     "the factory is landing it, at review: wait for it, or /sdlc-factory:land 016 if its "
+     "session ended"),
     ("closed", {"stage": "shipped"}, "/sdlc:close 016"),
     ("stopped", {"stopped": {"next": "read runs/step.md, then rerun the build"}},
      "read runs/step.md, then rerun the build"),
@@ -1183,6 +1192,8 @@ def test_a_card_in_two_states_names_the_higher_ones_step(high, low) -> None:
     entry = _in_states(high[1], low[1])
     if entry is None:
         pytest.skip(f"{high[0]} and {low[0]} set different stages")
+    if high is not low and "progress" in high[1] and "progress" in low[1]:
+        pytest.skip(f"{high[0]} and {low[0]} are two readings of one record")
     assert board.next_action(entry) == BOTH.get((high[0], low[0]), high[2])
 
 
@@ -1345,6 +1356,19 @@ def test_the_board_fixture_stops_as_the_factory_writes() -> None:
         assert record.read_text(encoding="utf-8") == want, folder.name
 
 
+@pytest.mark.portable
+def test_the_board_fixture_lands_as_the_factory_writes() -> None:
+    """133: each landing record in the fixture is what `land_step_text()` writes for its fields."""
+    records = sorted((FIXTURE / "changes").glob(f"*/{factory.LAND_STEP}"))
+    assert records, "the fixture holds a landing"
+    for record in records:
+        text = record.read_text(encoding="utf-8")
+        rec = factory.read_land_step(text)
+        assert rec, record
+        want = factory.land_step_text(rec, rec["since"] or "", rec["after"], rec["problems"])
+        assert text == want, record
+
+
 @pytest.mark.skipif(
     not all(shutil.which(tool) for tool in ("sh", "git", "uv")), reason="needs sh, git and uv"
 )
@@ -1365,6 +1389,8 @@ def test_the_board_fixture_shows_every_card_state(tmp_path: Path, monkeypatch) -
     factory_cards = [c for c in cards.values() if c["mode"] == "factory"]
     assert any(c.get("progress") and c["progress"]["steps"] for c in factory_cards), "a step track"
     assert any(c.get("stopped") for c in factory_cards), "a stopped run"
+    landing = [c for c in factory_cards if (c.get("progress") or {}).get("kind") == "land"]
+    assert any(c["column"] == "close" for c in landing), "a landing under way, tracked"
     assert any(c.get("pending") and c["column"] == "needs-you" for c in factory_cards)
     assert any(
         c["stage"] == "test" and c["decision"] == "ESCALATE" and c["column"] == "needs-you"
@@ -1875,3 +1901,187 @@ def test_the_focus_trap_skips_a_hidden_node() -> None:
     assert re.search(
         r"(?m)^\.md \.md-table:focus-visible, \.md pre\.md-code:focus-visible \{[^}]*outline", css
     )
+
+
+# ---------------------------------------------------------------- the landing's track (133)
+
+
+def _landing_at(
+    root: Path,
+    step: str,
+    stage: str = "shipped",
+    rnd: int | None = 1,
+    moves: int = 1,
+    since: str = "2000-01-01T00:00:00Z",
+    after: str | None = None,
+    problems: tuple[str, ...] = (),
+    name: str = "030-draft-land",
+) -> Path:
+    """A factory change the approver passed, landing: its record written by `factory.py`'s own
+    writer, at `stage` (`test` before its commit, `shipped` after)."""
+    folder = _worktree(root, name, 1, stage, commit=["src/land.py"], factory=True)
+    _write(folder / "build" / "round-1.md", "Built.\n")
+    _write(folder / "reviews" / "round-1" / "code.md", "VERDICT: PASS\n")
+    _write(folder / "decision.md", "DECISION: READY\n\nIt does what it says.\n")
+    out = {"step": step, "round": rnd, "moves": moves, "limit": 3}
+    _write(folder / factory.LAND_STEP, factory.land_step_text(out, since, after, list(problems)))
+    return folder
+
+
+LANDS = {
+    "ship": ["current", "todo", "todo", "todo", "todo", "todo"],
+    "rebase": ["done", "current", "todo", "todo", "todo", "todo"],
+    "resolve": ["done", "current", "todo", "todo", "todo", "todo"],
+    "fix": ["done", "current", "todo", "todo", "todo", "todo"],
+    "gate": ["done", "done", "current", "todo", "todo", "todo"],
+    "review": ["done", "done", "done", "current", "todo", "todo"],
+    "mend": ["done", "done", "done", "current", "todo", "todo"],
+    "verify": ["done", "done", "done", "done", "current", "todo"],
+    "close": ["done", "done", "done", "done", "done", "current"],
+}
+LABELS = {"resolve": ("rebase", "resolving"), "fix": ("rebase", "fixing"),
+          "mend": ("review", "mending")}  # fmt: skip
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("step", list(LANDS))
+def test_a_landing_card_shows_its_landing_track(repo, step) -> None:
+    """133: a change landing shows the landing's track, its step current, with its round and the
+    moves followed out of the bound, where it sits: Ready to close once committed."""
+    assert set(LANDS) == set(factory.LAND_STEPS), "every step the factory records"
+    _landing_at(repo, step)
+    card = _cards(repo)["030-draft-land"]
+    progress = card["progress"]
+    assert progress["kind"] == "land" and progress["step"] == step
+    assert [s["name"] for s in progress["steps"]] == list(board.LAND_TRACK)
+    assert [s["state"] for s in progress["steps"]] == LANDS[step]
+    assert (progress["round"], progress["moves"], progress["limit"]) == (1, 1, 3)
+    assert progress["elapsed"] > 0 and progress["problems"] == []
+    labels = {s["name"]: s["label"] for s in progress["steps"]}
+    if step in LABELS:
+        assert labels[LABELS[step][0]] == LABELS[step][1]
+    assert card["column"] == "close" and progress["plan"] is None
+
+
+@pytest.mark.portable
+def test_a_landing_from_ready_to_ship_is_tracked_there(repo) -> None:
+    """133: a landing at its first step, before its commit, shows in Ready to ship."""
+    _landing_at(repo, "ship", stage="test", rnd=None, moves=0)
+    card = _cards(repo)["030-draft-land"]
+    assert card["column"] == "ready" and card["progress"]["kind"] == "land"
+    assert card["progress"]["round"] is None and LANDS["ship"] == [
+        s["state"] for s in card["progress"]["steps"]
+    ]
+
+
+@pytest.mark.portable
+def test_a_stopped_landing_shows_why_on_its_card(repo) -> None:
+    """133: a stop is not `done`: the step it stopped after is marked stopped, its problems with
+    it, and no time runs."""
+    why = "the gate failed on the change as rebased (exit 1), in build/land-1.gate.md"
+    _landing_at(repo, "stop", after="gate", problems=(why,))
+    progress = _cards(repo)["030-draft-land"]["progress"]
+    assert [s["state"] for s in progress["steps"]] == [
+        "done", "done", "stopped", "todo", "todo", "todo",
+    ]  # fmt: skip
+    assert progress["problems"] == [why] and progress["elapsed"] is None
+    assert progress["stopped"] is True
+
+
+@pytest.mark.portable
+def test_a_landing_record_counts_only_at_a_landing_stage(repo) -> None:
+    """133: at `build` the build's record is the track; with no landing record, a decision at
+    `test` is every step of the build done, as before; a garbled one is a problem."""
+    folder = _run_at(repo, "review")
+    out = {"step": "close", "round": 1, "moves": 0, "limit": 3}
+    _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2026-11-18T10:00:00Z"))
+    assert _cards(repo)["016-draft-tags"]["progress"]["kind"] == "build"
+    assert _states(_cards(repo)["016-draft-tags"]) == TRACKS["review"]
+    assert _states(_cards(repo)["003-draft-export"]) == ["done"] * 6
+    landing = _landing_at(repo, "gate")
+    _write(landing / factory.LAND_STEP, "landing, probably\n")
+    card = _cards(repo)["030-draft-land"]
+    assert card["progress"] is None
+    assert any(factory.LAND_STEP.as_posix() in p for p in card["problems"]), card["problems"]
+
+
+@pytest.mark.portable
+def test_the_landing_step_record_is_a_pinned_copy() -> None:
+    """133: the board's copies are `factory.py`'s, and its writer reads back through the board."""
+    for name in ("MOVES_RE", "PROBLEM_RE"):
+        assert getattr(board, name).pattern == getattr(factory, name).pattern, name
+    assert board.LAND_STEP == factory.LAND_STEP
+    assert set(board.LAND_AT) == set(factory.LAND_STEPS)
+    for out, after, problems in (
+        ({"step": "review", "round": 2, "moves": 1, "limit": 3}, None, []),
+        ({"step": "stop", "round": None, "moves": 0, "limit": 2}, "ship", ["it broke"]),
+    ):
+        text = factory.land_step_text(out, "2026-11-18T10:00:00Z", after, problems)
+        assert board.read_land_step(text) == factory.read_land_step(text)
+
+
+@pytest.mark.portable
+def test_landing_typical_times_come_from_closed_factory_runs(repo) -> None:
+    """133: the rows after the approver are the landing's: its reviews and verifications, and its
+    gate from `build/land-<n>.gate.md`; a landing step is timed against them."""
+    rows = [*RUN[:-2], _row("behaviour", 90), _row("verifier", 30), _row("code", 70)]
+    for name in ("060-draft-a", "061-draft-b", "062-draft-c"):
+        _closed(repo, name, 1, rows, land_gates=(40.0,))
+    samples = board.history_samples(repo, "main")
+    assert samples[("land-review", 1)]["060-draft-a"] == [90, 70]
+    assert samples[("land-verify", 1)]["060-draft-a"] == [30]
+    assert samples[("land-gate", 1)]["060-draft-a"] == [40.0]
+    assert samples[("approve", 1)]["060-draft-a"] == [15]
+    table = board.typical_times(repo, "main")
+    assert table["land-gate/1"] == {"seconds": 40, "samples": 3}
+    _landing_at(repo, "gate", since="2000-01-01T00:00:00Z")
+    progress = _cards(repo)["030-draft-land"]["progress"]
+    assert (progress["typical"], progress["fraction"], progress["samples"]) == (40, 0.95, 3)
+
+
+@pytest.mark.portable
+def test_the_page_labels_a_landing_track_and_says_why_it_stopped() -> None:
+    """133: a landing's row names itself and its round, the moves it followed out of its bound,
+    and each problem of a stop as a flag, in text."""
+    script = _page_parts()[1]
+    row = re.search(r"function progressRow\(p\) \{(.*?)\n\}", script, re.S).group(1)
+    assert 'p.kind === "land"' in row and "`landing${" in row
+    assert "base moved ${p.moves} of" in row
+    assert re.search(r'for \(const why of p\.problems \|\| \[\]\).*"flag".*landing stopped', row)
+
+
+@pytest.mark.portable
+def test_a_landing_card_names_the_landing_not_close(repo) -> None:
+    """133 round 1: a landing under way, before or after its commit, names the landing as its next
+    step, never the hand-run close or ship; a stopped one names the way on, and no landing record
+    leaves close as it was."""
+    folder = _landing_at(repo, "review")
+    card = _cards(repo)["030-draft-land"]
+    assert card["next"] == (
+        "the factory is landing it, at review: wait for it, or /sdlc-factory:land 030 if its "
+        "session ended"
+    )
+    why = "its commit failed: the landing's output gives git's words; rerun it once fixed"
+    out = {"step": "stop", "round": 1, "moves": 0, "limit": 3}
+    _write(folder / factory.LAND_STEP, factory.land_step_text(out, "", "ship", [why]))
+    card = _cards(repo)["030-draft-land"]
+    assert card["progress"]["after"] == "ship" and card["progress"]["problems"] == [why]
+    assert card["next"] == (
+        "the landing stopped at ship: fix what it names, then /sdlc-factory:land 030, or "
+        "/sdlc:ship 030 by hand"
+    )
+    (folder / factory.LAND_STEP).unlink()
+    assert _cards(repo)["030-draft-land"]["next"] == "/sdlc:close 030"
+
+
+@pytest.mark.portable
+def test_a_stopped_landing_drops_the_ready_look() -> None:
+    """133 round 1: a stopped landing's card keeps its column but not its column's ready styling:
+    it takes a stop's edge, set after the column's so it wins."""
+    css, script = _page_parts()
+    assert re.search(r'c\.progress && c\.progress\.kind === "land" && c\.progress\.stopped', script)
+    assert '" landing-stopped"' in script
+    ready = css.index(".card.ready {")
+    stopped = css.index(".card.landing-stopped {")
+    assert stopped > ready and "var(--stop)" in css[stopped : css.index("}", stopped)]
+    assert re.search(r'key: "close", label: "Ready to close", who: "[^"]*landing', script)

@@ -540,7 +540,15 @@ track of the round under way (build, gate, reviews *n/m*, verify, rework, approv
 run against the median time that step took at that tier in the last 20 closed factory changes, a
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
 them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
-has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A click opens
+has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A change the factory
+is landing shows the landing's track instead (ship, rebase or resolving, gate, review, verify,
+close), from the `runs/land-step.md` each landing command writes as it starts its step: the
+landing round, how often the base branch has moved out of `[land] moves`, the gate, review and
+verify timed against closed changes' landings, and a stopped landing marked at its step with why,
+in Ready to ship before its commit and Ready to close after. Its next step names the landing, not
+`/sdlc:close` or `/sdlc:ship`, while it runs; once it stops, the card loses its column's ready look
+and names the way on: fix what it names, then `/sdlc-factory:land`, or `/sdlc:ship` by hand. A
+click opens
 any file in the change's folder, a markdown file rendered (its text never parsed as HTML; a link
 followed only to the web, in a new tab, or to another file of the change) with a `Raw` toggle for
 its exact text. It writes nothing, answers only `GET` for the page, `/state.json`
