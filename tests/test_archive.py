@@ -2472,10 +2472,10 @@ def test_close_reads_the_run_rows_the_factory_writes(tmp_path, monkeypatch) -> N
     factory.record_cost(folder, "s-2", "builder", "m", {"duration_ms": 5})
     at = lambda t: datetime.fromisoformat(f"2026-10-01T{t}+00:00")  # noqa: E731
     costs = (folder / factory.COSTS).read_text(encoding="utf-8")
-    assert sdlc.closing._timed_rows(costs) == [(at("11:30:00"), at("11:40:00"), "approver")]
+    assert sdlc.factory_records.timed_rows(costs) == [(at("11:30:00"), at("11:40:00"), "approver")]
     clock = iter(["2026-10-01T12:00:00Z", "2026-10-01T12:05:00Z"])
     monkeypatch.setattr(factory, "_utc_now", lambda: next(clock))
     factory._record_land(root, folder, "checks")
     factory._record_land(root, folder, "ship")
     times = (folder / factory.LAND_TIMES).read_text(encoding="utf-8")
-    assert sdlc.closing._land_sinces(times) == [at("12:00:00")]
+    assert sdlc.factory_records.land_sinces(times) == [at("12:00:00")]

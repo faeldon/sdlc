@@ -339,7 +339,7 @@ def test_the_cost_is_summed_as_the_factory_sums_it(repo) -> None:
         row("s-3", "test", "haiku", 500),
     ]
     _write(folder / "runs" / "costs.jsonl", "".join(json.dumps(r) + "\n" for r in rows) + "{bad\n")
-    mine, theirs = board.cost(folder), factory.run_cost(folder)
+    mine, theirs = sdlc.factory_records.cost(folder), factory.run_cost(folder)
     for key in ("usd", "by_role", "by_model", "runs", "unknown"):
         assert mine[key] == theirs[key], key
     assert mine["usd"] == 0.85 and mine["duration_ms"] == 91500
@@ -406,7 +406,7 @@ def test_an_unreadable_stop_record_is_a_stop_as_in_status(repo) -> None:
     folder = _stopped_run(repo)
     _write(folder / factory.STOPPED, "stopped, somehow\n")
     card = _cards(repo)["013-draft-escapes"]
-    assert card["stopped"] == sdlc.factory_stop(folder), "the reading status shows"
+    assert card["stopped"] == sdlc.factory_records.read_stop(folder), "the reading status shows"
     assert card["stopped"]["next"] == "read runs/stopped.md"
     assert card["column"] == "needs-you" and card["problems"] == []
     assert card["needs"] == ["stopped: read runs/stopped.md"]
@@ -424,7 +424,7 @@ def test_the_stop_record_says_why_and_reads_as_before(tmp_path) -> None:
         for regex in (factory.STOPPED_RE, factory.NEXT_RE, factory.PROBLEM_RE):
             assert not regex.match(why), (way, regex.pattern)
         _write(tmp_path / factory.STOPPED, text)
-        assert sdlc.factory_stop(tmp_path) == {
+        assert sdlc.factory_records.read_stop(tmp_path) == {
             "way": way, "next": factory.WAYS[way].format(id="013"), "problems": ["it broke"]
         }  # fmt: skip
 
@@ -489,21 +489,28 @@ def test_a_resumed_run_goes_back_to_build(repo) -> None:
 def test_the_factory_parsing_is_a_pinned_copy() -> None:
     names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "KEPT_RE", "DROPPED_RE", "LEDGER_RE")
     for name in names:
-        assert getattr(board, name).pattern == getattr(factory, name).pattern, name
-    assert board.VERIFIED == factory.VERIFIED and board.COSTS == factory.COSTS
-    assert board.RECONSIDER == factory.RECONSIDER
-    assert board.STOPPED == factory.STOPPED
-    assert board.SETTLED == factory.SETTLED
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    assert (
+        sdlc.factory_records.VERIFIED == factory.VERIFIED
+        and sdlc.factory_records.COSTS == factory.COSTS
+    )
+    assert sdlc.factory_records.RECONSIDER == factory.RECONSIDER
+    assert sdlc.factory_records.STOPPED == factory.STOPPED
+    assert sdlc.factory_records.SETTLED == factory.SETTLED
 
 
 @pytest.mark.portable
 def test_the_boards_opening_is_a_pinned_copy() -> None:
-    """140 R8: the board reads a round's verdicts and the decision as `factory.opening()` does,
-    case for case over the shared table."""
+    """140 R8, 163 R7: the board, `status` and the metrics read a round's verdicts and the
+    decision through `factory_records.opening()`, as `factory.opening()` does, case for case over
+    the shared table."""
     cases = json.loads((ROOT / "tests" / "fixtures" / "opening-cases.json").read_text("utf-8"))
     for case in cases:
         regex = {"verdict": factory.VERDICT_RE, "decision": factory.DECISION_RE}[case["kind"]]
-        mine, theirs = board.opening(case["lines"], regex), factory.opening(case["lines"], regex)
+        mine, theirs = (
+            sdlc.factory_records.opening(case["lines"], regex),
+            factory.opening(case["lines"], regex),
+        )
         got = [mine[0], mine[1].group(1)] if mine else None
         assert got == ([theirs[0], theirs[1].group(1)] if theirs else None) == case["answer"], case
 
@@ -524,11 +531,11 @@ def test_the_board_reads_a_verdict_and_a_decision_after_prose(tmp_path) -> None:
     )
     (folder / "decision.md").write_text("I read every round.\n\nDECISION: READY\n", "utf-8")
     problems: list[str] = []
-    found = board._factory(folder, problems)
+    found = sdlc.factory_records.card_reading(folder, problems)
     assert found["rounds"][0]["reviews"]["code"] == {"verdict": "CHANGES", "changes": 1}
     assert found["decision"] == "READY"
     assert problems == [factory._no_verdict(1, "test")], problems
-    assert board._reviewed(folder, 1) == 1
+    assert sdlc.factory_records.reviewed(folder, 1) == 1
 
 
 @pytest.mark.portable
@@ -743,7 +750,7 @@ def test_a_factory_card_shows_its_step_track(repo, step) -> None:
 def test_an_upgrade_pauses_the_step_track(repo, step) -> None:
     """112 R13: an upgrade and its spec pause the track where the run was, as a decide does, from
     the board's pinned copy of the paused steps."""
-    assert board.PAUSES == factory.PAUSES
+    assert sdlc.factory_records.PAUSES == factory.PAUSES
     _run_at(repo, step, 2, after="review")
     progress = _cards(repo)["016-draft-tags"]["progress"]
     assert progress is not None, "the track is kept, not dropped"
@@ -843,10 +850,13 @@ def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
     """R7: the board's copies are `factory.py`'s, and its writer reads back through the board."""
     for name in ("STEP_RE", "ROUND_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "AFTER_RE",
                  "SECONDS_RE", "STUCK_RE", "UNTESTABLE_RE"):  # fmt: skip
-        assert getattr(board, name).pattern == getattr(factory, name).pattern, name
-    assert board.STEP == factory.STEP and board.REVIEWER_ROLES == factory.REVIEWERS
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    assert (
+        sdlc.factory_records.STEP == factory.STEP
+        and sdlc.factory_records.REVIEWERS == factory.REVIEWERS
+    )
     gate = (ROOT / "plugins" / "factory" / "scripts" / "factory.py").read_text(encoding="utf-8")
-    assert "Seconds: {seconds}" in gate and board.SECONDS_RE.match("Seconds: 12.5")
+    assert "Seconds: {seconds}" in gate and sdlc.factory_records.SECONDS_RE.match("Seconds: 12.5")
     for out in (
         {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"]},
         {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"]},
@@ -860,9 +870,11 @@ def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
         },
     ):
         text = factory.step_text(out, "2026-11-17T10:00:00Z", "rework")
-        assert board.read_step(text) == factory.read_step(text)
-        assert board.read_step(text)["reviewers"] == out["reviewers"]
-    assert board.read_step(text)["stuck"] == ["code: a"], "the early stop's reason reads back"
+        assert sdlc.factory_records.read_step(text) == factory.read_step(text)
+        assert sdlc.factory_records.read_step(text)["reviewers"] == out["reviewers"]
+    assert sdlc.factory_records.read_step(text)["stuck"] == ["code: a"], (
+        "the early stop's reason reads back"
+    )
 
 
 def _row(role: str, seconds: float | None) -> tuple[str, dict]:
@@ -1494,7 +1506,7 @@ def test_the_board_fixture_stops_as_the_factory_writes() -> None:
     assert records, "the fixture holds a stopped run"
     for record in records:
         folder = record.parent.parent
-        stop = sdlc.factory_stop(folder)
+        stop = sdlc.factory_records.read_stop(folder)
         assert stop, record
         want = factory.stop_text(folder.name, stop["way"], stop["problems"])
         assert record.read_text(encoding="utf-8") == want, folder.name
@@ -2208,8 +2220,8 @@ def test_a_landing_record_counts_only_at_a_landing_stage(repo) -> None:
 def test_the_landing_step_record_is_a_pinned_copy() -> None:
     """133: the board's copies are `factory.py`'s, and its writer reads back through the board."""
     for name in ("MOVES_RE", "PROBLEM_RE", "TRAIN_RE"):
-        assert getattr(board, name).pattern == getattr(factory, name).pattern, name
-    assert board.LAND_STEP == factory.LAND_STEP
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    assert sdlc.factory_records.LAND_STEP == factory.LAND_STEP
     assert set(board.LAND_AT) == set(factory.LAND_STEPS)
     for out, after, problems in (
         ({"step": "review", "round": 2, "moves": 1, "limit": 3}, None, []),
@@ -2220,8 +2232,8 @@ def test_the_landing_step_record_is_a_pinned_copy() -> None:
          ["ejected from the train: the gate failed"]),
     ):  # fmt: skip
         text = factory.land_step_text(out, "2026-11-18T10:00:00Z", after, problems)
-        assert board.read_land_step(text) == factory.read_land_step(text)
-        assert board.read_land_step(text)["train"] == out.get("train")
+        assert sdlc.factory_records.read_land_step(text) == factory.read_land_step(text)
+        assert sdlc.factory_records.read_land_step(text)["train"] == out.get("train")
 
 
 @pytest.mark.portable
@@ -2246,7 +2258,7 @@ def test_a_train_member_shows_its_place_and_an_ejection(repo) -> None:
     assert progress["problems"] == [why] and progress["train"] == "2 of 3"
     assert "the landing stopped at gate" in card["next"], card["next"]
     # `status` reads the eject as the board does, so the two never disagree on it.
-    stop = sdlc.factory_land_stop(folder)
+    stop = sdlc.factory_records.read_land_stop(folder)
     assert stop == card["land_stop"] == {"after": "gate", "problems": [why]}, "as status reads it"
     assert (
         "landing stopped at gate"
@@ -2340,7 +2352,7 @@ def test_a_stopped_landing_is_in_needs_you(repo) -> None:
         "the landing stopped at close: fix what it names, then /sdlc-factory:land 030, or "
         "/sdlc:close 030 by hand"
     )
-    assert sdlc.factory_land_stop(folder) == card["land_stop"], "as status reads it"
+    assert sdlc.factory_records.read_land_stop(folder) == card["land_stop"], "as status reads it"
     _landing_at(repo, "stop", stage="test", after="ship", problems=("it broke",),
                 name="031-draft-early")  # fmt: skip
     card = _cards(repo)["031-draft-early"]
@@ -2360,19 +2372,19 @@ def test_a_stopped_landing_is_in_needs_you(repo) -> None:
 def test_the_landing_stop_is_read_as_status_reads_it(repo) -> None:
     """141: `sdlc.py`'s reading of a stop in `runs/land-step.md` is a pinned copy of the factory's,
     None for a landing under way or no record, and never raises on one that won't read."""
-    assert sdlc.FACTORY_LAND_STEP == factory.LAND_STEP
-    assert sdlc.FACTORY_AFTER_RE.pattern == factory.AFTER_RE.pattern
-    assert sdlc.FACTORY_LAND_STOPS == board.LAND_STOPS, "a stop to the board is one to status"
+    assert sdlc.factory_records.LAND_STEP == factory.LAND_STEP
+    assert sdlc.factory_records.AFTER_RE.pattern == factory.AFTER_RE.pattern
     folder = _landing_at(repo, "stop", after="gate", problems=("the gate failed", "exit 1"))
-    assert sdlc.factory_land_stop(folder) == {"after": "gate", "problems": ["the gate failed",
-                                                                            "exit 1"]}  # fmt: skip
+    assert sdlc.factory_records.read_land_stop(folder) == {"after": "gate",
+                                                           "problems": ["the gate failed",
+                                                                        "exit 1"]}  # fmt: skip
     out = {"step": "verify", "round": 1, "moves": 0, "limit": 3}
     _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2026-11-18T10:00:00Z"))
-    assert sdlc.factory_land_stop(folder) is None
+    assert sdlc.factory_records.read_land_stop(folder) is None
     _write(folder / factory.LAND_STEP, "landing, probably\n")
-    assert sdlc.factory_land_stop(folder) is None
+    assert sdlc.factory_records.read_land_stop(folder) is None
     (folder / factory.LAND_STEP).unlink()
-    assert sdlc.factory_land_stop(folder) is None
+    assert sdlc.factory_records.read_land_stop(folder) is None
 
 
 @pytest.mark.portable
@@ -2635,9 +2647,11 @@ def test_the_columns_name_the_state_of_the_work() -> None:
 def test_the_boards_problem_words_are_the_factorys(tmp_path) -> None:
     """145 R27: a reply or a decision with no answer the script reads is worded on the card as
     the factory words it: the board's copies, pinned."""
-    assert board.NO_DECISION == factory.NO_DECISION
-    assert board.no_verdict(2, "code") == factory._no_verdict(2, "code")
-    assert board.no_verdict(1, "test", "land") == factory._no_verdict(1, "test", "land")
+    assert sdlc.factory_records.NO_DECISION == factory.NO_DECISION
+    assert sdlc.factory_records.no_verdict(2, "code") == factory._no_verdict(2, "code")
+    assert sdlc.factory_records.no_verdict(1, "test", "land") == factory._no_verdict(
+        1, "test", "land"
+    )
     assert "holds no VERDICT: PASS or VERDICT: CHANGES the script reads" in factory._no_verdict(
         1, "code"
     )
@@ -2649,7 +2663,7 @@ def test_the_boards_problem_words_are_the_factorys(tmp_path) -> None:
     _write(folder / "reviews" / "round-1" / "code.md", "Looks fine.\n")
     _write(folder / "decision.md", "Ship it, I think.\n")
     problems: list[str] = []
-    board._factory(folder, problems)
+    sdlc.factory_records.card_reading(folder, problems)
     assert problems == [factory._no_verdict(1, "code"), factory.NO_DECISION], problems
 
 
@@ -2685,7 +2699,7 @@ def test_an_open_ended_step_never_shows_a_fraction(repo) -> None:
     history = {f"land-{step}/1": {"seconds": 60, "samples": 3} for step in factory.LAND_STEPS}
     entry = {"stage": "shipped", "tier": 1}
     for step in factory.LAND_STEPS:
-        if step in board.LAND_STOPS:
+        if step in sdlc.factory_records.LAND_STOPS:
             continue
         out = {"step": step, "round": 1, "moves": 0, "limit": 3}
         _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2000-01-01T00:00:00Z"))
@@ -2743,16 +2757,16 @@ def test_the_land_record_readers_are_pinned_copies() -> None:
         text = factory.land_step_text(
             out, "2026-11-18T10:00:00Z", out.get("after"), out.get("problems", [])
         )
-        assert board.read_land_step(text) == factory.read_land_step(text), out
+        assert sdlc.factory_records.read_land_step(text) == factory.read_land_step(text), out
         assert factory.read_land_step(text)["waits"] == out.get("waits"), out
     for text in cases["times"]:
-        assert board.read_land_times(text) == factory.read_land_times(text), text
+        assert sdlc.factory_records.read_land_times(text) == factory.read_land_times(text), text
     assert factory.read_land_times(cases["times"][0]) == [
         {"step": "ship", "round": None, "seconds": 12.5},
         {"step": "gate", "round": 1, "seconds": 40.0},
     ]
-    assert board.WAITS_RE.pattern == factory.WAITS_RE.pattern
-    assert board.LAND_TIMES == factory.LAND_TIMES
+    assert sdlc.factory_records.WAITS_RE.pattern == factory.WAITS_RE.pattern
+    assert sdlc.factory_records.LAND_TIMES == factory.LAND_TIMES
     assert set(board.LAND_AT) == set(factory.LAND_STEPS)
 
 
@@ -2816,8 +2830,8 @@ def test_the_column_rule_is_sdlcs_alone(repo) -> None:
 @pytest.mark.portable
 def test_factory_land_steps_match_the_boards_track() -> None:
     """151 R3: the steps `status` reads as a landing in flight are the board's track's."""
-    assert set(sdlc.FACTORY_LAND_STEPS) == set(board.LAND_AT)
-    assert set(sdlc.FACTORY_LAND_STOPS) <= set(sdlc.FACTORY_LAND_STEPS) | {"stop"}
+    assert set(sdlc.factory_records.LAND_STEPS) == set(board.LAND_AT)
+    assert set(sdlc.factory_records.LAND_STOPS) <= set(sdlc.factory_records.LAND_STEPS) | {"stop"}
 
 
 @pytest.mark.portable
@@ -2835,8 +2849,10 @@ def test_the_board_and_status_read_a_landing_in_flight_alike(repo, monkeypatch, 
     _write(garbled / factory.LAND_STEP, "landing, probably\n")
     names["079"] = "079-land-garbled"
     problem = "runs/land-step.md doesn't open with STEP:"
-    assert sdlc.factory_landing(garbled, "test") == (False, problem)
-    assert sdlc.factory_landing(garbled, "build") == (False, None), "only at a landing's stages"
+    assert sdlc.factory_records.landing(garbled, "test") == (False, problem)
+    assert sdlc.factory_records.landing(garbled, "build") == (False, None), (
+        "only at a landing's stages"
+    )
     cards = _cards(repo)
     out, a = _status(repo, monkeypatch, capsys)
     placed = _placed(out)

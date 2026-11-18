@@ -7,10 +7,11 @@ own globals, as it does `retro.py`: every reader the board shares with `status` 
 The page (`board.html`, beside this file) polls `/state.json`, which is rebuilt from the change
 folders on every request, so the board and the folders can't disagree. A change the factory ran
 on (its folder holds `runs/`) adds its rounds, decisions and cost, read from the files the run
-left with copies of `factory.py`'s parsing, each pinned to it by a test: the core never imports or
-runs the factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the
-person, with the record's problems and its way on, read by `sdlc.factory_stop()` as `status`
-reads it. Its card's step track is the step the
+left through `sdlc.factory_records` (`scripts/factory_records.py`, the core's one reader of them,
+its copies of `factory.py`'s parsing pinned by a test): the core never imports or runs the
+factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the person, with
+the record's problems and its way on, read by `factory_records.read_stop()` as `status` reads
+it. Its card's step track is the step the
 supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
 factory runs, read from history once per base-branch tip and kept in memory. A change landing (at
 `test` or `shipped` with a `runs/land-step.md`) shows the landing's track instead, from the step
@@ -49,70 +50,12 @@ MARKER = "sdlc"
 CLOSED = ("shipped", "dropped")
 GITHUB_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
-# The factory's files, read with copies of `factory.py`'s parsing, pinned to it by a test.
-VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
-DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
-CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
-KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
-DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
-LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$")
-SETTLED = " → settled by the approver: "
-RECONSIDER = "## Reconsider the approach"
-# An open box the ledger can't read: a problem, never an answered decision.
-OPEN_BOX = "- [ ]"
-VERIFIED = "verified.md"
-COSTS = Path("runs") / "costs.jsonl"
-STOPPED = Path("runs") / "stopped.md"
-STEP = Path("runs") / "step.md"
-STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
-STUCK_RE = re.compile(r"^- STUCK: (.+?)\s*$")
-UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(.+?)\s*$")
-ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
-LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
-REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
-SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
-AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
-SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
-LAND_STEP = Path("runs") / "land-step.md"
-MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
-TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
-WAITS_RE = re.compile(r"^WAITS: (.+?)\s*$")
-LAND_TIMES = Path("runs") / "land-times.jsonl"
-PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
-REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
-# A reply or a decision with no answer `opening()` reads, worded as `factory.py`'s `_no_verdict()`
-# and `NO_DECISION` word it, pinned by a test.
-NO_DECISION = (
-    "decision.md holds no DECISION: READY or DECISION: ESCALATE the script reads (first, or the "
-    "only answer it gives)"
-)
-
-
-def no_verdict(n: int, role: str, kind: str = "round") -> str:
-    return (
-        f"reviews/{kind}-{n}/{role}.md holds no VERDICT: PASS or VERDICT: CHANGES the script "
-        "reads (first, or the only answer it gives)"
-    )
-
-
-def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
-    """A reply's answer line, `(index, match)`, or None: a copy of `factory.py`'s `opening()`,
-    pinned to it by a test over a shared table of cases."""
-    if lines and (m := regex.match(lines[0])):
-        return 0, m
-    found = [(i, m) for i, line in enumerate(lines) if (m := regex.match(line))]
-    if found and len({m.group(1) for _, m in found}) == 1:
-        return found[0]
-    return None
-
-
 # A factory card's step track: the six positions of a round, and where each step the record names
-# sits on it (`fix` is the gate, fixing). A pause (`PAUSES`, `factory.py`'s, pinned by a test)
-# keeps the position it paused at; `done` is past them all. An estimate never fills its bar past
+# sits on it (`fix` is the gate, fixing). A pause (`factory_records.PAUSES`, `factory.py`'s) keeps
+# the position it paused at; `done` is past them all. An estimate never fills its bar past
 # `CAP` while the step runs.
 TRACK = ("build", "gate", "review", "verify", "rework", "approve")
 AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
-PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The acceptance checks and the
@@ -138,7 +81,6 @@ LAND_LABEL = {
     "wait": "waiting",
     "recheck": "checks",
 }
-LAND_STOPS = ("stop", "eject")
 # The steps whose figures come from the review and gate records history already holds, and those
 # `runs/land-times.jsonl` times. An open-ended step (a conflict, a fix, a mend, a paid case run, a
 # turn in a train) has no typical length: its card shows elapsed time and `running`, never a bar.
@@ -253,29 +195,35 @@ def _entry(
     if entry["mode"] == "manual" or rec["stage"] == "test":
         # The record a gate run by hand left (`sdlc.py gate`); a factory run's gate is its own
         # while it builds, and at `test` the hand gate clears the approver's `gate` reasons.
-        entry["gate"] = read("build/gate.md", lambda: sdlc.hand_gate(folder, home, trunk), None)
+        entry["gate"] = read(
+            sdlc.factory_records.HAND_GATE.as_posix(),
+            lambda: sdlc.hand_gate(folder, home, trunk),
+            None,
+        )
         problems += (entry["gate"] or {}).get("problems", [])
     if entry["mode"] == "factory":
-        entry.update(_factory(folder, problems))
+        entry.update(sdlc.factory_records.card_reading(folder, problems))
         # A stopped run sits at `build`; past it the record is history, and read past.
         entry["stopped"] = (
-            read("runs/stopped.md", lambda: _stopped(folder), None)
+            read(sdlc.factory_records.STOPPED.as_posix(), lambda: _stopped(folder), None)
             if rec["stage"] == "build"
             else None
         )
         entry["progress"] = read(
-            "runs/step.md", lambda: _progress(entry, folder, problems, history, now), None
+            sdlc.factory_records.STEP.as_posix(),
+            lambda: _progress(entry, folder, problems, history, now),
+            None,
         )
         if entry["progress"] and entry["progress"]["kind"] == "build":
             entry["progress"]["plan"] = read(
                 "plan.md", lambda: _plan_hint(entry, folder, home, trunk), None
             )
-    # A landing in flight, as `status` reads it (`sdlc.factory_landing()`); its problem is the
+    # A landing in flight, as `status` reads it (`factory_records.landing()`); its problem is the
     # track's own, already added where the track was read.
-    entry["in_flight"] = sdlc.factory_landing(folder, rec["stage"])[0]
+    entry["in_flight"] = sdlc.factory_records.landing(folder, rec["stage"])[0]
     entry["seen"] = read("its progress", lambda: sdlc.seen_stage(entry, folder, home, trunk), None)
-    # A landing that stopped, as `sdlc.factory_land_stop()` reads it for `status`: from the track
-    # already read, so the card and its column come from one reading of the record.
+    # A landing that stopped, as `factory_records.read_land_stop()` reads it for `status`: from
+    # the track already read, so the card and its column come from one reading of the record.
     landing = entry.get("progress") or {}
     entry["land_stop"] = (
         {"after": landing["after"], "problems": landing["problems"]}
@@ -335,99 +283,11 @@ def _files(folder: Path) -> list[str]:
     )  # fmt: skip
 
 
-def _factory(folder: Path, problems: list[str]) -> dict:
-    """What a factory run left: its rounds, the approver's decision, the ledger and the cost."""
-    rounds = []
-    base = folder / "reviews"
-    dirs = [p for p in base.glob("round-*") if p.is_dir() and p.name[6:].isdigit()]
-    for path in sorted(dirs, key=lambda p: int(p.name[6:])):
-        n = int(path.name[6:])
-        reviews = {}
-        for file in sorted(path.glob("*.md")):
-            if file.name == VERIFIED:
-                continue
-            lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
-            answer = opening(lines, VERDICT_RE)
-            if not answer:
-                problems.append(no_verdict(n, file.stem))
-                continue
-            at, m = answer
-            changes = sum(1 for line in lines[at + 1 :] if CHANGE_RE.match(line))
-            reviews[file.stem] = {"verdict": m.group(1), "changes": changes}
-        verified = None
-        if (path / VERIFIED).is_file():
-            lines = (path / VERIFIED).read_text(encoding="utf-8", errors="replace").splitlines()
-            verified = {
-                "kept": sum(1 for line in lines if KEPT_RE.match(line)),
-                "dropped": sum(1 for line in lines if DROPPED_RE.match(line)),
-            }
-        built = (folder / "build" / f"round-{n}.md").is_file()
-        rounds.append({"round": n, "built": built, "reviews": reviews, "verified": verified})
-    built = sorted(
-        int(p.stem[6:]) for p in (folder / "build").glob("round-*.md") if p.stem[6:].isdigit()
-    )
-    decision, reconsider = None, False
-    path = folder / "decision.md"
-    if path.is_file():
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        answer = opening(lines, DECISION_RE)
-        m = answer[1] if answer else None
-        decision = m.group(1) if m else None
-        reconsider = RECONSIDER in [line.strip() for line in lines]
-        if not m:
-            problems.append(NO_DECISION)
-    pending, assumed, ledger_lines, garbled = [], [], 0, False
-    path = folder / "decisions.md"
-    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
-        m = LEDGER_RE.match(line)
-        garbled = garbled or not m and line.startswith(OPEN_BOX)
-        # A look line is the approver's reason, read with the decision (`sdlc.factory_reading()`).
-        if m and m.group(4) == "look":
-            continue
-        ledger_lines += bool(m) and SETTLED not in line
-        if m and m.group(1) == " ":
-            item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
-            (pending if m.group(4) == "blocking" else assumed).append(item)
-    if garbled:
-        problems.append(sdlc.GARBLED_LEDGER)
-    # The approver's `gate` and `look` reasons and the look lines still open, as `status` reads
-    # them: `sdlc.factory_reading()` itself, so the card and `status` can't say two things.
-    reading = sdlc.factory_reading(folder)
-    return {
-        "rounds": rounds, "built": built, "decision": decision, "pending": pending,
-        "assumed": assumed, "cost": cost(folder), "reconsider": reconsider,
-        "ledger_lines": ledger_lines, "reasons": reading["reasons"], "looks": reading["looks"],
-    }  # fmt: skip
-
-
 def _stopped(folder: Path) -> dict | None:
     """The stop `factory.py verdicts --record` left in `runs/stopped.md`, as `status` reads it:
-    `sdlc.factory_stop()` itself, so the card and `status` can't say two things. None without
-    one; a record that won't read is still a stop, whose way on is to read it."""
-    return sdlc.factory_stop(folder)
-
-
-def read_step(text: str) -> dict | None:
-    """`runs/step.md`'s fields, as `factory.py`'s `read_step()` reads them (a test pins the two),
-    or None when it doesn't open with a `STEP:` line."""
-    lines = text.splitlines()
-    step = STEP_RE.match(lines[0]) if lines else None
-    if not step:
-        return None
-
-    def field(regex: re.Pattern) -> str | None:
-        found = [m.group(1) for m in map(regex.match, lines) if m]
-        return found[0] if found else None
-
-    rnd, limit, names = field(ROUND_RE), field(LIMIT_RE), field(REVIEWERS_RE)
-    return {
-        "step": step.group(1), "round": int(rnd) if rnd else None,
-        "limit": int(limit) if limit else None,
-        "reviewers": [n.strip() for n in (names or "").split(",") if n.strip()],
-        "since": field(SINCE_RE), "after": field(AFTER_RE),
-        "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
-        "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
-    }  # fmt: skip
+    `factory_records.read_stop()` itself, so the card and `status` can't say two things. None
+    without one; a record that won't read is still a stop, whose way on is to read it."""
+    return sdlc.factory_records.read_stop(folder)
 
 
 def _since(text: str | None) -> float | None:
@@ -443,13 +303,18 @@ def _progress(
     hint, from the supervisor's last reading (`runs/step.md`) and the run's files: None for a
     stopped run, a record that won't read, or a run with neither a record nor a first build under
     way (`runs/builder.sessions`, no builder report yet)."""
-    if entry.get("stopped") or ((folder / STOPPED).is_file() and entry["stage"] == "build"):
+    if entry.get("stopped") or (
+        (folder / sdlc.factory_records.STOPPED).is_file() and entry["stage"] == "build"
+    ):
         return None
     # A landing's record is the track from its first step, before its commit, until close removes
     # the folder: at any other stage it is history, and read past.
-    if entry["stage"] in ("test", "shipped") and (folder / LAND_STEP).is_file():
+    if (
+        entry["stage"] in ("test", "shipped")
+        and (folder / sdlc.factory_records.LAND_STEP).is_file()
+    ):
         return _land_progress(entry, folder, problems, history, now)
-    path = folder / STEP
+    path = folder / sdlc.factory_records.STEP
     # The approver's decision is the run's end only at the stages it belongs to, as in `column()`:
     # a change put back to `build` is building again, whatever `decision.md` still says.
     blank = {"round": None, "limit": None, "reviewers": [], "since": None, "stuck": [],
@@ -457,19 +322,20 @@ def _progress(
     if entry.get("decision") and entry["stage"] in ("test", *CLOSED):
         rec = {**blank, "step": "done"}
     elif path.is_file():
-        rec = read_step(path.read_text(encoding="utf-8", errors="replace"))
+        rec = sdlc.factory_records.read_step(path.read_text(encoding="utf-8", errors="replace"))
         if rec is None:
-            problems.append(f"{STEP.as_posix()} doesn't open with STEP:")
+            problems.append(f"{sdlc.factory_records.STEP.as_posix()} doesn't open with STEP:")
             return None
-    elif (folder / "runs" / "builder.sessions").is_file() and not entry.get("built"):
-        mtime = (folder / "runs" / "builder.sessions").stat().st_mtime
+    elif (mtime := sdlc.factory_records.builder_started(folder)) is not None and not entry.get(
+        "built"
+    ):
         rec = {**blank, "step": "build", "round": 1, "at": mtime}
     else:
         return None
     step = rec["step"]
     if step == "stop":
         return None
-    paused = step in PAUSES
+    paused = step in sdlc.factory_records.PAUSES
     at = AT.get(rec.get("after") or "") if paused else AT.get(step)
     if step == "done":
         at = len(TRACK)
@@ -490,7 +356,7 @@ def _progress(
         if name == "gate" and step == "fix":
             label = "fixing"
         if name == "review" and rnd and rec["reviewers"]:
-            label = f"reviews {_reviewed(folder, rnd)}/{len(rec['reviewers'])}"
+            label = f"reviews {sdlc.factory_records.reviewed(folder, rnd)}/{len(rec['reviewers'])}"
         if name == "approve" and kinds:
             label = f"approve ({', '.join(kinds)})"
         steps.append({"name": name, "state": state, "label": label})
@@ -512,51 +378,6 @@ def _progress(
     }  # fmt: skip
 
 
-def read_land_step(text: str) -> dict | None:
-    """`runs/land-step.md`'s fields, as `factory.py`'s `read_land_step()` reads them (a test pins
-    the two), or None when it doesn't open with a `STEP:` line."""
-    lines = text.splitlines()
-    step = STEP_RE.match(lines[0]) if lines else None
-    if not step:
-        return None
-
-    def field(regex: re.Pattern) -> str | None:
-        found = [m.group(1) for m in map(regex.match, lines) if m]
-        return found[0] if found else None
-
-    rnd, moves, limit = field(ROUND_RE), field(MOVES_RE), field(LIMIT_RE)
-    train = next((m for m in map(TRAIN_RE.match, lines) if m), None)
-    return {
-        "step": step.group(1), "round": int(rnd) if rnd else None,
-        "moves": int(moves) if moves else None, "limit": int(limit) if limit else None,
-        "since": field(SINCE_RE), "after": field(AFTER_RE),
-        "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
-        "train": {"k": int(train.group(1)), "n": int(train.group(2))} if train else None,
-        "waits": field(WAITS_RE),
-    }  # fmt: skip
-
-
-def read_land_times(text: str) -> list[dict]:
-    """`runs/land-times.jsonl`'s rows, as `factory.py`'s `read_land_times()` reads them (a test
-    pins the two over a shared table): each `{"step", "round", "seconds"}`, a row that won't read
-    passed over."""
-    rows = []
-    for line in text.splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(row, dict) or not isinstance(row.get("step"), str):
-            continue
-        rnd, seconds = row.get("round"), row.get("seconds")
-        if rnd is not None and (not isinstance(rnd, int) or isinstance(rnd, bool)):
-            continue
-        if not isinstance(seconds, int | float) or isinstance(seconds, bool) or seconds < 0:
-            continue
-        rows.append({"step": row["step"], "round": rnd, "seconds": float(seconds)})
-    return rows
-
-
 def _land_progress(
     entry: dict, folder: Path, problems: list[str], history: dict | None, now: float
 ) -> dict | None:
@@ -567,13 +388,13 @@ def _land_progress(
     open-ended step, `LAND_OPEN`), and on a stop (a train's `eject` too) the step it stopped after
     and its problems. None for a step this board doesn't know; a record that won't read is a
     problem."""
-    path = folder / LAND_STEP
-    rec = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
+    path = folder / sdlc.factory_records.LAND_STEP
+    rec = sdlc.factory_records.read_land_step(path.read_text(encoding="utf-8", errors="replace"))
     if rec is None:
-        problems.append(f"{LAND_STEP.as_posix()} doesn't open with STEP:")
+        problems.append(f"{sdlc.factory_records.LAND_STEP.as_posix()} doesn't open with STEP:")
         return None
     step = rec["step"]
-    stopped = step in LAND_STOPS
+    stopped = step in sdlc.factory_records.LAND_STOPS
     at = LAND_AT.get(rec["after"] or "", LAND_AT.get(step, 0)) if stopped else LAND_AT.get(step)
     if at is None:
         return None
@@ -604,18 +425,6 @@ def _land_progress(
         "samples": found["samples"] if fraction is not None else None, "plan": None,
         "running": not stopped and fraction is None,
     }  # fmt: skip
-
-
-def _reviewed(folder: Path, n: int) -> int:
-    """How many replies in `reviews/round-<n>/` hold a verdict `opening()` reads, `verified.md`
-    aside."""
-    count = 0
-    for file in (folder / "reviews" / f"round-{n}").glob("*.md"):
-        if file.name == VERIFIED:
-            continue
-        lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
-        count += opening(lines, VERDICT_RE) is not None
-    return count
 
 
 def typical_times(home: Path, trunk: str | None) -> dict:
@@ -656,7 +465,7 @@ def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, l
     work = sdlc.work_rel(home)
     out = sdlc._git(
         home, "log", "--first-parent", "--format=%H%x00%s", f"refs/heads/{trunk}", "--",
-        f"{work}/*/runs/costs.jsonl",
+        f"{work}/*/{sdlc.factory_records.COSTS.as_posix()}",
     ) or ""  # fmt: skip
     closes = []
     for line in out.splitlines():
@@ -669,20 +478,18 @@ def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, l
     found: dict[tuple[str, int], dict[str, list[float]]] = {}
     for sha, name in closes:
         at = f"{sha}^:{work}/{name}"
-        costs = sdlc._git(home, "show", f"{at}/{COSTS.as_posix()}")
+        costs = sdlc._git(home, "show", f"{at}/{sdlc.factory_records.COSTS.as_posix()}")
         tier = (sdlc.frontmatter_list(sdlc._git(home, "show", f"{at}/intent.md") or "", "tier")
                 or [""])[0]  # fmt: skip
         if costs is None or not tier.isdigit():
             continue
-        gates: dict[str, list[float]] = {"round-": [], "land-": []}
+        gates: dict[str, list[float]] = {"round": [], "land": []}
         for gate in (sdlc._git(home, "ls-tree", "--name-only", f"{at}/build") or "").splitlines():
-            kind = next((k for k in gates if gate.startswith(k)), None)
-            if kind and gate.endswith(".gate.md"):
+            if kind := sdlc.factory_records.gate_kind(gate):
                 text = sdlc._git(home, "show", f"{at}/build/{gate}") or ""
-                lines = text.splitlines()
-                gates[kind] += [float(m.group(1)) for m in map(SECONDS_RE.match, lines) if m]
-        times = sdlc._git(home, "show", f"{at}/{LAND_TIMES.as_posix()}") or ""
-        for step, values in step_samples(costs, gates["round-"], gates["land-"], times).items():
+                gates[kind] += sdlc.factory_records.gate_seconds(text)
+        times = sdlc._git(home, "show", f"{at}/{sdlc.factory_records.LAND_TIMES.as_posix()}") or ""
+        for step, values in step_samples(costs, gates["round"], gates["land"], times).items():
             if values:
                 found.setdefault((step, int(tier)), {})[name] = values
     return found
@@ -702,7 +509,7 @@ def step_samples(
     `runs/land-times.jsonl`; an open-ended one is never timed."""
     out: dict[str, list[float]] = {s: [] for s in TRACK}
     out.update({f"land-{s}": [] for s in (*LAND_TIMED, *LAND_TIMES_STEPS)})
-    for row in read_land_times(land_times):
+    for row in sdlc.factory_records.read_land_times(land_times):
         if row["step"] in LAND_TIMES_STEPS:
             out[f"land-{row['step']}"].append(row["seconds"])
     out["gate"] = list(gates)
@@ -719,7 +526,7 @@ def step_samples(
         if not isinstance(ms, int) or isinstance(ms, bool):
             continue
         role, seconds = row.get("role"), ms / 1000
-        if role in REVIEWER_ROLES:
+        if role in sdlc.factory_records.REVIEWERS:
             together.append(seconds)
             continue
         if together:
@@ -736,43 +543,6 @@ def step_samples(
     if together:
         out[f"{pre}review"].append(max(together))
     return out
-
-
-def cost(folder: Path) -> dict | None:
-    """What the run's agents cost, from `runs/costs.jsonl`, as `factory.py`'s `run_cost()` sums
-    it (each session's last reported total; a test pins the two), plus their time: None without
-    the file."""
-    path = folder / COSTS
-    if not path.is_file():
-        return None
-    last: dict[str, dict] = {}
-    duration = runs = unknown = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            row = None
-        if not isinstance(row, dict) or not isinstance(row.get("session"), str):
-            unknown += 1 if line.strip() else 0
-            continue
-        runs += 1
-        duration += row["duration_ms"] if isinstance(row.get("duration_ms"), int) else 0
-        if isinstance(row.get("cost_usd"), int | float) or row["session"] not in last:
-            last[row["session"]] = row
-    usd, by_role, by_model = 0.0, {}, {}
-    for row in last.values():
-        value = row.get("cost_usd")
-        if not isinstance(value, int | float):
-            unknown += 1
-            continue
-        usd += value
-        for split, key in ((by_role, "role"), (by_model, "model")):
-            name = str(row.get(key) or "unknown")
-            split[name] = round(split.get(name, 0.0) + value, 4)
-    return {
-        "usd": round(usd, 4), "by_role": by_role, "by_model": by_model, "runs": runs,
-        "unknown": unknown, "duration_ms": duration,
-    }  # fmt: skip
 
 
 def next_action(entry: dict) -> str:

@@ -152,7 +152,7 @@ def _gate(root: Path, capsys, ident: str = "008") -> tuple[int, dict | None]:
 
 
 def _record(root: Path) -> str:
-    return (_folder(root) / sdlc.HAND_GATE).read_text(encoding="utf-8")
+    return (_folder(root) / sdlc.factory_records.HAND_GATE).read_text(encoding="utf-8")
 
 
 def test_the_gate_runs_the_base_branchs_check_never_the_checkouts(repo, capsys) -> None:
@@ -211,14 +211,16 @@ def test_gate_refuses_and_writes_nothing(repo, capsys, setup, ident) -> None:
     setup(repo)
     code, _ = _gate(repo, capsys, ident)
     assert code == 1
-    assert not (_folder(repo) / sdlc.HAND_GATE).exists()
-    assert not (repo / ".sdlc" / "work" / "008-other-thing" / sdlc.HAND_GATE).exists()
+    assert not (_folder(repo) / sdlc.factory_records.HAND_GATE).exists()
+    assert not (
+        repo / ".sdlc" / "work" / "008-other-thing" / sdlc.factory_records.HAND_GATE
+    ).exists()
 
 
 def _masked(text: str) -> list[str]:
     return [
-        "Build: *" if sdlc.BUILD_RE.match(line)
-        else "Seconds: *" if sdlc.SECONDS_RE.match(line)
+        "Build: *" if sdlc.factory_records.BUILD_RE.match(line)
+        else "Seconds: *" if sdlc.factory_records.SECONDS_RE.match(line)
         else line
         for line in text.splitlines()
     ]  # fmt: skip
@@ -248,9 +250,11 @@ def test_the_record_is_the_factorys_shape_line_for_line(repo, capsys, monkeypatc
 def test_the_copies_are_the_factorys() -> None:
     """R3: the record's regexes and figures are `factory.py`'s."""
     for name in ("ATTEMPT_VERDICT_RE", "BUILD_RE", "SECONDS_RE"):
-        assert getattr(sdlc, name).pattern == getattr(factory, name).pattern, name
-    for name in ("GATE_TAIL", "GATE_TIMEOUT", "CLONE_MARK", "HOME_MARK", "TMP_MARK", "USER_MARK"):
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    for name in ("GATE_TAIL", "GATE_TIMEOUT"):
         assert getattr(sdlc, name) == getattr(factory, name), name
+    for name in ("CLONE_MARK", "HOME_MARK", "TMP_MARK", "USER_MARK"):
+        assert getattr(sdlc.factory_records, name) == getattr(factory, name), name
 
 
 def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
@@ -279,14 +283,14 @@ def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
     )
     (repo / ".sdlc").mkdir(exist_ok=True)
     (repo / ".sdlc" / "terms.local").write_text("# kept out\n\\bstale widgets\\b\n")
-    ours = sdlc._hand_placeholders(text, tree)
+    ours = sdlc.factory_records.placeholders(text, tree, sdlc._hand_main(tree))
     assert ours == factory._placeholders(text, tree)
-    assert str(repo) not in ours and f"{sdlc.HOME_MARK}/cache/venv" in ours
+    assert str(repo) not in ours and f"{sdlc.factory_records.HOME_MARK}/cache/venv" in ours
     assert "pytest-of-drafter" not in ours and "as drafter said" in ours
     assert "work/<046>*, /Users/<name>/x, /home/<name>/x and ~/<dir>/x" in ours
-    assert "built for <term>\n" in ours and sdlc.TERM_MARK == factory.TERM_MARK
-    assert sdlc.HAND_TERMS_FILE == factory.TERMS_FILE
-    shapes = [shape for shape, _ in sdlc.HAND_DEFUSE]
+    assert "built for <term>\n" in ours and sdlc.factory_records.TERM_MARK == factory.TERM_MARK
+    assert sdlc.factory_records.TERMS_FILE == factory.TERMS_FILE
+    shapes = [shape for shape, _ in sdlc.factory_records.DEFUSE]
     assert shapes == [shape for shape, _ in factory.DEFUSE]
 
 
@@ -331,7 +335,7 @@ def test_the_record_is_written_with_unix_newlines(repo, capsys) -> None:
     """R14."""
     _gate(repo, capsys)
     _gate(repo, capsys)
-    raw = (_folder(repo) / sdlc.HAND_GATE).read_bytes()
+    raw = (_folder(repo) / sdlc.factory_records.HAND_GATE).read_bytes()
     assert b"\r" not in raw and raw.decode("utf-8").count("## Attempt ") == 2
 
 
@@ -385,7 +389,7 @@ def test_hand_gate_reads_none_current_and_stale(repo, capsys, monkeypatch) -> No
 )
 def test_a_malformed_record_is_a_problem_never_current(repo, text) -> None:
     """R7: never raises."""
-    _write(_folder(repo) / sdlc.HAND_GATE, text)
+    _write(_folder(repo) / sdlc.factory_records.HAND_GATE, text)
     got = sdlc.hand_gate(_folder(repo), repo, "main")
     assert got["current"] is False and got["problems"], got
     assert "build/gate.md" in got["problems"][0]
@@ -600,7 +604,7 @@ def test_a_hand_gate_gives_up_after_its_wait_and_records_nothing(
     """R4: no slot within `SLOT_WAIT`: a refusal naming the limit, exit 1, the record as it was."""
     _factory_on(monkeypatch)
     _gate(repo, capsys)
-    before = (_folder(repo) / sdlc.HAND_GATE).read_bytes()
+    before = (_folder(repo) / sdlc.factory_records.HAND_GATE).read_bytes()
     monkeypatch.setattr(sdlc, "SLOT_WAIT", 0.5)
     child = _hold(HOLD_FACTORY, str(FACTORY_PY), str(repo), "60", str(tmp_path / "released"))
     try:
@@ -614,7 +618,7 @@ def test_a_hand_gate_gives_up_after_its_wait_and_records_nothing(
         "no gate slot came free in 0.5 seconds (1 of 1 in use): nothing was judged, run it again"
     ]
     assert "up to 0.5 seconds" in got.err
-    assert (_folder(repo) / sdlc.HAND_GATE).read_bytes() == before
+    assert (_folder(repo) / sdlc.factory_records.HAND_GATE).read_bytes() == before
     assert sdlc._wait_text(sdlc.GATE_TIMEOUT) == "30 minutes"
 
 
@@ -708,7 +712,7 @@ def test_the_hand_gate_gates_a_factory_run_at_test_alone(repo, capsys) -> None:
         code = sdlc.cmd_gate(repo, "008")
         out = json.loads(capsys.readouterr().out)
         assert code == 1 and "factory.py gate" in out["refusals"][0], out
-        assert not (_folder(repo) / sdlc.HAND_GATE).exists()
+        assert not (_folder(repo) / sdlc.factory_records.HAND_GATE).exists()
     _factory_at(repo, "test")
     code, out = _gate(repo, capsys)
     assert code == 0 and out["verdict"] == "PASS", out
@@ -734,7 +738,7 @@ def test_a_hand_gate_on_a_factory_run_is_counted_in_no_factory_figure(repo, caps
 def test_the_factorys_hand_build_is_sdlcs(repo) -> None:
     """145: the factory clears a `gate` reason by its copy of the hand gate's build, pinned to
     `sdlc.py`'s on one tree, its folder, counter, untracked files and deletions included."""
-    assert factory.HAND_GATE == sdlc.HAND_GATE
+    assert factory.HAND_GATE == sdlc.factory_records.HAND_GATE
     assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")
     _write(_folder(repo) / "notes.md", "# Notes\n")
     _write(repo / ".sdlc" / "last-id", "8\n")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -329,3 +330,236 @@ def test_the_factory_never_loads_sdlc_py(path: Path) -> None:
         )
     ]
     assert not loads, f"{path.name} loads sdlc.py at {loads}"
+
+
+# 163: the factory's records, read in core through one pure module.
+RECORDS_PY = ROOT / "scripts" / "factory_records.py"
+BOARD_PY = ROOT / "scripts" / "board.py"
+
+# R3: every copy of the factory's record parsing, in the module.
+RECORD_NAMES = {
+    # regexes
+    "VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "REASON_RE", "LOOK_SOURCE_RE",
+    "KEPT_RE", "DROPPED_RE", "STOPPED_RE", "NEXT_RE", "PROBLEM_RE", "STEP_RE", "AFTER_RE",
+    "ROUND_RE", "UPGRADED_FILE_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "STUCK_RE",
+    "UNTESTABLE_RE", "MOVES_RE", "TRAIN_RE", "WAITS_RE", "GATE_FAIL_RE", "ATTEMPT_VERDICT_RE",
+    "BUILD_RE", "SECONDS_RE",
+    # constants and paths
+    "REASON_KINDS", "DECIDED", "SETTLED", "STOPPED", "STEP", "LAND_STEP", "LAND_STOPS",
+    "LAND_STEPS", "AGENT_TIMEOUT", "RECONSIDER", "VERIFIED", "COSTS", "LAND_TIMES", "PAUSES",
+    "REVIEWERS", "OPEN_BOX", "NO_DECISION", "GARBLED_LEDGER", "HAND_GATE", "CLONE_MARK",
+    "HOME_MARK", "TMP_MARK", "USER_MARK", "TERM_MARK", "DEFUSE", "TERMS_FILE", "DECISION_FILE",
+    "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS",
+    # readers
+    "opening", "no_verdict", "read_stop", "read_land_stop", "landing", "first_build",
+    "upgraded_build", "newest_round", "reasons", "reading", "read_step", "read_land_step",
+    "read_land_times", "cost", "card_reading", "reviewed", "builder_started", "run_counts",
+    "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
+    "_terms", "placeholders", "timed_rows", "land_sinces",
+}  # fmt: skip
+
+# R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
+OLD_NAMES = {
+    *(f"FACTORY_{n}" for n in (
+        "VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "REASON_RE", "LOOK_SOURCE_RE",
+        "KEPT_RE", "DROPPED_RE", "STOPPED_RE", "NEXT_RE", "PROBLEM_RE", "STEP_RE", "AFTER_RE",
+        "ROUND_RE", "UPGRADED_FILE_RE", "GATE_FAIL_RE", "REASON_KINDS", "DECIDED", "SETTLED",
+        "STOPPED", "STEP", "LAND_STEP", "LAND_STOPS", "LAND_STEPS", "AGENT_TIMEOUT",
+        "RECONSIDER",
+    )),
+    "_factory_opening", "factory_stop", "factory_land_stop", "factory_landing",
+    "factory_first_build", "factory_upgraded_build", "factory_newest_round", "factory_reasons",
+    "factory_reading", "_gate_attempts", "_hand_placeholders", "_hand_login", "_hand_terms",
+    "HAND_DEFUSE", "HAND_TERMS_FILE", "REVIEWER_ROLES", "_factory", "_reviewed", "_timed_rows",
+    "_land_sinces",
+}  # fmt: skip
+
+# R4: core's own rules over the records, and the copies of what isn't a run's record.
+CONSUMER_NAMES = {
+    "needs_of", "column", "seen_stage", "answered", "decide_step", "touched_paths", "BY_STAGE",
+    "FACTORY_STOP_NEEDS", "hand_gate", "hand_build", "cmd_gate", "GATE_TIMEOUT", "GATE_TAIL",
+    "SLOT_NAME", "_try_lock", "_gate_jobs_at", "FACTORY_CONFIG", "_ui_at", "_current_shots",
+    "UI_DEFAULTS",
+}  # fmt: skip
+
+# A name a script defines for something of its own that a record's copy shares: `sdlc.py`'s
+# `MOVES_RE` reads the direction doc's `**Moves O<n>:**`, never a landing's `MOVES:` line.
+UNRELATED = {("sdlc.py", "MOVES_RE")}
+
+# R5: the factory's records by name. Kept here, so the module can't loosen it.
+RECORD_FILES = (
+    "decision.md", "decisions.md", "stopped.md", "step.md", "verified.md", "costs.jsonl",
+    "land-times.jsonl", "gate.md", "round-", ".sessions",
+)  # fmt: skip
+
+
+def _loads_of(tree: ast.AST, name: str) -> list[int]:
+    """The lines of every `spec_from_file_location` call naming `name` in a constant."""
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "spec_from_file_location"
+        and any(
+            isinstance(c, ast.Constant) and isinstance(c.value, str) and name in c.value
+            for arg in node.args
+            for c in ast.walk(arg)
+        )
+    ]
+
+
+def _docstrings(tree: ast.AST) -> set[int]:
+    """The ids of every docstring's node: a module's, a class's or a function's first string."""
+    found = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        first = body[0] if body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(id(first.value))
+    return found
+
+
+def _strings(tree: ast.AST) -> list[ast.Constant]:
+    """Every string constant but a docstring, f-string pieces included."""
+    docs = _docstrings(tree)
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
+    ]
+
+
+def _names_a_record(source: str) -> list[str]:
+    """R5's checker: each string literal in `source` that names a factory record and holds no
+    whitespace (prose does), as `line N: 'text'`."""
+    return [
+        f"line {node.lineno}: {node.value!r}"
+        for node in _strings(ast.parse(source))
+        if not any(ch.isspace() for ch in node.value)
+        and any(name in node.value for name in RECORD_FILES)
+    ]
+
+
+def test_factory_records_is_pure_and_loaded_once() -> None:
+    """163 R1: `sdlc.py` loads the module by path, once, and binds nothing into it; the module
+    runs no process, names no `sdlc`, loads nothing, and only defines names while it loads."""
+    assert RECORDS_PY.exists(), "scripts/factory_records.py is missing"
+    scripts = [
+        *sorted((ROOT / "scripts").glob("*.py")),
+        *(ROOT / "scripts" / "trackers").glob("*.py"),
+    ]
+    sites = {p.name: _loads_of(_tree(p), "factory_records.py") for p in scripts}
+    sites = {k: v for k, v in sites.items() if v}
+    assert list(sites) == ["sdlc.py"] and len(sites["sdlc.py"]) == 1, sites
+    tree = _tree(RECORDS_PY)
+    names = (
+        _named(tree)
+        | _reached(tree, "importlib")
+        | {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in node.names
+        }
+        | {(n.module or "") for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    )
+    assert "subprocess" not in names, "the module runs no process"
+    assert "sdlc" not in names, "the module names no sdlc"
+    assert "importlib" not in names and not _loads_of(tree, ""), "the module loads nothing"
+    loads = [n.value for n in _strings(tree) if "sdlc.py" in n.value or "factory.py" in n.value]
+    assert not loads, f"the module names a script outside its docstrings: {loads}"
+    kinds = (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef, ast.Assign, ast.AnnAssign)
+    docs = _docstrings(tree)
+    acts = [
+        node.lineno
+        for node in tree.body
+        if not isinstance(node, kinds)
+        and not (isinstance(node, ast.Expr) and id(node.value) in docs)
+    ]
+    assert not acts, f"the module does more than define names at load: lines {acts}"
+    sdlc = _load("sdlc_records_test", SDLC_PY)
+    assert not hasattr(sdlc.factory_records, "sdlc"), "sdlc binds nothing into the module"
+    assert Path(sdlc.factory_records.__file__).name == "factory_records.py"
+
+
+def test_the_board_and_close_read_records_through_sdlc() -> None:
+    """163 R2: the board and close reach the module as `sdlc.factory_records`, never loading or
+    naming it on their own, so they and `status` read through one module object."""
+    for path in (BOARD_PY, CLOSING_PY):
+        tree = _tree(path)
+        assert not _loads_of(tree, "factory_records"), f"{path.name} loads the module"
+        assert "factory_records" not in _named(tree), f"{path.name} names it bare"
+        assert "factory_records" in _reached(tree, "sdlc"), f"{path.name} reads no record"
+    sdlc = _load("sdlc_records_bound_test", SDLC_PY)
+    assert sdlc.factory_records is sdlc._load_board().sdlc.factory_records
+    assert sdlc.factory_records is sdlc.closing.sdlc.factory_records
+
+
+def test_the_record_readers_live_in_factory_records() -> None:
+    """163 R3, R4: every copy is defined in the module and nowhere else, under no old name, and
+    core's own rules over the records stay in `sdlc.py`."""
+    defined = _defined(_tree(RECORDS_PY))
+    assert not RECORD_NAMES - defined, f"the module lacks {sorted(RECORD_NAMES - defined)}"
+    for path in (SDLC_PY, CLOSING_PY, BOARD_PY):
+        left = (RECORD_NAMES | OLD_NAMES) & _defined(_tree(path))
+        left -= {name for script, name in UNRELATED if script == path.name}
+        assert not left, f"{path.name} still defines {sorted(left)}"
+    script = _defined(_tree(SDLC_PY))
+    assert not CONSUMER_NAMES - script, f"sdlc.py lacks {sorted(CONSUMER_NAMES - script)}"
+    moved = CONSUMER_NAMES & defined
+    assert not moved, f"the module took core's own rules: {sorted(moved)}"
+
+
+def test_no_factory_record_is_named_outside_its_reader() -> None:
+    """163 R5: no string in the core's scripts but the module's names a factory record, outside a
+    docstring or a line of prose; the checker is shown to catch one first."""
+    assert _names_a_record('text = (folder / "decision.md").read_text()\n')
+    assert _names_a_record('p = f"{branch}:{folder}/runs/costs.jsonl"\n')
+    assert not _names_a_record('def f():\n    """Reads `decision.md`."""\n')
+    assert not _names_a_record('help = "into build/gate.md; never pre-approved"\n')
+    scripts = [*(ROOT / "scripts").glob("*.py"), *(ROOT / "scripts" / "trackers").glob("*.py")]
+    found = {
+        p.name: hits
+        for p in sorted(scripts)
+        if p != RECORDS_PY and (hits := _names_a_record(p.read_text(encoding="utf-8")))
+    }
+    assert not found, f"a factory record named outside factory_records.py: {found}"
+
+
+def _comparable(value) -> bool:
+    if isinstance(value, tuple):
+        return all(_comparable(v) for v in value)
+    return isinstance(value, str | int | float | Path | re.Pattern)
+
+
+def _shape(value):
+    if isinstance(value, tuple):
+        return tuple(_shape(v) for v in value)
+    if isinstance(value, re.Pattern):
+        return ("pattern", value.pattern, value.flags)
+    return value
+
+
+def test_every_shared_name_is_the_factorys() -> None:
+    """163 R6: each constant, regex and path the module shares with `factory.py` by name has the
+    factory's value, so a copy added later under the factory's name is pinned with no new test."""
+    records = _load("factory_records_pins", RECORDS_PY)
+    factory = _load("factory_records_theirs", FACTORY_PY)
+    shared = {
+        name
+        for name in set(vars(records)) & set(vars(factory))
+        if not name.startswith("__") and _comparable(getattr(records, name))
+    }
+    assert {"LEDGER_RE", "STOPPED", "LAND_STEPS", "NO_DECISION", "REVIEWERS"} <= shared, shared
+    assert _shape(re.compile("a")) != _shape(re.compile("a", re.I)), "flags count"
+    drift = sorted(
+        name for name in shared if _shape(getattr(records, name)) != _shape(getattr(factory, name))
+    )
+    assert not drift, f"these differ from factory.py's: {drift}"

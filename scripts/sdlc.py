@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import getpass
 import hashlib
 import importlib.util
 import json
@@ -1924,7 +1923,7 @@ def analyze(root: Path, today: date | None = None) -> dict:
                 # not one left behind.
                 name == "plan.md"
                 and stage == "build"
-                and (factory_first_build(folder) or factory_upgraded_build(folder))
+                and (factory_records.first_build(folder) or factory_records.upgraded_build(folder))
             ):
                 problems.append(
                     {
@@ -3012,20 +3011,11 @@ def cli_accept(root: Path, home: Path, args) -> int:
 #
 # `gate` runs the base branch's `[commands] check` on a change built by hand and records the
 # attempt in its folder's `build/gate.md`, in the shape `factory.py gate` writes
-# `build/round-<N>.gate.md`, so the board and status read both alike. The constants and regexes
-# below are `factory.py`'s, copied (each plugin is cached on its own) and pinned to it by a test.
+# `build/round-<N>.gate.md`, so the board and status read both alike. The constants below are
+# `factory.py`'s, copied (each plugin is cached on its own) and pinned to it by a test; the record's
+# own copies (its path, regexes, reader and placeholders) are `factory_records`'.
 GATE_TIMEOUT = 30 * 60
 GATE_TAIL = 80
-CLONE_MARK = "<path-to-clone>"
-HOME_MARK = "<home>"
-TMP_MARK = "<tmp>"
-USER_MARK = "<user>"
-ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
-BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
-SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
-# The record, in the change's folder: beside the factory's round files, and matched by none of
-# their readers (`round-*`, `*.gate.md`).
-HAND_GATE = Path("build") / "gate.md"
 
 
 def _hand_paths(checkout: Path, trunk: str) -> tuple[str | None, list[str]]:
@@ -3065,80 +3055,13 @@ def hand_build(checkout: Path, trunk: str) -> str:
     return _hand_hash(fork, _hand_digests(checkout, paths))
 
 
-def _hand_login() -> str | None:
-    """The login name, as pytest names its temp folder by it; None when the platform can't say.
-    A copy of `factory.py`'s `_login()`."""
-    try:
-        return getpass.getuser() or None
-    except (OSError, KeyError, ImportError):
-        return None
-
-
-def _hand_placeholders(text: str, root: Path) -> str:
-    """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
-    `CLONE_MARK`, then the home directory as `HOME_MARK` and the temp directory as `TMP_MARK`: in
-    that order, so a checkout under the home directory reads `<path-to-clone>/…`, never
-    `<home>/…`, and a home under the temp directory `<home>/…`. Each path is matched as given and
-    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
-    path: never inside a longer one. Then the login name, where no letter or digit borders it
-    inside a path a mark begins, is `USER_MARK`, and never in prose. Last, each shape the repo's
-    scan refuses is its placeholder (`HAND_DEFUSE`), and each local term `TERM_MARK`. A copy of
-    `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed with the
-    change, and a machine's layout never reaches its history."""
+def _hand_main(root: Path) -> Path:
+    """The main checkout, the first worktree `git worktree list` names, else `root`: what
+    `factory_records.placeholders()` writes as the clone's root and reads the terms file from."""
     listed = _git(root, "worktree", "list", "--porcelain") or ""
     checkouts = [Path(line[len("worktree ") :]) for line in listed.splitlines()
                  if line.startswith("worktree ")]  # fmt: skip
-    for path, mark in (
-        (checkouts[0] if checkouts else root, CLONE_MARK),
-        (root, CLONE_MARK),
-        (Path.home(), HOME_MARK),
-        (Path(tempfile.gettempdir()), TMP_MARK),
-    ):
-        forms = {str(path), path.as_posix(), str(path.resolve()), path.resolve().as_posix()}
-        for form in sorted(forms - {"", "/", "."}, key=len, reverse=True):
-            text = re.sub(rf"(?<![\w.-]){re.escape(form)}(?![\w-])", mark, text)
-    if login := _hand_login():
-        name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
-        marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
-        text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
-    for shape, mark in HAND_DEFUSE:
-        text = re.sub(shape, mark, text, flags=re.IGNORECASE)
-    for term in _hand_terms(checkouts[0] if checkouts else root):
-        text = re.sub(term, TERM_MARK, text, flags=re.IGNORECASE)
-    return text
-
-
-def _hand_terms(home: Path) -> list[str]:
-    """The regexes in the main checkout's `HAND_TERMS_FILE`, one a line, blank lines and `#`
-    comments skipped, and a line that isn't a regex left out. A copy of `factory.py`'s
-    `_terms()`, pinned to it by `tests/test_hand_gate.py`."""
-    path = home / HAND_TERMS_FILE
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-    except (OSError, UnicodeDecodeError):
-        return []
-    terms = []
-    for line in (line.strip() for line in lines):
-        try:
-            if line and not line.startswith("#") and re.compile(line):
-                terms.append(line)
-        except re.error:
-            continue
-    return terms
-
-
-# The shapes the repo's own scan refuses, each with the placeholder a filed record writes
-# instead. A copy of `factory.py`'s `DEFUSE`, pinned to it by `tests/test_hand_gate.py`.
-HAND_DEFUSE = (
-    (r"\bwork/\d{3,}\b(?!-)", lambda m: f"{m[0][:5]}<{m[0][5:]}>"),
-    (r"/Users/[\w.-]+/", "/Users/<name>/"),
-    (r"/home/[\w.-]+/", "/home/<name>/"),
-    (r"~/[\w-]+/", "~/<dir>/"),
-)
-# The scan's own terms, in the main checkout's gitignored file, and the mark a record writes
-# for one. Copies of `factory.py`'s `TERMS_FILE` and `TERM_MARK`, pinned by the same test.
-HAND_TERMS_FILE = Path(".sdlc", "terms.local")
-TERM_MARK = "<term>"
+    return checkouts[0] if checkouts else root
 
 
 # The factory's gate slots, which a hand gate shares while `sdlc-factory` is enabled, so the two
@@ -3394,9 +3317,9 @@ def cmd_gate(root: Path, ident: str) -> int:
         )
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
-    path = folder / HAND_GATE
-    attempt = len(_gate_attempts(path)) + 1
-    output = _hand_placeholders(output, checkout)
+    path = folder / factory_records.HAND_GATE
+    attempt = len(factory_records.gate_attempts(path)) + 1
+    output = factory_records.placeholders(output, checkout, _hand_main(checkout))
     tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
     tail = tail or "    (no output)\n"
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
@@ -3432,13 +3355,13 @@ def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
     `path`, and whether it is `current`: that attempt judged the build as it stands now
     (`hand_build()`), on the change's own branch. A record that won't read is `current: false`
     with a `problems` line, never an exception: it stands for nothing judged."""
-    path = folder / HAND_GATE
+    path = folder / factory_records.HAND_GATE
     if not path.is_file():
         return None
     checkout = checkout_of(folder)
     rel = path.relative_to(checkout).as_posix()
     try:
-        attempts = _gate_attempts(path)
+        attempts = factory_records.gate_attempts(path)
     except OSError as e:
         attempts, why = [], f"{rel} couldn't be read: {e}"
     else:
@@ -3460,29 +3383,6 @@ def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
         trunk and on_branch and last["build"] and last["build"] == hand_build(checkout, trunk)
     )
     return out
-
-
-def _gate_attempts(path: Path) -> list[dict]:
-    """A gate record's attempts, oldest first, each its verdict, build, exit and seconds, read by
-    line as `factory.py`'s `read_gate_file()` reads one: the output is indented, so a line of it
-    never reads as the record's. [] without the file."""
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except FileNotFoundError:
-        return []
-    attempts: list[dict] = []
-    for line in lines:
-        if line.startswith("## Attempt "):
-            attempts.append({"verdict": None, "build": None, "exit": None, "seconds": None})
-        elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
-            attempts[-1]["verdict"] = m.group(1)
-        elif attempts and (m := BUILD_RE.match(line)):
-            attempts[-1]["build"] = m.group(1)
-        elif attempts and line.startswith("Exit: "):
-            attempts[-1]["exit"] = line[len("Exit: ") :].strip()
-        elif attempts and (m := SECONDS_RE.match(line)):
-            attempts[-1]["seconds"] = float(m.group(1))
-    return attempts
 
 
 # ---------------------------------------------------------------- the skills' own cases
@@ -5067,46 +4967,6 @@ def cli_resolve(root: Path, home: Path, args) -> int:
     return cmd_resolve(root, args.id, mode)
 
 
-# The factory's file formats, copied from `plugins/factory/scripts/factory.py` (never imported or
-# run: the factory is optional), and pinned to its copies by `tests/test_metrics.py`.
-FACTORY_VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
-FACTORY_DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
-FACTORY_CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
-FACTORY_LEDGER_RE = re.compile(
-    r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$"
-)
-# The approver's reasons beyond the ledger, `- ESCALATED: gate: …` or `look: …` (any other word
-# but `D<n>` a look), and the source `decisions` files a look line under; with the factory's
-# `newest_round()` (`factory_newest_round()`), what tells a current look line from history.
-FACTORY_REASON_RE = re.compile(r"^\s*- ESCALATED:\s*([^\s:]+):\s*(.+?)\s*$")
-FACTORY_REASON_KINDS = ("gate", "look")
-FACTORY_LOOK_SOURCE_RE = re.compile(r"^approver round (\d+)$")
-FACTORY_DECIDED = " → decided: "
-# The mark `factory.py decisions` ticks a default with when the approver settled it: never the
-# person's answer, so no reader counts it as one.
-FACTORY_SETTLED = " → settled by the approver: "
-FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
-FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
-
-
-def _factory_opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
-    """A factory reply's answer line, `(index, match)`, or None: a copy of `factory.py`'s
-    `opening()`, pinned to it by `tests/test_metrics.py` over a shared table of cases."""
-    if lines and (m := regex.match(lines[0])):
-        return 0, m
-    found = [(i, m) for i, line in enumerate(lines) if (m := regex.match(line))]
-    if found and len({m.group(1) for _, m in found}) == 1:
-        return found[0]
-    return None
-
-
-# A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
-FACTORY_GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
-# A stopped run's record, which `factory.py verdicts --record` writes and removes; status reads it.
-FACTORY_STOPPED = Path("runs") / "stopped.md"
-FACTORY_STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
-FACTORY_NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
-FACTORY_PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 # What a stop needs from the person, by its way, in their words, not the factory's: an imperative
 # like every other need, with no comma, since `status` joins a change's needs with one.
 FACTORY_STOP_NEEDS = {
@@ -5114,212 +4974,6 @@ FACTORY_STOP_NEEDS = {
     "mend": "rerun to ask an agent again",
     "rerun": "fix its cause and rerun",
 }
-# The step a run's last `verdicts --record` read, and the longest an agent session can run: what
-# `factory_first_build()` reads to tell a builder writing `plan.md` right now from a stale run.
-FACTORY_STEP = Path("runs") / "step.md"
-FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
-# The step a landing is at, written by each landing command as it starts (`factory.py`'s
-# `_record_land()`): a `stop`, and a train's `eject`, name the step it stopped after and why.
-# Copies, pinned by a test: `FACTORY_LAND_STOPS` is the board's `LAND_STOPS`, and
-# `FACTORY_LAND_STEPS` the steps its track places (`LAND_AT`), which are `factory.py`'s.
-FACTORY_LAND_STEP = Path("runs") / "land-step.md"
-FACTORY_LAND_STOPS = ("stop", "eject")
-FACTORY_LAND_STEPS = (
-    "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
-    "review", "mend", "verify", "close", "eject",
-)  # fmt: skip
-FACTORY_AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
-FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
-FACTORY_AGENT_TIMEOUT = 3 * 3600
-# A run upgraded to Tier 2 part way: `build/round-<P>.upgraded.md`, round P the upgraded run's
-# first, which `factory_upgraded_build()` reads.
-FACTORY_UPGRADED_FILE_RE = re.compile(r"^round-(\d+)\.upgraded\.md$")
-# The heading an escalation a run's rounds ran out on holds, in `decision.md`.
-FACTORY_RECONSIDER = "## Reconsider the approach"
-# An open box the ledger can't read: a problem, never an answered decision.
-GARBLED_LEDGER = "decisions.md: an open line that doesn't read as a decision"
-
-
-def factory_stop(folder: Path) -> dict | None:
-    """The stop a factory run recorded in its folder's `runs/stopped.md`: its way on (`ship`,
-    `mend` or `rerun`), the sentence saying it, and its problems as the factory worded them. None
-    without a record. Never raises: a record that won't read is a stop whose one problem says so,
-    since what it stands for is still a run waiting on the person."""
-    path = folder / FACTORY_STOPPED
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        lines, why = [], str(e)
-    else:
-        why = f"{FACTORY_STOPPED.as_posix()} doesn't open with STOPPED: and its NEXT: line"
-    way = FACTORY_STOPPED_RE.match(lines[0]) if lines else None
-    nxt = [m.group(1) for m in map(FACTORY_NEXT_RE.match, lines) if m]
-    if not way or not nxt:
-        return {"way": None, "next": f"read {FACTORY_STOPPED.as_posix()}", "problems": [why]}
-    found = [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m]
-    return {"way": way.group(1), "next": nxt[0], "problems": found}
-
-
-def factory_land_stop(folder: Path) -> dict | None:
-    """The stop a factory landing recorded in `folder`'s `runs/land-step.md`, a `stop` or a train's
-    `eject` (`FACTORY_LAND_STOPS`, as the board reads them): the step it stopped after (`after`,
-    None when the record names none) and its problems as the factory worded them, the plain line
-    first. None for a landing under way, no record, or one that won't read: a landing is the
-    factory's until its record says it stopped, so `status` never says it did on a guess; the
-    board reads a garbled record as a problem of its own."""
-    try:
-        lines = (folder / FACTORY_LAND_STEP).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    lines = lines.splitlines()
-    step = FACTORY_STEP_RE.match(lines[0]) if lines else None
-    if not step or step.group(1) not in FACTORY_LAND_STOPS:
-        return None
-    after = [m.group(1) for m in map(FACTORY_AFTER_RE.match, lines) if m]
-    return {
-        "after": after[0] if after else None,
-        "problems": [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m],
-    }
-
-
-def factory_first_build(folder: Path) -> bool:
-    """Whether a factory run's first build is under way in `folder`, so its builder is writing
-    `plan.md` now: a builder session started less than `FACTORY_AGENT_TIMEOUT` ago (no session
-    outlives it), no builder report yet, no stop recorded, and `runs/step.md` absent (a fresh run
-    builds before its first `verdicts --record`) or naming `build` at round 1. Never raises: a file
-    that won't read is no live build, so `check` reports as it would without the factory."""
-    try:
-        started = (folder / "runs" / "builder.sessions").stat().st_mtime
-        if time.time() - started >= FACTORY_AGENT_TIMEOUT:
-            return False
-        if any((folder / "build").glob("round-*.md")) or (folder / FACTORY_STOPPED).exists():
-            return False
-        step = folder / FACTORY_STEP
-        if not step.exists():
-            return True
-        lines = step.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return False
-    first = FACTORY_STEP_RE.match(lines[0]) if lines else None
-    rounds = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
-    return bool(first) and first.group(1) == "build" and (rounds or [""])[0] in ("", "1")
-
-
-def factory_upgraded_build(folder: Path) -> bool:
-    """Whether a factory run upgraded to Tier 2 is building its first round, P, in `folder`, so
-    its resumed builder is rewriting `plan.md` now: `factory_first_build()`'s rule for round P. An
-    upgrade record for P, no `build/round-<P>.md`, no stop recorded, and `runs/step.md` naming
-    `build` at round P, written less than `FACTORY_AGENT_TIMEOUT` ago (the builder is resumed, so
-    its session file is as old as round 1). Never raises: a file that won't read is no live
-    build."""
-    try:
-        rounds = [
-            int(m.group(1))
-            for m in (FACTORY_UPGRADED_FILE_RE.match(p.name) for p in (folder / "build").iterdir())
-            if m
-        ]
-        if not rounds:
-            return False
-        n = max(rounds)
-        if (folder / "build" / f"round-{n}.md").exists() or (folder / FACTORY_STOPPED).exists():
-            return False
-        step = folder / FACTORY_STEP
-        if time.time() - step.stat().st_mtime >= FACTORY_AGENT_TIMEOUT:
-            return False
-        lines = step.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return False
-    first = FACTORY_STEP_RE.match(lines[0]) if lines else None
-    found = [m.group(1) for m in map(FACTORY_ROUND_RE.match, lines) if m]
-    return bool(first) and first.group(1) == "build" and (found or [""])[0] == str(n)
-
-
-def factory_newest_round(folder: Path) -> int:
-    """The newest round built or reviewed: a copy of `factory.py`'s `newest_round()` (and its
-    `build_round()`), pinned to it by a test."""
-    names = [p.stem[6:] for p in (folder / "build").glob("round-*.md")]
-    built = max((int(n) for n in names if n.isdigit()), default=0)
-    reviewed = [
-        int(p.name[6:]) for p in (folder / "reviews").glob("round-*")
-        if p.is_dir() and p.name[6:].isdigit()
-    ]  # fmt: skip
-    return max([built, *reviewed])
-
-
-def factory_reasons(lines: list[str]) -> list[dict]:
-    """A decision's `gate` and `look` reasons, as `factory.py`'s `escalation_reasons()` reads them
-    (a test pins the two): each `{"kind", "text"}`, in order."""
-    found = []
-    for line in lines:
-        m = FACTORY_REASON_RE.match(line)
-        if not m or re.fullmatch(r"D\d+", m.group(1)):
-            continue
-        word, text = m.group(1), m.group(2)
-        if word in FACTORY_REASON_KINDS:
-            found.append({"kind": word, "text": text})
-        else:
-            found.append({"kind": "look", "text": f"{word}: {text}"})
-    return found
-
-
-def factory_reading(folder: Path) -> dict:
-    """What `needs_of()` reads from a factory run's folder, as the board reads it: the approver's
-    decision, whether it asks to reconsider the approach, the ledger's open blocking (`pending`)
-    and default (`assumed`) decisions, its count of decision lines (a default the approver settled
-    is none: it is no answer of the person's; a `look` line is none either), and `problems`: an
-    open box the ledger can't read, or a file that won't. `reasons` are the current decision's
-    `gate` and `look` reasons, each with whether it is `filed` (a look with a current ledger line)
-    and `cleared` (a look acknowledged; a gate never here: `needs_of()` reads the hand gate), and
-    `looks` the current look lines still open. A look line is current only while it names the
-    newest round and the current decision gives it word for word. Never raises."""
-    found = {"decision": None, "reconsider": False, "pending": [], "assumed": [],
-             "ledger_lines": 0, "problems": [], "reasons": [], "looks": []}  # fmt: skip
-    lines: list[str] = []
-    try:
-        path = folder / "decision.md"
-        if path.is_file():
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            answer = _factory_opening(lines, FACTORY_DECISION_RE)
-            found["decision"] = answer[1].group(1) if answer else None
-            found["reconsider"] = FACTORY_RECONSIDER in [line.strip() for line in lines]
-        path = folder / "decisions.md"
-        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
-    except OSError as e:
-        found["problems"].append(str(e))
-        return found
-    reasons = factory_reasons(lines)
-    looked = {r["text"] for r in reasons if r["kind"] == "look"}
-    newest = f"approver round {factory_newest_round(folder)}" if looked else None
-    garbled, filed, seen = False, set(), set()
-    for line in text.splitlines():
-        m = FACTORY_LEDGER_RE.match(line)
-        garbled = garbled or not m and line.startswith("- [ ]")
-        if not m:
-            continue
-        if m.group(4) == "look":
-            words = m.group(5).partition(FACTORY_DECIDED)[0].strip()
-            if m.group(3) != newest or words not in looked:
-                continue  # history: an older decision's, or a restart's
-            filed.add(words)
-            if m.group(1) == "x":
-                seen.add(words)
-            else:
-                found["looks"].append({"id": m.group(2), "by": m.group(3), "text": words})
-            continue
-        found["ledger_lines"] += FACTORY_SETTLED not in line
-        if m.group(1) == " ":
-            item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
-            found["pending" if m.group(4) == "blocking" else "assumed"].append(item)
-    found["reasons"] = [
-        r | {"filed": r["kind"] == "gate" or r["text"] in filed,
-             "cleared": r["kind"] == "look" and r["text"] in seen}
-        for r in reasons
-    ]  # fmt: skip
-    if garbled:
-        found["problems"].append(GARBLED_LEDGER)
-    return found
 
 
 def needs_of(rec: dict) -> list[str]:
@@ -5328,8 +4982,8 @@ def needs_of(rec: dict) -> list[str]:
     `ledger_lines`, `reasons`, `looks`, `gate` (the hand gate's record) and `spec_filled`. The
     one place the rules live, so the board and `status` can't disagree; it reads nothing itself.
     Every problem first, at any stage; at `test` or `shipped`, the landing's stages, a stopped
-    landing (`land_stop`, `factory_land_stop()`), naming the step it stopped after; a closed
-    change nothing more; at `build` a stop, then each blocking decision; at `test` with an
+    landing (`land_stop`, `factory_records.read_land_stop()`), naming the step it stopped after;
+    a closed change nothing more; at `build` a stop, then each blocking decision; at `test` with an
     ESCALATE what its ledger and decision still hold (each current `look` to acknowledge, and
     `gate it green` while a `gate` reason has no current green hand gate), or, with no reason and
     no ledger line at all, or a look reason not yet filed, the escalation itself; a Tier 2 at
@@ -5344,7 +4998,7 @@ def needs_of(rec: dict) -> list[str]:
     if stage == "build":
         if stop := rec.get("stopped"):
             way = FACTORY_STOP_NEEDS.get(stop.get("way") or "")
-            needs.append(f"stopped: {way or f'read {FACTORY_STOPPED.as_posix()}'}")
+            needs.append(f"stopped: {way or f'read {factory_records.STOPPED.as_posix()}'}")
         needs += pending
     elif stage == "test" and rec.get("decision") == "ESCALATE":
         needs += pending
@@ -5397,11 +5051,11 @@ def column(entry: dict) -> str:
     stage never moved), since a factory signal counts only at the stage it belongs to; Landing for
     a change committed and on its way (shipped or dropped and waiting on close, whatever the
     factory's files still say, or a factory landing in flight at `test`, `in_flight` from
-    `factory_landing()`); Ready for a factory change at `test` the approver called READY, or whose
-    escalation is answered, and a change built by hand whose review is written or whose gate is
-    green (`seen_stage()`); else by how far it has got: Planned, Designing or Building (a factory
-    change at `test` with no decision, a restart cut short, too). The one rule: the board and
-    `status` both call it."""
+    `factory_records.landing()`); Ready for a factory change at `test` the approver called READY,
+    or whose escalation is answered, and a change built by hand whose review is written or whose
+    gate is green (`seen_stage()`); else by how far it has got: Planned, Designing or Building (a
+    factory change at `test` with no decision, a restart cut short, too). The one rule: the board
+    and `status` both call it."""
     stage = entry["stage"]
     if entry["problems"] or entry.get("needs"):
         return "needs-you"
@@ -5458,27 +5112,6 @@ def rebasing_branches(root: Path) -> set[str]:
     """The branches a rebase is stopped on: it detaches the worktree's HEAD, so `worktrees()` no
     longer names them, and `_change_trees()` reads each from the rebase's own record."""
     return {b for _, b in _change_trees(root)} - {b for _, b in worktrees(root)}
-
-
-def factory_landing(folder: Path, stage: str | None) -> tuple[bool, str | None]:
-    """Whether a factory landing is in flight in `folder`, and the problem its record makes: at
-    `test` or `shipped`, a `runs/land-step.md` opening with a `STEP:` line that names a step of
-    the landing's track (`FACTORY_LAND_STEPS`) other than a stop (`FACTORY_LAND_STOPS`). A record
-    that doesn't open with `STEP:` is the board's problem, worded as it words it; no record, or
-    one at any other stage, is neither. Never raises. The board and `status` both read it, so
-    `column()` sees one answer."""
-    if stage not in ("test", "shipped"):
-        return False, None
-    try:
-        text = (folder / FACTORY_LAND_STEP).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False, None
-    lines = text.splitlines()
-    step = FACTORY_STEP_RE.match(lines[0]) if lines else None
-    if not step:
-        return False, f"{FACTORY_LAND_STEP.as_posix()} doesn't open with STEP:"
-    name = step.group(1)
-    return name in FACTORY_LAND_STEPS and name not in FACTORY_LAND_STOPS, None
 
 
 def _change_base(
@@ -6935,6 +6568,21 @@ def _load_metrics():
 
 
 metrics = _load_metrics()
+
+
+def _load_factory_records():
+    """`scripts/factory_records.py`, the one reader of a factory run's files, by path like
+    `metrics.py`, and pure like it: nothing is bound into it. The board and close read it through
+    their binding, as `sdlc.factory_records`, so a test's stand-in here reaches them too."""
+    spec = importlib.util.spec_from_file_location(
+        "sdlc_factory_records", PLUGIN_DIR / "scripts" / "factory_records.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+factory_records = _load_factory_records()
 # Bound here so `retro` reads them, and its tests can stand in for them, by these names.
 _project_dirs = metrics._project_dirs
 
@@ -8087,7 +7735,7 @@ def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
         return {"applies": False, "why": why}
 
     yes = {"applies": True, "why": None}
-    if (path / "decision.md").exists():
+    if (path / factory_records.DECISION_FILE).exists():
         return {name: no("a factory run: its own reviewers ran") for name in PASS_NAMES}
     out: dict = {}
     if risk is None:
@@ -8161,7 +7809,7 @@ def _pass_applies(parts: dict, name: str) -> bool:
 # when it applies, from preflight's parts and the change's folder. Ship reads only the files this
 # names, so whether a branch applies is the script's call, never the skill's.
 SHIP_BRANCHES = {
-    "factory.md": lambda parts, path: (path / "decision.md").exists(),
+    "factory.md": lambda parts, path: (path / factory_records.DECISION_FILE).exists(),
     "undone.md": lambda parts, path: bool(parts["undone"]["items"]),
     "closes.md": lambda parts, path: bool(parts["closes"]["closes"]),
     "recover.md": lambda parts, path: bool((parts["risk"] or {}).get("irreversible")),
@@ -10037,7 +9685,9 @@ def cli_status(root: Path, home: Path, args) -> int:
         rec["touched_ago"] = None if touched is None else now - touched
         rec["quiet"] = touched is None or now - touched > QUIET_HOURS * 3600
         # A factory run its supervisor recorded as stopped waits on the person, never quiet.
-        rec["stopped"] = factory_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
+        rec["stopped"] = (
+            factory_records.read_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
+        )
         # A gate run by hand (`gate`) says whether the build as it stands is green; a factory
         # run's gate is its own while it builds, and at `test` the hand gate clears a `gate` reason.
         folder = Path(root, rec["dir"])
@@ -10045,17 +9695,17 @@ def cli_status(root: Path, home: Path, args) -> int:
         rec["gate"] = hand_gate(folder, home, a["trunk"]) if hand else None
         # What it needs from the person, by the rules the board reads (`needs_of()`); a factory
         # run's decision and ledger only where it ran, and nothing but the two answers kept.
-        seen = factory_reading(folder) if (folder / "runs").is_dir() else {"problems": []}
+        seen = factory_records.reading(folder) if (folder / "runs").is_dir() else {"problems": []}
         reading = rec | seen | {
             "problems": rec["errors"] + seen["problems"],
             "spec_filled": "spec.md" in rec["artifacts"] and "spec.md" not in rec["unfilled"],
             # A landing stopped before its commit; one stopped after is in the ready list.
-            "land_stop": factory_land_stop(folder) if rec["stage"] == "test" else None,
+            "land_stop": factory_records.read_land_stop(folder) if rec["stage"] == "test" else None,
             "mode": "factory" if (folder / "runs").is_dir() else "manual",
             "change": f"{rec['id']}-{rec['slug']}",
         }  # fmt: skip
         # A landing in flight, and a record that won't read, as the board reads them.
-        reading["in_flight"], problem = factory_landing(folder, rec["stage"])
+        reading["in_flight"], problem = factory_records.landing(folder, rec["stage"])
         reading["problems"] += [problem] if problem else []
         rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
         # Its board column, by the one rule: how far a change built by hand has got, too.
@@ -10067,7 +9717,11 @@ def cli_status(root: Path, home: Path, args) -> int:
         # `shipped`, `needs_of()` reads only `problems` and `land_stop`: a field it comes to read
         # there must be added to this `reading` too.
         folder = work_dir(Path(rec["worktree"])) / rec["branch"]
-        reading = {"stage": rec["kind"], "problems": [], "land_stop": factory_land_stop(folder)}
+        reading = {
+            "stage": rec["kind"],
+            "problems": [],
+            "land_stop": factory_records.read_land_stop(folder),
+        }
         rec["needs"] = needs_of(reading)
         rec["column"] = column(reading | {"needs": rec["needs"], "mode": None})
     a["all"] = getattr(args, "all", False)

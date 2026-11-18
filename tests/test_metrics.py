@@ -1190,38 +1190,17 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_patterns")
     names = ("VERDICT_RE", "DECISION_RE", "CHANGE_RE", "LEDGER_RE", "KEPT_RE", "DROPPED_RE")
     for name in (*names, "STOPPED_RE", "NEXT_RE", "PROBLEM_RE", "STEP_RE", "ROUND_RE"):
-        assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
-    assert sdlc.FACTORY_STOPPED == factory.STOPPED
-    assert sdlc.FACTORY_STEP == factory.STEP
-    assert sdlc.FACTORY_AGENT_TIMEOUT == factory.AGENT_TIMEOUT
-    assert sdlc.FACTORY_RECONSIDER == factory.RECONSIDER
-    assert sdlc.FACTORY_SETTLED == factory.SETTLED
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    assert sdlc.factory_records.STOPPED == factory.STOPPED
+    assert sdlc.factory_records.STEP == factory.STEP
+    assert sdlc.factory_records.AGENT_TIMEOUT == factory.AGENT_TIMEOUT
+    assert sdlc.factory_records.RECONSIDER == factory.RECONSIDER
+    assert sdlc.factory_records.SETTLED == factory.SETTLED
     # 145: the approver's reasons, and what tells a current look line from history.
     for name in ("REASON_RE", "LOOK_SOURCE_RE"):
-        assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
-    assert sdlc.FACTORY_REASON_KINDS == factory.REASON_KINDS
-    assert sdlc.FACTORY_DECIDED == factory.DECIDED
-
-
-def test_sdlcs_opening_is_a_pinned_copy_of_the_factorys() -> None:
-    """140 R8: the metrics read a decision and each round's verdicts as `factory.opening()`
-    does, case for case over the shared table."""
-
-    def load(path: Path, name: str):
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    sdlc = load(ROOT / "scripts" / "sdlc.py", "sdlc_for_opening")
-    factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_opening")
-    cases = json.loads((ROOT / "tests" / "fixtures" / "opening-cases.json").read_text("utf-8"))
-    for case in cases:
-        regex = {"verdict": factory.VERDICT_RE, "decision": factory.DECISION_RE}[case["kind"]]
-        mine = sdlc._factory_opening(case["lines"], regex)
-        theirs = factory.opening(case["lines"], regex)
-        got = [mine[0], mine[1].group(1)] if mine else None
-        assert got == ([theirs[0], theirs[1].group(1)] if theirs else None) == case["answer"], case
+        assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
+    assert sdlc.factory_records.REASON_KINDS == factory.REASON_KINDS
+    assert sdlc.factory_records.DECIDED == factory.DECIDED
 
 
 SUPERSEDED_LEDGER = """\
@@ -1475,14 +1454,14 @@ def test_sdlcs_reasons_and_newest_round_are_the_factorys(tmp_path: Path) -> None
         "- ESCALATED: no word here\n"
     )
     (folder / "decision.md").write_text(text, encoding="utf-8")
-    assert sdlc.factory_reasons(text.splitlines()) == factory.escalation_reasons(folder)
+    assert sdlc.factory_records.reasons(text.splitlines()) == factory.escalation_reasons(folder)
     assert len(factory.escalation_reasons(folder)) == 4
     for files in ([], ["build/round-1.md"], ["reviews/round-2/code.md", "build/round-1.md"],
                   ["build/round-3.restart.md", "build/round-3.gate.md"]):  # fmt: skip
         for rel in files:
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text("x\n", encoding="utf-8")
-        assert sdlc.factory_newest_round(folder) == factory.newest_round(folder)
+        assert sdlc.factory_records.newest_round(folder) == factory.newest_round(folder)
 
 
 # ---------------------------------------------------------------- how an agent worked

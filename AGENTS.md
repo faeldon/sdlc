@@ -64,13 +64,14 @@ writes itself, overridable in `.sdlc/templates/`. A host's process and review do
 answers to the guides, read block by block (`doc_units()`). REFERENCE.md, *The docs* and
 *Templates*.
 
-**Modules loaded by path.** `retro.py`, `board.py`, `closing.py`, `metrics.py`, `indicators.py`
-and the trackers are loaded by path, never imported: `uv run --script` and the tests put different
+**Modules loaded by path.** `retro.py`, `board.py`, `closing.py`, `metrics.py`, `indicators.py`,
+`factory_records.py` and the trackers are loaded by path, never imported: `uv run --script` and the tests put different
 directories on `sys.path`. `retro.py`, `board.py` and `closing.py` are bound to a live view of
 `sdlc.py`'s globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them;
 `board.py` loads only when `board` runs. The factory's `landing.py` is bound the same way to
-`factory.py`'s, as `factory.<name>`. `metrics.py` and `indicators.py` are pure: no subprocess and
-no import of `sdlc.py`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
+`factory.py`'s, as `factory.<name>`. `metrics.py`, `indicators.py` and `factory_records.py` are
+pure: no subprocess and no import of `sdlc.py`; the board and close reach `factory_records.py`
+through their binding, as `sdlc.factory_records`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
 them: a function lives there when it is close's, the push's, the lock's or the landing's, or only
 code there calls it (`tests/test_modules.py`). Each module's docstring is its contract.
 
@@ -165,8 +166,8 @@ run at `stage: test`, and only there, where its green record clears the approver
 reasons (`needs_of()`). Its columns name the state of the work, the same for either tool, by
 `column()`, which lives in `sdlc.py` beside `needs_of()` and `seen_stage()`, so `status` prints its
 sections by the same rule without loading the board. It
-reads a factory run's files with copies of `factory.py`'s parsing, pinned by
-`tests/test_board.py`, and the page builds every node with `textContent`, never from a string of
+reads a factory run's files through `scripts/factory_records.py`, as `status`, the hand gate and
+close do, its copies of `factory.py`'s parsing pinned by `tests/test_modules.py`, and the page builds every node with `textContent`, never from a string of
 HTML. Its docstring; REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).
 
 **The register: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests.
@@ -242,7 +243,9 @@ Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing
 and the gate slots' lock files, for the hand gate (`_hand_slot()`), and the base branch's `[ui]`
 and the screenshot sets under `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`,
 `_current_shots()`), never running `factory.py`: each reads the other's files with
-copies of its parsing (`risk_paths()` and the regexes included), pinned by tests. Agents that
+copies of its parsing (`risk_paths()` and the regexes included), pinned by tests; core's copies
+of a run's records live in `scripts/factory_records.py` alone, under `factory.py`'s names, and
+no other core file names a record (`tests/test_modules.py`). Agents that
 judge have no Write; only the builder and the resolver edit (the builder's sub-agents only
 `Agent(Explore, Plan)`; the resolver, a train conflict's own agent, only the files the conflict
 names, which `resolve --continue` checks), and no agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py

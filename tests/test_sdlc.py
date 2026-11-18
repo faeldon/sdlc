@@ -307,7 +307,7 @@ def test_the_template_plan_shows_once_the_first_build_is_not_live(tmp_path, case
     d = _first_build(tmp_path, **files)
     sessions = d / "runs" / "builder.sessions"
     if case == "stale":
-        old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+        old = time.time() - sdlc.factory_records.AGENT_TIMEOUT - 60
         os.utime(sessions, (old, old))
     if case == "no-sessions":
         sessions.unlink()
@@ -332,7 +332,7 @@ def _upgraded_build(root: Path, **files: str) -> Path:
         path = d / rel.replace("__", "/")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+    old = time.time() - sdlc.factory_records.AGENT_TIMEOUT - 60
     os.utime(d / "runs" / "builder.sessions", (old, old))  # the session began in round 1
     return d
 
@@ -364,7 +364,7 @@ def test_the_template_plan_shows_once_the_upgraded_build_is_not_live(tmp_path, c
     }.get(case, {})
     d = _upgraded_build(tmp_path, **files)
     if case == "stale":
-        old = time.time() - sdlc.FACTORY_AGENT_TIMEOUT - 60
+        old = time.time() - sdlc.factory_records.AGENT_TIMEOUT - 60
         os.utime(d / "runs" / "step.md", (old, old))
     if case == "no-record":
         (d / "build" / "round-2.upgraded.md").unlink()
@@ -2821,7 +2821,7 @@ def test_a_ledger_with_alternatives_is_not_garbled(tmp_path) -> None:
     weighed = tmp_path / "weighed"
     weighed.mkdir()
     (weighed / "decisions.md").write_text(WEIGHED, encoding="utf-8")
-    a, b = sdlc.factory_reading(plain), sdlc.factory_reading(weighed)
+    a, b = sdlc.factory_records.reading(plain), sdlc.factory_records.reading(weighed)
     assert (b["pending"], b["assumed"], b["problems"]) == (a["pending"], a["assumed"], [])
     assert [d["id"] for d in b["assumed"]] == ["D2"]
 
@@ -2832,12 +2832,12 @@ def test_an_escalation_with_only_settled_defaults_is_not_answered(tmp_path) -> N
     lines leaves the escalation to be read."""
     (tmp_path / "decision.md").write_text("DECISION: ESCALATE\n\nWhy.\n", encoding="utf-8")
     (tmp_path / "decisions.md").write_text(WEIGHED.split("- [ ] D2")[0], encoding="utf-8")
-    found = sdlc.factory_reading(tmp_path)
+    found = sdlc.factory_records.reading(tmp_path)
     assert found["ledger_lines"] == 0 and found["problems"] == [], found
     rec = _rec(stage="test", **{k: found[k] for k in ("decision", "assumed", "ledger_lines")})
     assert sdlc.needs_of(rec) == ["read the escalation"] and sdlc.answered(rec) is False
     (tmp_path / "decisions.md").write_text(WEIGHED, encoding="utf-8")
-    found = sdlc.factory_reading(tmp_path)
+    found = sdlc.factory_records.reading(tmp_path)
     rec = _rec(stage="test", **{k: found[k] for k in ("decision", "assumed", "ledger_lines")})
     assert sdlc.needs_of(rec) == ["confirm 1 default"], "only the open default"
 

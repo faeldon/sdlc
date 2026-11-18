@@ -5627,8 +5627,8 @@ def test_fresh_holds_an_upgraded_run(tmp_path, capsys, monkeypatch, stage) -> No
 @pytest.mark.portable
 def test_the_upgraded_record_pattern_is_a_pinned_copy() -> None:
     """R12: `sdlc.py`'s `check` reads the record by its own copy of the factory's pattern."""
-    assert sdlc.FACTORY_UPGRADED_FILE_RE.pattern == factory.UPGRADED_FILE_RE.pattern
-    assert sdlc.FACTORY_UPGRADED_FILE_RE.match("round-12.upgraded.md").group(1) == "12"
+    assert sdlc.factory_records.UPGRADED_FILE_RE.pattern == factory.UPGRADED_FILE_RE.pattern
+    assert sdlc.factory_records.UPGRADED_FILE_RE.match("round-12.upgraded.md").group(1) == "12"
 
 
 @pytest.mark.portable
@@ -5874,9 +5874,9 @@ def test_a_look_line_is_counted_in_no_ledger_figure(tmp_path, capsys) -> None:
         + "- [x] D4 (builder round 1, default): log ids → settled by the approver: R4\n",
         encoding="utf-8",
     )
-    for pattern in (factory.LEDGER_RE, sdlc.FACTORY_LEDGER_RE):
+    for pattern in (factory.LEDGER_RE, sdlc.factory_records.LEDGER_RE):
         assert pattern.match("- [ ] D1 (approver round 1, look): it reads oddly")
-    reading = sdlc.factory_reading(folder)
+    reading = sdlc.factory_records.reading(folder)
     assert [d["id"] for d in reading["pending"]] == ["D2"]
     assert [d["id"] for d in reading["assumed"]] == ["D3"]
     assert [d["id"] for d in reading["looks"]] == ["D1"] and reading["problems"] == []
@@ -5952,7 +5952,7 @@ def test_a_restart_makes_a_look_line_history(tmp_path, capsys) -> None:
     assert _ledger_text(root).count("- [ ] D1 (approver round 1, look)") == 1, "kept as written"
     out = _run(capsys, factory.cmd_ask, root, "008", None)[1]
     assert out["items"] == [], out
-    reading = sdlc.factory_reading(folder)
+    reading = sdlc.factory_records.reading(folder)
     assert reading["looks"] == []
     rec = {"stage": "test", "problems": [], **reading}
     assert sdlc.needs_of(rec) == ["gate it green"]

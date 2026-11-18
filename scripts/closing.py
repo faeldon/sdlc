@@ -26,6 +26,9 @@ What it keeps: `_push()` is the core's one git push, never forced, called only b
 and by `cmd_close` and `cmd_release` through `_push_plan()`; close holds `_main_lock()` from its
 merge to its `Close` commit, reentrant within a thread and inherited by a handed-off close through
 `LOCK_HELD_ENV`; `fcntl` and `msvcrt` are imported only inside the functions that need them.
+The measure step reads a factory run's files on the change's branch through
+`sdlc.factory_records` (`scripts/factory_records.py`): the git reads are here (`_branch_files()`),
+the parsing is the module's.
 """
 
 from __future__ import annotations
@@ -242,68 +245,27 @@ def _close_times(main: Path, trunk: str) -> dict[str, datetime]:
     return found
 
 
+def _branch_files(main: Path, branch: str, folder: str):
+    """`show` and `listing` over the change's folder on its branch, as `factory_records` takes
+    them: `show(rel)` the file `<folder>/<rel>`, or None; `listing(rel)` every path under
+    `<folder>/<rel>`, one a line, relative to the folder. Close's measure step is the only place
+    those git reads run."""
+
+    def show(rel: str) -> str | None:
+        return sdlc._git(main, "show", f"{branch}:{folder}/{rel}")
+
+    def listing(rel: str) -> str:
+        listed = sdlc._git(main, "ls-tree", "-r", "--name-only", branch, f"{folder}/{rel}") or ""
+        return "\n".join(path[len(folder) + 1 :] for path in listed.splitlines())
+
+    return show, listing
+
+
 def _factory_files(main: Path, branch: str) -> dict | None:
-    """What the factory left in the change's commit, as counts: review rounds, each reviewer's
-    `CHANGES` verdicts, change requests and requests the verifier dropped (`dropped`, from each
-    round's `verified.md`), the approver's decision, the ledger's blocking and default decisions,
-    the defaults still open and those the approver settled, and the script gate's red attempts
-    (`gate_fail`, only when a gate file exists). None for a change built by hand (no
-    `decision.md`)."""
-    folder = f"{sdlc.work_rel(main)}/{branch}"
-    decision = sdlc._git(main, "show", f"{branch}:{folder}/decision.md")
-    if decision is None:
-        return None
-    answer = sdlc._factory_opening(decision.splitlines(), sdlc.FACTORY_DECISION_RE)
-    m = answer[1] if answer else None
-    listed = sdlc._git(main, "ls-tree", "-r", "--name-only", branch, f"{folder}/reviews") or ""
-    rounds: set[str] = set()
-    reviews: dict[str, dict] = {}
-    for path in listed.splitlines():
-        parts = path[len(folder) + 1 :].split("/")  # reviews, round-N, role.md
-        if len(parts) != 3 or not parts[1].startswith("round-") or not parts[2].endswith(".md"):
-            continue
-        rounds.add(parts[1])
-        lines = (sdlc._git(main, "show", f"{branch}:{path}") or "").splitlines()
-        if parts[2] == "verified.md":
-            # The verifier's answers, counted on the reviewer whose request it dropped.
-            for m in filter(None, map(sdlc.FACTORY_DROPPED_RE.match, lines)):
-                r = reviews.setdefault(m.group(1), {"changes": 0, "requests": 0})
-                r["dropped"] = r.get("dropped", 0) + 1
-            continue
-        answer = sdlc._factory_opening(lines, sdlc.FACTORY_VERDICT_RE)
-        at, verdict = answer if answer else (0, None)
-        r = reviews.setdefault(parts[2].removesuffix(".md"), {"changes": 0, "requests": 0})
-        r["changes"] += int(bool(verdict) and verdict.group(1) == "CHANGES")
-        r["requests"] += sum(1 for line in lines[at + 1 :] if sdlc.FACTORY_CHANGE_RE.match(line))
-    if any(p.endswith("/verified.md") for p in listed.splitlines()):
-        # A run with a verifier says `dropped` for every reviewer, 0 included; one from before
-        # it says nothing, so its trailer reads as unknown there, never as nothing dropped.
-        for r in reviews.values():
-            r.setdefault("dropped", 0)
-    ledger = sdlc._git(main, "show", f"{branch}:{folder}/decisions.md") or ""
-    entries = [e for e in map(sdlc.FACTORY_LEDGER_RE.match, ledger.splitlines()) if e]
-    defaults = [e for e in entries if e.group(4) == "default"]
-    found = {
-        "rounds": len(rounds),
-        "reviews": reviews,
-        "decision": m.group(1) if m else None,
-        "blocking": sum(1 for e in entries if e.group(4) == "blocking"),
-        "defaults": len(defaults),
-        "defaults_open": sum(1 for e in defaults if e.group(1) == " "),
-        "defaults_settled": sum(1 for e in defaults if sdlc.FACTORY_SETTLED in e.group(5)),
-    }
-    # The script gate's red attempts, known only for a run that had the gate: one from before it,
-    # or with no gate configured, says nothing, never 0.
-    built = sdlc._git(main, "ls-tree", "-r", "--name-only", branch, f"{folder}/build") or ""
-    gates = [p for p in built.splitlines() if p.endswith(".gate.md")]
-    if gates:
-        found["gate_fail"] = sum(
-            1
-            for p in gates
-            for line in (sdlc._git(main, "show", f"{branch}:{p}") or "").splitlines()
-            if sdlc.FACTORY_GATE_FAIL_RE.match(line)
-        )
-    return found
+    """What the factory left in the change's commit, as counts (`factory_records.run_counts()`):
+    None for a change built by hand."""
+    show, listing = _branch_files(main, branch, f"{sdlc.work_rel(main)}/{branch}")
+    return sdlc.factory_records.run_counts(show, listing)
 
 
 def _change_diff(main: Path, branch: str) -> int | None:
@@ -327,38 +289,15 @@ def _change_diff(main: Path, branch: str) -> int | None:
 
 def _agent_sessions(main: Path, branch: str, folder: str) -> dict[str, str]:
     """The sessions the factory ran as its agents, by session id, from the change's
-    `runs/<role>.sessions` on its branch: one id a line, written by `factory.py agent`. A
-    transcript names no `--agent` role, so this is how measuring tells a builder's session from
-    the person's."""
-    roles: dict[str, str] = {}
-    listed = sdlc._git(main, "ls-tree", "--name-only", f"{branch}:{folder}/runs") or ""
-    for name in listed.splitlines():
-        if not name.endswith(".sessions"):
-            continue
-        for line in (sdlc._git(main, "show", f"{branch}:{folder}/runs/{name}") or "").splitlines():
-            if line.strip():
-                roles[line.strip()] = name.removesuffix(".sessions")
-    return roles
+    `runs/<role>.sessions` on its branch (`factory_records.session_roles()`). A transcript names
+    no `--agent` role, so this is how measuring tells a builder's session from the person's."""
+    return sdlc.factory_records.session_roles(*_branch_files(main, branch, folder))
 
 
 def _agent_models(main: Path, branch: str, folder: str) -> dict[str, str]:
-    """The model each factory session ran on, by session id, from the change's
-    `runs/costs.jsonl` on its branch, which `factory.py agent` appends a row to for every run.
-    A line that doesn't parse, or names no session or model, is skipped; no file gives none."""
-    models: dict[str, str] = {}
-    for line in (sdlc._git(main, "show", f"{branch}:{folder}/runs/costs.jsonl") or "").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        model = row.get("model") if isinstance(row, dict) else None
-        if isinstance(row, dict) and isinstance(row.get("session"), str) and isinstance(model, str):
-            models[row["session"]] = model
-    return models
-
-
-# The factory's run files' times (`factory.py`'s `_utc_now()`), read with this copy of its format.
-RUN_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+    """The model each factory session ran on, by session id, from the change's `runs/costs.jsonl`
+    on its branch (`factory_records.session_models()`)."""
+    return sdlc.factory_records.session_models(_branch_files(main, branch, folder)[0])
 
 
 def opened_at(text: str) -> datetime | None:
@@ -369,42 +308,6 @@ def opened_at(text: str) -> datetime | None:
         return datetime.strptime(value, sdlc.OPENED_FORMAT).replace(tzinfo=UTC)
     except ValueError:
         return None
-
-
-def _run_time(value: object) -> datetime | None:
-    try:
-        return datetime.strptime(value, RUN_TIME_FORMAT).replace(tzinfo=UTC)
-    except (TypeError, ValueError):
-        return None
-
-
-def _json_rows(text: str) -> list[dict]:
-    rows = []
-    for line in text.splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
-
-
-def _timed_rows(text: str) -> list[tuple[datetime, datetime, str]]:
-    """`runs/costs.jsonl`'s rows that say when they ran, as `(started, ended, role)`, in order:
-    `record_cost()`'s `started` and `ended`. A row without them, or out of order, is passed
-    over."""
-    out = []
-    for row in _json_rows(text):
-        start, end = _run_time(row.get("started")), _run_time(row.get("ended"))
-        if start and end and start <= end:
-            out.append((start, end, str(row.get("role") or "")))
-    return out
-
-
-def _land_sinces(text: str) -> list[datetime]:
-    """When each landing step in `runs/land-times.jsonl` began (`_record_land()`'s `since`)."""
-    return [t for t in (_run_time(r.get("since")) for r in _json_rows(text)) if t]
 
 
 def _lead_marks(
@@ -418,10 +321,11 @@ def _lead_marks(
     (`transcripts`). Without either, `git`: no first, so no split."""
     authored = sdlc._git(main, "show", "-s", "--format=%aI", branch)
     tip = datetime.fromisoformat(authored) if authored else None
-    runs = f"{branch}:{folder}/runs"
     landing = None
     if factory:
-        sinces = _land_sinces(sdlc._git(main, "show", f"{runs}/land-times.jsonl") or "")
+        records = sdlc.factory_records
+        times = sdlc._git(main, "show", f"{branch}:{folder}/{records.LAND_TIMES.as_posix()}")
+        sinces = records.land_sinces(times or "")
         landing, ready = min(sinces) if sinces else tip, None
     else:
         ready = tip
@@ -431,7 +335,10 @@ def _lead_marks(
         return max(done)[1] if done else None
 
     if factory:
-        timed = _timed_rows(sdlc._git(main, "show", f"{runs}/costs.jsonl") or "")
+        costs = sdlc._git(
+            main, "show", f"{branch}:{folder}/{sdlc.factory_records.COSTS.as_posix()}"
+        )
+        timed = sdlc.factory_records.timed_rows(costs or "")
         source = "runs"
         if not timed:
             timed = [
@@ -486,7 +393,8 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
     settings = cfg["metrics"]
     folder = f"{sdlc.work_rel(main)}/{branch}"
     text = sdlc._git(main, "show", f"{branch}:{folder}/intent.md") or ""
-    decided = sdlc._git(main, "cat-file", "-e", f"{branch}:{folder}/decision.md")
+    decision = sdlc.factory_records.DECISION_FILE
+    decided = sdlc._git(main, "cat-file", "-e", f"{branch}:{folder}/{decision}")
     way = "factory" if decided is not None else "manual"
     try:
         post = frontmatter.loads(text)
