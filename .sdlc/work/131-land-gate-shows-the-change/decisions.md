@@ -1,6 +1,0 @@
-# Decisions
-
-- [x] D1 (builder round 1, default): Show `shown` as the `preview` on the `yes` and `yes, with a fix` options, with no change to the question's text? Options: preview on the yes options; put the block in the question's own text; show it only above the dialog. Going with the preview: it puts the detail in the dialog without changing the literal question. → decided: the assumed default, confirmed when landing
-- [x] D2 (builder round 1, default): Show each change's whole intent (title, Problem, Outcome) in Step 1 above the dialog, and only its title in the dialog's `shown`, whatever the batch size? Going ahead with this unless told otherwise. → decided: the assumed default, confirmed when landing
-- [x] D3 (builder round 1, default): Quote Problem and Outcome in full, with no length cap? Going ahead in full: the intent says quote, never summarise. → decided: the assumed default, confirmed when landing
-- [x] D4 (builder round 1, default): Should `shown` also hold checks, cases and `How to recover:` lines, not only dispositions and assumed decisions? Going ahead with all of them: the question says "as shown" or "shown" about each one. → decided: the assumed default, confirmed when landing
