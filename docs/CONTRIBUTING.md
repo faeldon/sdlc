@@ -83,6 +83,12 @@ from. A run that collects no tests is a failure. The tests run in parallel (`pyt
 none may depend on running alone or in order. `pyproject.toml` only gives the tests an
 environment; the script declares its own dependencies inline, and the two lists are kept in step.
 
+The tests marked `browser` drive the board's page in Chromium through Playwright, which is in the
+`dev` group and nowhere else: no plugin script declares or imports it, so it never reaches a host.
+Install the browser once with `uv run --group dev playwright install --only-shell chromium`.
+Without it those tests skip, with the reason in `pytest -rs`, and `./check.sh` stays green; CI's
+Linux job installs it, so they always run there.
+
 Off the machine, `.github/workflows/check.yml` runs the same gate on Linux, all but `claude plugin
 validate`, and on Windows the tests marked `portable` (`uv run --group dev pytest -q -m portable`
 here). It runs on every branch push, which close, release and `/sdlc:publish` make, not on the tag

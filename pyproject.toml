@@ -9,10 +9,12 @@ dependencies = []
 
 [dependency-groups]
 # The same two libraries the script declares, so the tests import exactly what it runs with, and
-# pytest-xdist, which runs the suite across the cores (`-n auto`): a test dependency only.
+# pytest-xdist, which runs the suite across the cores (`-n auto`), and Playwright, which drives the
+# board in a browser (tests/test_board_browser.py): test dependencies only, never a script's.
 dev = [
   "pytest>=8",
   "pytest-xdist>=3",
+  "playwright>=1.49",
   "ruff>=0.6",
   "python-frontmatter>=1.1",
   "PyYAML>=6.0",
@@ -32,4 +34,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 # The Windows CI job runs only these: a test that must pass there too is marked, so the job's
 # reach is written down rather than implied.
-markers = ["portable: must pass on Windows too; the Windows CI job runs only these"]
+markers = [
+  "portable: must pass on Windows too; the Windows CI job runs only these",
+  "browser: drives a page in Chromium through Playwright; skips when the browser isn't installed",
+]

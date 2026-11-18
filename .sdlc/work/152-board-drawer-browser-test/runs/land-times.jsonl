@@ -1,0 +1,5 @@
+{"step": "checks", "round": null, "seconds": 7.0}
+{"step": "ship", "round": null, "seconds": 14.0}
+{"step": "stack", "round": 1, "seconds": 275.0}
+{"step": "recheck", "round": 1, "seconds": 4.0}
+{"step": "review", "round": 1, "seconds": 63.0}
