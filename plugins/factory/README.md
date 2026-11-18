@@ -291,6 +291,15 @@ Only the builder and the resolver edit, the resolver only the files a conflict n
 `factory.py resolve --continue` refuses a resolution that changed any other file. The others
 return text, and the skill writes it to the change's folder.
 
+**What each agent is told** for each step is text in `plugins/factory/prompts/`, one file per task
+(`build.md`, `review.md`, `land-review.md` …) and `common.md` for what several share. Each file's
+`## <part>` sections are the pieces the script picks and joins, one line each, and what varies is a
+placeholder, `${round}`, which the script fills (`$$` is a literal `$`). A wording change is an
+edit there, not in the script. The prompts are read only from the plugin itself, never from a
+host's `.sdlc/`, so every repo's agents read the same text. A file whose parts or placeholders
+don't match what the script fills refuses the step, naming the file and the part, before any
+session starts.
+
 **The UI and UX reviewers** run only in a repo that declares a front end (`[ui]`, below), and only
 on a round whose diff touches its `paths`; once one round runs them, the later ones do too. They
 never make a run's depth full. Neither has a shell: before each runs, `factory.py agent` starts

@@ -3494,7 +3494,7 @@ def test_a_revision_reaches_the_same_spec_writer_through_the_ledger(tmp_path, ca
     draft = (folder / "runs" / "spec-draft.md").read_text(encoding="utf-8")
     assert draft.startswith("the report"), "a revision writes over the draft"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, None, True)
-    assert code == 0 and claude()[-1]["argv"][1] == factory.RECHECK
+    assert code == 0 and claude()[-1]["argv"][1] == factory.prompt_part("spec", "recheck")
     assert factory.read_ledger(folder) == [], "a revision is no decision the loop waits on"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None, None, True)
     assert code == 1 and "for --task spec" in out["refusals"][0]

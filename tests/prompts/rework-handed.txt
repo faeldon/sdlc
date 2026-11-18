@@ -1,0 +1,7 @@
+Round 1's changes are verified in .sdlc/work/008-reopen-drafts/reviews/round-1/verified.md. Address every KEPT line, then report. The kept changes, in the reviewers' words:
+- code: src/a.py:1: rename a
+Also make these nits, each weighed cheap and worth it:
+- code: src/c.py:3: a clearer name {key S high}
+- test: tests/t.py:9: one assert a line
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

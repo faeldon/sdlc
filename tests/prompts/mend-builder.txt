@@ -1,0 +1,3 @@
+Your reply has no ## Evidence, or a command without its exit: run what your claims rest on again and reply with it.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

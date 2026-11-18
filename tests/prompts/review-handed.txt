@@ -1,0 +1,1 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Review round 2. Nits handed to the builder last round: src/c.py:3: a clearer name {key S high}; raise again, word for word with its weights, any the rework didn't make.

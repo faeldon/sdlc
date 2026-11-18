@@ -1,0 +1,1 @@
+The script couldn't read your answers: reviews/round-1/verified.md: C2 answered twice. Reply again, the whole reply, answering each change exactly once as plain text with no emphasis, `- KEPT: <role>: C<n>: <why>` or `- DROPPED: <role>: C<n>: <the change> — <why>`.

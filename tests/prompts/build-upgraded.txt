@@ -1,0 +1,3 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. D3 is decided in decisions.md: upgrade to Tier 2: drafts need a retention policy. So this change is now Tier 2, upgraded before round 2, and .sdlc/work/008-reopen-drafts/spec.md is its approved spec. Rewrite .sdlc/work/008-reopen-drafts/plan.md against it first, keeping what still holds of your plan so far, then build round 2 to the spec, test first. Every other ticked line in decisions.md is settled: build on it.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

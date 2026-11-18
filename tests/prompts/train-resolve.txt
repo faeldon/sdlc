@@ -1,0 +1,6 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. A landing train stacks 3 changes on main in this order, and stacking 008-reopen-drafts onto the change before it conflicts in: src/a.py, src/b.py. Resolve each so every change in the train keeps what it was built to do: read each change's spec and diff with git show (reads only), edit only those files, run no other git command, then report what you kept from each side, ending with ## Evidence.
+- 007-keep-tabs: 007 — Keep tabs. Its spec: `git show 7777777:.sdlc/work/007-keep-tabs/spec.md`; its diff: `git show 7777777`.
+- 008-reopen-drafts (this change): 008 — Reopen saved drafts. Its spec: `git show 8888888:.sdlc/work/008-reopen-drafts/spec.md`; its diff: `git show 8888888`.
+- 009-trim-logs: 009 — Trim. Its spec: `git show 9999999:.sdlc/work/009-trim-logs/intent.md`; its diff: `git show 9999999`.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

@@ -1,0 +1,3 @@
+The base branch moved under this change, and rebasing onto it conflicts in: src/a.py. Resolve each, keeping what both sides meant; edit only those files, run no git command, then report what you kept from each side, ending with ## Evidence.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

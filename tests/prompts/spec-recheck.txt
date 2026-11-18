@@ -1,0 +1,1 @@
+Your draft is missing one of these: every <...> prompt replaced, the requirements numbered and each checkable, a Contracts touched line for each invariant the change comes near. Draft it again with all three.

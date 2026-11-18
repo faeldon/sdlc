@@ -1,0 +1,3 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Build it: plan.md first (Tier 2), then the code, test first.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

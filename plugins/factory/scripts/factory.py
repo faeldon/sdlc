@@ -110,6 +110,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from string import Template
 from typing import BinaryIO
 from urllib.parse import urlparse
 
@@ -1938,21 +1939,10 @@ def weigh_text(ledger: list[dict]) -> str:
     open_ids = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
     if not open_ids:
         return ""
-    text = (
-        f" Weigh each open default in decisions.md, {', '.join(open_ids)}, with exactly one line "
-        "each: `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers "
-        "it>`, or `- ESCALATED: D<n>: <why only the person can decide>`. A default with no line "
-        "counts as escalated, and the decision is ESCALATE while any is. Never settle a blocking "
-        "line, or a default about scope, policy, cost, a destructive operation, a secret or a "
-        "published interface."
-    )
+    text = " " + prompt_part("common", "weigh", ids=", ".join(open_ids))
     bare = [d["id"] for d in ledger if d["id"] in open_ids and len(d["options"]) < 2]
     if bare:
-        text += (
-            f" These have no options yet: {', '.join(bare)}. Under the ESCALATED line of each "
-            "you escalate, give two to four indented `  - OPTION: <option> — <pros and cons>` "
-            "lines, the default first, then one `  - WHY: <why the default was chosen>`."
-        )
+        text += " " + prompt_part("common", "weigh-bare", ids=", ".join(bare))
     return text
 
 
@@ -3713,31 +3703,119 @@ TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "veri
 # What the builder resumes on when a task carries on its own session. Never `train-resolve`: the
 # resolver is a session of its own, with every change in the train, not one change's builder.
 RESUMES = ("fix", "rework", "decided", "mend", "resolve", "land-fix")
-MEND = (
-    "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
-    "again and reply with it."
-)
 # The mends `agent` has filed, `<role> <round>` a line: the record that holds each to once a round.
 MENDED = Path("runs") / "mended"
-VERDICT_MEND = (
-    "Your reply holds VERDICT: lines that disagree, so the script can't read your verdict. Reply "
-    "again, the whole reply, with one VERDICT: line as the first line and nothing before it."
-)
-DECISION_MEND = (
-    "Your reply holds DECISION: lines that disagree, so the script can't read your decision. Reply "
-    "again, the whole reply, with one DECISION: line as the first line and nothing before it."
-)
-VERIFY_MEND = (
-    "The script couldn't read your answers: {problems}. Reply again, the whole reply, answering "
-    "each change exactly once as plain text with no emphasis, `- KEPT: <role>: C<n>: <why>` or "
-    "`- DROPPED: <role>: C<n>: <the change> — <why>`."
-)
-# What a spec draft must have before the person sees it; a draft missing one is sent back once.
-RECHECK = (
-    "Your draft is missing one of these: every <...> prompt replaced, the requirements numbered "
-    "and each checkable, a Contracts touched line for each invariant the change comes near. Draft "
-    "it again with all three."
-)
+# Every prompt an agent is sent is text in the plugin's own `prompts/<file>.md` (`PROMPTS_DIR`),
+# never a host's: a `# ` title, a `>` note, then one `## <part>` section per piece of text, its
+# placeholders `string.Template`'s (`${name}`, `$$` a literal `$`), so a filled value is never read
+# as one. The script picks the parts a prompt needs, as its `if`s always did, and joins them. This
+# table is what each file must hold: its parts, and exactly the placeholders the script fills in
+# each; `_prompt_file()` refuses a file that differs, before any session starts.
+PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
+    name: {key: frozenset(names.split()) for key, names in parts.items()}
+    for name, parts in {
+        "common": {"head": "rel root", "check": "script ident", "land-diff": "fork base",
+                   "weigh": "ids", "weigh-bare": "ids"},
+        "spec": {"draft": "", "upgraded": "round decision question answer before",
+                 "revise": "words", "recheck": ""},
+        "build": {"first": "", "restart": "before rel archive round", "restart-words": "words",
+                  "upgraded": "decision answer round rel"},
+        "fix": {"main": "round rel"},
+        "review": {"main": "round", "upgraded": "decision", "reworked": "reworked kept settled",
+                   "raise-again": "", "handed": "handed"},
+        "verify": {"main": "round", "counts": "untouched repeats settled"},
+        "rework": {"main": "round rel verified", "handed": ""},
+        "approve": {"main": "", "upgraded": "round decision", "stuck": "round before stuck",
+                    "untestable": "untestable", "next-step": "reconsider", "exhausted": "",
+                    "undone": "", "irreversible": "base touched"},
+        "decided": {"main": "decided answer", "reviews": "round rel"},
+        "mend": {"evidence": "", "verdict": "", "decision": "", "verify": "problems"},
+        "resolve": {"main": "files", "gone": "gone inbox"},
+        "train-resolve": {"main": "count base change files",
+                          "change": "name this title pre rel spec", "this": ""},
+        "land-fix": {"main": "ask"},
+        "land-review": {"main": "round what diff", "rebased": "base why", "resolved": "round",
+                        "clean": "", "asked": "round ask"},
+        "land-verify": {"main": "round diff"},
+    }.items()
+}  # fmt: skip
+# The files each task's prompt reads beyond `common`: a mend reads a review's opening, a landing's
+# mend the landing review's.
+TASK_PROMPTS = {
+    "land-mend": ("mend", "land-review"), "mend": ("mend", "review"),
+    **{t: (t,) for t in ("spec", "build", "fix", "review", "verify", "rework", "approve",
+                         "decided", "resolve", "train-resolve", "land-fix", "land-review",
+                         "land-verify")},
+}  # fmt: skip
+PART_RE = re.compile(r"^## ([a-z][a-z0-9-]*)$")
+
+
+def _prompt_file(name: str) -> dict[str, str] | str:
+    """Prompt file `name`'s parts, each its lines under its `## <part>` heading with the blank
+    lines around them dropped; or why it can't be sent: missing, a part missing or extra, a stray
+    `$`, or a placeholder the script doesn't fill or a fill the part doesn't name
+    (`PROMPT_PARTS`). Read on every call, never cached, from the plugin alone (`PROMPTS_DIR`);
+    text mode reads a CRLF checkout as LF."""
+    shown = f"prompts/{name}.md"
+    declared = PROMPT_PARTS[name]
+    try:
+        text = (PROMPTS_DIR / f"{name}.md").read_text(encoding="utf-8")
+    except OSError:
+        return f"{shown} is missing from the factory plugin: reinstall sdlc-factory"
+    found: dict[str, list[str]] = {}
+    key = None
+    for line in text.splitlines():
+        if m := PART_RE.match(line):
+            key = m.group(1)
+            if key in found:
+                return f"{shown}, part {key}: there twice"
+            found[key] = []
+        elif key is not None:
+            found[key].append(line)
+    for key in sorted(found.keys() - declared.keys()):
+        return f"{shown}, part {key}: a part the script never sends"
+    for key in sorted(declared.keys() - found.keys()):
+        return f"{shown}, part {key}: missing, and the script sends it"
+    parts = {}
+    for key, lines in found.items():
+        body = "\n".join(lines).strip("\n")
+        template = Template(body)
+        if not template.is_valid():
+            return f"{shown}, part {key}: a $ that names no placeholder (write $$ for a $)"
+        named = set(template.get_identifiers())
+        if extra := sorted(named - declared[key]):
+            shown_names = ", ".join(f"${{{n}}}" for n in extra)
+            return f"{shown}, part {key}: names {shown_names}, which the script doesn't fill"
+        if unnamed := sorted(declared[key] - named):
+            shown_names = ", ".join(f"${{{n}}}" for n in unnamed)
+            return f"{shown}, part {key}: never names {shown_names}, which the script fills"
+        parts[key] = body
+    return parts
+
+
+def prompt_refusal(task: str) -> str | None:
+    """Why `task`'s prompt can't be sent, from the first of its files that doesn't match what the
+    script fills (`_prompt_file()`), even in a part this run wouldn't send; None when all do."""
+    for name in (*TASK_PROMPTS.get(task, ()), "common"):
+        parts = _prompt_file(name)
+        if isinstance(parts, str):
+            return parts
+    return None
+
+
+def prompt_part(name: str, key: str, /, **values: object) -> str:
+    """Part `key` of prompt file `name`, its placeholders filled with `values`, each as it is: the
+    filled text is never read for placeholders. `_task()` has refused a file that doesn't match
+    before any part is asked for, so a mismatch here is the script's own bug. `name` and `key`
+    are positional, so a placeholder may be called either."""
+    parts = _prompt_file(name)
+    if isinstance(parts, str):
+        raise ValueError(parts)
+    if values.keys() != PROMPT_PARTS[name][key]:
+        raise ValueError(f"prompts/{name}.md, part {key}: filled with {sorted(values)}")
+    return Template(parts[key]).substitute({k: str(v) for k, v in values.items()})
+
+
 # The person's words for a revised spec draft, written to `decisions.md` before the run's gate:
 # the only way free text reaches an agent session, never through a shell argument.
 REVISION_RE = re.compile(r"^- \[x\] (R\d+) \(person, revise\): (.+?)\s*$")
@@ -3993,11 +4071,7 @@ def check_line(folder: Path) -> str:
     slot: this factory's own `check`, by its absolute path, which is never committed (a reply
     quoting it is filed through `_placeholders()`)."""
     script = shlex.quote(FACTORY_SCRIPT.as_posix())
-    ident = folder.name.split("-", 1)[0]
-    return (
-        f"A full run of the suite, when you want one, is `uv run --quiet --script {script} check "
-        f"{ident}`: it waits for a gate slot."
-    )
+    return prompt_part("common", "check", script=script, ident=folder.name.split("-", 1)[0])
 
 
 def _task(
@@ -4013,9 +4087,14 @@ def _task(
     """The prompt a task sends, the file its reply goes to (for the spec draft `runs/spec-draft.md`,
     never `spec.md`, which waits for the person's yes), and whether the reply is added to that
     file: or why it can't run now.
-    The wording is the build's own; every builder report goes to `build/round-<R+1>.md`, `<R>`
-    the highest review round so far, unless it answers a decision before its round's review.
+    The wording is in the plugin's `prompts/` (`prompt_part()`), and a file that doesn't match
+    what the script fills refuses the task before anything else is read (`prompt_refusal()`);
+    every builder report goes to `build/round-<R+1>.md`, `<R>` the highest review round so far,
+    unless it answers a decision before its round's review.
     Every prompt the builder is sent ends with `check_line()`; the landing's add their own."""
+    refusal = prompt_refusal(task)
+    if refusal:
+        return refusal
     planned = _task_prompt(root, folder, state, task, role, decided, revise, recheck)
     builder = TASK_ROLE.get(task) == "builder" or (task == "mend" and role == "builder")
     if isinstance(planned, str) or task in LAND_TASKS or not builder:
@@ -4035,7 +4114,7 @@ def _task_prompt(
     recheck: bool = False,
 ) -> tuple[str, Path | None, bool] | str:
     rel = folder.relative_to(root).as_posix()
-    head = f"Change folder: {rel}. Worktree: {root}. "
+    head = prompt_part("common", "head", rel=rel, root=root) + " "
     step = TASK_STEP.get(task)
     if step and state["next"] != step:
         return f"verdicts says {state['next']!r}, not {step!r}"
@@ -4047,159 +4126,127 @@ def _task_prompt(
         words = read_revision(folder, revise)
         if words is None:
             return f"{revise} isn't a `- [x] {revise} (person, revise): …` line in decisions.md"
-        return f"Revise your draft, as the person asks: {words}", folder / SPEC_DRAFT, False
+        return prompt_part("spec", "revise", words=words), folder / SPEC_DRAFT, False
     if task == "spec" and recheck:
-        return RECHECK, folder / SPEC_DRAFT, False
+        return prompt_part("spec", "recheck"), folder / SPEC_DRAFT, False
     upgrade = state.get("upgraded")
     if task == "spec":
-        prompt = head + "Draft spec.md for this change."
+        prompt = head + prompt_part("spec", "draft")
         if upgrade and state["next"] == "spec":
-            prompt += (
-                f" It was upgraded from Tier 1 to Tier 2 before round {upgrade['round']}, on the "
-                f"person's answer to {upgrade['decision']} ({upgrade['question']}): "
-                f"{upgrade['answer']}. The build so far, up to round {upgrade['round'] - 1}, is in "
-                "the worktree: specify the whole change, what is built included."
-            )
+            prompt += " " + prompt_part(
+                "spec", "upgraded", round=upgrade["round"], decision=upgrade["decision"],
+                question=upgrade["question"], answer=upgrade["answer"],
+                before=upgrade["round"] - 1,
+            )  # fmt: skip
         return prompt, folder / SPEC_DRAFT, False
     restart = state.get("restart")
     if task == "build" and restart and rnd == restart["round"]:
         # A fresh builder, told why the approver escalated: never resumed on the old approach.
         text = (folder / restart["archive"]).read_text(encoding="utf-8")
-        prompt = head + (
-            f"The approver escalated this change after round {rnd - 1}, and the person sent it "
-            f"back for another build: read {rel}/{restart['archive']} and build round {rnd} to "
-            "answer it, plan.md first where the approach changes, then the code, test first."
+        prompt = head + prompt_part(
+            "build", "restart", before=rnd - 1, rel=rel, archive=restart["archive"], round=rnd
         )
         section = reconsider_section(text)
         if section:
             prompt += "\n\n" + section
         if restart["words"]:
-            prompt += f"\n\nThe person adds: {read_restart_words(folder, restart['words'])}"
+            words = read_restart_words(folder, restart["words"])
+            prompt += "\n\n" + prompt_part("build", "restart-words", words=words)
         return prompt, folder / "build" / f"round-{rnd}.md", False
     if task == "build" and upgrade and rnd == upgrade["round"]:
         # The builder resumed, its context kept: told the answer, the spec, and to replan first.
-        prompt = head + (
-            f"{upgrade['decision']} is decided in decisions.md: {upgrade['answer']}. So this "
-            f"change is now Tier 2, upgraded before round {rnd}, and {rel}/spec.md is its approved "
-            f"spec. Rewrite {rel}/plan.md against it first, keeping what still holds of your plan "
-            f"so far, then build round {rnd} to the spec, test first. Every other ticked line in "
-            "decisions.md is settled: build on it."
-        )
+        prompt = head + prompt_part(
+            "build", "upgraded", decision=upgrade["decision"], answer=upgrade["answer"],
+            round=rnd, rel=rel,
+        )  # fmt: skip
         return prompt, folder / "build" / f"round-{rnd}.md", False
     if task == "build":
-        return (
-            head + "Build it: plan.md first (Tier 2), then the code, test first.",
-            (folder / "build" / "round-1.md"),
-            False,
-        )
+        return head + prompt_part("build", "first"), folder / "build" / "round-1.md", False
     if task == "fix":
         # Added to the round's report, as an answer before review is: the round isn't reviewed.
         return (
-            f"The gate failed on round {rnd}: read {rel}/build/round-{rnd}.gate.md, fix what it "
-            "shows, then report.",
+            prompt_part("fix", "main", round=rnd, rel=rel),
             folder / "build" / f"round-{rnd}.md",
             True,
         )
     if task == "review":
         if role not in state["missing"]:
             return f"{role} isn't among round {rnd}'s missing reviewers: {state['missing']}"
-        prompt = head + f"Review round {rnd}."
+        prompt = head + prompt_part("review", "main", round=rnd)
         if upgrade and rnd == upgrade["round"]:
-            prompt += (
-                f" This change was upgraded from Tier 1 to Tier 2 before this round "
-                f"({upgrade['decision']}): review it against spec.md."
-            )
+            prompt += " " + prompt_part("review", "upgraded", decision=upgrade["decision"])
         before = [r for r in state["rounds"] if r["round"] < rnd and role in r["reviews"]]
         if before and state["reworked"] is not None:
             prev = next((r for r in state["rounds"] if r["round"] == rnd - 1), None)
             kept = (prev or {}).get("verified") or {"kept": []}
-            prompt += (
-                f" Reworked: {', '.join(state['reworked']) or 'nothing'}. Kept last round: "
-                f"{'; '.join(k['role'] + ': ' + k['change'] for k in kept['kept']) or 'none'}. "
-                f"Settled, never raise again: {'; '.join(state['settled']) or 'none'}."
-            )
+            prompt += " " + prompt_part(
+                "review", "reworked",
+                reworked=", ".join(state["reworked"]) or "nothing",
+                kept="; ".join(k["role"] + ": " + k["change"] for k in kept["kept"]) or "none",
+                settled="; ".join(state["settled"]) or "none",
+            )  # fmt: skip
             if kept["kept"]:
-                prompt += (
-                    " Raise again, word for word, any change kept last round that the rework "
-                    "didn't make."
-                )
+                prompt += " " + prompt_part("review", "raise-again")
         handed = [h["text"] for h in state.get("handed") or [] if h["role"] == role]
         if handed:
-            prompt += (
-                f" Nits handed to the builder last round: {'; '.join(handed)}; raise again, word "
-                "for word with its weights, any the rework didn't make."
-            )
+            prompt += " " + prompt_part("review", "handed", handed="; ".join(handed))
         return prompt, reviews_dir / f"{role}.md", False
     if task == "verify":
         current = next(r for r in state["rounds"] if r["round"] == rnd)
         asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(current["reviews"])]
+        counts = prompt_part(
+            "verify", "counts",
+            untouched="; ".join(state["untouched"]) or "none",
+            repeats="; ".join(state["repeats"]) or "none",
+            settled="; ".join(state["settled"]) or "none",
+        )  # fmt: skip
         return (
-            head + f"Verify round {rnd}.\n" + "\n".join(asked) + "\n"
-            f"Untouched: {'; '.join(state['untouched']) or 'none'}. "
-            f"Repeats: {'; '.join(state['repeats']) or 'none'}. "
-            f"Settled: {'; '.join(state['settled']) or 'none'}.",
+            head + prompt_part("verify", "main", round=rnd) + "\n" + "\n".join(asked) + "\n"
+            + counts,
             reviews_dir / VERIFIED,
             False,
-        )
+        )  # fmt: skip
     if task == "rework":
         # Each kept change in the reviewer's own words, as `read_verified()` resolved it: the
         # verifier's line is its own summary, by id.
         current = next(r for r in state["rounds"] if r["round"] == rnd)
         kept = (current["verified"] or {"kept": []})["kept"]
         prompt = (
-            f"Round {rnd}'s changes are verified in {rel}/reviews/round-{rnd}/{VERIFIED}. Address "
-            "every KEPT line, then report. The kept changes, in the reviewers' words:\n"
+            prompt_part("rework", "main", round=rnd, rel=rel, verified=VERIFIED) + "\n"
             + "\n".join(f"- {k['role']}: {k['change']}" for k in kept)
-        )
+        )  # fmt: skip
         if state.get("handed"):
-            prompt += "\nAlso make these nits, each weighed cheap and worth it:\n" + "\n".join(
-                f"- {h['role']}: {h['text']}" for h in state["handed"]
+            prompt += (
+                "\n"
+                + prompt_part("rework", "handed")
+                + "\n"
+                + "\n".join(f"- {h['role']}: {h['text']}" for h in state["handed"])
             )
         return prompt, folder / "build" / f"round-{rnd + 1}.md", False
     if task == "approve":
-        prompt = head + "Decide."
+        prompt = head + prompt_part("approve", "main")
         if upgrade:
-            prompt += (
-                f" This change was upgraded from Tier 1 to Tier 2 before round {upgrade['round']}, "
-                f"on the person's answer to {upgrade['decision']}: judge it against spec.md."
+            prompt += " " + prompt_part(
+                "approve", "upgraded", round=upgrade["round"], decision=upgrade["decision"]
             )
         stuck, untestable = state.get("stuck") or [], state.get("untestable") or []
         if stuck:
-            prompt += (
-                f" Round {rnd} kept again what round {rnd - 1} kept: {'; '.join(stuck)}; nothing "
-                "a further round does will change it."
+            prompt += " " + prompt_part(
+                "approve", "stuck", round=rnd, before=rnd - 1, stuck="; ".join(stuck)
             )
         if untestable:
-            prompt += (
-                f" The builder reports these requirements can't be tested: {'; '.join(untestable)}."
-            )
+            prompt += " " + prompt_part("approve", "untestable", untestable="; ".join(untestable))
         if stuck or untestable:
-            prompt += (
-                f" Under `{RECONSIDER}`, name the next step you'd take: a requirement to rewrite, "
-                "a model to try, or an approach to change."
-            )
+            prompt += " " + prompt_part("approve", "next-step", reconsider=RECONSIDER)
         elif state["exhausted"]:
-            prompt += (
-                " The rounds ran out with changes still kept: say whether the approach should "
-                "be reconsidered."
-            )
+            prompt += " " + prompt_part("approve", "exhausted")
         prompt += weigh_text(read_ledger(folder))
-        prompt += (
-            " For each unticked `- [ ]` item in notes.md, propose its disposition at landing: "
-            "`- UNDONE: <the item's text, exactly> → seed: <a short title>` or `→ dropped: "
-            "<why>`; an item starting `pre-existing:` may instead be filed as a bug, "
-            "`→ bug: <severity>: <path>[, <path>…]: <title>`, its severity one of the words in "
-            "the Bugs section of the repo's process doc (`[docs] process`, else the plugin's "
-            "guide), never guessed: with no word that fits, carry it as a seed."
-        )
+        prompt += " " + prompt_part("approve", "undone")
         base = _base(root)
         touched = risk_paths(_changed_paths(root, base), _irreversible(root, base)) if base else []
         if touched:
-            prompt += (
-                f" The diff touches irreversible paths ([review] irreversible on {base}): "
-                f"{', '.join(touched)}. A revert won't undo what they reach: for each, or each "
-                "group, one `- RECOVER: <path or glob>: <the way back>` line, its command or "
-                "`fix forward:` and what the follow-up would do."
+            prompt += " " + prompt_part(
+                "approve", "irreversible", base=base, touched=", ".join(touched)
             )
         return prompt, folder / "decision.md", False
     reviewed = state["rounds"][-1]["round"] if state["rounds"] else 0
@@ -4220,38 +4267,43 @@ def _task_prompt(
         entry = next((d for d in read_ledger(folder) if d["id"] == decided), None)
         if entry is None or not entry["decided"]:
             return f"{decided} isn't a decided line in decisions.md"
-        prompt = f"{decided} is decided in decisions.md: {entry['answer']}. Continue."
+        prompt = prompt_part("decided", "main", decided=decided, answer=entry["answer"])
         if not entry["source"].startswith("builder"):
-            prompt += f" Round {reviewed}'s reviews are in {rel}/reviews/round-{reviewed}/."
+            prompt += " " + prompt_part("decided", "reviews", round=reviewed, rel=rel)
         target = folder / "build" / f"round-{reviewed + 1}.md"
         return prompt, target, target.is_file() and state["built"] == reviewed + 1
     # mend: the stops a run mends itself, once each: a reviewer resumed to give one verdict first,
     # the approver one decision, the verifier resumed to answer in its shape, the builder resumed
     # for its evidence, or a new behaviour check for its own.
     if role == "approver":
-        return DECISION_MEND, folder / "decision.md", False
+        return prompt_part("mend", "decision"), folder / "decision.md", False
     if role == "verifier":
         where = f"reviews/round-{reviewed}/{VERIFIED}"
         found = [p for p in state["problems"] if p.startswith(where)]
         return (
-            VERIFY_MEND.format(problems="; ".join(found)),
+            prompt_part("mend", "verify", problems="; ".join(found)),
             folder / "reviews" / f"round-{reviewed}" / VERIFIED,
             False,
         )
     if verdict_mend(folder, state, role):
         return (
-            VERDICT_MEND,
+            prompt_part("mend", "verdict"),
             folder / "reviews" / f"round-{reviewed}" / f"{role}.md",
             False,
         )
     if role == "builder":
-        return MEND, folder / "build" / f"round-{state['built']}.md", False
-    if role in RUNS_THE_CHANGE:
         return (
-            head + f"Review round {reviewed}. " + MEND,
-            (folder / "reviews" / f"round-{reviewed}" / f"{role}.md"),
+            prompt_part("mend", "evidence"),
+            folder / "build" / f"round-{state['built']}.md",
             False,
         )
+    if role in RUNS_THE_CHANGE:
+        return (
+            head + prompt_part("review", "main", round=reviewed) + " "
+            + prompt_part("mend", "evidence"),
+            (folder / "reviews" / f"round-{reviewed}" / f"{role}.md"),
+            False,
+        )  # fmt: skip
     return (
         f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence; a reviewer, the approver "
         "and the verifier are mended to answer in their shape"
@@ -4270,27 +4322,21 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     if not n:
         return "no landing round is under way: run land first"
     rel = folder.relative_to(root).as_posix()
-    head = f"Change folder: {rel}. Worktree: {root}. "
+    head = prompt_part("common", "head", rel=rel, root=root) + " "
     where = folder / "reviews" / f"land-{n}"
     base = _base(root) or "the base branch"
     if task == "resolve":
         files = _conflicted(root)
         if not files:
             return "no conflicted file: run resolve first"
-        prompt = (
-            f"The base branch moved under this change, and rebasing onto it conflicts in: "
-            f"{', '.join(files)}. Resolve each, keeping what both sides meant; edit only those "
-            "files, run no git command, then report what you kept from each side, ending with "
-            "## Evidence."
-        )
+        prompt = prompt_part("resolve", "main", files=", ".join(files))
         if INBOX.as_posix() in files:
             text = (folder / "intent.md").read_text(encoding="utf-8")
             ids = [*frontmatter_ids(text, "idea"), *frontmatter_ids(text, "fixes")]
             gone = [*ids, *named_nits(root, folder)]
             if gone:
-                prompt += (
-                    f" The landing deleted {', '.join(dict.fromkeys(gone))} from "
-                    f"{INBOX.as_posix()}, and they stay deleted: don't keep them."
+                prompt += " " + prompt_part(
+                    "resolve", "gone", gone=", ".join(dict.fromkeys(gone)), inbox=INBOX.as_posix()
                 )
         return (
             f"{prompt}\n\n{check_line(folder)}",
@@ -4316,18 +4362,25 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
                 (ln[2:].strip() for ln in intent.splitlines() if ln.startswith("# ")), name
             )
             spec = "spec.md" if frontmatter(intent).get("tier") == "2" else "intent.md"
-            this = " (this change)" if name == folder.name else ""
+            this = " " + prompt_part("train-resolve", "this") if name == folder.name else ""
             listed.append(
-                f"- {name}{this}: {title}. Its spec: `git show {each['pre']}:{rel_each}/{spec}`; "
-                f"its diff: `git show {each['pre']}`."
+                prompt_part(
+                    "train-resolve",
+                    "change",
+                    name=name,
+                    this=this,
+                    title=title,
+                    pre=each["pre"],
+                    rel=rel_each,
+                    spec=spec,
+                )  # fmt: skip
             )
+        main = prompt_part(
+            "train-resolve", "main", count=len(listed), base=base, change=folder.name,
+            files=", ".join(files),
+        )  # fmt: skip
         return (
-            head + f"A landing train stacks {len(listed)} changes on {base} in this order, and "
-            f"stacking {folder.name} onto the change before it conflicts in: {', '.join(files)}. "
-            "Resolve each so every change in the train keeps what it was built to do: read each "
-            "change's spec and diff with git show (reads only), edit only those files, run no "
-            "other git command, then report what you kept from each side, ending with "
-            "## Evidence.\n" + "\n".join(listed) + f"\n\n{check_line(folder)}",
+            head + main + "\n" + "\n".join(listed) + f"\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -4336,9 +4389,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
         if ask is None:
             return f"no fix was asked for in landing round {n}: run land-fix --ask first"
         return (
-            head + f"The person asked for a fix while landing this change: {ask} Make it, editing "
-            "only what the fix needs; run no git command, then report what you changed, ending "
-            f"with ## Evidence.\n\n{check_line(folder)}",
+            head + prompt_part("land-fix", "main", ask=ask) + f"\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -4349,32 +4400,29 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             return f"land-verdicts says {state['next']!r}, not a mend for {role}"
         if role == "verifier":
             gone = [p for p in state["problems"] if p.startswith(f"reviews/land-{n}/{VERIFIED}")]
-            return VERIFY_MEND.format(problems="; ".join(gone)), where / VERIFIED, False
+            return prompt_part("mend", "verify", problems="; ".join(gone)), where / VERIFIED, False
         if preamble(where / f"{role}.md"):
-            return VERDICT_MEND, where / f"{role}.md", False
+            return prompt_part("mend", "verdict"), where / f"{role}.md", False
         planned = _land_task(root, folder, "land-review", role)
         if isinstance(planned, str):
             return planned
-        return planned[0] + " " + MEND, planned[1], False
+        return planned[0] + " " + prompt_part("mend", "evidence"), planned[1], False
     if task == "land-review":
         if role not in REVIEWERS:
             return f"land-review needs --role, one of {', '.join(REVIEWERS)}"
         resolved = (folder / "runs" / "land-resolved").is_file()
         why = (
-            f"its conflicts resolved while landing, in build/land-{n}.md"
+            prompt_part("land-review", "resolved", round=n)
             if resolved
-            else ("with no conflict")
+            else prompt_part("land-review", "clean")
         )
-        what = f"the change was rebased onto {base}, {why}"
+        what = prompt_part("land-review", "rebased", base=base, why=why)
         if ask is not None:
-            what = (
-                f"the builder made a fix the person asked for while landing, in build/land-{n}.md. "
-                f"The person asked: {ask}"
-            )
+            what = prompt_part("land-review", "asked", round=n, ask=ask)
         if (diff := _land_diff(root, base)) is None:
             return _NO_FORK.format(base=base)
         return (
-            head + f"Review landing round {n}: {what}. Review its whole diff: " + diff,
+            head + prompt_part("land-review", "main", round=n, what=what, diff=diff),
             where / f"{role}.md",
             False,
         )
@@ -4392,7 +4440,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     if (diff := _land_diff(root, base)) is None:
         return _NO_FORK.format(base=base)
     return (
-        head + f"Verify landing round {n} against its diff: {diff}\n" + "\n".join(asked),
+        head + prompt_part("land-verify", "main", round=n, diff=diff) + "\n" + "\n".join(asked),
         where / VERIFIED,
         False,
     )
@@ -4416,11 +4464,7 @@ def _land_diff(root: Path, base: str) -> str | None:
         fork = stacked_on
     if not fork:
         return None
-    return (
-        f"`git diff {fork}...HEAD`, from the commit this round rebased the change onto. {base} "
-        "may have moved since: a commit on it that isn't in that diff is not the change's, and a "
-        "move is the script's to catch before the close, never a finding."
-    )
+    return prompt_part("common", "land-diff", fork=fork, base=base)
 
 
 def _file_draft(root: Path, folder: Path, reply: str) -> dict:
@@ -4652,6 +4696,8 @@ def ready(root: Path) -> list[dict]:
 # carries a risk signal (`land-check`), recorded on each change's commit as `Sdlc-Landed: by=auto`.
 
 FACTORY_ROOT = Path(__file__).resolve().parents[1]
+# Where every agent's prompt is read from (`_prompt_file()`): the plugin's own, never a host's.
+PROMPTS_DIR = FACTORY_ROOT / "prompts"
 # This script, as the builder and the resolver are told to run its `check` (`check_line()`), and
 # as the train runs each step (`landing.py`'s `_run_one()`).
 FACTORY_SCRIPT = Path(__file__).resolve()

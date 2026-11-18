@@ -1,0 +1,3 @@
+The base branch moved under this change, and rebasing onto it conflicts in: src/a.py, .sdlc/work/inbox.md. Resolve each, keeping what both sides meant; edit only those files, run no git command, then report what you kept from each side, ending with ## Evidence. The landing deleted 2026-11-01-3, 2026-11-02-1, 2026-11-03-2 from .sdlc/work/inbox.md, and they stay deleted: don't keep them.
+
+A full run of the suite, when you want one, is `uv run --quiet --script <factory-script> check 008`: it waits for a gate slot.

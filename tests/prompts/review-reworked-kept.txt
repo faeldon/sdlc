@@ -1,0 +1,1 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Review round 2. Reworked: src/a.py. Kept last round: code: src/a.py:1: rename a. Settled, never raise again: D1: 50. Raise again, word for word, any change kept last round that the rework didn't make.

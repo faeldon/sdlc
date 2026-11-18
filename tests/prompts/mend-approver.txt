@@ -1,0 +1,1 @@
+Your reply holds DECISION: lines that disagree, so the script can't read your decision. Reply again, the whole reply, with one DECISION: line as the first line and nothing before it.
