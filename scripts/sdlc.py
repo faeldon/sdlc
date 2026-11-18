@@ -4202,6 +4202,25 @@ def ready_to_close(root: Path) -> list[dict]:
     return out
 
 
+def held_by_rebase(root: Path) -> list[dict]:
+    """Shipped or dropped changes a stopped rebase holds (a landing's, on a conflict its builder
+    resolves), shaped as `ready_to_close()`'s: their worktree's HEAD is detached, so it can't see
+    them, and the board keeps their cards (`rebasing_branches()`). Read-only."""
+    held = rebasing_branches(root)
+    out = []
+    for tree, branch in _change_trees(root):
+        m = DIR_RE.match(branch)
+        if branch not in held or not m:
+            continue
+        kind = _stage(work_dir(tree) / branch)
+        if kind in ("shipped", "dropped"):
+            out.append(
+                {"id": m.group(1), "slug": m.group(2), "branch": branch, "worktree": str(tree),
+                 "kind": kind}
+            )  # fmt: skip
+    return out
+
+
 def behind_trunk(main: Path, branch: str, trunk: str | None) -> int | None:
     """How many of the base branch's commits `branch` lacks; None when either isn't a local
     branch. 0 is close's precondition, the base an ancestor of the branch, so a fast-forward is
@@ -4679,9 +4698,14 @@ FACTORY_STEP = Path("runs") / "step.md"
 FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 # The step a landing is at, written by each landing command as it starts (`factory.py`'s
 # `_record_land()`): a `stop`, and a train's `eject`, name the step it stopped after and why.
-# Copies, pinned by a test: `FACTORY_LAND_STOPS` is the board's `LAND_STOPS`.
+# Copies, pinned by a test: `FACTORY_LAND_STOPS` is the board's `LAND_STOPS`, and
+# `FACTORY_LAND_STEPS` the steps its track places (`LAND_AT`), which are `factory.py`'s.
 FACTORY_LAND_STEP = Path("runs") / "land-step.md"
 FACTORY_LAND_STOPS = ("stop", "eject")
+FACTORY_LAND_STEPS = (
+    "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
+    "review", "mend", "verify", "close", "eject",
+)  # fmt: skip
 FACTORY_AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 FACTORY_AGENT_TIMEOUT = 3 * 3600
@@ -4936,6 +4960,103 @@ def answered(rec: dict) -> bool:
     `needs_of()` allows only with a ledger line or a reason, every line ticked, every gate reason
     cleared by a current green hand gate, and no `Reconsider` section."""
     return rec.get("stage") == "test" and rec.get("decision") == "ESCALATE" and not needs_of(rec)
+
+
+# The board's columns, by the state of the work, the same for a change built by hand or by the
+# factory (`board.html`'s `COLUMNS`, keyed as these): a stage's own column by its `stage:` line, or
+# by `seen_stage()` for a change built by hand. `status` prints its sections by them too.
+BY_STAGE = {"plan": "planned", "design": "designing", "build": "building", "ready": "ready"}
+
+
+def column(entry: dict) -> str:
+    """The board's column, by the state of the work, checked in this order: Needs you for a file
+    that won't read, at any stage, or anything `needs_of()` names (a stop or a blocking decision
+    at `build`, an escalation not yet cleared at `test`, a stopped landing, a written spec whose
+    stage never moved), since a factory signal counts only at the stage it belongs to; Landing for
+    a change committed and on its way (shipped or dropped and waiting on close, whatever the
+    factory's files still say, or a factory landing in flight at `test`, `in_flight` from
+    `factory_landing()`); Ready for a factory change at `test` the approver called READY, or whose
+    escalation is answered, and a change built by hand whose review is written or whose gate is
+    green (`seen_stage()`); else by how far it has got: Planned, Designing or Building (a factory
+    change at `test` with no decision, a restart cut short, too). The one rule: the board and
+    `status` both call it."""
+    stage = entry["stage"]
+    if entry["problems"] or entry.get("needs"):
+        return "needs-you"
+    if stage in ("shipped", "dropped") or entry.get("in_flight"):
+        return "landing"
+    if stage == "test" and entry["mode"] == "factory":
+        ready = entry.get("decision") == "READY" or answered(entry)
+        return "ready" if ready else "building"
+    return BY_STAGE.get(entry.get("seen") or stage or "", "needs-you")
+
+
+def seen_stage(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | None:
+    """How far a change built by hand has got, past what its `stage:` says: nothing moves that line
+    between `plan` (or a Tier 2's `design`) and `shipped`, so the board and `status` read it.
+    `ready` once ship's review has written `findings.md`, or once a gate run by hand passed on the
+    build as it stands (`sdlc.py gate`'s record, current), and never while that record is current
+    and red; `build` once the change touches a path outside the change folders and the plugin's
+    own state, in its branch's commits or, in a worktree of its own, its uncommitted edits. None
+    when neither says more, and always for a factory run, whose stage line the factory moves
+    itself."""
+    stage = entry["stage"]
+    # A Tier 2 at `plan` has no spec yet: what it touches isn't its build.
+    moving = ("plan", "design", "build") if entry["tier"] == 1 else ("design", "build")
+    if entry["mode"] != "manual" or stage not in moving:
+        return None
+    gate = entry.get("gate") or {}
+    red = gate.get("current") and gate.get("verdict") == "FAIL"
+    green = gate.get("current") and gate.get("verdict") == "PASS"
+    if not red and ((folder / "findings.md").is_file() or green):
+        return "ready"
+    if stage == "build":
+        return None
+    own = (f"{work_rel(home)}/", *(f".sdlc/{name}" for name in STATE_FILES))
+    paths = touched_paths(entry, folder, home, trunk)
+    return "build" if any(not p.startswith(own) for p in paths) else None
+
+
+def touched_paths(entry: dict, folder: Path, home: Path, trunk: str | None) -> list[str]:
+    """Every path the change has touched: what its branch changed against the base branch, and in
+    a worktree of its own, its uncommitted edits. Nothing from the branch without a base branch."""
+    paths = []
+    if trunk:
+        span = f"refs/heads/{trunk}...refs/heads/{entry['change']}"
+        # `-z`, as `_dirty_paths()` reads them: unquoted, so both compare as the same text.
+        out = _git(home, "diff", "-z", "--name-only", "--no-renames", span) or ""
+        paths += out.split("\0")
+    checkout = checkout_of(folder)
+    if checkout.resolve() != home.resolve():
+        paths += _dirty_paths(checkout)
+    return [p for p in paths if p]
+
+
+def rebasing_branches(root: Path) -> set[str]:
+    """The branches a rebase is stopped on: it detaches the worktree's HEAD, so `worktrees()` no
+    longer names them, and `_change_trees()` reads each from the rebase's own record."""
+    return {b for _, b in _change_trees(root)} - {b for _, b in worktrees(root)}
+
+
+def factory_landing(folder: Path, stage: str | None) -> tuple[bool, str | None]:
+    """Whether a factory landing is in flight in `folder`, and the problem its record makes: at
+    `test` or `shipped`, a `runs/land-step.md` opening with a `STEP:` line that names a step of
+    the landing's track (`FACTORY_LAND_STEPS`) other than a stop (`FACTORY_LAND_STOPS`). A record
+    that doesn't open with `STEP:` is the board's problem, worded as it words it; no record, or
+    one at any other stage, is neither. Never raises. The board and `status` both read it, so
+    `column()` sees one answer."""
+    if stage not in ("test", "shipped"):
+        return False, None
+    try:
+        text = (folder / FACTORY_LAND_STEP).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False, None
+    lines = text.splitlines()
+    step = FACTORY_STEP_RE.match(lines[0]) if lines else None
+    if not step:
+        return False, f"{FACTORY_LAND_STEP.as_posix()} doesn't open with STEP:"
+    name = step.group(1)
+    return name in FACTORY_LAND_STEPS and name not in FACTORY_LAND_STOPS, None
 
 
 def _factory_files(main: Path, branch: str) -> dict | None:
@@ -9912,68 +10033,90 @@ def _cut(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1].rstrip() + "…"
 
 
+# `status`'s sections for the open changes, the board's columns in its order (`column()`), Needs
+# you printed last, after Problems.
+STATUS_STATES = (
+    ("planned", "Planned"), ("designing", "Designing"), ("building", "Building"),
+    ("ready", "Ready"), ("landing", "Landing"),
+)  # fmt: skip
+STATUS_TILDE = "    ~ = scaffolded from the template, not written yet"
+
+
+def _by_state(a: dict) -> dict[str, tuple[list[dict], list[dict]]]:
+    """Each state's open changes and its changes waiting on close, by each record's `column`, in
+    `analyze()`'s order. A record read without one (a caller printing `analyze()` alone) sits by
+    its stage, as `column()` places a change with nothing more to read."""
+    shown: dict[str, tuple[list[dict], list[dict]]] = {
+        key: ([], []) for key in (*(k for k, _ in STATUS_STATES), "needs-you")
+    }
+    for rec in a["open"]:
+        key = rec.get("column") or BY_STAGE.get(rec["stage"] or "", "needs-you")
+        shown[key][0].append(rec)
+    for rec in a.get("ready") or []:
+        shown[rec.get("column") or "landing"][1].append(rec)
+    return shown
+
+
+def _change_lines(rec: dict, a: dict) -> list[str]:
+    """An open change's line, its title, and a stopped run's `⚠` and `→` lines."""
+    tier = rec["tier"] if rec["tier"] is not None else "?"
+    stage = rec["stage"] or "?"
+    age = f"{rec['age_days']}d" if rec["age_days"] is not None else "?"
+    have = (
+        " ".join(
+            n.removesuffix(".md") + ("~" if n in rec["unfilled"] else "") for n in rec["artifacts"]
+        )
+        or "(empty)"
+    )
+    undone = f"  · {len(rec['undone'])} undone" if rec.get("undone") else ""
+    if rec.get("open_questions"):
+        undone += f"  · {rec['open_questions']} open question(s)"
+    if rec.get("behind"):
+        undone += f"  · behind {a.get('trunk')} by {rec['behind']}: /sdlc:ship brings it up to date"
+    if "quiet" in rec:
+        ago = rec["touched_ago"]
+        touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
+        mark = "stopped, " if rec.get("stopped") else "quiet, " if rec["quiet"] else ""
+        undone += f"  · {mark}{touched}"
+    gate = rec.get("gate")
+    if gate and gate["current"]:
+        undone += "  · gate green" if gate["verdict"] == "PASS" else "  · gate red"
+    lines = [f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}"]
+    indent = " " * 30
+    if rec["title"]:
+        lines.append(f"{indent}{rec['title']}")
+    if rec.get("stopped"):
+        for problem in rec["stopped"]["problems"]:
+            lines.append(f"{indent}⚠ {_cut(problem, STATUS_WIDTH - len(indent) - 2)}")
+        lines.append(f"{indent}→ {rec['stopped']['next']}")
+    return lines
+
+
+def _close_line(rec: dict, a: dict) -> str:
+    """A shipped or dropped change's line, naming `/sdlc:close`: marked dropped, or behind the base
+    branch while its landing hasn't stopped (a stopped one says so on its `needs you:` line)."""
+    mark = "  (dropped)" if rec.get("kind") == "dropped" else ""
+    if not mark and rec.get("behind") and not rec.get("needs"):
+        mark = f"  (behind {a.get('trunk')} by {rec['behind']}: rebase and ship again)"
+    return f"    {rec['id']}  {rec['slug']:<28} → /sdlc:close {rec['id']}{mark}"
+
+
 def print_status(a: dict) -> None:
     print(f"{a['work']} — {len(a['open'])} open, {len(a['changes'])} total   today: {a['today']}")
 
-    print(f"\n■ Open changes: {len(a['open'])}")
-    if not a["open"]:
-        print("    none")
-    for rec in a["open"]:
-        tier = rec["tier"] if rec["tier"] is not None else "?"
-        stage = rec["stage"] or "?"
-        age = f"{rec['age_days']}d" if rec["age_days"] is not None else "?"
-        have = (
-            " ".join(
-                n.removesuffix(".md") + ("~" if n in rec["unfilled"] else "")
-                for n in rec["artifacts"]
-            )
-            or "(empty)"
-        )
-        undone = f"  · {len(rec['undone'])} undone" if rec.get("undone") else ""
-        if rec.get("open_questions"):
-            undone += f"  · {rec['open_questions']} open question(s)"
-        if rec.get("behind"):
-            undone += (
-                f"  · behind {a.get('trunk')} by {rec['behind']}: /sdlc:ship brings it up to date"
-            )
-        if "quiet" in rec:
-            ago = rec["touched_ago"]
-            touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
-            mark = "stopped, " if rec.get("stopped") else "quiet, " if rec["quiet"] else ""
-            undone += f"  · {mark}{touched}"
-        gate = rec.get("gate")
-        if gate and gate["current"]:
-            undone += "  · gate green" if gate["verdict"] == "PASS" else "  · gate red"
-        print(f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}")
-        indent = " " * 30
-        if rec["title"]:
-            print(f"{indent}{rec['title']}")
-        if rec.get("stopped"):
-            for problem in rec["stopped"]["problems"]:
-                print(f"{indent}⚠ {_cut(problem, STATUS_WIDTH - len(indent) - 2)}")
-            print(f"{indent}→ {rec['stopped']['next']}")
-    if any(rec["unfilled"] for rec in a["open"]):
-        print("    ~ = scaffolded from the template, not written yet")
-
-    shipped = [r for r in a["changes"] if r["stage"] == "shipped"]
-    print(f"\n■ Shipped: {len(shipped)}")
-    for rec in shipped[-10:]:
-        print(f"    {rec['id']}  {rec['slug']:<28} {rec['updated']}")
-    if len(shipped) > 10:
-        print(f"    (+{len(shipped) - 10} more)")
-    if not shipped:
-        print("    none")
-
-    if a.get("ready"):
-        print(f"\n■ Ready to close: {len(a['ready'])}")
-        for rec in a["ready"]:
-            mark = "  (dropped)" if rec.get("kind") == "dropped" else ""
-            if rec.get("needs"):
-                # A landing that stopped after its commit: the board's words, not a rebase's.
-                mark = f"  ({', '.join(rec['needs'])})"
-            elif rec.get("behind") and rec.get("kind") != "dropped":
-                mark = f"  (behind {a.get('trunk')} by {rec['behind']}: rebase and ship again)"
-            print(f"    {rec['id']}  {rec['slug']:<28} → /sdlc:close {rec['id']}{mark}")
+    states = _by_state(a)
+    # The `~` legend once, after the last section that showed one.
+    tildes = [k for k, (recs, _) in states.items() if any(r["unfilled"] for r in recs)]
+    for key, label in STATUS_STATES:
+        recs, closing = states[key]
+        print(f"\n■ {label}: {len(recs) + len(closing)}")
+        for rec in recs:
+            for line in _change_lines(rec, a):
+                print(line)
+        for rec in closing:
+            print(_close_line(rec, a))
+        if tildes and tildes[-1] == key:
+            print(STATUS_TILDE)
 
     # Left out where releasing isn't set up and nothing has landed: most repos, most of the time.
     rel = a.get("release")
@@ -10089,14 +10232,21 @@ def print_status(a: dict) -> None:
     for pr in a["problems"]:
         print(f"    ⚠  {pr['dir']}: {pr['detail']}")
 
-    # Last, so the answer to "what needs me?" is the line the eye ends on.
-    print("\n■ What needs me")
-    waiting = [rec for rec in a["open"] + (a.get("ready") or []) if rec.get("needs")]
-    if not waiting:
+    # Last, so the answer to "what needs me?" is the line the eye ends on: the board's sixth state.
+    recs, closing = states["needs-you"]
+    print(f"\n■ Needs you: {len(recs) + len(closing)}")
+    if not recs and not closing:
         print("    nothing")
-    for rec in waiting:
+    indent = " " * 30
+    for rec in recs + closing:
+        lines = _change_lines(rec, a) if rec in recs else [_close_line(rec, a)]
+        for line in lines:
+            print(line)
+        needs = ", ".join(rec.get("needs") or []) or f"stage {rec.get('stage') or '?'}"
         step = decide_step(rec)
-        print(f"    {rec['id']}  {', '.join(rec['needs'])}" + (f"  {step}" if step else ""))
+        print(f"{indent}needs you: {needs}" + (f"  {step}" if step else ""))
+    if tildes and tildes[-1] == "needs-you":
+        print(STATUS_TILDE)
 
 
 def main() -> int:
@@ -10506,7 +10656,7 @@ def main() -> int:
             print("    none ✅")
         return 1 if (args.strict and a["problems"]) else 0
 
-    a["ready"] = ready_to_close(root)
+    a["ready"] = ready_to_close(root) + held_by_rebase(home)
     # Unconfigured, status shows only a count, so the intents behind it aren't read.
     cfg = load_config(home)[0]
     a["trunk"] = cfg["git"]["base"]
@@ -10537,8 +10687,17 @@ def main() -> int:
             "spec_filled": "spec.md" in rec["artifacts"] and "spec.md" not in rec["unfilled"],
             # A landing stopped before its commit; one stopped after is in the ready list.
             "land_stop": factory_land_stop(folder) if rec["stage"] == "test" else None,
+            "mode": "factory" if (folder / "runs").is_dir() else "manual",
+            "change": f"{rec['id']}-{rec['slug']}",
         }  # fmt: skip
+        # A landing in flight, and a record that won't read, as the board reads them.
+        reading["in_flight"], problem = factory_landing(folder, rec["stage"])
+        reading["problems"] += [problem] if problem else []
         rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
+        # Its board column, by the one rule: how far a change built by hand has got, too.
+        reading["needs"] = rec["needs"]
+        reading["seen"] = seen_stage(reading, folder, home, a["trunk"])
+        rec["column"] = column(reading)
     for rec in a["ready"]:
         # A shipped change whose landing stopped waits on the person, as on the board. At
         # `shipped`, `needs_of()` reads only `problems` and `land_stop`: a field it comes to read
@@ -10546,6 +10705,7 @@ def main() -> int:
         folder = work_dir(Path(rec["worktree"])) / rec["branch"]
         reading = {"stage": rec["kind"], "problems": [], "land_stop": factory_land_stop(folder)}
         rec["needs"] = needs_of(reading)
+        rec["column"] = column(reading | {"needs": rec["needs"], "mode": None})
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))

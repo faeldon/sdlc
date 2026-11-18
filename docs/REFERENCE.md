@@ -527,8 +527,15 @@ factory run its supervisor stopped (`runs/stopped.md`, at `stage: build`) reads 
 of `quiet`, with each problem on a `⚠` line and the step that moves it on, ship it by hand or rerun
 `/sdlc-factory:build NNN`, on a `→` line under its title.
 
-`status` ends with `■ What needs me`: one line per open change waiting on the person, saying what
-it waits for, or `nothing`. The texts are the board's (below), read by the same rules: `fix:` and
+`status` groups the open changes by the board's columns (below), in its order, by the same rule
+(`column()` in `sdlc.py`, which the board calls): `■ Planned`, `■ Designing`, `■ Building`, `■ Ready`
+and `■ Landing`, each with its count, and one with nothing under it printed alone. `Landing` lists
+each shipped or dropped change waiting on close, a stopped rebase's included, on a `→ /sdlc:close
+NNN` line, and a factory landing in flight on its change's line.
+
+`status` ends with `■ Needs you`, the board's sixth column: each change waiting on the person, its
+line, and under it a `needs you:` line saying what it waits for, or `nothing` when none is. The
+texts are the board's (below), read by the same rules: `fix:` and
 each problem, at any stage; at `build`, a stop's way on in plain words (`stopped: fix its cause and
 rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's commit`, or `stopped:
 read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
@@ -543,8 +550,10 @@ line here and never counted as an answer, nor as a default to confirm), the line
 decision, a default or a look; `landing stopped at <step>` for a factory landing that stopped
 (`runs/land-step.md`), at `test` before its commit or on a shipped change, whose Landing card says
 so too; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
-but whose stage never moved. `status` reads only what it already reads, so a problem only the
-board finds (a reply that isn't a review, a findings file that won't read) is on the board alone.
+but whose stage never moved. `status` reads the board's reading of a landing (`runs/land-step.md`,
+whether it is in flight and whether its record reads), but no more, so a problem only the board
+finds (a reply that isn't a review, a findings file that won't read) is on the board alone, and
+that change is under its stage's state in `status`.
 
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
 the same open changes as a live page on `127.0.0.1` until it is stopped, in columns that name the
@@ -555,7 +564,7 @@ approver called READY or whose escalation is answered, or a change built by hand
 written or whose gate is green), **Landing** (committed and on its way to the base branch: shipped
 or dropped and waiting on close, or a factory landing or train in flight), and **Needs you** for
 one with a file that won't read, at any stage, or whatever else it needs from the person, each
-card naming it on a `needs you:` line (the texts `/sdlc:status`'s `■ What needs me` gives, above):
+card naming it on a `needs you:` line (the texts `/sdlc:status`'s `■ Needs you` gives, above):
 a run that stopped or a blocking decision at `build`, an ESCALATE at `test` while its ledger holds
 an unticked line, a look is unacknowledged, a gate reason isn't green, it asks to reconsider the
 approach, or it holds no decision at all, a landing that stopped, before its commit or after, and

@@ -1,0 +1,11 @@
+{"step": "cases", "round": null, "seconds": 32.0}
+{"step": "ship", "round": null, "seconds": 1.0}
+{"step": "wait", "round": null, "seconds": 1.0}
+{"step": "stack", "round": 1, "seconds": 0.0}
+{"step": "resolve", "round": 1, "seconds": 263.0}
+{"step": "gate", "round": 1, "seconds": 123.0}
+{"step": "wait", "round": 1, "seconds": 202.0}
+{"step": "wait", "round": 1, "seconds": 202.0}
+{"step": "wait", "round": 1, "seconds": 202.0}
+{"step": "review", "round": 1, "seconds": 17.0}
+{"step": "wait", "round": 1, "seconds": 21.0}

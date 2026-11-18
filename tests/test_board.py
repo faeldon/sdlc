@@ -545,14 +545,6 @@ def test_a_change_s_issue_link_is_built_from_the_remote_only_when_github_numbers
     )
 
 
-def test_status_never_loads_the_board() -> None:
-    """R1: only `board`'s dispatch loads `board.py`, so no other command pays for it."""
-    source = (ROOT / "scripts" / "sdlc.py").read_text(encoding="utf-8")
-    calls = re.findall(r"(?<!def )_load_board\(\)", source)
-    assert len(calls) == 1 and "return _load_board().cmd_board(root, args.port)" in source
-    assert "board" not in vars(sdlc), "nothing binds it at import, as retro is bound"
-
-
 # ---------------------------------------------------------------- the server
 
 
@@ -1685,18 +1677,26 @@ def _needs_folders(root: Path) -> None:
 
 
 @pytest.mark.portable
-def test_status_ends_with_what_needs_me(repo, monkeypatch, capsys) -> None:
-    """R11: the last section, one line per change with needs, as the board reads them."""
+def test_status_ends_with_needs_you(repo, monkeypatch, capsys) -> None:
+    """R11 (091), 151 R8: the last section, the board's Needs you, each change's line and under it
+    what it needs, as the board reads them."""
     _needs_folders(repo)
     out, a = _status(repo, monkeypatch, capsys)
     heads = [line for line in out.splitlines() if line.startswith("■ ")]
-    assert heads[-1] == "■ What needs me" and heads[-2].startswith("■ Problems"), heads
-    tail = out.split("■ What needs me\n", 1)[1].splitlines()
-    assert tail == [
-        "    004  decide D1",
-        "    013  stopped: fix its cause and rerun",
-        "    041  decide D3, confirm 2 defaults  /sdlc-factory:decide 041",
+    assert heads[-1] == "■ Needs you: 3" and heads[-2].startswith("■ Problems"), heads
+    after = out.split("■ Needs you: 3\n", 1)[1].splitlines()
+    tail = [line for line in after if "needs you:" in line or re.match(r"^    \d{3}  ", line)]
+    shown = [re.sub(r"touched \d+[mh] ago", "touched now", line) for line in tail]
+    shown = [re.sub(r"^(    \d{3}  T\d \w+ +) *\d+d", r"\1Nd", line) for line in shown]
+    assert [re.sub(r"  +", " ", line.strip()) for line in shown] == [
+        "004 T1 build Nd draft-purge decisions intent · 1 open question(s) · touched now",
+        "needs you: decide D1",
+        "013 T1 build Nd draft-escapes intent · 1 open question(s) · stopped, touched now",
+        "needs you: stopped: fix its cause and rerun",
+        "041 T2 test Nd esc-open decision decisions intent · 1 open question(s) · touched now",
+        "needs you: decide D3, confirm 2 defaults /sdlc-factory:decide 041",
     ], tail
+    assert " " * 30 + "needs you: decide D3, confirm 2 defaults  /sdlc-factory:decide 041" in out
     assert "  · stopped, touched" in out and "→ " in out, "the stop's own lines stay"
     cards = _cards(repo)
     for rec in a["open"]:
@@ -1717,7 +1717,7 @@ def test_status_says_nothing_needs_me_when_nothing_does(tmp_path, monkeypatch, c
     _git(root, "commit", "-q", "-m", "init")
     _change(root, "001-reopen-drafts", 1, "plan", "Reopen drafts")
     out, _ = _status(root, monkeypatch, capsys)
-    assert out.rstrip().endswith("■ What needs me\n    nothing"), out[-200:]
+    assert out.rstrip().endswith("■ Needs you: 0\n    nothing"), out[-200:]
 
 
 @pytest.mark.portable
@@ -1728,7 +1728,8 @@ def test_status_records_only_gain_keys(repo, monkeypatch, capsys) -> None:
     _, a = _status(repo, monkeypatch, capsys)
     dispatch = {"behind", "touched_ago", "quiet", "stopped", "gate"}
     for rec in a["open"]:
-        assert set(rec) == before[rec["dir"]] | dispatch | {"needs", "answered"}, rec["dir"]
+        gained = {"needs", "answered", "column"}
+        assert set(rec) == before[rec["dir"]] | dispatch | gained, rec["dir"]
         assert isinstance(rec["needs"], list) and isinstance(rec["answered"], bool)
 
 
@@ -1741,7 +1742,7 @@ def test_status_reads_a_malformed_open_line_as_a_problem(repo, monkeypatch, caps
     rec = next(r for r in a["open"] if r["id"] == "041")
     line = "decisions.md: an open line that doesn't read as a decision"
     assert rec["needs"] == [f"fix: {line}"] and rec["answered"] is False
-    assert f"    041  fix: {line}" in out
+    assert f"{' ' * 30}needs you: fix: {line}" in out
 
 
 @pytest.mark.portable
@@ -2140,7 +2141,7 @@ STOPS = ("eject",)
 @pytest.mark.parametrize("step", list(LANDS))
 def test_a_landing_card_shows_its_landing_track(repo, step) -> None:
     """133: a change landing shows the landing's track, its step current, with its round and the
-    moves followed out of the bound, where it sits: Ready to close once committed."""
+    moves followed out of the bound, where it sits: Landing once committed."""
     assert set(LANDS) == set(factory.LAND_STEPS), "every step the factory records"
     _landing_at(repo, step)
     card = _cards(repo)["030-draft-land"]
@@ -2375,27 +2376,27 @@ def test_the_landing_stop_is_read_as_status_reads_it(repo) -> None:
 
 
 @pytest.mark.portable
-def test_status_lists_a_stopped_landing_under_what_needs_me(repo, monkeypatch, capsys) -> None:
-    """141: `status` reads the landing's stop as the board does: a shipped change whose landing
-    stopped is marked on its Ready to close line and listed under `■ What needs me`, as is one
-    stopped before its commit; a landing under way is neither."""
+def test_status_lists_a_stopped_landing_under_needs_you(repo, monkeypatch, capsys) -> None:
+    """141, 151 R7, R8: `status` reads the landing's stop as the board does: a shipped change whose
+    landing stopped is listed under Needs you with its close line, as is one stopped before its
+    commit with its change line; a landing under way is under Landing."""
     why = "sdlc.py close failed: run /sdlc:close 030 by hand to see why"
     _landing_at(repo, "stop", after="close", problems=(why,))
     _landing_at(repo, "stop", stage="test", after="ship", problems=("it broke",),
                 name="031-draft-early")  # fmt: skip
     _landing_at(repo, "review", name="032-draft-running")
     out, a = _status(repo, monkeypatch, capsys)
-    tail = out.split("■ What needs me\n", 1)[1].splitlines()
-    assert tail == [
-        "    004  decide D1",
-        "    031  landing stopped at ship",
-        "    030  landing stopped at close",
-    ], tail
-    ready = out.split("■ Ready to close: ", 1)[1].split("\n■", 1)[0]
-    assert (
-        "030  draft-land                   → /sdlc:close 030  (landing stopped at close)" in ready
-    )
-    assert "032  draft-running                → /sdlc:close 032\n" in ready
+    tail = "\n".join(_sections(out)["Needs you"])
+    needs = re.findall(r"^\s+(\d{3}  .*?|needs you: .*)$", tail, re.M)
+    assert [n.split("  ")[0] if n[0].isdigit() else n for n in needs] == [
+        "004", "needs you: decide D1",
+        "031", "needs you: landing stopped at ship",
+        "030", "needs you: landing stopped at close",
+    ], tail  # fmt: skip
+    assert "    030  draft-land                   → /sdlc:close 030\n" in tail
+    landing = "\n".join(_sections(out)["Landing"])
+    assert "    032  draft-running                → /sdlc:close 032" in landing
+    assert "030" not in landing and "031" not in landing
     cards = _cards(repo)
     for rec in a["open"]:
         card = cards[f"{rec['id']}-{rec['slug']}"]
@@ -2490,7 +2491,7 @@ LOOK_WHY = "- ESCALATED: look: the drafts page reads oddly at phone width\n"
 
 def test_a_green_hand_gate_clears_a_gate_reason_until_an_edit(repo, capsys, monkeypatch) -> None:
     """145 R8, the intent's test: a change escalated for a red gate, its tree fixed and a green
-    `sdlc.py gate` recorded, is Ready and gone from `■ What needs me`; an edit to a path it
+    `sdlc.py gate` recorded, is Ready and gone from `■ Needs you`; an edit to a path it
     touches puts it back."""
     _main_check(repo, "test ! -e RED")
     folder = _escalated(repo, "040-esc-gate", "test", commit=["src/gate.py", "RED"])
@@ -2505,7 +2506,7 @@ def test_a_green_hand_gate_clears_a_gate_reason_until_an_edit(repo, capsys, monk
     capsys.readouterr()
     card = _cards(repo)["040-esc-gate"]
     assert (card["column"], card["needs"], card["answered"]) == ("ready", [], True), card
-    assert "040" not in _status(repo, monkeypatch, capsys)[0].split("■ What needs me")[1]
+    assert "040" not in _status(repo, monkeypatch, capsys)[0].split("■ Needs you")[1]
     _write(tree / "src" / "gate.py", "edited after the gate\n")
     card = _cards(repo)["040-esc-gate"]
     assert (card["column"], card["needs"]) == ("needs-you", ["gate it green"]), card
@@ -2545,9 +2546,9 @@ def test_a_hand_gate_record_is_no_land_gate_sample(repo) -> None:
 # ---------------------------------------------------------------- columns that name the state (145)
 
 
-def _factory_at_state(root: Path, state: str) -> str:
+def _factory_at_state(root: Path, state: str, name: str | None = None) -> str:
     """A factory change at `state`, as a run leaves it: its name."""
-    name = f"05{len(state)}-fac-{state}"
+    name = name or f"05{len(state)}-fac-{state}"
     stage = {"planned": "plan", "designing": "design", "building": "build", "ready": "test",
              "landing": "shipped"}[state]  # fmt: skip
     folder = _worktree(root, name, 2, stage, commit=[f"src/{state}.py"], factory=True)
@@ -2560,9 +2561,9 @@ def _factory_at_state(root: Path, state: str) -> str:
     return name
 
 
-def _hand_at_state(root: Path, state: str) -> str:
+def _hand_at_state(root: Path, state: str, name: str | None = None) -> str:
     """A change built by hand at `state`: its name."""
-    name = f"06{len(state)}-hand-{state}"
+    name = name or f"06{len(state)}-hand-{state}"
     stage = {"planned": "plan", "designing": "design", "building": "build", "ready": "build",
              "landing": "shipped"}[state]  # fmt: skip
     commit = [] if state in ("planned", "designing") else [f"src/{state}.py"]
@@ -2763,3 +2764,179 @@ def test_a_recheck_after_the_commit_sits_after_the_gate(repo) -> None:
     shown = [s["label"] + (" (current)" if s["state"] == "current" else "")
              for s in progress["steps"]]  # fmt: skip
     assert shown == ["ship", "rebase", "gate", "checks (current)", "review", "verify", "close"]
+
+
+# ------------------------------------------------------- status by the board's states (151)
+
+LABEL = {"planned": "Planned", "designing": "Designing", "building": "Building", "ready": "Ready",
+         "landing": "Landing", "needs-you": "Needs you"}  # fmt: skip
+STATES = ["Planned", "Designing", "Building", "Ready", "Landing"]
+
+
+def _sections(out: str) -> dict[str, list[str]]:
+    """Each `■ ` section's lines by its heading, less the count after a `:`."""
+    found: dict[str, list[str]] = {}
+    name = None
+    for line in out.splitlines():
+        if line.startswith("■ "):
+            name = line[2:].split(":", 1)[0]
+            found[name] = []
+        elif name is not None:
+            found[name].append(line)
+    return found
+
+
+def _placed(out: str) -> dict[str, str]:
+    """Each change id `status` lists under a board state, and that state's heading."""
+    return {
+        m.group(1): head
+        for head, lines in _sections(out).items()
+        if head in (*STATES, "Needs you")
+        for m in map(re.compile(r"^    (\d{3,})  ").match, lines)
+        if m
+    }
+
+
+def test_the_column_rule_is_sdlcs_alone(repo) -> None:
+    """151 R1, R2: the column rule and how far a hand-built change has got live in `sdlc.py`; the
+    board calls them, and defines neither again."""
+    source = (ROOT / "scripts" / "board.py").read_text(encoding="utf-8")
+    for name in ("column", "_seen", "_touched", "_rebasing"):
+        assert f"def {name}(" not in source, name
+    assert not re.search(r"^BY_STAGE\b", source, re.M)
+    assert 'entry["column"] = sdlc.column(entry)' in source
+    for name in ("column", "seen_stage", "touched_paths", "rebasing_branches", "BY_STAGE"):
+        assert hasattr(sdlc, name), name
+    cards = _cards(repo)
+    assert {n: c["column"] for n, c in cards.items()} == {
+        n: sdlc.column(c) for n, c in cards.items()
+    }
+
+
+@pytest.mark.portable
+def test_factory_land_steps_match_the_boards_track() -> None:
+    """151 R3: the steps `status` reads as a landing in flight are the board's track's."""
+    assert set(sdlc.FACTORY_LAND_STEPS) == set(board.LAND_AT)
+    assert set(sdlc.FACTORY_LAND_STOPS) <= set(sdlc.FACTORY_LAND_STEPS) | {"stop"}
+
+
+@pytest.mark.portable
+def test_the_board_and_status_read_a_landing_in_flight_alike(repo, monkeypatch, capsys) -> None:
+    """151 R3, R4: a landing at `ship`, `gate` or `wait` is Landing on both sides; one stopped at
+    `stop` or `eject` is Landing on neither; a record that won't read is the board's problem on
+    both."""
+    names = {}
+    for n, step in enumerate(("ship", "gate", "wait", "stop", "eject")):
+        name = f"07{n}-land-{step}"
+        _landing_at(repo, step, stage="test", after="gate" if step in ("stop", "eject") else None,
+                    name=name)  # fmt: skip
+        names[name[:3]] = name
+    garbled = _landing_at(repo, "gate", stage="test", name="079-land-garbled")
+    _write(garbled / factory.LAND_STEP, "landing, probably\n")
+    names["079"] = "079-land-garbled"
+    problem = "runs/land-step.md doesn't open with STEP:"
+    assert sdlc.factory_landing(garbled, "test") == (False, problem)
+    assert sdlc.factory_landing(garbled, "build") == (False, None), "only at a landing's stages"
+    cards = _cards(repo)
+    out, a = _status(repo, monkeypatch, capsys)
+    placed = _placed(out)
+    for ident, name in names.items():
+        assert LABEL[cards[name]["column"]] == placed[ident], (name, placed[ident])
+    assert [cards[names[i]]["column"] for i in ("070", "071", "072")] == ["landing"] * 3
+    assert [cards[names[i]]["column"] for i in ("073", "074", "079")] == ["needs-you"] * 3
+    assert problem in cards["079-land-garbled"]["problems"]
+    rec = next(r for r in a["open"] if r["id"] == "079")
+    assert rec["needs"][0] == f"fix: {problem}", rec["needs"]
+
+
+@pytest.mark.portable
+def test_status_prints_the_board_states_in_order(repo, monkeypatch, capsys) -> None:
+    """151 R6: five state headings right after the first line, in the board's order, each with
+    its count, an empty one alone; none of the three it replaces."""
+    out, _ = _status(repo, monkeypatch, capsys)
+    lines = out.splitlines()
+    heads = [line for line in lines if line.startswith("■ ")]
+    assert [h.split(":", 1)[0] for h in heads[:5]] == [f"■ {s}" for s in STATES], heads
+    assert lines[1] == "" and lines[2] == heads[0], lines[:3]
+    sections = _sections(out)
+    for state in STATES:
+        ids = [line for line in sections[state] if re.match(r"^    \d{3,}  ", line)]
+        assert f"■ {state}: {len(ids)}" in heads, (state, heads)
+    assert heads[4] == "■ Landing: 0" and sections["Landing"] == [""], "an empty state, alone"
+    for old in ("■ Open changes", "■ Shipped", "■ Ready to close", "■ What needs me"):
+        assert old not in out, old
+
+
+@pytest.mark.portable
+def test_status_lists_a_change_closing_or_rebasing_under_landing(repo, monkeypatch, capsys) -> None:
+    """151 R7: a shipped or dropped change waiting on close prints its close line under Landing,
+    and so does a shipped one a stopped rebase holds; an open landing in flight its change line."""
+    _hand_at_state(repo, "landing")
+    _landing_at(repo, "gate", stage="test", name="031-draft-flying")
+    folder = _landing_at(repo, "resolve")
+    tree = sdlc.checkout_of(folder)
+    _write(repo / "src" / "land.py", "main's own\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "main moves")
+    stopped = subprocess.run(["git", "-C", str(tree), "rebase", "main"], capture_output=True,
+                             encoding="utf-8")  # fmt: skip
+    assert stopped.returncode != 0
+    assert "030-draft-land" not in {r["branch"] for r in sdlc.ready_to_close(repo)}
+    assert "030-draft-land" in sdlc.rebasing_branches(repo)
+    out, _ = _status(repo, monkeypatch, capsys)
+    landing = "\n".join(_sections(out)["Landing"])
+    assert "030  draft-land                   → /sdlc:close 030" in landing, landing
+    assert "067  hand-landing                 → /sdlc:close 067" in landing, landing
+    assert re.search(r"^    031  T1 test ", landing, re.M), landing
+    assert out.count("→ /sdlc:close 030") == 1
+    _git(tree, "rebase", "--abort")
+
+
+@pytest.mark.portable
+def test_status_places_each_change_under_its_board_column(repo, monkeypatch, capsys) -> None:
+    """151 R9: one change built by hand and one by the factory at each of the six states, each
+    under the `status` heading that is its board column's label."""
+    made = {}
+    for n, state in enumerate(("planned", "designing", "building", "ready", "landing")):
+        made[_hand_at_state(repo, state, f"09{n}-hand-{state}")] = state
+        if state != "landing":
+            made[_factory_at_state(repo, state, f"08{n}-fac-{state}")] = state
+    made[_landing_at(repo, "gate", stage="test", name="084-fac-landing").name] = "landing"
+    spec = _worktree(repo, "095-hand-spec", 2, "plan")
+    _write(spec / "spec.md", "# spec\n\n## Requirements\n\n- R1. Written.\n")
+    made["095-hand-spec"] = "needs-you"
+    made[_stopped_run(repo, "085-fac-stopped").name] = "needs-you"
+    cards = _cards(repo)
+    out, _ = _status(repo, monkeypatch, capsys)
+    placed = _placed(out)
+    for name, state in made.items():
+        assert cards[name]["column"] == state, (name, cards[name]["column"])
+        assert placed[name[:3]] == LABEL[state], (name, placed.get(name[:3]))
+
+
+def test_status_never_loads_the_board(repo, monkeypatch, capsys) -> None:
+    """R1 (091), 151 R10: only `board`'s dispatch loads `board.py`, so no other command pays for
+    it, `status` included."""
+    source = (ROOT / "scripts" / "sdlc.py").read_text(encoding="utf-8")
+    calls = re.findall(r"(?<!def )_load_board\(\)", source)
+    assert len(calls) == 1 and "return _load_board().cmd_board(root, args.port)" in source
+    assert "board" not in vars(sdlc), "nothing binds it at import, as retro is bound"
+
+    def refuse():
+        raise AssertionError("status loaded the board")
+
+    monkeypatch.setattr(sdlc, "_load_board", refuse)
+    _status(repo, monkeypatch, capsys)
+
+
+@pytest.mark.portable
+def test_nothing_names_a_retired_status_section() -> None:
+    """151 R12: every reader of `status`'s sections reads the board's states."""
+    retired = ("■ What needs me", "Ready to close", "■ Open changes")
+    for top in ("skills", "plugins", "docs", "scripts"):
+        for path in (ROOT / top).rglob("*"):
+            if not path.is_file() or path.suffix not in (".md", ".py", ".html", ".toml", ".json"):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for old in retired:
+                assert old not in text, (path.relative_to(ROOT).as_posix(), old)

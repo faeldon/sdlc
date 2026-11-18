@@ -42,7 +42,7 @@ A refusal is said, naming the change, with what the person can do instead, and t
   this again once the run reports the change ready to ship. At `plan`, the change hasn't been
   built yet. At `shipped` or `dropped`, there is nothing left to decide.
 - **A number that names no change**, or one `ask` can't find: say what it said, and that
-  `/sdlc:status` lists the open changes, and those that need deciding under `■ What needs me`.
+  `/sdlc:status` lists the open changes, and those that need deciding under `■ Needs you`.
 
 Otherwise `ask` prints `decision`, the approver's,
 `items`, each open line in id order (`id`, `kind`, `source`, `reply`, `question`, `options`, `why`,

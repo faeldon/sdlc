@@ -152,12 +152,13 @@ matches are questions, never counted. `scripts/retro.py`'s docstring; REFERENCE.
 **The board: `scripts/board.py`.** It writes nothing, `stage:` included, serves `127.0.0.1`
 alone, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A change
 built by hand moves across its columns by what it touched, whether ship's review ran, and whether
-`sdlc.py gate` left a green record on the build as it stands (`_seen()`, `hand_gate()`;
+`sdlc.py gate` left a green record on the build as it stands (`seen_stage()`, `hand_gate()`;
 `cmd_gate()` writes `build/gate.md` in `factory.py`'s record shape, its copies pinned by
 `tests/test_hand_gate.py`), never by a stage the board stamps; the hand gate also gates a factory
 run at `stage: test`, and only there, where its green record clears the approver's `gate`
-reasons (`needs_of()`). Its columns name the state of the work (`column()`), the same for either
-tool. It
+reasons (`needs_of()`). Its columns name the state of the work, the same for either tool, by
+`column()`, which lives in `sdlc.py` beside `needs_of()` and `seen_stage()`, so `status` prints its
+sections by the same rule without loading the board. It
 reads a factory run's files with copies of `factory.py`'s parsing, pinned by
 `tests/test_board.py`, and the page builds every node with `textContent`, never from a string of
 HTML. Its docstring; REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).

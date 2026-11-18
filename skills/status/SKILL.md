@@ -50,11 +50,17 @@ it already, so it is never the recommendation. A factory run its supervisor stop
 `· stopped, touched 12m ago`, with a `⚠` line per problem and a `→` line, the step that moves it on,
 under its title: it is neither in flight nor merely quiet, but waiting on the person.
 
-**`■ What needs me` is the last section**: each open change waiting on the person, with what it
-waits for (`decide D2, confirm 3 defaults`, `stopped: fix its cause and rerun`, `approve its
-spec`, `read the escalation`, `fix: …`), or `nothing`. It is the answer to "what needs me?": quote it, never
-re-derive it from the lines above. An escalated change it leaves out has had every question
-answered and is ready to ship.
+**The open changes come under the board's states**, in its order: `■ Planned`, `■ Designing`,
+`■ Building`, `■ Ready` and `■ Landing`, each with its count, an empty one alone. They are the
+board's columns by the same rule, so a change is under the heading its card is in. `Landing` holds
+the shipped or dropped changes waiting on close, each a `→ /sdlc:close NNN` line, and a factory
+landing in flight.
+
+**`■ Needs you` is the last section**, the board's sixth state: each change waiting on the person,
+its line and under it a `needs you:` line saying what it waits for (`decide D2, confirm 3
+defaults`, `stopped: fix its cause and rerun`, `approve its spec`, `read the escalation`, `fix: …`),
+or `nothing`. It is the answer to "what needs me?": quote it, never re-derive it from the lines
+above. An escalated change it leaves out has had every question answered and is ready to ship.
 
 **`■ Next up` is what comes after the open changes**, so you never need `.sdlc/work/inbox.md`, the nits
 register or the direction doc to answer "what's next". The script collects candidates from them
@@ -164,7 +170,7 @@ change in flight (marked neither `quiet` nor `stopped`) is never picked: say it'
 shape line.
 
 1. Anything `check --strict` flags as broken — fix the pipeline before extending it.
-2. A change in `Ready to close` — `/sdlc:close NNN` lands it.
+2. A `→ /sdlc:close NNN` line under `Landing` — `/sdlc:close NNN` lands it.
 3. A `stopped` change, or a quiet one already at `stage: build` or later — finish what's started
    before opening more. A stopped one's command is its own `→` line, and its `⚠` lines are the why.
 4. A quiet change others are declared to depend on: nothing that reads a thing can be built, or

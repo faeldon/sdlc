@@ -52,7 +52,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config
 ```
 
 With no number, it takes the worktree this session is in. From the main checkout with no number,
-run `sdlc.py status` instead and ask which of the changes under **Ready to close** to close.
+run `sdlc.py status` instead and ask which of the changes with a `→ /sdlc:close` line under
+**Landing** to close.
 
 The JSON names the change, its worktree and branch, the main checkout, every refusal, and where the
 change will be mirrored: `archive.target`, and `archive.kept_because` when there is nowhere to

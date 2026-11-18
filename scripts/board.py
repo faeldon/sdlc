@@ -165,7 +165,7 @@ def state(root: Path) -> dict:
     issues = _issue_base(home, cfg)
     now = datetime.now(UTC).timestamp()
     history = typical_times(home, trunk)
-    rebasing = _rebasing(home)
+    rebasing = sdlc.rebasing_branches(home)
     return {
         "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
         "changes": [
@@ -175,19 +175,13 @@ def state(root: Path) -> dict:
     }  # fmt: skip
 
 
-def _rebasing(root: Path) -> set[str]:
-    """The branches a rebase is stopped on: it detaches the worktree's HEAD, so `worktrees()` no
-    longer names them, and `_change_trees()` reads each from the rebase's own record."""
-    return {b for _, b in sdlc._change_trees(root)} - {b for _, b in sdlc.worktrees(root)}
-
-
 def _on_board(root: Path, rebasing: set[str] | None = None) -> list[Path]:
     """The folders the board shows: every open change's, and a shipped or dropped one's while its
-    worktree stands, which is what `status` lists as ready to close, or while a rebase is stopped
+    worktree stands, which is what `status` lists under Landing, or while a rebase is stopped
     in it (a landing's, on a conflict its agent resolves), when `ready_to_close()` can't see
     its branch."""
     closing = {r["branch"] for r in sdlc.ready_to_close(root)}
-    closing |= _rebasing(root) if rebasing is None else rebasing
+    closing |= sdlc.rebasing_branches(root) if rebasing is None else rebasing
     return [f for f in sdlc.change_dirs(root) if sdlc._stage(f) not in CLOSED or f.name in closing]
 
 
@@ -276,7 +270,10 @@ def _entry(
             entry["progress"]["plan"] = read(
                 "plan.md", lambda: _plan_hint(entry, folder, home, trunk), None
             )
-    entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
+    # A landing in flight, as `status` reads it (`sdlc.factory_landing()`); its problem is the
+    # track's own, already added where the track was read.
+    entry["in_flight"] = sdlc.factory_landing(folder, rec["stage"])[0]
+    entry["seen"] = read("its progress", lambda: sdlc.seen_stage(entry, folder, home, trunk), None)
     # A landing that stopped, as `sdlc.factory_land_stop()` reads it for `status`: from the track
     # already read, so the card and its column come from one reading of the record.
     landing = entry.get("progress") or {}
@@ -292,49 +289,8 @@ def _entry(
     entry["needs"] = sdlc.needs_of(entry)
     entry["answered"] = sdlc.answered(entry)
     entry["next"] = next_action(entry)
-    entry["column"] = column(entry)
+    entry["column"] = sdlc.column(entry)
     return entry
-
-
-def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | None:
-    """How far a change built by hand has got, past what its `stage:` says: nothing moves that line
-    between `plan` (or a Tier 2's `design`) and `shipped`, so the board reads what `status` does.
-    `ready` once ship's review has written `findings.md`, or once a gate run by hand passed on the
-    build as it stands (`sdlc.py gate`'s record, current), and never while that record is current
-    and red; `build` once the change touches a path outside the change folders and the plugin's
-    own state, in its branch's commits or, in a worktree of its own, its uncommitted edits. None
-    when neither says more, and always for a factory run, whose stage line the factory moves
-    itself."""
-    stage = entry["stage"]
-    # A Tier 2 at `plan` has no spec yet: what it touches isn't its build.
-    moving = ("plan", "design", "build") if entry["tier"] == 1 else ("design", "build")
-    if entry["mode"] != "manual" or stage not in moving:
-        return None
-    gate = entry.get("gate") or {}
-    red = gate.get("current") and gate.get("verdict") == "FAIL"
-    green = gate.get("current") and gate.get("verdict") == "PASS"
-    if not red and ((folder / "findings.md").is_file() or green):
-        return "ready"
-    if stage == "build":
-        return None
-    own = (f"{sdlc.work_rel(home)}/", *(f".sdlc/{name}" for name in sdlc.STATE_FILES))
-    paths = _touched(entry, folder, home, trunk)
-    return "build" if any(not p.startswith(own) for p in paths) else None
-
-
-def _touched(entry: dict, folder: Path, home: Path, trunk: str | None) -> list[str]:
-    """Every path the change has touched: what its branch changed against the base branch, and in
-    a worktree of its own, its uncommitted edits. Nothing from the branch without a base branch."""
-    paths = []
-    if trunk:
-        span = f"refs/heads/{trunk}...refs/heads/{entry['change']}"
-        # `-z`, as `_dirty_paths()` reads them: unquoted, so both compare as the same text.
-        out = sdlc._git(home, "diff", "-z", "--name-only", "--no-renames", span) or ""
-        paths += out.split("\0")
-    checkout = sdlc.checkout_of(folder)
-    if checkout.resolve() != home.resolve():
-        paths += sdlc._dirty_paths(checkout)
-    return [p for p in paths if p]
 
 
 def _plan_named(text: str) -> list[str]:
@@ -365,7 +321,7 @@ def _plan_hint(entry: dict, folder: Path, home: Path, trunk: str | None) -> dict
     named = _plan_named(path.read_text(encoding="utf-8", errors="replace"))
     if not named:
         return None
-    paths = set(_touched(entry, folder, home, trunk))
+    paths = set(sdlc.touched_paths(entry, folder, home, trunk))
     hit = [
         n for n in named if n in paths or n.endswith("/") and any(p.startswith(n) for p in paths)
     ]
@@ -921,35 +877,6 @@ def next_action(entry: dict) -> str:
     if stage == "build":
         return "build it, then /sdlc:ship"
     return "/sdlc:ship"
-
-
-# The board's columns, by the state of the work, the same for a change built by hand or by the
-# factory (`board.html`'s `COLUMNS`, keyed as these): a stage's own column by its `stage:` line, or
-# by `_seen()` for a change built by hand.
-BY_STAGE = {"plan": "planned", "design": "designing", "build": "building", "ready": "ready"}
-
-
-def column(entry: dict) -> str:
-    """The board's column, by the state of the work, checked in this order: Needs you for a file
-    that won't read, at any stage, or anything `sdlc.needs_of()` names (a stop or a blocking
-    decision at `build`, an escalation not yet cleared at `test`, a stopped landing, a written
-    spec whose stage never moved), since a factory signal counts only at the stage it belongs to;
-    Landing for a change committed and on its way (shipped or dropped and waiting on close,
-    whatever the factory's files still say, or a factory landing in flight at `test`); Ready for
-    a factory change at `test` the approver called READY, or whose escalation is answered, and a
-    change built by hand whose review is written or whose gate is green (`_seen()`); else by how
-    far it has got: Planned, Designing or Building (a factory change at `test` with no decision,
-    a restart cut short, too)."""
-    stage = entry["stage"]
-    if entry["problems"] or entry.get("needs"):
-        return "needs-you"
-    landing = entry.get("progress") or {}
-    if stage in CLOSED or (landing.get("kind") == "land" and not landing.get("stopped")):
-        return "landing"
-    if stage == "test" and entry["mode"] == "factory":
-        ready = entry.get("decision") == "READY" or sdlc.answered(entry)
-        return "ready" if ready else "building"
-    return BY_STAGE.get(entry.get("seen") or stage or "", "needs-you")
 
 
 def file_at(root: Path, change: str, rel: str) -> Path | None:
