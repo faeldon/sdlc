@@ -254,3 +254,12 @@ haiku rounds missed). Escalate early when every round fails on the same error, o
 can't be tested, instead of running more rounds.
 Theme: factory
 Raised 2026-11-18.
+
+## [2026-11-18-15] [idea] A factory skill that walks the person through one change's open decisions
+
+A factory skill (/sdlc-factory:decide, not "resolve", which already means rebase conflicts) that
+walks the person through one change's open decisions and confirmations one at a time: the
+background, the default, the alternatives and why the default was chosen, so escalations across
+changes are decided quickly and with context.
+Theme: factory
+Raised 2026-11-18.
