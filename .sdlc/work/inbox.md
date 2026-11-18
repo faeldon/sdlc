@@ -308,3 +308,18 @@ Paths: AGENTS.md
 Cost: S
 Value: low
 Raised by: 134-register-never-conflicts (correctness)
+
+## [2026-11-18-26] [bug] A factory agent's late reply overwrites its verdict
+
+136's code and test reviewers (round 1, 2026-11-18) each started their own background wait on
+./check.sh, gave VERDICT: PASS, then were woken by that wait's notice and replied again ("my
+verdict stands"). `factory.py agent` files only the session's last reply, so
+reviews/round-1/code.md and test.md held just that note, and `verdicts` stopped the run as
+`rerun`, not `mend`, losing both reviews. Expected: the reply that holds the verdict is what's
+filed (or a late reply is a mend), and reviewers don't run the full gate in the background when
+the script's gate already ran. To see it: a reviewer that backgrounds a long command and ends
+its turn before it exits.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-code.md, plugins/factory/agents/reviewer-test.md
+Theme: factory
