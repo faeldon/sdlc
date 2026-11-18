@@ -400,3 +400,16 @@ Evaluate the Fable builder experiment: the 139–143 batch ran its builder on cl
 landing stops and builder cost, then keep the [models] setting or revert it.
 Theme: factory
 Raised 2026-11-18.
+
+## [2026-11-18-41] [bug] factory.py reads [models] from the change's own worktree, not the base branch
+
+factory.py reads [models] from the change's own worktree, while mode, [land], [ui] and gate_jobs
+come from the base branch (`_base_factory()`): a change only gets a [models] setting committed on
+main once its branch includes it, and a change can pick its own agents' models by editing its own
+.sdlc/factory.toml. Seen 2026-11-18: builder = "claude-fable-5-1" committed on main (329748d) left
+140's and 143's builders on Opus. [models] should be read from the base branch like the rest, or
+the README should say it isn't.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py, plugins/factory/README.md
+Theme: factory
