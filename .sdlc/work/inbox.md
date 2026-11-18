@@ -148,14 +148,6 @@ rewrote close's lock and the landing at light depth with no security review. Ope
 Theme: factory
 Raised 2026-11-18.
 
-## [2026-11-18-60] [idea] Status groups its sections by the board's columns
-
-status groups its sections by the board's columns (Planned, Designing, Building, Ready, Landing,
-Needs you), so the board and status use one vocabulary. Raised by 145-escalations-that-clear,
-whose spec left status as it is: it reshapes status's output for every host, a change of its own.
-Theme: board
-Raised 2026-11-18.
-
 ## [2026-11-18-64] [nit] `bg` only looks for a trailing `&` at the end of the whole command.
 
 Raised by the code review of 146-measure-how-agents-work, round 1: scripts/metrics.py:306: `bg` only looks for a trailing `&` at the end of the whole command. A multi-line command that backgrounds a middle line, such as `a &\nb`, isn't counted. The spec calls every count a lower bound, so this is allowed. Saying so in the docstring or adding a test would settle it.
@@ -337,3 +329,23 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 149-landing-resolver-agent (correctness)
+
+## [2026-11-18-86] [nit] `a["ready"]` now adds `held_by_rebase(home)`.
+
+Raised by the code review of 151-status-by-board-states, round 1: scripts/sdlc.py:10620: `a["ready"]` now adds `held_by_rebase(home)`. That function calls `_change_trees` and `worktrees`, which `rebasing_branches` also calls, so `status` walks the worktree list twice. It's cheap, but `held_by_rebase` could take the branches as an argument.
+
+Theme: refactor
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 151-status-by-board-states (correctness)
+
+## [2026-11-18-87] [nit] `_by_state` falls back to `BY_STAGE` for a record with no `column`, and silently drops a stage `column()` would place elsewhere, such as `test`.
+
+Raised by the code review of 151-status-by-board-states, round 1: scripts/sdlc.py:10010: `_by_state` falls back to `BY_STAGE` for a record with no `column`, and silently drops a stage `column()` would place elsewhere, such as `test`. Nothing reads such a record today.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 151-status-by-board-states (correctness)
