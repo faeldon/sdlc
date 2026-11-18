@@ -371,3 +371,12 @@ Paths: tests/test_factory.py
 Cost: S
 Value: low
 Raised by: 136-factory-rounds-that-catch-enough (correctness)
+
+## [2026-11-18-38] [idea] The board labels build rounds B1, B2, not R1, R2
+
+The board labels build rounds R1, R2, which clashes with requirements (R1–R17 in a spec) and the
+ledger's R<n> for the person's words. Label build rounds B1, B2 and keep landing rounds L1,
+matching build/round-<n> and reviews/land-<n>; display labels only, nothing written to files
+changes.
+Theme: board
+Raised 2026-11-18.
