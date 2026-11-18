@@ -394,3 +394,12 @@ Raised by the retrospective of 2026-11-18.
 Close records each change's lead time (from new to Close) and how long it sat ready before landing, as trailers, and retro reports their medians beside elapsed. Today's elapsed leaves out queue and ready-wait: for 139–148 it was 43.5 min against a real median turnaround of 250, half of factory lead time is a ready change waiting.
 Theme: metrics
 Raised 2026-11-18.
+
+## [2026-11-18-95] [bug] A builder's "UNTESTABLE: none." stops the run as untestable
+
+A builder that writes `- UNTESTABLE: none.` is read as having one untestable requirement named "none.": `UNTESTABLE_RE` (plugins/factory/scripts/factory.py:201) captures any text, so `early_stop()` stops the run and the approver must ESCALATE a change with no gap. 155's round 1 showed it: three PASSes, a green gate, and an ESCALATE whose only reasons were this stop and a look. `none` (with or without a period) should mean no untestable requirements.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py
+Introduced by: 136-factory-rounds-that-catch-enough
+Theme: factory
