@@ -2941,6 +2941,10 @@ def test_each_landing_step_change_writes_a_times_row(tmp_path, monkeypatch) -> N
         {"step": "checks", "round": None, "seconds": 30.0},
         {"step": "ship", "round": None, "seconds": 90.0},
     ], rows
+    # 162 R9: each row says when its step began, for close's lead time; the readers above pass
+    # over the key, so the board's figures don't move.
+    raw_rows = [json.loads(line) for line in raw.decode("utf-8").splitlines()]
+    assert [r["since"] for r in raw_rows] == ["2026-11-18T10:00:00Z", "2026-11-18T10:00:30Z"]
 
 
 @needs_uv

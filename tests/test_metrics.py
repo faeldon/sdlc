@@ -1787,3 +1787,77 @@ def test_a_close_from_before_behaviours_parses_as_before() -> None:
         },
         "tools": {"Bash:sed": {"calls": 3, "errors": 0, "build": 3}},
     }  # fmt: skip
+
+
+# ---------------------------------------------------------------- lead time (162)
+
+
+def _t(minutes: float) -> datetime:
+    return T0 + timedelta(minutes=minutes)
+
+
+@pytest.mark.portable
+def test_lead_time_parts_sum_to_lead_and_overlapping_agents_count_once() -> None:
+    """162 R4: opened 0, first 10, ready 100, landing 130, closed 150. A builder 10 to 30, two
+    reviewers overlapping in 40 to 70 and a run past `ready` cut at it make 60 minutes of
+    agents, never 70."""
+    intervals = [(_t(10), _t(30)), (_t(40), _t(70)), (_t(50), _t(60)), (_t(90), _t(120))]
+    got = metrics.lead_time(_t(0), _t(150), _t(10), _t(100), _t(130), intervals)
+    assert got == {"lead": 9000, "queued": 600, "agents": 3600, "idle": 1800,
+                   "ready_wait": 1800, "landing": 1200}  # fmt: skip
+    assert sum(v for k, v in got.items() if k != "lead") == got["lead"]
+
+
+@pytest.mark.portable
+def test_without_a_landing_ready_waits_until_close() -> None:
+    got = metrics.lead_time(_t(0), _t(60), _t(5), _t(20), None, [(_t(5), _t(15))])
+    assert got == {"lead": 3600, "queued": 300, "agents": 600, "idle": 300, "ready_wait": 2400}
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "marks, kept",
+    [
+        ((None, _t(20), None), {"lead", "ready_wait"}),  # no first: no queued, agents or idle
+        ((_t(5), None, _t(50)), {"lead", "landing"}),  # no ready
+        ((_t(30), _t(20), None), {"lead"}),  # ready before first
+        ((_t(5), _t(20), _t(70)), {"lead"}),  # landing after closed
+        ((_t(5), _t(70), None), {"lead"}),  # ready after closed
+        ((_t(5), _t(40), _t(30)), {"lead"}),  # landing before ready
+    ],
+)
+def test_lead_time_leaves_out_what_it_cant_know(marks, kept) -> None:
+    """162 R5: a part it can't know is absent, never 0."""
+    first, ready, landing = marks
+    got = metrics.lead_time(_t(0), _t(60), first, ready, landing, [(_t(5), _t(10))])
+    assert set(got) == kept and got["lead"] == 3600
+
+
+@pytest.mark.portable
+def test_lead_time_with_opened_after_closed_is_nothing() -> None:
+    assert metrics.lead_time(_t(10), _t(5), None, None, None, []) == {}
+
+
+@pytest.mark.portable
+def test_agents_before_opened_are_clipped_to_it() -> None:
+    """A first event before `new` (the session that ran it) starts the clock at `opened`."""
+    got = metrics.lead_time(_t(10), _t(60), _t(0), _t(30), None, [(_t(0), _t(20))])
+    assert got == {"lead": 3000, "queued": 0, "agents": 600, "idle": 600, "ready_wait": 1800}
+
+
+@pytest.mark.portable
+def test_the_lead_line_round_trips_with_minutes_and_a_source_word() -> None:
+    """162 R6: whole minutes and a source word, read back as `metrics["lead"]`."""
+    parts = {"lead": 9000, "queued": 600, "agents": 3610, "idle": 1790,
+             "ready_wait": 1800, "landing": 1200}  # fmt: skip
+    line = metrics.lead_trailer(parts, "runs")
+    assert line == (
+        "Sdlc-Lead: lead=150 queued=10 agents=60 idle=30 ready_wait=30 landing=20 source=runs"
+    )
+    assert metrics.parse_trailers(line)["lead"] == {
+        "lead": 150, "queued": 10, "agents": 60, "idle": 30, "ready_wait": 30, "landing": 20,
+        "source": "runs",
+    }  # fmt: skip
+    short = metrics.lead_trailer({"lead": 600, "ready_wait": 120}, "git")
+    assert short == "Sdlc-Lead: lead=10 ready_wait=2 source=git"
+    assert "Sdlc-Lead" in metrics.__doc__ and "lead_time(" in metrics.__doc__

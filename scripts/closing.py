@@ -37,7 +37,7 @@ import subprocess
 import threading
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
@@ -357,6 +357,127 @@ def _agent_models(main: Path, branch: str, folder: str) -> dict[str, str]:
     return models
 
 
+# The factory's run files' times (`factory.py`'s `_utc_now()`), read with this copy of its format.
+RUN_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def opened_at(text: str) -> datetime | None:
+    """When the change was opened, from its intent's `opened:` line (`new`'s `OPENED_FORMAT`,
+    read as text), as an aware datetime; None when the line is missing or doesn't fit."""
+    value = (sdlc.frontmatter_list(text, "opened") or [""])[0]
+    try:
+        return datetime.strptime(value, sdlc.OPENED_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _run_time(value: object) -> datetime | None:
+    try:
+        return datetime.strptime(value, RUN_TIME_FORMAT).replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_rows(text: str) -> list[dict]:
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _timed_rows(text: str) -> list[tuple[datetime, datetime, str]]:
+    """`runs/costs.jsonl`'s rows that say when they ran, as `(started, ended, role)`, in order:
+    `record_cost()`'s `started` and `ended`. A row without them, or out of order, is passed
+    over."""
+    out = []
+    for row in _json_rows(text):
+        start, end = _run_time(row.get("started")), _run_time(row.get("ended"))
+        if start and end and start <= end:
+            out.append((start, end, str(row.get("role") or "")))
+    return out
+
+
+def _land_sinces(text: str) -> list[datetime]:
+    """When each landing step in `runs/land-times.jsonl` began (`_record_land()`'s `since`)."""
+    return [t for t in (_run_time(r.get("since")) for r in _json_rows(text)) if t]
+
+
+def _lead_marks(
+    main: Path, branch: str, folder: str, factory: bool, events: list[dict]
+) -> tuple[datetime | None, datetime | None, datetime | None, list, str]:
+    """`(first, ready, landing, intervals, source)` for `metrics.lead_time()`, from the first
+    source that has them. A factory change: its committed run files (`runs`), its landing from
+    the earliest `since`, else the tip's author date; else the factory sessions' runs in
+    `events` (`transcripts`). A change built by hand: ready at ship's commit (the tip's author
+    date, which a rebase keeps), no landing but close; its first event and turns from `events`
+    (`transcripts`). Without either, `git`: no first, so no split."""
+    authored = sdlc._git(main, "show", "-s", "--format=%aI", branch)
+    tip = datetime.fromisoformat(authored) if authored else None
+    runs = f"{branch}:{folder}/runs"
+    landing = None
+    if factory:
+        sinces = _land_sinces(sdlc._git(main, "show", f"{runs}/land-times.jsonl") or "")
+        landing, ready = min(sinces) if sinces else tip, None
+    else:
+        ready = tip
+
+    def before_landing(role: str, rows: list[tuple[datetime, datetime, str]]):
+        done = [r for r in rows if r[2] == role and (landing is None or r[0] < landing)]
+        return max(done)[1] if done else None
+
+    if factory:
+        timed = _timed_rows(sdlc._git(main, "show", f"{runs}/costs.jsonl") or "")
+        source = "runs"
+        if not timed:
+            timed = [
+                (e["ts"], e["ts"] + timedelta(milliseconds=e["ms"]), e["role"])
+                for e in events
+                if e["kind"] == "subagent"
+            ]
+            source = "transcripts"
+        if timed:
+            first = min(r[0] for r in timed)
+            return first, before_landing("approver", timed), landing, [r[:2] for r in timed], source
+        return None, None, landing, [], "git"
+    if not events:
+        return None, ready, None, [], "git"
+    intervals = [
+        (e["ts"] - timedelta(milliseconds=e["ms"]), e["ts"])
+        if e["kind"] == "turn"
+        else (e["ts"], e["ts"] + timedelta(milliseconds=e["ms"]))
+        for e in events
+        if e["kind"] in ("turn", "subagent")
+    ]
+    return events[0]["ts"], ready, None, intervals, "transcripts"
+
+
+def _lead_line(
+    main: Path, branch: str, folder: str, text: str, factory: bool, events: list[dict]
+) -> tuple[str | None, str | None]:
+    """The `Sdlc-Lead` line for a landing change, or None and the word `Sdlc-Coverage` gains
+    instead (`lead=none`, `lead=bad-opened`, `lead=failed`). Never raises."""
+    if sdlc.frontmatter_list(text, "opened") is None:
+        return None, "lead=none"
+    opened = opened_at(text)
+    if opened is None:
+        return None, "lead=bad-opened"
+    try:
+        first, ready, landing, intervals, source = _lead_marks(
+            main, branch, folder, factory, events
+        )
+        parts = sdlc.metrics.lead_time(opened, datetime.now(UTC), first, ready, landing, intervals)
+        if not parts:
+            return None, "lead=bad-opened"
+        return sdlc.metrics.lead_trailer(parts, source), None
+    except Exception:
+        return None, "lead=failed"
+
+
 def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]:
     """What a change cost, as a summary and its `Sdlc-*` trailer lines: from this repo's
     transcripts when `metrics.transcripts` allows and they hold the change, else what history
@@ -400,7 +521,13 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
             extra = []
         # What changed after the landed change's last review, carried from its tip to the totals.
         sdlc.metrics.landed_unreviewed(summary, tip)
-        return summary, sdlc.metrics.trailers(summary) + extra
+        # Lead time, only for a change that lands: a dropped one never did.
+        lead = None
+        if sdlc.frontmatter_list(text, "stage") != ["dropped"]:
+            lead, missing = _lead_line(main, branch, folder, text, way == "factory", events)
+            if missing:
+                summary["coverage"] += f" {missing}"
+        return summary, sdlc.metrics.trailers(summary) + extra + ([lead] if lead else [])
 
     def from_history(reason: str) -> tuple[dict, list[str]]:
         now = datetime.now(UTC)

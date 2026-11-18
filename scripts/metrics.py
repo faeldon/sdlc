@@ -94,6 +94,20 @@ written as `Sdlc-Extra` lines, with `harness=` and `command=` on `Sdlc-Totals`: 
 without those counted harness entries and other commands as `extra`, and is read as
 unclassified, never as none.
 
+Lead time, from the change's `opened:` to its close, and where it went, on a line of its own:
+
+    lead_time(opened, closed, first, ready, landing, intervals) -> dict   seconds by part
+    lead_trailer(lead, source)                    -> line      `Sdlc-Lead`
+
+`Sdlc-Lead: lead=<m> queued=<m> agents=<m> idle=<m> ready_wait=<m> landing=<m> source=<word>`, in
+whole minutes, read back as `lead`: `queued` from opened to the first agent or edit, `agents` the
+union of the agents' runs from then to ready (parallel reviewers count once), `idle` the rest of
+that span, `ready_wait` from ready to the landing (to the close with no landing) and `landing` from
+the landing to the close. A part that can't be known is left out, never 0; `source` is `runs`
+(the factory's run files), `transcripts` or `git`. A change with no `opened:` has no line, and
+`Sdlc-Coverage` says so (` lead=none`, ` lead=bad-opened`, ` lead=failed`): a `Close` commit
+without it is unmeasured, never a lead of 0.
+
 A change `/sdlc-factory:land` landed may say on its `Sdlc-Landed` how many paths changed after its
 last review (`unreviewed=<n>`, or `unknown` with no snapshot to compare). `landed_unreviewed()`
 carries it to `Sdlc-Totals` as `unreviewed=`, beside `auto=`; a change without it has none.
@@ -1581,6 +1595,56 @@ def trailers(summary: dict) -> list[str]:
     for dep, seconds in sorted(summary["blocked"].items()):
         lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(seconds)}")
     return lines
+
+
+LEAD_PARTS = ("queued", "agents", "idle", "ready_wait", "landing")
+
+
+def lead_time(
+    opened: datetime,
+    closed: datetime,
+    first: datetime | None,
+    ready: datetime | None,
+    landing: datetime | None,
+    intervals: list[tuple[datetime, datetime]],
+) -> dict:
+    """A change's lead time in seconds, `opened` to `closed`, and the parts of it the marks know
+    (`LEAD_PARTS`): any of `first`, `ready` and `landing` may be None, and a part that needs one
+    is left out, never 0. Marks out of order (`first` before `opened` excepted, which starts the
+    clock at `opened`: the session that ran `new` began before it) keep `lead` alone; `opened`
+    after `closed` gives nothing. The parts present with all three marks sum to `lead`."""
+    if opened > closed:
+        return {}
+    out = {"lead": (closed - opened).total_seconds()}
+    if first is not None and first < opened:
+        first = opened
+    marks = [m for m in (opened, first, ready, landing, closed) if m is not None]
+    if any(a > b for a, b in zip(marks, marks[1:], strict=False)):
+        return out
+    if first is not None and ready is not None:
+        merged: list[list[datetime]] = []
+        for start, end in sorted((max(s, first), min(e, ready)) for s, e in intervals):
+            if start >= end:
+                continue
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        agents = sum((e - s).total_seconds() for s, e in merged)
+        out["queued"] = (first - opened).total_seconds()
+        out["agents"] = agents
+        out["idle"] = (ready - first).total_seconds() - agents
+    if ready is not None:
+        out["ready_wait"] = ((landing or closed) - ready).total_seconds()
+    if landing is not None:
+        out["landing"] = (closed - landing).total_seconds()
+    return out
+
+
+def lead_trailer(lead: dict, source: str) -> str:
+    """`lead_time()`'s parts as the `Sdlc-Lead` line: whole minutes and a source word only."""
+    fields = {k: _minutes(lead[k]) for k in ("lead", *LEAD_PARTS) if k in lead}
+    return f"Sdlc-Lead: {_pairs(fields)} source={_word(source)}"
 
 
 def landed_unreviewed(summary: dict, tip: dict | None) -> None:

@@ -983,6 +983,13 @@ is in `review_unknown`, never a review that found nothing. The report gives one 
 them with an Important finding a landing round raised, fixed or recorded, each change once. The
 report gives it as `Landing catches: <caught> of <reviewed> factory-reviewed changes`.
 
+`process.lead` is lead time from each change's `Sdlc-Lead` (see *Metrics*): per tier and way of
+building, the changes, the median and the 85th percentile (nearest rank); each part's `share`,
+its sum over the changes that recorded it against their leads' sum, with how many `changes` that
+is; and `measured` and `unmeasured`, the changes with and without the line, which move no figure.
+It sits beside `process.cycle`'s `elapsed`, which is unchanged, and the report shows it under the
+*Cycle time* table.
+
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
 A path is tests when a directory in it is `test`, `tests`, `spec` or `__tests__`, or its name
@@ -1178,6 +1185,24 @@ and the entry as the branch last held it (a line from before `paths=` reads as p
 reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing. An issue
 triage closed gets `Sdlc-Triaged: #<N> verdict=<word> ref=<what it rests on>` on its `Triage` or
 `File` commit, its reason as a `Why #<N>:` line in the body.
+
+Close also records the change's lead time and where it went, on one line: `Sdlc-Lead: lead=<m>
+queued=<m> agents=<m> idle=<m> ready_wait=<m> landing=<m> source=<runs|transcripts|git>`, in
+minutes. Lead time runs from when `new` opened the change, the `opened:` line it writes into
+`intent.md` (UTC, to the minute, under either numbering), to the close; it starts at `new` even
+for a change opened from an issue someone filed earlier. `queued` is the time before the first
+agent or edit, `agents` the time agents were working up to ready (reviewers running together count
+once), `idle` the rest of that span, `ready_wait` the time from ready to the landing, and
+`landing` the landing itself. A factory change is ready when its last approver run before the
+landing ended, and its landing begins at its first landing step: both read from the run files its
+commit holds (`runs/costs.jsonl`'s `started` and `ended`, `runs/land-times.jsonl`'s `since`), so
+a close on another machine still records them (`source=runs`). A change built by hand is ready
+at ship's commit, and its close is its landing, so it has no `landing`. Without run times, the
+transcripts give the agents' runs (`source=transcripts`); without those, the line holds `lead`
+and `ready_wait` (with `landing` for a factory change) alone (`source=git`). A part that can't be
+known is left out, never 0. A change with no `opened:` (one opened before it was written) gets
+no line, and `Sdlc-Coverage` says ` lead=none` (` lead=bad-opened` for a value that doesn't fit,
+` lead=failed` when timing it failed); a dropped change has none.
 
 Where a change started is recorded as `Sdlc-Base: <sha>`: the base branch's tip just before close
 merged it, which close keeps in `refs/sdlc/base/<branch>` between its runs and removes with the

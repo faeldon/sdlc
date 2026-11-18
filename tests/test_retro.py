@@ -2368,3 +2368,67 @@ def test_retro_prints_a_change_s_agent_counts_only_with_metrics(tmp_path: Path, 
         ("001-reopen-drafts", "builder", "model-a", 2),
         ("002-draft-titles", "builder", "model-a", 0),
     ]
+
+
+# ---------------------------------------------------------------- lead time (162)
+
+
+def _led(name: str, tier: int, mode: str, lead: dict | None, elapsed: int | None = None) -> dict:
+    """A record with `Sdlc-Mode` and, when `lead` is set, an `Sdlc-Lead` line's fields."""
+    rec = _rec(name, tier, "2026-10-05", "12:00", elapsed)
+    metrics = rec["metrics"] or {}
+    metrics["mode"] = mode
+    if lead is not None:
+        metrics["lead"] = {**lead, "source": "runs"}
+    rec["metrics"] = metrics
+    return rec
+
+
+def test_lead_time_by_tier_and_way_with_unmeasured_counted_apart() -> None:
+    """162 R13, R14: median and nearest-rank p85 per tier and way; a change without the line
+    moves no figure and is counted as unmeasured; computed with no `elapsed` anywhere."""
+    changes = [_led(f"0{i:02d}-a", 2, "factory", {"lead": 10 * i}) for i in range(1, 11)]
+    changes += [
+        _led("020-b", 1, "manual", {"lead": 100, "ready_wait": 60}),
+        _led("021-c", 1, "manual", {"lead": 50, "queued": 5, "agents": 20, "idle": 5,
+                                    "ready_wait": 20}),
+        _led("022-d", 1, "manual", None),
+    ]  # fmt: skip
+    out = _views(changes)
+    lead = out["lead"]
+    assert (lead["measured"], lead["unmeasured"]) == (12, 1)
+    assert lead["groups"] == [
+        {"tier": "1", "way": "manual", "n": 2, "median": 75, "p85": 100},
+        {"tier": "2", "way": "factory", "n": 10, "median": 55, "p85": 90},
+    ]
+    assert lead["shares"]["ready_wait"] == {"share": 0.53, "changes": 2}
+    assert lead["shares"]["agents"] == {"share": 0.4, "changes": 1}
+    assert "landing" not in lead["shares"], "no change recorded it: never 0"
+    assert out["cycle"] is None, "no elapsed: the timed views are unmeasured, as before"
+
+
+def test_without_a_lead_line_every_other_figure_is_as_it_was() -> None:
+    """162 R14: the existing views don't see the new line."""
+    plain = [
+        _rec("001-a", 1, "2026-10-05", "12:00", 120),
+        _rec("002-b", 2, "2026-10-05", "11:00", 60),
+    ]
+    led = [dict(r, metrics={**r["metrics"], "lead": {"lead": 999, "source": "git"}}) for r in plain]
+    a, b = _views(plain), _views(led)
+    for key in ("window", "cycle", "time", "wip", "capacity"):
+        assert a[key] == b[key], key
+    assert a["lead"] == {"measured": 0, "unmeasured": 2, "groups": [], "shares": {}}
+
+
+def test_the_report_shows_lead_time_under_cycle_time() -> None:
+    """162 R15: the lead table and the shares under the elapsed table, or alone."""
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    both = [_led("001-a", 2, "factory", {"lead": 250, "ready_wait": 100}, elapsed=60),
+            _led("002-b", 2, "factory", None, elapsed=30)]  # fmt: skip
+    text = sdlc.retro.render_report(template, _views(both))
+    assert "| Tier | Changes | Median elapsed |" in text
+    assert "| Tier | Way | Changes | Median lead | 85th percentile |" in text
+    assert "| 2 | factory | 1 | 4h 10m | 4h 10m |" in text
+    assert "ready and waiting 40% (of 1)" in text and "1 change has no lead time" in text
+    alone = sdlc.retro.render_report(template, _views([_led("001-a", 1, "manual", {"lead": 30})]))
+    assert "| 1 | manual | 1 | 30m | 30m |" in alone and "Median elapsed" not in alone

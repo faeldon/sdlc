@@ -49,6 +49,7 @@
     "{\"step\": \"ship\", \"round\": null, \"seconds\": 12.5}\n{\"step\": \"gate\", \"round\": 1, \"seconds\": 40}\n",
     "not json\n{\"step\": \"stack\", \"round\": 1}\n{\"step\": 3, \"round\": 1, \"seconds\": 2}\n{\"step\": \"close\", \"round\": \"1\", \"seconds\": 5}\n",
     "{\"step\": \"rebase\", \"round\": 2, \"seconds\": -1}\n{\"step\": \"recheck\", \"round\": 2, \"seconds\": true}\n[1, 2]\n\n",
-    ""
+    "",
+    "{\"step\": \"checks\", \"round\": null, \"seconds\": 30.0, \"since\": \"2026-11-18T10:00:00Z\"}\n"
   ]
 }

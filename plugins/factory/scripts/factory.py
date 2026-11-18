@@ -2353,8 +2353,8 @@ def _record_land(
     the step it stopped after, the one the record named, and `problems`; a change a train names
     carries its place, `TRAIN: k of n`, and the train's moves; a `wait` what it waits on
     (`WAITS:`). When the step or round changes, the one replaced (never a stop) is added to
-    `runs/land-times.jsonl` with its seconds since its `SINCE:`, for the board's typical times.
-    For the board alone."""
+    `runs/land-times.jsonl` with its seconds since its `SINCE:` and that `since`, for the board's
+    typical times and `sdlc`'s close, which times the landing from the earliest."""
     path = folder / LAND_STEP
     try:
         old = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
@@ -2383,7 +2383,7 @@ def _record_land(
         fmt = "%Y-%m-%dT%H:%M:%SZ"
         took = datetime.strptime(now, fmt) - datetime.strptime(old["since"], fmt)
         row = {"step": old["step"], "round": old["round"],
-               "seconds": max(0.0, took.total_seconds())}  # fmt: skip
+               "seconds": max(0.0, took.total_seconds()), "since": old["since"]}  # fmt: skip
         with (folder / LAND_TIMES).open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(row) + "\n")
     path.write_text(land_step_text(out, since, after, problems), encoding="utf-8", newline="\n")
@@ -3934,12 +3934,18 @@ def holds(role: str, reply: str) -> bool:
     return EVIDENCE in [line.strip() for line in lines]
 
 
-def record_cost(folder: Path, session: str, role: str, model: str, figures: dict) -> None:
+def record_cost(
+    folder: Path, session: str, role: str, model: str, figures: dict,
+    started: str | None = None, ended: str | None = None,
+) -> None:  # fmt: skip
     """Add one run's figures to the change's `runs/costs.jsonl`, with its session, role and
-    model: numbers and names only, never a prompt or a reply."""
+    model, and when it `started` and `ended` (`_utc_now()`'s form, taken around the `claude`
+    call: what `sdlc`'s close times the change's lead from): numbers and names only, never a
+    prompt or a reply."""
     path = folder / COSTS
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps({"session": session, "role": role, "model": model, **figures})
+    times = {k: v for k, v in (("started", started), ("ended", ended)) if v}
+    line = json.dumps({"session": session, "role": role, "model": model, **figures, **times})
     with path.open("a", encoding="utf-8", newline="\n") as f:
         f.write(line + "\n")
 
@@ -4527,9 +4533,10 @@ def cmd_agent(
     argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{agent_name(role)}"]
     argv += ["--model", model, "--permission-mode", cfg["mode"]]
     argv += ["--output-format", "stream-json", "--verbose", how, session]
+    started = _utc_now()
     code, replies, problem, figures = _claude(argv, root)
     if figures:
-        record_cost(folder, session, role, model, figures)
+        record_cost(folder, session, role, model, figures, started, _utc_now())
     out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
     out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
     if problem:

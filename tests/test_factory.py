@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -2837,6 +2838,10 @@ def test_each_agent_run_records_its_figures_and_a_resume_is_not_counted_twice(
     assert code == 0, out
     session = out["session"]
     rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
+    # 162 R9: when the run began and ended, around the `claude` call, for close's lead time.
+    started, ended = rows[0].pop("started"), rows[0].pop("ended")
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    assert datetime.strptime(started, fmt) <= datetime.strptime(ended, fmt)
     assert rows == [{
         "session": session, "role": "builder", "model": "opus", "cost_usd": 0.5,
         "duration_ms": 1200, "turns": 3, "in": 10, "out": 5, "cache_create": 100,

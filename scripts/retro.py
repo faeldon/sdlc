@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import re
 import statistics
 import subprocess
@@ -573,6 +574,64 @@ def dropped_cost(dropped: list[dict]) -> dict:
 CLOCKS = ("agent", "response", "away", "blocked")
 
 
+# The parts of a change's lead time (`metrics.LEAD_PARTS`), as the report names them.
+LEAD_NAMES = {
+    "queued": "queued", "agents": "agents working", "idle": "idle",
+    "ready_wait": "ready and waiting", "landing": "landing",
+}  # fmt: skip
+
+
+def lead_view(changes: list[dict]) -> dict:
+    """Lead time from each change's `Sdlc-Lead`: per tier and way of building (`Sdlc-Mode`)
+    the count, median and nearest-rank 85th percentile of `lead`; each part's share, its sum
+    over the changes that recorded it against their leads' sum, with how many those are; and
+    how many changes have the line and how many don't, which move no figure."""
+    led = []
+    for c in changes:
+        lead = (c.get("metrics") or {}).get("lead")
+        if isinstance(lead, dict) and isinstance(lead.get("lead"), int):
+            led.append((c, lead))
+    groups: dict[tuple[str, str], list[int]] = {}
+    for c, lead in led:
+        way = str((c.get("metrics") or {}).get("mode") or "unknown")
+        groups.setdefault((str(c["tier"]), way), []).append(lead["lead"])
+    rows = []
+    for (tier, way), leads in sorted(groups.items()):
+        leads.sort()
+        rows.append({
+            "tier": tier, "way": way, "n": len(leads), "median": statistics.median(leads),
+            "p85": leads[math.ceil(0.85 * len(leads)) - 1],
+        })  # fmt: skip
+    shares = {}
+    for part in LEAD_NAMES:
+        had = [lead for _, lead in led if isinstance(lead.get(part), int)]
+        total = sum(lead["lead"] for lead in had)
+        if had and total:
+            share = round(sum(lead[part] for lead in had) / total, 2)
+            shares[part] = {"share": share, "changes": len(had)}
+    return {
+        "measured": len(led), "unmeasured": len(changes) - len(led), "groups": rows,
+        "shares": shares,
+    }  # fmt: skip
+
+
+def _lead_text(lead: dict) -> str:
+    """The report's lead-time block: its table, then the shares and what isn't measured."""
+    table = _table(
+        ["Tier", "Way", "Changes", "Median lead", "85th percentile"],
+        [[r["tier"], r["way"], r["n"], _hm(r["median"]), _hm(r["p85"])] for r in lead["groups"]],
+    )
+    said = [
+        f"{LEAD_NAMES[k]} {round(v['share'] * 100)}% (of {v['changes']})"
+        for k, v in lead["shares"].items()
+    ]
+    text = f"\n\nLead time's shares: {', '.join(said)}." if said else ""
+    n = lead["unmeasured"]
+    if n:
+        text += f" {n} change{' has' if n == 1 else 's have'} no lead time recorded."
+    return table + text
+
+
 def process_views(
     changes: list[dict], dropped: list[dict], rework: list[dict], questions: list[dict],
     bugs: dict, since: dict | None, today: date,
@@ -628,6 +687,7 @@ def process_views(
         "review_sources": bugs.get("review_sources") or {},
         "landing_catches": bugs.get("landing_catches"),
         "cycle": None, "time": None, "wip": None, "capacity": None,
+        "lead": lead_view(changes),
     }  # fmt: skip
     if not measured:
         return out
@@ -842,6 +902,8 @@ def render_report(template: str, process: dict, spend: dict | None = None) -> st
             [[t, r["n"], _hm(r["elapsed"]), _hm(r["max"]), _hm(r["agent"]), r["days_open"]]
              for t, r in process["cycle"].items()],
         )  # fmt: skip
+        if process["lead"]["measured"]:
+            values["cycle"] += "\n\n" + _lead_text(process["lead"])
         t = process["time"]
         values["time"] = _table(
             ["Tier", *(f"Median {k}" for k in CLOCKS)],
@@ -864,6 +926,8 @@ def render_report(template: str, process: dict, spend: dict | None = None) -> st
                 ],
             )  # fmt: skip
         )
+    if not process["cycle"] and process["lead"]["measured"]:
+        values["cycle"] = _lead_text(process["lead"])
     for key, value in values.items():
         template = template.replace("{{" + key + "}}", value)
     return template

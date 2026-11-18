@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -2233,3 +2234,248 @@ def test_a_first_commit_without_the_folder_reaches_and_counts(
     assert out["reaches"] == {"skills": ["sdlc:x"]}
     rework = next(t for t in out["measure"]["trailers"] if t.startswith("Sdlc-Rework:"))
     assert "final=3" in rework, rework
+
+
+# ---------------------------------------------------------------- lead time (162)
+
+CLOSED_AT = datetime(2026, 10, 1, 13, 0, tzinfo=UTC)
+
+
+class _Frozen(datetime):
+    """`datetime` with `now()` fixed at `CLOSED_AT`: the moment close measures."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return CLOSED_AT
+
+
+def _row(role: str, started: str | None, ended: str | None, session: str = "s") -> str:
+    row = {"session": session, "role": role, "model": "m", "duration_ms": 1}
+    if started:
+        row.update(started=f"2026-10-01T{started}:00Z", ended=f"2026-10-01T{ended}:00Z")
+    return json.dumps(row) + "\n"
+
+
+# A factory run: a builder, two reviewers overlapping, an approver; a rework, a reviewer, the
+# approver again; then the landing, from 12:00, with its own review and approver after it, and
+# a row from before the times were recorded.
+COSTS = "".join([
+    _row("builder", "10:00", "10:20"), _row("code", "10:30", "10:50"),
+    _row("test", "10:40", "11:00"), _row("approver", "11:00", "11:05"),
+    _row("builder", "11:10", "11:20"), _row("code", "11:20", "11:30"),
+    _row("approver", "11:30", "11:40"), _row("code", "12:10", "12:20"),
+    _row("approver", "12:30", "12:35"), _row("builder", None, None),
+])  # fmt: skip
+LAND_TIMES = (
+    '{"step": "checks", "round": null, "seconds": 300.0, "since": "2026-10-01T12:00:00Z"}\n'
+    '{"step": "ship", "round": null, "seconds": 60.0, "since": "2026-10-01T12:05:00Z"}\n'
+    '{"step": "gate", "round": 1, "seconds": 60.0}\n'
+)
+
+
+def _opened(tree_folder: Path, opened: str | None) -> None:
+    """The intent's `opened:` set to `opened` (removed when None) and `created:` to its day."""
+    intent = tree_folder / "intent.md"
+    lines = [ln for ln in intent.read_text().splitlines(keepends=True)
+             if not ln.startswith(("opened:", "created:"))]  # fmt: skip
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("updated:"))
+    lines[at:at] = ["created: 2026-10-01\n"] + ([f"opened: {opened}\n"] if opened else [])
+    intent.write_text("".join(lines), encoding="utf-8", newline="\n")
+
+
+def _lead_shipped(root: Path, monkeypatch, opened: str | None, files: dict | None = None) -> str:
+    """A change shipped at 12:00 on 2026-10-01 (its tip's author date), opened at `opened`:
+    built by the factory when `files` holds a `decision.md`, else by hand; its name."""
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "2026-10-01T12:00:00Z")
+    folder = _open(root)
+    tree = sdlc.checkout_of(folder)
+    _opened(folder, opened)
+    for name, text in (files or {}).items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8")
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
+    assert sdlc.cmd_ship(root, folder.name.split("-")[0]) == 0
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", f"ship {folder.name}")
+    monkeypatch.delenv("GIT_AUTHOR_DATE")
+    return folder.name
+
+
+def _lead(lines: list[str]) -> dict | None:
+    found = [ln for ln in lines if ln.startswith("Sdlc-Lead:")]
+    assert len(found) <= 1, found
+    return sdlc.metrics.parse_trailers(found[0])["lead"] if found else None
+
+
+def _measure(root: Path, name: str) -> tuple[dict, list[str]]:
+    return sdlc.closing.measure_change(root, name, sdlc.load_config(root)[0])
+
+
+def test_new_writes_opened_under_github_numbering(tmp_path, gh) -> None:
+    """162 R1: numbered by the change's issue, the intent has its `opened:` all the same."""
+    root = _repo(tmp_path)
+    text = (_open(root) / "intent.md").read_text(encoding="utf-8")
+    [stamp] = sdlc.frontmatter_list(text, "opened")
+    assert sdlc.closing.opened_at(text) == datetime.strptime(stamp, "%Y-%m-%dT%H:%MZ").replace(
+        tzinfo=UTC
+    )
+
+
+def test_close_times_a_factory_change_from_its_run_files(tmp_path, gh, capsys, monkeypatch):
+    """162 R7, R8: first the earliest run, ready the last approver before the landing, the
+    landing the earliest `since`; overlapping reviewers count once. The line comes after every
+    existing one, which stays as it was, and lands on the `Close` commit."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    files = {**FACTORY_FILES, "runs/costs.jsonl": COSTS, "runs/land-times.jsonl": LAND_TIMES}
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T09:00Z", files)
+    folder = f".sdlc/work/{name}"
+    first, ready, landing, intervals, source = sdlc.closing._lead_marks(
+        root, name, folder, True, []
+    )
+    at = lambda hm: datetime.fromisoformat(f"2026-10-01T{hm}:00+00:00")  # noqa: E731
+    assert (first, ready, landing, source) == (at("10:00"), at("11:40"), at("12:00"), "runs")
+    assert len(intervals) == 9 and (at("10:40"), at("11:00")) in intervals
+
+    summary, lines = _measure(root, name)
+    assert _lead(lines) == {"lead": 240, "queued": 60, "agents": 85, "idle": 15,
+                            "ready_wait": 20, "landing": 60, "source": "runs"}  # fmt: skip
+    assert lines[-1].startswith("Sdlc-Lead:") and "lead=" not in summary["coverage"]
+    real = sdlc.closing._lead_line
+    monkeypatch.setattr(sdlc.closing, "_lead_line", lambda *_: (None, None))
+    assert _measure(root, name)[1] == lines[:-1], "every other line as it was"
+    monkeypatch.setattr(sdlc.closing, "_lead_line", real)
+
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert sdlc.metrics.parse_trailers(body)["lead"]["source"] == "runs"
+
+
+def test_a_factory_change_with_no_landing_row_lands_at_its_tip(tmp_path, gh, monkeypatch):
+    """162 R8: no `since` in `land-times.jsonl`: the landing began at the tip's author date."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    files = {**FACTORY_FILES, "runs/costs.jsonl": COSTS}
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T09:00Z", files)
+    lead = _lead(_measure(root, name)[1])
+    assert (lead["ready_wait"], lead["landing"], lead["source"]) == (20, 60, "runs")
+
+
+def test_a_hand_built_change_without_transcripts_records_lead_and_its_wait(
+    tmp_path, gh, monkeypatch
+) -> None:
+    """162 R10: ready is ship's commit, the close is its landing; no split is invented."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T08:50Z")
+    assert _lead(_measure(root, name)[1]) == {"lead": 250, "ready_wait": 60, "source": "git"}
+
+
+def test_a_hand_built_change_with_transcripts_splits_its_time(tmp_path, gh, monkeypatch):
+    """162 R10: first the change's first event, agents its turns, from the transcripts."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T08:50Z")
+    _transcript(home, root, name, SESSION)
+    assert _lead(_measure(root, name)[1]) == {
+        "lead": 250, "queued": 10, "agents": 6, "idle": 174, "ready_wait": 60,
+        "source": "transcripts",
+    }  # fmt: skip
+
+
+def test_a_factory_change_from_before_the_times_reads_its_sessions(tmp_path, gh, monkeypatch):
+    """162 R10: rows without `started` fall back to the factory sessions' runs."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    files = {**FACTORY_FILES, "runs/builder.sessions": "sess-b\n",
+             "runs/approver.sessions": "sess-a\n",
+             "runs/costs.jsonl": _row("builder", None, None, "sess-b")}  # fmt: skip
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T08:50Z", files)
+    folder = home / ".claude" / "projects" / "".join(c if c.isalnum() else "-" for c in str(root))
+    folder.mkdir(parents=True)
+    for session, start, end in (("sess-b", "09:00", "09:01"), ("sess-a", "09:10", "09:15")):
+        entries = [{"type": "user", "timestamp": f"2026-10-01T{t}:00Z", "gitBranch": name,
+                    "message": {"content": "Go."}} for t in (start, end)]  # fmt: skip
+        (folder / f"{session}.jsonl").write_text("\n".join(map(json.dumps, entries)) + "\n")
+    assert _lead(_measure(root, name)[1]) == {
+        "lead": 250, "queued": 10, "agents": 6, "idle": 9, "ready_wait": 165, "landing": 60,
+        "source": "transcripts",
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "opened, word", [(None, "lead=none"), ("yesterday", "lead=bad-opened")]
+)  # fmt: skip
+def test_a_change_without_a_usable_opened_says_so(
+    tmp_path, gh, capsys, monkeypatch, opened, word
+) -> None:
+    """162 R11: no line, the coverage says why, every other trailer is written, close lands."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, opened)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and not _on_main(root, name), out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert "Sdlc-Lead" not in body and "Sdlc-Totals:" in body
+    assert sdlc.metrics.parse_trailers(body)["coverage"].endswith(f" {word}")
+
+
+def test_timing_that_fails_drops_only_its_own_line(tmp_path, gh, capsys, monkeypatch) -> None:
+    """162 R11: a raising reader costs the `Sdlc-Lead` line alone."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T08:50Z")
+
+    def broken(*_):
+        raise RuntimeError("a run file shape nobody planned for")
+
+    monkeypatch.setattr(sdlc.metrics, "lead_time", broken)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and not _on_main(root, name), out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert "Sdlc-Lead" not in body and "Sdlc-Totals:" in body and "Sdlc-Happy:" in body
+    assert "Sdlc-Coverage: none: no transcripts for this repo lead=failed" in body
+
+
+def test_a_dropped_change_records_no_lead(tmp_path, gh, capsys) -> None:
+    """162 R12: it never landed."""
+    root = _repo(tmp_path)
+    _dropped(root)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and out["kind"] == "dropped", out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert body.startswith("Drop ") and "Sdlc-Coverage:" in body and "Sdlc-Lead" not in body
+
+
+def test_close_reads_the_run_rows_the_factory_writes(tmp_path, monkeypatch) -> None:
+    """162 R9: closing's readers are pinned to rows `record_cost()` and `_record_land()` wrote."""
+    spec = importlib.util.spec_from_file_location(
+        "factory_lead_pin", ROOT / "plugins" / "factory" / "scripts" / "factory.py"
+    )
+    factory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(factory)
+    root = _repo(tmp_path, github=False)
+    folder = root / ".sdlc" / "work" / "001-timed"
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text("---\nid: 001\nstage: test\n---\n", encoding="utf-8")
+    factory.record_cost(folder, "s-1", "approver", "m", {"duration_ms": 5},
+                        "2026-10-01T11:30:00Z", "2026-10-01T11:40:00Z")  # fmt: skip
+    factory.record_cost(folder, "s-2", "builder", "m", {"duration_ms": 5})
+    at = lambda t: datetime.fromisoformat(f"2026-10-01T{t}+00:00")  # noqa: E731
+    costs = (folder / factory.COSTS).read_text(encoding="utf-8")
+    assert sdlc.closing._timed_rows(costs) == [(at("11:30:00"), at("11:40:00"), "approver")]
+    clock = iter(["2026-10-01T12:00:00Z", "2026-10-01T12:05:00Z"])
+    monkeypatch.setattr(factory, "_utc_now", lambda: next(clock))
+    factory._record_land(root, folder, "checks")
+    factory._record_land(root, folder, "ship")
+    times = (folder / factory.LAND_TIMES).read_text(encoding="utf-8")
+    assert sdlc.closing._land_sinces(times) == [at("12:00:00")]

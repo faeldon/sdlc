@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -250,6 +251,8 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     body = _git(root, "log", "-1", "--format=%B", trunk)
     assert "Sdlc-Coverage: none: no transcripts for this repo" in body
     assert "Sdlc-Totals: elapsed=" in body and "Sdlc-Mode: manual" in body
+    # 162: `new` wrote `opened:`, so close times the lead from git alone.
+    assert re.search(r"^Sdlc-Lead: lead=\d+ ready_wait=\d+ source=git$", body, re.M), body
     assert not tree.exists()
     assert "001-first-change" not in _git(root, "branch", "--list")
     assert not (root / ".sdlc" / "work" / "001-first-change").exists()

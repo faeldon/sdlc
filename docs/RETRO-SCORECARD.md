@@ -97,8 +97,9 @@ The pillars measure how work is done. This band measures what it is spent on.
   counts only the measured segments of each stage, so it hides time spent queued and time spent
   ready but not landed. *Baseline:* changes 139–148 showed 43.5 minutes of `elapsed` against a
   real median lead time of 250.
-- **Where:** the change's GitHub issue opening, or the `new` time, and its `Close` commit.
-- **Status:** needs S1 (seed 2026-11-18-94).
+- **Where:** the `opened:` time `new` writes into the intent, and the `Close` commit.
+- **Status:** captured (S1): `Sdlc-Lead`'s `lead` on each `Close` commit, and `process.lead`'s
+  median and 85th percentile by tier and way of building.
 
 ### Supporting: throughput
 - **What:** changes landed per week, by way of building, and by impact.
@@ -117,14 +118,16 @@ The pillars measure how work is done. This band measures what it is spent on.
   factory lead time was ready-waiting; agents working was 23%.
 - **Where:** agent sessions' start and end times, the approver's decision time, `land-times.jsonl`,
   the `Close` commit.
-- **Status:** needs S1.
+- **Status:** captured (S1): `Sdlc-Lead`'s parts, and `process.lead`'s `shares`
+  (`ready_wait`, `agents`).
 
 ### Supporting: predictability
 - **What:** the 85th percentile lead time against the median, and how far the board's "typical"
   step estimates were from the actual times.
 - **Why:** a process that is fast on average but sometimes very slow is hard to plan around.
 - **Where:** lead times, the board's step medians.
-- **Status:** needs S1.
+- **Status:** partly: the 85th percentile against the median is captured (S1); the board's
+  estimates against the actual times aren't.
 
 ### Guardrail: change failure rate
 - **What:** the share of landed changes that needed a follow-up fix: a later change's `reworks:`
@@ -436,9 +439,9 @@ This doc stays this repo's design reference. Two figures read differently in a h
   (skills used, footprint, growth) is this repo's measure alone.
 - **The structural debt index** comes from the host's own `retro.indicators`, in its language.
 
-**Lead time needs a start time in every host.** Here a change's GitHub issue gives it. A host on
-local numbering has no issue, and `intent.md`'s `created:` holds only a date, so S1 has `new`
-record a timestamp.
+**Lead time needs a start time in every host.** A host on local numbering has no issue, and
+`intent.md`'s `created:` holds only a date, so `new` records `opened:`, to the minute, under
+either numbering (S1).
 
 **What a host's scorecard leaves out.** The skills' cases are this repo's only, so nothing about
 them is in a host's scorecard. A host with no factory gets the by-hand view: the mode comparison

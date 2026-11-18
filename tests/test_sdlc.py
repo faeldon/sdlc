@@ -21,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -3041,3 +3041,59 @@ def test_needs_of_an_escalation_by_its_reasons(fields, needs) -> None:
     assert (step is not None) == any(
         n.startswith(("decide ", "confirm ", "acknowledge ")) for n in needs
     )
+
+
+# ---------------------------------------------------------------- opened (162)
+
+OPENED_RE = r"^opened: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z)$"
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("tier", [1, 2])
+def test_new_writes_when_the_change_was_opened_to_the_minute(tmp_path: Path, tier: int) -> None:
+    """162 R1: local numbering; `opened:` in UTC after `created:`, the id kept as written, and
+    every other line the template's own."""
+    (tmp_path / ".sdlc").mkdir()
+    (tmp_path / ".sdlc" / "last-id").write_text("011\n", encoding="utf-8")
+    before = datetime.now(UTC).replace(second=0, microsecond=0)
+    assert sdlc.cmd_new(tmp_path, "reopen-drafts", tier, None) == 0
+    text = (tmp_path / ".sdlc" / "work" / "012-reopen-drafts" / "intent.md").read_text("utf-8")
+    [stamp] = re.findall(OPENED_RE, text, re.M)
+    opened = datetime.strptime(stamp, "%Y-%m-%dT%H:%MZ").replace(tzinfo=UTC)
+    assert before <= opened <= datetime.now(UTC)
+    assert sdlc.frontmatter_list(text, "opened") == [stamp]
+    assert "\nid: 012\n" in text
+    lines = text.splitlines()
+    assert lines[lines.index(f"opened: {stamp}") - 1].startswith("created: ")
+    rendered, _ = sdlc.render_template(
+        tmp_path, "intent.md", "012", "reopen-drafts", date.today().isoformat(), "reopen drafts"
+    )
+    rendered = rendered.replace("tier: 1", f"tier: {tier}", 1)
+    assert text.replace(f"opened: {stamp}\n", "", 1) == rendered
+
+
+@pytest.mark.portable
+def test_opened_goes_before_the_closing_line_without_created() -> None:
+    text = "---\nid: 012\nstage: plan\n---\n\n# 012 — x\n"
+    got = sdlc._with_opened(text, "2026-11-19T10:05Z")
+    assert got == "---\nid: 012\nstage: plan\nopened: 2026-11-19T10:05Z\n---\n\n# 012 — x\n"
+    assert sdlc._with_opened("no frontmatter\n", "2026-11-19T10:05Z") == "no frontmatter\n"
+
+
+@pytest.mark.portable
+def test_shipping_dropping_and_upgrading_keep_opened(tmp_path, capsys) -> None:
+    """162 R2: every stamp edits its own lines and leaves `opened:` as it is."""
+    text = "---\nid: 012\nstage: build\ncreated: 2026-11-18\nopened: 2026-11-18T09:07Z\n"
+    text += "updated: 2026-11-18\n---\n\n# 012 — x\n"
+    for stamped, _ in (sdlc.stamp_shipped(text, "2026-11-19"),
+                       sdlc.stamp_dropped(text, "2026-11-19", "build")):  # fmt: skip
+        assert "\nopened: 2026-11-18T09:07Z\n" in stamped
+    root, folder = _upgradable(tmp_path)
+    intent = folder / "intent.md"
+    lines = intent.read_text(encoding="utf-8").splitlines(keepends=True)
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("created:"))
+    lines.insert(at + 1, "opened: 2026-10-01T08:30Z\n")
+    intent.write_text("".join(lines), encoding="utf-8", newline="\n")
+    code, out = _upgrade(root, capsys)
+    assert code == 0, out
+    assert "\nopened: 2026-10-01T08:30Z\n" in intent.read_text(encoding="utf-8")

@@ -2192,6 +2192,24 @@ def claim(
         return dest, tree, None
 
 
+# When `new` opened a change, UTC to the minute, on the intent's `opened:` line: no seconds, so a
+# YAML reader takes it for text, never a timestamp. Close times its lead from it.
+OPENED_FORMAT = "%Y-%m-%dT%H:%MZ"
+
+
+def _with_opened(text: str, stamp: str) -> str:
+    """`text` with `opened: <stamp>` on the frontmatter line after `created:`, or before the
+    closing `---` when there is none; every other line as it was, by `_stamp`'s rule. A text
+    without a frontmatter block is returned as it is."""
+    lines = text.splitlines(keepends=True)
+    close = next((i for i, ln in enumerate(lines) if i and ln.strip() == "---"), None)
+    if not lines or lines[0].strip() != "---" or close is None:
+        return text
+    created = next((i for i in range(1, close) if lines[i].startswith("created:")), None)
+    lines.insert(close if created is None else created + 1, f"opened: {stamp}\n")
+    return "".join(lines)
+
+
 def cmd_new(
     root: Path,
     given_slug: str,
@@ -2281,6 +2299,7 @@ def cmd_new(
         text, origin = render_template(home, artifact, nid, slug, stamp, heading)
         if artifact == "intent.md":
             text = text.replace("tier: 1", f"tier: {tier}", 1)
+            text = _with_opened(text, datetime.now(UTC).strftime(OPENED_FORMAT))
         (dest / artifact).write_text(text, encoding="utf-8", newline="\n")
         print(f"  created  {dest / artifact}  ({origin} template)")
 
