@@ -405,3 +405,15 @@ factory.py files any agent's reply it should write a change's own folder glob or
 Severity: med
 Paths: plugins/factory/scripts/factory.py
 Theme: factory
+
+## [2026-11-18-43] [idea] Move close, push, the lock and the landing into modules the deep review can name
+
+Move close, push and the main lock out of scripts/sdlc.py, and the landing out of
+plugins/factory/scripts/factory.py, into modules of their own (as retro.py and board.py are), each
+loaded by path with its docstring as its contract, and list those modules in [review] sensitive.
+Today the deep review matches paths, and those two files are touched by most changes (60 and 50
+commits this month), so listing them would make nearly every run full depth; 139-landing-train
+rewrote close's lock and the landing at light depth with no security review. Open it after the
+139–147 batch and the release, so the move is made on quiet code.
+Theme: factory
+Raised 2026-11-18.
