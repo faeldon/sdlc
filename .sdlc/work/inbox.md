@@ -263,3 +263,11 @@ background, the default, the alternatives and why the default was chosen, so esc
 changes are decided quickly and with context.
 Theme: factory
 Raised 2026-11-18.
+
+## [2026-11-18-16] [idea] A landing whose only conflict is the register skips the reviewers
+
+A landing rebase whose only conflict is the register (.sdlc/work/inbox.md) still sends every
+reviewer at the run's depth to read it; check mechanically that both sides' entries survived and
+skip the reviewers.
+Theme: landing
+Raised 2026-11-18.
