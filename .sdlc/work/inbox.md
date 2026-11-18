@@ -166,21 +166,6 @@ Left undone by 133-board-tracks-landing, carried forward when it landed: ux: the
 See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-26] [bug] A factory agent's late reply overwrites its verdict
-
-136's code and test reviewers (round 1, 2026-11-18) each started their own background wait on
-./check.sh, gave VERDICT: PASS, then were woken by that wait's notice and replied again ("my
-verdict stands"). `factory.py agent` files only the session's last reply, so
-reviews/round-1/code.md and test.md held just that note, and `verdicts` stopped the run as
-`rerun`, not `mend`, losing both reviews. Expected: the reply that holds the verdict is what's
-filed (or a late reply is a mend), and reviewers don't run the full gate in the background when
-the script's gate already ran. To see it: a reviewer that backgrounds a long command and ends
-its turn before it exits.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-code.md, plugins/factory/agents/reviewer-test.md
-Theme: factory
-
 ## [2026-11-18-32] [bug] The board drops a shipped change while its landing's rebase is stopped on a conflict
 
 `_on_board()` keeps a shipped folder only when `ready_to_close()` lists its branch, and a stopped
@@ -347,3 +332,19 @@ Paths: skills/ship/security.md
 Cost: S
 Value: low
 Raised by: 143-ship-review-parity (correctness)
+
+## [2026-11-18-47] [idea] Reword `_no_verdict()` and `NO_DECISION` now that an answer after prose is read
+
+Left undone by 140-agent-replies-that-file-right, carried forward when it landed: `_no_verdict()` and `NO_DECISION` still say "doesn't open with VERDICT…/DECISION…", which the spec kept so the board's and status's problem text doesn't move. Since `opening()` now reads an answer after prose, the words now mean "holds no answer the script reads". A rewording would change the board's and status's text together, and their pins with it.
+See .sdlc/work/140-agent-replies-that-file-right/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-48] [nit] `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem.
+
+Raised by the code review of 140-agent-replies-that-file-right, round 1: plugins/factory/scripts/factory.py:3840: `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem. A one-line comment saying so would help.
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 140-agent-replies-that-file-right (correctness)
