@@ -1256,7 +1256,7 @@ def test_a_superseded_default_is_counted_but_not_open(tmp_path: Path) -> None:
     (folder / "decisions.md").write_text(SUPERSEDED_LEDGER, encoding="utf-8", newline="\n")
     git("add", "-A")
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
-    found = sdlc._factory_files(tmp_path, name)
+    found = sdlc.closing._factory_files(tmp_path, name)
     assert (found["blocking"], found["defaults"], found["defaults_open"]) == (1, 3, 1)
 
 
@@ -1287,7 +1287,7 @@ def test_the_metrics_read_a_verdict_and_a_decision_after_prose(tmp_path: Path) -
     )
     git("add", "-A")
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
-    found = sdlc._factory_files(tmp_path, name)
+    found = sdlc.closing._factory_files(tmp_path, name)
     assert found["decision"] == "READY"
     assert found["reviews"]["code"] == {"changes": 1, "requests": 1}
     assert found["reviews"]["test"]["changes"] == 0
@@ -1319,7 +1319,7 @@ def test_a_settled_default_is_counted_apart(tmp_path: Path) -> None:
     (folder / "decisions.md").write_text(ledger, encoding="utf-8", newline="\n")
     git("add", "-A")
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
-    found = sdlc._factory_files(tmp_path, name)
+    found = sdlc.closing._factory_files(tmp_path, name)
     assert (found["blocking"], found["defaults"], found["defaults_open"],
             found["defaults_settled"]) == (1, 4, 1, 1)  # fmt: skip
     done = metrics.rework([], {}, {**FACTORY, "defaults_settled": 1}, None, 2)
@@ -1449,7 +1449,7 @@ def test_a_cleared_escalation_still_measures_as_escalate(tmp_path: Path) -> None
     )
     git("add", "-A")
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
-    found = sdlc._factory_files(tmp_path, name)
+    found = sdlc.closing._factory_files(tmp_path, name)
     assert found["decision"] == "ESCALATE"
     assert (found["blocking"], found["defaults"], found["defaults_open"]) == (0, 0, 0)
     assert "gate_fail" not in found, "the hand gate's record is no round's gate"

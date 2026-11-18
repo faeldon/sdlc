@@ -64,12 +64,15 @@ writes itself, overridable in `.sdlc/templates/`. A host's process and review do
 answers to the guides, read block by block (`doc_units()`). REFERENCE.md, *The docs* and
 *Templates*.
 
-**Modules loaded by path.** `retro.py`, `board.py`, `metrics.py`, `indicators.py` and the
-trackers are loaded by path, never imported: `uv run --script` and the tests put different
-directories on `sys.path`. `retro.py` and `board.py` are bound to a live view of `sdlc.py`'s
-globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them; `board.py`
-loads only when `board` runs. `metrics.py` and `indicators.py` are pure: no subprocess and no
-import of `sdlc.py`. Each module's docstring is its contract.
+**Modules loaded by path.** `retro.py`, `board.py`, `closing.py`, `metrics.py`, `indicators.py`
+and the trackers are loaded by path, never imported: `uv run --script` and the tests put different
+directories on `sys.path`. `retro.py`, `board.py` and `closing.py` are bound to a live view of
+`sdlc.py`'s globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them;
+`board.py` loads only when `board` runs. The factory's `landing.py` is bound the same way to
+`factory.py`'s, as `factory.<name>`. `metrics.py` and `indicators.py` are pure: no subprocess and
+no import of `sdlc.py`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
+them: a function lives there when it is close's, the push's, the lock's or the landing's, or only
+code there calls it (`tests/test_modules.py`). Each module's docstring is its contract.
 
 **The base branch: `git.base`.** `main` in this file means the base branch a host names in
 `[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
@@ -115,8 +118,9 @@ which decides nothing; and the factory's `cases` (and `cases --skip`), which wri
 `main` into the branch, which close would put on `main`'s first-parent line, where
 `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 
-**Closing: `cmd_close()`.** Every git step is one git refuses when something would be lost, and a
-rerun resumes where a failed step stopped. A refused push is `push_failed` and a failed cleanup
+**Closing: `cmd_close()`,** in `scripts/closing.py` with `_main_lock()` and `_push()`. Every
+git step is one git refuses when something would be lost, and a rerun resumes where a failed
+step stopped. A refused push is `push_failed` and a failed cleanup
 `cleanup_failed`, never a failed close: the change has landed. The `Close` commit removes the folder
 and, in the same commit, files and retires the change's register entries (`_close_commit()`,
 `register_plan()`), so its first parent is still the change's commit. Close holds `_main_lock()`
@@ -243,8 +247,8 @@ judge have no Write; only the builder and the resolver edit (the builder's sub-a
 `Agent(Explore, Plan)`; the resolver, a train conflict's own agent, only the files the conflict
 names, which `resolve --continue` checks), and no agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
 gate` and `check`, through one function (`_run_check()`), the only places it runs a host's command,
-the base branch's `[commands] check`. Landing is
-the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
+the base branch's `[commands] check`. Landing, in
+`scripts/landing.py`, is the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
 (`sdlc_path()`): a batch lands as a train (`cmd_train()`, its state `TRAIN_STATE` in the git
 common dir, never in a tree), each change committed by `land` (which no longer runs `base`),
 stacked on the one before it by the factory's own rebase (`resolve --onto`), the gate run once
@@ -293,8 +297,8 @@ Changing a skill or the script usually means satisfying these, so know them befo
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill
   must run its script's `config` and name the config keys listed in `READS_CONFIG`.
 - **Only the named steps push** (`tests/test_skills.py::test_only_the_named_steps_push`): no
-  skill has a `push` rule or runs `git push`; `sdlc.py`'s one git push is in `_push()`, never
-  forced, called only by `cmd_publish`, and by `cmd_close` and `cmd_release` through
+  skill has a `push` rule or runs `git push`; the core's one git push is in `closing.py`'s
+  `_push()`, never forced, called only by `cmd_publish`, and by `cmd_close` and `cmd_release` through
   `_push_plan()`, so each pushes only when `git.push` names it, behind the question it already
   asks. Ship never pushes.
 - **Narrow `allowed-tools`** (`tests/test_skills.py`): a skill's `allowed-tools` *grants* each tool

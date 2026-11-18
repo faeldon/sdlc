@@ -472,6 +472,30 @@ def _function(source: str, name: str) -> str:
     return source.split(f"\ndef {name}(")[1].split("\ndef ")[0]
 
 
+CORE_SOURCES = ("sdlc.py", "retro.py", "closing.py")
+# A git call naming push: `_git(home, "push", …)`, `_git_err(…)`, or a `["git", …]` list.
+GIT_PUSH = re.compile(r'_git\w*\(\s*\w+,\s*"push"|\["git",[^\]]*"push"')
+
+
+def _core_sources() -> list[str]:
+    """Each core file's text, apart: `_function()` reads a body up to the next `def`, which
+    must never run on from one file's last function into the next file."""
+    return [(ROOT / "scripts" / name).read_text(encoding="utf-8") for name in CORE_SOURCES]
+
+
+def _defining(sources: list[str], name: str) -> str:
+    return next(text for text in sources if f"\ndef {name}(" in text)
+
+
+def test_the_push_guard_reaches_closing_py() -> None:
+    """153 R8: `_push()` lives in `closing.py`; the guard reads it, and a second push planted
+    there is one more than the one."""
+    closing = (ROOT / "scripts" / "closing.py").read_text(encoding="utf-8")
+    assert "closing.py" in CORE_SOURCES and len(GIT_PUSH.findall(closing)) == 1
+    planted = closing + '\ndef _other(home):\n    _git(home, "push", "origin", "x")\n'
+    assert len(GIT_PUSH.findall(planted)) == 2
+
+
 def test_only_the_named_steps_push() -> None:
     """The production gate: no skill pushes, and the script pushes in one function, `_push()`,
     called by publish behind its own approval, and by close and release only when `git.push`
@@ -482,24 +506,25 @@ def test_only_the_named_steps_push() -> None:
         assert not rules and not pushes, f"{_id(skill)} pushes: {rules or pushes}"
     publish = frontmatter.load(ROOT / "skills" / "publish" / "SKILL.md")
     assert "sdlc.py publish" in publish.content
-    # The core's code, retro's half included, so a push added there counts as one outside.
-    source = "\n".join(
-        (ROOT / "scripts" / name).read_text(encoding="utf-8") for name in ("sdlc.py", "retro.py")
-    )
-    body = _function(source, "_push")
-    # A git call naming push: `_git(home, "push", …)`, `_git_err(…)`, or a `["git", …]` list.
-    git_push = re.compile(r'_git\w*\(\s*\w+,\s*"push"|\["git",[^\]]*"push"')
+    # The core's code, retro's and closing's halves included, so a push added there counts as
+    # one outside.
+    sources = _core_sources()
+    source = "\n".join(sources)
+    body = _function(_defining(sources, "_push"), "_push")
+    git_push = GIT_PUSH
     assert len(git_push.findall(source)) == len(git_push.findall(body)) == 1, "a push outside"
     call = next(line for line in body.splitlines() if git_push.search(line))
     assert "force" not in call and '"-f"' not in call, call
     callers = {
         name
-        for name in re.findall(r"\ndef (\w+)\(", source)
-        if name != "_push" and "_push(" in _function(source, name).replace("def _push(", "")
+        for text in sources
+        for name in re.findall(r"\ndef (\w+)\(", text)
+        if name != "_push" and "_push(" in _function(text, name).replace("def _push(", "")
     }
     assert callers == {"cmd_publish", "cmd_close", "cmd_release"}, callers
     for name in ("cmd_close", "cmd_release"):
-        assert "_push_plan(" in _function(source, name), f"{name} pushes without git.push"
+        text = _defining(sources, name)
+        assert "_push_plan(" in _function(text, name), f"{name} pushes without git.push"
 
 
 @pytest.mark.parametrize("name", ["sdlc:release", "sdlc:retro"])

@@ -65,7 +65,7 @@ def _shipped(root: Path, slug: str = "thing", config: str | None = None) -> tupl
 def _close(root: Path, capsys, monkeypatch, ident="001", check_only=False) -> tuple[int, dict]:
     monkeypatch.chdir(root)
     capsys.readouterr()
-    code = sdlc.cmd_close(root, ident, check_only)
+    code = sdlc.closing.cmd_close(root, ident, check_only)
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -144,7 +144,7 @@ def test_a_failed_cleanup_never_fails_the_close(tmp_path, capsys, monkeypatch) -
 def test_a_hung_cleanup_times_out_and_the_close_stands(tmp_path, capsys, monkeypatch) -> None:
     root = _repo(tmp_path, _cleanup("sleep 5"))
     _shipped(root)
-    monkeypatch.setattr(sdlc, "CLEANUP_TIMEOUT", 1)
+    monkeypatch.setattr(sdlc.closing, "CLEANUP_TIMEOUT", 1)
     code, out = _close(root, capsys, monkeypatch)
     assert code == 0 and out["cleanup_failed"] == "timed out after 1s"
 

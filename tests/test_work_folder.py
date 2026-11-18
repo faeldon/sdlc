@@ -82,7 +82,11 @@ def test_the_shims_commands_are_gone(command: list[str], monkeypatch) -> None:
     assert raised.value.code != 0
 
 
-CORE = [ROOT / "scripts" / "sdlc.py", ROOT / "scripts" / "retro.py"]
+CORE = [
+    ROOT / "scripts" / "sdlc.py",
+    ROOT / "scripts" / "retro.py",
+    ROOT / "scripts" / "closing.py",
+]
 
 
 @pytest.mark.parametrize("script", CORE, ids=lambda p: p.name)
@@ -97,6 +101,13 @@ def test_no_literal_work_path_in_the_script(script: Path) -> None:
 def test_the_work_path_guard_reaches_retro_py() -> None:
     retro = CORE[1].read_text(encoding="utf-8")
     assert _work_paths(retro + '\nPATH = "work/x"\n')
+
+
+def test_the_work_path_guard_reaches_closing_py() -> None:
+    """153 R8: the guard reads `closing.py`, where close builds its paths now."""
+    closing = CORE[2].read_text(encoding="utf-8")
+    assert CORE[2].name == "closing.py"
+    assert _work_paths(closing + '\nPATH = "work/x"\n')
 
 
 def _work_paths(source: str) -> list[str]:

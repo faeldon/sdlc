@@ -529,7 +529,7 @@ def test_inbox_commit_waits_for_the_lock_claim_takes(tmp_path: Path, capsys) -> 
     tree = _tree(root)
     _tree_inbox(tree, _idea("2026-10-01-1", "One"), _idea("2026-10-05-1", "Five"))
     done = threading.Event()
-    with sdlc._main_lock(root):
+    with sdlc.closing._main_lock(root):
         worker = threading.Thread(
             target=lambda: (sdlc.cmd_inbox_commit(tree, ["2026-10-05-1"]), done.set())
         )
@@ -604,7 +604,7 @@ def test_close_retires_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path
     root = _repo(tmp_path, *entries)
     folder = _fixing(root, "2026-10-01-1, 2026-10-01-3, 2026-10-01-9")
     register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    plan = sdlc.register_plan(
+    plan = sdlc.closing.register_plan(
         register, (folder / "intent.md").read_text("utf-8"), sdlc.held_entries("")
     )
     assert plan["retire"] == ["2026-10-01-1", "2026-10-01-3"] and plan["gone"] == ["2026-10-01-9"]
@@ -626,7 +626,7 @@ def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> N
     _inbox(root)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "Ship 001-keep-drafts")
-    assert sdlc.fix_trailers(root, "001-keep-drafts") == [
+    assert sdlc.closing.fix_trailers(root, "001-keep-drafts") == [
         "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start "
         "paths=src/drafts.py,src/list/",
         "Sdlc-Fixes: 2026-10-02-1 severity=low reported=2026-10-02 introduced_by=unknown "
@@ -634,7 +634,7 @@ def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> N
         "Sdlc-Fixes: 2026-10-03-9 severity=unknown reported=unknown introduced_by=unknown "
         "paths=unknown",
     ]
-    assert sdlc.fix_trailers(root, "no-such-branch") == []
+    assert sdlc.closing.fix_trailers(root, "no-such-branch") == []
     parsed = sdlc.metrics.parse_trailers(
         "Sdlc-Fixes: 2026-10-01-1 severity=high reported=2026-10-01 introduced_by=000-start "
         "paths=src/drafts.py,src/list/"
@@ -940,7 +940,7 @@ def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
     assert "fixes: 'One' isn't an id: name each bug by its YYYY-MM-DD-n" in errors
     intent = (root / ".sdlc" / "work" / "001-keep-drafts" / "intent.md").read_text("utf-8")
     register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    plan = sdlc.register_plan(register, intent, sdlc.held_entries(""))
+    plan = sdlc.closing.register_plan(register, intent, sdlc.held_entries(""))
     assert plan["retire"] == [] and plan["text"] == register, "a title retires nothing"
 
 
@@ -966,7 +966,7 @@ def test_close_retires_an_untagged_seed_its_idea_line_names(tmp_path: Path, ref)
     intent = folder / "intent.md"
     text = intent.read_text(encoding="utf-8").replace("idea:\n", f"idea: {ref}\n")
     register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    plan = sdlc.register_plan(register, text, sdlc.held_entries(""))
+    plan = sdlc.closing.register_plan(register, text, sdlc.held_entries(""))
     assert plan["text"] == "# Inbox\n\n" + _idea("2026-10-02-1", "Two"), "every other as it was"
 
 

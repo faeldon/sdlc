@@ -28,8 +28,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SDLC_PY = REPO / "scripts" / "sdlc.py"
-# The core's code, which the guards that read source scan: retro.py beside the script loading it.
-CORE = [SDLC_PY, REPO / "scripts" / "retro.py"]
+# The core's code, which the guards that read source scan: retro.py and closing.py beside the
+# script loading them.
+CORE = [SDLC_PY, REPO / "scripts" / "retro.py", REPO / "scripts" / "closing.py"]
 
 
 def _load():
@@ -1025,7 +1026,7 @@ def _shipped_change(root: Path, slug: str = "thing") -> tuple[Path, str]:
 
 def _close(root: Path, ident, capsys, check_only: bool = False) -> tuple[int, dict]:
     capsys.readouterr()  # what new and ship printed while setting up
-    code = sdlc.cmd_close(root, ident, check_only)
+    code = sdlc.closing.cmd_close(root, ident, check_only)
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -1917,6 +1918,16 @@ def test_the_source_guards_reach_retro_py() -> None:
     assert _gh_calls(retro + '\nRUN = ["gh", "issue"]\n')
 
 
+def test_the_source_guards_reach_closing_py() -> None:
+    """153 R8: close moved out of `sdlc.py`; the guards above read `closing.py` too, so moving
+    the code didn't move it out of their reach."""
+    closing = CORE[2].read_text(encoding="utf-8")
+    assert CORE[2].name == "closing.py"
+    assert not _main_refs(closing) and not _gh_calls(closing)
+    assert _main_refs(closing + '\nREF = "refs/heads/main"\n')
+    assert _gh_calls(closing + '\nRUN = ["gh", "issue"]\n')
+
+
 def test_archive_targets_are_the_tracker_modules() -> None:
     """A module added to scripts/trackers/ is a target, with no edit to the config code."""
     stems = {p.stem for p in TRACKERS.glob("*.py") if not p.stem.startswith("_")}
@@ -2329,7 +2340,7 @@ def _seeded(tmp_path: Path, idea: str, ideas: str = IDEAS) -> tuple[Path, Path]:
 def _planned(idea: str, ideas: str = IDEAS, held: str = "", fixes: str = "") -> dict:
     """What close would make of `ideas` for a change whose `idea:` is `idea`, holding `held`."""
     intent = _fm(stage="shipped", idea=idea, **({"fixes": fixes} if fixes else {}))
-    return sdlc.register_plan(ideas, intent, sdlc.held_entries(held))
+    return sdlc.closing.register_plan(ideas, intent, sdlc.held_entries(held))
 
 
 def _staged(root: Path) -> list[str]:

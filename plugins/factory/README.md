@@ -487,6 +487,13 @@ the register and the `Close` commits' trailers with copies of `sdlc.py`'s parsin
 For `fresh`, `upgrade` and landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
 or the cache's), so ship, base, upgrade and close have one implementation; another version is refused.
 
+The landing's own code (`land`, `land-check`, `train`, `resolve` and `land-verdicts`, the one place
+the factory commits) lives in `scripts/landing.py` beside it, which `factory.py` loads by path and
+binds to a live view of its own names; its docstring says where the line between the two falls.
+It is apart so a repo's `[review] sensitive` can name it, as this one's does, without naming the
+whole script: a change to the landing is reviewed in depth, a change elsewhere in `factory.py`
+needn't be.
+
 ## License
 
 MIT. The agents adapt material from [Agent Skills](https://github.com/addyosmani/agent-skills) by

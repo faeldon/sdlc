@@ -427,7 +427,7 @@ def test_a_hand_gate_is_no_factory_file(repo, capsys) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "built, gate red")
     assert _git(repo, "show", f"{NAME}:.sdlc/work/{NAME}/build/gate.md").startswith("GATE: FAIL")
-    assert sdlc._factory_files(repo, NAME) is None
+    assert sdlc.closing._factory_files(repo, NAME) is None
 
 
 # ---------------------------------------------------------------- the shared gate slots (113)
@@ -678,7 +678,7 @@ def test_new_claims_a_number_while_a_hand_gate_waits(repo, tmp_path) -> None:
         took = threading.Event()
 
         def claim() -> None:
-            with sdlc._main_lock(repo):
+            with sdlc.closing._main_lock(repo):
                 took.set()
 
         threading.Thread(target=claim, daemon=True).start()
@@ -727,7 +727,7 @@ def test_a_hand_gate_on_a_factory_run_is_counted_in_no_factory_figure(repo, caps
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "built")
     assert _record(repo).startswith("GATE: FAIL")
-    assert sdlc._factory_files(repo, NAME)["gate_fail"] == 1
+    assert sdlc.closing._factory_files(repo, NAME)["gate_fail"] == 1
 
 
 @pytest.mark.portable

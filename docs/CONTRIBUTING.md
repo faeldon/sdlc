@@ -188,6 +188,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 | `skills/<name>/SKILL.md` | the `sdlc` skills; the directory name is the skill's name. Any other `*.md` beside it is a branch file, read only when the script says it applies (ship's, from `preflight`'s `branches`; setup's `drafts.md`, unless `readiness` says `complete`) |
 | `scripts/sdlc.py` | the mechanism, argparse subcommands |
 | `scripts/retro.py` | the retrospective's readers, loaded by `sdlc.py` and reading its names as `sdlc.<name>` |
+| `scripts/closing.py` | close, the push and the main lock, loaded by `sdlc.py` like `retro.py`; apart so `[review] sensitive` names them, and a change touching it is reviewed in depth |
 | `scripts/trackers/` | one module per tracker, loaded by path only when `archive.target` names it |
 | `scripts/metrics.py` | what a change cost, measured at close |
 | `scripts/indicators.py` | what the retrospective's architecture pass counts, from git's output |
@@ -195,6 +196,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 | `guide/` | the process and review guides, read in place from the plugin and never copied; a host's `.sdlc/SDLC.md` and `REVIEW.md` hold only its answers to them; one shape, see `AGENTS.md` |
 | `defaults/` | a doc `/sdlc:setup` copies into a host once, after which the host owns it: the plugin reads it, and a rerun of setup only proposes what a newer default changed (`drift`, against `.sdlc/setup.json`) (the process, review, project, product and health docs); one shape, see `AGENTS.md` |
 | `plugins/factory/` | `sdlc-factory`, a second plugin with its own skills, agents and `factory.py`; its [README](../plugins/factory/README.md) describes it |
+| `plugins/factory/scripts/landing.py` | the factory's landing and train, loaded by `factory.py` and reading its names as `factory.<name>`; apart, and listed in `[review] sensitive`, as `closing.py` is |
 | `.claude-plugin/` | `plugin.json` and `marketplace.json`: this repo is its own marketplace |
 | `.sdlc/` | this repo's own config and process docs |
 | `tests/` | pytest; skills are tested as text, the script by loading it by path |

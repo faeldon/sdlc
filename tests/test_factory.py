@@ -738,12 +738,18 @@ def test_a_superseded_default_is_neither_assumed_nor_a_signal_nor_a_decision(
     monkeypatch.setattr(factory, "_sdlc", lambda args, cwd: (0, {}, ""))
     cfg = factory.load_config(root)[0]
     open_signal = "decisions still open or assumed in decisions.md"
-    assert open_signal in factory.land_signals(folder, root, "READY", cfg)[0], "D2 is assumed"
+    assert open_signal in factory.landing.land_signals(folder, root, "READY", cfg)[0], (
+        "D2 is assumed"
+    )
     path = folder / "decisions.md"
     path.write_text(path.read_text().replace("- [ ] D2", "- [x] D2").replace(
         "Page at 100.", "Page at 100. → decided: 100"))  # fmt: skip
-    assert open_signal not in factory.land_signals(folder, root, "READY", cfg)[0], "D1 isn't open"
-    assert factory.land_parts(folder, {})["assumed"] == [], "a superseded line isn't assumed"
+    assert open_signal not in factory.landing.land_signals(folder, root, "READY", cfg)[0], (
+        "D1 isn't open"
+    )
+    assert factory.landing.land_parts(folder, {})["assumed"] == [], (
+        "a superseded line isn't assumed"
+    )
 
 
 # ---------------------------------------------------------------- a default's alternatives
@@ -1894,6 +1900,35 @@ def test_the_sensitive_list_is_the_base_branch_s_not_the_change_s(tmp_path, caps
     assert _verdicts(root, capsys)["depth"] == "light", "editing the list here changes nothing"
 
 
+def test_the_landing_code_is_reviewed_in_depth(tmp_path, capsys) -> None:
+    """153 R10: this repo's own `[review] sensitive` names `closing.py` and `landing.py`, so a
+    diff touching either runs full depth, while one elsewhere in `sdlc.py` or `factory.py` stays
+    light; and ship's `risk_paths()` names the same two modules and not the scripts."""
+    import tomllib
+
+    listed = tomllib.loads((ROOT / ".sdlc" / "config.toml").read_text(encoding="utf-8"))
+    sensitive = listed["review"]["sensitive"]
+    config = "[review]\nsensitive = " + json.dumps(sensitive) + "\n"
+    closing, landing = "scripts/closing.py", "plugins/factory/scripts/landing.py"
+    scripts = ["scripts/sdlc.py", "plugins/factory/scripts/factory.py"]
+    for path in (closing, landing, *scripts):
+        assert (ROOT / path).exists(), path
+    for n, path in enumerate((closing, landing)):
+        root = _change(tmp_path / f"module-{n}", config=config)
+        _touch(root, path)
+        _build_report(root, 1)
+        out = _verdicts(root, capsys)
+        assert out["depth"] == "full" and path in out["sensitive"], (path, out)
+    for n, path in enumerate(scripts):
+        root = _change(tmp_path / f"script-{n}", config=config)
+        _touch(root, path)
+        _build_report(root, 1)
+        out = _verdicts(root, capsys)
+        assert out["depth"] == "light" and not out["sensitive"], (path, out)
+    risky = sdlc.risk_paths([closing, landing, *scripts], sensitive)
+    assert risky == [closing, landing], risky
+
+
 def _light_round(tmp_path: Path, tier: object, factory_toml: str | None = None) -> Path:
     """A change at `tier` whose first build touches no sensitive path, with no review yet."""
     root = _change(tmp_path, tier, "build", config=LISTED)
@@ -2032,7 +2067,7 @@ def test_the_landing_review_judges_a_tier_2_light_run_with_its_test_reviewer(
     (folder / "reviews" / "land-1").mkdir(parents=True)
     (folder / "runs").mkdir()
     (folder / "runs" / "land-resolved").write_text("", encoding="utf-8")
-    _, out = _run(capsys, factory.cmd_land_verdicts, root, "008")
+    _, out = _run(capsys, factory.landing.cmd_land_verdicts, root, "008")
     assert out["missing"] == ["code", "test", "behaviour"], out
 
 
@@ -2269,7 +2304,7 @@ def test_the_factorys_reading_of_case_failures_matches_sdlcs() -> None:
         "c": {"result": "failed", "runs": []}, "d": "nonsense"}}  # fmt: skip
     assert sdlc.cases_failures(record) == {"a": ["x", "y", "z"], "c": []}
     for r in (record, {}, None, {"verdicts": []}):
-        assert factory.cases_failures(r) == sdlc.cases_failures(r)
+        assert factory.landing.cases_failures(r) == sdlc.cases_failures(r)
 
 
 # ---------------------------------------------------------------- the eval: what escaped
@@ -3071,12 +3106,12 @@ def test_a_cost_line_written_mid_rebase_goes_into_the_resolved_commit(tmp_path, 
     _git(tree, "commit", "-q", "-m", "the change")
     (root / "README.md").write_text("main's line\n", encoding="utf-8")
     _git(root, "commit", "-q", "-am", "main moves")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "008", False, "main")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "008", False, "main")
     assert out["conflicted"] == ["README.md"], out
     with costs.open("a", encoding="utf-8", newline="\n") as f:
         f.write('{"session": "s-2", "role": "builder", "cost_usd": 0.25}\n')
     (tree / "README.md").write_text("main's line, and the change's\n", encoding="utf-8")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "008", True)
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "008", True)
     assert (code, out["state"]) == (0, "resolved"), out
     assert "s-2" in _git(tree, "show", f"HEAD:.sdlc/work/{NAME}/runs/costs.jsonl")
 
@@ -3838,14 +3873,14 @@ def test_close_counts_the_red_gates_only_for_a_run_that_had_one(tmp_path, capsys
     (folder / "decision.md").write_text("DECISION: READY\n\nAll pass.\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "built, no gate yet")
-    assert "gate_fail" not in sdlc._factory_files(root, NAME)
+    assert "gate_fail" not in sdlc.closing._factory_files(root, NAME)
     _gate(root, capsys)
     (root / "fixed.txt").write_text("ok\n", encoding="utf-8")
     _fixed(root)
     _gate(root, capsys)
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "gated")
-    found = sdlc._factory_files(root, NAME)
+    found = sdlc.closing._factory_files(root, NAME)
     assert found["gate_fail"] == 1 and found["rounds"] == 1, "the gate file is no review round"
     done = metrics.rework([], {}, found, None, 2)
     assert done["gate_fail"] == 1
@@ -3872,7 +3907,7 @@ def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> No
     (runs / "reviewer-ux.sessions").write_text("s-5\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "the run")
-    found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
+    found = sdlc.closing._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
     assert found == {"s-1": "builder", "s-2": "builder", "s-3": "reviewer-code",
                      "s-4": "reviewer-ui", "s-5": "reviewer-ux"}  # fmt: skip
 
@@ -3886,7 +3921,7 @@ def test_a_resolver_session_is_its_own_role(tmp_path) -> None:
     (runs / "resolver.sessions").write_text("s-2\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "the run")
-    found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
+    found = sdlc.closing._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
     assert found == {"s-1": "builder", "s-2": "resolver"}
 
 
@@ -5842,7 +5877,7 @@ def test_a_look_line_is_counted_in_no_ledger_figure(tmp_path, capsys) -> None:
     assert [d["id"] for d in reading["looks"]] == ["D1"] and reading["problems"] == []
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "built")
-    found = sdlc._factory_files(root, NAME)
+    found = sdlc.closing._factory_files(root, NAME)
     assert (found["blocking"], found["defaults"], found["defaults_open"],
             found["defaults_settled"]) == (1, 2, 1, 1)  # fmt: skip
     assert _verdicts(root, capsys)["assumed"] == ["D3"]
@@ -5859,10 +5894,10 @@ def test_only_the_person_ticks_a_look_line(tmp_path, capsys) -> None:
     assert out["unsettled"] == [{"id": "D1", "why": "D1 is the person's to acknowledge"}], out
     assert _ledger_text(root) == before
     pre = {"undone": {"items": []}, "checks": {"checks": []}}
-    parts = factory.land_parts(folder, pre)
+    parts = factory.landing.land_parts(folder, pre)
     assert parts["assumed"] == [], "a look is no default to confirm"
     (folder / "notes.md").write_text("# Notes\n", encoding="utf-8")
-    factory._dispose(root, folder, pre)
+    factory.landing._dispose(root, folder, pre)
     assert _ledger_text(root) == before, "the landing's yes ticks no look line"
     path = folder / "decisions.md"
     path.write_text(before.replace("- [ ] D1", "- [x] D1").replace(
@@ -5917,5 +5952,5 @@ def test_a_restart_makes_a_look_line_history(tmp_path, capsys) -> None:
     rec = {"stage": "test", "problems": [], **reading}
     assert sdlc.needs_of(rec) == ["gate it green"]
     cfg = factory.load_config(root)[0]
-    signals, _ = factory.land_signals(folder, root, "ESCALATE", cfg, pre={})
+    signals, _ = factory.landing.land_signals(folder, root, "ESCALATE", cfg, pre={})
     assert "decisions still open or assumed in decisions.md" not in signals, signals

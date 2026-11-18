@@ -209,7 +209,7 @@ def test_release_publish_and_measuring_never_read_the_register() -> None:
     for skill in ("release", "publish"):
         text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
         assert "nits" not in text and "inbox" not in text, skill
-    for fn in (sdlc.cmd_release, sdlc.cmd_publish, sdlc.measure_change):
+    for fn in (sdlc.cmd_release, sdlc.cmd_publish, sdlc.closing.measure_change):
         source = inspect.getsource(fn)
         for word in ("nits", "nit_", "inbox", "INBOX", "register_path"):
             assert word not in source, (fn.__name__, word)

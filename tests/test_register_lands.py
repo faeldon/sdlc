@@ -87,7 +87,7 @@ def _ship(root: Path, tree: Path, folder: Path, capsys=None) -> None:
 
 def _close(root: Path, ident: str, capsys, check: bool = False) -> tuple[int, dict]:
     capsys.readouterr()
-    code = sdlc.cmd_close(root, ident, check)
+    code = sdlc.closing.cmd_close(root, ident, check)
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -199,7 +199,7 @@ def test_a_close_rerun_files_each_entry_once(tmp_path, capsys, monkeypatch) -> N
     assert code == 0, out
     assert _register(root).count("[2026-10-02-1]") == 1
     assert "Reopen drafts" not in _register(root)
-    plan = sdlc.register_plan(_register(root), "", sdlc.held_entries(f"# t\n\n{entry}"))
+    plan = sdlc.closing.register_plan(_register(root), "", sdlc.held_entries(f"# t\n\n{entry}"))
     assert plan["skipped"] == ["2026-10-02-1"] and plan["file"] == []
 
 
@@ -214,7 +214,7 @@ def test_close_and_inbox_commit_keep_both_entries(tmp_path, capsys, monkeypatch)
     _held(folder, _entry("2026-10-02-1", "Page the drafts"))
     _ship(root, tree, folder)
     monkeypatch.chdir(root)
-    real = sdlc._push_plan
+    real = sdlc.closing._push_plan
 
     def write_an_idea(home, cfg, point):
         # What /sdlc:idea does in another session after close's check of the register and before
@@ -222,9 +222,9 @@ def test_close_and_inbox_commit_keep_both_entries(tmp_path, capsys, monkeypatch)
         (root / INBOX).write_text(_register(root) + "\n" + _entry("2026-10-03-1", "Late"), "utf-8")
         return real(home, cfg, point)
 
-    monkeypatch.setattr(sdlc, "_push_plan", write_an_idea)
+    monkeypatch.setattr(sdlc.closing, "_push_plan", write_an_idea)
     capsys.readouterr()
-    code = sdlc.cmd_close(root, "001")
+    code = sdlc.closing.cmd_close(root, "001")
     out = capsys.readouterr().out
     assert code == 0, out
     text = _register(root)

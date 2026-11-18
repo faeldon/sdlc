@@ -97,7 +97,7 @@ def _shipped(root: Path, slug: str = "thing", extra: dict[str, str] | None = Non
 
 def _close(root: Path, capsys, ident: str, check: bool = False) -> tuple[int, dict]:
     capsys.readouterr()
-    code = sdlc.cmd_close(root, ident, check)
+    code = sdlc.closing.cmd_close(root, ident, check)
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -323,8 +323,8 @@ def handoffs(monkeypatch):
         calls.append((argv, ran))
         return 0
 
-    monkeypatch.setattr(sdlc, "_handoff", record)
-    monkeypatch.delenv(sdlc.HANDOFF_ENV, raising=False)
+    monkeypatch.setattr(sdlc.closing, "_handoff", record)
+    monkeypatch.delenv(sdlc.closing.HANDOFF_ENV, raising=False)
     return calls
 
 
@@ -348,7 +348,7 @@ def test_a_copy_that_isnt_mains_hands_the_close_to_mains_script(
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
     _landing(root, {"feature.txt": "x\n"})
-    assert sdlc.cmd_close(root, "001", check) == 0
+    assert sdlc.closing.cmd_close(root, "001", check) == 0
     assert handoffs == [(["001", "--check"] if check else ["001"], "home")]
     assert _git(root, "rev-parse", "main") != _git(root, "rev-parse", "001-thing"), "nothing done"
 
@@ -356,7 +356,7 @@ def test_a_copy_that_isnt_mains_hands_the_close_to_mains_script(
 def test_mains_script_once_handed_the_close_runs_it(tmp_path, gh, capsys, handoffs, monkeypatch):
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
-    monkeypatch.setenv(sdlc.HANDOFF_ENV, "home")
+    monkeypatch.setenv(sdlc.closing.HANDOFF_ENV, "home")
     name = _landing(root, {"feature.txt": "x\n"})
     code, out = _close(root, capsys, "001")
     assert code == 0 and handoffs == [] and not _on_main(root, name), out
@@ -369,7 +369,7 @@ def test_a_merge_that_brings_scripts_hands_the_rest_to_the_merged_code(
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
     name = _landing(root, {path: "print('merged')\n"})
-    assert sdlc.cmd_close(root, "001") == 0
+    assert sdlc.closing.cmd_close(root, "001") == 0
     assert handoffs == [([name], "merged")]
     assert _git(root, "rev-parse", "main") == _git(root, "rev-parse", name), "merged first"
     assert _on_main(root, name), "everything after the merge is the merged code's"
@@ -385,14 +385,14 @@ def test_a_merge_with_no_scripts_or_already_merged_code_carries_on(
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
     if ran_env:
-        monkeypatch.setenv(sdlc.HANDOFF_ENV, ran_env)
+        monkeypatch.setenv(sdlc.closing.HANDOFF_ENV, ran_env)
     name = _landing(root, files)
     code, out = _close(root, capsys, "001")
     assert code == 0 and handoffs == [] and not _on_main(root, name), out
 
 
 def test_merged_code_that_wont_start_stops_after_the_merge(tmp_path, gh, capsys, monkeypatch):
-    monkeypatch.delenv(sdlc.HANDOFF_ENV, raising=False)
+    monkeypatch.delenv(sdlc.closing.HANDOFF_ENV, raising=False)
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
     name = _landing(root, {"scripts/sdlc.py": "def broken(:\n"})
@@ -408,7 +408,7 @@ def test_merged_code_that_wont_start_stops_after_the_merge(tmp_path, gh, capsys,
 
 
 def test_mains_script_that_wont_start_does_nothing(tmp_path, gh, capsys, monkeypatch) -> None:
-    monkeypatch.delenv(sdlc.HANDOFF_ENV, raising=False)
+    monkeypatch.delenv(sdlc.closing.HANDOFF_ENV, raising=False)
     root = _own(_repo(tmp_path), script="def broken(:\n")
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
     name = _landing(root, {"feature.txt": "x\n"})
@@ -780,7 +780,7 @@ def test_close_records_rework_and_the_happy_path_from_the_factorys_files(
     monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
     root = _repo(tmp_path)
     name = _factory_shipped(root)
-    assert sdlc._change_diff(root, name) == 10, "before the merge"
+    assert sdlc.closing._change_diff(root, name) == 10, "before the merge"
     code, out = _close(root, capsys, "001")
     assert code == 0, out
     body = _git(root, "log", "-1", "--format=%B", "main")
@@ -824,7 +824,7 @@ def test_measuring_reads_each_transcript_once(tmp_path, gh, monkeypatch) -> None
     read: list[Path] = []
     real = sdlc.metrics._lines
     monkeypatch.setattr(sdlc.metrics, "_lines", lambda p: read.append(p) or real(p))
-    _, lines = sdlc.measure_change(root, name, sdlc.load_config(root)[0])
+    _, lines = sdlc.closing.measure_change(root, name, sdlc.load_config(root)[0])
     assert len(read) == len(set(read)) == 2, read
     [role] = [ln for ln in lines if ln.startswith("Sdlc-Role: builder")]
     back = sdlc.metrics.parse_trailers(role)["roles"]["builder"]
@@ -838,7 +838,7 @@ def test_what_the_verifier_dropped_is_counted_on_each_reviewer(tmp_path, gh, cap
     root = _repo(tmp_path)
     verified = "- KEPT: code: name it\n- DROPPED: code: test it — the test exists\n"
     name = _factory_shipped(root, {**FACTORY_FILES, "reviews/round-1/verified.md": verified})
-    assert sdlc._factory_files(root, name)["reviews"] == {
+    assert sdlc.closing._factory_files(root, name)["reviews"] == {
         "code": {"changes": 1, "requests": 2, "dropped": 1},
         "test": {"changes": 0, "requests": 0, "dropped": 0},
     }
@@ -851,11 +851,11 @@ def test_what_the_verifier_dropped_is_counted_on_each_reviewer(tmp_path, gh, cap
 def test_the_diffs_size_is_the_same_after_the_merge(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     name = _factory_shipped(root)
-    before = sdlc._change_diff(root, name)
+    before = sdlc.closing._change_diff(root, name)
     _git(root, "merge", "--ff-only", "-q", name)
-    assert sdlc._change_diff(root, name) == before == 10
-    assert sdlc._factory_files(root, name)["decision"] == "READY"
-    assert sdlc._factory_files(root, "001-missing") is None
+    assert sdlc.closing._change_diff(root, name) == before == 10
+    assert sdlc.closing._factory_files(root, name)["decision"] == "READY"
+    assert sdlc.closing._factory_files(root, "001-missing") is None
 
 
 def test_rework_that_fails_drops_only_its_own_lines(tmp_path, gh, capsys, monkeypatch) -> None:

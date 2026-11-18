@@ -24,10 +24,12 @@ SDLC_PY = REPO / "scripts" / "sdlc.py"
 SCRIPTS = [
     SDLC_PY,
     REPO / "scripts" / "retro.py",
+    REPO / "scripts" / "closing.py",
     REPO / "scripts" / "metrics.py",
     REPO / "scripts" / "indicators.py",
     *sorted((REPO / "scripts" / "trackers").glob("*.py")),
     REPO / "plugins" / "factory" / "scripts" / "factory.py",
+    REPO / "plugins" / "factory" / "scripts" / "landing.py",
 ]
 GIT_ID = {
     "GIT_AUTHOR_NAME": "t",
@@ -99,8 +101,8 @@ def test_the_script_loads_and_claims_without_fcntl(tmp_path: Path, monkeypatch) 
     monkeypatch.setitem(sys.modules, "fcntl", None)
     monkeypatch.setitem(sys.modules, "msvcrt", fake)
     mod = _load("sdlc_without_fcntl")
-    monkeypatch.setattr(mod, "_lock", mod._msvcrt_lock)
-    monkeypatch.setattr(mod, "_unlock", mod._msvcrt_unlock)
+    monkeypatch.setattr(mod.closing, "_lock", mod.closing._msvcrt_lock)
+    monkeypatch.setattr(mod.closing, "_unlock", mod.closing._msvcrt_unlock)
     real = mod.next_id
 
     def slow(home: Path) -> str:
@@ -138,7 +140,7 @@ def test_a_lock_that_fails_for_another_reason_raises_rather_than_waits(
     fd = os.open(tmp_path / "lock", os.O_RDWR | os.O_CREAT)
     try:
         with pytest.raises(OSError, match="bad descriptor"):
-            sdlc._msvcrt_lock(fd)
+            sdlc.closing._msvcrt_lock(fd)
     finally:
         os.close(fd)
 
@@ -146,13 +148,13 @@ def test_a_lock_that_fails_for_another_reason_raises_rather_than_waits(
 def test_the_lock_is_a_file_in_the_git_dir_that_git_status_never_shows(tmp_path: Path) -> None:
     """R2, R4: inside git the lock is `sdlc.lock` beside the objects; outside, `.sdlc/lock`."""
     root = _repo(tmp_path)
-    with sdlc._main_lock(root):
+    with sdlc.closing._main_lock(root):
         pass
     assert (root / ".git" / "sdlc.lock").is_file()
     assert _git(root, "status", "--porcelain") == ""
     bare = tmp_path / "bare"
     bare.mkdir()
-    assert sdlc._lock_path(bare) == bare / ".sdlc" / "lock"
+    assert sdlc.closing._lock_path(bare) == bare / ".sdlc" / "lock"
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do")

@@ -100,11 +100,11 @@ def test_the_lock_is_reentrant_in_a_thread_and_exclusive_across_threads(tmp_path
     done = threading.Event()
 
     def other() -> None:
-        with sdlc._main_lock(root):
+        with sdlc.closing._main_lock(root):
             done.set()
 
-    with sdlc._main_lock(root):
-        with sdlc._main_lock(root):
+    with sdlc.closing._main_lock(root):
+        with sdlc.closing._main_lock(root):
             worker = threading.Thread(target=other)
             worker.start()
             assert not done.wait(0.5), "another thread got the lock while this one held it twice"
@@ -120,23 +120,23 @@ def test_close_holds_the_lock_from_its_merge_to_its_close(tmp_path, capsys, monk
     root = _plain_repo(tmp_path)
     tree, folder = _shipped(root, "reopen")
     paused, go = threading.Event(), threading.Event()
-    real = sdlc.measure_change
+    real = sdlc.closing.measure_change
 
     def pausing(main, branch, cfg):
         paused.set()  # just after the merge, before the Close commit
         assert go.wait(10)
         return real(main, branch, cfg)
 
-    monkeypatch.setattr(sdlc, "measure_change", pausing)
+    monkeypatch.setattr(sdlc.closing, "measure_change", pausing)
     results: dict = {}
 
     def closing() -> None:
-        results["close"] = sdlc.cmd_close(root, "001")
+        results["close"] = sdlc.closing.cmd_close(root, "001")
 
     filed = threading.Event()
 
     def filing() -> None:
-        with sdlc._main_lock(root):
+        with sdlc.closing._main_lock(root):
             (root / INBOX).write_text(
                 REGISTER + "\n## [2026-10-03-1] [idea] Late\n\nFiled meanwhile.\n", "utf-8"
             )
@@ -168,7 +168,7 @@ def test_close_refuses_a_branch_carrying_another_change(tmp_path, capsys) -> Non
     _git(b_tree, "-c", "user.name=t", "-c", "user.email=t@t", "rebase", "-q", a.name)
     assert _git(b_tree, "rev-parse", "HEAD^") == _git(a_tree, "rev-parse", "HEAD"), "stacked"
     before = _git(root, "rev-parse", "main")
-    code, out = _run(capsys, sdlc.cmd_close, root, "002")
+    code, out = _run(capsys, sdlc.closing.cmd_close, root, "002")
     assert code == 1, out
     assert any(a.name in r and "another change" in r for r in out["refusals"]), out["refusals"]
     assert out["done"] == [] and _git(root, "rev-parse", "main") == before
@@ -178,7 +178,12 @@ def test_close_refuses_a_branch_carrying_another_change(tmp_path, capsys) -> Non
 def _close_env() -> dict[str, str]:
     """The environment a close is run in from a test: without this session's virtualenv, so `uv`
     builds the script's own, and without the flags a handed-off close reads."""
-    dropped = ("VIRTUAL_ENV", sdlc.HANDOFF_ENV, sdlc.OWN_SCRIPT_ENV, sdlc.LOCK_HELD_ENV)
+    dropped = (
+        "VIRTUAL_ENV",
+        sdlc.closing.HANDOFF_ENV,
+        sdlc.OWN_SCRIPT_ENV,
+        sdlc.closing.LOCK_HELD_ENV,
+    )
     return {k: v for k, v in os.environ.items() if k not in dropped}
 
 
@@ -233,7 +238,7 @@ def test_the_handoff_passes_the_hold_and_the_child_takes_no_lock(tmp_path, monke
     lock; a close told so pops the variable before any other process starts, and runs to its end
     while another thread holds the OS lock, since it takes none of its own."""
     root = _plain_repo(tmp_path)
-    lock = str(sdlc._lock_path(root))
+    lock = str(sdlc.closing._lock_path(root))
     seen: list[dict | None] = []
     real = subprocess.run
 
@@ -247,11 +252,14 @@ def test_the_handoff_passes_the_hold_and_the_child_takes_no_lock(tmp_path, monke
 
     monkeypatch.setattr(sdlc.subprocess, "run", fake_run)
     report = {"change": "001", "refusals": [], "done": []}
-    sdlc._handoff(root, ["001"], "merged", dict(report))
-    assert sdlc.LOCK_HELD_ENV not in seen[-1], "not held: nothing to pass"
-    with sdlc._main_lock(root):
-        sdlc._handoff(root, ["001"], "merged", dict(report))
-    assert seen[-1][sdlc.LOCK_HELD_ENV] == lock and seen[-1][sdlc.HANDOFF_ENV] == "merged"
+    sdlc.closing._handoff(root, ["001"], "merged", dict(report))
+    assert sdlc.closing.LOCK_HELD_ENV not in seen[-1], "not held: nothing to pass"
+    with sdlc.closing._main_lock(root):
+        sdlc.closing._handoff(root, ["001"], "merged", dict(report))
+    assert (
+        seen[-1][sdlc.closing.LOCK_HELD_ENV] == lock
+        and seen[-1][sdlc.closing.HANDOFF_ENV] == "merged"
+    )
     monkeypatch.undo()
 
     # The child's side: told the parent holds it, it runs while that hold stands.
@@ -260,7 +268,7 @@ def test_the_handoff_passes_the_hold_and_the_child_takes_no_lock(tmp_path, monke
 
     def watching(argv, **kwargs):
         env = kwargs.get("env") or os.environ
-        carried.append(sdlc.LOCK_HELD_ENV in env)
+        carried.append(sdlc.closing.LOCK_HELD_ENV in env)
         return real(argv, **kwargs)
 
     monkeypatch.setattr(sdlc.subprocess, "run", watching)
@@ -268,25 +276,25 @@ def test_the_handoff_passes_the_hold_and_the_child_takes_no_lock(tmp_path, monke
     result: dict = {}
 
     def holding() -> None:
-        with sdlc._main_lock(root):
+        with sdlc.closing._main_lock(root):
             held.set()
             assert done.wait(60), "the close never finished under the parent's hold"
 
     def closing() -> None:
-        result["code"] = sdlc.cmd_close(root, "001")
+        result["code"] = sdlc.closing.cmd_close(root, "001")
         done.set()
 
     holder = threading.Thread(target=holding)
     holder.start()
     assert held.wait(10)
-    monkeypatch.setenv(sdlc.LOCK_HELD_ENV, lock)  # as the parent sets it for its child
+    monkeypatch.setenv(sdlc.closing.LOCK_HELD_ENV, lock)  # as the parent sets it for its child
     closer = threading.Thread(target=closing)
     closer.start()
     closer.join(60)
     assert done.is_set(), "the close deadlocked on the lock its parent holds"
     holder.join(10)
     assert result["code"] == 0
-    assert sdlc.LOCK_HELD_ENV not in os.environ, "popped at the close's entry"
+    assert sdlc.closing.LOCK_HELD_ENV not in os.environ, "popped at the close's entry"
     assert carried and not any(carried), "no subprocess of the close saw the variable"
     assert _git(root, "log", "-1", "--format=%s", "main") == f"Close {folder.name}"
 
@@ -373,14 +381,14 @@ def test_land_commits_and_leaves_the_rebase_to_the_train(tmp_path, capsys) -> No
     tree = _ready(root, "lone", {"lone.txt": "lone\n"})
     base = _git(root, "rev-parse", "main")
     _move(root, 1)
-    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
     assert (code, out["state"], out["round"]) == (0, "committed", None), out
     assert "Sdlc-Landed: by=auto" in _git(tree, "log", "-1", "--format=%B")
     assert _git(tree, "rev-parse", "HEAD^") == base, "not rebased: the train stacks it"
     assert _git(tree, "status", "--porcelain") == ""
     assert not list((_folder(tree) / "reviews").glob("land-*")), "no landing round opened"
     head = _git(tree, "rev-parse", "HEAD")
-    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
     assert (code, out["state"]) == (0, "committed"), out
     assert _git(tree, "rev-parse", "HEAD") == head, "a rerun commits nothing again"
 
@@ -398,7 +406,7 @@ def test_the_question_says_the_batch_is_stacked_and_gated_once() -> None:
     """R16: the one question says what a train does: stacked in this order, gated once at the
     tip, a red tip bisected and the change at fault left out, conflicts resolved by one landing
     agent and reviewed again, up to date as often as the base moves, closed in order."""
-    plain = factory.land_question([_entry("001-a"), _entry("002-b")], "main", 4)
+    plain = factory.landing.land_question([_entry("001-a"), _entry("002-b")], "main", 4)
     assert plain == (
         "Land 2 changes in this order, 001-a, 002-b, each shipped with its approver's impact, "
         "committed, stacked in this order on main, gated once at the tip (a red tip bisected, "
@@ -408,7 +416,9 @@ def test_the_question_says_the_batch_is_stacked_and_gated_once() -> None:
         "(yes / yes, with a fix / leave one out / no)"
     )
     assert "its builder" not in plain, "one landing agent, never each change's own builder"
-    one = factory.land_question([_entry("001-a", checks=[{"name": "x", "command": "true"}])], "t")
+    one = factory.landing.land_question(
+        [_entry("001-a", checks=[{"name": "x", "command": "true"}])], "t"
+    )
     assert one.startswith("Land 1 change in this order, 001-a, each shipped with its approver's "
                           "impact, its acceptance checks run as shown, committed, stacked in this "
                           "order on t, gated once at the tip")  # fmt: skip
@@ -420,7 +430,7 @@ def test_the_question_says_the_batch_is_stacked_and_gated_once() -> None:
 def _begin(root: Path, capsys, by: str = "auto", *idents: str) -> dict:
     """Begin a train over `idents`, or over every ready change."""
     names = list(idents) or [r["change"] for r in factory.ready(root)]
-    code, out = _run(capsys, factory.cmd_train, root, begin=names, by=by)
+    code, out = _run(capsys, factory.landing.cmd_train, root, begin=names, by=by)
     assert code == 0 and out["state"] == "begun", out
     return out
 
@@ -454,7 +464,7 @@ def _first_parent(root: Path) -> list[str]:
 
 def _state_file(root: Path) -> Path:
     common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    return Path(common) / factory.TRAIN_STATE
+    return Path(common) / factory.landing.TRAIN_STATE
 
 
 # ---------------------------------------------------------- stacking and closing (R1, R9, R11, R19)
@@ -512,7 +522,7 @@ def test_a_train_of_three_lands_as_three_closes(tmp_path, capsys) -> None:
         assert r["metrics"] and "coverage" in r["metrics"], r["metrics"]
     assert not any(t.exists() for t in trees), "every worktree removed by close"
     assert not _state_file(root).exists(), "the train is over"
-    assert _run(capsys, factory.cmd_train, root)[1]["under_way"] is False
+    assert _run(capsys, factory.landing.cmd_train, root)[1]["under_way"] is False
 
 
 @needs_uv
@@ -525,7 +535,7 @@ def test_a_rerun_resumes_the_train_and_a_second_refuses(tmp_path, capsys) -> Non
     assert _state_file(root).is_file() and ".git" in _state_file(root).parts, "the common dir"
     assert _git(root, "status", "--porcelain") == "", "the main checkout is untouched"
     drive_train(factory, root, capsys, until=lambda o: o["next"] == "stack")
-    code, again = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person")
+    code, again = _run(capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="person")
     assert code == 1 and "under way" in again["refusals"][0], again
     # A new session: the reading resumes from the state alone.
     readings = drive_train(factory, root, capsys)
@@ -543,7 +553,7 @@ def test_a_stopped_train_puts_every_unlanded_change_back(tmp_path, capsys) -> No
     _begin(root, capsys)
     readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
     pre = {n: c["pre"] for n, c in readings[-1]["changes"].items()}
-    code, out = _run(capsys, factory.cmd_train, root, stop=True)
+    code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
     assert code == 0 and out["state"] == "stopped", out
     assert [p["change"] for p in out["put_back"]] == [t.name for t in trees]
     undone = {p["change"]: p["undo"] for p in out["put_back"]}
@@ -827,7 +837,7 @@ def test_a_train_resolution_is_reviewed_before_it_closes(tmp_path, capsys) -> No
     steps = [(r["next"], r.get("change")) for r in readings]
     assert ("resolve", trees[1].name) in steps and ("gate", trees[1].name) in steps
     assert steps.index(("gate", trees[1].name)) < steps.index(("review", trees[1].name))
-    code, out = _run(capsys, factory.cmd_land_close, trees[1], "002")
+    code, out = _run(capsys, factory.landing.cmd_land_close, trees[1], "002")
     assert code == 1 and "no landing review has passed it" in out["refusals"][0], out
     assert _git(root, "log", "-1", "--format=%s", "main") == "init", "nothing closed"
     readings = drive_train(factory, root, capsys, resolve=_resolving)
@@ -891,7 +901,7 @@ def test_a_train_conflict_goes_to_the_resolver_with_every_change(tmp_path, capsy
     assert [(r["role"], r["model"], r["session"]) for r in added] == [
         ("resolver", "sonnet", session)
     ], added
-    code, out = _run(capsys, factory.cmd_resolve, trees[1], "002", True)
+    code, out = _run(capsys, factory.landing.cmd_resolve, trees[1], "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
     assert (trees[1] / "notes.txt").read_bytes() == untouched, "R10: left as the rebase left it"
     assert (trees[1] / ".sdlc" / "last-id").read_text(encoding="utf-8").strip() == "002"
@@ -921,7 +931,7 @@ def test_a_train_conflict_in_a_non_ascii_path_resolves(tmp_path, capsys) -> None
     assert readings[-1]["files"] == [name], readings[-1]
     assert factory._conflicted(second) == [name]
     (second / name).write_text("first's one, and second's\ntwo\n", encoding="utf-8")
-    code, out = _run(capsys, factory.cmd_resolve, second, "002", True)
+    code, out = _run(capsys, factory.landing.cmd_resolve, second, "002", True)
     assert (code, out["state"], out["resolved"]) == (0, "resolved", [name]), out
     assert _git(second, "show", f"HEAD:{name}").startswith("first's one, and second's")
 
@@ -959,11 +969,11 @@ def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
     marker = folder / "runs" / "land-resolved"
 
     def refused(stray: str) -> None:
-        code, out = _run(capsys, factory.cmd_resolve, tree, "002", True)
+        code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
         assert code == 1 and out["state"] == "refused", out
         assert stray in out["refusals"][0] and "outside its conflicted files" in out["refusals"][0]
         assert not marker.exists(), "no marker"
-        assert factory._rebasing(tree), "the rebase is left under way"
+        assert factory.landing._rebasing(tree), "the rebase is left under way"
         assert factory._conflicted(tree) == ["README.md"], "nothing staged"
         step = factory.read_land_step((folder / factory.LAND_STEP).read_text(encoding="utf-8"))
         assert any("resolve 002 --continue" in p for p in step["problems"]), step
@@ -975,7 +985,7 @@ def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
         f.write("# touched\n")
     refused(".gitignore")
     _git(tree, "checkout", "--", ".gitignore")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "002", True)
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
     assert _git(tree, "show", "HEAD:notes.txt") == "second's notes"
 
@@ -1001,14 +1011,14 @@ def test_a_train_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> No
     out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
     tree, num = Path(out["worktree"]), out["change"].split("-")[0]
     (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
-    code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
+    code, done = _run(capsys, factory.landing.cmd_resolve, tree, num, False, onto=out["onto"])
     assert code == 1 and done["refusals"][0].startswith("uncommitted outside"), done
     plain, raw = stop(tree)
     assert (
         "stray.txt" in plain and f"/sdlc-factory:land {num}" in plain and raw == done["refusals"][0]
     )
     (tree / "stray.txt").unlink()
-    code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto="0" * 40)
+    code, done = _run(capsys, factory.landing.cmd_resolve, tree, num, False, onto="0" * 40)
     assert code == 1 and done["refusals"][0].startswith("git rebase --onto"), done
     plain, raw = stop(tree)
     assert plain.startswith("stacking it onto") and f"/sdlc-factory:land {num}" in plain
@@ -1017,7 +1027,7 @@ def test_a_train_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> No
     root, (_, second) = _conflicting(tmp_path / "two")
     _begin(root, capsys)
     drive_train(factory, root, capsys, until=lambda r: r.get("next") == "resolve")
-    code, done = _run(capsys, factory.cmd_resolve, second, "002", True)
+    code, done = _run(capsys, factory.landing.cmd_resolve, second, "002", True)
     assert code == 1 and "conflict markers left" in done["refusals"][0], "not resolved yet"
     plain, raw = stop(second)
     assert "sdlc.py resolve 002 --continue" in plain, "a plain line first"
@@ -1174,7 +1184,7 @@ def test_every_ejection_names_its_cause(tmp_path, capsys) -> None:
     out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
     tree, num = Path(out["worktree"]), out["change"].split("-")[0]
     (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
-    assert _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])[0] == 1
+    assert _run(capsys, factory.landing.cmd_resolve, tree, num, False, onto=out["onto"])[0] == 1
     (tree / "stray.txt").unlink()
     readings = drive_train(factory, root, capsys)
     assert [r["cause"] for r in ejections(readings)] == ["refusal"]
@@ -1198,7 +1208,7 @@ def test_a_resolution_leaves_the_worktree_clean(tmp_path, capsys) -> None:
     reply.parent.mkdir(exist_ok=True)
     reply.write_text("Kept both lines.\n\n## Evidence\n\n$ true\nexit: 0\n", encoding="utf-8")
     _resolving(tree, out["files"])
-    code, done = _run(capsys, factory.cmd_resolve, tree, "002", True)
+    code, done = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
     assert (code, done["state"]) == (0, "resolved"), done
     assert _git(tree, "status", "--porcelain") == "", "nothing left uncommitted"
     rel = f".sdlc/work/{tree.name}"
@@ -1220,10 +1230,10 @@ def test_a_failed_resolution_leaves_no_marker(tmp_path, capsys) -> None:
     (root / "README.md").write_text("main's one\ntwo\nthree\n", encoding="utf-8")
     _git(root, "commit", "-q", "-am", "main moves")
     head = _git(tree, "rev-parse", "HEAD")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "001", False, onto="main")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "001", False, onto="main")
     assert (code, out["state"]) == (0, "conflict"), out
     (tree / "README.md").write_text("main's one, and twice's\ntwo\nthree\n", encoding="utf-8")
-    code, out = _run(capsys, factory.cmd_resolve, tree, "001", True)
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "001", True)
     assert code == 1 and "second conflict" in out["refusals"][0], out
     assert _git(tree, "rev-parse", "HEAD") == head, "the abort put the branch back"
     assert not (_folder(tree) / "runs" / "land-resolved").exists(), "no marker left"
@@ -1238,18 +1248,20 @@ def test_the_train_driver_takes_every_step_a_reading_names() -> None:
     calls, `_train_gate()`'s and the landing round's, as `land_verdict()` names them), and both
     the shared test driver and the loop (`RUN_STEPS`, a stop in `RUN_STOPS`, or `done`) take
     each; no test file keeps a driver of its own."""
-    emitted = set(re.findall(r'done\(\s*"(\w+)"', inspect.getsource(factory._train_reading)))
-    emitted |= set(re.findall(r'"next": "(\w+)"', inspect.getsource(factory._train_gate)))
-    verdicts = inspect.getsource(factory.land_verdict)
+    emitted = set(
+        re.findall(r'done\(\s*"(\w+)"', inspect.getsource(factory.landing._train_reading))
+    )
+    emitted |= set(re.findall(r'"next": "(\w+)"', inspect.getsource(factory.landing._train_gate)))
+    verdicts = inspect.getsource(factory.landing.land_verdict)
     emitted |= set(re.findall(r'out\["next"\](?:, out\["\w+"\])? = \(?\s*"(\w+)"', verdicts))
     emitted |= {"eject", "stop"}  # `ejecting()` and `stopping()`
     emitted.discard("pass")  # a passing round goes on to the next change, never a step
     assert {"commit", "stack", "gate", "review", "close", "fix", "done"} <= emitted, emitted
-    assert emitted <= set(factory.TRAIN_STEPS), emitted - set(factory.TRAIN_STEPS)
-    assert set(factory.TRAIN_STEPS) <= DRIVER_STEPS
-    covered = set(factory.RUN_STEPS) | set(factory.RUN_STOPS) | {"done"}
-    assert covered == set(factory.TRAIN_STEPS), covered ^ set(factory.TRAIN_STEPS)
-    assert not set(factory.RUN_STEPS) & set(factory.RUN_STOPS)
+    assert emitted <= set(factory.landing.TRAIN_STEPS), emitted - set(factory.landing.TRAIN_STEPS)
+    assert set(factory.landing.TRAIN_STEPS) <= DRIVER_STEPS
+    covered = set(factory.landing.RUN_STEPS) | set(factory.landing.RUN_STOPS) | {"done"}
+    assert covered == set(factory.landing.TRAIN_STEPS), covered ^ set(factory.landing.TRAIN_STEPS)
+    assert not set(factory.landing.RUN_STEPS) & set(factory.landing.RUN_STOPS)
     own = [f"def _{name}(" for name in ("drive", "land_train")]  # never this test's own text
     for path in (ROOT / "tests").glob("test_*.py"):
         text = path.read_text(encoding="utf-8")
@@ -1265,7 +1277,7 @@ KEEPS = "VERDICT: CHANGES\n- CHANGE: bb.txt:1: say more\n\n## Evidence\n$ true\n
 def _loop(root: Path, capsys) -> tuple[int, dict, str]:
     """`train --run` in process, its own steps each a subprocess: exit, JSON, progress lines."""
     capsys.readouterr()
-    code = factory.cmd_train(root, run=True)
+    code = factory.landing.cmd_train(root, run=True)
     said = capsys.readouterr()
     return code, json.loads(said.out), said.err
 
@@ -1338,7 +1350,7 @@ def test_train_run_records_each_step(tmp_path, capsys, monkeypatch) -> None:
 def test_the_loop_runs_only_its_named_commands() -> None:
     """147 R3: `RUN_STEPS` names exactly the commands the loop may run; never `accept`, `cases`,
     `--stop`, and `--eject` only as the gate's step."""
-    commands = {" ".join(argv) for argvs in factory.RUN_STEPS.values() for argv in argvs}
+    commands = {" ".join(argv) for argvs in factory.landing.RUN_STEPS.values() for argv in argvs}
     assert commands == {
         "land {change} --by {by}", "resolve {change} --onto {onto}",
         "agent {change} --task train-resolve", "resolve {change} --continue",
@@ -1347,8 +1359,8 @@ def test_the_loop_runs_only_its_named_commands() -> None:
         "agent {change} --task land-mend --role {role}", "land-fix {change} --ask {ask}",
         "agent {change} --task land-fix", "land-fix {change} --commit", "land {change} --close",
     }, commands  # fmt: skip
-    assert factory.RUN_EJECTS == ("gate",)
-    assert set(factory.RUN_STOPS) == {"accept", "stop"}
+    assert factory.landing.RUN_EJECTS == ("gate",)
+    assert set(factory.landing.RUN_STOPS) == {"accept", "stop"}
 
 
 @needs_uv
@@ -1381,7 +1393,7 @@ def test_train_run_stops_at_a_kept_change(tmp_path, capsys, monkeypatch) -> None
     assert (stopped["next"], stopped["cause"], stopped["change"]) == ("eject", "review", two), out
     assert "kept 1 change" in stopped["reason"], stopped
     assert "/sdlc-factory:land" in stopped["way_on"] and "train --stop" in stopped["way_on"]
-    reading = _run(capsys, factory.cmd_train, root)[1]
+    reading = _run(capsys, factory.landing.cmd_train, root)[1]
     assert _git(trees[1], "rev-parse", "HEAD") == reading["changes"][two]["stacked"]
     assert not [s for s in _first_parent(root) if s.startswith("Close ")], "nothing closed"
     step = factory.read_land_step(
@@ -1395,7 +1407,7 @@ def test_train_run_resumes_after_a_kept_change(tmp_path, capsys, monkeypatch) ->
     """147 R5: after the stop at a kept change, the person's `train --eject <two>`, then
     `train --run`, lands one and three."""
     root, trees, out = _kept_at_two(tmp_path, capsys, monkeypatch)
-    code, ejected = _run(capsys, factory.cmd_train, root, eject=trees[1].name)
+    code, ejected = _run(capsys, factory.landing.cmd_train, root, eject=trees[1].name)
     assert code == 0 and ejected["cause"] == "review", ejected
     code, out, _ = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), out
@@ -1456,7 +1468,7 @@ def test_train_run_stops_when_nothing_moves(tmp_path, capsys, monkeypatch) -> No
         ran.extend(argv for argv, _ in group)
         return [{"argv": argv, "code": 0, "out": {}, "said": ""} for argv, _ in group]
 
-    monkeypatch.setattr(factory, "_run_group", idle)
+    monkeypatch.setattr(factory.landing, "_run_group", idle)
     code, out, _ = _loop(root, capsys)
     stopped = out["stopped"]
     assert code == 1 and (stopped["next"], stopped["change"]) == ("commit", trees[0].name), out
@@ -1496,26 +1508,26 @@ def test_a_second_train_run_refuses_while_one_runs(tmp_path, capsys, monkeypatch
     _begin(root, capsys)
     state = _state_file(root)
     before = state.read_bytes()
-    monkeypatch.delenv(factory.TRAIN_RUN_ENV, raising=False)
-    with factory.run_lock(root) as held:
+    monkeypatch.delenv(factory.landing.TRAIN_RUN_ENV, raising=False)
+    with factory.landing.run_lock(root) as held:
         assert held
         for kwargs in ({"run": True}, {"begin": ["1"], "by": "auto"}, {"eject": "2"},
                        {"stop": True}):  # fmt: skip
-            code, out = _run(capsys, factory.cmd_train, root, **kwargs)
+            code, out = _run(capsys, factory.landing.cmd_train, root, **kwargs)
             assert code == 1 and "train --run is under way" in out["refusals"][0], (kwargs, out)
-        code, out = _run(capsys, factory.cmd_train, root)
+        code, out = _run(capsys, factory.landing.cmd_train, root)
         assert code == 0 and out == {"under_way": True, "running": True}, out
         assert state.read_bytes() == before, "nothing written"
-        monkeypatch.setenv(factory.TRAIN_RUN_ENV, "held")
-        code, out = _run(capsys, factory.cmd_train, root)
+        monkeypatch.setenv(factory.landing.TRAIN_RUN_ENV, "held")
+        code, out = _run(capsys, factory.landing.cmd_train, root)
         assert code == 0 and out["next"] == "commit" and "running" not in out, out
-        code, out = _run(capsys, factory.cmd_train, root, eject="2")
+        code, out = _run(capsys, factory.landing.cmd_train, root, eject="2")
         assert "no fault" in out["refusals"][0], "past the lock, to its own check"
-        code, out = _run(capsys, factory.cmd_train, root, begin=["1"], by="auto")
+        code, out = _run(capsys, factory.landing.cmd_train, root, begin=["1"], by="auto")
         assert "a train is under way" in out["refusals"][0], "past the lock, to its own check"
-        code, out = _run(capsys, factory.cmd_train, root, stop=True)
+        code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
         assert code == 0 and out["state"] == "stopped", out
-    with factory.run_lock(root) as held:
+    with factory.landing.run_lock(root) as held:
         assert held, "let go when its holder ended"
 
 
@@ -1525,7 +1537,7 @@ def test_train_run_cancels_between_steps(tmp_path, capsys, monkeypatch) -> None:
     runs lets that step finish, then the loop exits `cancel`, removes the file and leaves the
     train under way; a rerun lands the batch."""
     root, trees = _three(tmp_path, check="true")
-    code, out = _run(capsys, factory.cmd_train, root, cancel=True)
+    code, out = _run(capsys, factory.landing.cmd_train, root, cancel=True)
     assert code == 1 and "no train --run is under way" in out["refusals"][0], out
     cancel = [sys.executable, str(SCRIPT), "train", "--cancel"]
     calls = fake_claude(tmp_path, monkeypatch, {
@@ -1535,7 +1547,7 @@ def test_train_run_cancels_between_steps(tmp_path, capsys, monkeypatch) -> None:
     code, out, _ = _loop(root, capsys)
     assert code == 1 and out["stopped"]["next"] == "cancel", out
     assert [c["change"] for c in calls()] == [trees[1].name], "the step in flight finished"
-    assert not (_state_file(root).parent / factory.TRAIN_CANCEL).exists()
+    assert not (_state_file(root).parent / factory.landing.TRAIN_CANCEL).exists()
     assert factory.read_train(root) is not None, "the train is still under way"
     assert not [s for s in _first_parent(root) if s.startswith("Close ")]
     code, out, _ = _loop(root, capsys)
@@ -1559,11 +1571,17 @@ def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> N
     calls = fake_claude(tmp_path, monkeypatch, {
         f"{trees[0].name}:builder": {"write": {"aa.txt": "AA\n"}},
     })  # fmt: skip
-    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="auto", fix="1=R1")
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="auto", fix="1=R1"
+    )
     assert code == 1 and "--by person" in out["refusals"][0], out
-    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R9")
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="person", fix="1=R9"
+    )
     assert code == 1 and "R9" in out["refusals"][0], out
-    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1")
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1"
+    )
     assert code == 0 and out["fix"] == {"change": trees[0].name, "ask": "R1"}, out
     code, out, err = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), (out, err)
@@ -1593,16 +1611,18 @@ def test_a_fix_the_gate_needs_is_made_before_the_gate(tmp_path, capsys, monkeypa
     fake_claude(tmp_path, monkeypatch, {
         f"{trees[0].name}:builder": {"write": {"aa.txt": "AA\n"}},
     })  # fmt: skip
-    code, out = _run(capsys, factory.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1")
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1"
+    )
     assert code == 0, out
     steps = []
-    while (out := _run(capsys, factory.cmd_train, root)[1])["next"] in ("commit", "stack"):
+    while (out := _run(capsys, factory.landing.cmd_train, root)[1])["next"] in ("commit", "stack"):
         steps.append((out["next"], out["change"]))
         if out["next"] == "commit":
-            code, said = _run(capsys, factory.cmd_land, Path(out["worktree"]), out["change"][:3],
-                              "person")  # fmt: skip
+            code, said = _run(capsys, factory.landing.cmd_land, Path(out["worktree"]),
+                              out["change"][:3], "person")  # fmt: skip
         else:
-            code, said = _run(capsys, factory.cmd_resolve, Path(out["worktree"]),
+            code, said = _run(capsys, factory.landing.cmd_resolve, Path(out["worktree"]),
                               out["change"][:3], False, onto=out["onto"])  # fmt: skip
         assert code == 0, said
     assert (out["next"], out["change"]) == ("fix", trees[0].name), (steps, out)

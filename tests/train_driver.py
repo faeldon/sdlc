@@ -84,11 +84,13 @@ def drive_train(
     failure. Stops at `done`, at `stop` (after `--stop`), or once `until(reading)` holds. Returns
     every reading, an `eject`'s with what `--eject` printed as `did`."""
     if begin is not None and factory.read_train(root) is None:
-        code, out = _run(capsys, factory.cmd_train, root, begin=[t.name for t in begin], by=by)
+        code, out = _run(
+            capsys, factory.landing.cmd_train, root, begin=[t.name for t in begin], by=by
+        )
         assert code == 0 and out["state"] == "begun", out
     readings: list[dict] = []
     for _ in range(limit):
-        code, out = _run(capsys, factory.cmd_train, root)
+        code, out = _run(capsys, factory.landing.cmd_train, root)
         readings.append(out)
         nxt = out.get("next")
         if until is not None and until(out):
@@ -97,7 +99,7 @@ def drive_train(
             return readings
         if nxt == "stop":
             assert not strict, out
-            code, stopped = _run(capsys, factory.cmd_train, root, stop=True)
+            code, stopped = _run(capsys, factory.landing.cmd_train, root, stop=True)
             assert code == 0, stopped
             readings.append(stopped)
             return readings
@@ -106,22 +108,24 @@ def drive_train(
         if nxt == "commit":
             for first in out["before"]:
                 assert _run(capsys, getattr(factory, f"cmd_{first}"), tree, num)[0] == 0
-            code, done = _run(capsys, factory.cmd_land, tree, num, out["by"])
+            code, done = _run(capsys, factory.landing.cmd_land, tree, num, out["by"])
             assert code == 0, done
         elif nxt == "stack":
-            code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
+            code, done = _run(
+                capsys, factory.landing.cmd_resolve, tree, num, False, onto=out["onto"]
+            )
             states = ("current", "stacked") if strict else ("current", "stacked", "conflict")
             assert code == 0 and done["state"] in states, done
         elif nxt == "resolve":
             assert resolve is not None, out
             resolve(tree, out["files"])
-            code, done = _run(capsys, factory.cmd_resolve, tree, num, True)
+            code, done = _run(capsys, factory.landing.cmd_resolve, tree, num, True)
             assert code == 0, done
         elif nxt == "gate":
             code, done = _run(capsys, factory.cmd_gate, tree, num, True)
             assert not strict or done["verdict"] == "PASS", done
         elif nxt == "eject":
-            code, done = _run(capsys, factory.cmd_train, root, eject=out["change"])
+            code, done = _run(capsys, factory.landing.cmd_train, root, eject=out["change"])
             assert code == 0, done
             out["did"] = done
         elif nxt == "accept":
@@ -153,13 +157,15 @@ def drive_train(
         elif nxt == "fix":
             assert fix is not None, out
             if not out["asked"]:
-                code, done = _run(capsys, factory.cmd_land_fix, tree, num, out["ask"], False)
+                code, done = _run(
+                    capsys, factory.landing.cmd_land_fix, tree, num, out["ask"], False
+                )
                 assert code == 0, done
             fix(tree)
-            code, done = _run(capsys, factory.cmd_land_fix, tree, num, None, True)
+            code, done = _run(capsys, factory.landing.cmd_land_fix, tree, num, None, True)
             assert code == 0, done
         elif nxt == "close":
-            code, done = _run(capsys, factory.cmd_land_close, tree, num)
+            code, done = _run(capsys, factory.landing.cmd_land_close, tree, num)
             assert code == 0, done
             assert not strict or "merge" in done.get("done", []) or done.get("state") == "moved"
         else:

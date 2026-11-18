@@ -71,7 +71,7 @@ def _close(where: Path, capsys, monkeypatch, check_only: bool = False) -> tuple[
     """Close 001 from `where`: the main checkout, or its worktree, which close keeps (exit 3)."""
     monkeypatch.chdir(where)
     capsys.readouterr()
-    code = sdlc.cmd_close(where, "001", check_only)
+    code = sdlc.closing.cmd_close(where, "001", check_only)
     return code, json.loads(capsys.readouterr().out)
 
 
@@ -335,6 +335,6 @@ def test_a_push_never_waits_on_a_prompt(tmp_path, monkeypatch) -> None:
         return subprocess.CompletedProcess(args, 128, "", "could not read Username")
 
     monkeypatch.setattr(sdlc.subprocess, "run", run)
-    assert sdlc._push(tmp_path, "origin", "refs/heads/main") == "could not read Username"
+    assert sdlc.closing._push(tmp_path, "origin", "refs/heads/main") == "could not read Username"
     assert seen["stdin"] is subprocess.DEVNULL and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert "--force" not in seen["args"]
