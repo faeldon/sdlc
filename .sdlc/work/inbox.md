@@ -226,12 +226,6 @@ Cost: S
 Value: low
 Raised by: 143-ship-review-parity (correctness)
 
-## [2026-11-18-47] [idea] Reword `_no_verdict()` and `NO_DECISION` now that an answer after prose is read
-
-Left undone by 140-agent-replies-that-file-right, carried forward when it landed: `_no_verdict()` and `NO_DECISION` still say "doesn't open with VERDICT…/DECISION…", which the spec kept so the board's and status's problem text doesn't move. Since `opening()` now reads an answer after prose, the words now mean "holds no answer the script reads". A rewording would change the board's and status's text together, and their pins with it.
-See .sdlc/work/140-agent-replies-that-file-right/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-48] [nit] `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem.
 
 Raised by the code review of 140-agent-replies-that-file-right, round 1: plugins/factory/scripts/factory.py:3840: `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem. A one-line comment saying so would help.
@@ -241,18 +235,6 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 140-agent-replies-that-file-right (correctness)
-
-## [2026-11-18-49] [idea] Board says "builder is resolving a conflict" on a factory landing mid-rebase
-
-Left undone by 141-board-landing-track-truth, carried forward when it landed: A shipped change whose landing rebase is stopped shows the hand-run `sdlc.py resolve` line as its next step while the factory's builder is resolving the conflict (`next_action()` puts `rebasing` first): a landing-aware line ("its builder is resolving a conflict: wait for it") would be truer. Left for a change of its own, since `PRECEDENCE` and `BOTH` pin the order.
-See .sdlc/work/141-board-landing-track-truth/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-50] [idea] Landing track shows post-rebase `accept` as its own step after the gate
-
-Left undone by 141-board-landing-track-truth, carried forward when it landed: `factory.py accept` run after a rebase (inside a landing round) records no step: the track stays at `gate`, which it runs beside. A `checks` position after the gate would need the record to say where it sits.
-See .sdlc/work/141-board-landing-track-truth/notes.md in its commit.
-Raised 2026-11-18.
 
 ## [2026-11-18-51] [nit] `stop_text` types `stuck` and `untestable` as `list[str] = ()`.
 
