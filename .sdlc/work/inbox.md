@@ -294,17 +294,3 @@ against 129 after a move. Weigh it at the retro once the register fix has landed
 conflicts are counted.
 Theme: landing
 Raised 2026-11-18.
-
-## [2026-11-18-22] [bug] An agent's evidence can carry this machine's home path into the committed record
-
-An agent's ## Evidence can carry this machine's home path (e.g. `git worktree list` output) into a
-review file under .sdlc/work/NNN-slug/, which is committed, so the next gate fails
-test_nothing_local on a change whose code is fine (131's landing, 2026-11-18,
-reviews/land-1/behaviour.md:42; the gate log land-2.gate.md then quoted it again). The factory
-should keep machine paths out of what it files — redact the home and clone paths when it writes an
-agent's reply, or tell the agents to write <path-to-clone> — rather than stop a landing on its own
-record.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md
-Theme: factory

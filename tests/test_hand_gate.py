@@ -240,7 +240,7 @@ def test_the_record_is_the_factorys_shape_line_for_line(repo, capsys, monkeypatc
     ours = _record(repo)
     assert _masked(ours) == _masked(theirs)
     assert ours.startswith("GATE: PASS\n") and ours.count("## Attempt ") == 2
-    assert "    at <path-to-clone> under ~\n" in ours and str(repo) not in ours
+    assert "    at <path-to-clone> under <home>\n" in ours and str(repo) not in ours
 
 
 @pytest.mark.portable

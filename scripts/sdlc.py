@@ -2770,7 +2770,7 @@ def cmd_accept(root: Path, ident: str) -> int:
 GATE_TIMEOUT = 30 * 60
 GATE_TAIL = 80
 CLONE_MARK = "<path-to-clone>"
-HOME_MARK = "~"
+HOME_MARK = "<home>"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
@@ -2819,10 +2819,10 @@ def hand_build(checkout: Path, trunk: str) -> str:
 def _hand_placeholders(text: str, root: Path) -> str:
     """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
     `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
-    the home directory reads `<path-to-clone>/…`, never `~/…`. Each path is matched as given and
-    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too. A copy of
-    `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed with the
-    change, and a machine's layout never reaches its history."""
+    the home directory reads `<path-to-clone>/…`, never `<home>/…`. Each path is matched as
+    given and resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too. A
+    copy of `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed
+    with the change, and a machine's layout never reaches its history."""
     listed = _git(root, "worktree", "list", "--porcelain") or ""
     checkouts = [Path(line[len("worktree ") :]) for line in listed.splitlines()
                  if line.startswith("worktree ")]  # fmt: skip

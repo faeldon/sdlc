@@ -1653,6 +1653,20 @@ def test_a_read_showing_its_output_needs_no_exit() -> None:
 
 
 @pytest.mark.portable
+def test_a_read_naming_a_mark_is_still_a_read() -> None:
+    """135: a filed reply names this machine's paths by `<home>` and `<path-to-clone>`, whose `<`
+    and `>` are words there, never redirects: a read naming one owes no `exit:`, as the path it
+    replaced didn't. A real redirect beside a mark still makes it a non-read."""
+    for mark in (factory.HOME_MARK, factory.CLONE_MARK):
+        command = f"ls {mark}/.nvm/bin"
+        assert factory.is_read(command), command
+        text = f"## Evidence\n\n$ {command}\nnode\n"
+        assert factory.read_evidence(text, "r") == [], text
+        assert not factory.is_read(f"cat {mark}/a > {mark}/b")
+        assert not factory.is_read(f"cat {mark}/a >out")
+
+
+@pytest.mark.portable
 def test_a_silent_read_still_needs_its_exit() -> None:
     """123 R3: a read that prints nothing, before the next `$` or the end, a fence or a blank line
     all it shows, still owes its exit: the exit is its only result."""
@@ -2699,8 +2713,8 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
 def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch) -> None:
     """087: `claude plugin validate` prints its manifests' absolute paths and `pytest -n auto` a
     failing worker's venv, and the record is committed with the change, so the checkout reads
-    `<path-to-clone>` and the home directory `~`. Home holds the checkout here: the checkout is
-    written first, so it never reads `~/…`."""
+    `<path-to-clone>` and the home directory `<home>`. Home holds the checkout here: the checkout
+    is written first, so it never reads `<home>/…`."""
     monkeypatch.setenv("HOME", str(tmp_path))
     root = _change(tmp_path)
     _gate_config(
@@ -2716,10 +2730,66 @@ def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch)
     for path in {str(root), str(root.resolve()), str(tmp_path), str(tmp_path.resolve())}:
         assert path not in record, path
     assert "    Validating marketplace manifest: <path-to-clone>/.claude-plugin/" in record
-    assert "    [gw0] crashed under ~/.cache/uv/venv" in record
+    assert "    [gw0] crashed under <home>/.cache/uv/venv" in record
     assert [(a["verdict"], a["exit"]) for a in factory.read_gate(folder, 1)["attempts"]] == [
         ("FAIL", "1")
     ]
+
+
+def _forbidden_shapes() -> re.Pattern:
+    """`tests/test_nothing_local.py`'s `PATTERNS`, the shapes the gate refuses in any record."""
+    scan = _load("nothing_local_for_factory", ROOT / "tests" / "test_nothing_local.py")
+    return re.compile("|".join(scan.PATTERNS), re.IGNORECASE)
+
+
+def test_a_path_under_home_is_filed_in_a_form_the_scan_accepts(tmp_path, monkeypatch) -> None:
+    """135: a path under the home directory but outside the clone, or a clone path that output
+    cut short, keeps the directory after home: written `~/…`, it reads as a home path to the scan
+    and the gate fails on a record whose change is fine."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root = _change(tmp_path)
+    text = (
+        f"node at {tmp_path}/.nvm/versions/node/bin/node\n"
+        f"cut short: {tmp_path}/repo-but-cut/s...\n"
+        f"elsewhere: {tmp_path.resolve().as_posix()}/projects/other/x.py\n"
+    )
+    filed = factory._placeholders(text, root)
+    assert str(tmp_path) not in filed and str(tmp_path.resolve()) not in filed
+    assert f"{factory.HOME_MARK}/projects/other/x.py" in filed
+    assert _forbidden_shapes().search(filed) is None, filed
+
+
+def test_every_reply_is_filed_without_this_machine_s_paths(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """135: an agent quoting `git worktree list` names the main checkout and the change's own
+    worktree, and a reply is committed with the change: the builder's report and the spec draft
+    read `<path-to-clone>` and the home mark, never the path, and what the agent concluded
+    stays as it said it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root, tree = _from_main(tmp_path)
+    folder = tree / ".sdlc" / "work" / NAME
+    quoted = (
+        f"- CHANGE: scripts/x.py: keep it\n\n## Evidence\n\n$ git worktree list\n"
+        f"{root.resolve()}  abc123 [main]\n{tree}  def456 [{NAME}]\n"
+        f"$ which node\n{tmp_path}/.nvm/bin/node\nexit: 0\n"
+    )
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "Built it.\n" + quoted)
+    code, out = _run(capsys, factory.cmd_agent, tree, "008", "build", None, None)
+    assert code == 0, out
+    report = (tree / out["to"]).read_text(encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "---\nid: 008\n---\n\n# 008 — spec\n\n" + quoted)
+    code, out = _run(capsys, factory.cmd_agent, tree, "008", "spec", None, None)
+    assert code == 0, out
+    draft = (folder / "runs" / "spec-draft.md").read_text(encoding="utf-8")
+    for filed in (report, draft):
+        for path in {str(root), str(root.resolve()), str(tree), str(tmp_path)}:
+            assert path not in filed, path
+        assert "<path-to-clone>  abc123 [main]\n" in filed
+        assert f"<path-to-clone>  def456 [{NAME}]\n" in filed
+        assert f"{factory.HOME_MARK}/.nvm/bin/node\n" in filed
+        assert "- CHANGE: scripts/x.py: keep it\n" in filed
+        assert _forbidden_shapes().search(filed) is None, filed
 
 
 def test_a_third_red_gate_in_a_round_is_a_stop(tmp_path, capsys) -> None:

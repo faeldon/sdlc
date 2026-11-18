@@ -567,7 +567,7 @@ checkout's, so a change can't edit the gate that judges it) from the change's ch
 record's shape: a first line `GATE: PASS` or `GATE: FAIL` for the latest attempt, then one
 `## Attempt <k>` section each with its `Verdict:`, `Command:`, `Build:`, `Exit:`, `Seconds:` and
 `Tree:` lines and the last 80 lines of its output, the main checkout and the change's checkout
-written `<path-to-clone>` and the home directory `~`. PASS only on exit 0, in time, with every path
+written `<path-to-clone>` and the home directory `<home>`. PASS only on exit 0, in time, with every path
 the build covers as it was. `Build:` is a hash of where the branch left the base branch and the
 content of every path it changed since (committed, uncommitted or untracked, outside `.sdlc/work/`),
 so committing the same work keeps a record current, and any other edit, or a rebase onto a moved

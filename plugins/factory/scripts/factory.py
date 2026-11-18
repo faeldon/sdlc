@@ -241,7 +241,7 @@ GATE_TAIL = 80
 # What the recorded output says in place of the main checkout's root and the home directory: the
 # record is committed with the change, and a machine's layout never reaches its history.
 CLONE_MARK = "<path-to-clone>"
-HOME_MARK = "~"
+HOME_MARK = "<home>"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # How long an attempt ran, which the board reads from a closed change's history for its estimates.
@@ -1348,6 +1348,9 @@ def is_read(command: str) -> bool:
     Pure, and strict: a read judged a non-read costs one mend; the other way loses a result."""
     if _substitutes(command):
         return False
+    # A filed reply names this machine's paths by the marks (`_placeholders()`), whose `<` and `>`
+    # are part of a word there, never a redirect.
+    command = command.replace(HOME_MARK, "HOME").replace(CLONE_MARK, "CLONE")
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split, lexer.commenters = True, ""
     try:
@@ -2395,8 +2398,8 @@ def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) ->
 def _placeholders(text: str, root: Path) -> str:
     """`text` with the main checkout's root, then `root` when it lies elsewhere, written as
     `CLONE_MARK`, and then the home directory as `HOME_MARK`: in that order, so a checkout under
-    the home directory reads `<path-to-clone>/…`, never `~/…`. Each path is matched as given and
-    resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too."""
+    the home directory reads `<path-to-clone>/…`, never `<home>/…`. Each path is matched as
+    given and resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too."""
     checkouts = _all_checkouts(root)
     for path, mark in (
         (checkouts[0] if checkouts else root, CLONE_MARK),
@@ -3477,6 +3480,9 @@ def cmd_agent(
     if problem:
         return emit({**out, "problem": problem}, 1)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # The reply is committed with the change: an agent quoting a command's output never files
+    # this machine's paths, only the marks (`_placeholders()`).
+    reply = _placeholders(reply, root)
     if task == "spec":
         return emit({**out, **_file_draft(root, folder, reply)})
     text = reply if reply.endswith("\n") else reply + "\n"
