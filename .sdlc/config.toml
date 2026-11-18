@@ -52,3 +52,7 @@ after_bump = "uv lock"
 # by `area: setup`, `area: new` and `area: close` (O1) and `lost-work` (O2). Stops (O3) are
 # already in retro's own metrics.
 evidence = ["uv run --quiet --script .sdlc/evidence.py"]
+# Per-test run times for the pruning pass: the suite run once, its JUnit report printed alone on
+# stdout. The report goes to a temp file, so the tree stays clean for `retro-commit`; pytest's own
+# output goes to /dev/null, and `;` lets a red suite still print its times.
+test_times = ['f=$(mktemp); uv run --group dev pytest -q -n auto --junitxml="$f" >/dev/null 2>&1; cat "$f"; rm -f "$f"']
