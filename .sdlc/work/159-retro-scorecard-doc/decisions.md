@@ -1,0 +1,3 @@
+# Decisions
+
+- [x] R1 (person, fix): add a "Hosts" section to docs/RETRO-SCORECARD.md from the three Hosts items in notes.md: how the scorecard reaches hosts (numbers in core sdlc.py retro, the page in templates/retro.md a host can override, the questions in a guide/ file a host extends, the meanings in REFERENCE.md's Retrospectives; this doc stays the design reference; in a host, Simplicity means the process's own overhead there, and the structural debt index comes from the host's own retro.indicators), that lead time needs new to record a start timestamp in hosts on local numbering, and that a host's scorecard leaves out the skills' cases and says "no factory changes" rather than zeros.

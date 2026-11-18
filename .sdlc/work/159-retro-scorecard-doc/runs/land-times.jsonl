@@ -1,0 +1,8 @@
+{"step": "checks", "round": null, "seconds": 8.0}
+{"step": "ship", "round": null, "seconds": 1.0}
+{"step": "fix", "round": 1, "seconds": 23.0}
+{"step": "gate", "round": 1, "seconds": 132.0}
+{"step": "recheck", "round": 1, "seconds": 1.0}
+{"step": "recheck", "round": 1, "seconds": 1.0}
+{"step": "review", "round": 1, "seconds": 17.0}
+{"step": "mend", "round": 1, "seconds": 14.0}

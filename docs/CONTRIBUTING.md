@@ -192,6 +192,7 @@ agent wrote it: no `Co-Authored-By` naming Claude, no session links (`AGENTS.md`
 | `scripts/trackers/` | one module per tracker, loaded by path only when `archive.target` names it |
 | `scripts/metrics.py` | what a change cost, measured at close |
 | `scripts/indicators.py` | what the retrospective's architecture pass counts, from git's output |
+| `docs/RETRO-SCORECARD.md` | the framework `/sdlc:retro` reports against: its pillars, what each metric means and where it comes from, and the seeds that build it; a reference, read by nothing |
 | `templates/` | the shape of a file the plugin writes itself, each time it creates or rewrites one (the change artifacts, direction doc, issue, `inbox.md`, `notes.md`); a host overrides one in `.sdlc/templates/`; one shape, see `AGENTS.md` |
 | `guide/` | the process and review guides, read in place from the plugin and never copied; a host's `.sdlc/SDLC.md` and `REVIEW.md` hold only its answers to them; one shape, see `AGENTS.md` |
 | `defaults/` | a doc `/sdlc:setup` copies into a host once, after which the host owns it: the plugin reads it, and a rerun of setup only proposes what a newer default changed (`drift`, against `.sdlc/setup.json`) (the process, review, project, product and health docs); one shape, see `AGENTS.md` |
