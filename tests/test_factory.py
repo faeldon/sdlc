@@ -158,11 +158,11 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
     )
     cfg, warnings = factory.load_config(tmp_path)
     assert cfg["reviewers"] == ["code"] and cfg["rounds"] == 3
-    assert cfg["models"] == {"builder": "sonnet"}
+    assert cfg["models"] == {}, "[models] is the base branch's, and there is none"
     assert any("unknown reviewer 'secruity'" in w for w in warnings)
     assert any("rounds must be" in w for w in warnings)
     assert "unknown key loops" in warnings
-    assert any("unknown role 'designer'" in w for w in warnings)
+    assert any("models is read from the base branch" in w for w in warnings)
 
 
 def test_light_is_a_table_checked_like_the_top_level(tmp_path: Path) -> None:
@@ -1902,6 +1902,18 @@ def _light_round(tmp_path: Path, tier: object, factory_toml: str | None = None) 
     return root
 
 
+def _on_base(root: Path, factory_toml: str) -> None:
+    """`factory_toml` committed on the base branch too, where `[models]` and the rest of what
+    shapes a run are read from, and left in the change's checkout as it was."""
+    config = root / ".sdlc" / "factory.toml"
+    _git(root, "checkout", "-q", "main")
+    config.write_text(factory_toml, encoding="utf-8")
+    _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "-m", "factory.toml")
+    _git(root, "checkout", "-q", NAME)
+    config.write_text(factory_toml, encoding="utf-8")
+
+
 def test_a_tier_2_light_round_includes_the_test_reviewer(tmp_path, capsys) -> None:
     """R1, R2, R3, R7: a Tier 2's light rounds expect the test reviewer; a Tier 1's, or one whose
     tier won't read, don't; `start` names the same list for the run's one question."""
@@ -1997,6 +2009,7 @@ def test_a_host_s_own_depth_and_models_are_kept(tmp_path, capsys) -> None:
     )
     for tier in (1, 2):
         root = _light_round(tmp_path / f"tier-{tier}", tier, own)
+        _on_base(root, own)
         _, out = _run(capsys, factory.cmd_start, root, "008", "build")
         assert (out["reviewers"], out["rounds"]) == (FULL, 4), tier
         assert out["light"] == {"reviewers": ["code"], "rounds": 1, "chosen": True}, tier
@@ -2538,6 +2551,39 @@ def test_the_agents_mode_is_the_base_branchs(tmp_path) -> None:
     assert any("read from the base branch" in w for w in warnings)
     (root / ".sdlc" / "factory.toml").write_text('mode = "acceptEdits"\n', encoding="utf-8")
     assert factory.load_config(root)[1] == []
+
+
+def test_models_are_the_base_branch_s_even_for_an_older_worktree(tmp_path, capsys, claude) -> None:
+    """Bug 2026-11-18-41: a `[models]` entry committed on the base branch after a change's
+    worktree was made reaches that change's `start` and its agents; one in the change's own
+    checkout changes nothing, and says so."""
+    root, tree = _from_main(tmp_path)
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "factory.toml").write_text(
+        '[models]\nbuilder = "fable"\ndesigner = "opus"\n', encoding="utf-8"
+    )
+    _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "-m", "models")
+    cfg, warnings = factory.load_config(tree)
+    assert any("unknown role 'designer'" in w for w in warnings), "the base's entries are checked"
+    assert not (tree / ".sdlc" / "factory.toml").exists(), "the worktree predates it"
+    _, out = _run(capsys, factory.cmd_start, tree, "008", "build")
+    assert {out["models_at"][d]["builder"] for d in ("light", "full")} == {"fable"}
+    code, out = _run(capsys, factory.cmd_agent, tree, "008", "build", None, None)
+    assert code == 0 and out["model"] == "fable", out
+    argv = claude()[-1]["argv"]
+    assert argv[argv.index("--model") + 1] == "fable"
+
+    (tree / ".sdlc" / "factory.toml").write_text(
+        '[models]\nbuilder = "haiku"\ncode = "haiku"\n', encoding="utf-8"
+    )
+    cfg, warnings = factory.load_config(tree)
+    assert cfg["models"] == {"builder": "fable"}, "a change can't pick its own agents' models"
+    assert any("models is read from the base branch" in w for w in warnings), warnings
+    (tree / ".sdlc" / "factory.toml").write_text(
+        '[models]\nbuilder = "fable"\ndesigner = "opus"\n', encoding="utf-8"
+    )
+    assert not [w for w in factory.load_config(tree)[1] if "read from the base branch" in w]
 
 
 @pytest.mark.parametrize("bad", ["0", "true", '"two"', "1.5"])
@@ -3549,6 +3595,37 @@ def test_every_reply_is_filed_without_this_machine_s_paths(
         assert f"{factory.HOME_MARK}/.nvm/bin/node\n" in filed
         assert "- CHANGE: scripts/x.py: keep it\n" in filed
         assert _forbidden_shapes().search(filed) is None, filed
+
+
+def test_a_reply_citing_its_own_change_by_number_is_filed_by_its_full_name(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """Bug 2026-11-18-42: an agent that cites its own change's folder by bare number or glob
+    has it filed as the full folder name, which the gate's scan accepts; another change's number,
+    a longer number and a path already named in full are left as the agent wrote them."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    # Built from parts: written whole, each citation is the shape the scan refuses in this file.
+    w, n = "work/", "008"
+    reply = (
+        "Built it.\n\n## Evidence\n\n"
+        f"$ ls .sdlc/{w}{n}*/build\nround-1.md\nexit: 0\n"
+        f"$ cat .sdlc/{w}{n}/intent.md\nid: 008\nexit: 0\n"
+        f"Seen in {w}{n}, and in {w}{n}* too.\n"
+        f"Already whole: {w}{NAME}/plan.md, {w}{n}9, {w}009 and {w}{n}-*.\n"
+    )
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", reply)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    filed = (root / out["to"]).read_text(encoding="utf-8")
+    assert f"$ ls .sdlc/{w}{NAME}/build\n" in filed
+    assert f"$ cat .sdlc/{w}{NAME}/intent.md\n" in filed
+    assert f"Seen in {w}{NAME}, and in {w}{NAME} too.\n" in filed
+    assert f"Already whole: {w}{NAME}/plan.md, {w}{n}9, {w}009 and {w}{n}-*.\n" in filed
+    assert "Built it.\n\n## Evidence\n" in filed and "round-1.md\nexit: 0\n" in filed
+    own = [line for line in filed.splitlines() if not line.startswith("Already whole")]
+    assert _forbidden_shapes().search("\n".join(own)) is None, filed
+    assert (folder / "build" / "round-1.md").is_file()
 
 
 def test_a_third_red_gate_in_a_round_is_a_stop(tmp_path, capsys) -> None:

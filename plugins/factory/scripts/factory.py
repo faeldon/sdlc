@@ -458,6 +458,9 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     warnings += ui_warnings
     cfg["gate_jobs"], jobs_warnings = _gate_jobs(root)
     warnings += jobs_warnings
+    base_models = _base_factory(root).get("models", {})
+    cfg["models"], models_warnings = _models(base_models)
+    warnings += models_warnings
     path = root / CONFIG_FILE
     if not path.is_file():
         return cfg, warnings
@@ -473,17 +476,11 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     else:
         warnings += [f"unknown key light.{key}" for key in table if key not in light]
         cfg["light"]["chosen"] = _depth_keys(table, cfg["light"], "light.", warnings)
-    models = data.get("models", {})
-    if not isinstance(models, dict):
-        warnings.append("models must be a table of role = model")
-    else:
-        for role, model in models.items():
-            if role not in ROLES:
-                warnings.append(f"unknown role {role!r} in models: one of {', '.join(ROLES)}")
-            elif not isinstance(model, str):
-                warnings.append(f"models.{role} must be a model name")
-            else:
-                cfg["models"][role] = model
+    if "models" in data and data.get("models") != base_models:
+        warnings.append(
+            f"models is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
+            "[models] applies once it lands"
+        )
     if "mode" in data and data.get("mode") != cfg["mode"]:
         warnings.append(
             f"mode is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
@@ -512,6 +509,23 @@ def _base_factory(root: Path) -> dict:
         return tomllib.loads(_git(root, "show", f"{base}:{CONFIG_FILE.as_posix()}") or "")
     except tomllib.TOMLDecodeError:
         return {}
+
+
+def _models(table: object) -> tuple[dict, list[str]]:
+    """`[models]`, the base branch's (`load_config()`): a change can't pick its own agents'
+    models, and a setting committed on the base branch reaches a change whose worktree predates
+    it. Each bad entry is a warning that leaves the role's rule (`model_for()`)."""
+    if not isinstance(table, dict):
+        return {}, ["models must be a table of role = model"]
+    out, warnings = {}, []
+    for role, model in table.items():
+        if role not in ROLES:
+            warnings.append(f"unknown role {role!r} in models: one of {', '.join(ROLES)}")
+        elif not isinstance(model, str):
+            warnings.append(f"models.{role} must be a model name")
+        else:
+            out[role] = model
+    return out, warnings
 
 
 def _mode(root: Path) -> tuple[str, list[str]]:
@@ -2800,6 +2814,15 @@ def _placeholders(text: str, root: Path) -> str:
     return text
 
 
+def _own_folder(text: str, name: str) -> str:
+    """`text` with each citation of the change's own folder by its bare number, `work/NNN`,
+    `work/NNN/…` or the glob `work/NNN*`, written as its full name `work/NNN-slug`, which the
+    repo's own scan accepts in a committed record. Another change's number, a longer one and a
+    citation already followed by `-` are left as they are."""
+    number = name.split("-", 1)[0]
+    return re.sub(rf"\bwork/{re.escape(number)}\*?(?![\w-])", f"work/{name}", text)
+
+
 # Each of `gate_jobs` slots is a lock on a file of its own in the git common dir, which every
 # worktree shares and no `git status` shows; never `sdlc.py`'s `sdlc.lock`, which `new` claims
 # numbers under. A lock held on an open descriptor, never a file whose existence is the lock, so
@@ -4011,8 +4034,9 @@ def cmd_agent(
     # answered after the verdict never replaces it (`holds()`).
     reply = next((r for r in reversed(replies) if holds(role, r)), replies[-1])
     # The reply is committed with the change: an agent quoting a command's output never files
-    # this machine's paths, only the marks (`_placeholders()`).
-    reply = _placeholders(reply, root)
+    # this machine's paths, only the marks (`_placeholders()`), and cites its own change's folder
+    # by its full name (`_own_folder()`).
+    reply = _own_folder(_placeholders(reply, root), folder.name)
     if task == "spec":
         return emit({**out, **_file_draft(root, folder, reply)})
     text = reply if reply.endswith("\n") else reply + "\n"

@@ -356,7 +356,8 @@ mode = "auto"                              # the permission mode agent sessions 
 gate_jobs = 1                              # the most gates running at once across every
                                            # worktree, read from the base branch
 
-[models]                                   # override a role's model (else the rule above)
+[models]                                   # override a role's model (else the rule above),
+                                           # read from the base branch
 # code = "haiku"
 
 [land]                                     # /sdlc-factory:land, read from the base branch
@@ -376,9 +377,10 @@ timeout = 60                               # seconds the server gets to answer
 # fixture = "fixtures/demo"                # data in the checkout serve is given, as {fixture}
 ```
 
-`mode`, `gate_jobs`, `[land]` and `[ui]` are read from the base branch's copy of the file, never a change's
-own, so a change can't widen what its agents may do unasked, or choose the command a UI review
-starts. `serve`, `shoot` and `paths` must all be set for a UI review; the screenshot command is
+`mode`, `gate_jobs`, `[models]`, `[land]` and `[ui]` are read from the base branch's copy of the
+file, never a change's own, so a change can't widen what its agents may do unasked, pick its own
+agents' models, or choose the command a UI review starts, and a setting committed on the base
+branch reaches every open change at once, its worktree made before it or not. `serve`, `shoot` and `paths` must all be set for a UI review; the screenshot command is
 yours, so any tool that writes a PNG to `{out}` will do, and Playwright's CLI is one
 (`npx playwright install chromium` once, or `uvx --from playwright playwright …` without Node).
 A page that fills in after it loads needs the command to wait for it (Playwright's
