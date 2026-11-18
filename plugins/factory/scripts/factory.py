@@ -4525,6 +4525,63 @@ FRESH_RE = re.compile(r"^>?\s*Fresh review:\s*(ran|skipped)\b,?\s*(.*)$")
 CASES_RE = re.compile(r"^>?\s*Skill evals:\s*(ran|skipped)\b,?\s*(.*)$")
 CASE_CAP_USD = 5
 CONFIRMED = "the assumed default, confirmed when landing"
+# The lists `sdlc.py`'s `cases_note()` puts after `ran, <passed> of <cases>`, each `<word>: …`.
+CASES_NOTE_LISTS = {"failed": "failed", "environment": "environment",
+                    "passed on rerun": "passed_on_rerun"}  # fmt: skip
+
+
+def cases_failures(record: dict | None) -> dict[str, list[str]]:
+    """Each failed case in a run's `scope.json` and the graders that failed in its runs, in
+    order, once each. A copy of `sdlc.py`'s `cases_failures()`, pinned by a test."""
+    out: dict[str, list[str]] = {}
+    verdicts = (record or {}).get("verdicts")
+    for case, v in sorted(verdicts.items()) if isinstance(verdicts, dict) else []:
+        if not isinstance(v, dict) or v.get("result") != "failed":
+            continue
+        names = [g.get("name") for r in v.get("runs") or [] if isinstance(r, dict)
+                 for g in r.get("graders") or [] if isinstance(g, dict)]  # fmt: skip
+        out[case] = list(dict.fromkeys(n for n in names if isinstance(n, str)))
+    return out
+
+
+def read_cases_note(folder: Path) -> dict | None:
+    """findings.md's `Skill evals:` line, read: whether it `ran`, its `skipped` why, the cases it
+    lists as `failed`, `environment` and `passed_on_rerun`, and its `run` folder. None without
+    the line."""
+    path = folder / "findings.md"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        if line.startswith("## "):
+            break
+        m = CASES_RE.match(line.strip())
+        if not m:
+            continue
+        out: dict = {"ran": m.group(1) == "ran", "skipped": None, "run": None,
+                     **{k: [] for k in CASES_NOTE_LISTS.values()}}  # fmt: skip
+        if not out["ran"]:
+            return {**out, "skipped": m.group(2).strip() or "no reason given"}
+        for part in m.group(2).split("; ")[1:]:
+            word, _, rest = part.partition(": ")
+            if word == "run":
+                out["run"] = rest.strip() or None
+            elif word in CASES_NOTE_LISTS:
+                out[CASES_NOTE_LISTS[word]] = [c.strip() for c in rest.split(",") if c.strip()]
+        return out
+    return None
+
+
+def _case_failures(root: Path, note: dict) -> list[dict]:
+    """The note's failed cases, each with the graders that failed in its runs, read from the run's
+    `scope.json` in the main checkout; with no readable record, the cases alone."""
+    record = None
+    if note.get("run"):
+        checkouts = _all_checkouts(root)
+        home = checkouts[0] if checkouts else root
+        try:
+            record = json.loads((home / note["run"] / "scope.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = None
+    graders = cases_failures(record if isinstance(record, dict) else None)
+    return [{"case": c, "graders": graders.get(c, [])} for c in note["failed"]]
 
 
 def _plugin(root: Path) -> dict:
@@ -4883,7 +4940,7 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
     return {
         "checks": [{"name": c["name"], "command": c["command"]}
                    for c in (pre.get("checks") or {}).get("checks") or []],
-        "cases": {"scope": scope, "cap_usd": CASE_CAP_USD} if scope else {},
+        "cases": _cases_part(root or folder.parents[2], folder, scope) if scope else {},
         "undone": undone,
         "assumed": [{"id": d["id"], "text": d["text"]} for d in ledger
                     if d["open"] and d["kind"] == "default"],
@@ -4892,6 +4949,19 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
         "recover": [f"{subject}: {way}" for subject, way in recover],
         "nits": nits,
         "escalations": escalation_lines(root or folder.parents[2], folder, ledger),
+    }  # fmt: skip
+
+
+def _cases_part(root: Path, folder: Path, scope: list[str]) -> dict:
+    """A change's skills' cases as the landing shows them: the `scope` and `cap_usd`, whether its
+    note says anything yet (`noted`), and from it the cases that `failed` (each with its failing
+    graders), hit the `environment`, or why they were `skipped`, and the `run`."""
+    note = read_cases_note(folder)
+    return {
+        "scope": scope, "cap_usd": CASE_CAP_USD, "noted": note is not None,
+        "failed": _case_failures(root, note) if note else [],
+        "environment": note["environment"] if note else [],
+        "skipped": note["skipped"] if note else None, "run": note["run"] if note else None,
     }  # fmt: skip
 
 
@@ -4950,6 +5020,7 @@ def land_shown(batch: list[dict]) -> str:
         if c["cases"]:
             scope = ", ".join(c["cases"]["scope"])
             lines.append(f"  Skills' cases (at most ${c['cases']['cap_usd']}): {scope}")
+            lines += _cases_shown(c["cases"])
         disposed = [
             f"{u['text']} → {u['shown']}" if "bug" in u
             else f"{u['text']} → seed: {u['seed']}" if "seed" in u
@@ -4967,6 +5038,21 @@ def land_shown(batch: list[dict]) -> str:
         lines += listed("Escalated", c.get("escalations") or [])
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def _cases_shown(cases: dict) -> list[str]:
+    """The lines under a change's cases that its yes accepts: each failed case with its failing
+    graders and where its traces are, the cases the sandbox spoiled, and a skip with why."""
+    lines = []
+    where = f", trace in {cases['run']}/traces" if cases.get("run") else ""
+    for f in cases.get("failed") or []:
+        graders = f" ({', '.join(f['graders'])})" if f["graders"] else ""
+        lines.append(f"  - failed: {f['case']}{graders}{where}")
+    if cases.get("environment"):
+        lines.append(f"  - hit the environment: {', '.join(cases['environment'])}")
+    if cases.get("skipped"):
+        lines.append(f"  - skipped: {cases['skipped']}")
+    return lines
 
 
 def land_unreviewed(root: Path, folder: Path, cfg: dict) -> list[str] | None:
@@ -5059,6 +5145,7 @@ def land_signals(
         signals.append(f"acceptance checks to run: {n}")
     if n := len((pre.get("cases") or {}).get("scope") or []):
         signals.append(f"skills' cases in scope: {n}")
+        signals += _cases_signals(parts["cases"])
     if n := len(parts["nits"]):
         past = sum(i["reason"] == CAP_REASON for i in nit_findings(worktree, folder, cfg))
         signals.append(
@@ -5067,10 +5154,27 @@ def land_signals(
     return signals, excluded
 
 
+def _cases_signals(cases: dict) -> list[str]:
+    """What a change's note says its skills' cases did that only the person accepts: cases that
+    failed (with their graders, and the run), hit the environment, or were skipped."""
+    out = []
+    if cases.get("failed"):
+        each = [f["case"] + (f" ({', '.join(f['graders'])})" if f["graders"] else "")
+                for f in cases["failed"]]  # fmt: skip
+        where = f", trace in {cases['run']}" if cases.get("run") else ""
+        out.append(f"skills' cases failed: {', '.join(each)}{where}")
+    if cases.get("environment"):
+        out.append(f"skills' cases hit the environment: {', '.join(cases['environment'])}")
+    if cases.get("skipped"):
+        out.append(f"skills' cases skipped: {cases['skipped']}")
+    return out
+
+
 def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["moves"]) -> str:
     """The batch's question, worded here so the skill never words its own: a clause for the checks
-    and cases, for the dispositions and confirmations, for the agents' nits to file, and for `How
-    to recover:`, each only when some change in the batch has one, and the cases' total ceiling,
+    and cases, for failed or skipped cases accepted as shown, for the dispositions and
+    confirmations, for the agents' nits to file, and for `How to recover:`, each only when some
+    change in the batch has one, and the cases' total ceiling,
     the cap per change with any; what the train does (stacked in this order, gated once at the
     tip, a red tip bisected and the change at fault left out, a conflict resolved by one landing
     agent and reviewed again, closed in order); the most times it follows `base` moving
@@ -5084,6 +5188,8 @@ def land_question(batch: list[dict], base: str, moves: int = DEFAULTS["land"]["m
     if runs:
         ceiling = f" (at most ${CASE_CAP_USD * with_cases})" if with_cases else ""
         parts.append(f"its {' and '.join(runs)} run as shown{ceiling}")
+    if any((c["cases"] or {}).get("failed") or (c["cases"] or {}).get("skipped") for c in batch):
+        parts.append("its failed or skipped skills' cases accepted as shown")
     undone = any(c["undone"] for c in batch)
     assumed = any(c["assumed"] for c in batch)
     bugs = any("bug" in u for c in batch for u in c["undone"])
@@ -5379,15 +5485,29 @@ def _note_line(folder: Path, line_re: re.Pattern, line: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
-def cmd_cases(root: Path, ident: str) -> int:
+def cmd_cases(root: Path, ident: str, skip: str | None = None) -> int:
     """Run the skills' cases change `ident`'s diff calls for through `sdlc.py run-cases`, under its
-    own cost cap, and write what ship reads into `findings.md`'s note: `Skill evals: ran, <passed>
-    of <cases>`, or `skipped, <why>`. A failed case writes nothing and exits 1. Never `eval` in its
-    name, and no skill's rule grants it: each run is paid, so the harness asks first. Before the
-    landing's commit it records the landing step `cases` (`_record_land()`), for the board."""
+    own cost cap, and write what ship reads into `findings.md`'s note: run-cases' own `note`, as
+    it worded it (`Skill evals: ran, …`), when cases fail too, which exits 1, or `skipped, <why>`.
+    With `skip`, the person's decline of the paid run: `Skill evals: skipped, <skip>`, nothing run,
+    refused for an empty why or a change whose cases already ran. Never `eval` in its name, and no
+    skill's rule grants it: each run is paid, so the harness asks first. Before the landing's
+    commit it records the landing step `cases` (`_record_land()`), for the board."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
+    if skip is not None:
+        said = read_cases_note(folder)
+        if not skip.strip():
+            return emit({"change": folder.name, "refusals": ["--skip needs a why"]}, 1)
+        if said and said["ran"]:
+            why = f"{folder.name}'s skills' cases already ran: its note says so"
+            return emit({"change": folder.name, "refusals": [why]}, 1)
+        if _before_commit(folder):
+            _record_land(root, folder, "cases")
+        note = f"Skill evals: skipped, {' '.join(skip.split())}"
+        _note_line(folder, CASES_RE, note)
+        return emit({"change": folder.name, "skipped": skip.strip(), "note": note})
     if _before_commit(folder):
         _record_land(root, folder, "cases")
     code, found, said = _sdlc(["run-cases", folder.name], root)
@@ -5395,16 +5515,15 @@ def cmd_cases(root: Path, ident: str) -> int:
         why = f"sdlc.py run-cases: {said.strip()[-500:]}"
         return emit({"change": folder.name, "refusals": [why]}, 1)
     out = {**found, "change": folder.name}
-    if code:
-        return emit({**out, "note": None}, 1)
     if found.get("skipped"):
         note = f"Skill evals: skipped, {found['skipped']}"
+    elif isinstance(found.get("note"), str) and CASES_RE.match(found["note"]):
+        note = found["note"]
     else:
-        rows = [r for r in found.get("cases") or [] if isinstance(r, dict)]
-        passed = sum(1 for r in rows if isinstance(r.get("score"), int | float) and r["score"] >= 1)
-        note = f"Skill evals: ran, {passed} of {len(rows)}"
+        why = "sdlc.py run-cases printed no note to write"
+        return emit({**out, "note": None, "refusals": [why]}, 1)
     _note_line(folder, CASES_RE, note)
-    return emit({**out, "note": note})
+    return emit({**out, "note": note}, 1 if code else 0)
 
 
 def _unreviewed_at_test(root: Path, folder: Path, cfg: dict) -> list[str] | None:
@@ -7890,6 +8009,9 @@ def main() -> int:
         "cases", help="run a change's skills' cases through sdlc.py run-cases; paid, never allowed"
     )
     p_cases.add_argument("id")
+    p_cases.add_argument(
+        "--skip", metavar="WHY", help="the person declined the paid run: write why, run nothing"
+    )
     p_fix = sub.add_parser("land-fix", help="a fix the person asked for at landing")
     p_fix.add_argument("id")
     fix_how = p_fix.add_mutually_exclusive_group(required=True)
@@ -7933,7 +8055,7 @@ def main() -> int:
     if args.cmd == "accept":
         return cmd_accept(root, args.id)
     if args.cmd == "cases":
-        return cmd_cases(root, args.id)
+        return cmd_cases(root, args.id, args.skip)
     if args.cmd == "land-fix":
         return cmd_land_fix(root, args.id, args.ask, args.commit)
     if args.cmd == "agent":

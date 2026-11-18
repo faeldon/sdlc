@@ -79,7 +79,10 @@ committed; a tag that doesn't exist yet; something with an impact other than `no
 
 When `cases` is in the output (only in this plugin's own repo), show when the skills' cases last
 ran in full (`last_full`: its run, whether it `passed`, any `failed`, and the Claude Code version
-it ran on, beside `claude`, the one installed now), or that they never have. It is advice, never a
+it ran on, beside `claude`, the one installed now), or that they never have. With two or more runs
+in `full_history` (every full run, oldest first), set the last one's cases beside the run's before
+it: each case's score and verdict in both, and the date, Claude Code version and cost of each, so a
+case that fell shows as one. It is advice, never a
 refusal: offer the full run before asking, at most $20, and run it only on a yes, as
 `sdlc.py run-cases --full`, named here with no rule so the person answers its prompt. Then run
 Step 1 again, so the question carries the new run.

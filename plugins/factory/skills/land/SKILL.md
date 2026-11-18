@@ -64,7 +64,9 @@ depends on), or those named: `batch`, each with its `intent` (its `title`, `prob
 `outcome`, quoted from its `intent.md`), its decision, the impact its approver proposed,
 the others it `overlaps`, its `signals`, and what the yes approves for it: `checks` (each
 acceptance check's `name` and `command`), `cases` (the skills' cases in `scope`, with `cap_usd`,
-the ceiling of its own run), `undone` (each unticked `notes.md` item, with the `seed` title, the
+the ceiling of its own run, whether its note says anything of them yet, `noted`, and from that note
+the cases that `failed`, each with its failing `graders`, those that hit the `environment`, why
+they were `skipped`, and the `run`), `undone` (each unticked `notes.md` item, with the `seed` title, the
 `dropped` reason or, for a `pre-existing:` item, the `bug` its approver proposed, with its
 `shown` line), `assumed` (each assumed decision, by `id`), `recover` (the `How to recover:`
 lines its commit will carry) and `nits` (each agent nit `carry` recorded to file, at most five a
@@ -92,13 +94,30 @@ nit to file, its `shown` line, `[nit] <title> (<theme>, <cost>, <value>; <paths>
 worktree lands it, and any `over_limit`, which the next landing takes.
 With an empty batch, say why and stop.
 
+**Then each change's skills' cases, before the question,** so its yes accepts what they did
+rather than what they might do. For each change in the batch whose `cases` has a `scope` and isn't
+`noted` (its `findings.md` says nothing of them yet), say its cases and that the run is paid and
+capped (at most $<cap_usd>), then run it, named here and in no rule, so the harness asks first:
+`uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases <NNN>`. It writes the
+`Skill evals:` line ship reads, the cases that failed included: a failed case (one that failed
+its rerun too), one the sandbox spoiled, or a skipped run is no stop here but a signal the question
+shows. When the person declines that prompt, record the decline in these words, never theirs,
+behind its own prompt: `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases
+<NNN> --skip "declined at landing"`. A change already `noted` is shown as it stands: the cases never
+run twice, each run being paid. Then run `land-check <NNN…>` again over the batch, so its signals,
+`shown` and question carry each result: under a change's cases, each that failed with its graders
+and where its traces are, each that hit the environment, and a skip with why; and the question,
+`its failed or skipped skills' cases accepted as shown`, whose yes accepts them as `/sdlc:ship`'s
+`wrong` answers one.
+
 **With `clear` true, the gate passes itself.** Say so, `the batch is clear: landing without
 asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's rules don't let it
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
 decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
 reviewer has seen, a path changed since the last review round's snapshot (or no snapshot), a fix
-made while landing, acceptance checks, skills' cases in scope, undone notes, nits to file (and
-how many fell past the cap of 5), or `land.auto` off. A
+made while landing, acceptance checks, skills' cases in scope (and any that failed, hit the
+environment or were skipped), undone notes, nits to file (and how many fell past the cap of 5), or
+`land.auto` off. A
 change landed with paths no review read says so on its commit (`Sdlc-Landed: by=person
 unreviewed=<n>`). A conflict resolved while landing is seen once every reviewer at the run's depth
 passed its landing round; one `sdlc.py resolve` recorded in `conflicts.md`, once the newest
@@ -138,8 +157,9 @@ holds, so the harness asks before each run, for each change in the batch in orde
 - for a change with `checks`, its acceptance checks, through `sdlc.py accept`, the attempt
   recorded in `.sdlc/work/NNN-slug/build/land-accept.md`:
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py accept <NNN>`
-- for a change with skills' cases in scope, `sdlc.py run-cases <NNN>` under its own cap, which
-  writes the `Skill evals:` line ship reads (a skipped run says why, and is no stop):
+- for a change with skills' cases in scope whose `cases` still isn't `noted` (Step 1 runs them;
+  this catches one that didn't), `sdlc.py run-cases <NNN>` under its own cap, which writes the
+  `Skill evals:` line ship reads (a skipped run says why, and is no stop):
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases <NNN>`
 
 The loop runs neither.

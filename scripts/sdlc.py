@@ -3363,6 +3363,11 @@ CASES_RUN = "cases"  # a run's folder: `cases-<date>-<n>`
 # What a run grants: a case's own `allowed_tools` grants none of these.
 CASE_TOOLS = ("Bash", "Write", "Edit")
 CASE_CAP = {"change": ("1", "5"), "full": ("3", "20")}  # runs per case, and the USD ceiling
+# What a tool's result says when the eval's macOS sandbox couldn't start git (a stale xcrun cache):
+# a run that failed with it in its trace is the environment's, never the skill's.
+CASE_ENV_MARKERS = ("xcode-select: Failed to locate 'git'",)
+CASE_RESULTS = ("passed", "passed on rerun", "failed", "environment")
+CAP_WHY = "not rerun: the cost cap"
 UNAVAILABLE = ("currently unavailable", "early access")
 
 
@@ -3414,6 +3419,202 @@ def compare_runs(prev: dict | None, cur: dict) -> dict:
             "passed": bool(rows) and not failed}  # fmt: skip
 
 
+def case_runs(result: dict | None) -> dict[str, list[dict]]:
+    """Each case's runs in a `plugin eval` result, in order: its `score`, whether it `failed`
+    (below 1, or an error), its failing graders (`name`, `explanation`) and its `trace_path`.
+    A result that isn't the shape expected gives no cases, never an exception."""
+    out: dict[str, list[dict]] = {}
+    for case in (result or {}).get("cases") or []:
+        if not isinstance(case, dict) or not isinstance(case.get("name"), str):
+            continue
+        runs = ((case.get("arms") or {}).get("with")) or []
+        out[case["name"]] = [
+            {"score": float(r["score"]) if isinstance(r.get("score"), int | float) else 0.0,
+             "failed": not (isinstance(r.get("score"), int | float) and r["score"] >= 1)
+                       or bool(r.get("error")),
+             "graders": [{"name": g.get("name"), "explanation": g.get("explanation")}
+                         for g in r.get("graders") or []
+                         if isinstance(g, dict) and g.get("passed") is False],
+             "trace_path": r.get("tracePath") if isinstance(r.get("tracePath"), str) else None,
+             "trace": None, "environment": False}
+            for r in runs if isinstance(r, dict)
+        ]  # fmt: skip
+    return out
+
+
+def _environment_run(trace: Path | None) -> bool:
+    """Whether a run's trace shows the sandbox couldn't start git: one of `CASE_ENV_MARKERS` in a
+    tool's result (a `user` entry's `tool_result`, as text or text blocks), never in the agent's
+    own words or the prompt. False for a trace that can't be read."""
+    try:
+        lines = trace.read_text(encoding="utf-8", errors="replace").splitlines() if trace else []
+    except OSError:
+        return False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "user":
+            continue
+        content = (entry.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            said = block.get("content")
+            if isinstance(said, list):
+                said = "\n".join(b.get("text", "") for b in said if isinstance(b, dict))
+            if isinstance(said, str) and any(m in said for m in CASE_ENV_MARKERS):
+                return True
+    return False
+
+
+def classify_runs(runs: dict[str, list[dict]]) -> None:
+    """Mark each failed run whose trace (the kept copy, else the eval's own) shows the sandbox
+    couldn't start git as `environment`. A passing run never is."""
+    for case_runs_ in runs.values():
+        for r in case_runs_:
+            where = r.get("kept") or r.get("trace_path")
+            r["environment"] = r["failed"] and _environment_run(Path(where) if where else None)
+
+
+def _workspace_of(trace: Path) -> Path | None:
+    """The eval's own temporary workspace a trace sits in: the nearest folder named `e-*` above
+    it, and only when that folder is directly in the resolved system temp dir or `/tmp`. None
+    for anything else, which is never removed."""
+    ws = next((p for p in trace.parents if p.name.startswith("e-")), None)
+    if ws is None:
+        return None
+    temps = {Path(tempfile.gettempdir()).resolve()}
+    if Path("/tmp").is_dir():
+        temps.add(Path("/tmp").resolve())
+    return ws if ws.resolve().parent in temps else None
+
+
+def _remove_workspace(ws: Path) -> bool:
+    """Remove an eval's workspace, whose folders it leaves unwritable (`e-*` and its `sealed/`):
+    each folder is made the owner's to write first, never through a link. False when it stays."""
+    try:
+        os.chmod(ws, 0o700)
+        for top, dirs, _ in os.walk(ws):
+            for d in dirs:
+                if not os.path.islink(os.path.join(top, d)):
+                    os.chmod(os.path.join(top, d), 0o700)
+        shutil.rmtree(ws)
+    except OSError:
+        return False
+    return not ws.exists()
+
+
+def _keep_traces(run: Path, home: Path, runs: dict[str, list[dict]], suffix: str,
+                 keep: bool) -> list[str]:  # fmt: skip
+    """After a `plugin eval` call: copy each failed run's trace into `<run>/traces/<case>-<n>
+    <suffix>.jsonl` (its `trace`, relative to `home`), mark the sandbox's failures, and, without
+    `keep`, remove each run's workspace that `_workspace_of()` allows. Returns the folders left
+    where they were, for a guard they failed or a delete refused."""
+    left: list[str] = []
+    for case, case_runs_ in runs.items():
+        for n, r in enumerate(case_runs_, 1):
+            src = Path(r["trace_path"]) if r["trace_path"] else None
+            if r["failed"] and src is not None and src.is_file():
+                to = run / "traces" / f"{case}-{'rerun' if suffix else n}.jsonl"
+                to.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copyfile(src, to)
+                except OSError:
+                    continue
+                r["kept"] = str(to)
+                r["trace"] = to.relative_to(home).as_posix()
+    classify_runs(runs)
+    if keep:
+        return left
+    for case_runs_ in runs.values():
+        for r in case_runs_:
+            if not r["trace_path"]:
+                continue
+            src = Path(r["trace_path"])
+            ws = _workspace_of(src)
+            if ws is None:
+                near = next((p for p in src.parents if p.name.startswith("e-")), src.parent)
+                if near.exists():
+                    left.append(near.as_posix())
+            elif ws.exists() and not _remove_workspace(ws):
+                left.append(ws.as_posix())
+    return sorted(set(left))
+
+
+def case_verdicts(scope: str, runs: dict[str, list[dict]], reruns: dict) -> dict[str, dict]:
+    """Each case's verdict from its runs, classed by `classify_runs()`: its `result` (one of
+    `CASE_RESULTS`), its runs (score, failing graders, kept trace; a rerun's marked `rerun`) and
+    `why`, when a failure wasn't rerun. A change's scope: a case fails only when its rerun
+    (`reruns[case]`: its runs, or why there were none) fails too, and is `environment` only when
+    every run it had was the sandbox's. A full run never reruns: a case fails on two failures of
+    the skill's. A case whose every run was the sandbox's is `environment` in either."""
+    out = {}
+    for case, first in sorted(runs.items()):
+        if not first:
+            continue
+        again = reruns.get(case)
+        shown = [*first, *(again if isinstance(again, list) else [])]
+        rows = [{"score": r["score"], "graders": r["graders"], "trace": r["trace"],
+                 "environment": r["environment"], "rerun": i >= len(first)}
+                for i, r in enumerate(shown)]  # fmt: skip
+        verdict: dict = {"result": "passed", "runs": rows}
+        skill = [r for r in shown if r["failed"] and not r["environment"]]
+        if all(r["failed"] and r["environment"] for r in shown):
+            verdict["result"] = "environment"
+        elif scope == "full":
+            verdict["result"] = "failed" if len(skill) >= 2 else "passed"
+        elif any(r["failed"] and not r["environment"] for r in first):
+            if isinstance(again, str) or not again:
+                verdict |= {
+                    "result": "failed",
+                    "why": again if isinstance(again, str) else "rerun wrote no result",
+                }
+            elif any(r["failed"] for r in again):
+                verdict["result"] = "failed"
+            else:
+                verdict["result"] = "passed on rerun"
+        out[case] = verdict
+    return out
+
+
+def verdict_lists(verdicts: dict[str, dict]) -> dict[str, list[str]]:
+    """The cases that `failed`, hit the `environment`, and `passed_on_rerun`."""
+    of = {w: sorted(c for c, v in verdicts.items() if v.get("result") == w)
+          for w in ("failed", "environment", "passed on rerun")}  # fmt: skip
+    return {"failed": of["failed"], "environment": of["environment"],
+            "passed_on_rerun": of["passed on rerun"]}  # fmt: skip
+
+
+def cases_note(verdicts: dict[str, dict], run: str) -> str:
+    """findings.md's line for a run, composed here only (`factory.py cases` writes it as given):
+    `Skill evals: ran, <passed> of <cases>`, then each list that has a case, then the run."""
+    lists = verdict_lists(verdicts)
+    passed = sum(v.get("result") in ("passed", "passed on rerun") for v in verdicts.values())
+    parts = [f"Skill evals: ran, {passed} of {len(verdicts)}"]
+    for key, word in (("failed", "failed"), ("environment", "environment"),
+                      ("passed_on_rerun", "passed on rerun")):  # fmt: skip
+        if lists[key]:
+            parts.append(f"{word}: {', '.join(lists[key])}")
+    return "; ".join([*parts, f"run: {run}"])
+
+
+def cases_failures(record: dict | None) -> dict[str, list[str]]:
+    """Each failed case in a run's `scope.json` and the graders that failed in its runs, in
+    order, once each: what the landing shows of a failure. `factory.py` reads it with a copy,
+    pinned by a test. {} for a record from before verdicts, or none."""
+    out: dict[str, list[str]] = {}
+    verdicts = (record or {}).get("verdicts")
+    for case, v in sorted(verdicts.items()) if isinstance(verdicts, dict) else []:
+        if not isinstance(v, dict) or v.get("result") != "failed":
+            continue
+        names = [g.get("name") for r in v.get("runs") or [] if isinstance(r, dict)
+                 for g in r.get("graders") or [] if isinstance(g, dict)]  # fmt: skip
+        out[case] = list(dict.fromkeys(n for n in names if isinstance(n, str)))
+    return out
+
+
 def _claude_version() -> str | None:
     try:
         out = subprocess.run(
@@ -3447,15 +3648,43 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _run_summary(run: Path) -> dict:
+    """A run's scope and outcome: its confirmed failures from its record's verdicts, and, for a
+    run made before there were any, from its `result.json`'s scores."""
     scope = _read_json(run / "scope.json") or {}
     result = _read_json(run / "result.json")
     found = compare_runs(None, result or {})
+    if isinstance(scope.get("verdicts"), dict):
+        failed = verdict_lists(scope["verdicts"])["failed"]
+        passed = not failed if result else None
+    else:
+        failed, passed = found["failed"], found["passed"] if result else None
     return {
         "run": run.name, "scope": scope.get("scope"), "change": scope.get("change"),
-        "skipped": scope.get("skipped"), "passed": found["passed"] if result else None,
-        "failed": found["failed"], "claude": (result or {}).get("claudeVersion"),
-        "cost_usd": (result or {}).get("costUsd"),
+        "skipped": scope.get("skipped"), "passed": passed, "failed": failed,
+        "claude": (result or {}).get("claudeVersion"), "cost_usd": (result or {}).get("costUsd"),
     }  # fmt: skip
+
+
+def _full_history(runs: list[Path]) -> list[dict]:
+    """Every full run, oldest first: its date, Claude Code version, cost, and each case's score
+    and verdict (from its record's verdicts, else `passed` at a score of 1)."""
+    out = []
+    for run in runs:
+        record = _read_json(run / "scope.json") or {}
+        result = _read_json(run / "result.json")
+        if record.get("scope") != "full" or result is None:
+            continue
+        verdicts = record.get("verdicts") if isinstance(record.get("verdicts"), dict) else {}
+        rows = compare_runs(None, result)["cases"]
+        day = run.name.removeprefix(f"{CASES_RUN}-").rpartition("-")[0]
+        out.append({
+            "run": run.name, "date": day, "claude": result.get("claudeVersion"),
+            "cost_usd": result.get("costUsd"),
+            "cases": [{"case": r["case"], "score": r["score"],
+                       "result": (verdicts.get(r["case"]) or {}).get("result")
+                       or ("passed" if r["score"] >= 1 else "failed")} for r in rows],
+        })  # fmt: skip
+    return out
 
 
 def _cases_report(root: Path, path: Path | None) -> dict:
@@ -3477,6 +3706,7 @@ def _cases_report(root: Path, path: Path | None) -> dict:
     out["last"] = _run_summary(runs[-1]) if runs else None
     full = [r for r in runs if (_read_json(r / "scope.json") or {}).get("scope") == "full"]
     out["last_full"] = _run_summary(full[-1]) if full else None
+    out["full_history"] = _full_history(full)
     return out
 
 
@@ -3539,27 +3769,53 @@ def _case_run_dir(home: Path) -> Path:
     return run
 
 
-def cases_argv(target: Path, run: Path, scope: str, tags: list[str], keep: bool) -> list[str]:
+def cases_argv(
+    target: Path, run: Path, scope: str, tags: list[str], case: str | None = None,
+    cap: str | None = None,
+) -> list[str]:  # fmt: skip
     """The `claude plugin eval` call for a run: the target first, as the CLI wants it, then, for a
-    change's scope, its skills' tags (`--tag` takes a list; `--case` takes one glob, and a second
-    replaces the first), the grants, and the cost ceiling."""
-    runs, cap = CASE_CAP[scope]
+    change's scope, its skills' tags (`--tag` takes a list), or, for a rerun, the one `case`
+    (`--case` takes one glob, and a second replaces the first), the grants, the cost ceiling
+    (the scope's, or `cap`), and `--keep-temp` always, so a failed run's trace can be kept."""
+    runs, ceiling = CASE_CAP[scope]
     argv = ["claude", "plugin", "eval", str(target)]
-    if scope == "change":
+    if case is not None:
+        argv += ["--case", case]
+        runs = "1"
+    elif scope == "change":
         argv += ["--tag", *tags]
     argv += ["--scaffold", "--no-publish", "--trust-plugin", "--ablation", "none",
-             "--runs", runs, "--max-cost-usd", cap, "--output-dir", str(run),
-             "--allow-tools", *CASE_TOOLS]  # fmt: skip
-    if keep:
-        argv.append("--keep-temp")
+             "--runs", runs, "--max-cost-usd", cap or ceiling, "--output-dir", str(run),
+             "--allow-tools", *CASE_TOOLS, "--keep-temp"]  # fmt: skip
     return [*argv, "--json", str(run / "result.json")]
+
+
+def _eval(argv: list[str], root: Path) -> tuple[int | None, str]:
+    """Run one `plugin eval` call: its exit and what it printed, or None and why it didn't run."""
+    try:
+        done = subprocess.run(
+            argv, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+    except OSError as e:
+        return None, f"claude didn't run: {e}"
+    return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+def _cost(result: dict | None) -> float:
+    cost = (result or {}).get("costUsd")
+    return float(cost) if isinstance(cost, int | float) else 0.0
 
 
 def cmd_run_cases(root: Path, ident: str | None, keep: bool = False) -> int:
     """Run the skills' cases through `claude plugin eval`, a change's scope or the full suite, into
-    a fresh folder under `.sdlc/reports/`, and print the scores beside the last run's. Never
-    pre-approved: every run is a paid model call. A missing `claude`, an unavailable eval or a run
-    the cost ceiling stopped is `skipped` with why, and exits 0: it never fails ship or release."""
+    a fresh folder under `.sdlc/reports/`, and print each case's verdict, the scores beside the
+    last run's, and findings.md's `note`. In a change's scope a failed case reruns alone, once,
+    under what's left of the cap (`case_verdicts()`); a run the sandbox spoiled is `environment`,
+    never rerun or counted. A failed run's trace is kept in the run; each run's workspace is
+    removed unless `keep`. Never pre-approved: every run is a paid model call. A missing
+    `claude`, an unavailable eval or a first run the cost ceiling stopped is `skipped` with why,
+    and exits 0; a case fails the run (exit 1) only when its verdict is `failed`."""
     path = _one_change(root, ident) if ident else None
     if ident and path is None:
         return 1
@@ -3574,43 +3830,67 @@ def cmd_run_cases(root: Path, ident: str | None, keep: bool = False) -> int:
         return 0
     home = main_root(root)
     run = _case_run_dir(home)
-    record = {"scope": scope, "change": path.name if path else None, "cases": cases}
-    tags = sorted({t for c in cases for t in report["cases"][c]})
-    argv = cases_argv(root / CASES_DIR, run, scope, tags, keep)
-    try:
-        done = subprocess.run(
-            argv, cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL,
-        )  # fmt: skip
-        said = done.stdout + done.stderr
-        if any(w in said for w in UNAVAILABLE):
-            record["skipped"] = "plugin eval is unavailable: " + said.strip().splitlines()[-1]
-        elif done.returncode == 2:
-            record["skipped"] = "the run stopped early, at its cost ceiling or a refused credential"
-    except OSError as e:
-        record["skipped"] = f"claude didn't run: {e}"
-        said = ""
-    (run / "scope.json").write_text(json.dumps(record, indent=2), encoding="utf-8", newline="\n")
     rel = run.relative_to(home).as_posix()
-    if record.get("skipped"):
-        print(json.dumps({"run": rel, **record}, indent=2, ensure_ascii=False))
-        return 0
-    result = _read_json(run / "result.json")
-    if result is None:
+    record: dict = {"scope": scope, "change": path.name if path else None, "cases": cases}
+
+    def write(out: dict) -> None:
+        (run / "scope.json").write_text(json.dumps(out, indent=2, ensure_ascii=False),
+                                        encoding="utf-8", newline="\n")  # fmt: skip
+
+    tags = sorted({t for c in cases for t in report["cases"][c]})
+    code, said = _eval(cases_argv(root / CASES_DIR, run, scope, tags), root)
+    if code is None:
+        record["skipped"] = said
+    elif any(w in said for w in UNAVAILABLE):
+        record["skipped"] = "plugin eval is unavailable: " + said.strip().splitlines()[-1]
+    elif code == 2:
+        record["skipped"] = "the run stopped early, at its cost ceiling or a refused credential"
+    result = None if record.get("skipped") else _read_json(run / "result.json")
+    if result is None and not record.get("skipped"):
         # A case that failed to load, or a run that never started: no run happened, as for an
         # unavailable eval.
         last = (said.strip().splitlines() or ["nothing printed"])[-1]
         record["skipped"] = f"plugin eval wrote no result: {last}"
-        (run / "scope.json").write_text(json.dumps(record, indent=2), encoding="utf-8",
-                                        newline="\n")  # fmt: skip
+    if record.get("skipped"):
+        write(record)
         print(json.dumps({"run": rel, **record}, indent=2, ensure_ascii=False))
         return 0
+    runs = case_runs(result)
+    left = _keep_traces(run, home, runs, "", keep)
+    spent, reruns = _cost(result), {}
+    for case, first in sorted(runs.items()) if scope == "change" else []:
+        if not any(r["failed"] and not r["environment"] for r in first):
+            continue
+        ceiling = int((float(CASE_CAP["change"][1]) - spent) * 100) / 100
+        if ceiling <= 0:
+            reruns[case] = CAP_WHY
+            continue
+        sub = run / f"rerun-{case}"
+        sub.mkdir()
+        code, said = _eval(cases_argv(root / CASES_DIR, sub, scope, [], case, f"{ceiling:g}"),
+                           root)  # fmt: skip
+        again = _read_json(sub / "result.json")
+        spent += _cost(again)
+        if code == 2:
+            reruns[case] = CAP_WHY
+            continue
+        found = case_runs(again).get(case) if again else None
+        if not found:
+            reruns[case] = "rerun wrote no result"
+            continue
+        left += _keep_traces(run, home, {case: found}, "rerun", keep)
+        reruns[case] = found
+    verdicts = case_verdicts(scope, runs, reruns)
+    lists = verdict_lists(verdicts)
+    record |= {"verdicts": verdicts, **lists, "passed": not lists["failed"],
+               "note": cases_note(verdicts, rel), "left": sorted(set(left))}  # fmt: skip
+    write(record)
     earlier = [r for r in _case_runs(home)[:-1] if _read_json(r / "result.json")]
     found = compare_runs(_read_json(earlier[-1] / "result.json") if earlier else None, result)
-    out = {"run": rel, **record, **found, "claude": result.get("claudeVersion"),
-           "cost_usd": result.get("costUsd")}  # fmt: skip
+    out = {"run": rel, **found, **record, "claude": result.get("claudeVersion"),
+           "cost_usd": round(spent, 6)}  # fmt: skip
     print(json.dumps(out, indent=2, ensure_ascii=False))
-    return 0 if found["passed"] else 1
+    return 1 if lists["failed"] else 0
 
 
 def cmd_ship(
@@ -7066,7 +7346,8 @@ def cmd_release(
     # refusal.
     cases = _cases_report(home, None)
     if cases["available"]:
-        report["cases"] = {"last_full": cases["last_full"], "claude": _claude_version()}
+        report["cases"] = {"last_full": cases["last_full"], "claude": _claude_version(),
+                           "full_history": cases["full_history"]}  # fmt: skip
     if check_only:
         report["skipped"] = [f"{name} (--check)" for name, _ in steps]
         return emit(0)
@@ -10411,7 +10692,9 @@ def main() -> int:
     run_scope.add_argument("id", nargs="?", help="a change's id: the cases its diff calls for")
     run_scope.add_argument("--full", action="store_true", help="every case")
     p_run_cases.add_argument(
-        "--keep", action="store_true", help="keep each run's folder and trace, to debug a case"
+        "--keep",
+        action="store_true",
+        help="keep each run's workspace, to debug a case (a failed run's trace is always kept)",
     )
 
     p_drop = sub.add_parser(

@@ -435,7 +435,9 @@ def test_land_check_shows_each_changes_checks_cases_notes_decisions_and_recovery
     code, batch = _run(capsys, factory.cmd_land_check, root, [])
     by = {c["change"]: c for c in batch["batch"]}
     assert by[full.name]["checks"] == [{"name": "It runs", "command": "true"}]
-    assert by[full.name]["cases"] == {"scope": ["ship-basic"], "cap_usd": 5}
+    assert by[full.name]["cases"] == {"scope": ["ship-basic"], "cap_usd": 5, "noted": False,
+                                      "failed": [], "environment": [], "skipped": None,
+                                      "run": None}  # fmt: skip
     assert by[full.name]["undone"] == [
         {"line": 3, "text": "Page the list", "seed": "Page the list"},
         {"line": 5, "text": "Rename the flag", "dropped": "the flag went away in round 2"},
@@ -554,6 +556,12 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     assert only.startswith("Land 1 change in this order, 001-a,")
     cases_only = factory.land_question([_entry("001-a", cases=cases)], "main")
     assert "its skills' cases run as shown (at most $5)," in cases_only
+    assert "accepted" not in cases_only
+    # 156 R15: a failed or skipped case, seen in the question, is accepted by its yes.
+    for seen in ({"failed": [{"case": "ship-basic", "graders": []}]}, {"skipped": "declined"}):
+        accepted = factory.land_question([_entry("001-a", cases={**cases, **seen})], "main")
+        assert ("its skills' cases run as shown (at most $5), its failed or skipped skills' cases "
+                "accepted as shown, committed") in accepted, accepted  # fmt: skip
     notes = factory.land_question([_entry("001-a", undone=[{"line": 1, "text": "t", "seed": "t"}])],
                                   "main")  # fmt: skip
     assert "its undone notes carried or dropped as shown," in notes and "assumed" not in notes
@@ -599,6 +607,28 @@ def test_intent_parts_quote_the_title_problem_and_outcome(tmp_path) -> None:
         "outcome": "- The list shows 50 at a time.",
     }
     assert factory.intent_parts(tmp_path) == {"title": "", "problem": "", "outcome": ""}
+
+
+def test_the_dialog_shows_each_failed_or_skipped_case() -> None:
+    """156 R15: under a change's cases, each failed case with its failing graders and the run's
+    traces, each the sandbox spoiled, and a skip with why: what the yes accepts."""
+    cases = {
+        "scope": ["ship-basic", "ship-risky"],
+        "cap_usd": 5,
+        "noted": True,
+        "failed": [{"case": "ship-basic", "graders": ["asks-the-question"]}],
+        "environment": ["ship-risky"],
+        "skipped": None,
+        "run": ".sdlc/reports/cases-1",
+    }
+    assert factory.land_shown([_entry("007-a", cases=cases)]) == (
+        "007-a\n"
+        "  Skills' cases (at most $5): ship-basic, ship-risky\n"
+        "  - failed: ship-basic (asks-the-question), trace in .sdlc/reports/cases-1/traces\n"
+        "  - hit the environment: ship-risky"
+    )
+    skipped = {**cases, "failed": [], "environment": [], "skipped": "declined", "run": None}
+    assert factory.land_shown([_entry("007-a", cases=skipped)]).endswith("\n  - skipped: declined")
 
 
 def test_the_dialog_shows_each_disposition_and_assumed_decision() -> None:
@@ -1057,8 +1087,9 @@ def test_factory_accept_records_sdlc_accepts_verdict(tmp_path, capsys) -> None:
 
 @needs_uv
 def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, monkeypatch) -> None:
-    """103 R5: `factory.py cases` runs `sdlc.py run-cases` for one change; a pass or a skip writes
-    the `Skill evals:` line ship reads, once, and a failed case writes nothing."""
+    """103 R5, 156 R11: `factory.py cases` runs `sdlc.py run-cases` for one change and writes the
+    `Skill evals:` line ship reads, as run-cases worded it, once: on a pass, a skip, and a failed
+    case too, which exits 1, its note replaced by a rerun of the command."""
     root = _repo(tmp_path)
     tree = _ready(root, "cased", "cased's one")
     folder = _folder(tree)
@@ -1071,7 +1102,7 @@ def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, mon
     monkeypatch.setattr(factory, "_sdlc", fake)
     rows = [{"case": "ship-basic", "score": 1.0}, {"case": "ship-risky", "score": 1.0}]
     reply.update(code=0, data={"run": ".sdlc/reports/cases-1", "cases": rows, "failed": [],
-                               "passed": True})  # fmt: skip
+                               "passed": True, "note": "Skill evals: ran, 2 of 2"})  # fmt: skip
     code, out = _run(capsys, factory.cmd_cases, tree, "001")
     assert code == 0 and calls == [["run-cases", tree.name]]
     findings = folder / "findings.md"
@@ -1093,11 +1124,106 @@ def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, mon
     assert "Fresh review: ran\nSkill evals: skipped, plugin eval is unavailable" in text
     assert sdlc.findings_entries(folder)["cases"]["ran"] is False
 
-    reply.update(code=1, data={"run": "r", "cases": rows, "failed": ["ship-risky"],
-                               "passed": False})  # fmt: skip
+    failed = "Skill evals: ran, 1 of 2; failed: ship-risky; run: .sdlc/reports/cases-2"
+    reply.update(code=1, data={"run": ".sdlc/reports/cases-2", "cases": rows, "note": failed,
+                               "failed": ["ship-risky"], "passed": False})  # fmt: skip
     code, out = _run(capsys, factory.cmd_cases, tree, "001")
-    assert code == 1 and out["failed"] == ["ship-risky"]
-    assert findings.read_text(encoding="utf-8") == text, "a failed case writes no note"
+    assert code == 1 and out["failed"] == ["ship-risky"] and out["note"] == failed
+    text = findings.read_text(encoding="utf-8")
+    assert text.count("Skill evals:") == 1 and f"Fresh review: ran\n{failed}\n" in text, text
+    assert sdlc.findings_entries(folder)["cases"]["ran"] is True
+    reply["data"] = {**reply["data"], "note": failed.replace("1 of 2", "0 of 2")}
+    code, out = _run(capsys, factory.cmd_cases, tree, "001")
+    text = findings.read_text(encoding="utf-8")
+    assert code == 1 and text.count("Skill evals:") == 1 and "ran, 0 of 2" in text, text
+
+
+@needs_uv
+def test_factory_cases_skip_writes_why_and_runs_nothing(tmp_path, capsys, monkeypatch) -> None:
+    """156 R12: `cases --skip <why>` writes `Skill evals: skipped, <why>` and runs nothing; it
+    refuses an empty why, and a change whose cases already ran."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "skipped", "skipped's one")
+    folder = _folder(tree)
+    calls = []
+    monkeypatch.setattr(factory, "_sdlc", lambda args, cwd: calls.append(args) or (0, {}, ""))
+    code, out = _run(capsys, factory.cmd_cases, tree, "001", skip="  ")
+    assert code == 1 and "why" in out["refusals"][0] and not (folder / "findings.md").exists()
+    code, out = _run(capsys, factory.cmd_cases, tree, "001", skip="declined at landing")
+    assert (code, out["note"]) == (0, "Skill evals: skipped, declined at landing")
+    assert sdlc.findings_entries(folder)["cases"] == {"ran": False, "why": "declined at landing"}
+    assert calls == [], "a skip runs nothing"
+    factory._note_line(folder, factory.CASES_RE, "Skill evals: ran, 1 of 1; run: r")
+    code, out = _run(capsys, factory.cmd_cases, tree, "001", skip="declined at landing")
+    assert code == 1 and "already ran" in out["refusals"][0], out
+    assert "Skill evals: ran, 1 of 1" in (folder / "findings.md").read_text(encoding="utf-8")
+
+
+def _a_failed_run(root: Path, name: str = "cases-2026-11-18-1") -> str:
+    """A run of the skills' cases in the main checkout's reports, `ship-basic` failed twice."""
+    run = root / ".sdlc" / "reports" / name
+    run.mkdir(parents=True)
+    graders = [{"name": "asks-the-question", "explanation": "pattern not found"}]
+    record = {"scope": "change", "verdicts": {
+        "ship-basic": {"result": "failed", "runs": [
+            {"score": 0.5, "graders": graders, "trace": f"{run}/traces/ship-basic-1.jsonl"},
+            {"score": 0.5, "graders": [*graders, {"name": "never-writes", "explanation": "1x"}],
+             "trace": None}]},
+        "ship-risky": {"result": "environment", "runs": []}}}  # fmt: skip
+    (run / "scope.json").write_text(json.dumps(record), encoding="utf-8")
+    return f".sdlc/reports/{name}"
+
+
+@needs_uv
+def test_a_failed_case_is_a_signal_not_a_refusal(tmp_path, capsys, monkeypatch) -> None:
+    """156 R13, R14, R15: a failed, environment or skipped case is a signal, with its graders and
+    run, so `--by auto` can't land the change; the person's yes, which saw it, does. `land` never
+    refuses a change whose cases ran with failures, or were skipped: only one where they didn't."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "failing", "failing's one")
+    folder = _folder(tree)
+    _with_cases(monkeypatch, ["ship-basic", "ship-risky"])
+    run = _a_failed_run(root)
+    note = f"Skill evals: ran, 0 of 2; failed: ship-basic; environment: ship-risky; run: {run}"
+    factory._note_line(folder, factory.CASES_RE, note)
+    cfg, _ = factory.load_config(tree)
+    signals, excluded = factory.land_signals(folder, tree, "READY", cfg)
+    assert excluded == []
+    assert (f"skills' cases failed: ship-basic (asks-the-question, never-writes), trace in {run}"
+            in signals), signals  # fmt: skip
+    assert "skills' cases hit the environment: ship-risky" in signals
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    part = batch["batch"][0]["cases"]
+    assert part == {"scope": ["ship-basic", "ship-risky"], "cap_usd": 5, "noted": True,
+                    "failed": [{"case": "ship-basic",
+                                "graders": ["asks-the-question", "never-writes"]}],
+                    "environment": ["ship-risky"], "skipped": None, "run": run}  # fmt: skip
+    assert "its failed or skipped skills' cases accepted as shown" in batch["question"]
+    assert (
+        f"  - failed: ship-basic (asks-the-question, never-writes), trace in {run}/traces"
+        in (batch["shown"])
+    )
+    assert factory._land_readiness(tree, folder, "person")["before"] == []
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
+    assert code == 1 and "skills' cases failed: ship-basic" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "committed"), out
+
+    other = _ready(root, "skipping", "skipping's one")
+    skipped = _folder(other)
+    assert factory._land_readiness(other, skipped, "person")["before"] == ["cases"]
+    factory._note_line(skipped, factory.CASES_RE, "Skill evals: skipped, declined at landing")
+    assert factory._land_readiness(other, skipped, "person")["before"] == []
+    signals, _ = factory.land_signals(skipped, other, "READY", cfg)
+    assert "skills' cases skipped: declined at landing" in signals
+    # With no readable record, the note alone still names the failed case.
+    factory._note_line(
+        skipped,
+        factory.CASES_RE,
+        "Skill evals: ran, 1 of 2; failed: ship-basic; run: .sdlc/reports/gone",
+    )
+    signals, _ = factory.land_signals(skipped, other, "READY", cfg)
+    assert "skills' cases failed: ship-basic, trace in .sdlc/reports/gone" in signals, signals
 
 
 @needs_uv

@@ -1442,6 +1442,43 @@ def test_no_skill_lets_accept_run_unasked(skill: Path) -> None:
         assert not granted, f"{_id(skill)} would run factory.py `{cmd}` without a prompt"
 
 
+@pytest.mark.parametrize("skill", SKILLS, ids=_id)
+def test_no_skill_grants_the_cases(skill: Path) -> None:
+    """156 R16: no skill's rule runs the skills' cases, or skips them, without the harness's
+    prompt: `factory.py cases` (with or without `--skip`) and `sdlc.py run-cases`, which no
+    pre-approved rule covers either. A skip is the person's word."""
+    root = '"${CLAUDE_PLUGIN_ROOT}"/scripts'
+    for cmd in (f"{root}/factory.py cases 005", f'{root}/factory.py cases 005 --skip "x"',
+                f"{root}/sdlc.py run-cases 005", f"{root}/sdlc.py run-cases --full"):  # fmt: skip
+        run = f"uv run --quiet --script {cmd}"
+        granted = [r for r in _bash_rules(skill) if _rule_regex(r).match(run)]
+        assert not granted, f"{_id(skill)} would run `{cmd}` without a prompt"
+    assert "run-cases" not in sdlc.READ_ONLY
+    assert not any("run-cases" in r for r in sdlc.ALLOW_RULES)
+
+
+def test_ship_cases_names_the_note_environment_and_rerun() -> None:
+    """156 R17: ship copies run-cases' `note` as printed; a failed case is a finding with its
+    graders and trace; a case the sandbox spoiled, or one that passed on its rerun, is none."""
+    text = " ".join((ROOT / "skills" / "ship" / "cases.md").read_text(encoding="utf-8").split())
+    for word in ("`note`", "`environment`", "`passed on rerun`", "failing graders", "trace"):
+        assert word in text, word
+    assert "copied as `run-cases` printed it" in text
+
+
+def test_land_runs_the_cases_before_its_question() -> None:
+    """156 R16: the land skill runs each change's cases in Step 1, before its WAIT, so the
+    question shows what they did; a declined prompt is `--skip` with why, in the skill's words,
+    never the person's; and `land-check` again after, so the question carries the results."""
+    land = frontmatter.load(BY_ID["sdlc-factory:land"]).content
+    step1 = " ".join(land.split("## Step 1")[1].split("## Step 2")[0].split())
+    assert "`factory.py cases <NNN>`" in step1 or "factory.py cases <NNN>" in step1
+    assert 'factory.py cases <NNN> --skip "declined at landing"' in step1
+    assert step1.index("factory.py cases <NNN>") < step1.index("land-check")
+    assert "`noted`" in step1 and "at most $<cap_usd>" in step1
+    assert "accepted as shown" in step1
+
+
 def test_the_gate_and_ci_never_run_the_skills_cases() -> None:
     """R13: the cases run only by hand, behind a prompt; never in check.sh or CI."""
     for path in [ROOT / "check.sh", *sorted((ROOT / ".github" / "workflows").glob("*.yml"))]:

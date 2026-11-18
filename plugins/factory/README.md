@@ -105,13 +105,16 @@ reviewing, and deciding whether to escalate.
   One approval covers the batch, and it **passes itself when no change in it carries a risk
   signal** (a sensitive or irreversible path, `impact: major`, an ESCALATE, an open or assumed
   decision, a default the approver settled, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
-  read, a fix made while landing, acceptance checks, skills' cases in scope, undone notes, nits
-  to file),
+  read, a fix made while landing, acceptance checks, skills' cases in scope (and any that
+  failed, hit the sandbox or were skipped), undone notes, nits to file),
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
   its one question shows what your yes approves, for each change: each acceptance check's name
-  and command and the skills' cases with their cost cap, each run then through `factory.py
-  accept` and `cases` behind the harness's own prompt (a failure stops that change and those
-  after it, and a rebased change runs its checks again); each undone note carried to the
+  and command, run then through `factory.py accept` behind the harness's own prompt (a failure
+  stops that change and those after it, and a rebased change runs its checks again), and the
+  skills' cases with their cost cap, run before the question through `factory.py cases`, behind
+  the same prompt, so it shows each case that failed (with its failing graders and its traces),
+  hit the sandbox, or was skipped (`cases --skip` when you decline the run), which your yes
+  accepts as shown, as ship's `wrong` does; each undone note carried to the
   register as a seed or dropped, as its approver proposed, and a `pre-existing:` one it proposed
   as a bug filed as a `[bug]` with its severity and paths (`filed as a bug, <severity>: <title>
   (<paths>)`); each nit its agents weighed to file, as a `[nit]` entry with its theme, paths,
@@ -475,8 +478,8 @@ batch, its signals and its question (`land-check`), the train and its next step 
 under the run lock, and `--cancel`), each change's landing (`land`, `resolve --onto`, `land-fix`,
 `land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
 the board's landing track (`land-verdicts --record` adds a stop and why, a plain line over the
-tool's words), its acceptance checks and skills' cases (`accept`, `cases`, never
-pre-approved, each recording its step before the commit);
+tool's words), its acceptance checks and skills' cases (`accept`, `cases` and `cases --skip`,
+never pre-approved, each recording its step before the commit);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads

@@ -109,11 +109,27 @@ uv run --quiet --script scripts/sdlc.py run-cases --full    # every case, three 
 uv run --quiet --script scripts/sdlc.py cases compare .sdlc/reports/cases-<date>-<n>
 ```
 
-`/sdlc:ship` offers the scoped run when a change touches a skill with cases, and `/sdlc:release`
-the full one. Results go under `.sdlc/reports/`, never committed. `run-cases --keep` keeps each
-run's folder and trace to debug a case that fails. A case is a folder in `evals/` with
-`prompt.md`, `case.yaml` (its `tags` name the skill it tests) and `graders/`; its scaffold passes
-`--sandbox` so `evals/scaffold.sh` readies uv in the run's home, where the sandbox has no network.
+`/sdlc:ship` offers the scoped run when a change touches a skill with cases, the factory's
+`/sdlc-factory:land` runs it before its question, and `/sdlc:release` offers the full one, the
+measure of the skills, whose verdicts it sets beside the full run before. Results go under
+`.sdlc/reports/`, never committed. In a change's scope a case that fails reruns alone, once, in the
+same call and under the same cap, and fails only when the rerun fails too (`passed on rerun`
+otherwise); a full run reruns nothing, and a case fails on two failed runs of its three. A run
+whose trace shows, in a tool's result, that the sandbox couldn't start git (`xcode-select: Failed
+to locate 'git'`, a stale xcrun cache) is `environment`: never rerun, never counted against the
+skill. Each failed run's trace is copied into the run's `traces/`, and each run's temporary
+workspace is removed after; `run-cases --keep` keeps the workspaces too. The run prints, and
+writes into its `scope.json`, each case's verdict with its runs' failing graders and traces, and
+`note`, the `Skill evals:` line ship and the landing write as given. At a landing, a failed,
+environment or skipped case is a signal the question shows, which the person's yes accepts; a
+declined prompt is `factory.py cases <NNN> --skip <why>`.
+
+A case is a folder in `evals/` with `prompt.md`, `case.yaml` (its `tags` name the skill it tests)
+and `graders/`; its scaffold passes `--sandbox` so `evals/scaffold.sh` readies uv in the run's
+home, where the sandbox has no network. Graders check outcomes, never which tool reached them: a
+grader that requires a call names only `Bash`, for a command only a shell runs (the plugin's
+script, or git), since a file is read or written the same by `cat` as by Read
+(`test_no_grader_insists_on_a_tool`); what a run wrote is judged by an `llm` grader on its trace.
 An `llm` grader that judges what a reply showed before its question sets `focus: trace`: the
 default, `last_message`, is only the question when the skill asks it in a message of its own.
 

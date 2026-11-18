@@ -105,11 +105,13 @@ a tracker never reads `.sdlc/` (the change folder included), and core never call
 mirrors an open change and never creates an issue. The interface: CONTRIBUTING.md, *Writing a
 tracker*; what a host sees: REFERENCE.md, *Trackers* and *The project doc*.
 
-**Writes before a WAIT.** Four, each a named exception to confirm-before-writing: ship's `base`
+**Writes before a WAIT.** Five, each a named exception to confirm-before-writing: ship's `base`
 and `resolve`, which move only the change's own branch and print the undo; the factory's
 `fresh`, which is those two, run through `sdlc.py` by its build and spec skills before the
-spec-writer drafts, and leaves the worktree as it found it on a conflict; and ship's `findings.md`,
-which decides nothing. Never a stash (the stack is shared across worktrees), and never a merge of
+spec-writer drafts, and leaves the worktree as it found it on a conflict; ship's `findings.md`,
+which decides nothing; and the factory's `cases` (and `cases --skip`), which writes the same
+`Skill evals:` line of it before `land`'s WAIT, so the yes accepts a failed case it has seen
+(`cmd_cases()`). Never a stash (the stack is shared across worktrees), and never a merge of
 `main` into the branch, which close would put on `main`'s first-parent line, where
 `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 

@@ -2259,6 +2259,19 @@ def test_the_factorys_copies_of_ships_notes_and_cap_match_sdlcs() -> None:
     assert str(factory.CASE_CAP_USD) == sdlc.CASE_CAP["change"][1]
 
 
+def test_the_factorys_reading_of_case_failures_matches_sdlcs() -> None:
+    """156 R13: the landing names a failed case's graders from the run's record with a copy of
+    `sdlc.py`'s reading."""
+    record = {"verdicts": {
+        "a": {"result": "failed", "runs": [{"graders": [{"name": "x"}, {"name": "y"}]},
+                                           {"graders": [{"name": "y"}, {"name": "z"}]}]},
+        "b": {"result": "passed on rerun", "runs": [{"graders": [{"name": "x"}]}]},
+        "c": {"result": "failed", "runs": []}, "d": "nonsense"}}  # fmt: skip
+    assert sdlc.cases_failures(record) == {"a": ["x", "y", "z"], "c": []}
+    for r in (record, {}, None, {"verdicts": []}):
+        assert factory.cases_failures(r) == sdlc.cases_failures(r)
+
+
 # ---------------------------------------------------------------- the eval: what escaped
 
 REGISTER = """\
