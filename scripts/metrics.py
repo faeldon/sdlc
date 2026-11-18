@@ -6,7 +6,7 @@ directories on sys.path. Pure functions only, and no import of `sdlc.py`.
 
 The contract the follow-ups extend, never redefine:
 
-    read_events(dirs, branch, ident, check_cmd, roles=None) -> [event]   time-ordered; numbers
+    read_events(dirs, branch, ident, check_cmd, roles=None, models=None) -> [event]   numbers
     summarize(events, dep_closes, cfg, way, tier) -> summary   stages, clocks, stops, tokens
     trailers(summary)                             -> [line]    `Sdlc-Key: name k=v k=v`
     parse_trailers(body)                          -> dict | None
@@ -28,7 +28,7 @@ An event is a dict with `ts` (an aware datetime) and `kind`:
     tokens{in, cache_create, cache_read, out}
     edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  answer{reply, waited}
     check{ok}  permission{name, rejected}  mode{modes}  tool{name, error, role?}
-    subagent{role, ms, in, cache_create, cache_read, out}
+    subagent{role, ms, in, cache_create, cache_read, out, behaviour, calls, model?}
 
 A `human` event's `words` is how many whitespace-separated words the person typed (`_words()`): a
 slash command's name and arguments, a reply's text, never what the harness wraps around it. It is
@@ -40,6 +40,21 @@ factory agent's session's carry its `role`, as its edits do. They are written on
 a name, `Sdlc-Tool: <name> calls=<n> errors=<n> <stage>=<n> …`, with `tools=` (all calls) on
 `Sdlc-Totals`. A `Close` commit without `tools=` or `words=` was closed before they were counted,
 or measured from history alone: unrecorded, never none.
+
+How an agent worked is counted in the same pass over its run's entries (`_run()`, `_behaviour()`),
+never a second: a `subagent` event's `behaviour` holds `BEHAVIOURS` as counts and `calls` its tool
+calls by `_prompt_name()`, both None when counting raised. `edits=` is its `EDIT_TOOLS` calls,
+`shell_edits=` its `Bash` commands that write a file by a named shape (`_shell()`), `bg=` those that
+went to the background (a result's `toolUseResult.backgroundTaskId`, or a trailing `&`),
+`tool_errors=` its results with `is_error`, `test_runs=` its runs of the host's check, the hand gate
+or a `TEST_RUNNERS` program, and `broke=` the test runs whose output matches `BROKE_RE` with an edit
+since the run before. `read_events(models=)` maps a factory session's id to the model
+`runs/costs.jsonl` records for it, the event's `model`; a sub-agent's run has none. Each is written
+at the end of the role's `Sdlc-Role` line: `model=` (sorted, `,`-joined, each `_model_word()`, left
+off with none known), then the six counts; and one `Sdlc-Calls: <role> <name>=<n> …` line a role,
+read back as `calls`. A role whose counting failed keeps none of them, and `Sdlc-Coverage` gains
+` behaviour=failed`. A role line without `edits=` was closed before they were counted, or its
+counting failed: unrecorded, never zero. Every count is a lower bound: a shape not named is missed.
 
 A `question` is an `AskUserQuestion` call and its `answer` what the person chose, as a class like
 a typed reply, with the seconds the dialog waited: theirs, never the agent's. Every gate asks in a
@@ -416,7 +431,7 @@ def _usage(msg: dict) -> dict:
     }
 
 
-def _subagent(path: Path, branch: str) -> dict | None:
+def _subagent(path: Path, branch: str, check: str | None = None) -> dict | None:
     """One sub-agent's run, from its transcript and the `.meta.json` beside it: role, time and
     tokens, the parent tool call that started it, its edits, as `edit` events tagged with its
     role (the factory's builder writes the code), and the tool prompts the person answered for
@@ -425,14 +440,68 @@ def _subagent(path: Path, branch: str) -> dict | None:
         meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    found = _run(_lines(path) or [], str(meta.get("agentType") or "agent"), branch)
+    found = _run(_lines(path) or [], str(meta.get("agentType") or "agent"), branch, check)
     return {"parent": meta.get("toolUseId"), "events": found["events"]} if found else None
 
 
-def _run(entries: list[dict], role: str, branch: str) -> dict | None:
+# How an agent worked, each a count on its `Sdlc-Role` line (`_behaviour()`).
+BEHAVIOURS = ("edits", "shell_edits", "bg", "tool_errors", "test_runs", "broke")
+
+
+def _behaviour(state: dict, entry: dict, msg: dict, check: str | None) -> None:
+    """One entry of a run, counted into `state`: each tool call by name, and `BEHAVIOURS`. A
+    test run remembers whether an edit came since the run before it, so its result can say
+    `broke`. Only counts leave: never a command, a path or an output."""
+    count = state["behaviour"]
+    content = msg.get("content")
+    blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+    if entry.get("type") == "assistant":
+        for block in blocks:
+            if block.get("type") != "tool_use":
+                continue
+            name = str(block.get("name") or "")
+            inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+            called = _prompt_name(name, inp)
+            state["calls"][called] = state["calls"].get(called, 0) + 1
+            if name in EDIT_TOOLS:
+                count["edits"] += 1
+                state["dirty"] = True
+            if name != "Bash":
+                continue
+            writes, bg, test = _shell(str(inp.get("command") or ""), check)
+            if writes:
+                count["shell_edits"] += 1
+                state["dirty"] = True
+            if bg:
+                count["bg"] += 1
+                state["bg"].add(str(block.get("id")))
+            if test:
+                count["test_runs"] += 1
+                state["tests"][str(block.get("id"))] = state["dirty"]
+                state["dirty"] = False
+        return
+    found = entry.get("toolUseResult")
+    moved = isinstance(found, dict) and isinstance(found.get("backgroundTaskId"), str)
+    for block in blocks:
+        if block.get("type") != "tool_result":
+            continue
+        use = str(block.get("tool_use_id"))
+        count["tool_errors"] += 1 if block.get("is_error") else 0
+        if moved and use not in state["bg"]:
+            count["bg"] += 1
+            state["bg"].add(use)
+        if state["tests"].pop(use, False) and BROKE_RE.search(_entry_text(block.get("content"))):
+            count["broke"] += 1
+
+
+def _run(
+    entries: list[dict], role: str, branch: str, check: str | None = None, model: str | None = None
+) -> dict | None:
     """One agent's run as `role`, from its entries: a sub-agent's transcript, or a whole session
     the factory ran as that agent (`claude -p --agent`). Its `subagent` event and edits, and the
-    `Agent` calls it made, whose own sub-agents are its to count."""
+    `Agent` calls it made, whose own sub-agents are its to count. The event carries how the run
+    worked (`behaviour`, `calls`), counted in this same loop, None when counting failed, and
+    the `model` the factory ran it on, when known."""
     stamps = [t for t in (_ts(e) for e in entries) if t]
     tokens = dict.fromkeys(TOKEN_KEYS.values(), 0)
     edits = []
@@ -440,8 +509,17 @@ def _run(entries: list[dict], role: str, branch: str) -> dict | None:
     uses: dict[str, tuple[str, dict]] = {}
     calls: dict[str, dict] = {}
     agents: set[str] = set()
+    state: dict | None = {
+        "behaviour": dict.fromkeys(BEHAVIOURS, 0), "calls": {}, "dirty": False, "tests": {},
+        "bg": set(),
+    }  # fmt: skip
     for e in entries:
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+        if state is not None and _ts(e) and e.get("type") in ("user", "assistant"):
+            try:
+                _behaviour(state, e, msg, check)
+            except Exception:  # a shape nobody planned for: only these counts are lost
+                state = None
         if e.get("type") == "user" and _ts(e):
             edits.extend({"ts": _ts(e), **p} for p in _prompts(e, msg.get("content"), uses))
             _answered(msg.get("content"), calls)
@@ -478,7 +556,11 @@ def _run(entries: list[dict], role: str, branch: str) -> dict | None:
         "role": role,
         "ms": int((stamps[-1] - stamps[0]).total_seconds() * 1000),
         **tokens,
+        "behaviour": state["behaviour"] if state else None,
+        "calls": state["calls"] if state else None,
     }
+    if model:
+        run["model"] = model
     return {"events": [run, *edits], "agents": agents}
 
 
@@ -518,17 +600,7 @@ def _prompt_name(tool: str, inp: dict) -> str:
         return "unknown"
     if tool != "Bash":
         return _word(tool)
-    command = str(inp.get("command") or "")
-    try:
-        words = shlex.split(command)
-    except ValueError:
-        words = command.split()
-    segments: list[list[str]] = [[]]
-    for word in words:
-        if word in SEPARATORS:
-            segments.append([])
-        else:
-            segments[-1].append(word)
+    segments = _segments(str(inp.get("command") or ""))
     segment = next((s for s in segments if s and s[0] != "cd"), [])
     while segment and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", segment[0]):
         segment = segment[1:]
@@ -544,6 +616,108 @@ def _prompt_name(tool: str, inp: dict) -> str:
         if script in PLUGIN_SCRIPTS:  # the plugin's own script is what ran, not uv
             parts = [script, _subcommand(after[1:])]
     return "Bash:" + ":".join(_word(p) or "unknown" for p in parts)
+
+
+def _segments(command: str) -> list[list[str]]:
+    """A shell command's words, split into the segments its `&&`, `||`, `;` and `|` separate."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    segments: list[list[str]] = [[]]
+    for word in words:
+        if word in SEPARATORS:
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return segments
+
+
+# Test runners by program, or program and subcommand, looked up past `uv run`, `npx` and kin.
+TEST_RUNNERS = (
+    "pytest", "tox", "nox", "jest", "vitest", "mocha", "rspec",
+    "go test", "cargo test", "npm test", "pnpm test", "yarn test", "make test",
+)  # fmt: skip
+# A run that couldn't even parse or import the code: `broke=` once an edit came before it.
+BROKE_RE = re.compile(
+    r"SyntaxError|IndentationError|ImportError|ModuleNotFoundError|ERROR collecting|"
+    r"Cannot find module|syntax error"
+)
+# Where a redirect writes nothing the change keeps.
+SCRATCH = ("/dev/", "/tmp/", "/private/tmp/", "/var/folders/", "$TMPDIR", "${TMPDIR}")
+INTERPRETERS = re.compile(r"^python(\d+(\.\d+)?)?$")
+SCRIPT_WRITES = re.compile(
+    r"write_text\(|\.write\(|\bopen\((?:[^)]*,\s*)?(?:mode\s*=\s*)?['\"][bt+]*[wa][bt+]*['\"]"
+)
+HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?=\n|$)|\Z)", re.S)
+QUOTED_RE = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
+REDIRECT_RE = re.compile(r"(?<![\w<>&-])1?>{1,2}(?![>&])\s*([^\s;|&<>()]*)")
+# `uv run`'s options that take a value, so the value isn't the program.
+UV_VALUED = (
+    "--group", "--only-group", "--with", "--with-requirements", "--python", "-p", "--project",
+    "--directory", "--extra", "--package", "--env-file",
+)  # fmt: skip
+
+
+def _program(words: list[str]) -> list[str]:
+    """A segment from its program on: past `VAR=` assignments, `uv run [opts]`, `uvx`, `npx` and
+    `python -m`, with the program as its basename."""
+    words = list(words)
+    while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+        words = words[1:]
+    if words[:2] == ["uv", "run"]:
+        words, skip = words[2:], False
+        while words and (skip or words[0].startswith("-")):
+            skip = not skip and words[0] in UV_VALUED
+            words = words[1:]
+    elif words and words[0] in ("uvx", "npx"):
+        words = [w for w in words[1:] if not w.startswith("-")][:1] + words[2:]
+    if words and INTERPRETERS.match(Path(words[0]).name) and words[1:2] == ["-m"]:
+        words = words[2:]
+    return [Path(words[0]).name, *words[1:]] if words else []
+
+
+def _shell(command: str, check: str | None) -> tuple[bool, bool, bool]:
+    """What a `Bash` command did, by its shape alone: whether it wrote a file (a redirect outside
+    `SCRATCH`, `tee`, `sed -i`, `perl -i`, `patch`, `git apply`, or an inline interpreter script
+    that writes), whether it went to the background (`… &`), and whether it ran tests (the host's
+    check, the hand gate, or `TEST_RUNNERS`). Each is a lower bound: a shape not named is missed."""
+    line = command.strip()
+    test = bool(check and line.startswith(check)) or bool(HAND_GATE_RE.search(line))
+    writes = False
+    # A heredoc's body is text, never shell: blanked, and read only as an interpreter's script.
+    for m in HEREDOC_RE.finditer(command):
+        before = command[: m.start()].rsplit("\n", 1)[-1]
+        if any(
+            INTERPRETERS.match(Path(w).name) for s in _segments(before) for w in _program(s)[:1]
+        ):
+            writes = writes or bool(SCRIPT_WRITES.search(m.group(3)))
+    shell = HEREDOC_RE.sub(lambda m: m.group(0).split("\n", 1)[0], command)
+    for row in shell.splitlines():
+        for words in _segments(row):
+            words = _program(words)
+            if not words:
+                continue
+            program, rest = words[0], words[1:]
+            if INTERPRETERS.match(program) and "-c" in rest[:-1]:
+                writes = writes or bool(SCRIPT_WRITES.search(rest[rest.index("-c") + 1]))
+            elif (
+                program in ("tee", "patch")
+                or (program == "git" and _subcommand(rest) == "apply")
+                or (program in ("sed", "perl") and any(
+                    re.match(r"^-[A-Za-z]*i", w) or w == "--in-place" for w in rest
+                ))
+            ):  # fmt: skip
+                writes = True
+            two = f"{program} {rest[0]}" if rest else program
+            test = test or program in TEST_RUNNERS or two in TEST_RUNNERS
+    # Quoted text is never a redirect: its shell characters are neutralised, its quotes dropped.
+    bare = QUOTED_RE.sub(lambda m: re.sub(r"[<>|;&\s]", "_", m.group(0)[1:-1]) or "_", shell)
+    for target in REDIRECT_RE.findall(bare):
+        if target and not target.startswith(SCRATCH):
+            writes = True
+    bg = bool(re.search(r"(?<![&>|])&\s*$", bare))
+    return writes, bg, test
 
 
 # Options that take a value of their own (`git -C <dir>`), so the value isn't the subcommand.
@@ -618,11 +792,13 @@ def read_events(
     ident: str,
     check_cmd: str | None,
     roles: dict[str, str] | None = None,
+    models: dict[str, str] | None = None,
 ) -> list[dict]:
     """The change's events from every session in `dirs`, oldest first. Numbers and names only.
     `roles` names the sessions the factory ran as one of its agents, by session id (a transcript's
     file is named by it): each is one `subagent` run of that role, with its own sub-agents, never
-    the person's stages."""
+    the person's stages. `models` names the model each such session ran on, by the same id (the
+    change's `runs/costs.jsonl`): it goes on that run's `subagent` event as `model`."""
     events: list[dict] = []
     check = (check_cmd or "").strip()
     for folder in dirs:
@@ -635,11 +811,12 @@ def read_events(
                 continue
             if roles and path.stem in roles:
                 found = _run([e for e, k in zip(entries, keep, strict=True) if k],
-                             roles[path.stem], branch)  # fmt: skip
+                             roles[path.stem], branch, check or None,
+                             (models or {}).get(path.stem))  # fmt: skip
                 if found:
                     events.extend(found["events"])
                     for sub in sorted((folder / path.stem / "subagents").glob("agent-*.jsonl")):
-                        inner = _subagent(sub, branch)
+                        inner = _subagent(sub, branch, check or None)
                         if inner and inner["parent"] in found["agents"]:
                             events.extend(inner["events"])
                 continue
@@ -770,7 +947,7 @@ def read_events(
             if last is not None:
                 events.append({"ts": last, "kind": "mode", "modes": sorted(modes)})
             for sub in sorted((folder / path.stem / "subagents").glob("agent-*.jsonl")):
-                found = _subagent(sub, branch)
+                found = _subagent(sub, branch, check or None)
                 if found and found["parent"] in agents:
                     events.extend(found["events"])
     events.sort(key=lambda e: e["ts"])
@@ -997,7 +1174,32 @@ def summarize(
             role["agent"] += event["ms"] / 1000
             for k in TOKEN_KEYS.values():
                 role[k] += event[k]
+            if event.get("model"):
+                role.setdefault("models", set()).add(event["model"])
+            if "behaviour" not in event:  # counted by nothing: no counts, never zeros
+                role["_unrecorded"] = True
+            elif event["behaviour"] is None or event.get("calls") is None:
+                role["_failed"] = True
+            else:
+                sums = role.setdefault("behaviour", dict.fromkeys(BEHAVIOURS, 0))
+                for k in BEHAVIOURS:
+                    sums[k] += event["behaviour"].get(k, 0)
+                called = role.setdefault("calls", {})
+                for name, n in event["calls"].items():
+                    called[name] = called.get(name, 0) + n
     close_span()
+    # A role whose counting failed in any run keeps none of how it worked, and coverage says so.
+    behaviour_failed = False
+    for role in roles.values():
+        failed, unrecorded = role.pop("_failed", False), role.pop("_unrecorded", False)
+        if failed or unrecorded:
+            role.pop("behaviour", None)
+            role.pop("calls", None)
+        if failed:
+            role.pop("models", None)
+            behaviour_failed = True
+        if "models" in role:
+            role["models"] = sorted(role["models"])
 
     for seg in segments:
         stages[seg["stage"]]["elapsed"] += (seg["end"] - seg["start"]).total_seconds()
@@ -1067,7 +1269,8 @@ def summarize(
     return {
         "mode": way,
         # The caller, which knows how many transcripts it read, puts that number first.
-        "coverage": f"stages={','.join(seen) or 'none'}",
+        "coverage": f"stages={','.join(seen) or 'none'}"
+        + (" behaviour=failed" if behaviour_failed else ""),
         "totals": totals,
         # A stage seen, or one with activity before any stage opened (counted under intent), so
         # the stage lines always add up to the totals.
@@ -1306,6 +1509,12 @@ def _word(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.:,-]", "-", str(value))
 
 
+def _model_word(value: str) -> str:
+    """A model's name safe as a role field's value: no `:` (which `_value()` would read as a
+    pair), no space, slash or tilde."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", str(value))
+
+
 def _pairs(values: dict) -> str:
     return " ".join(f"{k}={v}" for k, v in values.items())
 
@@ -1344,7 +1553,15 @@ def trailers(summary: dict) -> list[str]:
     for role, r in sorted(summary["roles"].items()):
         fields = {"runs": r["runs"], "agent": _minutes(r["agent"])}
         fields.update({k: r[k] for k in TOKEN_KEYS.values()})
+        models = sorted({_model_word(m) for m in r.get("models") or () if str(m).strip()})
+        if models:
+            fields["model"] = ",".join(models)
+        fields.update(r.get("behaviour") or {})
         lines.append(f"Sdlc-Role: {_word(role)} {_pairs(fields)}")
+    for role, r in sorted(summary["roles"].items()):
+        if r.get("calls"):
+            called = {_word(n): v for n, v in sorted(r["calls"].items())}
+            lines.append(f"Sdlc-Calls: {_word(role)} {_pairs(called)}")
     for name, p in sorted((summary.get("prompts") or {}).items()):
         lines.append(f"Sdlc-Prompt: {_word(name)} {_pairs(p)}")
     for name, t in sorted((summary.get("tools") or {}).items()):
@@ -1427,6 +1644,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out.setdefault("prompts", {})[name] = fields
         elif key == "tool" and name:
             out.setdefault("tools", {})[name] = fields
+        elif key == "calls" and name:
+            out.setdefault("calls", {})[name] = fields
         elif key == "extra" and name:
             out.setdefault("extra", {})[name] = fields
         elif key == "blocked" and name:

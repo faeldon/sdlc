@@ -467,6 +467,8 @@ def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, caps
         assert all("metrics" not in r for r in lean[key]), key
         full[key] = [{k: v for k, v in r.items() if k != "metrics"} for r in full[key]]
     assert "changes" not in lean["spend"] and full["spend"].pop("changes")
+    assert "changes" not in lean["spend"]["agents"]
+    full["spend"]["agents"].pop("changes")  # 146 R15: each change's own agent counts
     assert full == lean, "the summaries, dropped_cost and bugs are the same either way"
 
 
@@ -2265,3 +2267,104 @@ def test_review_sources_split_ship_from_the_agents(tmp_path: Path) -> None:
     report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 25))
     for source in ("ship", "fresh", "code", "security", "test"):
         assert re.search(rf"^\| {source} \| 1 \|", report, re.M), report
+
+
+# ---------------------------------------------------------------- how factory agents worked (146)
+
+AGENT_COUNTS = "edits={} shell_edits={} bg={} tool_errors=0 test_runs=4 broke={}"
+
+
+def _agent_closed(root: Path, name: str, closed: str, *roles: str) -> None:
+    """A factory change closed with the given `Sdlc-Role` lines."""
+    _close(root, name, tier=2, closed=closed, trailers=(
+        "Sdlc-Mode: factory",
+        "Sdlc-Coverage: transcripts=2 stages=build,ship",
+        "Sdlc-Totals: elapsed=60 agent=40 tools=20 words=3 out=10",
+        *(f"Sdlc-Role: {r}" for r in roles),
+    ))  # fmt: skip
+
+
+def test_retro_compares_agents_by_model(tmp_path: Path) -> None:
+    """146 R13: recorded role lines grouped by role and model, with each count's per-change
+    median, in the JSON and the report."""
+    root = _repo(tmp_path)
+    _agent_closed(
+        root,
+        "001-reopen-drafts",
+        "2026-10-02",
+        "builder runs=1 agent=30 model=model-a " + AGENT_COUNTS.format(0, 28, 2, 1),
+        "code runs=2 agent=5 model=model-a " + AGENT_COUNTS.format(0, 0, 0, 0),
+    )
+    _agent_closed(
+        root,
+        "002-draft-titles",
+        "2026-10-03",
+        "builder runs=1 agent=20 model=model-b " + AGENT_COUNTS.format(9, 0, 0, 0),
+    )
+    _agent_closed(
+        root,
+        "003-draft-sync",
+        "2026-10-04",
+        "builder runs=2 agent=20 model=model-b " + AGENT_COUNTS.format(5, 2, 0, 0),
+    )
+    agents = _retro(root)["spend"]["agents"]
+    groups = {(g["role"], g["model"]): g for g in agents["groups"]}
+    assert set(groups) == {("builder", "model-a"), ("builder", "model-b"), ("code", "model-a")}
+    a, b = groups[("builder", "model-a")], groups[("builder", "model-b")]
+    assert (a["changes"], a["runs"], a["median"]["shell_edits"], a["median"]["bg"]) == (1, 1, 28, 2)
+    assert (b["changes"], b["runs"], b["median"]["edits"], b["median"]["shell_edits"]) == (
+        2,
+        3,
+        7,
+        1,
+    )
+    assert agents["unrecorded"] == 0
+    report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "Agents by role and model" in report
+    assert "| builder | model-a | 1 | 1 | 0 | 28 | 2 | 0 | 4 | 1 |" in report
+    assert "| builder | model-b | 2 | 3 | 7 | 1 | 0 | 0 | 4 | 0 |" in report
+
+
+def test_retro_leaves_agents_from_before_behaviours_out(tmp_path: Path) -> None:
+    """146 R14: a role line without `edits=` is unrecorded, never zero; a recorded one without a
+    model groups under `unknown`."""
+    root = _repo(tmp_path)
+    _agent_closed(root, "001-reopen-drafts", "2026-10-02", "builder runs=1 agent=30 out=4")
+    _agent_closed(
+        root,
+        "002-draft-titles",
+        "2026-10-03",
+        "builder runs=1 agent=20 " + AGENT_COUNTS.format(3, 1, 0, 0),
+    )
+    agents = _retro(root)["spend"]["agents"]
+    assert [(g["role"], g["model"], g["changes"]) for g in agents["groups"]] == [
+        ("builder", "unknown", 1)
+    ]
+    assert agents["unrecorded"] == 1
+    assert agents["groups"][0]["median"]["edits"] == 3
+
+
+def test_retro_prints_a_change_s_agent_counts_only_with_metrics(tmp_path: Path, capsys) -> None:
+    """146 R15: each change's own role counts, in close order, only with `--metrics`."""
+    root = _repo(tmp_path)
+    _agent_closed(
+        root,
+        "001-reopen-drafts",
+        "2026-10-02",
+        "builder runs=1 agent=30 model=model-a " + AGENT_COUNTS.format(1, 0, 2, 0),
+    )
+    _agent_closed(
+        root,
+        "002-draft-titles",
+        "2026-10-03",
+        "builder runs=1 agent=20 model=model-a " + AGENT_COUNTS.format(1, 0, 0, 0),
+    )
+    assert sdlc.retro.cmd_retro(root) == 0
+    lean = json.loads(capsys.readouterr().out)["spend"]["agents"]
+    assert "changes" not in lean and lean["groups"]
+    assert sdlc.retro.cmd_retro(root, metrics=True) == 0
+    rows = json.loads(capsys.readouterr().out)["spend"]["agents"]["changes"]
+    assert [(r["change"], r["role"], r["model"], r["bg"]) for r in rows] == [
+        ("001-reopen-drafts", "builder", "model-a", 2),
+        ("002-draft-titles", "builder", "model-a", 0),
+    ]

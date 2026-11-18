@@ -1483,3 +1483,302 @@ def test_sdlcs_reasons_and_newest_round_are_the_factorys(tmp_path: Path) -> None
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text("x\n", encoding="utf-8")
         assert sdlc.factory_newest_round(folder) == factory.newest_round(folder)
+
+
+# ---------------------------------------------------------------- how an agent worked
+
+
+@pytest.mark.parametrize(
+    "command, writes",
+    [
+        ("echo x > notes.txt", True),
+        ("echo x >> notes.txt", True),
+        ("echo x 1> notes.txt", True),
+        ("printf x | tee notes.txt", True),
+        ("sed -i '' 's/a/b/' lib.py", True),
+        ("perl -pi -e 's/a/b/' lib.py", True),
+        ("patch -p1 < fix.diff", True),
+        ("git apply fix.diff", True),
+        ("python3 -c \"from pathlib import Path; Path('a').write_text('x')\"", True),
+        ("uv run python -c \"open('a', 'w').write('x')\"", True),
+        ("python3 - <<'EOF'\nimport pathlib\npathlib.Path('a').write_text('x')\nEOF", True),
+        ("cat > lib.py <<'EOF'\nx = 1\nEOF", True),
+        ("pytest -q 2>&1 | tail", False),
+        ("make > /dev/null", False),
+        ("echo x > /tmp/scratch.txt", False),
+        ('echo x > "$TMPDIR/scratch.txt"', False),
+        ("grep '>' lib.py", False),
+        ("sed -n '1,5p' lib.py", False),
+        ("python3 -c \"print(open('lib.py').read())\"", False),
+        ("cat <<'EOF'\nx > y\nEOF", False),
+    ],
+)
+def test_a_shell_edit_is_known_by_its_command(command: str, writes: bool) -> None:
+    """R3: a `Bash` command writes a file by the named shapes alone."""
+    assert metrics._shell(command, None)[0] is writes
+
+
+@pytest.mark.parametrize(
+    "command, check, test",
+    [
+        ("uv run --group dev pytest -q", None, True),
+        ("./check.sh 2>&1 | tail", "./check.sh", True),
+        ("python -m pytest tests", None, True),
+        ("cd x && CI=1 npx jest", None, True),
+        ("cargo test", None, True),
+        ("npm test", None, True),
+        ('uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py gate 012', None, True),
+        ("grep pytest x", None, False),
+        ("cat pytest.ini", None, False),
+        ("go build ./...", None, False),
+    ],
+)
+def test_a_test_run_is_known_by_its_program(command: str, check, test: bool) -> None:
+    """R5: the host's check, the hand gate, or a known runner past `uv run`, `npx`, `python -m`
+    and `VAR=`: never a word that only names one."""
+    assert metrics._shell(command, check)[2] is test
+
+
+@pytest.mark.parametrize(
+    "command, bg", [("pytest -q &", True), ("sleep 5 & ", True), ("a && b", False),
+                    ("make 2>&1", False)],
+)  # fmt: skip
+def test_a_command_ending_in_a_lone_ampersand_goes_to_the_background(command, bg) -> None:
+    """R4: the `&` half; the result's half is read from the transcript below."""
+    assert metrics._shell(command, None)[1] is bg
+
+
+BEHAVIOURS = ("edits", "shell_edits", "bg", "tool_errors", "test_runs", "broke")
+WORKTREE = "-made-up-repo--claude-worktrees-012-reopen-drafts"
+
+
+def said(t: float, ident: str, text: str, error: bool = False, **kw) -> dict:
+    """A tool's result whose output is `text`."""
+    block = {"type": "tool_result", "tool_use_id": ident, "is_error": error, "content": text}
+    return user(t, [block], **kw)
+
+
+def _role_events(
+    tmp_path: Path,
+    sessions: dict,
+    roles: dict,
+    models: dict | None = None,
+    check: str | None = None,
+) -> list:
+    folder = tmp_path / "projects" / WORKTREE
+    for name, entries in sessions.items():
+        _write(folder, name, entries)
+    return metrics.read_events([folder], BRANCH, "012", check, roles, models=models)
+
+
+def _role_line(events: list, role: str = "builder") -> dict:
+    back = metrics.parse_trailers("\n".join(metrics.trailers(_summary(events, way="factory"))))
+    return back["roles"][role]
+
+
+ONE_OF_EACH = [
+    user(0, "Build it."),
+    asst(1, "m1", [tool("Edit", "e1", file_path="/x/a.py", new_string="x", old_string="y")]),
+    result(2, "e1"),
+    asst(3, "m2", [tool("Bash", "b1", command="uv run --group dev pytest -q 2>&1 | tail")]),
+    said(4, "b1", "E   SyntaxError: invalid syntax", error=True),
+    asst(5, "m3", [tool("Bash", "b2", command="sed -i '' 's/a/b/' /x/a.py")]),
+    result(6, "b2"),
+    asst(7, "m4", [tool("Bash", "b3", command="sleep 100", run_in_background=True)]),
+    said(8, "b3", "Command running in background",
+         toolUseResult={"stdout": "", "stderr": "", "backgroundTaskId": "bt1"}),
+    asst(9, "m5", [tool("Read", "r1", file_path="/x/a.py")]),  # interrupted: no result
+]  # fmt: skip
+
+
+def test_a_role_s_behaviours_are_counted_from_its_transcript(tmp_path: Path) -> None:
+    """R1, R2: one of each behaviour, each counted once; an interrupted call adds nothing."""
+    events = _role_events(tmp_path, {"sess-b": ONE_OF_EACH}, {"sess-b": "builder"})
+    line = _role_line(events)
+    assert {k: line.get(k) for k in BEHAVIOURS} == dict.fromkeys(BEHAVIOURS, 1)
+    assert line["runs"] == 1
+
+
+def test_a_backgrounded_command_is_known_by_its_result(tmp_path: Path) -> None:
+    """R4: `run_in_background`, the harness moving a long command there, and a trailing `&`; a
+    plain `a && b` is none of them."""
+    entries = [
+        user(0, "Build it."),
+        asst(1, "m1", [tool("Bash", "b1", command="./check.sh", run_in_background=True)]),
+        said(2, "b1", "running", toolUseResult={"stdout": "", "backgroundTaskId": "bt1"}),
+        asst(3, "m2", [tool("Bash", "b2", command="uv run pytest -q | tail")]),
+        said(4, "b2", "moved", toolUseResult={"stdout": "", "stderr": "", "interrupted": False,
+                                              "backgroundTaskId": "bt2",
+                                              "timedOutAfterMs": 120000}),
+        asst(5, "m3", [tool("Bash", "b3", command="make serve &")]),
+        said(6, "b3", ""),
+        asst(7, "m4", [tool("Bash", "b4", command="git status && git diff")]),
+        said(8, "b4", "", toolUseResult={"stdout": "", "stderr": ""}),
+    ]  # fmt: skip
+    events = _role_events(tmp_path, {"sess-b": entries}, {"sess-b": "builder"})
+    assert _role_line(events)["bg"] == 3
+
+
+@pytest.mark.parametrize(
+    "edit, output, broke",
+    [
+        (True, "E   SyntaxError: invalid syntax", 1),
+        (True, "ModuleNotFoundError: No module named 'drafts'", 1),
+        (False, "E   SyntaxError: invalid syntax", 0),
+        (True, "E   assert 1 == 2\n1 failed", 0),
+    ],
+)
+def test_a_broken_build_is_a_failed_parse_after_an_edit(tmp_path, edit, output, broke) -> None:
+    """R6: a test run that couldn't parse or import, with an edit since the last run; never the
+    same output with no edit before it, nor a failing assertion."""
+    entries = [user(0, "Build it.")]
+    if edit:
+        entries += [asst(1, "m1", [tool("Write", "w1", file_path="/x/a.py", content="x")]),
+                    result(2, "w1")]  # fmt: skip
+    entries += [
+        asst(3, "m2", [tool("Bash", "b1", command="python -m pytest -q")]),
+        said(4, "b1", output, error=True),
+        asst(5, "m3", [tool("Bash", "b2", command="python -m pytest -q")]),  # no edit since
+        said(6, "b2", output, error=True),
+    ]
+    events = _role_events(tmp_path, {"sess-b": entries}, {"sess-b": "builder"})
+    line = _role_line(events)
+    assert line["broke"] == broke and line["test_runs"] == 2
+
+
+def test_a_broken_build_is_read_from_text_blocks_too(tmp_path: Path) -> None:
+    """R6: a result's output as a list of text blocks, the other shape a transcript holds."""
+    entries = [
+        user(0, "Build it."),
+        asst(1, "m1", [tool("Bash", "b0", command="echo x > a.py")]),
+        result(2, "b0"),
+        asst(3, "m2", [tool("Bash", "b1", command="pytest")]),
+        user(4, [{"type": "tool_result", "tool_use_id": "b1", "is_error": True,
+                  "content": [{"type": "text", "text": "ERROR collecting tests/test_a.py"}]}]),
+    ]  # fmt: skip
+    events = _role_events(tmp_path, {"sess-b": entries}, {"sess-b": "builder"})
+    line = _role_line(events)
+    assert (line["shell_edits"], line["broke"]) == (1, 1)
+
+
+def test_a_role_s_tools_are_listed_by_name(tmp_path: Path) -> None:
+    """R7: one `Sdlc-Calls` line a role, every name it called with its count, sorted, never
+    more than `Sdlc-Tool` counts for the name."""
+    builder = [
+        user(0, "Build it."),
+        asst(1, "m1", [tool("Bash", "b1", command="sed -n '1,5p' /x/a.py"),
+                       tool("Bash", "b2", command="sed -i '' 's/a/b/' /x/a.py")]),
+        result(2, "b1"), result(2, "b2"),
+        asst(3, "m2", [tool("Edit", "e1", file_path="/x/a.py", new_string="x", old_string="y")]),
+        result(4, "e1"),
+    ]  # fmt: skip
+    reviewer = [user(5, "Review it."), asst(6, "m3", [tool("Bash", "b3", command="sed -n 1p a")]),
+                result(7, "b3")]  # fmt: skip
+    events = _role_events(tmp_path, {"sess-b": builder, "sess-r": reviewer},
+                          {"sess-b": "builder", "sess-r": "code"})  # fmt: skip
+    lines = metrics.trailers(_summary(events, way="factory"))
+    assert "Sdlc-Calls: builder Bash:sed=2 Edit=1" in lines
+    assert "Sdlc-Calls: code Bash:sed=1" in lines
+    back = metrics.parse_trailers("\n".join(lines))
+    for name, row in back["tools"].items():
+        assert sum(c.get(name, 0) for c in back["calls"].values()) <= row["calls"]
+    assert back["calls"]["builder"] == {"Bash:sed": 2, "Edit": 1}
+
+
+@pytest.mark.parametrize(
+    "models, want",
+    [
+        ({"sess-b": "model-a"}, "model-a"),
+        ({"sess-b": "model-b", "sess-c": "model-a"}, "model-a,model-b"),
+        ({"sess-b": "provider:model/x"}, "provider-model-x"),
+        ({}, None),
+        (None, None),
+    ],
+)
+def test_a_role_s_model_comes_from_its_costs(tmp_path, models, want) -> None:
+    """R8: `model=` from the session ids' `costs.jsonl` rows, several joined sorted, every name
+    made a word; with no row, left off."""
+    entries = lambda t: [user(t, "Build it."), asst(t + 1, f"m{t}")]  # noqa: E731
+    events = _role_events(tmp_path, {"sess-b": entries(0), "sess-c": entries(10)},
+                          {"sess-b": "builder", "sess-c": "builder"}, models)  # fmt: skip
+    lines = metrics.trailers(_summary(events, way="factory"))
+    [role] = [ln for ln in lines if ln.startswith("Sdlc-Role: builder")]
+    back = metrics.parse_trailers(role)["roles"]["builder"]
+    assert back.get("model") == want and back["runs"] == 2
+    assert ("model=" in role) is (want is not None)
+
+
+def test_a_behaviour_count_that_fails_drops_only_its_fields(tmp_path, monkeypatch) -> None:
+    """R10: counting that raises drops that role's counts, `model=` and `Sdlc-Calls`, says
+    `behaviour=failed`, and leaves every other line as it was."""
+    sessions, roles = {"sess-b": ONE_OF_EACH}, {"sess-b": "builder"}
+    models = {"sess-b": "model-a"}
+    good = metrics.trailers(
+        _summary(_role_events(tmp_path, sessions, roles, models), way="factory")
+    )
+
+    def broken(*_):
+        raise RuntimeError("a transcript shape nobody planned for")
+
+    monkeypatch.setattr(metrics, "_behaviour", broken)
+    s = _summary(_role_events(tmp_path, sessions, roles, models), way="factory")
+    bad = metrics.trailers(s)
+    assert s["coverage"].endswith(" behaviour=failed")
+    keep = ("Sdlc-Totals", "Sdlc-Stage", "Sdlc-Tool")
+    assert [ln for ln in bad if ln.startswith(keep)] == [ln for ln in good if ln.startswith(keep)]
+    [role] = [ln for ln in bad if ln.startswith("Sdlc-Role:")]
+    assert role.startswith("Sdlc-Role: builder runs=1 agent=")
+    assert not any(f"{k}=" in role for k in (*BEHAVIOURS, "model"))
+    assert not any(ln.startswith("Sdlc-Calls:") for ln in bad)
+
+
+def test_behaviour_trailers_carry_no_text(tmp_path: Path) -> None:
+    """R11: numbers and names only: no command, path or output reaches a role's lines."""
+    marker = "zzmarker"
+    entries = [
+        user(0, f"Build {marker}."),
+        asst(1, "m1", [tool("Edit", "e1", file_path=f"~/{marker}/a.py", new_string=marker)]),
+        said(2, "e1", f"edited {marker}"),
+        asst(3, "m2", [tool("Bash", "b1", command=f"pytest tests/{marker} -k '{marker} x'")]),
+        said(4, "b1", f"SyntaxError in /{marker}/a.py", error=True),
+        asst(5, "m3", [tool("Bash", "b2", command=f"echo {marker} > ~/{marker}.txt &")]),
+        said(6, "b2", marker, toolUseResult={"backgroundTaskId": marker}),
+    ]  # fmt: skip
+    events = _role_events(tmp_path, {"sess-b": entries}, {"sess-b": "builder"},
+                          {"sess-b": "m x/y~z"})  # fmt: skip
+    lines = [ln for ln in metrics.trailers(_summary(events, way="factory"))
+             if ln.startswith(("Sdlc-Role:", "Sdlc-Calls:"))]  # fmt: skip
+    assert len(lines) == 2
+    for line in lines:
+        assert marker not in line
+        assert "/" not in line and "~" not in line
+        for word in line.split(": ", 1)[1].split()[1:]:
+            assert "=" in word, word
+    role = next(ln for ln in lines if ln.startswith("Sdlc-Role:"))
+    assert "model=m-x-y-z" in role, "the model is a name, made a word"
+
+
+def test_a_close_from_before_behaviours_parses_as_before() -> None:
+    """R12: an old body reads exactly as it did: no `calls`, no new role fields."""
+    old = (
+        "Sdlc-Mode: factory\n"
+        "Sdlc-Coverage: transcripts=3 stages=build,ship\n"
+        "Sdlc-Totals: elapsed=90 agent=40 tools=12 words=5 out=7\n"
+        "Sdlc-Role: builder runs=1 agent=30 in=1 cache_create=2 cache_read=3 out=4\n"
+        "Sdlc-Role: Explore runs=2 agent=5 in=1 cache_create=0 cache_read=0 out=1\n"
+        "Sdlc-Tool: Bash:sed calls=3 errors=0 build=3\n"
+    )
+    assert metrics.parse_trailers(old) == {
+        "mode": "factory",
+        "coverage": "transcripts=3 stages=build,ship",
+        "stages": {},
+        "blocked": {},
+        "totals": {"elapsed": 90, "agent": 40, "tools": 12, "words": 5, "out": 7},
+        "roles": {
+            "builder": {"runs": 1, "agent": 30, "in": 1, "cache_create": 2, "cache_read": 3,
+                        "out": 4},
+            "Explore": {"runs": 2, "agent": 5, "in": 1, "cache_create": 0, "cache_read": 0,
+                        "out": 1},
+        },
+        "tools": {"Bash:sed": {"calls": 3, "errors": 0, "build": 3}},
+    }  # fmt: skip

@@ -754,7 +754,35 @@ def _spend_text(spend: dict | None, closed: int) -> str:
         head, tiers, outliers,
         "Most called:\n\n" + (_table(head_tools, rows(called)) if called else "No calls recorded."),
         "Most errors:\n\n" + (_table(head_tools, rows(failed)) if failed else "No call failed."),
+        _agents_text(spend.get("agents")),
     ])  # fmt: skip
+
+
+def _agents_text(agents: dict | None) -> str:
+    """The "Agents by role and model" table: each group's changes, runs and per-change medians,
+    then how many role lines were closed before the counts were."""
+    groups = (agents or {}).get("groups") or []
+    names = [k.replace("_", " ") for k in sdlc.metrics.BEHAVIOURS]
+    table = (
+        _table(
+            ["Role", "Model", "Changes", "Runs", *(f"Median {n}" for n in names)],
+            [
+                [
+                    g["role"],
+                    g["model"],
+                    g["changes"],
+                    g["runs"],
+                    *(g["median"][k] for k in sdlc.metrics.BEHAVIOURS),
+                ]
+                for g in groups
+            ],
+        )  # fmt: skip
+        if groups
+        else "No agent's counts recorded."
+    )
+    left = (agents or {}).get("unrecorded") or 0
+    note = f"\n\n{left} role lines were closed before these were counted." if left else ""
+    return "Agents by role and model:\n\n" + table + note
 
 
 def _sources_text(sources: dict[str, dict], catches: dict | None = None) -> str:
@@ -1146,7 +1174,51 @@ def _spend(home: Path, cfg: dict, changes: list[dict], diffs: dict[str, str]) ->
     out = indicators.spend(rows)
     out["why"] = dict(Counter(r["why"] for r in rows if r["why"]))
     out["changes"] = rows
+    out["agents"] = _agents(changes)
     return out
+
+
+def _agents(changes: list[dict]) -> dict:
+    """How the window's factory agents worked, from each `Close` commit's `Sdlc-Role` lines:
+    grouped by role and model (`unknown` with no `model=`), each group's changes, runs, and the
+    per-change median of each count in `metrics.BEHAVIOURS`. A role line without `edits=` was
+    closed before they were counted: `unrecorded`, in no group. `changes` holds each change's
+    own rows, in close order: `cmd_retro()` prints them only with `--metrics`."""
+    counts = sdlc.metrics.BEHAVIOURS
+    rows: list[dict] = []
+    unrecorded = 0
+    for rec in changes:
+        for role, fields in sorted(((rec.get("metrics") or {}).get("roles") or {}).items()):
+            if not isinstance(fields.get("edits"), int):
+                unrecorded += 1
+                continue
+            model = fields.get("model")
+            rows.append({
+                "change": rec["name"], "role": role,
+                "model": str(model) if model not in (None, "") else "unknown",
+                "runs": fields.get("runs") if isinstance(fields.get("runs"), int) else 0,
+                **{k: fields.get(k) if isinstance(fields.get(k), int) else None for k in counts},
+            })  # fmt: skip
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        groups.setdefault((row["role"], row["model"]), []).append(row)
+
+    def median(values: list) -> float | None:
+        values = [v for v in values if isinstance(v, int)]
+        return statistics.median(values) if values else None
+
+    return {
+        "groups": [
+            {
+                "role": role, "model": model, "changes": len({r["change"] for r in rs}),
+                "runs": sum(r["runs"] for r in rs),
+                "median": {k: median([r[k] for r in rs]) for k in counts},
+            }
+            for (role, model), rs in sorted(groups.items())
+        ],
+        "unrecorded": unrecorded,
+        "changes": rows,
+    }  # fmt: skip
 
 
 def _kind(cfg: dict):
@@ -1502,6 +1574,9 @@ def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
     )
     if not metrics:  # each change's own spend, as its `metrics` are: the summary stays
         out["spend"] = {k: v for k, v in out["spend"].items() if k != "changes"}
+        agents = out["spend"].get("agents")
+        if isinstance(agents, dict):
+            out["spend"]["agents"] = {k: v for k, v in agents.items() if k != "changes"}
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 

@@ -795,6 +795,43 @@ def test_close_records_rework_and_the_happy_path_from_the_factorys_files(
     assert "/" not in "\n".join(ln for ln in body.splitlines() if ln.startswith("Sdlc-"))
 
 
+def test_measuring_reads_each_transcript_once(tmp_path, gh, monkeypatch) -> None:
+    """146 R9, R8: a factory change's builder session is counted, its model read from the
+    change's `runs/costs.jsonl`, and no transcript is read twice."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    root = _repo(tmp_path)
+    costs = (
+        json.dumps({"session": "sess-b", "role": "builder", "model": "model-a", "turns": 3})
+        + "\nnot json\n"
+    )
+    files = {**FACTORY_FILES, "runs/builder.sessions": "sess-b\n", "runs/costs.jsonl": costs}
+    name = _factory_shipped(root, files)
+    folder = home / ".claude" / "projects" / "".join(c if c.isalnum() else "-" for c in str(root))
+    folder.mkdir(parents=True)
+    entries = [
+        {"type": "user", "timestamp": "2026-10-01T09:00:00Z", "message": {"content": "Build."}},
+        {"type": "assistant", "timestamp": "2026-10-01T09:01:00Z", "message": {"id": "m1",
+         "content": [{"type": "tool_use", "id": "e1", "name": "Edit",
+                      "input": {"file_path": "lib.py", "new_string": "x", "old_string": "y"}}]}},
+    ]  # fmt: skip
+    (folder / "sess-b.jsonl").write_text(
+        "\n".join(json.dumps({"gitBranch": name, **e}) for e in entries) + "\n"
+    )
+    (folder / "s1.jsonl").write_text(
+        "\n".join(json.dumps({"gitBranch": name, **e}) for e in SESSION) + "\n"
+    )
+    read: list[Path] = []
+    real = sdlc.metrics._lines
+    monkeypatch.setattr(sdlc.metrics, "_lines", lambda p: read.append(p) or real(p))
+    _, lines = sdlc.measure_change(root, name, sdlc.load_config(root)[0])
+    assert len(read) == len(set(read)) == 2, read
+    [role] = [ln for ln in lines if ln.startswith("Sdlc-Role: builder")]
+    back = sdlc.metrics.parse_trailers(role)["roles"]["builder"]
+    assert back["model"] == "model-a" and back["edits"] == 1
+    assert "Sdlc-Calls: builder Edit=1" in lines
+
+
 def test_what_the_verifier_dropped_is_counted_on_each_reviewer(tmp_path, gh, capsys) -> None:
     """A run with a verifier says `dropped` for every reviewer, none included; a run from before
     it, above, says nothing, so its trailer reads as unknown there."""

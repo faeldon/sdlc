@@ -5025,6 +5025,22 @@ def _agent_sessions(main: Path, branch: str, folder: str) -> dict[str, str]:
     return roles
 
 
+def _agent_models(main: Path, branch: str, folder: str) -> dict[str, str]:
+    """The model each factory session ran on, by session id, from the change's
+    `runs/costs.jsonl` on its branch, which `factory.py agent` appends a row to for every run.
+    A line that doesn't parse, or names no session or model, is skipped; no file gives none."""
+    models: dict[str, str] = {}
+    for line in (_git(main, "show", f"{branch}:{folder}/runs/costs.jsonl") or "").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        model = row.get("model") if isinstance(row, dict) else None
+        if isinstance(row, dict) and isinstance(row.get("session"), str) and isinstance(model, str):
+            models[row["session"]] = model
+    return models
+
+
 def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]:
     """What a change cost, as a summary and its `Sdlc-*` trailer lines: from this repo's
     transcripts when `metrics.transcripts` allows and they hold the change, else what history
@@ -5079,7 +5095,8 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         if not files:
             return from_history("no transcripts for this repo")
         roles = _agent_sessions(main, branch, folder)
-        events = metrics.read_events(dirs, branch, branch, cfg["commands"]["check"], roles)
+        models = _agent_models(main, branch, folder)
+        events = metrics.read_events(dirs, branch, branch, cfg["commands"]["check"], roles, models)
         if not events:
             return from_history("no transcripts for this change")
         closes = _close_times(main, cfg["git"]["base"])

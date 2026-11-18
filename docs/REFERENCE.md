@@ -1114,7 +1114,23 @@ An error is a call whose result the transcript marks as one, a rejected prompt i
 with no result is no error. A sub-agent's calls, and a factory agent's, count with the change.
 And it counts the words the person typed (a slash command's name and arguments, a reply's text,
 never the text itself) as `words=` on each `Sdlc-Stage` and on `Sdlc-Totals`. A `Close` commit
-without `tools=` or `words=` is read as unrecorded, never as none. Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
+without `tools=` or `words=` is read as unrecorded, never as none.
+
+Each agent role's `Sdlc-Role` line also says how that role worked, counted in the same pass over its
+transcripts: `model=`, the model `runs/costs.jsonl` records for a factory agent's sessions (several
+joined with `,`, left off when none is recorded), then `edits=` (Edit and Write tool calls),
+`shell_edits=` (shell commands that write a file: a redirect outside `/dev/` or a temp dir, `tee`,
+`sed -i`, `perl -i`, `patch`, `git apply`, or an inline Python script that writes), `bg=` (commands
+that went to the background), `tool_errors=`, `test_runs=` (runs of `[commands] check`, `sdlc.py
+gate`, or a common test runner) and `broke=` (a test run that couldn't parse or import the code,
+right after an edit). Each is a lower bound: a shape not named isn't counted. One `Sdlc-Calls:
+<role> <name>=<n> …` line a role names every tool it called, as `Sdlc-Tool` names them. Numbers and
+names only, never a command, a path or an output; if counting fails, the role keeps its other fields
+and `Sdlc-Coverage` says `behaviour=failed`. `/sdlc:retro` compares them by role and model in an
+"Agents by role and model" table under *Spend* (each change's own rows only with `--metrics`); a
+role line without `edits=` was closed before they were counted and is unrecorded, never zero.
+
+Ship adds its review's findings as an `Sdlc-Findings` trailer on its own
 commit, counted from `findings.md` by `sdlc.py findings`: `important`, `nit` and `preexisting`,
 each pass's count, then each disposition's count by pass (`fixed=correctness:2,context:1`, or `0`),
 then `fresh` and `fresh_wrong`: how many findings the fresh-context reviewer raised, and how many of
