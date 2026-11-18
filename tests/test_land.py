@@ -2440,6 +2440,10 @@ def test_a_landing_past_its_moves_records_the_stop(tmp_path, capsys) -> None:
     stop = _land_step(folder)
     assert (stop["step"], stop["after"], stop["moves"]) == ("stop", "close", 1), stop
     assert stop["problems"] == out["refusals"]
+    # 133: the stop, and the round it stopped on, go into the change's commit, so `sdlc.py base`
+    # finds the worktree clean when the person ships it by hand.
+    assert _committed_step(tree, folder) == stop
+    assert _git(tree, "status", "--porcelain") == "", "the stop is in the commit"
 
 
 @pytest.mark.portable

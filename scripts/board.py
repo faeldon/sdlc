@@ -725,11 +725,14 @@ def next_action(entry: dict) -> str:
     # A landing under way is the factory's, before its commit and after: never the hand-run
     # close or ship, until it stops, when the person takes it on.
     landing = entry.get("progress") or {}
+    # A change already shipped, as a landing that stopped at its close is, is closed by hand, not
+    # shipped again.
     if landing.get("kind") == "land" and landing.get("stopped"):
         ident = entry["id"]
+        hand = f"/sdlc:close {ident}" if stage in CLOSED else f"/sdlc:ship {ident}"
         return (
             f"the landing stopped at {landing.get('after') or 'a step'}: fix what it names, then "
-            f"/sdlc-factory:land {ident}, or /sdlc:ship {ident} by hand"
+            f"/sdlc-factory:land {ident}, or {hand} by hand"
         )
     if landing.get("kind") == "land":
         return (

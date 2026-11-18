@@ -4727,6 +4727,16 @@ def _amend_record(root: Path, folder: Path, also: list[str] = ()) -> str | None:
     return None
 
 
+def _close_stopped(root: Path, folder: Path, why: str, plain: list[str] | None = None) -> int:
+    """A stop at the landing's close: recorded, then amended in with the round it stopped on, as
+    `_amend_record()` takes the rest, so the person's `/sdlc:ship` finds the worktree clean and
+    `sdlc.py base` can rebase it. Nothing has landed yet, so the commit is still the branch's own;
+    an amend that can't be made leaves the record uncommitted, as before."""
+    _record_land(root, folder, "stop", plain or [why])
+    _amend_record(root, folder)
+    return emit({"refusals": [why]}, 1)
+
+
 def cmd_land_close(root: Path, ident: str) -> int:
     """Land change `ident`'s second half: `sdlc.py close` run from the main checkout (from inside
     the change's worktree it would keep the worktree), which merges, archives, removes the folder,
@@ -4747,10 +4757,10 @@ def cmd_land_close(root: Path, ident: str) -> int:
         cfg, _ = load_config(root)
         if LANDING_RESOLVED in resolution_signals(root, folder, cfg):
             why = f"landed by=auto, and {LANDING_RESOLVED}: no landing review has passed it"
-            return _land_refused(root, folder, {}, why)
+            return _close_stopped(root, folder, why)
         if list(folder.glob("build/land-*.ask.md")):
             why = f"landed by=auto, and {LANDING_FIXED}: the gate is the person's"
-            return _land_refused(root, folder, {}, why)
+            return _close_stopped(root, folder, why)
     # The base branch moved since the change was gated and reviewed: close would only refuse (it
     # fast-forwards), so the landing goes back to its rebase, `land` again, with the move
     # recorded before the amend so the commit it was found on carries it.
@@ -4764,12 +4774,12 @@ def cmd_land_close(root: Path, ident: str) -> int:
         write_findings(folder, _rounds_at_depth(root, folder, cfg)[0] + landing)
     moved = _behind(root) > 0
     if moved and (why := _record_move(root, folder, cfg)):
-        return _land_refused(root, folder, {}, why)
+        return _close_stopped(root, folder, why)
     if moved:
         # Back to its rebase, the move counted: the record says so, in the commit it amends.
         _record_land(root, folder, "rebase")
     if why := _amend_record(root, folder):
-        return _land_refused(root, folder, {}, why)
+        return _close_stopped(root, folder, why)
     if moved:
         return emit(_moved(folder))
     main = worktrees(root)[0][0] if worktrees(root) else root
@@ -4777,16 +4787,17 @@ def cmd_land_close(root: Path, ident: str) -> int:
     # A move racing the close: read from the base, never from close's words.
     if code and not (closed or {}).get("done") and _behind(root) > 0:
         if why := _record_move(root, folder, cfg):
-            return _land_refused(root, folder, {}, why)
+            return _close_stopped(root, folder, why)
         _record_land(root, folder, "rebase")
         if why := _amend_record(root, folder):
-            return _land_refused(root, folder, {}, why)
+            return _close_stopped(root, folder, why)
         return emit(_moved(folder))
     if code and not (closed or {}).get("done") and folder.is_dir():
         plain = (closed or {}).get("refusals") or [
             f"sdlc.py close failed: run /sdlc:close {ident} by hand to see why"
         ]
         _record_land(root, folder, "stop", plain)
+        _amend_record(root, folder)
     return emit(closed or {"refusals": [said.strip()[-500:]]}, code)
 
 

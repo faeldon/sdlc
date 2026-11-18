@@ -14,3 +14,7 @@
 {"session": "91b48acd-b37e-4eb3-8adc-bb089a239eae", "role": "ux", "model": "haiku", "cost_usd": 0.01894015, "duration_ms": 58270, "turns": 23, "in": 14, "out": 12078, "cache_create": 53980, "cache_read": 210375}
 {"session": "ff4cf02b-dad1-4c9a-968a-2d0d1249f519", "role": "code", "model": "haiku", "cost_usd": 0.07021314000000001, "duration_ms": 226640, "turns": 21, "in": 42, "out": 38353, "cache_create": 102840, "cache_read": 1347028}
 {"session": "259b5cbc-05ad-4396-98cf-9f3a00c8d50e", "role": "builder", "model": "opus", "cost_usd": 5.7407610000000036, "duration_ms": 101942, "turns": 6, "in": 12, "out": 2415, "cache_create": 6233, "cache_read": 1306156}
+{"session": "97f1b0a1-b78f-4301-b1fb-acaf25d988ae", "role": "ui", "model": "haiku", "cost_usd": 0.013551400000000002, "duration_ms": 29752, "turns": 14, "in": 12, "out": 5589, "cache_create": 45160, "cache_read": 172370}
+{"session": "db84a53d-5225-4481-ae6d-41eafdf13b68", "role": "ux", "model": "haiku", "cost_usd": 0.01804726, "duration_ms": 60860, "turns": 23, "in": 20, "out": 11673, "cache_create": 46495, "cache_read": 290976}
+{"session": "a2a59e91-ce1d-45c7-9528-8a9d2fb6ea71", "role": "code", "model": "haiku", "cost_usd": 0.09601869, "duration_ms": 245948, "turns": 29, "in": 48, "out": 45142, "cache_create": 101689, "cache_read": 1530473}
+{"session": "7637244d-d297-426f-a8a9-9400719892b2", "role": "verifier", "model": "sonnet", "cost_usd": 0.1286501, "duration_ms": 17851, "turns": 6, "in": 10, "out": 2054, "cache_create": 24687, "cache_read": 93421}

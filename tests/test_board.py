@@ -1163,6 +1163,10 @@ BOTH = {
     ("problems", "decision pending"):
         "decide D1 in the factory's supervisor, and fix what its problems name",
     ("problems", "escalation pending"): "decide D2, and fix what its problems name",
+    # 133: a landing stopped on a change already shipped is closed by hand, not shipped again.
+    ("landing stopped", "closed"):
+        "the landing stopped at gate: fix what it names, then /sdlc-factory:land 016, or "
+        "/sdlc:close 016 by hand",
 }  # fmt: skip
 
 
@@ -2053,8 +2057,8 @@ def test_the_page_labels_a_landing_track_and_says_why_it_stopped() -> None:
 @pytest.mark.portable
 def test_a_landing_card_names_the_landing_not_close(repo) -> None:
     """133 round 1: a landing under way, before or after its commit, names the landing as its next
-    step, never the hand-run close or ship; a stopped one names the way on, and no landing record
-    leaves close as it was."""
+    step, never the hand-run close or ship; a stopped one names the way on, close by hand for a
+    change already shipped, and no landing record leaves close as it was."""
     folder = _landing_at(repo, "review")
     card = _cards(repo)["030-draft-land"]
     assert card["next"] == (
@@ -2068,8 +2072,8 @@ def test_a_landing_card_names_the_landing_not_close(repo) -> None:
     assert card["progress"]["after"] == "ship" and card["progress"]["problems"] == [why]
     assert card["next"] == (
         "the landing stopped at ship: fix what it names, then /sdlc-factory:land 030, or "
-        "/sdlc:ship 030 by hand"
-    )
+        "/sdlc:close 030 by hand"
+    ), "a shipped change is closed by hand, never shipped again"
     (folder / factory.LAND_STEP).unlink()
     assert _cards(repo)["030-draft-land"]["next"] == "/sdlc:close 030"
 
