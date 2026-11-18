@@ -377,12 +377,6 @@ Five changes' Important findings share one class: a context or reference doc sti
 Theme: review
 Raised by the retrospective of 2026-11-18.
 
-## [2026-11-18-94] [idea] Close records lead time and ready-wait, and retro reports them
-
-Close records each change's lead time (from new to Close) and how long it sat ready before landing, as trailers, and retro reports their medians beside elapsed. Today's elapsed leaves out queue and ready-wait: for 139–148 it was 43.5 min against a real median turnaround of 250, half of factory lead time is a ready change waiting.
-Theme: metrics
-Raised 2026-11-18.
-
 ## [2026-11-18-95] [bug] A builder's "UNTESTABLE: none." stops the run as untestable
 
 A builder that writes `- UNTESTABLE: none.` is read as having one untestable requirement named "none.": `UNTESTABLE_RE` (plugins/factory/scripts/factory.py:201) captures any text, so `early_stop()` stops the run and the approver must ESCALATE a change with no gap. 155's round 1 showed it: three PASSes, a green gate, and an ESCALATE whose only reasons were this stop and a look. `none` (with or without a period) should mean no untestable requirements.
@@ -473,12 +467,6 @@ Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: t
 See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-106] [idea] Hosts: lead time needs a start time in every host.
-
-Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: lead time needs a start time in every host. Here a change's GitHub issue gives it; a host on local numbering has no issue, and `intent.md`'s `created:` holds only a date. S1 has `new` record a timestamp.
-See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-107] [idea] Hosts: the skills' cases are this repo's only, so nothing about them is in a host's scorecard, and a host with no factory gets the by-hand view: mode comparison and pipeline health say "no factory changes" rather than show zeros.
 
 Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: the skills' cases are this repo's only, so nothing about them is in a host's scorecard, and a host with no factory gets the by-hand view: mode comparison and pipeline health say "no factory changes" rather than show zeros.
@@ -504,3 +492,43 @@ Paths: tests/test_registry.py
 Cost: S
 Value: low
 Raised by: 160-command-registry (correctness)
+
+## [2026-11-19-1] [nit] `lead_time()` returns `{}` when `opened` is after `closed`, and the code files that as `lead=bad-opened`.
+
+Raised by the code review of 162-lead-time, round 1: scripts/closing.py:474: `lead_time()` returns `{}` when `opened` is after `closed`, and the code files that as `lead=bad-opened`. That word is meant for an unparsable `opened:`. A clock that ran backwards is a different case; a distinct word such as `lead=clock` would say which one it was.
+
+Theme: docs
+Paths: scripts/closing.py
+Cost: S
+Value: low
+Raised by: 162-lead-time (correctness)
+
+## [2026-11-19-2] [nit] a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`).
+
+Raised by the code review of 162-lead-time, round 1: scripts/closing.py:431: a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`). R10's "no transcripts" case says `lead`, `ready_wait` and `landing` are kept. The code is reasonable, because there is no approver row to read `ready` from. The spec could say so, or `ready` could fall back to the tip's author date for a factory change too.
+
+Theme: robustness
+Paths: scripts/closing.py
+Cost: S
+Value: low
+Raised by: 162-lead-time (correctness)
+
+## [2026-11-19-3] [nit] the broad `except Exception` also hides programming errors as `lead=failed`.
+
+Raised by the security review of 162-lead-time, round 1: scripts/closing.py:475: the broad `except Exception` also hides programming errors as `lead=failed`. That fits "never refuses", but it could log the exception's type name to stderr so a regression is visible
+
+Theme: robustness
+Paths: scripts/closing.py
+Cost: S
+Value: low
+Raised by: 162-lead-time (contract)
+
+## [2026-11-19-4] [nit] the `lead=bad-opened` path for `opened` after `closed` (decision D3) has no test of its own; only a malformed value is parametrized
+
+Raised by the test review of 162-lead-time, round 1: tests/test_archive.py: the `lead=bad-opened` path for `opened` after `closed` (decision D3) has no test of its own; only a malformed value is parametrized
+
+Theme: tests
+Paths: tests/test_archive.py
+Cost: S
+Value: low
+Raised by: 162-lead-time (correctness)
