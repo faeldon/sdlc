@@ -460,7 +460,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 | **S2** | Work mix: each landed change classed capability, fix, debt or process from its `impact:`, seed tag, `fixes:`, `reworks:` and theme; retro reports the shares. | Value | – |
 | **S3** | Decisions and stops counted: escalations per change, the kept-default rate, overturned approver calls, auto-landed share, spurious stops and looks. | Autonomy | – |
 | **S4** | Waste tagged in `costs.jsonl` (each run marked by what it was for: build, rework, red-gate fix, ejected, rerun, mend); retro reports waste share and cost per landed change. | Cost | – |
-| **S5** | Feature inventory: retro lists every skill, command and config key with its use in the window, the footprint setup leaves, and the surface's growth per release; unused for N windows becomes a retire candidate. | Simplicity | – |
+| **S5** | Feature inventory: retro lists every skill, command and config key with its use in the window, the footprint setup leaves, and the surface's growth per release; unused for N windows becomes a retire candidate. Its list is the feature map, 2026-10-25-3. | Simplicity | – |
 | **S6** | Workarounds tagged: a change landed outside the loop, a record fixed by hand, an override, each recorded so retro counts it. | Simplicity | – |
 | **S7** | This repo's function-heat indicator, `.sdlc/function-heat.py`, set in `retro.indicators`. **Open as a Tier 1 intent by hand.** | Quality | – |
 | **S8** | Indicators in a structured format (JSON rows), rendered as a table in the report; "no indicators set" said when empty; setup offers the key. | Quality | S7 |
@@ -469,6 +469,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 | **S11** | Trust band: each headline's coverage and why the rest is missing, greyed under half; the Claude Code version, models and plugin version against the last window. | Trust | – |
 | **S12** | Follow-through: the share of the last retrospective's seeds, milestones and intents done or dropped against carried or vanished. | Value | – |
 | **S13** | Time to users: median time from landing to release, and releases per window. | Value | – |
+| **S17** | Comment health, an indicator beside function heat: comment density per file as a band and its trend, docstring coverage of long and hot functions, the share of comments that restate their line, and comments' share of what agents read. **Exists as 2026-11-19-9.** | Quality, Cost | S8 |
 
 ### Presentation (the report)
 
@@ -503,12 +504,68 @@ move in the style of the one that gave close and the landing their own modules.
 | **R5** | Split `tests/test_factory.py` along the factory's modules | 5,712 lines, +4,773 in a window | – |
 | **R6** | Split `cmd_close` into named steps inside `closing.py` | 365 lines in one function | – |
 
-### Suggested order
+### Waves
 
-1. **S7** and **S1**: the cheapest, and they unlock Quality's and Speed's headlines.
-2. **S2, S3, S4, S11, S12, S13**: independent, small, any order.
-3. **S5, S6, S8, S9, S10**.
-4. **S14**, then **S15** and **S16**.
+The order the work follows, in waves: a wave starts once the one before it has landed, and its
+changes can run side by side. Under each change are the register entries it takes in, by id. Its
+intent names them, so landing it retires them; an entry's text and state stay in
+`.sdlc/work/inbox.md`. Every entry open when this plan was written is named once, wave 6 holding
+those the scorecard doesn't need. An entry filed later goes into the wave of the change that
+touches its files.
 
-The refactors (R1–R6) can run alongside any of these; R1 first, since it cuts the conflicts every
-other change meets.
+#### Wave 0, done
+
+- **R1**, the command registry: 160.
+- **S7**, function heat: 161.
+
+#### Wave 1, done
+
+- **S1**, lead time and its stage breakdown: 162.
+- **R4**, one reader in core for the factory's records: 163.
+- **R2**, the agents' prompts in files: 164.
+
+#### Wave 1½: two bug fixes
+
+- Bug 2026-11-18-95, with idea 2026-11-18-91.
+- Bug 2026-11-18-103, with idea 2026-11-18-66.
+
+#### Wave 2
+
+- **S2, S12 and S13**, as one change: 2026-11-18-64, 2026-11-18-65, 2026-11-18-97.
+- **S3**: 2026-11-18-92, 2026-11-18-86, 2026-11-18-87.
+- **S11**: 2026-11-18-107.
+- **R3**: 2026-11-18-68, 2026-11-18-69, 2026-11-18-80, 2026-11-18-84, 2026-11-18-70,
+  2026-11-18-71, 2026-11-18-85, 2026-11-18-98, and idea 2026-11-18-67.
+- **R6**: 2026-11-19-1, 2026-11-19-2, 2026-11-19-3, 2026-11-19-4, 2026-11-18-100. The first two
+  restate decisions D3 and D1 of 162, so R6 retires them as answered.
+- **The style pay-down**, 2026-11-18-89, last in the wave: 2026-11-18-81, 2026-11-18-82,
+  2026-11-18-75, 2026-11-18-77, 2026-11-18-78, 2026-11-18-83, 2026-11-18-96, 2026-11-19-5,
+  2026-11-18-76, 2026-11-18-108.
+
+#### Wave 3
+
+- **S4**.
+- **S5**, with the feature map 2026-10-25-3 and the process map 2026-10-25-1.
+- **S6**, with 2026-11-18-93.
+- **S8**.
+- **S17**, 2026-11-19-9, after S8.
+- **S9**.
+- **S10**.
+
+#### Wave 4
+
+- **S14**, with 2026-11-18-105.
+
+#### Wave 5
+
+- **S15**.
+- **S16**.
+- **R5**, with the tests pay-down 2026-11-18-88 and the pruning pass 2026-11-18-90:
+  2026-11-18-79, 2026-11-18-101, 2026-11-18-104, 2026-11-18-109, 2026-11-19-6, 2026-11-19-7,
+  2026-11-19-8.
+
+#### Wave 6: outside the scorecard
+
+The backlog the scorecard doesn't need, in no order: 2026-10-25-23, 2026-10-27-10, 2026-10-26-11,
+2026-10-26-13, 2026-10-26-10, 2026-11-10-2, 2026-11-18-74, 2026-11-13-1, 2026-11-18-99,
+2026-10-24-6.
