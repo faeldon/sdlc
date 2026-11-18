@@ -323,3 +323,15 @@ its turn before it exits.
 Severity: med
 Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-code.md, plugins/factory/agents/reviewer-test.md
 Theme: factory
+
+## [2026-11-18-32] [bug] The board drops a shipped change while its landing's rebase is stopped on a conflict
+
+`_on_board()` keeps a shipped folder only when `ready_to_close()` lists its branch, and a stopped
+rebase detaches the worktree's HEAD, so the card vanishes exactly while the builder resolves the
+conflict (138, 2026-11-18). It should keep a shipped folder whose branch is rebasing, which
+`state()` already computes. To see it: land a change whose rebase conflicts, and open the board
+while `factory.py resolve` has the rebase stopped.
+
+Severity: low
+Paths: scripts/board.py
+Theme: board
