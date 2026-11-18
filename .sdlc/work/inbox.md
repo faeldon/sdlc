@@ -346,3 +346,16 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 147-landing-runs-unattended (correctness)
+
+## [2026-11-18-73] [bug] resolve --continue misses non-ASCII conflicted paths
+
+factory.py's _conflicted() and sdlc.py's _unmerged() list the conflicted files with
+`git diff --name-only --diff-filter=U`, which quotes a path holding non-ASCII characters
+("docs/caf\303\251.md"), so resolve --continue stages the quoted name, misses the real file, and the
+rebase's continue refuses or the resolution leaves it out. They should read the list with -z (or
+core.quotePath=false). To see it: stack a change that conflicts in a file with a non-ASCII name and
+run resolve --continue. Not reproduced yet: found by reading the code (149's spec-writer).
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py, scripts/sdlc.py
+Theme: factory
