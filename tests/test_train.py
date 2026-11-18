@@ -878,7 +878,10 @@ def test_a_reply_still_unreadable_after_its_mend_ejects_only_that_change(tmp_pat
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
     assert [e["change"] for e in last["ejected"]] == [trees[1].name]
-    assert "doesn't open with a VERDICT" in last["ejected"][0]["reason"], last["ejected"]
+    assert (
+        "holds no VERDICT: PASS or VERDICT: CHANGES the script reads"
+        in last["ejected"][0]["reason"]
+    ), last["ejected"]
     steps = [(r["next"], r.get("change")) for r in readings]
     assert steps.count(("mend", trees[1].name)) == 1, "mended once, then a stop"
     assert ("eject", trees[1].name) in steps
@@ -1093,3 +1096,37 @@ def test_a_train_stops_past_land_moves(tmp_path, capsys) -> None:
              ":(exclude).sdlc/work"], capture_output=True,
         ).returncode == 0, tree.name  # fmt: skip
     assert not _state_file(root).exists()
+
+
+# ---------------------------------------------------------------- waiting its turn (145 R22)
+
+
+def _waits(tree: Path) -> tuple[str, str | None]:
+    rec = factory.read_land_step((_folder(tree) / factory.LAND_STEP).read_text(encoding="utf-8"))
+    return rec["step"], rec["waits"]
+
+
+@needs_uv
+def test_a_waiting_change_records_what_it_waits_on(tmp_path, capsys) -> None:
+    """145 R22: as the train turns to a change, each committed change after it records `wait`
+    and the live change before it: to stack on while it isn't stacked, to close after once it is;
+    the train lands all three as before."""
+    root, trees = _three(tmp_path)
+    names = [t.name for t in trees]
+    _begin(root, capsys)
+    readings = _drive(root, capsys, until=lambda o: o.get("next") == "stack")
+    assert readings[-1]["change"] == names[1], readings[-1]
+    assert _waits(trees[2]) == ("wait", f"stack on {names[1]}")
+    assert _waits(trees[0])[0] != "wait", "a change before the one acted on never waits"
+    readings = _drive(root, capsys, until=lambda o: o.get("next") == "close")
+    assert readings[-1]["change"] == names[0], readings[-1]
+    assert _waits(trees[1]) == ("wait", f"close after {names[0]}")
+    assert _waits(trees[2]) == ("wait", f"close after {names[1]}")
+    times = factory.read_land_times(
+        (_folder(trees[2]) / factory.LAND_TIMES).read_text(encoding="utf-8")
+    )
+    assert any(row["step"] == "wait" for row in times), times
+    _drive(root, capsys)
+    assert [s for s in _first_parent(root) if s.startswith("Close ")] == [
+        f"Close {n}" for n in reversed(names)
+    ]

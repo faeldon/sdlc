@@ -71,9 +71,11 @@ reviewing, and deciding whether to escalate.
   paths. The supervisor never ships: you land them.
 - **`/sdlc-factory:decide NNN`**, on one change at `stage: test`: its open decisions and assumed
   defaults, one at a time, each with its background, the default, the alternatives the agent
-  weighed and why it chose the default, asked in a dialog with the default first. After one
-  approval it writes your answers into `decisions.md` (`→ decided:`), as the supervisor does, and
-  says what's next: decide again, rebuild (an answer the build doesn't follow), or ship. It reads
+  weighed and why it chose the default, asked in a dialog with the default first, and each `look`
+  the approver escalated for (`seen`, or what you checked). After one approval it writes your
+  answers into `decisions.md` (`→ decided:`), as the supervisor does, and says what's next: decide
+  again, rebuild (an answer the build doesn't follow), the hand gate (a `gate` reason not yet
+  green on the change as it stands), or ship. It reads
   through `factory.py ask`, which writes nothing, and starts no agent.
 - **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and

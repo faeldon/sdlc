@@ -1102,7 +1102,7 @@ def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, mon
 def test_accept_and_cases_record_their_landing_step(tmp_path, capsys, monkeypatch) -> None:
     """2026-11-18-39: before the landing's commit, `accept` records `checks` and `cases` records
     `cases` in `runs/land-step.md`, so the board's track shows them rather than the build's; after
-    the commit the checks run inside the gate's step, and the record is left as it stands."""
+    the commit (145 R26) it records `recheck`, its own step after the gate."""
     root = _repo(tmp_path)
     tree = _ready(root, "stepped", "stepped's one")
     folder = _folder(tree)
@@ -1123,10 +1123,10 @@ def test_accept_and_cases_record_their_landing_step(tmp_path, capsys, monkeypatc
         intent.read_text(encoding="utf-8").replace("stage: test", "stage: shipped"),
         encoding="utf-8",
     )
-    before = (folder / factory.LAND_STEP).read_text(encoding="utf-8")
     reply["data"] = {"passed": True, "checks": [], "problems": []}
     assert _run(capsys, factory.cmd_accept, tree, "001")[0] == 0
-    assert (folder / factory.LAND_STEP).read_text(encoding="utf-8") == before, "the gate's step"
+    assert _land_step(folder)["step"] == "recheck", "145 R26: its own step after the gate"
+    assert "recheck" in factory.LAND_STEPS
 
 
 @needs_uv
@@ -2514,10 +2514,11 @@ def test_a_landing_records_each_step_it_takes(tmp_path, capsys, monkeypatch) -> 
     assert (code, out["state"], out["round"]) == (0, "stacked", 2), out
     again = _committed_step(tree, folder)
     assert (again["step"], again["round"], again["moves"]) == ("stack", 1, 1), again
-    assert _git(tree, "status", "--porcelain").split() == [
-        "M",
-        f".sdlc/work/{tree.name}/runs/land-step.md",
-    ], "the stack's own step, for the close to amend in"
+    status = _git(tree, "status", "--porcelain").splitlines()
+    assert sorted(line.split() for line in status) == [
+        ["M", f".sdlc/work/{tree.name}/runs/land-step.md"],
+        ["M", f".sdlc/work/{tree.name}/runs/land-times.jsonl"],
+    ], "the stack's own step and the time of the one before it, for the close to amend in"
     code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
     _pass_behaviour(folder, 2)
     code, out = _run(capsys, factory.cmd_land_close, tree, "001")
@@ -2580,6 +2581,7 @@ def test_the_landing_step_record_reads_back_what_it_writes() -> None:
     assert factory.read_land_step(text) == {
         "step": "review", "round": 2, "moves": 1, "limit": 3,
         "since": "2026-11-18T10:00:00Z", "after": None, "problems": [], "train": None,
+        "waits": None,
     }  # fmt: skip
     stop = {"step": "stop", "round": None, "moves": 0, "limit": 3}
     text = factory.land_step_text(stop, "2026-11-18T10:00:00Z", "ship", ["it broke\nbadly"])
@@ -2712,3 +2714,106 @@ def test_two_factory_landings_never_conflict_on_the_register(tmp_path, capsys) -
         assert titles.count(title) == 1, titles
     assert "The change's own seed" not in titles and "A bug the change fixes" not in titles
     assert len({e["id"] for e in entries}) == len(entries), "no id twice"
+
+
+# ---------------------------------------------------------------- escalations that clear (145)
+
+
+@needs_uv
+def test_land_check_shows_how_each_reason_was_cleared(tmp_path, capsys) -> None:
+    """145 R13, R10: a cleared escalation still signals `the approver escalated`, so the gate
+    never passes itself, and the question shows each reason with how it cleared; nothing the
+    landing reads rewrites `decision.md`."""
+    root = _repo(tmp_path)
+    _config(root, '[commands]\ncheck = "true"\n')
+    tree = _ready(root, "esc", "esc's one")
+    folder = _folder(tree)
+    (folder / "runs").mkdir(exist_ok=True)
+    (folder / "decision.md").write_text(
+        "DECISION: ESCALATE\n\nThree things.\n\n- IMPACT: minor — a test change\n"
+        "- ESCALATED: gate: the gate was red on round 1\n"
+        "- ESCALATED: look: the page reads oddly\n",
+        encoding="utf-8",
+    )
+    (folder / "decisions.md").write_text(
+        "# Decisions\n\n- [x] D1 (builder round 1, blocking): Keep drafts? → decided: 30 days\n",
+        encoding="utf-8",
+    )
+    shown = (folder / "decision.md").read_bytes()
+    _run(capsys, factory.cmd_decisions, tree, tree.name[:3])
+    _run(capsys, factory.cmd_ask, tree, tree.name[:3], None)
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    [entry] = batch["batch"]
+    assert entry["escalations"] == ["D1: decided: 30 days", "D2: not cleared", "gate: not cleared"]
+    ledger = folder / "decisions.md"
+    text = ledger.read_text(encoding="utf-8").replace("- [ ] D2", "- [x] D2")
+    ledger.write_text(text.replace("oddly\n", "oddly → decided: seen\n"), encoding="utf-8")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "built")
+    assert sdlc.cmd_gate(tree, tree.name[:3]) == 0
+    capsys.readouterr()
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    [entry] = batch["batch"]
+    assert entry["escalations"] == [
+        "D1: decided: 30 days",
+        "D2: acknowledged: seen",
+        "gate: green on the build as it stands (attempt 1)",
+    ]
+    assert batch["clear"] is False and "the approver escalated" in entry["signals"]
+    assert "  Escalated:\n  - D1: decided: 30 days\n  - D2: acknowledged: seen\n" in batch["shown"]
+    assert (folder / "decision.md").read_bytes() == shown
+
+
+def test_each_landing_step_change_writes_a_times_row(tmp_path, monkeypatch) -> None:
+    """145 R19: a step that replaces another adds the one it replaces to `runs/land-times.jsonl`,
+    its round and its seconds since its `SINCE:`; the same step and round again adds nothing."""
+    root = _repo(tmp_path)
+    folder = root / ".sdlc" / "work" / "001-timed"
+    folder.mkdir(parents=True)
+    (folder / "intent.md").write_text("---\nid: 001\nstage: test\n---\n", encoding="utf-8")
+    clock = iter(["2026-11-18T10:00:00Z", "2026-11-18T10:00:30Z", "2026-11-18T10:00:30Z",
+                  "2026-11-18T10:02:00Z"])  # fmt: skip
+    monkeypatch.setattr(factory, "_utc_now", lambda: next(clock))
+    factory._record_land(root, folder, "checks")
+    factory._record_land(root, folder, "ship")
+    factory._record_land(root, folder, "ship")
+    factory._record_land(root, folder, "gate")
+    raw = (folder / factory.LAND_TIMES).read_bytes()
+    assert b"\r" not in raw
+    rows = factory.read_land_times(raw.decode("utf-8"))
+    assert rows == [
+        {"step": "checks", "round": None, "seconds": 30.0},
+        {"step": "ship", "round": None, "seconds": 90.0},
+    ], rows
+
+
+@needs_uv
+def test_nothing_rewrites_decision_md(tmp_path, capsys) -> None:
+    """145 R10: on an escalated change, `decisions`, `ask`, `sdlc.py gate`, `land-check` and the
+    board's state each leave `decision.md` byte for byte as the approver wrote it."""
+    root = _repo(tmp_path)
+    _config(root, '[commands]\ncheck = "true"\n')
+    tree = _ready(root, "kept", "kept's one")
+    folder = _folder(tree)
+    (folder / "runs").mkdir(exist_ok=True)
+    (folder / "decision.md").write_text(
+        "DECISION: ESCALATE\n\nTwo things.\n\n- IMPACT: minor — a test change\n"
+        "- ESCALATED: gate: the gate was red on round 1\n"
+        "- ESCALATED: look: the page reads oddly\n",
+        encoding="utf-8",
+    )
+    shown = (folder / "decision.md").read_bytes()
+    ident = tree.name[:3]
+    steps = [
+        ("decisions", lambda: factory.cmd_decisions(tree, ident)),
+        ("ask", lambda: factory.cmd_ask(tree, ident, None)),
+        ("sdlc.py gate", lambda: sdlc.cmd_gate(tree, ident)),
+        ("land-check", lambda: factory.cmd_land_check(root, [])),
+        ("the board's state", lambda: sdlc._load_board().state(root)),
+    ]
+    for name, step in steps:
+        step()
+        capsys.readouterr()
+        assert (folder / "decision.md").read_bytes() == shown, name
+    card = {c["change"]: c for c in sdlc._load_board().state(root)["changes"]}[tree.name]
+    assert card["decision"] == "ESCALATE" and "acknowledge D1" in card["needs"], card

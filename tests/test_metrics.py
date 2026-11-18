@@ -1196,6 +1196,11 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     assert sdlc.FACTORY_AGENT_TIMEOUT == factory.AGENT_TIMEOUT
     assert sdlc.FACTORY_RECONSIDER == factory.RECONSIDER
     assert sdlc.FACTORY_SETTLED == factory.SETTLED
+    # 145: the approver's reasons, and what tells a current look line from history.
+    for name in ("REASON_RE", "LOOK_SOURCE_RE"):
+        assert getattr(sdlc, f"FACTORY_{name}").pattern == getattr(factory, name).pattern, name
+    assert sdlc.FACTORY_REASON_KINDS == factory.REASON_KINDS
+    assert sdlc.FACTORY_DECIDED == factory.DECIDED
 
 
 def test_sdlcs_opening_is_a_pinned_copy_of_the_factorys() -> None:
@@ -1410,3 +1415,71 @@ def test_a_close_from_before_tool_lines_is_unrecorded() -> None:
     s = metrics.history_summary(600, "manual", 1, CFG, "metrics.transcripts is off")
     lines = metrics.trailers(s)
     assert not any(line.startswith("Sdlc-Tool:") or "tools=" in line for line in lines)
+
+
+def test_a_cleared_escalation_still_measures_as_escalate(tmp_path: Path) -> None:
+    """145 R14: every reason cleared (a look acknowledged, a gate green by hand) leaves the
+    approver's call as measuring reads it, since `decision.md` is never rewritten; the look line
+    counts in no ledger figure."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    spec = importlib.util.spec_from_file_location("sdlc_cleared", ROOT / "scripts" / "sdlc.py")
+    sdlc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sdlc)
+    name = "008-reopen-drafts"
+    git("init", "-q", "-b", "main")
+    (tmp_path / "README.md").write_text("a repo\n", encoding="utf-8")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+    git("checkout", "-q", "-b", name)
+    folder = tmp_path / ".sdlc" / "work" / name
+    (folder / "build").mkdir(parents=True)
+    (folder / "decision.md").write_text(
+        "DECISION: ESCALATE\n\n- ESCALATED: gate: red\n- ESCALATED: look: odd\n", encoding="utf-8"
+    )
+    (folder / "decisions.md").write_text(
+        "# Decisions\n\n- [x] D1 (approver round 1, look): odd → decided: seen\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (folder / "build" / "gate.md").write_text(
+        "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\n", encoding="utf-8"
+    )
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
+    found = sdlc._factory_files(tmp_path, name)
+    assert found["decision"] == "ESCALATE"
+    assert (found["blocking"], found["defaults"], found["defaults_open"]) == (0, 0, 0)
+    assert "gate_fail" not in found, "the hand gate's record is no round's gate"
+
+
+def test_sdlcs_reasons_and_newest_round_are_the_factorys(tmp_path: Path) -> None:
+    """145: `factory_reasons()` reads a decision as `escalation_reasons()` does, and
+    `factory_newest_round()` is `newest_round()`, on one folder as it grows."""
+
+    def load(path: Path, name: str):
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    sdlc = load(ROOT / "scripts" / "sdlc.py", "sdlc_for_reasons")
+    factory = load(ROOT / "plugins" / "factory" / "scripts" / "factory.py", "factory_reasons")
+    folder = tmp_path / "008-reopen-drafts"
+    folder.mkdir()
+    text = (
+        "DECISION: ESCALATE\n\n- ESCALATED: D2: the product's call\n- ESCALATED: gate: red\n"
+        "  - ESCALATED: look: odd at 390px\n- ESCALATED: taste: flat\n- ESCALATED: D3x: what\n"
+        "- ESCALATED: no word here\n"
+    )
+    (folder / "decision.md").write_text(text, encoding="utf-8")
+    assert sdlc.factory_reasons(text.splitlines()) == factory.escalation_reasons(folder)
+    assert len(factory.escalation_reasons(folder)) == 4
+    for files in ([], ["build/round-1.md"], ["reviews/round-2/code.md", "build/round-1.md"],
+                  ["build/round-3.restart.md", "build/round-3.gate.md"]):  # fmt: skip
+        for rel in files:
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_text("x\n", encoding="utf-8")
+        assert sdlc.factory_newest_round(folder) == factory.newest_round(folder)

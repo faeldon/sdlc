@@ -1466,6 +1466,25 @@ def test_the_approver_weighs_each_open_default() -> None:
     assert "→ settled by the approver:" in flat and "never the person's word" in flat
 
 
+def test_the_approver_gives_every_reason_a_line_with_its_kind() -> None:
+    """145 R1: every reason the approver escalates for is a line of its own with a kind: an open
+    ledger line by its id or its `- ESCALATED: D<n>:` line, else `gate:` or `look:`."""
+    flat = " ".join((FACTORY / "agents" / "approver.md").read_text(encoding="utf-8").split())
+    assert "`- ESCALATED: gate: <why>`" in flat and "`- ESCALATED: look: <why>`" in flat
+    assert "Every reason you escalate for is a line of its own" in flat
+    assert "a green `[commands] check` on the change would show is fixed" in flat
+
+
+def test_decide_asks_each_look_and_runs_nothing_for_a_gate() -> None:
+    """145 R12: a look item is asked in a dialog of its own, `seen` or `checked something`, and
+    recorded as the person's words; a gate reason is told, never run."""
+    flat = " ".join((FACTORY / "skills" / "decide" / "SKILL.md").read_text("utf-8").split())
+    assert "`seen` and `checked something`" in flat
+    assert "→ decided: seen" in flat
+    assert "the hand gate run from the change's worktree" in flat and "Run nothing for it" in flat
+    assert "sdlc.py gate" not in flat, "never pre-approved: no skill names it"
+
+
 def test_ship_shows_settled_defaults_apart() -> None:
     """137 R12: ship shows a settled line as its own list with its reason, and each open default
     with its alternatives."""

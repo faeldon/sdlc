@@ -274,7 +274,9 @@ SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
 # The ledger, `decisions.md`: one line each, ticked once a person has decided it.
-LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+# A third kind, `look`, is an approver's reason only the person can clear by acknowledging it
+# (`escalation_reasons()`), filed by `decisions`, never raised by an agent.
+LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$")
 DECIDED = " → decided: "
 # A later default naming the one it replaces, `- DECISION: [default] (supersedes D2) …`; `decisions`
 # ticks the named line with SUPERSEDED, which every reader of an unticked line then passes over.
@@ -289,6 +291,13 @@ WHY_RE = re.compile(r"^\s+- WHY:\s*(.+?)\s*$")
 # or a round, which `decisions` ticks with SETTLED (never the person's word), or escalated to them.
 SETTLED_RE = re.compile(r"^\s*- SETTLED:\s*(D\d+):\s*(.+?)\s*$")
 ESCALATED_RE = re.compile(r"^\s*- ESCALATED:\s*(D\d+):\s*(.+?)\s*$")
+# Any other reason the approver escalates for, a line each with its kind, which says how it clears:
+# `gate` (a green `[commands] check` on the change would show it fixed: the hand gate's record,
+# `sdlc.py gate`) or `look` (the person acknowledges it in `/sdlc-factory:decide`). A word that is
+# neither, nor `D<n>`, still needs the person: it reads as a look.
+REASON_RE = re.compile(r"^\s*- ESCALATED:\s*([^\s:]+):\s*(.+?)\s*$")
+REASON_KINDS = ("gate", "look")
+LOOK_SOURCE_RE = re.compile(r"^approver round (\d+)$")
 SETTLED = " → settled by the approver: "
 # The answer `/sdlc-factory:decide` writes when the person keeps the default the build assumed.
 KEPT_ANSWER = "the assumed default, confirmed"
@@ -1113,9 +1122,12 @@ def read_nit(line: str) -> dict:
 
 
 def _no_verdict(n: int, role: str, kind: str = "round") -> str:
-    """The problem a round's reply with no verdict `opening()` reads is, word for word as the
-    board and status show it."""
-    return f"reviews/{kind}-{n}/{role}.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
+    """The problem a round's reply with no verdict `opening()` reads is (none first, and none
+    that all its verdict lines agree on), word for word as the board shows it."""
+    return (
+        f"reviews/{kind}-{n}/{role}.md holds no VERDICT: PASS or VERDICT: CHANGES the script "
+        "reads (first, or the only answer it gives)"
+    )
 
 
 def preamble(path: Path) -> bool:
@@ -1500,7 +1512,10 @@ def read_evidence(text: str, where: str) -> list[str]:
     return problems
 
 
-NO_DECISION = "decision.md doesn't open with DECISION: READY or DECISION: ESCALATE"
+NO_DECISION = (
+    "decision.md holds no DECISION: READY or DECISION: ESCALATE the script reads (first, or the "
+    "only answer it gives)"
+)
 
 
 def decision_preamble(folder: Path) -> bool:
@@ -1697,7 +1712,9 @@ def read_ledger(folder: Path) -> list[dict]:
     it. `decided` is a ticked line the person answered, `open` an unticked one: a superseded line
     is neither, so no reader counts it as assumed or as the person's word, and nor is a line the
     approver `settled` (its reason). `options` (each `{"option", "notes"}`, the default first) and
-    `why` are the indented lines under it (`sub_lines()`): empty on a line with none."""
+    `why` are the indented lines under it (`sub_lines()`): empty on a line with none. A `look`
+    line is `current` while it stands for a reason of the current decision (`look_current()`), and
+    open only then: an old one is history, asked by no one."""
     path = folder / "decisions.md"
     if not path.is_file():
         return []
@@ -1711,12 +1728,15 @@ def read_ledger(folder: Path) -> list[dict]:
             text, _, by = text.partition(SUPERSEDED)
             ticked, by, settled = m.group(1) == "x", by.strip() or None, settled.strip() or None
             options, why = sub_lines(lines[i + 1 :])
+            look = m.group(4) == "look"
+            current = look_current(folder, m.group(3), text.strip()) if look else True
             found.append(
                 {"id": m.group(2), "source": m.group(3), "kind": m.group(4), "text": text.strip()}
                 | {
                     "decided": ticked and not by and not settled,
-                    "open": not ticked,
+                    "open": not ticked and current,
                     "answer": answer.strip() or None,
+                    "current": current,
                 }
                 | {"superseded_by": by, "settled": settled, "options": options, "why": why}
             )
@@ -1783,6 +1803,36 @@ def approver_weighing(folder: Path) -> tuple[list[tuple[str, str]], dict[str, di
     return settles, escalated
 
 
+def escalation_reasons(folder: Path) -> list[dict]:
+    """The current `decision.md`'s `gate` and `look` reasons in order, never an archived
+    decision's, each `{"kind", "text"}`: a word other than `gate`, `look` or `D<n>` is a `look`,
+    its word kept in its text. [] without a decision."""
+    path = folder / "decision.md"
+    if not path.is_file():
+        return []
+    found = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = REASON_RE.match(line)
+        if not m or re.fullmatch(r"D\d+", m.group(1)):
+            continue
+        word, text = m.group(1), m.group(2)
+        if word in REASON_KINDS:
+            found.append({"kind": word, "text": text})
+        else:
+            found.append({"kind": "look", "text": f"{word}: {text}"})
+    return found
+
+
+def look_current(folder: Path, source: str, text: str) -> bool:
+    """Whether a `look` line sourced `approver round <R>` with `text` stands for a reason of the
+    current decision: R is the newest round, and the current `decision.md` gives that look word for
+    word. Any other look line is history (a restart's, or an older decision's)."""
+    m = LOOK_SOURCE_RE.match(source)
+    if not m or int(m.group(1)) != newest_round(folder):
+        return False
+    return any(r["kind"] == "look" and r["text"] == text for r in escalation_reasons(folder))
+
+
 def weigh_text(ledger: list[dict]) -> str:
     """What the approve prompt asks of the open defaults in `ledger`, named by id: one `SETTLED`
     or `ESCALATED` line each, what it may never settle, and the options owed for each bare one it
@@ -1813,6 +1863,8 @@ def _settle_refusal(ledger: list[dict], target: str) -> str | None:
     entry = next((d for d in ledger if d["id"] == target), None)
     if entry is None:
         return f"there is no {target} in decisions.md"
+    if entry["kind"] == "look":
+        return f"{target} is the person's to acknowledge"
     if entry["kind"] != "default":
         return f"{target} is blocking: only the person answers it"
     if entry["superseded_by"]:
@@ -1852,12 +1904,14 @@ def cmd_decisions(root: Path, ident: str) -> int:
     lists the open defaults still short of two). The approver's `- SETTLED: D<n>: <reason>`, read
     from the current `decision.md` alone, ticks an open default with ` → settled by the approver:
     <reason>`, never the person's mark; one naming any other line, or an id named twice, marks
-    nothing and is listed in `unsettled` with why. A rerun writes nothing."""
+    nothing and is listed in `unsettled` with why. Each `look` reason of the current decision
+    (`escalation_reasons()`) is filed once for the newest round, `(approver round <R>, look)`, for
+    the person to acknowledge. A rerun writes nothing."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     ledger = read_ledger(folder)
-    by_text = {d["text"]: d for d in ledger}
+    by_text = {d["text"]: d for d in ledger if d["kind"] != "look"}
     added, new_lines, marks, unmarked, fills = [], [], {}, [], {}
 
     def fill(entry: dict, options: list[dict], why: str | None) -> None:
@@ -1875,7 +1929,7 @@ def cmd_decisions(root: Path, ident: str) -> int:
         ledger.append(
             {"id": added[-1], "source": source, "kind": kind, "text": text}
             | {"decided": False, "open": True, "answer": None, "superseded_by": None}
-            | {"settled": None, "options": options, "why": why}
+            | {"settled": None, "options": options, "why": why, "current": True}
         )
         by_text[text] = ledger[-1]
         new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
@@ -1909,6 +1963,21 @@ def cmd_decisions(root: Path, ident: str) -> int:
         entry = next((d for d in ledger if d["id"] == target), None)
         if entry is not None:
             fill(entry, said["options"], said["chose"])
+    # Each look reason of the current decision, once for its round: a restart's new decision files
+    # its own, whatever its words, so an old acknowledgement never answers a new build.
+    source = f"approver round {newest_round(folder)}"
+    filed = {(d["source"], d["text"]) for d in ledger if d["kind"] == "look"}
+    for reason in escalation_reasons(folder):
+        if reason["kind"] != "look" or (source, reason["text"]) in filed:
+            continue
+        filed.add((source, reason["text"]))
+        added.append(f"D{len(ledger) + 1}")
+        ledger.append(
+            {"id": added[-1], "source": source, "kind": "look", "text": reason["text"]}
+            | {"decided": False, "open": True, "answer": None, "current": True}
+            | {"superseded_by": None, "settled": None, "options": [], "why": None}
+        )
+        new_lines.append(f"- [ ] {added[-1]} ({source}, look): {reason['text']}\n")
     if new_lines or marks or fills:
         path = folder / "decisions.md"
         body = path.read_text(encoding="utf-8") if path.is_file() else "# Decisions\n\n"
@@ -1951,14 +2020,17 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     with the reply that raised it (`reply_path()`), its question, its options (the default first;
     none on a ledger from before them), why the default was chosen, and the approver's reason for
     escalating it from the current `decision.md` (`escalated`); and `settled`, the defaults the
-    approver settled, with its reasons. A run still building asks its own, so any other stage is
-    refused.
+    approver settled, with its reasons; a `look` line replies to `decision.md`. `gate` is each
+    `gate` reason of the current decision, whether a green hand gate cleared it
+    (`hand_gate_state()`), and the record's path; None with none. A run still building asks its
+    own, so any other stage is refused.
 
     With `answered`, the ids the person just answered, comma-separated (never their words), it
-    also says `next`: `decide` while any line is open; `rebuild` when an answer isn't
-    `KEPT_ANSWER`, so the build doesn't follow it, `then` naming how (`/sdlc-factory:build NNN`
-    for an ESCALATE, `/sdlc:ship NNN` for a READY, which `restart` refuses); `ship` otherwise. An id
-    that isn't a decided line is refused."""
+    also says `next`: `decide` while any line is open; `rebuild` when an answer (a look's aside)
+    isn't `KEPT_ANSWER`, so the build doesn't follow it, `then` naming how (`/sdlc-factory:build
+    NNN` for an ESCALATE, `/sdlc:ship NNN` for a READY, which `restart` refuses); `gate` while a
+    `gate` reason isn't cleared, `then` `sdlc.py gate NNN`; `ship` otherwise. An id that isn't a
+    decided line is refused."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1973,12 +2045,14 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     _, escalated = approver_weighing(folder)
     items = [
         {"id": d["id"], "kind": d["kind"], "source": d["source"]}
-        | {"reply": reply_path(d["source"]), "question": d["text"], "options": d["options"]}
+        | {"reply": "decision.md" if d["kind"] == "look" else reply_path(d["source"])}
+        | {"question": d["text"], "options": d["options"]}
         | {"why": d["why"], "escalated": (escalated.get(d["id"]) or {}).get("why")}
         for d in sorted(ledger, key=lambda d: int(d["id"][1:]))
         if d["open"]
     ]
     out = {"change": folder.name, "decision": decision, "items": items}
+    out["gate"] = gate_reasons(root, folder)
     out["settled"] = [
         {"id": d["id"], "text": d["text"], "reason": d["settled"]} for d in ledger if d["settled"]
     ]
@@ -1990,13 +2064,16 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
             said = ", ".join(wrong) or "no id"
             return emit({"refusals": [f"{said} isn't a decided line in decisions.md"]}, 1)
         number = folder.name.split("-", 1)[0]
+        gate = out["gate"]
         if items:
             out["next"] = "decide"
-        elif any(by_id[i]["answer"] != KEPT_ANSWER for i in ids):
+        elif any(by_id[i]["kind"] != "look" and by_id[i]["answer"] != KEPT_ANSWER for i in ids):
             out["next"] = "rebuild"
             out["then"] = (
                 f"/sdlc:ship {number}" if decision == "READY" else f"/sdlc-factory:build {number}"
             )
+        elif gate and not all(r["cleared"] for r in gate["reasons"]):
+            out["next"], out["then"] = "gate", f"sdlc.py gate {number}"
         else:
             out["next"] = "ship"
     return emit(out)
@@ -2101,7 +2178,29 @@ def read_land_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
         "train": {"k": int(train.group(1)), "n": int(train.group(2))} if train else None,
+        "waits": field(WAITS_RE),
     }  # fmt: skip
+
+
+def read_land_times(text: str) -> list[dict]:
+    """`runs/land-times.jsonl`'s rows, each `{"step", "round", "seconds"}`, in order: a row that
+    isn't an object with a text `step`, an integer or null `round` and a number of `seconds` not
+    below 0 is passed over. The board keeps a copy, pinned over a shared table."""
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("step"), str):
+            continue
+        rnd, seconds = row.get("round"), row.get("seconds")
+        if rnd is not None and (not isinstance(rnd, int) or isinstance(rnd, bool)):
+            continue
+        if not isinstance(seconds, int | float) or isinstance(seconds, bool) or seconds < 0:
+            continue
+        rows.append({"step": row["step"], "round": rnd, "seconds": float(seconds)})
+    return rows
 
 
 def land_step_text(
@@ -2117,17 +2216,24 @@ def land_step_text(
     ]  # fmt: skip
     if train := out.get("train"):
         lines.append(f"TRAIN: {train['k']} of {train['n']}")
+    if waits := out.get("waits"):
+        lines.append(f"WAITS: {waits}")
     if after:
         lines.append(f"AFTER: {after}")
     lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
     return "\n".join(line.rstrip() for line in lines) + "\n"
 
 
-def _record_land(root: Path, folder: Path, step: str, problems: list[str] = ()) -> None:
+def _record_land(
+    root: Path, folder: Path, step: str, problems: list[str] = (), waits: str | None = None
+) -> None:
     """Write `runs/land-step.md` for landing step `step`, keeping `SINCE:` while the step and
     round hold (the reviewers started together share one start); a `stop` or an `eject` records
     the step it stopped after, the one the record named, and `problems`; a change a train names
-    carries its place, `TRAIN: k of n`, and the train's moves. For the board alone."""
+    carries its place, `TRAIN: k of n`, and the train's moves; a `wait` what it waits on
+    (`WAITS:`). When the step or round changes, the one replaced (never a stop) is added to
+    `runs/land-times.jsonl` with its seconds since its `SINCE:`, for the board's typical times.
+    For the board alone."""
     path = folder / LAND_STEP
     try:
         old = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
@@ -2143,12 +2249,22 @@ def _record_land(root: Path, folder: Path, step: str, problems: list[str] = ()) 
     if train and folder.name in train["order"]:
         out["moves"] = train["moves"]
         out["train"] = {"k": train["order"].index(folder.name) + 1, "n": len(train["order"])}
+    if waits:
+        out["waits"] = waits
     same = old and old["step"] == step and old["round"] == out["round"]
-    since = old["since"] if same and old["since"] else _utc_now()
+    now = _utc_now()
+    since = old["since"] if same and old["since"] else now
     after = None
     if step in ("stop", "eject") and old:
         after = old["after"] if old["step"] in ("stop", "eject") else old["step"]
     path.parent.mkdir(parents=True, exist_ok=True)
+    if old and not same and old["since"] and old["step"] not in ("stop", "eject"):
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        took = datetime.strptime(now, fmt) - datetime.strptime(old["since"], fmt)
+        row = {"step": old["step"], "round": old["round"],
+               "seconds": max(0.0, took.total_seconds())}  # fmt: skip
+        with (folder / LAND_TIMES).open("a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(row) + "\n")
     path.write_text(land_step_text(out, since, after, problems), encoding="utf-8", newline="\n")
 
 
@@ -2755,6 +2871,86 @@ def landed_build(root: Path) -> str:
     return (_git(root, "rev-parse", "HEAD") or "")[:16]
 
 
+# The gate a person runs by hand, `sdlc.py gate NNN`, and its record `build/gate.md`: on a factory
+# run at `stage: test` it clears the approver's `gate` reasons, while its last attempt is a PASS on
+# the build as it stands. Copies of `sdlc.py`'s `HAND_GATE`, `_hand_paths()`, `_hand_digests()`,
+# `_hand_hash()` and `hand_build()`, pinned to them by `tests/test_hand_gate.py`; the record reads
+# through `read_gate_file()`. Never a round's: `verdicts` and the gate history never read it.
+HAND_GATE = Path("build") / "gate.md"
+
+
+def _hand_paths(checkout: Path, base: str) -> tuple[str | None, list[str]]:
+    fork = _git(checkout, "merge-base", base, "HEAD")
+    if not fork:
+        return None, []
+    tracked = _git(checkout, "diff", "-z", "--name-only", "--no-renames", fork) or ""
+    untracked = _git(checkout, "ls-files", "-z", "--others", "--exclude-standard") or ""
+    own = (f"{work_rel(checkout)}/", COUNTER)
+    paths = {p for p in (tracked.split("\0") + untracked.split("\0")) if p}
+    return fork, sorted(p for p in paths if not p.startswith(own))
+
+
+def _hand_digests(checkout: Path, paths: list[str]) -> dict[str, str]:
+    found = {}
+    for p in paths:
+        file = checkout / p
+        found[p] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+    return found
+
+
+def _hand_hash(fork: str | None, digests: dict[str, str]) -> str:
+    text = (fork or "") + "\n" + "".join(f"{p}\0{d}\n" for p, d in sorted(digests.items()))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def hand_build(checkout: Path, base: str) -> str:
+    fork, paths = _hand_paths(checkout, base)
+    return _hand_hash(fork, _hand_digests(checkout, paths))
+
+
+def hand_gate_state(root: Path, folder: Path) -> dict:
+    """The hand gate as it stands on change `folder`, in checkout `root`: its `record` path (from
+    `root`), the last attempt's `verdict` and number (`attempt`), and `green`, a PASS on the build
+    as it stands (`hand_build()`), on the change's own branch. A record that is missing or won't
+    read is never green."""
+    path = folder / HAND_GATE
+    out = {"record": path.relative_to(root).as_posix(), "verdict": None, "attempt": 0,
+           "green": False}  # fmt: skip
+    try:
+        record = read_gate_file(path)
+    except (OSError, UnicodeDecodeError):
+        return out
+    attempts = (record or {}).get("attempts") or []
+    if not attempts:
+        return out
+    last = attempts[-1]
+    out.update(verdict=last["verdict"], attempt=len(attempts))
+    base = _base(root)
+    on_branch = current_branch(root) == folder.name
+    out["green"] = bool(
+        base
+        and on_branch
+        and last["verdict"] == "PASS"
+        and last["build"]
+        and last["build"] == hand_build(root, base)
+    )
+    return out
+
+
+def gate_reasons(root: Path, folder: Path) -> dict | None:
+    """The current decision's `gate` reasons, each `{"text", "cleared"}`, and the hand gate's
+    `record` path: one green hand gate clears them all, and a later edit makes it stale. None
+    without a `gate` reason."""
+    texts = [r["text"] for r in escalation_reasons(folder) if r["kind"] == "gate"]
+    if not texts:
+        return None
+    state = hand_gate_state(root, folder)
+    return {
+        "reasons": [{"text": t, "cleared": state["green"]} for t in texts],
+        "record": state["record"],
+    }
+
+
 def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) -> dict | None:
     """The gate on landing round `n`'s rebased change, as `_gate_state` reads a build's: None when
     the base branch names no check. `settled` reads a round already reviewed: its last attempt's
@@ -3227,14 +3423,21 @@ LAND_STEP = Path("runs") / "land-step.md"
 MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
 # The change's place in a landing train, `TRAIN: <k> of <n>`, on a record of a change a train names.
 TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
+# What a change in a train waits on, `WAITS: stack on <change>` or `WAITS: close after <change>`,
+# on its `wait` record: the live change before it.
+WAITS_RE = re.compile(r"^WAITS: (.+?)\s*$")
+# Each landing step's time, a row as the next step replaces it (`_record_land()`), amended into the
+# change's commit with the rest of its records: what the board's typical landing times read.
+LAND_TIMES = Path("runs") / "land-times.jsonl"
 # The steps a landing records: `checks` and `cases` (its acceptance checks and skills' cases,
 # before its commit; after a rebase the checks run inside the gate's step), `ship` (its commit),
-# `rebase` (a landing again), `stack` (the train stacking it), `resolve` (the builder on a
-# conflict), `fix` (the builder on the person's fix), `gate`, `review`, `mend`, `verify`,
-# `close`, `eject` (the train put it back, a stop with its reason) and `stop`.
+# `rebase` (a landing again), `stack` (the train stacking it), `wait` (a train's change waiting its
+# turn), `resolve` (the builder on a conflict), `fix` (the builder on the person's fix), `gate`,
+# `recheck` (the acceptance checks again, after the commit), `review`, `mend`, `verify`, `close`,
+# `eject` (the train put it back, a stop with its reason) and `stop`.
 LAND_STEPS = (
-    "checks", "cases", "ship", "rebase", "stack", "resolve", "fix", "gate", "review", "mend",
-    "verify", "close", "eject",
+    "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
+    "review", "mend", "verify", "close", "eject",
 )  # fmt: skip
 # The landing tasks `agent` runs, and the step each records as it starts.
 LAND_TASK_STEP = {
@@ -4531,7 +4734,8 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
     each with its reason, never among those to confirm, the `How to recover:` lines its commit
     will carry, and,
     read from its worktree `root` with `cfg`, the agents' nits to file as `[nit]` entries
-    (`nit_findings()`'s `file`, with the line the question shows of each)."""
+    (`nit_findings()`'s `file`, with the line the question shows of each); and for an ESCALATE,
+    how each of its reasons was cleared (`escalation_lines()`)."""
     proposed, recover = read_proposals(folder)
     notes = note_items(folder)
     undone = []
@@ -4567,7 +4771,31 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
                     if d["settled"]],
         "recover": [f"{subject}: {way}" for subject, way in recover],
         "nits": nits,
+        "escalations": escalation_lines(root or folder.parents[2], folder, ledger),
     }  # fmt: skip
+
+
+def escalation_lines(root: Path, folder: Path, ledger: list[dict] | None = None) -> list[str]:
+    """For a change the approver escalated, one line per reason saying how it was cleared, read
+    beside `decision.md`, which no one rewrites: each blocking or default line it holds (never one
+    the approver settled, nor a superseded one) `D2: decided: <answer>`, each current look
+    `D7: acknowledged: <words>`, each `gate` reason `gate: green on the build as it stands
+    (attempt <n>)`, and `<id>: not cleared` or `gate: not cleared` while it isn't. [] for READY."""
+    if read_decision(folder)[0] != "ESCALATE":
+        return []
+    lines = []
+    for d in read_ledger(folder) if ledger is None else ledger:
+        if d["settled"] or d["superseded_by"] or not d["current"]:
+            continue
+        said = "acknowledged" if d["kind"] == "look" else "decided"
+        lines.append(f"{d['id']}: {said}: {d['answer']}" if d["decided"]
+                     else f"{d['id']}: not cleared")  # fmt: skip
+    if any(r["kind"] == "gate" for r in escalation_reasons(folder)):
+        state = hand_gate_state(root, folder)
+        green = f"gate: green on the build as it stands (attempt {state['attempt']})"
+        reasons = [r for r in escalation_reasons(folder) if r["kind"] == "gate"]
+        lines += [green if state["green"] else "gate: not cleared" for _ in reasons]
+    return lines
 
 
 def intent_parts(folder: Path) -> dict:
@@ -4587,8 +4815,9 @@ def land_shown(batch: list[dict]) -> str:
     """What the batch's question calls `as shown`, for the dialog to show beside its yes: each
     change by its name and intent's title, then each part `land_parts()` gives it, only those it
     has: its checks, its cases and their cap, each undone note with its disposition, each assumed
-    decision, each default the approver settled with its reason, its `How to recover:` lines and
-    the agents' nits to file, by their `shown` line."""
+    decision, each default the approver settled with its reason, its `How to recover:` lines,
+    the agents' nits to file, by their `shown` line, and for an escalation how each of its reasons
+    was cleared."""
 
     def listed(head: str, items: list[str]) -> list[str]:
         return [f"  {head}:", *(f"  - {i}" for i in items)] if items else []
@@ -4615,6 +4844,7 @@ def land_shown(batch: list[dict]) -> str:
                          for d in c.get("settled") or []])  # fmt: skip
         lines += listed("How to recover", c["recover"])
         lines += listed("Agents' nits to file", [n["shown"] for n in c.get("nits") or []])
+        lines += listed("Escalated", c.get("escalations") or [])
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -4960,13 +5190,12 @@ def cmd_accept(root: Path, ident: str) -> int:
     the attempt to `build/land-accept.md`, in the gate file's shape: never reading or running
     `checks.md` itself. No skill's rule grants it, so the harness asks before every run. Before
     the landing's commit it records the landing step `checks` (`_record_land()`), for the board;
-    after, its run is part of the gate's step, which the record already names."""
+    after, `recheck`, its own step after the gate."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     build = accept_build(root, folder)
-    if _before_commit(folder):
-        _record_land(root, folder, "checks")
+    _record_land(root, folder, "checks" if _before_commit(folder) else "recheck")
     code, found, said = _sdlc(["accept", folder.name], root)
     if found is None:
         why = f"sdlc.py accept: {said.strip()[-500:]}"
@@ -5928,6 +6157,8 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
 
     def done(step: str, name: str | None = None, **more) -> int:
         tree = trees.get(name) if name else None
+        if name and step not in ("eject", "stop"):
+            _train_waits(state, trees, name)
         out.update(next=step, change=name, worktree=str(tree) if tree else None, **more)
         out["changes"] = {
             n: {k: c.get(k) for k in ("pre", "on", "stacked", "landed", "ejected", "failed")}
@@ -6012,6 +6243,29 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         return done(verdict["next"], name, verdict=verdict)
     # 5. Closed in order.
     return done("close", train_live(state)[0])
+
+
+def _train_waits(state: dict, trees: dict[str, Path], name: str) -> None:
+    """As the train turns to change `name`, each committed live change after it records the step
+    `wait` (`_record_land()`), naming the live change before it: `stack on` it while it isn't
+    stacked, `close after` it once it is. A change mid-rebase, or whose record is a stop, is left
+    as it is. For the board alone: the train never reads the record."""
+    live = train_live(state)
+    if name not in live:
+        return
+    for i in range(live.index(name) + 1, len(live)):
+        other, tree = live[i], trees.get(live[i])
+        if tree is None or not state["changes"][other].get("pre") or _rebasing(tree):
+            continue
+        folder = tree / work_rel(tree) / other
+        try:
+            old = read_land_step((folder / LAND_STEP).read_text(encoding="utf-8"))
+        except OSError:
+            old = None
+        if old and old["step"] in ("stop", "eject"):
+            continue
+        verb = "close after" if _stacked(state, other) else "stack on"
+        _record_land(tree, folder, "wait", waits=f"{verb} {live[i - 1]}")
 
 
 def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> dict | None:
@@ -6380,7 +6634,7 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
         lines = file.read_text(encoding="utf-8").splitlines()
         found = opening(lines, VERDICT_RE)
         if not found:
-            problem = f"reviews/land-{n}/{role}.md doesn't open with a VERDICT"
+            problem = _no_verdict(n, role, "land")
             problems.append(problem)
             if preamble(file):
                 mendable.setdefault(role, []).append(problem)

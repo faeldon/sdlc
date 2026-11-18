@@ -3186,7 +3186,9 @@ def cmd_gate(root: Path, ident: str) -> int:
     only on exit 0, within `GATE_TIMEOUT`, with every path the build covers as it found it. The
     check is read from the base branch, never the checkout, so a change can't edit the gate that
     judges it. Writes only that file, holding no path of this machine's. Never pre-approved: it
-    runs a command, as `accept` does. A factory run is refused: `factory.py gate` gates it."""
+    runs a command, as `accept` does. A factory run is refused while it builds (`factory.py gate`
+    gates it); at `stage: test`, where the factory's own gate has stopped, it gates it too, and its
+    record clears the approver's `gate` reasons while it is current (`needs_of()`)."""
     home = main_root(root)
     trunk = load_config(home)[0]["git"]["base"]
     if refusal := trunk_refusal(home, trunk):
@@ -3200,7 +3202,7 @@ def cmd_gate(root: Path, ident: str) -> int:
     folder = _one_change(root, ident)
     if folder is None:
         return 1
-    if (folder / "runs").is_dir():
+    if (folder / "runs").is_dir() and _stage(folder) != "test":
         return _refused(f"{folder.name} is a factory run: its gate is `factory.py gate`")
     checkout = checkout_of(folder)
     branch = _git(checkout, "rev-parse", "--abbrev-ref", "HEAD")
@@ -4594,7 +4596,16 @@ def _close_times(main: Path, trunk: str) -> dict[str, datetime]:
 FACTORY_VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 FACTORY_DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 FACTORY_CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
-FACTORY_LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+FACTORY_LEDGER_RE = re.compile(
+    r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$"
+)
+# The approver's reasons beyond the ledger, `- ESCALATED: gate: …` or `look: …` (any other word
+# but `D<n>` a look), and the source `decisions` files a look line under; with the factory's
+# `newest_round()` (`factory_newest_round()`), what tells a current look line from history.
+FACTORY_REASON_RE = re.compile(r"^\s*- ESCALATED:\s*([^\s:]+):\s*(.+?)\s*$")
+FACTORY_REASON_KINDS = ("gate", "look")
+FACTORY_LOOK_SOURCE_RE = re.compile(r"^approver round (\d+)$")
+FACTORY_DECIDED = " → decided: "
 # The mark `factory.py decisions` ticks a default with when the approver settled it: never the
 # person's answer, so no reader counts it as one.
 FACTORY_SETTLED = " → settled by the approver: "
@@ -4744,14 +4755,47 @@ def factory_upgraded_build(folder: Path) -> bool:
     return bool(first) and first.group(1) == "build" and (found or [""])[0] == str(n)
 
 
+def factory_newest_round(folder: Path) -> int:
+    """The newest round built or reviewed: a copy of `factory.py`'s `newest_round()` (and its
+    `build_round()`), pinned to it by a test."""
+    names = [p.stem[6:] for p in (folder / "build").glob("round-*.md")]
+    built = max((int(n) for n in names if n.isdigit()), default=0)
+    reviewed = [
+        int(p.name[6:]) for p in (folder / "reviews").glob("round-*")
+        if p.is_dir() and p.name[6:].isdigit()
+    ]  # fmt: skip
+    return max([built, *reviewed])
+
+
+def factory_reasons(lines: list[str]) -> list[dict]:
+    """A decision's `gate` and `look` reasons, as `factory.py`'s `escalation_reasons()` reads them
+    (a test pins the two): each `{"kind", "text"}`, in order."""
+    found = []
+    for line in lines:
+        m = FACTORY_REASON_RE.match(line)
+        if not m or re.fullmatch(r"D\d+", m.group(1)):
+            continue
+        word, text = m.group(1), m.group(2)
+        if word in FACTORY_REASON_KINDS:
+            found.append({"kind": word, "text": text})
+        else:
+            found.append({"kind": "look", "text": f"{word}: {text}"})
+    return found
+
+
 def factory_reading(folder: Path) -> dict:
     """What `needs_of()` reads from a factory run's folder, as the board reads it: the approver's
     decision, whether it asks to reconsider the approach, the ledger's open blocking (`pending`)
     and default (`assumed`) decisions, its count of decision lines (a default the approver settled
-    is none: it is no answer of the person's), and `problems`: an open box the ledger can't read,
-    or a file that won't. Never raises."""
+    is none: it is no answer of the person's; a `look` line is none either), and `problems`: an
+    open box the ledger can't read, or a file that won't. `reasons` are the current decision's
+    `gate` and `look` reasons, each with whether it is `filed` (a look with a current ledger line)
+    and `cleared` (a look acknowledged; a gate never here: `needs_of()` reads the hand gate), and
+    `looks` the current look lines still open. A look line is current only while it names the
+    newest round and the current decision gives it word for word. Never raises."""
     found = {"decision": None, "reconsider": False, "pending": [], "assumed": [],
-             "ledger_lines": 0, "problems": []}  # fmt: skip
+             "ledger_lines": 0, "problems": [], "reasons": [], "looks": []}  # fmt: skip
+    lines: list[str] = []
     try:
         path = folder / "decision.md"
         if path.is_file():
@@ -4764,14 +4808,34 @@ def factory_reading(folder: Path) -> dict:
     except OSError as e:
         found["problems"].append(str(e))
         return found
-    garbled = False
+    reasons = factory_reasons(lines)
+    looked = {r["text"] for r in reasons if r["kind"] == "look"}
+    newest = f"approver round {factory_newest_round(folder)}" if looked else None
+    garbled, filed, seen = False, set(), set()
     for line in text.splitlines():
         m = FACTORY_LEDGER_RE.match(line)
-        found["ledger_lines"] += bool(m) and FACTORY_SETTLED not in line
         garbled = garbled or not m and line.startswith("- [ ]")
-        if m and m.group(1) == " ":
+        if not m:
+            continue
+        if m.group(4) == "look":
+            words = m.group(5).partition(FACTORY_DECIDED)[0].strip()
+            if m.group(3) != newest or words not in looked:
+                continue  # history: an older decision's, or a restart's
+            filed.add(words)
+            if m.group(1) == "x":
+                seen.add(words)
+            else:
+                found["looks"].append({"id": m.group(2), "by": m.group(3), "text": words})
+            continue
+        found["ledger_lines"] += FACTORY_SETTLED not in line
+        if m.group(1) == " ":
             item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
             found["pending" if m.group(4) == "blocking" else "assumed"].append(item)
+    found["reasons"] = [
+        r | {"filed": r["kind"] == "gate" or r["text"] in filed,
+             "cleared": r["kind"] == "look" and r["text"] in seen}
+        for r in reasons
+    ]  # fmt: skip
     if garbled:
         found["problems"].append(GARBLED_LEDGER)
     return found
@@ -4780,13 +4844,15 @@ def factory_reading(folder: Path) -> dict:
 def needs_of(rec: dict) -> list[str]:
     """What a change needs from the person, as short texts, from fields already read: `stage`,
     `tier`, `problems`, `stopped`, `land_stop`, `decision`, `reconsider`, `pending`, `assumed`,
-    `ledger_lines` and `spec_filled`. The one place the rules live, so the board and `status`
-    can't disagree; it reads nothing itself. Every problem first, at any stage; at `test` or
-    `shipped`, the landing's stages, a stopped landing (`land_stop`, `factory_land_stop()`),
-    naming the step it stopped after; a closed change nothing more; at `build` a stop, then each
-    blocking decision; at `test` with an ESCALATE what its ledger and decision still hold, or,
-    with no ledger line at all, the escalation itself; a Tier 2 at `plan` whose `spec.md` is
-    written but whose stage never moved, its approval."""
+    `ledger_lines`, `reasons`, `looks`, `gate` (the hand gate's record) and `spec_filled`. The
+    one place the rules live, so the board and `status` can't disagree; it reads nothing itself.
+    Every problem first, at any stage; at `test` or `shipped`, the landing's stages, a stopped
+    landing (`land_stop`, `factory_land_stop()`), naming the step it stopped after; a closed
+    change nothing more; at `build` a stop, then each blocking decision; at `test` with an
+    ESCALATE what its ledger and decision still hold (each current `look` to acknowledge, and
+    `gate it green` while a `gate` reason has no current green hand gate), or, with no reason and
+    no ledger line at all, or a look reason not yet filed, the escalation itself; a Tier 2 at
+    `plan` whose `spec.md` is written but whose stage never moved, its approval."""
     needs = [f"fix: {p}" for p in rec.get("problems") or []]
     stage = rec.get("stage")
     if stage in ("test", "shipped") and (stop := rec.get("land_stop")):
@@ -4805,7 +4871,14 @@ def needs_of(rec: dict) -> list[str]:
             needs.append(f"confirm {n} default" + ("s" if n > 1 else ""))
         if rec.get("reconsider"):
             needs.append("reconsider the approach")
-        if not rec.get("ledger_lines"):
+        needs += [f"acknowledge {d['id']}" for d in rec.get("looks") or []]
+        reasons = rec.get("reasons") or []
+        gate = rec.get("gate") or {}
+        green = bool(gate.get("current")) and gate.get("verdict") == "PASS"
+        if any(r["kind"] == "gate" for r in reasons) and not green:
+            needs.append("gate it green")
+        unfiled = any(r["kind"] == "look" and not r.get("filed") for r in reasons)
+        if (not reasons and not rec.get("ledger_lines")) or unfiled:
             needs.append("read the escalation")
     elif stage == "plan" and rec.get("tier") == 2 and rec.get("spec_filled"):
         needs.append("approve its spec")
@@ -4814,17 +4887,19 @@ def needs_of(rec: dict) -> list[str]:
 
 def decide_step(rec: dict) -> str | None:
     """Where the person answers what an escalation at `test` still needs, from its `needs`: the
-    factory's `/sdlc-factory:decide NNN`, while they hold a decision to make or defaults to
-    confirm; None otherwise. Status and the board both name it."""
+    factory's `/sdlc-factory:decide NNN`, while they hold a decision to make, defaults to confirm
+    or a look to acknowledge; None otherwise. Status and the board both name it."""
     needs = rec.get("needs") or []
-    if rec.get("stage") != "test" or not any(n.startswith(("decide ", "confirm ")) for n in needs):
+    asks = ("decide ", "confirm ", "acknowledge ")
+    if rec.get("stage") != "test" or not any(n.startswith(asks) for n in needs):
         return None
     return f"/sdlc-factory:decide {rec['id']}"
 
 
 def answered(rec: dict) -> bool:
     """An escalation the person has answered: an ESCALATE at `test` that needs nothing more, which
-    `needs_of()` allows only with a ledger line, every one ticked, and no `Reconsider` section."""
+    `needs_of()` allows only with a ledger line or a reason, every line ticked, every gate reason
+    cleared by a current green hand gate, and no `Reconsider` section."""
     return rec.get("stage") == "test" and rec.get("decision") == "ESCALATE" and not needs_of(rec)
 
 
@@ -10393,9 +10468,10 @@ def main() -> int:
         # A factory run its supervisor recorded as stopped waits on the person, never quiet.
         rec["stopped"] = factory_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
         # A gate run by hand (`gate`) says whether the build as it stands is green; a factory
-        # run's gate is its own.
+        # run's gate is its own while it builds, and at `test` the hand gate clears a `gate` reason.
         folder = Path(root, rec["dir"])
-        rec["gate"] = None if (folder / "runs").is_dir() else hand_gate(folder, home, a["trunk"])
+        hand = not (folder / "runs").is_dir() or rec["stage"] == "test"
+        rec["gate"] = hand_gate(folder, home, a["trunk"]) if hand else None
         # What it needs from the person, by the rules the board reads (`needs_of()`); a factory
         # run's decision and ledger only where it ran, and nothing but the two answers kept.
         seen = factory_reading(folder) if (folder / "runs").is_dir() else {"problems": []}

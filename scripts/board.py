@@ -55,7 +55,7 @@ DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
-LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$")
 SETTLED = " → settled by the approver: "
 RECONSIDER = "## Reconsider the approach"
 # An open box the ledger can't read: a problem, never an answered decision.
@@ -76,8 +76,23 @@ SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 LAND_STEP = Path("runs") / "land-step.md"
 MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
 TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
+WAITS_RE = re.compile(r"^WAITS: (.+?)\s*$")
+LAND_TIMES = Path("runs") / "land-times.jsonl"
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 REVIEWER_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
+# A reply or a decision with no answer `opening()` reads, worded as `factory.py`'s `_no_verdict()`
+# and `NO_DECISION` word it, pinned by a test.
+NO_DECISION = (
+    "decision.md holds no DECISION: READY or DECISION: ESCALATE the script reads (first, or the "
+    "only answer it gives)"
+)
+
+
+def no_verdict(n: int, role: str, kind: str = "round") -> str:
+    return (
+        f"reviews/{kind}-{n}/{role}.md holds no VERDICT: PASS or VERDICT: CHANGES the script "
+        "reads (first, or the only answer it gives)"
+    )
 
 
 def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
@@ -99,17 +114,19 @@ TRACK = ("build", "gate", "review", "verify", "rework", "approve")
 AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
 PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
-# A landing's track, from `runs/land-step.md`: its six positions, and where each step the record
+# A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The acceptance checks and the
-# skills' cases run before the commit, at the ship's position; the builder resolving a conflict or
-# making the person's fix sits at the rebase, as does a train stacking the change, a mend at the
-# review, each with its own label. A `stop`, and a train's `eject`, mark the step it stopped
-# after (an `eject` naming none sits at the gate, where most come from). Only the steps history
-# can time are timed.
-LAND_TRACK = ("ship", "rebase", "gate", "review", "verify", "close")
+# skills' cases run before the commit, at the ship's position, and the checks again after the
+# commit (`recheck`) at a position of their own after the gate; the builder resolving a conflict or
+# making the person's fix sits at the rebase, as does a train stacking the change or a change
+# waiting its turn in one, a mend at the review, each with its own label. A `stop`, and a train's
+# `eject`, mark the step it stopped after (an `eject` naming none sits at the gate, where most
+# come from).
+LAND_TRACK = ("ship", "rebase", "gate", "checks", "review", "verify", "close")
 LAND_AT = {
-    "checks": 0, "cases": 0, "ship": 0, "rebase": 1, "stack": 1, "resolve": 1, "fix": 1,
-    "gate": 2, "review": 3, "mend": 3, "verify": 4, "close": 5, "eject": 2,
+    "checks": 0, "cases": 0, "ship": 0, "rebase": 1, "stack": 1, "wait": 1, "resolve": 1,
+    "fix": 1, "gate": 2, "recheck": 3, "review": 4, "mend": 4, "verify": 5, "close": 6,
+    "eject": 2,
 }  # fmt: skip
 LAND_LABEL = {
     "checks": "checks",
@@ -118,9 +135,16 @@ LAND_LABEL = {
     "fix": "fixing",
     "mend": "mending",
     "stack": "stacking",
+    "wait": "waiting",
+    "recheck": "checks",
 }
 LAND_STOPS = ("stop", "eject")
+# The steps whose figures come from the review and gate records history already holds, and those
+# `runs/land-times.jsonl` times. An open-ended step (a conflict, a fix, a mend, a paid case run, a
+# turn in a train) has no typical length: its card shows elapsed time and `running`, never a bar.
 LAND_TIMED = ("gate", "review", "verify")
+LAND_TIMES_STEPS = ("ship", "rebase", "stack", "checks", "recheck", "close")
+LAND_OPEN = ("resolve", "fix", "mend", "cases", "wait")
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
 # only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
 WINDOW = 20
@@ -232,8 +256,9 @@ def _entry(
         "mode": "factory" if (folder / "runs").is_dir() else "manual",
         "rebasing": rebasing,
     }  # fmt: skip
-    if entry["mode"] == "manual":
-        # The record a gate run by hand left (`sdlc.py gate`); a factory run's gate is its own.
+    if entry["mode"] == "manual" or rec["stage"] == "test":
+        # The record a gate run by hand left (`sdlc.py gate`); a factory run's gate is its own
+        # while it builds, and at `test` the hand gate clears the approver's `gate` reasons.
         entry["gate"] = read("build/gate.md", lambda: sdlc.hand_gate(folder, home, trunk), None)
         problems += (entry["gate"] or {}).get("problems", [])
     if entry["mode"] == "factory":
@@ -274,21 +299,22 @@ def _entry(
 def _seen(entry: dict, folder: Path, home: Path, trunk: str | None) -> str | None:
     """How far a change built by hand has got, past what its `stage:` says: nothing moves that line
     between `plan` (or a Tier 2's `design`) and `shipped`, so the board reads what `status` does.
-    `test` once ship's review has written `findings.md`, or once a gate run by hand passed on the
-    build as it stands (`sdlc.py gate`'s record, current); `build` once the change touches a path
-    outside the change folders and the plugin's own state, in its branch's commits or, in a
-    worktree of its own, its uncommitted edits. None when neither says more, and always for a
-    factory run, whose stage line the factory moves itself."""
+    `ready` once ship's review has written `findings.md`, or once a gate run by hand passed on the
+    build as it stands (`sdlc.py gate`'s record, current), and never while that record is current
+    and red; `build` once the change touches a path outside the change folders and the plugin's
+    own state, in its branch's commits or, in a worktree of its own, its uncommitted edits. None
+    when neither says more, and always for a factory run, whose stage line the factory moves
+    itself."""
     stage = entry["stage"]
     # A Tier 2 at `plan` has no spec yet: what it touches isn't its build.
     moving = ("plan", "design", "build") if entry["tier"] == 1 else ("design", "build")
     if entry["mode"] != "manual" or stage not in moving:
         return None
-    if (folder / "findings.md").is_file():
-        return "test"
-    gate = entry.get("gate")
-    if gate and gate["current"] and gate["verdict"] == "PASS":
-        return "test"
+    gate = entry.get("gate") or {}
+    red = gate.get("current") and gate.get("verdict") == "FAIL"
+    green = gate.get("current") and gate.get("verdict") == "PASS"
+    if not red and ((folder / "findings.md").is_file() or green):
+        return "ready"
     if stage == "build":
         return None
     own = (f"{sdlc.work_rel(home)}/", *(f".sdlc/{name}" for name in sdlc.STATE_FILES))
@@ -367,7 +393,7 @@ def _factory(folder: Path, problems: list[str]) -> dict:
             lines = file.read_text(encoding="utf-8", errors="replace").splitlines()
             answer = opening(lines, VERDICT_RE)
             if not answer:
-                problems.append(f"reviews/round-{n}/{file.name} doesn't open with a VERDICT line")
+                problems.append(no_verdict(n, file.stem))
                 continue
             at, m = answer
             changes = sum(1 for line in lines[at + 1 :] if CHANGE_RE.match(line))
@@ -393,22 +419,28 @@ def _factory(folder: Path, problems: list[str]) -> dict:
         decision = m.group(1) if m else None
         reconsider = RECONSIDER in [line.strip() for line in lines]
         if not m:
-            problems.append("decision.md doesn't open with DECISION: READY or ESCALATE")
+            problems.append(NO_DECISION)
     pending, assumed, ledger_lines, garbled = [], [], 0, False
     path = folder / "decisions.md"
     for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
         m = LEDGER_RE.match(line)
-        ledger_lines += bool(m) and SETTLED not in line
         garbled = garbled or not m and line.startswith(OPEN_BOX)
+        # A look line is the approver's reason, read with the decision (`sdlc.factory_reading()`).
+        if m and m.group(4) == "look":
+            continue
+        ledger_lines += bool(m) and SETTLED not in line
         if m and m.group(1) == " ":
             item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
             (pending if m.group(4) == "blocking" else assumed).append(item)
     if garbled:
         problems.append(sdlc.GARBLED_LEDGER)
+    # The approver's `gate` and `look` reasons and the look lines still open, as `status` reads
+    # them: `sdlc.factory_reading()` itself, so the card and `status` can't say two things.
+    reading = sdlc.factory_reading(folder)
     return {
         "rounds": rounds, "built": built, "decision": decision, "pending": pending,
         "assumed": assumed, "cost": cost(folder), "reconsider": reconsider,
-        "ledger_lines": ledger_lines,
+        "ledger_lines": ledger_lines, "reasons": reading["reasons"], "looks": reading["looks"],
     }  # fmt: skip
 
 
@@ -544,7 +576,29 @@ def read_land_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "problems": [m.group(1) for m in map(PROBLEM_RE.match, lines) if m],
         "train": {"k": int(train.group(1)), "n": int(train.group(2))} if train else None,
+        "waits": field(WAITS_RE),
     }  # fmt: skip
+
+
+def read_land_times(text: str) -> list[dict]:
+    """`runs/land-times.jsonl`'s rows, as `factory.py`'s `read_land_times()` reads them (a test
+    pins the two over a shared table): each `{"step", "round", "seconds"}`, a row that won't read
+    passed over."""
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("step"), str):
+            continue
+        rnd, seconds = row.get("round"), row.get("seconds")
+        if rnd is not None and (not isinstance(rnd, int) or isinstance(rnd, bool)):
+            continue
+        if not isinstance(seconds, int | float) or isinstance(seconds, bool) or seconds < 0:
+            continue
+        rows.append({"step": row["step"], "round": rnd, "seconds": float(seconds)})
+    return rows
 
 
 def _land_progress(
@@ -552,9 +606,11 @@ def _land_progress(
 ) -> dict | None:
     """A landing's track, from the step its last command recorded (`runs/land-step.md`): the
     landing round, the base branch's moves followed out of `[land] moves`, the change's place in
-    a train (`k of n`), the current step's time against the typical one where history has it, and
-    on a stop (a train's `eject` too) the step it stopped after and its problems. None for a step
-    this board doesn't know; a record that won't read is a problem."""
+    a train (`k of n`) and what it waits on there (`wait`), the current step's time against the
+    typical one where history has it, else its elapsed time alone and `running` (always, for an
+    open-ended step, `LAND_OPEN`), and on a stop (a train's `eject` too) the step it stopped after
+    and its problems. None for a step this board doesn't know; a record that won't read is a
+    problem."""
     path = folder / LAND_STEP
     rec = read_land_step(path.read_text(encoding="utf-8", errors="replace"))
     if rec is None:
@@ -573,20 +629,24 @@ def _land_progress(
         steps.append({"name": name, "state": state, "label": label})
     start = _since(rec["since"])
     elapsed = max(0, round(now - start)) if not stopped and start is not None else None
-    timed = step in LAND_TIMED and not stopped
+    timed = step not in LAND_OPEN and not stopped
     found = (history or {}).get(f"land-{step}/{entry['tier']}") if timed else None
     typical = found["seconds"] if found else None
     fraction = None
     if typical and elapsed is not None:
         fraction = round(min(elapsed / typical, CAP), 3)
+    # The change it waits on by its number, as a card names a change.
+    waits = re.sub(r"\b(\d{3,})-[a-z0-9][a-z0-9-]*", r"\1", rec["waits"] or "")
     return {
         "kind": "land", "steps": steps, "round": rec["round"], "limit": rec["limit"],
         "moves": rec["moves"], "step": step, "after": rec["after"] if stopped else None,
         "train": f"{rec['train']['k']} of {rec['train']['n']}" if rec["train"] else None,
+        "wait": f"waiting to {waits}" if step == "wait" and waits else None,
         "paused": False, "stopped": stopped, "early": None,
         "problems": rec["problems"], "elapsed": elapsed,
         "typical": typical if fraction is not None else None, "fraction": fraction,
         "samples": found["samples"] if fraction is not None else None, "plan": None,
+        "running": not stopped and fraction is None,
     }  # fmt: skip
 
 
@@ -635,7 +695,8 @@ def typical_times(home: Path, trunk: str | None) -> dict:
 def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, list[float]]]:
     """Each step's seconds at each tier, by change, from the newest `WINDOW` `Close` commits on the
     base branch's first-parent line that removed a `runs/costs.jsonl`: the change's own files,
-    read at the `Close` commit's parent, where its folder last stood."""
+    read at the `Close` commit's parent, where its folder last stood, its landing's step times
+    (`runs/land-times.jsonl`) among them."""
     work = sdlc.work_rel(home)
     out = sdlc._git(
         home, "log", "--first-parent", "--format=%H%x00%s", f"refs/heads/{trunk}", "--",
@@ -664,14 +725,15 @@ def history_samples(home: Path, trunk: str) -> dict[tuple[str, int], dict[str, l
                 text = sdlc._git(home, "show", f"{at}/build/{gate}") or ""
                 lines = text.splitlines()
                 gates[kind] += [float(m.group(1)) for m in map(SECONDS_RE.match, lines) if m]
-        for step, values in step_samples(costs, gates["round-"], gates["land-"]).items():
+        times = sdlc._git(home, "show", f"{at}/{LAND_TIMES.as_posix()}") or ""
+        for step, values in step_samples(costs, gates["round-"], gates["land-"], times).items():
             if values:
                 found.setdefault((step, int(tier)), {})[name] = values
     return found
 
 
 def step_samples(
-    costs: str, gates: list[float], land_gates: list[float] = ()
+    costs: str, gates: list[float], land_gates: list[float] = (), land_times: str = ""
 ) -> dict[str, list[float]]:
     """One run's seconds by step, from its `costs.jsonl` rows in the order its sessions ended: the
     first builder's is the build, every later one before the approver a rework (a gate fix among
@@ -680,9 +742,13 @@ def step_samples(
     approver is the landing's: its review rounds and verifications as `land-review` and
     `land-verify`, its gates (`land_gates`) as `land-gate`, and its builder rows (a resolve or a
     fix, which the rows can't tell apart) not at all. A row without an integer `duration_ms` is
-    skipped."""
+    skipped. The landing's other steps (`LAND_TIMES_STEPS`) come from `land_times`, its
+    `runs/land-times.jsonl`; an open-ended one is never timed."""
     out: dict[str, list[float]] = {s: [] for s in TRACK}
-    out.update({f"land-{s}": [] for s in LAND_TIMED})
+    out.update({f"land-{s}": [] for s in (*LAND_TIMED, *LAND_TIMES_STEPS)})
+    for row in read_land_times(land_times):
+        if row["step"] in LAND_TIMES_STEPS:
+            out[f"land-{row['step']}"].append(row["seconds"])
     out["gate"] = list(gates)
     out["land-gate"] = list(land_gates)
     together: list[float] = []
@@ -757,15 +823,26 @@ def next_action(entry: dict) -> str:
     """What a person runs next on the change, from its stage and tier, and for a factory run its
     decision and the decisions its `needs` still holds (`sdlc.needs_of()`, so the step follows the
     card's `needs you:` line): the step `status` and each skill's report name. The first state a
-    card holds names it, highest first: a stopped rebase, a missing stage, any other problem (with
+    card holds names it, highest first: a factory landing's builder resolving a conflict, a
+    stopped rebase, a missing stage, any other problem (with
     a decision that still waits named before it), a stopped landing, a landing under way, shipped
     or dropped, a factory stop, a decision
-    still to make, the approver's decision, a factory build, a red gate, then the stage's own step
+    still to make or a look to acknowledge, a gate reason the hand gate clears, the approver's
+    decision, a factory build, a red gate, then the stage's own step
     (`PRECEDENCE` and `BOTH` in `tests/test_board.py` pin every pair)."""
     stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
+    landing = entry.get("progress") or {}
     # A stopped rebase comes first: until it ends, no step of the stage's applies, and its
-    # conflicted files may be what won't read. `sdlc.py resolve` finishes or undoes it, and an
-    # undo keeps what was resolved under `refs/sdlc/end/<branch>` (`sdlc.RESOLVE_REFS`).
+    # conflicted files may be what won't read. A factory landing's builder resolves its own
+    # (the record names `resolve`, no stop): the person waits, or lands it again if its session
+    # ended. Any other, `sdlc.py resolve` finishes or undoes, and an undo keeps what was resolved
+    # under `refs/sdlc/end/<branch>` (`sdlc.RESOLVE_REFS`).
+    resolving = landing.get("kind") == "land" and landing.get("step") == "resolve"
+    if entry.get("rebasing") and resolving and not landing.get("stopped"):
+        return (
+            "its builder is resolving a conflict: wait for it, or "
+            f"/sdlc-factory:land {entry['id']} if its session ended"
+        )
     if entry.get("rebasing"):
         ident = entry["id"]
         return (
@@ -791,7 +868,6 @@ def next_action(entry: dict) -> str:
         return f"{decide}, and fix what its problems name" if ids else "fix what its problems name"
     # A landing under way is the factory's, before its commit and after: never the hand-run
     # close or ship, until it stops, when the person takes it on.
-    landing = entry.get("progress") or {}
     # A change already shipped, as a landing that stopped at its close is, is closed by hand, not
     # shipped again.
     if landing.get("kind") == "land" and landing.get("stopped"):
@@ -800,6 +876,12 @@ def next_action(entry: dict) -> str:
         return (
             f"the landing stopped at {landing.get('after') or 'a step'}: fix what it names, then "
             f"/sdlc-factory:land {ident}, or {hand} by hand"
+        )
+    if landing.get("kind") == "land" and landing.get("wait"):
+        # A change in a train waiting its turn: what it waits on, never the step it last finished.
+        return (
+            f"{landing['wait']}: wait for it, or /sdlc-factory:land {entry['id']} if its session "
+            "ended"
         )
     if landing.get("kind") == "land":
         return (
@@ -813,10 +895,16 @@ def next_action(entry: dict) -> str:
     if ids and stage == "build":
         return decide
     if step := sdlc.decide_step(entry):
-        # An escalation at `test` is answered one item at a time in the factory's `decide`.
+        # An escalation at `test` is answered one item at a time in the factory's `decide`, a
+        # look acknowledged there too.
+        seen = [n.removeprefix("acknowledge ") for n in entry["needs"]
+                if n.startswith("acknowledge ")]  # fmt: skip
         asked = [n.removeprefix("confirm ") for n in entry["needs"] if n.startswith("confirm ")]
-        what = " and ".join(filter(None, [", ".join(ids), *asked]))
+        what = " and ".join(filter(None, [", ".join(ids + seen), *asked]))
         return f"{step} for {what}, then /sdlc:ship, or /sdlc-factory:land with the others ready"
+    if "gate it green" in (entry.get("needs") or []):
+        # A `gate` reason alone is left: the hand gate, green on the change as it stands, clears it.
+        return f"sdlc.py gate {entry['id']}, once its gate's fault is fixed"
     if ids:
         return f"{decide}, then /sdlc:ship, or /sdlc-factory:land with the others ready"
     if entry.get("decision") and stage == "test":
@@ -835,22 +923,33 @@ def next_action(entry: dict) -> str:
     return "/sdlc:ship"
 
 
+# The board's columns, by the state of the work, the same for a change built by hand or by the
+# factory (`board.html`'s `COLUMNS`, keyed as these): a stage's own column by its `stage:` line, or
+# by `_seen()` for a change built by hand.
+BY_STAGE = {"plan": "planned", "design": "designing", "build": "building", "ready": "ready"}
+
+
 def column(entry: dict) -> str:
-    """The board's column: a file that won't read first, at any stage; then Needs you exactly
-    when `sdlc.needs_of()` names something (a stop or a blocking decision at `build`, an
-    escalation's open ledger at `test`, a stopped landing at `test` or `shipped`, a written spec
-    whose stage never moved), since a factory signal counts only at the stage it belongs to; then
-    a shipped or dropped change, waiting on close whatever the factory's files still say; then
-    the approver's decision at `test`, an escalation by now answered, as Ready to ship; else how
-    far it has got."""
+    """The board's column, by the state of the work, checked in this order: Needs you for a file
+    that won't read, at any stage, or anything `sdlc.needs_of()` names (a stop or a blocking
+    decision at `build`, an escalation not yet cleared at `test`, a stopped landing, a written
+    spec whose stage never moved), since a factory signal counts only at the stage it belongs to;
+    Landing for a change committed and on its way (shipped or dropped and waiting on close,
+    whatever the factory's files still say, or a factory landing in flight at `test`); Ready for
+    a factory change at `test` the approver called READY, or whose escalation is answered, and a
+    change built by hand whose review is written or whose gate is green (`_seen()`); else by how
+    far it has got: Planned, Designing or Building (a factory change at `test` with no decision,
+    a restart cut short, too)."""
     stage = entry["stage"]
     if entry["problems"] or entry.get("needs"):
         return "needs-you"
-    if stage in CLOSED:
-        return "close"
-    if stage == "test" and entry.get("decision") in ("READY", "ESCALATE"):
-        return "ready"
-    return entry.get("seen") or stage or "needs-you"
+    landing = entry.get("progress") or {}
+    if stage in CLOSED or (landing.get("kind") == "land" and not landing.get("stopped")):
+        return "landing"
+    if stage == "test" and entry["mode"] == "factory":
+        ready = entry.get("decision") == "READY" or sdlc.answered(entry)
+        return "ready" if ready else "building"
+    return BY_STAGE.get(entry.get("seen") or stage or "", "needs-you")
 
 
 def file_at(root: Path, change: str, rel: str) -> Path | None:

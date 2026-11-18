@@ -16,7 +16,9 @@ disable-model-invocation: true
 A factory run leaves the calls its agents couldn't make in the change's ledger,
 `.sdlc/work/NNN-slug/decisions.md`: blocking decisions the supervisor didn't get to, and defaults the
 build went ahead on. The approver settles the defaults it can from the spec, the code and the
-rounds, and escalates the rest. This skill asks the person what is left, on one change, one item
+rounds, and escalates the rest, with any other reason it escalates for: a `look`, filed in the
+ledger for the person to acknowledge, or a `gate`, which the hand gate clears once it is green on
+the change as it stands. This skill asks the person what is left, on one change, one item
 at a time, with what they need to judge it in front of them, and records their answers where the
 supervisor records its own: `- [x] … → decided: <answer>`.
 
@@ -44,7 +46,13 @@ A refusal is said, naming the change, with what the person can do instead, and t
 
 Otherwise `ask` prints `decision`, the approver's,
 `items`, each open line in id order (`id`, `kind`, `source`, `reply`, `question`, `options`, `why`,
-`escalated`), and `settled`, the defaults the approver settled with its reasons.
+`escalated`), `settled`, the defaults the approver settled with its reasons, and `gate`: each
+`gate` reason with whether it is `cleared`, and the hand gate's `record`, or null with none.
+
+Tell the person about each uncleared `gate` reason, naming the change: what the approver said, and
+that once they have fixed it, the hand gate run from the change's worktree (the command `ask
+--answered` names in `then`), green on the change as it stands, clears it; an edit after makes it
+stale. Run nothing for it: the gate is the person's own command, never this skill's.
 
 With no `items`, say that nothing is open on `NNN-slug` and stop. Otherwise show first, naming the
 change: the approver's `decision`, and the `settled` list as one block (`The approver settled
@@ -65,6 +73,11 @@ the default and why it was chosen (`why`), and each alternative with its notes. 
   question's text, for the person to type.
 - With no `options` (a ledger from before them, or a bare line): `keep the default` and `change it`.
   For `change it`, ask what they want instead, as text.
+
+- A `look` item (`kind: look`, the approver's reason in `question`, its `reply` `decision.md`): read
+  the decision around it, and ask whether they have looked. Its answers are `seen` and `checked
+  something`; for `checked something`, ask what they checked, as text. A look is never answered for
+  them, and never by an agent.
 
 For a blocking item, the first option is the agent's recommendation, marked as such in its
 description. Hold each answer: the option the person chose, or their words when they typed one.
@@ -96,6 +109,7 @@ On `change one`, ask which, ask that item again as in Step 1, and come back to t
 `- WHY:` lines under it left as they are. The answer is exactly `the assumed default, confirmed`
 when the person kept the default; the option's text when they chose an alternative (or, on a
 blocking line, the recommendation); and their own words, as they gave them, for anything typed.
+A look's answer is `→ decided: seen`, or the words they gave for what they checked.
 Then pass the ids, never the words, which go on no command line:
 
 ```bash
@@ -109,6 +123,8 @@ Say its `next` in the person's words, naming the change:
 - `rebuild`: an answer isn't the default the build assumed, so the build doesn't follow it yet.
   Run `then`: `/sdlc-factory:build NNN` sends an escalated change back for another build, told the
   answers; for a READY change, `/sdlc:ship NNN` from its worktree, where the rework is done by hand.
+- `gate`: every item is answered, and a `gate` reason isn't cleared yet. `then` names the hand
+  gate's command, for the person to run from the change's worktree once its fault is fixed.
 - `ship`: every answer kept what was built. `/sdlc-factory:land`, or `/sdlc:ship NNN` from its
   worktree.
 

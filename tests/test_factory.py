@@ -795,10 +795,10 @@ def test_a_ledger_without_alternatives_reads_as_before(tmp_path) -> None:
     assert factory.read_ledger(folder) == [
         {"id": "D1", "source": "builder round 1", "kind": "default", "text": "Page at 50.",
          "decided": False, "open": True, "answer": None, "superseded_by": None,
-         "settled": None, "options": [], "why": None},
+         "settled": None, "options": [], "why": None, "current": True},
         {"id": "D2", "source": "code round 1", "kind": "blocking", "text": "Keep 30 days?",
          "decided": True, "open": False, "answer": "30 days", "superseded_by": None,
-         "settled": None, "options": [], "why": None},
+         "settled": None, "options": [], "why": None, "current": True},
     ]  # fmt: skip
 
 
@@ -3091,9 +3091,7 @@ def test_a_reviewer_s_disagreeing_verdicts_are_mended_by_the_same_reviewer(
     reply.write_text(DISAGREEING, encoding="utf-8")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["code"]), out
-    assert out["problems"] == [
-        "reviews/round-1/code.md doesn't open with VERDICT: PASS or VERDICT: CHANGES"
-    ]
+    assert out["problems"] == [factory._no_verdict(1, "code")]
 
     (folder / "runs").mkdir()
     (folder / "runs" / "reviewer-code.sessions").write_text("s-code\n", encoding="utf-8")
@@ -4273,7 +4271,7 @@ def test_start_refuses_a_ready_or_unreadable_test_change(tmp_path, capsys) -> No
     assert any("/sdlc:ship" in r and "/sdlc-factory:land" in r for r in out["refusals"])
     decision.write_text("I think it's fine.\n", encoding="utf-8")
     code, out = _run(capsys, factory.cmd_start, root, "008", "build")
-    assert code == 1 and any("doesn't open with DECISION" in r for r in out["refusals"])
+    assert code == 1 and any(factory.NO_DECISION in r for r in out["refusals"]), out
     decision.unlink()
     code, out = _run(capsys, factory.cmd_start, root, "008", "build")
     assert code == 1 and any("no decision.md" in r for r in out["refusals"])
@@ -5470,3 +5468,177 @@ def test_no_build_question_without_a_base_branch(tmp_path, capsys) -> None:
 )  # fmt: skip
 def test_the_build_question_lists_reviewers_as_a_sentence(names, said) -> None:
     assert factory._listed(names) == said
+
+
+# ---------------------------------------------------------------- escalations that clear (145)
+
+GATE_REASON = "- ESCALATED: gate: tests/test_nothing_local.py fails on the behaviour record\n"
+LOOK_REASON = "- ESCALATED: look: the drafts page reads oddly at phone width\n"
+
+
+def _escalated_for(tmp_path: Path, capsys, *reasons: str) -> Path:
+    """A change at `test` the approver escalated for `reasons`, round 1 built and reviewed, its
+    ledger filed by `decisions`."""
+    root = _change(tmp_path, stage="test")
+    _round(root, 1)
+    _decision(root, *reasons)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    return root
+
+
+def test_escalation_reasons_read_the_current_decision_alone(tmp_path) -> None:
+    """145 R2: each `gate` and `look` line in order; an unknown word is a look; a `D<n>` line is
+    the weighing's, never a reason; an archived decision is never read."""
+    root = _change(tmp_path, stage="test")
+    folder = root / ".sdlc" / "work" / NAME
+    _decision(
+        root,
+        "- ESCALATED: D2: the page size is the product's call\n",
+        GATE_REASON,
+        "- ESCALATED: taste: the copy is flat\n",
+        LOOK_REASON,
+    )
+    (folder / "decision-1.md").write_text(
+        "DECISION: ESCALATE\n\n- ESCALATED: look: an old reason\n", encoding="utf-8"
+    )
+    assert factory.escalation_reasons(folder) == [
+        {"kind": "gate", "text": "tests/test_nothing_local.py fails on the behaviour record"},
+        {"kind": "look", "text": "taste: the copy is flat"},
+        {"kind": "look", "text": "the drafts page reads oddly at phone width"},
+    ]
+    assert factory.approver_weighing(folder)[1].keys() == {"D2"}, "ESCALATED_RE reads D<n> alone"
+    for line in (GATE_REASON, LOOK_REASON):
+        assert not factory.ESCALATED_RE.match(line)
+    (folder / "decision.md").unlink()
+    assert factory.escalation_reasons(folder) == []
+
+
+def test_a_look_reason_is_filed_once(tmp_path, capsys) -> None:
+    """145 R3: a look reason becomes one `look` line, sourced by the newest round; a gate reason
+    none; a rerun writes nothing."""
+    root = _escalated_for(tmp_path, capsys, GATE_REASON, LOOK_REASON)
+    assert _ledger_text(root) == (
+        "# Decisions\n\n- [ ] D1 (approver round 1, look): the drafts page reads oddly at phone "
+        "width\n"
+    )
+    before = _ledger_text(root)
+    _, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert out["added"] == [] and _ledger_text(root) == before
+
+
+def test_a_look_reason_is_filed_again_after_a_restart(tmp_path, capsys) -> None:
+    """145 R3, R6: after a restart, the new decision's reason is a new line even with the same
+    words, and the old line is history: never open, so never asked."""
+    root = _escalated_for(tmp_path, capsys, LOOK_REASON)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "decision.md").rename(folder / "decision-1.md")
+    assert [d["open"] for d in factory.read_ledger(folder)] == [False], "no current reason"
+    _round(root, 2)
+    _decision(root, LOOK_REASON)
+    _, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert out["added"] == ["D2"], out
+    ledger = factory.read_ledger(folder)
+    assert [(d["id"], d["source"], d["open"]) for d in ledger] == [
+        ("D1", "approver round 1", False),
+        ("D2", "approver round 2", True),
+    ]
+
+
+def test_a_look_line_is_counted_in_no_ledger_figure(tmp_path, capsys) -> None:
+    """145 R4: a look line is never pending, assumed or garbled, on the factory's, status's and
+    the board's readings, and counts in no measured figure."""
+    root = _escalated_for(tmp_path, capsys, LOOK_REASON)
+    folder = root / ".sdlc" / "work" / NAME
+    path = folder / "decisions.md"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        + "- [ ] D2 (builder round 1, blocking): keep drafts 30 days?\n"
+        + "- [ ] D3 (builder round 1, default): page at 50\n"
+        + "- [x] D4 (builder round 1, default): log ids → settled by the approver: R4\n",
+        encoding="utf-8",
+    )
+    for pattern in (factory.LEDGER_RE, sdlc.FACTORY_LEDGER_RE):
+        assert pattern.match("- [ ] D1 (approver round 1, look): it reads oddly")
+    reading = sdlc.factory_reading(folder)
+    assert [d["id"] for d in reading["pending"]] == ["D2"]
+    assert [d["id"] for d in reading["assumed"]] == ["D3"]
+    assert [d["id"] for d in reading["looks"]] == ["D1"] and reading["problems"] == []
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "built")
+    found = sdlc._factory_files(root, NAME)
+    assert (found["blocking"], found["defaults"], found["defaults_open"],
+            found["defaults_settled"]) == (1, 2, 1, 1)  # fmt: skip
+    assert _verdicts(root, capsys)["assumed"] == ["D3"]
+
+
+def test_only_the_person_ticks_a_look_line(tmp_path, capsys) -> None:
+    """145 R5: the approver's SETTLED is refused, a landing's yes never confirms one, and it is
+    never an upgrade answer."""
+    root = _escalated_for(tmp_path, capsys, LOOK_REASON)
+    folder = root / ".sdlc" / "work" / NAME
+    _decision(root, LOOK_REASON, "- SETTLED: D1: the copy is fine\n")
+    before = _ledger_text(root)
+    _, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert out["unsettled"] == [{"id": "D1", "why": "D1 is the person's to acknowledge"}], out
+    assert _ledger_text(root) == before
+    pre = {"undone": {"items": []}, "checks": {"checks": []}}
+    parts = factory.land_parts(folder, pre)
+    assert parts["assumed"] == [], "a look is no default to confirm"
+    (folder / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    factory._dispose(root, folder, pre)
+    assert _ledger_text(root) == before, "the landing's yes ticks no look line"
+    path = folder / "decisions.md"
+    path.write_text(before.replace("- [ ] D1", "- [x] D1").replace(
+        "width\n", "width → decided: upgrade to Tier 2\n"), encoding="utf-8")  # fmt: skip
+    assert factory.upgrade_answer(factory.read_ledger(folder)) is None
+
+
+def test_ask_lists_look_items_and_the_gate(tmp_path, capsys) -> None:
+    """145 R11: a look line is an item replying to decision.md; `gate` says each gate reason and
+    whether it is cleared; with `--answered`, a look never means rebuild, and an uncleared gate
+    reason alone means `gate`."""
+    root = _escalated_for(tmp_path, capsys, GATE_REASON, LOOK_REASON)
+    code, out = _run(capsys, factory.cmd_ask, root, "008", None)
+    assert code == 0, out
+    assert out["items"] == [{
+        "id": "D1", "kind": "look", "source": "approver round 1", "reply": "decision.md",
+        "question": "the drafts page reads oddly at phone width", "options": [], "why": None,
+        "escalated": None,
+    }]  # fmt: skip
+    assert out["gate"] == {
+        "reasons": [{"text": "tests/test_nothing_local.py fails on the behaviour record",
+                     "cleared": False}],
+        "record": f".sdlc/work/{NAME}/build/gate.md",
+    }  # fmt: skip
+    _answer(root, "D1", "seen")
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1")[1]
+    assert (out["next"], out["then"]) == ("gate", "sdlc.py gate 008"), out
+
+
+def test_ask_says_ship_once_a_look_is_seen_and_no_gate_is_owed(tmp_path, capsys) -> None:
+    """145 R11: a look acknowledged in the person's own words is no rebuild."""
+    root = _escalated_for(tmp_path, capsys, LOOK_REASON)
+    _answer(root, "D1", "checked it at 390px: it reads fine")
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1")[1]
+    assert out["next"] == "ship" and out["gate"] is None, out
+
+
+def test_a_restart_makes_a_look_line_history(tmp_path, capsys) -> None:
+    """145 R6: once a restart archives the decision that filed an open look line, the line is in
+    none of `ask`'s items, `needs_of()`'s needs or the landing's signals."""
+    root = _escalated_for(tmp_path, capsys, LOOK_REASON)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "decision.md").rename(folder / "decision-1.md")
+    _round(root, 2)
+    _decision(root, GATE_REASON)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    assert _ledger_text(root).count("- [ ] D1 (approver round 1, look)") == 1, "kept as written"
+    out = _run(capsys, factory.cmd_ask, root, "008", None)[1]
+    assert out["items"] == [], out
+    reading = sdlc.factory_reading(folder)
+    assert reading["looks"] == []
+    rec = {"stage": "test", "problems": [], **reading}
+    assert sdlc.needs_of(rec) == ["gate it green"]
+    cfg = factory.load_config(root)[0]
+    signals, _ = factory.land_signals(folder, root, "ESCALATE", cfg, pre={})
+    assert "decisions still open or assumed in decisions.md" not in signals, signals

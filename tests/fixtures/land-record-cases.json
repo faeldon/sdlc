@@ -1,0 +1,54 @@
+{
+  "steps": [
+    {
+      "step": "review",
+      "round": 2,
+      "moves": 1,
+      "limit": 3
+    },
+    {
+      "step": "wait",
+      "round": 1,
+      "moves": 0,
+      "limit": 3,
+      "train": {
+        "k": 2,
+        "n": 3
+      },
+      "waits": "stack on 140-board-columns"
+    },
+    {
+      "step": "wait",
+      "round": null,
+      "moves": 0,
+      "limit": 3,
+      "train": {
+        "k": 3,
+        "n": 3
+      },
+      "waits": "close after 141-board-track"
+    },
+    {
+      "step": "recheck",
+      "round": 1,
+      "moves": 0,
+      "limit": 3
+    },
+    {
+      "step": "stop",
+      "round": null,
+      "moves": 0,
+      "limit": 2,
+      "after": "wait",
+      "problems": [
+        "it broke"
+      ]
+    }
+  ],
+  "times": [
+    "{\"step\": \"ship\", \"round\": null, \"seconds\": 12.5}\n{\"step\": \"gate\", \"round\": 1, \"seconds\": 40}\n",
+    "not json\n{\"step\": \"stack\", \"round\": 1}\n{\"step\": 3, \"round\": 1, \"seconds\": 2}\n{\"step\": \"close\", \"round\": \"1\", \"seconds\": 5}\n",
+    "{\"step\": \"rebase\", \"round\": 2, \"seconds\": -1}\n{\"step\": \"recheck\", \"round\": 2, \"seconds\": true}\n[1, 2]\n\n",
+    ""
+  ]
+}

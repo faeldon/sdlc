@@ -1,0 +1,11 @@
+# Decisions
+
+- [x] R1 (person, revise): yes, fold them in when the drafts arrive (seeds 2026-11-18-49 board says "builder is resolving a conflict" on a factory landing mid-rebase, 2026-11-18-50 landing track shows post-rebase accept as its own step after the gate, 2026-11-18-47 reword _no_verdict() and NO_DECISION now that an answer after prose is read; read each in .sdlc/work/inbox.md and make each a requirement of this spec)
+- [x] D1 (builder round 1, default): Write one `Escalated` line per `gate` reason in the spec's exact words (`gate: green on the build as it stands (attempt N)` / `gate: not cleared`), without the reason's own text. Going ahead unless told otherwise. → settled by the approver: spec R13 gives the `Escalated` block's lines word for word (`gate: green on the build as it stands (attempt N)` / `not cleared`), and one green hand gate clears every `gate` reason at once (spec, Edge cases). Identical lines lose nothing. The round-1 code review recorded it as a spec-faithful nit only.
+  - OPTION: spec's words only — matches R13 exactly; two gate reasons show as two identical lines
+  - OPTION: add the reason's text (`gate (<why>): …`) — tells reasons apart; departs from R13's wording
+  - WHY: R13 gives the line forms word for word, and one green hand gate clears every gate reason at once anyway
+- [x] D2 (builder round 1, default): A train writes `wait` only for changes already committed, after the one it acts on, and never over a `stop` or `eject` record or a change mid-rebase. Going ahead unless told otherwise. → settled by the approver: R22's wait is for a change waiting to *stack on* or *close after* another, and only a committed change can be. `_amend_record()` needs the landing's commit to amend the record into (spec, Assumptions). R23's train-of-three test passes under it, and the behaviour reviewer found it matches the spec in both rounds.
+  - OPTION: committed changes only — the record is amended into the change's own commit like the rest; nothing dirties a branch before its commit exists
+  - OPTION: every live change behind — waiting shows even during the commit step; the record would ride into the change's commit without being one of its landing records
+  - WHY: `_amend_record()` needs the landing's commit to amend into, and `resolve --onto` amends dirty records first

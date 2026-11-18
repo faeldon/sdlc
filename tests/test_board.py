@@ -134,12 +134,17 @@ def test_every_open_change_is_on_the_board_with_its_next_step(repo) -> None:
     assert list(cards) == ["001-reopen-drafts", "002-draft-history", "003-draft-export",
                            "004-draft-purge"], "a shipped change is not open"  # fmt: skip
     one, two = cards["001-reopen-drafts"], cards["002-draft-history"]
-    assert (one["tier"], one["stage"], one["mode"], one["column"]) == (1, "plan", "manual", "plan")
+    assert (one["tier"], one["stage"], one["mode"], one["column"]) == (
+        1,
+        "plan",
+        "manual",
+        "planned",
+    )
     assert one["next"] == "plan mode, then build it"
     assert one["title"] == "001 — Reopen drafts" and one["open_questions"] == 1
     assert one["undone"] == ["say why a draft closes"] and one["issue"] is None
     assert one["files"] == ["intent.md", "notes.md"] and one["problems"] == []
-    assert (two["column"], two["next"]) == ("design", "plan mode, then build it")
+    assert (two["column"], two["next"]) == ("designing", "plan mode, then build it")
     assert two["depends_on"] == ["001"] and two["unfilled"] == ["spec.md"] and two["checks"] == 1
     assert "rounds" not in two, "a change built by hand has no factory fields"
     assert "progress" not in one and "progress" not in two, "nor a step track"
@@ -220,16 +225,16 @@ def test_a_change_built_by_hand_moves_on_as_its_branch_and_review_do(repo) -> No
     cards = _cards(repo)
     seen = {n: (c["column"], c["seen"]) for n, c in cards.items() if n >= "006"}
     assert seen == {
-        "006-draft-tags": ("build", "build"),
-        "007-draft-notes": ("plan", None),  # only its folder, the register and the counter
-        "008-draft-sort": ("build", "build"),  # uncommitted, in its own worktree
-        "009-draft-share": ("test", "test"),
-        "010-draft-sync": ("plan", None),  # a Tier 2 with no spec yet
-        "011-draft-lock": ("build", None),  # the factory moves its own stage line
+        "006-draft-tags": ("building", "build"),
+        "007-draft-notes": ("planned", None),  # only its folder, the register and the counter
+        "008-draft-sort": ("building", "build"),  # uncommitted, in its own worktree
+        "009-draft-share": ("ready", "ready"),
+        "010-draft-sync": ("planned", None),  # a Tier 2 with no spec yet
+        "011-draft-lock": ("building", None),  # the factory moves its own stage line
     }
     assert cards["006-draft-tags"]["next"] == "build it, then /sdlc:ship"
     assert cards["009-draft-share"]["next"] == "/sdlc:ship"
-    assert cards["001-reopen-drafts"]["column"] == "plan", "no branch: nothing to read"
+    assert cards["001-reopen-drafts"]["column"] == "planned", "no branch: nothing to read"
     assert cards["006-draft-tags"]["stage"] == "plan", (
         "the board reads its stage line, never writes it"
     )
@@ -247,7 +252,7 @@ def _hand_gate(tree: Path, ident: str) -> int:
 
 
 @pytest.mark.parametrize("stage", ["plan", "build"])
-def test_a_green_gate_moves_a_hand_built_card_to_test_until_an_edit(repo, capsys, stage) -> None:
+def test_a_green_gate_moves_a_hand_built_card_to_ready_until_an_edit(repo, capsys, stage) -> None:
     """091 R8, R10: a current green record is `test`, `/sdlc:ship` next, before ship's review
     has run; an edit outside the change's folder makes it stale, and the card goes back."""
     _main_check(repo, "true")
@@ -255,20 +260,20 @@ def test_a_green_gate_moves_a_hand_built_card_to_test_until_an_edit(repo, capsys
     folder = _worktree(repo, name, 1, stage, commit=["src/pins.py"])
     tree = sdlc.checkout_of(folder)
     card = _cards(repo)[name]
-    assert (card["column"], card["gate"]) == ("build", None)
+    assert (card["column"], card["gate"]) == ("building", None)
     assert _hand_gate(tree, "012") == 0
     capsys.readouterr()
     card = _cards(repo)[name]
-    assert (card["column"], card["seen"], card["next"]) == ("test", "test", "/sdlc:ship")
+    assert (card["column"], card["seen"], card["next"]) == ("ready", "ready", "/sdlc:ship")
     assert (card["gate"]["verdict"], card["gate"]["current"]) == ("PASS", True)
     assert card["stage"] == stage, "the board reads its stage line, never writes it"
     _write(tree / "src" / "pins.py", "edited again\n")
     card = _cards(repo)[name]
-    assert (card["column"], card["gate"]["current"]) == ("build", False)
+    assert (card["column"], card["gate"]["current"]) == ("building", False)
     assert card["next"] == "build it, then /sdlc:ship"
 
 
-def test_a_red_gate_keeps_the_card_in_build_and_says_so(repo, capsys) -> None:
+def test_a_red_gate_keeps_the_card_in_building_and_says_so(repo, capsys) -> None:
     """091 R9."""
     _main_check(repo, "exit 1")
     folder = _worktree(repo, "012-draft-pins", 1, "plan", commit=["src/pins.py"])
@@ -276,7 +281,7 @@ def test_a_red_gate_keeps_the_card_in_build_and_says_so(repo, capsys) -> None:
     capsys.readouterr()
     card = _cards(repo)["012-draft-pins"]
     assert (card["column"], card["gate"]["verdict"], card["gate"]["current"]) == (
-        "build", "FAIL", True,
+        "building", "FAIL", True,
     )  # fmt: skip
     assert card["next"] == "the gate is red: read build/gate.md, fix it, then sdlc.py gate 012"
 
@@ -287,7 +292,7 @@ def test_a_factory_card_never_reads_a_hand_gate(repo) -> None:
     folder = _worktree(repo, "011-draft-lock", 1, "build", commit=["src/lock.py"], factory=True)
     _write(folder / "build" / "gate.md", "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\n")
     card = _cards(repo)["011-draft-lock"]
-    assert "gate" not in card and card["seen"] is None and card["column"] == "build"
+    assert "gate" not in card and card["seen"] is None and card["column"] == "building"
     assert _cards(repo)["001-reopen-drafts"]["gate"] is None
 
 
@@ -304,7 +309,7 @@ def test_a_shipped_change_waits_on_close_until_its_worktree_goes(served) -> None
     root, url, _ = served
     _worktree(root, "012-draft-pins", 1, "shipped", commit=["src/pins.py"])
     card = _cards(root)["012-draft-pins"]
-    assert (card["column"], card["next"]) == ("close", "/sdlc:close 012")
+    assert (card["column"], card["next"]) == ("landing", "/sdlc:close 012")
     assert "005-old-thing" not in _cards(root), "shipped with no worktree: closed already"
     query = urllib.parse.urlencode({"change": "012-draft-pins", "path": "intent.md"})
     assert _get(f"{url}/file?{query}")[0] == 200
@@ -458,7 +463,7 @@ def test_a_stop_record_counts_only_at_build(repo) -> None:
     folder = _stopped_run(repo, "014-draft-stale", "test")
     _write(folder / "decision.md", "DECISION: READY\n")
     cards = _cards(repo)
-    assert cards["013-draft-escapes"]["column"] == "design"
+    assert cards["013-draft-escapes"]["column"] == "designing"
     assert cards["013-draft-escapes"]["stopped"] is None
     assert (cards["014-draft-stale"]["column"], cards["014-draft-stale"]["stopped"]) == (
         "ready",
@@ -467,7 +472,7 @@ def test_a_stop_record_counts_only_at_build(repo) -> None:
     shipped = _worktree(repo, "015-draft-shipped", 1, "shipped", commit=["src/x.py"], factory=True)
     _write(shipped / factory.STOPPED, "not even readable\n")
     card = _cards(repo)["015-draft-shipped"]
-    assert (card["column"], card["problems"]) == ("close", [])
+    assert (card["column"], card["problems"]) == ("landing", [])
 
 
 @pytest.mark.portable
@@ -476,7 +481,7 @@ def test_a_resumed_run_goes_back_to_build(repo) -> None:
     folder = _stopped_run(repo)
     (folder / factory.STOPPED).unlink()
     card = _cards(repo)["013-draft-escapes"]
-    assert (card["column"], card["stopped"]) == ("build", None)
+    assert (card["column"], card["stopped"]) == ("building", None)
     assert card["next"] == "the factory is building it: wait for its decision"
 
 
@@ -522,7 +527,7 @@ def test_the_board_reads_a_verdict_and_a_decision_after_prose(tmp_path) -> None:
     found = board._factory(folder, problems)
     assert found["rounds"][0]["reviews"]["code"] == {"verdict": "CHANGES", "changes": 1}
     assert found["decision"] == "READY"
-    assert problems == ["reviews/round-1/test.md doesn't open with a VERDICT line"], problems
+    assert problems == [factory._no_verdict(1, "test")], problems
     assert board._reviewed(folder, 1) == 1
 
 
@@ -658,7 +663,7 @@ def test_the_page_is_self_contained_and_never_parses_data_as_html() -> None:
     for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
         assert sink not in page, sink
     assert "textContent" in page
-    for column in ("plan", "design", "build", "test", "ready", "needs-you"):
+    for column in ("planned", "designing", "building", "ready", "landing", "needs-you"):
         assert f'key: "{column}"' in page, column
 
 
@@ -668,7 +673,7 @@ def test_no_column_key_is_a_class_the_page_styles_on_its_own() -> None:
     # anywhere but on a `.col` or a `.card` restyles every card in the column.
     page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
     keys = set(re.findall(r'\{ key: "([^"]+)"', page))
-    assert {"ready", "close", "needs-you"} <= keys
+    assert {"ready", "landing", "needs-you"} <= keys
     css = re.search(r"<style>(.*?)</style>", page, re.S).group(1)
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
     clashes = []
@@ -775,7 +780,7 @@ def test_an_early_stop_shows_on_the_card(repo) -> None:
     out["untestable"] = []
     _write(folder / factory.STEP, factory.step_text(out, "2026-11-17T10:00:00Z"))
     assert _cards(repo)["016-draft-tags"]["progress"]["steps"][-1]["label"] == "approve (stuck)"
-    assert card["column"] == "build" and card["needs"] == [], "the approver is still to decide"
+    assert card["column"] == "building" and card["needs"] == [], "the approver is still to decide"
     script = _page_parts()[1]
     row = re.search(r"function progressRow\(p\) \{(.*?)\n\}", script, re.S).group(1)
     assert re.search(r"p\.early.*stuck.*\"flag\".*stopped early", row, re.S), row
@@ -881,10 +886,15 @@ RUN = [
 ]  # fmt: skip
 
 
-def _closed(root: Path, name: str, tier: int, rows=RUN, gates=(5.0, 6.0), land_gates=()) -> None:
+def _closed(
+    root: Path, name: str, tier: int, rows=RUN, gates=(5.0, 6.0), land_gates=(), files=None
+) -> None:
     """A factory change closed on `main`: its folder committed with the rows `factory.py`'s own
-    `record_cost()` writes and its gate files, then removed by a `Close` commit."""
+    `record_cost()` writes, its gate files and any other `files` (path in the folder: text),
+    then removed by a `Close` commit."""
     folder = _change(root, name, tier, "shipped", name.split("-", 1)[1])
+    for rel, text in (files or {}).items():
+        _write(folder / rel, text)
     for i, (role, figures) in enumerate(rows):
         factory.record_cost(folder, f"s-{i}", role, "opus", figures)
     for file, seconds in (("round-1", gates), ("land-1", land_gates)):
@@ -1131,14 +1141,14 @@ def test_each_factory_signal_counts_only_at_its_stage(repo) -> None:
     cards = _cards(repo)
     got = {n: (c["column"], c["next"]) for n, c in cards.items() if n >= "020"}
     assert got == {
-        "020-esc-shipped": ("close", "/sdlc:close 020"),
-        "021-esc-dropped": ("close", "/sdlc:close 021"),
+        "020-esc-shipped": ("landing", "/sdlc:close 020"),
+        "021-esc-dropped": ("landing", "/sdlc:close 021"),
         "022-esc-by-hand": ("needs-you", "/sdlc:ship, or /sdlc-factory:land with the others ready"),
         "028-esc-answered": ("ready", "/sdlc:ship, or /sdlc-factory:land with the others ready"),
-        "023-esc-back": ("build", "the factory is building it: wait for its decision"),
-        "024-stop-shipped": ("close", "/sdlc:close 024"),
-        "025-pend-shipped": ("close", "/sdlc:close 025"),
-        "027-pend-test": ("test", "/sdlc:ship"),
+        "023-esc-back": ("building", "the factory is building it: wait for its decision"),
+        "024-stop-shipped": ("landing", "/sdlc:close 024"),
+        "025-pend-shipped": ("landing", "/sdlc:close 025"),
+        "027-pend-test": ("building", "/sdlc:ship"),  # 145: no decision yet
     }
     assert all(cards[n]["problems"] == [] for n in got), "every file read"
     assert cards["022-esc-by-hand"]["needs"] == ["read the escalation"], "107 R9: no ledger"
@@ -1168,7 +1178,7 @@ def test_a_restarted_factory_card_is_in_build_with_its_old_decision_as_a_file(se
     _write(folder / "decision-1.md", "DECISION: ESCALATE\n\nD1 is still assumed.\n")
     _write(folder / "build" / "round-2.restart.md", "RESTART: decision-1.md\n")
     card = _cards(root)["016-draft-restart"]
-    assert (card["column"], card["decision"], card["problems"]) == ("build", None, [])
+    assert (card["column"], card["decision"], card["problems"]) == ("building", None, [])
     assert card["built"] == [1], "the restart record is no builder report"
     assert {"decision-1.md", "build/round-2.restart.md"} <= set(card["files"])
     code, body, _ = _get(f"{url}/file?change=016-draft-restart&path=decision-1.md")
@@ -1200,6 +1210,11 @@ def test_a_card_with_a_problem_never_names_close(repo) -> None:
 # else it holds, but for the pairs in `BOTH`; two states that set `stage` to different values
 # can't overlap.
 PRECEDENCE = [
+    # 145 R25: a factory landing's builder resolving the conflict a rebase stopped on.
+    ("landing conflict",
+     {"rebasing": True, "progress": {"kind": "land", "stopped": False, "step": "resolve"}},
+     "its builder is resolving a conflict: wait for it, or /sdlc-factory:land 016 if its session "
+     "ended"),
     ("rebasing", {"rebasing": True},
      "a rebase is stopped in its worktree: resolve its conflicts, then "
      "sdlc.py resolve 016 --continue, or sdlc.py resolve 016 --abort, which keeps the "
@@ -1227,6 +1242,13 @@ PRECEDENCE = [
      {"stage": "test", "decision": "ESCALATE", "needs": ["confirm 2 defaults"]},
      "/sdlc-factory:decide 016 for 2 defaults, then /sdlc:ship, or /sdlc-factory:land with the "
      "others ready"),
+    # 145 R9: a look to acknowledge, in `decide`; a gate reason alone, by the hand gate.
+    ("acknowledge pending",
+     {"stage": "test", "decision": "ESCALATE", "needs": ["acknowledge D4"]},
+     "/sdlc-factory:decide 016 for D4, then /sdlc:ship, or /sdlc-factory:land with the others "
+     "ready"),
+    ("gate owed", {"stage": "test", "decision": "ESCALATE", "needs": ["gate it green"]},
+     "sdlc.py gate 016, once its gate's fault is fixed"),
     ("approver decided", {"stage": "test", "decision": "READY"},
      "/sdlc:ship, or /sdlc-factory:land with the others ready"),
     ("factory building", {"stage": "build", "mode": "factory", "built": [1]},
@@ -1250,6 +1272,16 @@ BOTH = {
     ("escalation pending", "defaults to confirm"):
         "/sdlc-factory:decide 016 for 2 defaults, then /sdlc:ship, or /sdlc-factory:land with the "
         "others ready",
+    # 145: one card holds one `needs` list, so the lower state's is the one the pair keeps.
+    ("escalation pending", "acknowledge pending"):
+        "/sdlc-factory:decide 016 for D4, then /sdlc:ship, or /sdlc-factory:land with the others "
+        "ready",
+    ("defaults to confirm", "acknowledge pending"):
+        "/sdlc-factory:decide 016 for D4, then /sdlc:ship, or /sdlc-factory:land with the others "
+        "ready",
+    ("escalation pending", "gate owed"): "sdlc.py gate 016, once its gate's fault is fixed",
+    ("defaults to confirm", "gate owed"): "sdlc.py gate 016, once its gate's fault is fixed",
+    ("acknowledge pending", "gate owed"): "sdlc.py gate 016, once its gate's fault is fixed",
 }  # fmt: skip
 
 
@@ -1387,6 +1419,12 @@ def test_a_shipped_change_whose_landing_rebase_is_stopped_keeps_its_card(repo) -
     card = _cards(repo)["030-draft-land"]
     assert card["rebasing"] is True and card["stage"] == "shipped" and card["problems"] == []
     assert card["progress"]["kind"] == "land" and _states(card) == LANDS["resolve"]
+    # 145 R25: the factory's builder is on it, so the card says so, never the hand-run resolve.
+    assert card["next"] == (
+        "its builder is resolving a conflict: wait for it, or /sdlc-factory:land 030 if its "
+        "session ended"
+    )
+    assert card["column"] == "landing"
     assert board.file_at(repo, "030-draft-land", "intent.md") is not None
     _git(tree, "rebase", "--abort")
     assert _cards(repo)["030-draft-land"]["rebasing"] is False
@@ -1499,12 +1537,12 @@ def test_the_board_fixture_shows_every_card_state(tmp_path: Path, monkeypatch) -
     cards = {c["change"]: c for c in board.state(repo)["changes"]}
     assert set(cards) == {p.name for p in (FIXTURE / "changes").iterdir() if p.is_dir()}
     columns = {c["column"] for c in cards.values()}
-    assert columns == {"plan", "design", "build", "test", "ready", "close", "needs-you"}, columns
+    assert columns == {"planned", "designing", "building", "ready", "landing", "needs-you"}, columns
     factory_cards = [c for c in cards.values() if c["mode"] == "factory"]
     assert any(c.get("progress") and c["progress"]["steps"] for c in factory_cards), "a step track"
     assert any(c.get("stopped") for c in factory_cards), "a stopped run"
     landing = [c for c in factory_cards if (c.get("progress") or {}).get("kind") == "land"]
-    assert any(c["column"] == "close" for c in landing), "a landing under way, tracked"
+    assert any(c["column"] == "landing" for c in landing), "a landing under way, tracked"
     assert any(c.get("pending") and c["column"] == "needs-you" for c in factory_cards)
     assert any(
         c["stage"] == "test" and c["decision"] == "ESCALATE" and c["column"] == "needs-you"
@@ -1609,7 +1647,7 @@ def test_a_written_spec_at_plan_needs_the_person(repo) -> None:
         ["approve its spec"],
     )
     assert (cards["043-spec-scaffold"]["column"], cards["043-spec-scaffold"]["needs"]) == (
-        "plan",
+        "planned",
         [],
     )
     assert cards["003-draft-export"]["needs"] == [] and cards["003-draft-export"]["column"] == (
@@ -2072,25 +2110,29 @@ def _landing_at(
 
 
 LANDS = {
-    "checks": ["current", "todo", "todo", "todo", "todo", "todo"],
-    "cases": ["current", "todo", "todo", "todo", "todo", "todo"],
-    "ship": ["current", "todo", "todo", "todo", "todo", "todo"],
-    "rebase": ["done", "current", "todo", "todo", "todo", "todo"],
-    "resolve": ["done", "current", "todo", "todo", "todo", "todo"],
-    "fix": ["done", "current", "todo", "todo", "todo", "todo"],
-    "gate": ["done", "done", "current", "todo", "todo", "todo"],
-    "review": ["done", "done", "done", "current", "todo", "todo"],
-    "mend": ["done", "done", "done", "current", "todo", "todo"],
-    "verify": ["done", "done", "done", "done", "current", "todo"],
-    "close": ["done", "done", "done", "done", "done", "current"],
+    "checks": ["current", "todo", "todo", "todo", "todo", "todo", "todo"],
+    "cases": ["current", "todo", "todo", "todo", "todo", "todo", "todo"],
+    "ship": ["current", "todo", "todo", "todo", "todo", "todo", "todo"],
+    "rebase": ["done", "current", "todo", "todo", "todo", "todo", "todo"],
+    "resolve": ["done", "current", "todo", "todo", "todo", "todo", "todo"],
+    "fix": ["done", "current", "todo", "todo", "todo", "todo", "todo"],
+    "gate": ["done", "done", "current", "todo", "todo", "todo", "todo"],
+    # 145 R26: the acceptance checks rerun after the commit, a position of their own.
+    "recheck": ["done", "done", "done", "current", "todo", "todo", "todo"],
+    "review": ["done", "done", "done", "done", "current", "todo", "todo"],
+    "mend": ["done", "done", "done", "done", "current", "todo", "todo"],
+    "verify": ["done", "done", "done", "done", "done", "current", "todo"],
+    "close": ["done", "done", "done", "done", "done", "done", "current"],
     # 139: a train's steps. `stack` sits at the rebase; `eject` is a stop, at the gate when the
-    # record names no step it stopped after.
-    "stack": ["done", "current", "todo", "todo", "todo", "todo"],
-    "eject": ["done", "done", "stopped", "todo", "todo", "todo"],
+    # record names no step it stopped after. 145 R22: `wait`, its turn to come, at the rebase.
+    "stack": ["done", "current", "todo", "todo", "todo", "todo", "todo"],
+    "wait": ["done", "current", "todo", "todo", "todo", "todo", "todo"],
+    "eject": ["done", "done", "stopped", "todo", "todo", "todo", "todo"],
 }
 LABELS = {"resolve": ("rebase", "resolving"), "fix": ("rebase", "fixing"),
           "mend": ("review", "mending"), "stack": ("rebase", "stacking"),
-          "checks": ("ship", "checks"), "cases": ("ship", "cases")}  # fmt: skip
+          "checks": ("ship", "checks"), "cases": ("ship", "cases"),
+          "wait": ("rebase", "waiting"), "recheck": ("checks", "checks")}  # fmt: skip
 STOPS = ("eject",)
 
 
@@ -2115,16 +2157,16 @@ def test_a_landing_card_shows_its_landing_track(repo, step) -> None:
     if step in LABELS:
         assert labels[LABELS[step][0]] == LABELS[step][1]
     # 141: a stopped landing (a train's ejection too) needs the person; else it waits on close.
-    assert card["column"] == ("needs-you" if step in STOPS else "close"), step
+    assert card["column"] == ("needs-you" if step in STOPS else "landing"), step
     assert progress["plan"] is None
 
 
 @pytest.mark.portable
-def test_a_landing_from_ready_to_ship_is_tracked_there(repo) -> None:
-    """133: a landing at its first step, before its commit, shows in Ready to ship."""
+def test_a_landing_before_its_commit_is_tracked_in_landing(repo) -> None:
+    """133, 145 R15: a landing at its first step, before its commit, shows in Landing."""
     _landing_at(repo, "ship", stage="test", rnd=None, moves=0)
     card = _cards(repo)["030-draft-land"]
-    assert card["column"] == "ready" and card["progress"]["kind"] == "land"
+    assert card["column"] == "landing" and card["progress"]["kind"] == "land"
     assert card["progress"]["round"] is None and LANDS["ship"] == [
         s["state"] for s in card["progress"]["steps"]
     ]
@@ -2138,7 +2180,7 @@ def test_a_stopped_landing_shows_why_on_its_card(repo) -> None:
     _landing_at(repo, "stop", after="gate", problems=(why,))
     progress = _cards(repo)["030-draft-land"]["progress"]
     assert [s["state"] for s in progress["steps"]] == [
-        "done", "done", "stopped", "todo", "todo", "todo",
+        "done", "done", "stopped", "todo", "todo", "todo", "todo",
     ]  # fmt: skip
     assert progress["problems"] == [why] and progress["elapsed"] is None
     assert progress["stopped"] is True
@@ -2199,8 +2241,7 @@ def test_a_train_member_shows_its_place_and_an_ejection(repo) -> None:
     card = _cards(repo)["030-draft-land"]
     progress = card["progress"]
     assert progress["stopped"] is True and progress["after"] == "gate"
-    assert [s["state"] for s in progress["steps"]] == ["done", "done", "stopped", "todo", "todo",
-                                                      "todo"]  # fmt: skip
+    assert [s["state"] for s in progress["steps"]] == LANDS["eject"]
     assert progress["problems"] == [why] and progress["train"] == "2 of 3"
     assert "the landing stopped at gate" in card["next"], card["next"]
     # `status` reads the eject as the board does, so the two never disagree on it.
@@ -2307,11 +2348,11 @@ def test_a_stopped_landing_is_in_needs_you(repo) -> None:
     running = _cards(repo)
     _landing_at(repo, "review", name="032-draft-running")
     card = _cards(repo)["032-draft-running"]
-    assert (card["column"], card["needs"], card["land_stop"]) == ("close", [], None)
+    assert (card["column"], card["needs"], card["land_stop"]) == ("landing", [], None)
     assert running, "a landing under way keeps its column"
     css, script = _page_parts()
     assert "landing-stopped" not in css and "landing-stopped" not in script
-    assert re.search(r'key: "close", label: "Ready to close", who: "[^"]*landing', script)
+    assert re.search(r'key: "landing", label: "Landing", who: "[^"]*on its way', script)
 
 
 @pytest.mark.portable
@@ -2439,3 +2480,286 @@ def test_an_empty_file_says_so() -> None:
         assert _text(run["pane"]) == "This file is empty.", path
         assert _nodes(run["pane"], "pre"), "in the pane's plain style, as an empty folder's note"
         assert run["raw"] is True, "nothing raw to show"
+
+
+# ---------------------------------------------------------------- escalations that clear (145)
+
+GATE_WHY = "- ESCALATED: gate: tests/test_nothing_local.py fails on the behaviour record\n"
+LOOK_WHY = "- ESCALATED: look: the drafts page reads oddly at phone width\n"
+
+
+def test_a_green_hand_gate_clears_a_gate_reason_until_an_edit(repo, capsys, monkeypatch) -> None:
+    """145 R8, the intent's test: a change escalated for a red gate, its tree fixed and a green
+    `sdlc.py gate` recorded, is Ready and gone from `■ What needs me`; an edit to a path it
+    touches puts it back."""
+    _main_check(repo, "test ! -e RED")
+    folder = _escalated(repo, "040-esc-gate", "test", commit=["src/gate.py", "RED"])
+    _write(folder / "decision.md", f"DECISION: ESCALATE\n\nThe gate is red.\n\n{GATE_WHY}")
+    tree = sdlc.checkout_of(folder)
+    card = _cards(repo)["040-esc-gate"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["gate it green"]), card
+    assert card["next"] == "sdlc.py gate 040, once its gate's fault is fixed"
+    shown = (folder / "decision.md").read_bytes()
+    (tree / "RED").unlink()
+    assert _hand_gate(tree, "040") == 0
+    capsys.readouterr()
+    card = _cards(repo)["040-esc-gate"]
+    assert (card["column"], card["needs"], card["answered"]) == ("ready", [], True), card
+    assert "040" not in _status(repo, monkeypatch, capsys)[0].split("■ What needs me")[1]
+    _write(tree / "src" / "gate.py", "edited after the gate\n")
+    card = _cards(repo)["040-esc-gate"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["gate it green"]), card
+    assert (folder / "decision.md").read_bytes() == shown, "145 R10: never rewritten"
+
+
+def test_a_look_is_acknowledged_and_clears(repo) -> None:
+    """145 R9: a look reason needs `acknowledge D<n>` named in `decide`, and once ticked by the
+    person the escalation is answered."""
+    folder = _escalated(repo, "041-esc-look", "test", commit=["src/look.py"])
+    _write(folder / "decision.md", f"DECISION: ESCALATE\n\nLook at it.\n\n{LOOK_WHY}")
+    line = "- [ ] D1 (approver round 1, look): the drafts page reads oddly at phone width\n"
+    _write(folder / "decisions.md", "# Decisions\n\n" + line)
+    card = _cards(repo)["041-esc-look"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["acknowledge D1"]), card
+    assert card["next"] == (
+        "/sdlc-factory:decide 041 for D1, then /sdlc:ship, or /sdlc-factory:land with the others "
+        "ready"
+    )
+    assert card["pending"] == [] and card["assumed"] == [] and card["problems"] == []
+    ticked = line.replace("[ ]", "[x]").rstrip() + " → decided: seen\n"
+    _write(folder / "decisions.md", "# Decisions\n\n" + ticked)
+    card = _cards(repo)["041-esc-look"]
+    assert (card["column"], card["needs"], card["answered"]) == ("ready", [], True), card
+
+
+def test_a_hand_gate_record_is_no_land_gate_sample(repo) -> None:
+    """145 R7: a closed change's `build/gate.md` is no `land-gate` or `gate` sample."""
+    record = "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nSeconds: 999\n"
+    for name in ("070-draft-a", "071-draft-b", "072-draft-c"):
+        _closed(repo, name, 1, land_gates=(40.0,), files={"build/gate.md": record})
+    samples = board.history_samples(repo, "main")
+    assert samples[("land-gate", 1)]["070-draft-a"] == [40.0]
+    assert samples[("gate", 1)]["070-draft-a"] == [5.0, 6.0]
+
+
+# ---------------------------------------------------------------- columns that name the state (145)
+
+
+def _factory_at_state(root: Path, state: str) -> str:
+    """A factory change at `state`, as a run leaves it: its name."""
+    name = f"05{len(state)}-fac-{state}"
+    stage = {"planned": "plan", "designing": "design", "building": "build", "ready": "test",
+             "landing": "shipped"}[state]  # fmt: skip
+    folder = _worktree(root, name, 2, stage, commit=[f"src/{state}.py"], factory=True)
+    if state in ("ready", "landing"):
+        _write(folder / "build" / "round-1.md", "Built.\n")
+        _write(folder / "reviews" / "round-1" / "code.md", "VERDICT: PASS\n")
+        _write(folder / "decision.md", "DECISION: READY\n\nFine.\n")
+    if state == "designing":
+        _write(folder / "spec.md", "# spec\n\n## Requirements\n\n- R1. Written.\n")
+    return name
+
+
+def _hand_at_state(root: Path, state: str) -> str:
+    """A change built by hand at `state`: its name."""
+    name = f"06{len(state)}-hand-{state}"
+    stage = {"planned": "plan", "designing": "design", "building": "build", "ready": "build",
+             "landing": "shipped"}[state]  # fmt: skip
+    commit = [] if state in ("planned", "designing") else [f"src/{state}.py"]
+    folder = _worktree(root, name, 2, stage, commit=commit)
+    if state == "ready":
+        _write(folder / "findings.md", "# Findings\n")
+    return name
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("state", ["planned", "designing", "building", "ready", "landing"])
+def test_hand_and_factory_changes_share_a_column_per_state(repo, state) -> None:
+    """145 R15: a change built by hand and one built by the factory, at one state of the work,
+    sit in the same column, each card naming its own tool's next step."""
+    factory_name, hand_name = _factory_at_state(repo, state), _hand_at_state(repo, state)
+    cards = _cards(repo)
+    assert cards[factory_name]["column"] == cards[hand_name]["column"] == state, (
+        cards[factory_name]["column"], cards[hand_name]["column"],
+    )  # fmt: skip
+
+
+@pytest.mark.portable
+def test_a_factory_landing_is_landing_before_and_after_its_commit(repo) -> None:
+    """145 R15: a landing in flight is Landing at `test` (before its commit) and `shipped`."""
+    _landing_at(repo, "checks", stage="test", rnd=None, moves=0)
+    _landing_at(repo, "gate", name="031-draft-after")
+    cards = _cards(repo)
+    assert cards["030-draft-land"]["column"] == cards["031-draft-after"]["column"] == "landing"
+
+
+@pytest.mark.portable
+def test_a_restart_cut_short_at_test_is_building(repo) -> None:
+    """145 R15: a factory change at `test` with no decision is still building."""
+    _worktree(repo, "045-fac-cut", 2, "test", commit=["src/cut.py"], factory=True)
+    assert _cards(repo)["045-fac-cut"]["column"] == "building"
+
+
+def test_a_hand_change_is_ready_by_review_or_a_green_gate_never_a_red_one(repo, capsys) -> None:
+    """145 R16: Ready once ship's review wrote `findings.md`, or the hand gate is current and
+    green; never while it is current and red, whatever the review says."""
+    _main_check(repo, "test ! -e RED")
+    reviewed = _worktree(repo, "046-hand-reviewed", 1, "build", commit=["src/r.py"])
+    _write(reviewed / "findings.md", "# Findings\n")
+    green = _worktree(repo, "047-hand-green", 1, "build", commit=["src/g.py"])
+    assert _hand_gate(sdlc.checkout_of(green), "047") == 0
+    red = _worktree(repo, "048-hand-red", 1, "build", commit=["src/x.py", "RED"])
+    _write(red / "findings.md", "# Findings\n")
+    assert _hand_gate(sdlc.checkout_of(red), "048") == 1
+    capsys.readouterr()
+    cards = _cards(repo)
+    assert cards["046-hand-reviewed"]["column"] == "ready"
+    assert cards["047-hand-green"]["column"] == "ready"
+    assert cards["048-hand-red"]["column"] == "building"
+    assert cards["048-hand-red"]["next"].startswith("the gate is red")
+
+
+@pytest.mark.portable
+def test_the_columns_name_the_state_of_the_work() -> None:
+    """145 R17: the page's columns, keyed as `column()` returns them."""
+    html = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    found = re.findall(r'\{ key: "([a-z-]+)", label: "([^"]+)"', html)
+    assert found == [
+        ("planned", "Planned"), ("designing", "Designing"), ("building", "Building"),
+        ("ready", "Ready"), ("landing", "Landing"), ("needs-you", "Needs you"),
+    ]  # fmt: skip
+
+
+@pytest.mark.portable
+def test_the_boards_problem_words_are_the_factorys(tmp_path) -> None:
+    """145 R27: a reply or a decision with no answer the script reads is worded on the card as
+    the factory words it: the board's copies, pinned."""
+    assert board.NO_DECISION == factory.NO_DECISION
+    assert board.no_verdict(2, "code") == factory._no_verdict(2, "code")
+    assert board.no_verdict(1, "test", "land") == factory._no_verdict(1, "test", "land")
+    assert "holds no VERDICT: PASS or VERDICT: CHANGES the script reads" in factory._no_verdict(
+        1, "code"
+    )
+    assert factory.NO_DECISION == (
+        "decision.md holds no DECISION: READY or DECISION: ESCALATE the script reads (first, or "
+        "the only answer it gives)"
+    )
+    folder = tmp_path / "008-reopen-drafts"
+    _write(folder / "reviews" / "round-1" / "code.md", "Looks fine.\n")
+    _write(folder / "decision.md", "Ship it, I think.\n")
+    problems: list[str] = []
+    board._factory(folder, problems)
+    assert problems == [factory._no_verdict(1, "code"), factory.NO_DECISION], problems
+
+
+# ---------------------------------------------------------------- a landing's progress (145)
+
+
+@pytest.mark.portable
+def test_landing_step_times_come_from_land_times(repo) -> None:
+    """145 R20: each closed change's `runs/land-times.jsonl`, read at its `Close` commit's parent,
+    gives `land-<step>` samples for the steps it times; a step's figure needs three changes."""
+    rows = (
+        '{"step": "ship", "round": null, "seconds": 20}\n'
+        '{"step": "stack", "round": 1, "seconds": 5}\n'
+        '{"step": "resolve", "round": 1, "seconds": 900}\n'
+        '{"step": "recheck", "round": 1, "seconds": 7}\n'
+    )
+    for name in ("080-draft-a", "081-draft-b", "082-draft-c"):
+        _closed(repo, name, 2, files={"runs/land-times.jsonl": rows})
+    samples = board.history_samples(repo, "main")
+    assert samples[("land-ship", 2)]["080-draft-a"] == [20]
+    assert samples[("land-recheck", 2)]["081-draft-b"] == [7]
+    assert ("land-resolve", 2) not in samples, "an open-ended step is never timed"
+    table = board.typical_times(repo, "main")
+    assert table["land-ship/2"] == {"seconds": 20, "samples": 3}
+    assert table["land-stack/2"]["seconds"] == 5
+
+
+@pytest.mark.portable
+def test_an_open_ended_step_never_shows_a_fraction(repo) -> None:
+    """145 R21: with history for every step, an open-ended step shows its elapsed time and that
+    it is running, never a fraction or a typical time; a timed step with no history the same."""
+    folder = _landing_at(repo, "gate")
+    history = {f"land-{step}/1": {"seconds": 60, "samples": 3} for step in factory.LAND_STEPS}
+    entry = {"stage": "shipped", "tier": 1}
+    for step in factory.LAND_STEPS:
+        if step in board.LAND_STOPS:
+            continue
+        out = {"step": step, "round": 1, "moves": 0, "limit": 3}
+        _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2000-01-01T00:00:00Z"))
+        found = board._land_progress(entry, folder, [], history, 1e9)
+        if step in board.LAND_OPEN:
+            assert (found["fraction"], found["typical"], found["running"]) == (None, None, True)
+        else:
+            assert found["fraction"] == board.CAP and found["running"] is False, step
+        assert found["elapsed"] > 0
+        bare = board._land_progress(entry, folder, [], {}, 1e9)
+        assert (bare["fraction"], bare["running"]) == (None, True), step
+    assert set(board.LAND_OPEN) == {"resolve", "fix", "mend", "cases", "wait"}
+
+
+@pytest.mark.portable
+def test_a_train_of_three_shows_its_step_place_and_wait(repo) -> None:
+    """145 R23, the intent's test: one change stacking and two waiting their turn, each card with
+    its step, its place, and what it waits on, never the last step it finished."""
+    names = ["030-draft-one", "031-draft-two", "032-draft-three"]
+    records = [
+        {"step": "stack", "train": {"k": 1, "n": 3}},
+        {"step": "wait", "train": {"k": 2, "n": 3}, "waits": f"stack on {names[0]}"},
+        {"step": "wait", "train": {"k": 3, "n": 3}, "waits": f"stack on {names[1]}"},
+    ]
+    for name, rec in zip(names, records, strict=True):
+        folder = _landing_at(repo, "ship", name=name)
+        out = {"round": 1, "moves": 0, "limit": 3, **rec}
+        _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2000-01-01T00:00:00Z"))
+    cards = _cards(repo)
+    got = [
+        (cards[n]["progress"]["steps"][1]["label"], cards[n]["progress"]["train"],
+         cards[n]["progress"]["wait"])
+        for n in names
+    ]  # fmt: skip
+    assert got == [
+        ("stacking", "1 of 3", None),
+        ("waiting", "2 of 3", "waiting to stack on 030"),
+        ("waiting", "3 of 3", "waiting to stack on 031"),
+    ], got
+    assert all(cards[n]["column"] == "landing" for n in names)
+    assert "the factory is landing it, at wait" not in cards[names[1]]["next"]
+    assert cards[names[1]]["next"] == (
+        "waiting to stack on 030: wait for it, or /sdlc-factory:land 031 if its session ended"
+    )
+    html = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert "p.wait" in html and "running" in html
+
+
+@pytest.mark.portable
+def test_the_land_record_readers_are_pinned_copies() -> None:
+    """145 R24: the board reads `WAITS:` and the times rows as `factory.py` does, case for case
+    over the shared table."""
+    cases = json.loads((ROOT / "tests" / "fixtures" / "land-record-cases.json").read_text("utf-8"))
+    for out in cases["steps"]:
+        text = factory.land_step_text(
+            out, "2026-11-18T10:00:00Z", out.get("after"), out.get("problems", [])
+        )
+        assert board.read_land_step(text) == factory.read_land_step(text), out
+        assert factory.read_land_step(text)["waits"] == out.get("waits"), out
+    for text in cases["times"]:
+        assert board.read_land_times(text) == factory.read_land_times(text), text
+    assert factory.read_land_times(cases["times"][0]) == [
+        {"step": "ship", "round": None, "seconds": 12.5},
+        {"step": "gate", "round": 1, "seconds": 40.0},
+    ]
+    assert board.WAITS_RE.pattern == factory.WAITS_RE.pattern
+    assert board.LAND_TIMES == factory.LAND_TIMES
+    assert set(board.LAND_AT) == set(factory.LAND_STEPS)
+
+
+@pytest.mark.portable
+def test_a_recheck_after_the_commit_sits_after_the_gate(repo) -> None:
+    """145 R26: the track names the post-commit checks as their own position, after the gate."""
+    _landing_at(repo, "recheck")
+    progress = _cards(repo)["030-draft-land"]["progress"]
+    shown = [s["label"] + (" (current)" if s["state"] == "current" else "")
+             for s in progress["steps"]]  # fmt: skip
+    assert shown == ["ship", "rebase", "gate", "checks (current)", "review", "verify", "close"]

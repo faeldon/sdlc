@@ -83,6 +83,18 @@ even a sentence of your own. Then:
 - **Open items**, one line each: every unresolved CHANGE, with the reviewer that raised it.
 - **Decisions to confirm**, one line each: every unticked blocking decision by its id (`D2`),
   then each open default's `- SETTLED:` or `- ESCALATED:` line (above).
+- **Every other reason you escalate for**, when the decision is ESCALATE. Every reason you
+  escalate for is a line of its own, with its kind, which says how it clears without a rebuild:
+  - `- ESCALATED: gate: <why>` for something a green `[commands] check` on the change would show is
+    fixed: a red gate, or a failing test or lint the check runs. The person fixes it and runs
+    `sdlc.py gate NNN`; a green attempt on the change as it stands clears it.
+  - `- ESCALATED: look: <why>` for anything else the person must look at: a Critical or High
+    finding still open, a disagreement, a departure from the spec, a requirement with no test.
+    The person acknowledges it in `/sdlc-factory:decide`.
+
+  An open ledger line keeps its own form (above). A reason with no line of its own is one the
+  person can't clear without a rebuild, so give each its line, and keep `## Reconsider the
+  approach` for a run that can't converge.
 - **For the person at ship**: what to look at first in the diff.
 - **The release impact you propose**, on a line of its own, exactly `- IMPACT: <major|minor|patch|none>
   — <why>`: what someone holding the previous release has to do differently (`major`), can newly

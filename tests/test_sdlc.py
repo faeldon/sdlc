@@ -2986,3 +2986,47 @@ def test_upgrade_refuses_and_writes_nothing(tmp_path, capsys, case) -> None:
     needle = {"tier-2": "already Tier 2", "stage-design": "stage: design",
               "another-change": "013", "base-branch": "main"}[case]  # fmt: skip
     assert any(needle in r for r in out["refusals"]), out["refusals"]
+
+
+# ---------------------------------------------------------------- escalations that clear (145)
+
+GREEN = {"verdict": "PASS", "current": True}
+GATE = {"kind": "gate", "text": "the gate is red", "cleared": False, "filed": True}
+LOOK = {"kind": "look", "text": "it reads oddly", "cleared": False, "filed": True}
+SEEN = LOOK | {"cleared": True}
+UNFILED = LOOK | {"filed": False}
+LOOKS = [{"id": "D4", "text": "it reads oddly"}]
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    ("fields", "needs"),
+    [
+        ({"pending": _d("D2"), "assumed": _d("D3", "D5"), "ledger_lines": 3},
+         ["decide D2", "confirm 2 defaults"]),
+        ({"reconsider": True}, ["reconsider the approach", "read the escalation"]),
+        ({"reasons": [LOOK], "looks": LOOKS}, ["acknowledge D4"]),
+        ({"reasons": [SEEN], "looks": []}, []),
+        ({"reasons": [GATE, GATE | {"text": "lint"}]}, ["gate it green"]),
+        ({"reasons": [GATE], "gate": GREEN}, []),
+        ({"reasons": [GATE], "gate": {"verdict": "PASS", "current": False}}, ["gate it green"]),
+        ({"reasons": [GATE], "gate": {"verdict": "FAIL", "current": True}}, ["gate it green"]),
+        ({"reasons": [GATE, LOOK], "looks": LOOKS, "pending": _d("D1"), "ledger_lines": 1},
+         ["decide D1", "acknowledge D4", "gate it green"]),
+        ({"reasons": [UNFILED], "looks": []}, ["read the escalation"]),
+        ({}, ["read the escalation"]),
+        ({"ledger_lines": 1}, []),
+    ],
+    ids=["ledger", "reconsider", "look", "seen", "gate", "gate-green", "gate-stale", "gate-red",
+         "all", "unfiled", "old-decision", "ticked"],
+)  # fmt: skip
+def test_needs_of_an_escalation_by_its_reasons(fields, needs) -> None:
+    """145 R9: an ESCALATE at `test` needs what its ledger and its reasons still hold, a gate
+    reason cleared only by a current green hand gate; one that needs nothing is answered."""
+    rec = _rec(stage="test", decision="ESCALATE") | fields
+    assert sdlc.needs_of(rec) == needs
+    assert sdlc.answered(rec) == (needs == [])
+    step = sdlc.decide_step(rec | {"id": "008", "needs": needs})
+    assert (step is not None) == any(
+        n.startswith(("decide ", "confirm ", "acknowledge ")) for n in needs
+    )

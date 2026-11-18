@@ -38,7 +38,7 @@ h1 { margin: 0; font-size: 17px; }
 .status { color: var(--muted); font-size: 13px; }
 .status.down { color: var(--stop); }
 main.board {
-  display: grid; grid-template-columns: repeat(7, minmax(168px, 1fr)); gap: 12px;
+  display: grid; grid-template-columns: repeat(6, minmax(168px, 1fr)); gap: 12px;
   padding: 16px; overflow-x: auto; align-items: start;
 }
 @media (max-width: 760px) {
@@ -54,7 +54,7 @@ main.board {
 .col-head .who { grid-column: 1 / -1; grid-row: 2; color: var(--muted); font-size: 12px; }
 .col-head .count { grid-column: 2; grid-row: 1; color: var(--muted); font-size: 12px; }
 .col.needs-you .col-head h2 { color: var(--stop); }
-.col.ready .col-head h2, .col.close .col-head h2 { color: var(--accent); }
+.col.ready .col-head h2, .col.landing .col-head h2 { color: var(--accent); }
 .empty { color: var(--muted); padding: 8px 2px; }
 .card {
   display: block; width: 100%; text-align: left; font: inherit; color: inherit;
@@ -194,12 +194,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 "use strict";
 const POLL_MS = 2000;
 const COLUMNS = [
-  { key: "plan", label: "Plan", who: "intent" },
-  { key: "design", label: "Design", who: "spec" },
-  { key: "build", label: "Build", who: "plan and code" },
-  { key: "test", label: "Test", who: "the gate and the review" },
-  { key: "ready", label: "Ready to ship", who: "factory: READY, or answered" },
-  { key: "close", label: "Ready to close", who: "/sdlc:close, or the factory's landing" },
+  { key: "planned", label: "Planned", who: "intent, nothing built" },
+  { key: "designing", label: "Designing", who: "a Tier 2's spec" },
+  { key: "building", label: "Building", who: "code, by hand or in rounds" },
+  { key: "ready", label: "Ready", who: "built and checked, not committed" },
+  { key: "landing", label: "Landing", who: "committed, on its way to the base" },
   { key: "needs-you", label: "Needs you", who: "what each card says it needs" },
 ];
 const $ = (id) => document.getElementById(id);
@@ -448,10 +447,12 @@ function progressRow(p) {
     parts.push(h("div", { class: "meta" },
       `${dur(p.elapsed)} · ~${dur(p.typical)} typical · estimate (${p.samples} runs)`));
   } else if (p.elapsed !== null && p.elapsed !== undefined) {
-    parts.push(h("div", { class: "meta" }, `${dur(p.elapsed)} so far`));
+    // No typical time to draw against (an open-ended step, or none in history): no bar, never a guess.
+    parts.push(h("div", { class: "meta" }, `${dur(p.elapsed)} so far${p.running ? " · running" : ""}`));
   }
   if (p.plan) parts.push(h("div", { class: "meta" }, `plan: ${p.plan.touched} of ${p.plan.named} files touched`));
   if (land && p.train) parts.push(h("div", { class: "meta" }, `${p.train} in a train`));
+  if (land && p.wait) parts.push(h("div", { class: "meta" }, p.wait));
   if (land && p.moves) parts.push(h("div", { class: "meta" }, `base moved ${p.moves} of ${p.limit || "?"} times`));
   for (const why of p.problems || []) parts.push(h("div", { class: "flag" }, `landing stopped: ${why}`));
   // A run stopped early goes to the approver with rounds left: each reason, in plain words.
@@ -541,7 +542,8 @@ function render(st) {
   }
   const factory = st.changes.filter((c) => c.mode === "factory");
   const usd = factory.reduce((s, c) => s + (c.cost ? c.cost.usd : 0), 0);
-  const openCount = st.changes.filter((c) => c.column !== "close").length;
+  // A shipped or dropped change waits on close: no longer open, though its card stays.
+  const openCount = st.changes.filter((c) => c.stage !== "shipped" && c.stage !== "dropped").length;
   $("totals").textContent = `${openCount} open · ${factory.length} by the factory` +
     (factory.length ? ` · $${usd.toFixed(2)} API-equivalent` : "");
 }

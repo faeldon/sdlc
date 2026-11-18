@@ -682,3 +682,59 @@ def test_new_claims_a_number_while_a_hand_gate_waits(repo, tmp_path) -> None:
         child.wait()
         out, err = gate.communicate(timeout=30)
     assert gate.returncode == 0 and json.loads(out)["slot"] == 0, (out, err)
+
+
+# ---------------------------------------------------------------- a factory run at test (145 R7)
+
+
+def _factory_at(root: Path, stage: str) -> None:
+    folder = _folder(root)
+    _write(folder / "runs" / "builder.sessions", "s-1\n")
+    intent = folder / "intent.md"
+    intent.write_text(INTENT.replace("stage: build", f"stage: {stage}"), encoding="utf-8")
+
+
+def test_the_hand_gate_gates_a_factory_run_at_test_alone(repo, capsys) -> None:
+    """145 R7: at `test` a factory run is gated by hand into `build/gate.md`; at `build` or
+    `design` it is refused, naming `factory.py gate`."""
+    for stage in ("build", "design"):
+        _factory_at(repo, stage)
+        code = sdlc.cmd_gate(repo, "008")
+        out = json.loads(capsys.readouterr().out)
+        assert code == 1 and "factory.py gate" in out["refusals"][0], out
+        assert not (_folder(repo) / sdlc.HAND_GATE).exists()
+    _factory_at(repo, "test")
+    code, out = _gate(repo, capsys)
+    assert code == 0 and out["verdict"] == "PASS", out
+    assert _record(repo).startswith("GATE: PASS\n")
+
+
+def test_a_hand_gate_on_a_factory_run_is_counted_in_no_factory_figure(repo, capsys) -> None:
+    """145 R7: `gate_fail` counts the factory's round gates alone, never `build/gate.md`."""
+    _base_check(repo, "exit 1")
+    _factory_at(repo, "test")
+    _gate(repo, capsys)
+    folder = _folder(repo)
+    _write(folder / "decision.md", "DECISION: ESCALATE\n\n- ESCALATED: gate: red\n")
+    attempts = "## Attempt 1\n\nVerdict: FAIL\n\n## Attempt 2\n\nVerdict: PASS\n"
+    _write(folder / "build" / "round-1.gate.md", f"GATE: PASS\n\n{attempts}")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "built")
+    assert _record(repo).startswith("GATE: FAIL")
+    assert sdlc._factory_files(repo, NAME)["gate_fail"] == 1
+
+
+@pytest.mark.portable
+def test_the_factorys_hand_build_is_sdlcs(repo) -> None:
+    """145: the factory clears a `gate` reason by its copy of the hand gate's build, pinned to
+    `sdlc.py`'s on one tree, its folder, counter, untracked files and deletions included."""
+    assert factory.HAND_GATE == sdlc.HAND_GATE
+    assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")
+    _write(_folder(repo) / "notes.md", "# Notes\n")
+    _write(repo / ".sdlc" / "last-id", "8\n")
+    _write(repo / "src" / "new.py", "y = 1\n")
+    (repo / "README.md").unlink()
+    assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "built")
+    assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")

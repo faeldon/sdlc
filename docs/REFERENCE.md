@@ -533,39 +533,52 @@ each problem, at any stage; at `build`, a stop's way on in plain words (`stopped
 rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's commit`, or `stopped:
 read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
 decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
-approach` (its `decision.md` holds that section) and, with no decision line at all in its ledger,
+approach` (its `decision.md` holds that section), `acknowledge D<n>` for each `look` the approver
+escalated for (`- ESCALATED: look: <why>`, filed in the ledger as `(approver round <R>, look)`),
+`gate it green` while a `gate` reason (`- ESCALATED: gate: <why>`) has no green hand gate on the
+change as it stands (below), and, with no such reason and no decision line at all in its ledger,
 `read the escalation` (a default the approver settled, `→ settled by the approver:`, is no decision
 line here and never counted as an answer, nor as a default to confirm), the line ending with
 `/sdlc-factory:decide NNN`, where the person answers them one at a time, while it holds a
-decision or a default; `landing stopped at <step>` for a factory landing that stopped
-(`runs/land-step.md`), at `test` before its commit or on a shipped change, whose Ready to close
-line says so too; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
+decision, a default or a look; `landing stopped at <step>` for a factory landing that stopped
+(`runs/land-step.md`), at `test` before its commit or on a shipped change, whose Landing card says
+so too; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
 but whose stage never moved. `status` reads only what it already reads, so a problem only the
 board finds (a reply that isn't a review, a findings file that won't read) is on the board alone.
 
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
-the same open changes as a live page on `127.0.0.1` until it is stopped: one column per stage, then
-**Ready to ship** for a factory change the approver called READY, **Ready to close** for a shipped or
-dropped one whose worktree still stands, and **Needs you** for one with a file that won't read, at
-any stage, or whatever else it needs from the person, each card naming it on a `needs you:` line
-(the texts `/sdlc:status`'s `■ What needs me` gives, above): a run that stopped or a blocking
-decision at `build`, an ESCALATE at `test` while its ledger holds an unticked line, asks to
-reconsider the approach, or holds no decision at all, a landing that stopped, before its commit
-or after, and a written spec waiting on its approval.
-An escalation whose every ledger line is ticked moves to Ready to ship, badged `escalated:
-answered`; an open `- [ ]` line the ledger can't read is a problem, so it never counts as an
-answer. The stage is the only mark that the person has answered a stop or a blocking decision, so a change they shipped,
+the same open changes as a live page on `127.0.0.1` until it is stopped, in columns that name the
+state of the work, the same for a change built by hand or by the factory: **Planned** (an intent,
+nothing built), **Designing** (a Tier 2's spec), **Building** (code being written, by hand or in
+the factory's rounds), **Ready** (built and checked, nothing committed: a factory change the
+approver called READY or whose escalation is answered, or a change built by hand whose review is
+written or whose gate is green), **Landing** (committed and on its way to the base branch: shipped
+or dropped and waiting on close, or a factory landing or train in flight), and **Needs you** for
+one with a file that won't read, at any stage, or whatever else it needs from the person, each
+card naming it on a `needs you:` line (the texts `/sdlc:status`'s `■ What needs me` gives, above):
+a run that stopped or a blocking decision at `build`, an ESCALATE at `test` while its ledger holds
+an unticked line, a look is unacknowledged, a gate reason isn't green, it asks to reconsider the
+approach, or it holds no decision at all, a landing that stopped, before its commit or after, and
+a written spec waiting on its approval. Each card's `next:` line names its own tool's command.
+An escalation whose every reason is cleared (each ledger line ticked, each look acknowledged in
+`/sdlc-factory:decide`, each gate reason by a current green hand gate) moves to Ready, badged
+`escalated: answered`, its `decision.md` never rewritten: the landing still asks, and shows how
+each reason was cleared; an open `- [ ]` line the ledger can't read is a problem, so it never
+counts as an answer. The stage is the only mark that the person has answered a stop or a blocking decision, so a change they shipped,
 dropped or put back to `build` leaves Needs you for the column that answer leads to, whatever the
 run's files still say; one sent back to the factory keeps its old decision as `decision-<n>.md`, a
-file of its folder, and is in Build again. A change built by hand moves on from its `stage:` line
-by what it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`,
-to Test once ship's review has written its `findings.md` or its gate run by hand is green on the
-build as it stands (below), with a `gate green` or `gate red` badge while that record is current.
+file of its folder, and is in Building again. A change built by hand moves on from its `stage:`
+line by what it has touched: to Building once its branch or worktree changes a path outside
+`.sdlc/work/`, to Ready once ship's review has written its `findings.md` or its gate run by hand is
+green on the build as it stands (below), never while that record is current and red, with a
+`gate green` or `gate red` badge while it is current.
 A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, shipped
 or not, with a
 `rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
 `--continue` or `--abort` as its next step, saying that `--abort` keeps the resolved work under
-`refs/sdlc/end/<branch>`. A card with a file that won't read names that as its next step, at any
+`refs/sdlc/end/<branch>`; a factory landing whose builder is resolving the conflict says so, its
+next step to wait for it, or `/sdlc-factory:land NNN` if its session ended. A card with a file
+that won't read names that as its next step, at any
 stage. Its next step follows its `needs you:` line: a decision still to make (`decide D<n>`) is
 named first, before the problem a card also has; on an escalation at `test`, a decision or
 default to confirm makes it `/sdlc-factory:decide NNN for D2 and 1 default`, then `/sdlc:ship`; a blocking decision at
@@ -584,12 +597,15 @@ run against the median time that step took at that tier in the last 20 closed fa
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
 them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
 has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A change the factory
-is landing shows the landing's track instead (its checks or cases, then ship, rebase or resolving,
-gate, review, verify,
-close), from the `runs/land-step.md` each landing command writes as it starts its step: the
-landing round, how often the base branch has moved out of `[land] moves`, the gate, review and
-verify timed against closed changes' landings, and a stopped landing marked at its step with why,
-in Ready to ship before its commit and Ready to close after. Its next step names the landing, not
+is landing shows the landing's track instead (its checks or cases, then ship, rebase, resolving,
+stacking or waiting, gate, checks run again after the commit, review, verify, close), from the
+`runs/land-step.md` each landing command writes as it starts its step: the landing round, how
+often the base branch has moved out of `[land] moves`, a change's place in a train (`2 of 3`) and
+what it waits on there (`waiting to stack on 140`), the current step timed against closed
+changes' landings (each step's time is kept in `runs/land-times.jsonl` as the next replaces it),
+or, for a step with no history or one that is open-ended (a conflict, a fix, a mend, a paid case
+run, a turn in a train), its elapsed time and `running`, never a made-up bar; and a stopped
+landing marked at its step with why, in Landing before its commit and after. Its next step names the landing, not
 `/sdlc:close` or `/sdlc:ship`, while it runs; once it stops, the card is in Needs you (`landing
 stopped at <step>`), each reason a plain line with the tool's own words under it, and names the way
 on: fix what it names, then `/sdlc-factory:land`, or by hand `/sdlc:ship` before its commit and
@@ -620,8 +636,10 @@ the build covers as it was. `Build:` is a hash of where the branch left the base
 content of every path it changed since (committed, uncommitted or untracked, outside `.sdlc/work/`),
 so committing the same work keeps a record current, and any other edit, or a rebase onto a moved
 base, makes it stale. It prints a JSON summary and exits 0 on PASS, 1 otherwise, and refuses a
-factory run (its folder holds `runs/`; `factory.py gate` gates it), a checkout not on the change's
-branch, and a base branch with no check. It is the person's step after building, never
+factory run still building (its folder holds `runs/`, at `design` or `build`; `factory.py gate`
+gates it), a checkout not on the change's branch, and a base branch with no check. A factory run at
+`stage: test` it gates like any change: its record is no round's, never counted as the factory's
+gate, and while it is current and green it clears the approver's `gate` reasons. It is the person's step after building, never
 pre-approved, since it runs a command: no skill runs it, and ship's own gate is unchanged. The board
 and `/sdlc:status` read the record (`· gate green` or `· gate red` on the change's line) only while
 it is current, and ship commits it with the change's folder. While `sdlc-factory` is enabled,
