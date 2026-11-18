@@ -301,3 +301,11 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 141-board-landing-track-truth (correctness)
+
+## [2026-11-18-60] [idea] Status groups its sections by the board's columns
+
+status groups its sections by the board's columns (Planned, Designing, Building, Ready, Landing,
+Needs you), so the board and status use one vocabulary. Raised by 145-escalations-that-clear,
+whose spec left status as it is: it reshapes status's output for every host, a change of its own.
+Theme: board
+Raised 2026-11-18.
