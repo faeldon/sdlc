@@ -216,9 +216,10 @@ second file beside it.
 ## Step 6 — Report and stop
 
 Give the commit, each issue's verdict, and anything `mark-triaged` or `sync` listed as failed with
-the command to rerun. Name each dangling issue that is waiting on the push, which `/sdlc:publish`
-or close will do, and, with `dangling_unread`, that no dangling issue was offered, and why. Then the next action: `/sdlc:intent <id>` for an entry the human wants built
-now, or nothing, and `/sdlc:status` puts the new entries forward with the rest.
+the command to rerun. Name each dangling issue that is waiting on the push, which `/sdlc:publish` or
+close will do, and, with `dangling_unread`, that no dangling issue was offered, and why. Then the
+next action: `/sdlc:intent <id>` for an entry the human wants built now, or nothing, and
+`/sdlc:status` puts the new entries forward with the rest.
 
 ## Out of scope
 

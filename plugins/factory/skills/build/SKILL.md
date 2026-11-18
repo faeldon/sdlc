@@ -418,8 +418,10 @@ the next step for that change. A `problem` is a stop, reported for that change a
 
    - **`approve`**: first carry what's unresolved into the notes, so `/sdlc:ship` must give each a
      disposition, then run the approver, whose reply goes to `.sdlc/work/NNN-slug/decision.md`.
-     When `exhausted` is true, it is asked whether the approach should be reconsidered, and only an
-     ESCALATE with a `## Reconsider the approach` section passes the next call.
+     When `exhausted` is true, whether the rounds ran out or the run stopped early on `stuck` or
+     `untestable`, the approver is told which, and asked whether the approach should be
+     reconsidered; only an ESCALATE with a `## Reconsider the approach` section passes the next
+     call.
 
      ```bash
      uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry <NNN> && \

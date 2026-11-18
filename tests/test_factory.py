@@ -1671,6 +1671,10 @@ def test_a_change_kept_twice_escalates_before_the_rounds_run_out(tmp_path, capsy
     (folder / "build" / "round-2.restart.md").write_text("RESTART: decision-1.md\n")
     out = _verdicts(root, capsys)
     assert (out["next"], out["stuck"]) == ("rework", []), out
+    # A round before with no `verified.md` kept nothing, so the same change is kept once.
+    root = _change(tmp_path / "unverified")
+    (_kept_again(root) / "reviews" / "round-1" / "verified.md").unlink()
+    assert _verdicts(root, capsys)["stuck"] == []
 
 
 def test_an_untestable_requirement_escalates_after_its_round(tmp_path, capsys) -> None:
@@ -1728,10 +1732,17 @@ def test_an_early_escalation_names_its_reason_to_the_approver(tmp_path, capsys) 
     assert NEXT_STEP not in prompt and "can't be tested" not in prompt
 
 
+REASK = (
+    "A kept change the rework didn't make, raise again word for word, as the prompt quotes it: the "
+    "run tells a change kept twice by its words, and stops for the person rather than rework it a "
+    "third time."
+)
+
+
 def test_the_review_prompt_asks_for_an_undone_kept_change_word_for_word(tmp_path, capsys) -> None:
     """136 R4: round N+1's reviewers are told to raise again, word for word, a change kept last
     round that the rework didn't make, so the run can tell one kept twice; each reviewer's own
-    prompt says the same."""
+    prompt says the same, in the same sentence."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     _round(root, 1, code="CHANGES")
@@ -1749,7 +1760,7 @@ def test_the_review_prompt_asks_for_an_undone_kept_change_word_for_word(tmp_path
     ), prompt
     for role in factory.REVIEWERS:
         text = (ROOT / "plugins" / "factory" / "agents" / f"reviewer-{role}.md").read_text("utf-8")
-        assert "word for word" in " ".join(text.split()).split("## Later rounds")[1], role
+        assert REASK in " ".join(text.split()).split("## Later rounds")[1], role
 
 
 # ---------------------------------------------------------------- rounds that converge
@@ -1971,6 +1982,8 @@ def test_readme_names_the_light_reviewers_and_models() -> None:
     (model,) = models
     assert f"Each reviewer runs on {model} at either depth and tier" in text, model
     assert f"Every scaled reviewer runs on {model}**" in text
+    # The table under "Why these defaults" (changes 124, 125, 129 and 131) is history, not a rule:
+    # no test can read it, so it is checked by hand against each change's `Close` commit.
     assert "### Why these defaults" in text and "Landing catches: k of n" in text
 
 
@@ -5023,7 +5036,7 @@ def test_the_build_question_carries_on_an_upgraded_run(tmp_path, capsys) -> None
     )
 
 
-def test_no_build_question_for_a_refusal_or_a_spec(tmp_path, capsys) -> None:
+def test_no_build_question_for_a_refusal_or_a_tier_1_spec(tmp_path, capsys) -> None:
     root = _change(tmp_path, 2, "test")
     assert _question(root, capsys) is None, "a test change with no decision is refused"
     _, out = _run(capsys, factory.cmd_start, _change(tmp_path / "b", 1, "plan"), "008", "spec")

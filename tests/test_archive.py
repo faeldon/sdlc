@@ -1753,8 +1753,8 @@ def test_intake_lists_only_what_no_one_has_recorded(tmp_path, gh, capsys) -> Non
 def test_intake_never_says_nothing_waits_when_it_can_t_read_the_unpushed_commits(
     tmp_path, gh, capsys, monkeypatch
 ) -> None:
-    """138 C1: with the unpushed commits unread, no dangling issue is said not to wait on the
-    push: each says `waits_on_push: null`, and `dangling_unread` says why, so triage offers none."""
+    """With the unpushed commits unread, no dangling issue is said not to wait on the push: each
+    says `waits_on_push: null`, and `dangling_unread` says why, so triage offers none."""
     root = _repo(tmp_path)
     _filed(gh, 50, labels=("triaged",))
     monkeypatch.setattr(sdlc, "unpushed_closes", lambda *a: None)

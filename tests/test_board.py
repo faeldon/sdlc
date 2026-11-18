@@ -2238,7 +2238,7 @@ def test_a_stale_response_never_paints_over_the_newer_file() -> None:
 @needs_node
 def test_an_empty_file_says_so() -> None:
     """2026-11-18-8: an empty file draws a note, never a blank pane, and no Raw toggle; one
-    holding only whitespace is as empty (138 C2)."""
+    holding only whitespace is as empty."""
     cases = [
         ("intent.md", ""),
         ("build/round-1.files", ""),
