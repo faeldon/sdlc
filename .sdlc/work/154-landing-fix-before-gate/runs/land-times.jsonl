@@ -1,7 +1,0 @@
-{"step": "ship", "round": null, "seconds": 1.0}
-{"step": "wait", "round": null, "seconds": 10.0}
-{"step": "stack", "round": 1, "seconds": 3.0}
-{"step": "gate", "round": 1, "seconds": 261.0}
-{"step": "wait", "round": 1, "seconds": 36.0}
-{"step": "review", "round": 1, "seconds": 32.0}
-{"step": "wait", "round": 1, "seconds": 28.0}
