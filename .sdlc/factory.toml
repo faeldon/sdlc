@@ -2,6 +2,11 @@
 # defaults: the board `sdlc.py board` serves is this plugin's one front end, so a factory change to
 # it gets the UI and UX reviewers, judging screenshots of the board as that change built it.
 
+[models]
+# An experiment from 2026-11-18: the builder on Fable for the 139–143 batch, compared with that
+# day's Opus builds (rounds, kept changes, landing stops, cost) before it is kept or reverted.
+builder = "claude-fable-5-1"
+
 [ui]
 # The board over a scratch repo built from the fixture's copy, with a change in every state a card
 # can show, served by this checkout's own scripts/sdlc.py (tests/fixtures/board/serve.sh).
