@@ -18,6 +18,10 @@ Rework within a change, read from the same events and summary, written on lines 
     spike(events, summary)                        -> dict | None   `Sdlc-Spike`
     in_change_trailers(done, first_time, spiked)  -> [line]
 
+On a factory change, `Sdlc-Rework` counts its ledger: `blocking=`, `defaults=` (every default
+line), `defaults_open=` (those still unticked) and `defaults_settled=` (those the approver
+settled, never the person's word; absent from a change closed before it was counted, never 0).
+
 An event is a dict with `ts` (an aware datetime) and `kind`:
 
     skill{name}  turn{ms}  human{reply, command, plugin, asked, interrupt, words}  harness
@@ -1209,6 +1213,8 @@ def rework(
                 "reviews": reviews,
             }
         )
+        if "defaults_settled" in factory:
+            out["defaults_settled"] = factory["defaults_settled"]
         if "gate_fail" in factory:
             out["gate_fail"] = factory["gate_fail"]
     return out

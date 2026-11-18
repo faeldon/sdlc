@@ -1,0 +1,122 @@
+---
+name: decide
+description: Walk the person through one factory change's open decisions and assumed defaults at stage test, one at a time — each with its background, the default, the alternatives the agent weighed and why it chose the default — and after one approval record their answers in the change's decisions.md and say what the change needs next. Use after a factory run escalates, or when status says a change needs its defaults confirmed. Not for a run still building (the supervisor asks its own blocking decisions), not for more than one change at once, and never to rebuild, ship or land a change.
+argument-hint: "[NNN — the change whose decisions to take]"
+allowed-tools:
+  - Read
+  - Edit
+  - AskUserQuestion
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ask *)'
+disable-model-invocation: true
+---
+
+# Factory decide — the person's open calls on one change, one at a time
+
+A factory run leaves the calls its agents couldn't make in the change's ledger,
+`.sdlc/work/NNN-slug/decisions.md`: blocking decisions the supervisor didn't get to, and defaults the
+build went ahead on. The approver settles the defaults it can from the spec, the code and the
+rounds, and escalates the rest. This skill asks the person what is left, on one change, one item
+at a time, with what they need to judge it in front of them, and records their answers where the
+supervisor records its own: `- [x] … → decided: <answer>`.
+
+**It answers nothing itself.** Every answer is the person's, chosen or typed. A line the approver
+settled (`→ settled by the approver:`) is its call, shown here as one list and never asked; a person
+who wants to overturn one can still change the ledger by hand, or ship by hand, where it is shown.
+It starts no agent, and rebuilds, ships and lands nothing: it says which of those comes next.
+
+## Step 0 — What is open (mechanical, no confirmation needed)
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py config && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ask <NNN>
+```
+
+`config` gives no key this skill reads; it is run so a broken `.sdlc/factory.toml` is said first.
+A refusal is said, naming the change, with what the person can do instead, and the skill stops:
+
+- **Not at `stage: test`.** At `build` or `design`, a run is still building it: its blocking
+  decisions are asked in the session running `/sdlc-factory:build`, so answer them there, and run
+  this again once the run reports the change ready to ship. At `plan`, the change hasn't been
+  built yet. At `shipped` or `dropped`, there is nothing left to decide.
+- **A number that names no change**, or one `ask` can't find: say what it said, and that
+  `/sdlc:status` lists the open changes, and those that need deciding under `■ What needs me`.
+
+Otherwise `ask` prints `decision`, the approver's,
+`items`, each open line in id order (`id`, `kind`, `source`, `reply`, `question`, `options`, `why`,
+`escalated`), and `settled`, the defaults the approver settled with its reasons.
+
+With no `items`, say that nothing is open on `NNN-slug` and stop. Otherwise show first, naming the
+change: the approver's `decision`, and the `settled` list as one block (`The approver settled
+these: D3: Log the draft id? (spec R4 forbids it)`), none of them asked.
+
+## Step 1 — Ask each item in a dialog of its own (writes nothing)
+
+For each item in order, read what it needs to be judged: the reply that raised it (`reply`, under
+the change's folder), around its `- DECISION:` line, and the part of `spec.md` (or the intent's
+Approach, at Tier 1) it touches. Then ask it with `AskUserQuestion`, one item to a dialog, never two
+items and never two changes in one: the question's text says the change's `NNN-slug`, who raised
+it in which round (`source`), the background in two or three sentences of your own from what you
+read, the question as the agent put it, the approver's reason it is the person's (`escalated`),
+the default and why it was chosen (`why`), and each alternative with its notes. Its options:
+
+- With `options`: the default first, labelled as its option text, then at most three alternatives,
+  each its option text, its notes as the option's description. Any more are listed in the
+  question's text, for the person to type.
+- With no `options` (a ledger from before them, or a bare line): `keep the default` and `change it`.
+  For `change it`, ask what they want instead, as text.
+
+For a blocking item, the first option is the agent's recommendation, marked as such in its
+description. Hold each answer: the option the person chose, or their words when they typed one.
+Never fill in an answer they didn't give; an item dismissed, empty, timed out or refused is left
+open, and said so. These dialogs collect answers and record nothing.
+
+## Step 2 — WAIT for explicit approval
+
+Show each answer under its id, the question and what the person chose: `D2: Page the drafts
+list at 50? → 50, the default kept`, or the alternative, or the words they gave. Then ask literally:
+
+> `Record <n> answers in NNN-slug's decisions.md as shown? (yes / change one / no)`
+
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
+them an option in that order, labelled as written, `header` the skill's name. Only a
+chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, and stop.
+
+On `change one`, ask which, ask that item again as in Step 1, and come back to this question. On
+`no`, record nothing and stop.
+
+**Do nothing more until the person says yes.**
+
+## Step 3 — Record the answers, and say what's next
+
+`Edit` each answered line in `decisions.md`, that line alone, from `- [ ] D2 (...)` to
+`- [x] D2 (...)`, with ` → decided: <answer>` at the end of it, its indented `- OPTION:` and
+`- WHY:` lines under it left as they are. The answer is exactly `the assumed default, confirmed`
+when the person kept the default; the option's text when they chose an alternative (or, on a
+blocking line, the recommendation); and their own words, as they gave them, for anything typed.
+Then pass the ids, never the words, which go on no command line:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py ask <NNN> --answered <D2,D3>
+```
+
+Say its `next` in the person's words, naming the change:
+
+- `decide`: some items are still open (one dismissed, or left out): `/sdlc-factory:decide NNN`
+  again takes them.
+- `rebuild`: an answer isn't the default the build assumed, so the build doesn't follow it yet.
+  Run `then`: `/sdlc-factory:build NNN` sends an escalated change back for another build, told the
+  answers; for a READY change, `/sdlc:ship NNN` from its worktree, where the rework is done by hand.
+- `ship`: every answer kept what was built. `/sdlc-factory:land`, or `/sdlc:ship NNN` from its
+  worktree.
+
+Start none of them yourself.
+
+## Out of scope
+
+- A run still building: its supervisor asks its blocking decisions in its own session.
+- More than one change in a run: `/sdlc:status` lists which need deciding.
+- Answering, settling or ticking anything the person didn't answer, or a line the approver settled.
+- Rebuilding, shipping, landing or committing the change.

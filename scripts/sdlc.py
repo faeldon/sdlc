@@ -4343,6 +4343,9 @@ FACTORY_VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 FACTORY_DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 FACTORY_CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 FACTORY_LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+# The mark `factory.py decisions` ticks a default with when the approver settled it: never the
+# person's answer, so no reader counts it as one.
+FACTORY_SETTLED = " → settled by the approver: "
 FACTORY_KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 FACTORY_DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 # A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
@@ -4451,8 +4454,9 @@ def factory_upgraded_build(folder: Path) -> bool:
 def factory_reading(folder: Path) -> dict:
     """What `needs_of()` reads from a factory run's folder, as the board reads it: the approver's
     decision, whether it asks to reconsider the approach, the ledger's open blocking (`pending`)
-    and default (`assumed`) decisions, its count of decision lines, and `problems`: an open box
-    the ledger can't read, or a file that won't. Never raises."""
+    and default (`assumed`) decisions, its count of decision lines (a default the approver settled
+    is none: it is no answer of the person's), and `problems`: an open box the ledger can't read,
+    or a file that won't. Never raises."""
     found = {"decision": None, "reconsider": False, "pending": [], "assumed": [],
              "ledger_lines": 0, "problems": []}  # fmt: skip
     try:
@@ -4470,7 +4474,7 @@ def factory_reading(folder: Path) -> dict:
     garbled = False
     for line in text.splitlines():
         m = FACTORY_LEDGER_RE.match(line)
-        found["ledger_lines"] += bool(m)
+        found["ledger_lines"] += bool(m) and FACTORY_SETTLED not in line
         garbled = garbled or not m and line.startswith("- [ ]")
         if m and m.group(1) == " ":
             item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
@@ -4511,6 +4515,16 @@ def needs_of(rec: dict) -> list[str]:
     return needs
 
 
+def decide_step(rec: dict) -> str | None:
+    """Where the person answers what an escalation at `test` still needs, from its `needs`: the
+    factory's `/sdlc-factory:decide NNN`, while they hold a decision to make or defaults to
+    confirm; None otherwise. Status and the board both name it."""
+    needs = rec.get("needs") or []
+    if rec.get("stage") != "test" or not any(n.startswith(("decide ", "confirm ")) for n in needs):
+        return None
+    return f"/sdlc-factory:decide {rec['id']}"
+
+
 def answered(rec: dict) -> bool:
     """An escalation the person has answered: an ESCALATE at `test` that needs nothing more, which
     `needs_of()` allows only with a ledger line, every one ticked, and no `Reconsider` section."""
@@ -4521,8 +4535,9 @@ def _factory_files(main: Path, branch: str) -> dict | None:
     """What the factory left in the change's commit, as counts: review rounds, each reviewer's
     `CHANGES` verdicts, change requests and requests the verifier dropped (`dropped`, from each
     round's `verified.md`), the approver's decision, the ledger's blocking and default decisions,
-    and the script gate's red attempts (`gate_fail`, only when a gate file exists). None for a
-    change built by hand (no `decision.md`)."""
+    the defaults still open and those the approver settled, and the script gate's red attempts
+    (`gate_fail`, only when a gate file exists). None for a change built by hand (no
+    `decision.md`)."""
     folder = f"{work_rel(main)}/{branch}"
     decision = _git(main, "show", f"{branch}:{folder}/decision.md")
     if decision is None:
@@ -4563,6 +4578,7 @@ def _factory_files(main: Path, branch: str) -> dict | None:
         "blocking": sum(1 for e in entries if e.group(4) == "blocking"),
         "defaults": len(defaults),
         "defaults_open": sum(1 for e in defaults if e.group(1) == " "),
+        "defaults_settled": sum(1 for e in defaults if FACTORY_SETTLED in e.group(5)),
     }
     # The script gate's red attempts, known only for a run that had the gate: one from before it,
     # or with no gate configured, says nothing, never 0.
@@ -9497,7 +9513,8 @@ def print_status(a: dict) -> None:
     if not waiting:
         print("    nothing")
     for rec in waiting:
-        print(f"    {rec['id']}  {', '.join(rec['needs'])}")
+        step = decide_step(rec)
+        print(f"    {rec['id']}  {', '.join(rec['needs'])}" + (f"  {step}" if step else ""))
 
 
 def main() -> int:

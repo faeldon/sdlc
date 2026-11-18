@@ -75,6 +75,17 @@ When a requirement can't be tested as written (it isn't checkable, or two requir
 raise it as `- DECISION: [blocking] ...` with the options and your recommendation, rather than
 guessing what it meant. Read `decisions.md` first: an answered decision is settled.
 
+Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your
+recommendation first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
+keeps them under the line, and the approver and the person weigh it from them:
+
+```
+- DECISION: [blocking] Should a draft reopened twice keep both edits? Recommend the newest.
+  - OPTION: the newest — what the person saw last; the older edit is lost
+  - OPTION: both, merged — nothing lost; a merge the spec never describes
+  - WHY: the spec's reopen keeps one draft
+```
+
 A finding is filed under the correctness pass; one that belongs to another may open with it
 after the colon (`- CHANGE: [cost] tests/test_drafts.py:9: …`), as may a `- PREEXISTING:` or
 `- NIT:` line.

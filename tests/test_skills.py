@@ -82,6 +82,7 @@ GATED = {
     "sdlc-factory:eval",
     "sdlc-factory:review",
     "sdlc-factory:land",
+    "sdlc-factory:decide",
 }
 
 # Every config key a skill reads, by skill. A skill that stops naming its key has gone back to
@@ -187,6 +188,7 @@ READS_CONFIG = {
     "sdlc-factory:eval": ["factory.reviewers", "factory.models"],
     "sdlc-factory:review": ["factory.models"],
     "sdlc-factory:land": ["factory.land", "factory.land.moves"],
+    "sdlc-factory:decide": [],
 }
 
 
@@ -196,7 +198,7 @@ def test_skills_were_found() -> None:
     more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea", "dashboard"}
     assert {f"sdlc:{n}" for n in names | more} | {
         "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review",
-        "sdlc-factory:land",
+        "sdlc-factory:land", "sdlc-factory:decide",
     } == set(BY_ID)  # fmt: skip
 
 
@@ -1361,7 +1363,10 @@ def test_the_build_session_brings_the_persons_decisions_to_them() -> None:
     assert "Never answer a decision yourself" in build.content
     assert "decisions.md" in _steps("ship", "factory.md")["0"]
     approver = (FACTORY / "agents" / "approver.md").read_text(encoding="utf-8")
-    assert "decisions.md" in approver and "still unticked" in approver
+    assert (
+        "decisions.md" in approver
+        and "a blocking decision in `decisions.md` still unticked" in (" ".join(approver.split()))
+    )
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
     assert "- DECISION: [blocking]" in builder and "- DECISION: [default]" in builder
 
@@ -1383,6 +1388,71 @@ def test_agents_say_how_a_default_supersedes() -> None:
     for name, path in readers.items():
         text = " ".join(path.read_text(encoding="utf-8").split())
         assert "→ superseded by D<m>" in text, name
+
+
+def test_agents_give_a_defaults_alternatives() -> None:
+    """137 R4: each agent that raises a decision gives its two to four options, its own first,
+    as indented lines under it, with an example."""
+    names = ("builder", "reviewer-code", "reviewer-security", "reviewer-ui", "reviewer-ux",
+             "reviewer-test", "reviewer-behaviour")  # fmt: skip
+    for name in names:
+        text = (FACTORY / "agents" / f"{name}.md").read_text(encoding="utf-8")
+        assert "\n  - OPTION: " in text and "\n  - WHY: " in text, f"{name}: an example"
+        flat = " ".join(text.split())
+        assert "two to four" in flat and (
+            "own first" in flat or "default first" in flat or ("recommendation first" in flat)
+        ), name
+
+
+def test_the_approver_weighs_each_open_default() -> None:
+    """137 R5: the approver gives one SETTLED or ESCALATED line per open default, never settles a
+    blocking line or the person's kinds of call, and reads a settled line as no one's word but
+    its own."""
+    flat = " ".join((FACTORY / "agents" / "approver.md").read_text(encoding="utf-8").split())
+    assert "`- SETTLED: D<n>: " in flat and "`- ESCALATED: D<n>: " in flat
+    assert "A default with no line counts as escalated" in flat
+    assert "Never settle a blocking line" in flat
+    assert "scope, policy, cost, a destructive operation, a secret or a published interface" in flat
+    assert "→ settled by the approver:" in flat and "never the person's word" in flat
+
+
+def test_ship_shows_settled_defaults_apart() -> None:
+    """137 R12: ship shows a settled line as its own list with its reason, and each open default
+    with its alternatives."""
+    flat = " ".join((ROOT / "skills" / "ship" / "factory.md").read_text(encoding="utf-8").split())
+    assert "`- [x] … → settled by the approver: <reason>`" in flat
+    assert "neither decided nor assumed, never an open item and never the person's word" in flat
+    assert "with its `- OPTION:` and `- WHY:` lines as the ledger holds them" in flat
+
+
+def test_decide_writes_answers_only_after_its_wait() -> None:
+    """137 R15: the per-item dialogs collect answers; nothing is recorded before the one WAIT."""
+    content = frontmatter.load(BY_ID["sdlc-factory:decide"]).content
+    before, after = re.split(r"(?m)^#+ .*WAIT.*$", content, maxsplit=1)
+    assert "Edit" not in before, "no edit before the WAIT"
+    assert "`Edit` each answered line" in after
+    assert "the assumed default, confirmed" in after and "→ decided: <answer>" in after
+    assert "one item to a dialog, never two items and never two changes in one" in " ".join(
+        before.split()
+    )
+
+
+def test_decide_says_what_to_do_instead_when_ask_refuses() -> None:
+    """137, round 1: a refusal names the way on, for a run still building and for a bad number."""
+    text = BY_ID["sdlc-factory:decide"].read_text(encoding="utf-8")
+    flat = " ".join(text.split("\n## Step 0")[1].split("\n## Step 1")[0].split())
+    assert "answer them there, and run this again once the run reports the change ready" in flat
+    assert "`/sdlc:status` lists the open changes" in flat
+
+
+def test_decide_never_takes_words_on_a_command_line() -> None:
+    """137 R15: ids go on the command line, the person's words never do."""
+    text = BY_ID["sdlc-factory:decide"].read_text(encoding="utf-8")
+    calls = [ln for ln in text.splitlines() if "factory.py ask" in ln and "Bash(" not in ln]
+    assert calls, "decide runs ask"
+    for line in calls:
+        assert re.search(r"factory\.py ask <NNN>( --answered <D2,D3>)?$", line), line
+    assert "Then pass the ids, never the words" in text
 
 
 def test_the_retro_keeps_evidence_and_the_product_docs_prose_out_of_what_it_writes() -> None:

@@ -21,6 +21,7 @@ close keep one implementation.
     uv run --script factory.py start 008 --for build
     uv run --script factory.py fresh 008
     uv run --script factory.py decisions 008
+    uv run --script factory.py ask 008 --answered D2,D3
     uv run --script factory.py verdicts 008 --head 1a2b3c4 --record
     uv run --script factory.py gate 008
     uv run --script factory.py carry 008
@@ -56,7 +57,13 @@ one change runs in its worktree, found from the main checkout when the superviso
 policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] ...` line in its
 reply. `decisions` gathers them into `decisions.md`; `verdicts` says `decide` while a blocking one
 is unanswered, and the session running the build, the only one that can talk to the person, asks
-them. A default one lets the run go on, recorded as assumed until the person confirms it.
+them. A default one lets the run go on, recorded as assumed until the person confirms it. Each
+can carry its alternatives, indented `- OPTION:` lines and a `- WHY:` under it, which `decisions`
+files under its ledger line. The approver weighs every open default: one it settles from the spec,
+the code or a round (`- SETTLED: D<n>: <reason>`) `decisions` ticks `→ settled by the approver:`,
+its own mark and never the person's; one it escalates stays open. `ask`, read-only, lists what is
+left for the person at `stage: test`, for `/sdlc-factory:decide`, and given the ids answered says
+what the change needs next.
 
 **An upgrade to Tier 2.** A Tier 1 change found bigger than its Approach is upgraded only by the
 person's answer to a blocking decision, one that starts `upgrade to Tier 2`: `verdicts` names
@@ -260,6 +267,18 @@ DECIDED = " → decided: "
 # ticks the named line with SUPERSEDED, which every reader of an unticked line then passes over.
 SUPERSEDES_RE = re.compile(r"^\(supersedes (D\d+)\)\s*(.+)$")
 SUPERSEDED = " → superseded by "
+# A decision's alternatives, the default first, and why it was chosen: indented lines straight
+# after its `- DECISION:` line in a reply (or an approver's `- ESCALATED:` line), and after its line
+# in the ledger, where `decisions` files them. No reader of the ledger's lines ever matches one.
+OPTION_RE = re.compile(r"^\s+- OPTION:\s*(.+?)\s+—\s+(.+?)\s*$")
+WHY_RE = re.compile(r"^\s+- WHY:\s*(.+?)\s*$")
+# The approver's weighing of each open default, in `decision.md`: settled from the spec, the code
+# or a round, which `decisions` ticks with SETTLED (never the person's word), or escalated to them.
+SETTLED_RE = re.compile(r"^\s*- SETTLED:\s*(D\d+):\s*(.+?)\s*$")
+ESCALATED_RE = re.compile(r"^\s*- ESCALATED:\s*(D\d+):\s*(.+?)\s*$")
+SETTLED = " → settled by the approver: "
+# The answer `/sdlc-factory:decide` writes when the person keeps the default the build assumed.
+KEPT_ANSWER = "the assumed default, confirmed"
 # How `carry` starts a `notes.md` the change doesn't have yet: a copy of `sdlc`'s
 # `templates/notes.md`, which this plugin's cached copy can't read. A test keeps the two the same.
 NOTES_HEAD = """\
@@ -1626,32 +1645,58 @@ def read_ledger(folder: Path) -> list[dict]:
     """`decisions.md` as records: id, who raised it and when, blocking or default, the question,
     the person's answer once the line is ticked, and `superseded_by`, the default that replaced
     it. `decided` is a ticked line the person answered, `open` an unticked one: a superseded line
-    is neither, so no reader counts it as assumed or as the person's word."""
+    is neither, so no reader counts it as assumed or as the person's word, and nor is a line the
+    approver `settled` (its reason). `options` (each `{"option", "notes"}`, the default first) and
+    `why` are the indented lines under it (`sub_lines()`): empty on a line with none."""
     path = folder / "decisions.md"
     if not path.is_file():
         return []
     found = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines):
         m = LEDGER_RE.match(line)
         if m:
-            text, _, answer = m.group(5).partition(DECIDED)
+            text, _, settled = m.group(5).partition(SETTLED)
+            text, _, answer = text.partition(DECIDED)
             text, _, by = text.partition(SUPERSEDED)
-            ticked, by = m.group(1) == "x", by.strip() or None
+            ticked, by, settled = m.group(1) == "x", by.strip() or None, settled.strip() or None
+            options, why = sub_lines(lines[i + 1 :])
             found.append(
                 {"id": m.group(2), "source": m.group(3), "kind": m.group(4), "text": text.strip()}
                 | {
-                    "decided": ticked and not by,
+                    "decided": ticked and not by and not settled,
                     "open": not ticked,
                     "answer": answer.strip() or None,
                 }
-                | {"superseded_by": by}
+                | {"superseded_by": by, "settled": settled, "options": options, "why": why}
             )
     return found
 
 
-def raised_decisions(folder: Path) -> list[tuple[str, str, str]]:
-    """Every `- DECISION:` line an agent's reply holds, oldest first, as (source, kind, text): the
-    builder's reports in `build/round-<N>.md`, and the reviews in `reviews/round-<N>/<role>.md`."""
+def sub_lines(lines: list[str]) -> tuple[list[dict], str | None]:
+    """The run of `OPTION_RE` and `WHY_RE` lines `lines` starts with, as options in their order
+    and the first why; the first line that is neither ends it."""
+    options, why = [], None
+    for line in lines:
+        if m := OPTION_RE.match(line):
+            options.append({"option": m.group(1), "notes": m.group(2)})
+        elif m := WHY_RE.match(line):
+            why = why or m.group(1)
+        else:
+            break
+    return options, why
+
+
+def sub_text(options: list[dict], why: str | None) -> list[str]:
+    """The ledger's lines for a decision's alternatives, under its line: `sub_lines()` reversed."""
+    lines = [f"  - OPTION: {o['option']} — {o['notes']}\n" for o in options]
+    return lines + ([f"  - WHY: {why}\n"] if why else [])
+
+
+def raised_decisions(folder: Path) -> list[tuple[str, str, str, list[dict], str | None]]:
+    """Every `- DECISION:` line an agent's reply holds, oldest first, as (source, kind, text,
+    options, why), its alternatives being the `sub_lines()` straight after it: the builder's
+    reports in `build/round-<N>.md`, and the reviews in `reviews/round-<N>/<role>.md`."""
     found = []
 
     def rounds(base: Path, pattern: str) -> list[Path]:
@@ -1662,11 +1707,69 @@ def raised_decisions(folder: Path) -> list[tuple[str, str, str]]:
     for path in rounds(folder / "reviews", "round-*"):
         sources += [(f, f"{f.stem} round {path.name[6:]}") for f in sorted(path.glob("*.md"))]
     for path, source in sources:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
             m = RAISED_RE.match(line)
             if m:
-                found.append((source, m.group(1), m.group(2)))
+                found.append((source, m.group(1), m.group(2), *sub_lines(lines[i + 1 :])))
     return found
+
+
+def approver_weighing(folder: Path) -> tuple[list[tuple[str, str]], dict[str, dict]]:
+    """What the current `decision.md` says of the open defaults, never an archived one: each
+    `- SETTLED: D<n>: <reason>` as (id, reason) in its order, and each `- ESCALATED: D<n>: <why>`
+    by id, the first of each, with the `sub_lines()` under it, as {"why", "options", "chose"}."""
+    path = folder / "decision.md"
+    if not path.is_file():
+        return [], {}
+    settles, escalated = [], {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines):
+        if m := SETTLED_RE.match(line):
+            settles.append((m.group(1), m.group(2)))
+        elif (m := ESCALATED_RE.match(line)) and m.group(1) not in escalated:
+            options, chose = sub_lines(lines[i + 1 :])
+            escalated[m.group(1)] = {"why": m.group(2), "options": options, "chose": chose}
+    return settles, escalated
+
+
+def weigh_text(ledger: list[dict]) -> str:
+    """What the approve prompt asks of the open defaults in `ledger`, named by id: one `SETTLED`
+    or `ESCALATED` line each, what it may never settle, and the options owed for each bare one it
+    escalates. Empty with none open."""
+    open_ids = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
+    if not open_ids:
+        return ""
+    text = (
+        f" Weigh each open default in decisions.md, {', '.join(open_ids)}, with exactly one line "
+        "each: `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers "
+        "it>`, or `- ESCALATED: D<n>: <why only the person can decide>`. A default with no line "
+        "counts as escalated, and the decision is ESCALATE while any is. Never settle a blocking "
+        "line, or a default about scope, policy, cost, a destructive operation, a secret or a "
+        "published interface."
+    )
+    bare = [d["id"] for d in ledger if d["id"] in open_ids and len(d["options"]) < 2]
+    if bare:
+        text += (
+            f" These have no options yet: {', '.join(bare)}. Under the ESCALATED line of each "
+            "you escalate, give two to four indented `  - OPTION: <option> — <pros and cons>` "
+            "lines, the default first, then one `  - WHY: <why the default was chosen>`."
+        )
+    return text
+
+
+def _settle_refusal(ledger: list[dict], target: str) -> str | None:
+    """Why the approver can't settle `target`, or None when it can: an open default alone."""
+    entry = next((d for d in ledger if d["id"] == target), None)
+    if entry is None:
+        return f"there is no {target} in decisions.md"
+    if entry["kind"] != "default":
+        return f"{target} is blocking: only the person answers it"
+    if entry["superseded_by"]:
+        return f"{target} is superseded by {entry['superseded_by']}"
+    if entry["decided"]:
+        return f"{target} is decided by the person"
+    return None
 
 
 def _supersede_refusal(ledger: list[dict], target: str, new: str) -> str | None:
@@ -1691,51 +1794,162 @@ def cmd_decisions(root: Path, ident: str) -> int:
     person answers: ticking a line with ` → decided: <answer>` is the answer. A default raised as
     `(supersedes D<n>)` ticks D<n>'s line with ` → superseded by D<m>`, that line alone, and only
     when D<n> is a default still open (`unmarked` says why not); the prefix stays out of the new
-    line's text, which is what keeps it from being added twice."""
+    line's text, which is what keeps it from being added twice.
+
+    A raise's alternatives (`sub_lines()`) are filed under its new line. A line with no options is
+    filled once, by the first that `decisions` reads of a later raise of the same text with
+    options or the approver's `- ESCALATED:` line for it with options, and never again (`bare`
+    lists the open defaults still short of two). The approver's `- SETTLED: D<n>: <reason>`, read
+    from the current `decision.md` alone, ticks an open default with ` → settled by the approver:
+    <reason>`, never the person's mark; one naming any other line, or an id named twice, marks
+    nothing and is listed in `unsettled` with why. A rerun writes nothing."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     ledger = read_ledger(folder)
-    known = {d["text"] for d in ledger}
-    added, new_lines, marks, unmarked = [], [], {}, []
-    for source, kind, raised in raised_decisions(folder):
+    by_text = {d["text"]: d for d in ledger}
+    added, new_lines, marks, unmarked, fills = [], [], {}, [], {}
+
+    def fill(entry: dict, options: list[dict], why: str | None) -> None:
+        if options and entry["open"] and not entry["options"]:
+            entry.update(options=options, why=why)
+            fills[entry["id"]] = sub_text(options, why)
+
+    for source, kind, raised, options, why in raised_decisions(folder):
         named = SUPERSEDES_RE.match(raised) if kind == "default" else None
         text = named.group(2) if named else raised
-        if text in known:
+        if text in by_text:
+            fill(by_text[text], options, why)
             continue
-        known.add(text)
         added.append(f"D{len(ledger) + 1}")
         ledger.append(
             {"id": added[-1], "source": source, "kind": kind, "text": text}
             | {"decided": False, "open": True, "answer": None, "superseded_by": None}
+            | {"settled": None, "options": options, "why": why}
         )
+        by_text[text] = ledger[-1]
         new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
+        new_lines += sub_text(options, why)
         if named:
-            why = _supersede_refusal(ledger, named.group(1), added[-1])
-            if why:
-                unmarked.append({"id": added[-1], "supersedes": named.group(1), "why": why})
+            refused = _supersede_refusal(ledger, named.group(1), added[-1])
+            if refused:
+                unmarked.append({"id": added[-1], "supersedes": named.group(1), "why": refused})
                 continue
             entry = next(d for d in ledger if d["id"] == named.group(1))
             entry.update(superseded_by=added[-1], open=False)
-            marks[entry["id"]] = added[-1]
-    if new_lines:
+            marks[entry["id"]] = f"{SUPERSEDED}{added[-1]}"
+    settles, escalated = approver_weighing(folder)
+    weighed, settled, unsettled = set(escalated), [], []
+    for target, reason in settles:
+        entry = next((d for d in ledger if d["id"] == target), None)
+        if target in weighed:
+            unsettled.append({"id": target, "why": f"{target} is named twice in decision.md"})
+            continue
+        weighed.add(target)
+        if entry is not None and entry["settled"] is not None:
+            continue
+        refused = _settle_refusal(ledger, target)
+        if refused:
+            unsettled.append({"id": target, "why": refused})
+            continue
+        entry.update(settled=reason, open=False)
+        marks[target] = f"{SETTLED}{reason}"
+        settled.append(target)
+    for target, said in escalated.items():
+        entry = next((d for d in ledger if d["id"] == target), None)
+        if entry is not None:
+            fill(entry, said["options"], said["chose"])
+    if new_lines or marks or fills:
         path = folder / "decisions.md"
         body = path.read_text(encoding="utf-8") if path.is_file() else "# Decisions\n\n"
         body += "" if body.endswith("\n") else "\n"
-        lines = (body + "".join(new_lines)).splitlines(keepends=True)
-        for i, line in enumerate(lines):
+        lines = []
+        for line in (body + "".join(new_lines)).splitlines(keepends=True):
             m = LEDGER_RE.match(line)
             if m and m.group(1) == " " and m.group(2) in marks:
-                end = "\n" if line.endswith("\n") else ""
                 ticked = "- [x]" + line.rstrip("\r\n")[len("- [ ]") :]
-                lines[i] = f"{ticked}{SUPERSEDED}{marks[m.group(2)]}{end}"
+                line = f"{ticked}{marks[m.group(2)]}\n"
+            lines.append(line)
+            if m and m.group(2) in fills:
+                lines += fills[m.group(2)]
         path.write_text("".join(lines), encoding="utf-8", newline="\n")
     pending = [d["id"] for d in ledger if d["kind"] == "blocking" and d["open"]]
     assumed = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
+    bare = [d for d in assumed if len(next(e for e in ledger if e["id"] == d)["options"]) < 2]
+    superseded = [k for k, v in marks.items() if v.startswith(SUPERSEDED)]
     return emit(
         {"change": folder.name, "decisions": ledger, "added": added}
-        | {"pending": pending, "assumed": assumed, "superseded": list(marks), "unmarked": unmarked}
+        | {"pending": pending, "assumed": assumed, "superseded": superseded, "unmarked": unmarked}
+        | {"settled": settled, "unsettled": unsettled, "bare": bare}
     )
+
+
+def reply_path(source: str) -> str | None:
+    """The reply a ledger line's `source` names, relative to the change folder: `builder round 3`
+    is `build/round-3.md`, `code round 2` is `reviews/round-2/code.md`; None for any other."""
+    m = re.fullmatch(r"([a-z-]+) round (\d+)", source)
+    if not m:
+        return None
+    if m.group(1) == "builder":
+        return f"build/round-{m.group(2)}.md"
+    return f"reviews/round-{m.group(2)}/{m.group(1)}.md"
+
+
+def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
+    """What the person has to decide on a change at `stage: test`, for `/sdlc-factory:decide`,
+    writing nothing: the approver's `decision`; `items`, every open ledger line in id order, each
+    with the reply that raised it (`reply_path()`), its question, its options (the default first;
+    none on a ledger from before them), why the default was chosen, and the approver's reason for
+    escalating it from the current `decision.md` (`escalated`); and `settled`, the defaults the
+    approver settled, with its reasons. A run still building asks its own, so any other stage is
+    refused.
+
+    With `answered`, the ids the person just answered, comma-separated (never their words), it
+    also says `next`: `decide` while any line is open; `rebuild` when an answer isn't
+    `KEPT_ANSWER`, so the build doesn't follow it, `then` naming how (`/sdlc-factory:build NNN`
+    for an ESCALATE, `/sdlc:ship NNN` for a READY, which `restart` refuses); `ship` otherwise. An id
+    that isn't a decided line is refused."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    stage = frontmatter((folder / "intent.md").read_text(encoding="utf-8")).get("stage")
+    if stage != "test":
+        return emit({"refusals": [(
+            f"{folder.name} is at stage: {stage}, not stage: test: a run still building asks "
+            "its own blocking decisions, through the session running it"
+        )]}, 1)  # fmt: skip
+    ledger = read_ledger(folder)
+    decision, _ = read_decision(folder)
+    _, escalated = approver_weighing(folder)
+    items = [
+        {"id": d["id"], "kind": d["kind"], "source": d["source"]}
+        | {"reply": reply_path(d["source"]), "question": d["text"], "options": d["options"]}
+        | {"why": d["why"], "escalated": (escalated.get(d["id"]) or {}).get("why")}
+        for d in sorted(ledger, key=lambda d: int(d["id"][1:]))
+        if d["open"]
+    ]
+    out = {"change": folder.name, "decision": decision, "items": items}
+    out["settled"] = [
+        {"id": d["id"], "text": d["text"], "reason": d["settled"]} for d in ledger if d["settled"]
+    ]
+    if answered is not None:
+        ids = [i.strip() for i in answered.split(",") if i.strip()]
+        by_id = {d["id"]: d for d in ledger}
+        wrong = [i for i in ids if not (by_id.get(i) or {}).get("decided")]
+        if wrong or not ids:
+            said = ", ".join(wrong) or "no id"
+            return emit({"refusals": [f"{said} isn't a decided line in decisions.md"]}, 1)
+        number = folder.name.split("-", 1)[0]
+        if items:
+            out["next"] = "decide"
+        elif any(by_id[i]["answer"] != KEPT_ANSWER for i in ids):
+            out["next"] = "rebuild"
+            out["then"] = (
+                f"/sdlc:ship {number}" if decision == "READY" else f"/sdlc-factory:build {number}"
+            )
+        else:
+            out["next"] = "ship"
+    return emit(out)
 
 
 def stop_text(change: str, way: str, problems: list[str]) -> str:
@@ -3235,6 +3449,7 @@ def _task(
                 " The rounds ran out with changes still kept: say whether the approach should "
                 "be reconsidered."
             )
+        prompt += weigh_text(read_ledger(folder))
         prompt += (
             " For each unticked `- [ ]` item in notes.md, propose its disposition at landing: "
             "`- UNDONE: <the item's text, exactly> → seed: <a short title>` or `→ dropped: "
@@ -3971,7 +4186,9 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
     acceptance checks, its skills' cases with the cap, its undone notes, each with its whole text
     (`note_items()`) and the disposition the approver proposed for its first line or its whole
     text (a seed titled by the note's first sentence when none was; a bug with what the question
-    shows of it), its assumed decisions, the `How to recover:` lines its commit will carry, and,
+    shows of it), its assumed decisions (the open defaults), the defaults the approver settled,
+    each with its reason, never among those to confirm, the `How to recover:` lines its commit
+    will carry, and,
     read from its worktree `root` with `cfg`, the agents' nits to file as `[nit]` entries
     (`nit_findings()`'s `file`, with the line the question shows of each)."""
     proposed, recover = read_proposals(folder)
@@ -3997,13 +4214,16 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
                        f"{', '.join(n['paths'])})"}
         for n in (i["file"] for i in found) if n
     ]  # fmt: skip
+    ledger = read_ledger(folder)
     return {
         "checks": [{"name": c["name"], "command": c["command"]}
                    for c in (pre.get("checks") or {}).get("checks") or []],
         "cases": {"scope": scope, "cap_usd": CASE_CAP_USD} if scope else {},
         "undone": undone,
-        "assumed": [{"id": d["id"], "text": d["text"]} for d in read_ledger(folder)
-                    if not d["decided"] and d["kind"] == "default"],
+        "assumed": [{"id": d["id"], "text": d["text"]} for d in ledger
+                    if d["open"] and d["kind"] == "default"],
+        "settled": [{"id": d["id"], "text": d["text"], "reason": d["settled"]} for d in ledger
+                    if d["settled"]],
         "recover": [f"{subject}: {way}" for subject, way in recover],
         "nits": nits,
     }  # fmt: skip
@@ -4026,7 +4246,8 @@ def land_shown(batch: list[dict]) -> str:
     """What the batch's question calls `as shown`, for the dialog to show beside its yes: each
     change by its name and intent's title, then each part `land_parts()` gives it, only those it
     has: its checks, its cases and their cap, each undone note with its disposition, each assumed
-    decision, its `How to recover:` lines and the agents' nits to file, by their `shown` line."""
+    decision, each default the approver settled with its reason, its `How to recover:` lines and
+    the agents' nits to file, by their `shown` line."""
 
     def listed(head: str, items: list[str]) -> list[str]:
         return [f"  {head}:", *(f"  - {i}" for i in items)] if items else []
@@ -4048,6 +4269,9 @@ def land_shown(batch: list[dict]) -> str:
         lines += listed("Undone notes", disposed)
         lines += listed("Assumed decisions to confirm",
                         [f"{d['id']}: {d['text']}" for d in c["assumed"]])  # fmt: skip
+        lines += listed("Settled by the approver",
+                        [f"{d['id']}: {d['text']} ({d['reason']})"
+                         for d in c.get("settled") or []])  # fmt: skip
         lines += listed("How to recover", c["recover"])
         lines += listed("Agents' nits to file", [n["shown"] for n in c.get("nits") or []])
         blocks.append("\n".join(lines))
@@ -4124,9 +4348,11 @@ def land_signals(
     ledger = read_ledger(folder)
     if [d for d in ledger if d["open"]]:
         signals.append("decisions still open or assumed in decisions.md")
-    assumed = [d["id"] for d in ledger if not d["decided"] and d["kind"] == "default"]
+    assumed = [d["id"] for d in ledger if d["open"] and d["kind"] == "default"]
     if assumed:
         signals.append(f"assumed decisions to confirm: {', '.join(assumed)}")
+    if settled := [d["id"] for d in ledger if d["settled"]]:
+        signals.append(f"defaults settled by the approver: {', '.join(settled)}")
     signals += resolution_signals(worktree, folder, cfg)
     if list(folder.glob("build/land-*.ask.md")):
         signals.append(LANDING_FIXED)
@@ -5760,6 +5986,9 @@ def main() -> int:
     )
     p_decisions = sub.add_parser("decisions", help="the agents' decisions into decisions.md")
     p_decisions.add_argument("id")
+    p_ask = sub.add_parser("ask", help="what the person has to decide on a change, read-only")
+    p_ask.add_argument("id")
+    p_ask.add_argument("--answered", help="the ids just answered, comma-separated: says `next`")
     p_carry = sub.add_parser("carry", help="unresolved changes to notes.md as `- [ ]` items")
     p_carry.add_argument("id")
     p_snapshot = sub.add_parser("snapshot", help="hash what a round's build left, for the next")
@@ -5867,6 +6096,8 @@ def main() -> int:
         return cmd_verdicts(root, args.id, args.head, args.record)
     if args.cmd == "decisions":
         return cmd_decisions(root, args.id)
+    if args.cmd == "ask":
+        return cmd_ask(root, args.id, args.answered)
     if args.cmd == "carry":
         return cmd_carry(root, args.id)
     if args.cmd == "snapshot":

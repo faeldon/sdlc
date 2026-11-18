@@ -787,7 +787,8 @@ def test_close_records_rework_and_the_happy_path_from_the_factorys_files(
     back = sdlc.metrics.parse_trailers(body)
     assert back["mode"] == "factory"
     assert back["rework"] == {"final": 10, "rounds": 2, "changes": 1, "escalate": 0,
-                              "blocking": 1, "defaults": 1, "defaults_open": 1}  # fmt: skip
+                              "blocking": 1, "defaults": 1, "defaults_open": 1,
+                              "defaults_settled": 0}  # fmt: skip
     assert back["reviews"] == {"code": {"changes": 1, "requests": 2},
                                "test": {"changes": 0, "requests": 0}}  # fmt: skip
     assert back["happy"]["build"] == "unknown", "no transcripts: never guessed"

@@ -93,6 +93,17 @@ the fix is a trade-off only they can make) is not a CHANGE. Raise it instead, as
 without the answer, or `[default]` with the default you'd assume. Read `decisions.md` first: an
 answered decision is settled, so review against its answer. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
+Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your own
+default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
+keeps them under the line, and the approver and the person weigh it from them:
+
+```
+- DECISION: [default] Log the draft id? Assuming no.
+  - OPTION: no — nothing to leak; a report is harder to trace
+  - OPTION: yes — a report is easy to trace; the id is personal data
+  - WHY: the spec keeps personal data out of the logs
+```
+
 Then `## Notes`: Optional findings and Nits (at most five), each nit on a line of its own as
 `- NIT: path/to/file.py:42: what {<theme> <cost> <value>}` (they never make the verdict CHANGES,
 and no verifier reads them: they are recorded in the change's `findings.md`), what is done well

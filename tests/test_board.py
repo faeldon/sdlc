@@ -487,6 +487,7 @@ def test_the_factory_parsing_is_a_pinned_copy() -> None:
     assert board.VERIFIED == factory.VERIFIED and board.COSTS == factory.COSTS
     assert board.RECONSIDER == factory.RECONSIDER
     assert board.STOPPED == factory.STOPPED
+    assert board.SETTLED == factory.SETTLED
 
 
 @pytest.mark.portable
@@ -1147,7 +1148,12 @@ PRECEDENCE = [
      "decide D1 in the factory's supervisor"),
     ("escalation pending",
      {"stage": "test", "decision": "ESCALATE", "needs": ["decide D2", "confirm 1 default"]},
-     "decide D2, then /sdlc:ship, or /sdlc-factory:land with the others ready"),
+     "/sdlc-factory:decide 016 for D2 and 1 default, then /sdlc:ship, or /sdlc-factory:land with "
+     "the others ready"),
+    ("defaults to confirm",
+     {"stage": "test", "decision": "ESCALATE", "needs": ["confirm 2 defaults"]},
+     "/sdlc-factory:decide 016 for 2 defaults, then /sdlc:ship, or /sdlc-factory:land with the "
+     "others ready"),
     ("approver decided", {"stage": "test", "decision": "READY"},
      "/sdlc:ship, or /sdlc-factory:land with the others ready"),
     ("factory building", {"stage": "build", "mode": "factory", "built": [1]},
@@ -1167,6 +1173,9 @@ BOTH = {
     ("landing stopped", "closed"):
         "the landing stopped at gate: fix what it names, then /sdlc-factory:land 016, or "
         "/sdlc:close 016 by hand",
+    ("escalation pending", "defaults to confirm"):
+        "/sdlc-factory:decide 016 for 2 defaults, then /sdlc:ship, or /sdlc-factory:land with the "
+        "others ready",
 }  # fmt: skip
 
 
@@ -1220,7 +1229,10 @@ def test_an_escalation_names_the_decision_it_still_needs_first(repo) -> None:
            "- [ ] D2 (builder round 1, blocking): keep drafts 30 days?\n")  # fmt: skip
     card = _cards(repo)["033-esc-open"]
     assert card["needs"] == ["decide D2"] and card["column"] == "needs-you"
-    assert card["next"] == "decide D2, then /sdlc:ship, or /sdlc-factory:land with the others ready"
+    assert card["next"] == (
+        "/sdlc-factory:decide 033 for D2, then /sdlc:ship, or /sdlc-factory:land with the others "
+        "ready"
+    )
     _write(folder / "decisions.md", TICKED)
     card = _cards(repo)["033-esc-open"]
     assert card["needs"] == [] and card["next"].startswith("/sdlc:ship")
@@ -1446,6 +1458,35 @@ def test_an_answered_escalation_is_ready_to_ship(repo) -> None:
     assert card["answered"] is False
 
 
+WEIGHED = (
+    "# Decisions\n\n"
+    "- [x] D1 (code round 1, default): log the draft id? → settled by the approver: spec R4\n"
+    "- [ ] D2 (builder round 1, default): page at 50\n"
+    "  - OPTION: 50 — one screen; a second page past it\n"
+    "  - WHY: the list view shows 50\n"
+)
+
+
+@pytest.mark.portable
+def test_a_ledger_with_alternatives_is_not_garbled(repo) -> None:
+    """137 R2 on the board: the indented OPTION and WHY lines are no open box."""
+    folder = _escalated(repo, "044-esc-weighed", "test", commit=["src/weighed.py"])
+    _write(folder / "decisions.md", WEIGHED)
+    card = _cards(repo)["044-esc-weighed"]
+    assert card["problems"] == [] and card["needs"] == ["confirm 1 default"], card
+
+
+@pytest.mark.portable
+def test_an_escalation_with_only_settled_defaults_is_not_answered(repo) -> None:
+    """137 R10 on the board: a settled line is no ledger line, so the escalation still needs
+    reading."""
+    folder = _escalated(repo, "045-esc-settled", "test", commit=["src/settled.py"])
+    _write(folder / "decisions.md", WEIGHED.split("- [ ] D2")[0])
+    card = _cards(repo)["045-esc-settled"]
+    assert (card["ledger_lines"], card["answered"]) == (0, False), card
+    assert card["needs"] == ["read the escalation"], card
+
+
 @pytest.mark.portable
 def test_a_malformed_open_line_keeps_the_escalation(repo) -> None:
     """R6: an open box the ledger can't read is a problem, never an answer."""
@@ -1518,7 +1559,7 @@ def test_status_ends_with_what_needs_me(repo, monkeypatch, capsys) -> None:
     assert tail == [
         "    004  decide D1",
         "    013  stopped: fix its cause and rerun",
-        "    041  decide D3, confirm 2 defaults",
+        "    041  decide D3, confirm 2 defaults  /sdlc-factory:decide 041",
     ], tail
     assert "  · stopped, touched" in out and "→ " in out, "the stop's own lines stay"
     cards = _cards(repo)

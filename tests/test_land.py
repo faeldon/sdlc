@@ -436,6 +436,59 @@ def test_land_check_shows_each_changes_checks_cases_notes_decisions_and_recovery
     assert "(at most $10)" in batch["question"], "two changes with cases, $5 each"
 
 
+SETTLED_LEDGER = (
+    "# Decisions\n\n- [ ] D1 (builder round 1, default): Page at 50? Going with 50.\n"
+    "  - OPTION: 50 — one screen; a second page past it\n"
+    "  - OPTION: 100 — fewer pages; a slower first paint\n"
+    "- [x] D2 (code round 1, default): Log the draft id? → settled by the approver: "
+    "spec R4 forbids it\n"
+)
+
+
+@needs_uv
+def test_the_landing_shows_settled_defaults_apart_and_never_confirms_them(tmp_path, capsys):
+    """137 R8: the approver's settled default is shown under its own heading, never as one to
+    confirm, and a landing by the person confirms the open default alone."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "weighed", "weighed's one")
+    folder = _folder(tree)
+    (folder / "decisions.md").write_text(SETTLED_LEDGER, encoding="utf-8")
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    [c] = batch["batch"]
+    assert c["assumed"] == [{"id": "D1", "text": "Page at 50? Going with 50."}], c
+    assert c["settled"] == [
+        {"id": "D2", "text": "Log the draft id?", "reason": "spec R4 forbids it"}
+    ], c
+    shown = batch["shown"]
+    assert "  Settled by the approver:\n  - D2: Log the draft id? (spec R4 forbids it)" in shown
+    assert shown.index("Assumed decisions to confirm") < shown.index("Settled by the approver")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    ledger = (folder / "decisions.md").read_text(encoding="utf-8")
+    assert "D2 (code round 1, default): Log the draft id? → settled by the approver: " in ledger
+    assert ledger.count("→ decided:") == 1 and "50. → decided: " in ledger, ledger
+    assert "  - OPTION: 50 — one screen; a second page past it\n" in ledger, "sub-lines kept"
+
+
+@needs_uv
+def test_a_settled_default_keeps_the_batch_from_passing_itself(tmp_path, capsys) -> None:
+    """137 R9: a settled default is a landing signal of its own, so the batch isn't clear; the
+    open-or-assumed signals don't fire for it."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "weighed", "weighed's one")
+    (_folder(tree) / "decisions.md").write_text(
+        SETTLED_LEDGER.replace("- [ ] D1", "- [x] D1").replace(
+            "Going with 50.\n", "Going with 50. → decided: 50\n"
+        ),
+        encoding="utf-8",
+    )
+    code, batch = _run(capsys, factory.cmd_land_check, root, [])
+    assert batch["clear"] is False
+    signals = batch["batch"][0]["signals"]
+    assert "defaults settled by the approver: D2" in signals, signals
+    assert not any("assumed" in s or "still open" in s for s in signals), signals
+
+
 def _entry(name: str, **parts) -> dict:
     empty = {"checks": [], "cases": {}, "undone": [], "assumed": [], "recover": [], "nits": []}
     return {"change": name, **empty, **parts}

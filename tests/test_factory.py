@@ -742,6 +742,291 @@ def test_a_superseded_default_is_neither_assumed_nor_a_signal_nor_a_decision(
     path.write_text(path.read_text().replace("- [ ] D2", "- [x] D2").replace(
         "Page at 100.", "Page at 100. → decided: 100"))  # fmt: skip
     assert open_signal not in factory.land_signals(folder, root, "READY", cfg)[0], "D1 isn't open"
+    assert factory.land_parts(folder, {})["assumed"] == [], "a superseded line isn't assumed"
+
+
+# ---------------------------------------------------------------- a default's alternatives
+
+PAGING = (
+    "- DECISION: [default] Page the drafts list at 50?\n"
+    "  - OPTION: 50 — one screen's worth; long lists need a second page\n"
+    "  - OPTION: 100 — fewer pages; a slower first paint\n"
+    "  - WHY: the spec's list view shows 50\n"
+)
+PAGING_LEDGER = (
+    "- [ ] D1 (builder round 1, default): Page the drafts list at 50?\n"
+    "  - OPTION: 50 — one screen's worth; long lists need a second page\n"
+    "  - OPTION: 100 — fewer pages; a slower first paint\n"
+    "  - WHY: the spec's list view shows 50\n"
+)
+
+
+def _ledger_text(root: Path) -> str:
+    return (root / ".sdlc" / "work" / NAME / "decisions.md").read_text(encoding="utf-8")
+
+
+def test_a_defaults_alternatives_reach_the_ledger_under_its_line(tmp_path, capsys) -> None:
+    """137 R1: the OPTION and WHY lines after a DECISION line are filed under its ledger line,
+    indented two spaces, in the reply's order; the line after them is no part of it."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING, "Then the next slice.\n  - OPTION: stray — not a decision's\n")
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["added"] == ["D1"] and out["bare"] == [], out
+    assert _ledger_text(root) == "# Decisions\n\n" + PAGING_LEDGER
+    [d1] = out["decisions"]
+    assert d1["options"] == [
+        {"option": "50", "notes": "one screen's worth; long lists need a second page"},
+        {"option": "100", "notes": "fewer pages; a slower first paint"},
+    ]
+    assert d1["why"] == "the spec's list view shows 50"
+
+
+def test_a_ledger_without_alternatives_reads_as_before(tmp_path) -> None:
+    """137 R2: a ledger written before alternatives existed gives the same records, plus the new
+    fields, empty."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "decisions.md").write_text(
+        "# Decisions\n\n- [ ] D1 (builder round 1, default): Page at 50.\n"
+        "- [x] D2 (code round 1, blocking): Keep 30 days? → decided: 30 days\n",
+        encoding="utf-8",
+    )
+    assert factory.read_ledger(folder) == [
+        {"id": "D1", "source": "builder round 1", "kind": "default", "text": "Page at 50.",
+         "decided": False, "open": True, "answer": None, "superseded_by": None,
+         "settled": None, "options": [], "why": None},
+        {"id": "D2", "source": "code round 1", "kind": "blocking", "text": "Keep 30 days?",
+         "decided": True, "open": False, "answer": "30 days", "superseded_by": None,
+         "settled": None, "options": [], "why": None},
+    ]  # fmt: skip
+
+
+def test_options_fill_a_bare_line_once(tmp_path, capsys) -> None:
+    """137 R3: a later raise of the same text with options fills a bare line; a line that has
+    options never gets more; a rerun changes no byte."""
+    root = _change(tmp_path)
+    _build_report(root, 1, "- DECISION: [default] Page the drafts list at 50?\n")
+    out = _run(capsys, factory.cmd_decisions, root, "008")[1]
+    assert out["bare"] == ["D1"], out
+    _build_report(root, 2, PAGING)
+    _build_report(root, 3, PAGING.replace("100 —", "25 —"))
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["bare"] == []
+    assert _ledger_text(root) == "# Decisions\n\n" + PAGING_LEDGER
+    _run(capsys, factory.cmd_decisions, root, "008")
+    assert _ledger_text(root) == "# Decisions\n\n" + PAGING_LEDGER, "a rerun changes nothing"
+
+
+# ---------------------------------------------------------------- the approver weighs defaults
+
+
+def _decision(root: Path, *lines: str, head: str = "DECISION: ESCALATE") -> None:
+    path = root / ".sdlc" / "work" / NAME / "decision.md"
+    path.write_text(head + "\n\nWhy.\n\n" + "".join(lines), encoding="utf-8")
+
+
+def test_the_approver_settles_one_default_and_escalates_another(tmp_path, capsys) -> None:
+    """137 R6: a SETTLED default is ticked as the approver's, its sub-lines kept; an ESCALATED one
+    stays open, its options filed from the approver's reply; `decision.md` is never edited."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING, "- DECISION: [default] Log the draft id? Assuming no.\n")
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _decision(
+        root,
+        "- SETTLED: D1: spec R4 shows 50 a page\n",
+        "- ESCALATED: D2: logging is a policy call\n",
+        "  - OPTION: no — nothing to leak; harder to trace\n",
+        "  - OPTION: yes — easy to trace; the id is personal data\n",
+        "  - WHY: the safer default\n",
+    )
+    shown = (root / ".sdlc" / "work" / NAME / "decision.md").read_bytes()
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["settled"] == ["D1"] and out["unsettled"] == [], out
+    assert out["assumed"] == ["D2"] and out["bare"] == [], out
+    assert _ledger_text(root).splitlines()[2:] == [
+        "- [x] D1 (builder round 1, default): Page the drafts list at 50?"
+        " → settled by the approver: spec R4 shows 50 a page",
+        *PAGING_LEDGER.splitlines()[1:],
+        "- [ ] D2 (builder round 1, default): Log the draft id? Assuming no.",
+        "  - OPTION: no — nothing to leak; harder to trace",
+        "  - OPTION: yes — easy to trace; the id is personal data",
+        "  - WHY: the safer default",
+    ]
+    assert (root / ".sdlc" / "work" / NAME / "decision.md").read_bytes() == shown
+    before = _ledger_text(root)
+    again = _run(capsys, factory.cmd_decisions, root, "008")[1]
+    assert (again["settled"], again["unsettled"]) == ([], []), again
+    assert _ledger_text(root) == before, "a rerun changes nothing"
+
+
+@pytest.mark.parametrize("case", ["blocking", "decided", "superseded", "unknown", "twice"])
+def test_a_settle_that_cant_apply_marks_nothing(tmp_path, capsys, case) -> None:
+    """137 R6: the approver never settles a blocking, decided, superseded or unknown line; the
+    second of two settles for one id is refused; each refusal is listed with why."""
+    root = _change(tmp_path)
+    _build_report(root, 1, "- DECISION: [blocking] Keep drafts 30 days?\n",
+                  "- DECISION: [default] Page at 50.\n",
+                  "- DECISION: [default] (supersedes D2) Page at 100.\n",
+                  "- DECISION: [default] Log the draft id?\n")  # fmt: skip
+    _run(capsys, factory.cmd_decisions, root, "008")
+    path = root / ".sdlc" / "work" / NAME / "decisions.md"
+    path.write_text(path.read_text().replace("- [ ] D4", "- [x] D4").replace(
+        "draft id?", "draft id? → decided: no"))  # fmt: skip
+    target = {"blocking": "D1", "decided": "D4", "superseded": "D2", "unknown": "D9"}.get(
+        case, "D3"
+    )
+    lines = [f"- SETTLED: {target}: the spec says so\n"]
+    if case == "twice":
+        lines.insert(0, "- ESCALATED: D3: the person's call\n")
+    before = _ledger_text(root)
+    _decision(root, *lines)
+    out = _run(capsys, factory.cmd_decisions, root, "008")[1]
+    assert out["settled"] == [] and _ledger_text(root) == before, out
+    [refused] = out["unsettled"]
+    assert refused["id"] == target and refused["why"], refused
+
+
+def test_a_settled_default_is_not_the_persons_word(tmp_path, capsys) -> None:
+    """137 R7: a settled line is neither open nor decided: `verdicts` doesn't count it assumed,
+    `--decision` refuses it, and it is never an upgrade answer."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1, "- DECISION: [default] Page at 50.\n")
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _round(root, 1)
+    _decision(root, "- SETTLED: D1: upgrade to Tier 2: the spec says 50\n", head="DECISION: READY")
+    _run(capsys, factory.cmd_decisions, root, "008")
+    [d1] = factory.read_ledger(folder)
+    assert (d1["settled"], d1["decided"], d1["open"], d1["answer"]) == (
+        "upgrade to Tier 2: the spec says 50", False, False, None
+    )  # fmt: skip
+    assert _verdicts(root, capsys)["assumed"] == []
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "decided", None, "D1")
+    assert code == 1 and "D1 isn't a decided line" in out["refusals"][0], out
+    assert factory.upgrade_answer([d1 | {"kind": "blocking"}]) is None
+
+
+def test_the_approver_is_asked_to_weigh_each_open_default(tmp_path, capsys) -> None:
+    """137 R5: the approve prompt names every open default by id, and both line shapes."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING, "- DECISION: [default] Log the draft id?\n",
+                  "- DECISION: [blocking] Keep drafts 30 days?\n")  # fmt: skip
+    _run(capsys, factory.cmd_decisions, root, "008")
+    path = root / ".sdlc" / "work" / NAME / "decisions.md"
+    path.write_text(path.read_text().replace("- [ ] D3", "- [x] D3").replace(
+        "30 days?", "30 days? → decided: 30"))  # fmt: skip
+    _round(root, 1)
+    state, _ = factory.loop_state(root, "008", None)
+    assert state["next"] == "approve", state
+    prompt, target, _ = factory._task(root, root / ".sdlc" / "work" / NAME, state, "approve",
+                                      "approver", None)  # fmt: skip
+    assert target.name == "decision.md"
+    assert "D1, D2" in prompt and "D3" not in prompt, prompt
+    assert "- SETTLED: D<n>: " in prompt and "- ESCALATED: D<n>: " in prompt, prompt
+    assert "no options yet: D2." in prompt, prompt
+
+
+# ---------------------------------------------------------------- what the person decides (ask)
+
+
+def _weighed(tmp_path: Path, capsys, stage: str = "test") -> Path:
+    """A change the approver escalated with one default settled and one escalated, and a reviewer's
+    blocking line still open."""
+    root = _change(tmp_path, stage=stage)
+    _build_report(root, 1, PAGING, "- DECISION: [default] Log the draft id? Assuming no.\n")
+    _review(root, 1, "security", "VERDICT: PASS")
+    review = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "security.md"
+    review.write_text(review.read_text() + "- DECISION: [blocking] Keep drafts 30 days?\n")
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _decision(root, "- ESCALATED: D1: the page size is the product's call\n",
+              "- SETTLED: D2: spec R4 forbids logging ids\n")  # fmt: skip
+    _run(capsys, factory.cmd_decisions, root, "008")
+    return root
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    folder = root / ".sdlc" / "work" / NAME
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*")
+            if p.is_file()}  # fmt: skip
+
+
+def test_ask_lists_open_items_with_their_background_and_writes_nothing(tmp_path, capsys) -> None:
+    """137 R13: every open line in id order with where it came from, its options and the
+    approver's reason; the settled ones apart; no byte of the folder changes."""
+    root = _weighed(tmp_path, capsys)
+    before = _tree_bytes(root)
+    code, out = _run(capsys, factory.cmd_ask, root, "008", None)
+    assert code == 0 and out["decision"] == "ESCALATE", out
+    assert out["items"] == [
+        {"id": "D1", "kind": "default", "source": "builder round 1",
+         "reply": "build/round-1.md", "question": "Page the drafts list at 50?",
+         "options": [
+             {"option": "50", "notes": "one screen's worth; long lists need a second page"},
+             {"option": "100", "notes": "fewer pages; a slower first paint"},
+         ],
+         "why": "the spec's list view shows 50",
+         "escalated": "the page size is the product's call"},
+        {"id": "D3", "kind": "blocking", "source": "security round 1",
+         "reply": "reviews/round-1/security.md", "question": "Keep drafts 30 days?",
+         "options": [], "why": None, "escalated": None},
+    ]  # fmt: skip
+    assert out["settled"] == [
+        {
+            "id": "D2",
+            "text": "Log the draft id? Assuming no.",
+            "reason": "spec R4 forbids logging ids",
+        }
+    ]
+    assert "next" not in out
+    assert _tree_bytes(root) == before, "ask writes nothing"
+
+
+@pytest.mark.parametrize("stage", ["build", "design", "shipped"])
+def test_ask_refuses_a_change_not_at_test(tmp_path, capsys, stage) -> None:
+    """137 R13: a run still building asks its own blocking decisions, through the supervisor."""
+    root = _weighed(tmp_path, capsys, stage=stage)
+    code, out = _run(capsys, factory.cmd_ask, root, "008", None)
+    assert code == 1 and "stage: test" in out["refusals"][0], out
+
+
+def _answer(root: Path, ident: str, answer: str) -> None:
+    path = root / ".sdlc" / "work" / NAME / "decisions.md"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = [
+        "- [x]" + ln[5:] + factory.DECIDED + answer if ln.startswith(f"- [ ] {ident} ") else ln
+        for ln in lines
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_ask_says_rebuild_when_an_answer_overturns_a_default(tmp_path, capsys) -> None:
+    """137 R14: with a line open, `decide`; once all are answered, an answer that isn't the kept
+    default means a rebuild, by `build` for an ESCALATE and by ship for a READY."""
+    root = _weighed(tmp_path, capsys)
+    _answer(root, "D1", factory.KEPT_ANSWER)
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1")[1]
+    assert out["next"] == "decide", out
+    _answer(root, "D3", "forever")
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1,D3")[1]
+    assert out["next"] == "rebuild" and out["then"] == "/sdlc-factory:build 008", out
+    path = root / ".sdlc" / "work" / NAME / "decision.md"
+    path.write_text(path.read_text().replace("DECISION: ESCALATE", "DECISION: READY"))
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1,D3")[1]
+    assert out["next"] == "rebuild" and out["then"] == "/sdlc:ship 008", out
+
+
+def test_ask_says_ship_when_every_default_is_kept(tmp_path, capsys) -> None:
+    """137 R14: every answer keeps the default: ship. An id that isn't a decided line is refused."""
+    root = _change(tmp_path, stage="test")
+    _build_report(root, 1, PAGING)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _decision(root, "- ESCALATED: D1: the product's call\n")
+    code, out = _run(capsys, factory.cmd_ask, root, "008", "D1")
+    assert code == 1 and "D1 isn't a decided line" in out["refusals"][0], out
+    _answer(root, "D1", factory.KEPT_ANSWER)
+    code, out = _run(capsys, factory.cmd_ask, root, "008", "D1")
+    assert code == 0 and out["items"] == [] and out["next"] == "ship", out
+    code, out = _run(capsys, factory.cmd_ask, root, "008", "D1,D7")
+    assert code == 1 and "D7 isn't a decided line" in out["refusals"][0], out
 
 
 # ---------------------------------------------------------------- sdlc reads it like any other

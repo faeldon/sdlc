@@ -56,6 +56,7 @@ CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default)\): (.+?)\s*$")
+SETTLED = " → settled by the approver: "
 RECONSIDER = "## Reconsider the approach"
 # An open box the ledger can't read: a problem, never an answered decision.
 OPEN_BOX = "- [ ]"
@@ -353,7 +354,7 @@ def _factory(folder: Path, problems: list[str]) -> dict:
     path = folder / "decisions.md"
     for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
         m = LEDGER_RE.match(line)
-        ledger_lines += bool(m)
+        ledger_lines += bool(m) and SETTLED not in line
         garbled = garbled or not m and line.startswith(OPEN_BOX)
         if m and m.group(1) == " ":
             item = {"id": m.group(2), "by": m.group(3), "text": m.group(5)}
@@ -714,7 +715,7 @@ def next_action(entry: dict) -> str:
     if entry["problems"] and stage is None:
         return "fix intent.md's frontmatter"
     # The decisions its `needs` still holds: a blocking one at `build`, answered in the session
-    # running the factory, or one an escalation at `test` still needs, answered at ship.
+    # running the factory, or one an escalation at `test` still needs, answered in `decide`.
     ids = [n.removeprefix("decide ") for n in entry.get("needs") or [] if n.startswith("decide ")]
     decide = f"decide {', '.join(ids)}" + (
         " in the factory's supervisor" if stage == "build" else ""
@@ -745,6 +746,11 @@ def next_action(entry: dict) -> str:
         return entry["stopped"]["next"]
     if ids and stage == "build":
         return decide
+    if step := sdlc.decide_step(entry):
+        # An escalation at `test` is answered one item at a time in the factory's `decide`.
+        asked = [n.removeprefix("confirm ") for n in entry["needs"] if n.startswith("confirm ")]
+        what = " and ".join(filter(None, [", ".join(ids), *asked]))
+        return f"{step} for {what}, then /sdlc:ship, or /sdlc-factory:land with the others ready"
     if ids:
         return f"{decide}, then /sdlc:ship, or /sdlc-factory:land with the others ready"
     if entry.get("decision") and stage == "test":

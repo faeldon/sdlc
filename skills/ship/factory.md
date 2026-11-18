@@ -10,7 +10,10 @@ A change built by agents has `.sdlc/work/NNN-slug/decision.md`, opening `DECISIO
 opening `VERDICT: PASS` or `VERDICT: CHANGES`, each round's verifier answers in
 `reviews/round-<N>/verified.md` (`- KEPT:` for the builder, `- DROPPED:` with why), and the person's
 calls the agents raised in `.sdlc/work/NNN-slug/decisions.md` (`- [x]` decided, `- [ ]` assumed,
-and `- [x] … → superseded by D<m>` a default a later one replaced, neither decided nor assumed).
+`- [x] … → superseded by D<m>` a default a later one replaced, and `- [x] … → settled by the
+approver: <reason>` a default the approver settled, its call and never the person's word: neither
+decided nor assumed). Indented `- OPTION:` and `- WHY:` lines under a line are its alternatives,
+the default first, and why the agent chose it.
 Read the decision, the highest round's reviews, every `verified.md` and the ledger: they are
 evidence for Step 3, never a substitute for it. A dropped change your own passes confirm is a
 finding like any other. The builder's reports in `build/round-<N>.md` and the behaviour check's
@@ -34,7 +37,11 @@ items, first and plainly when it is `ESCALATE`. Then every decision in `decision
 unticked: each is an assumption the build rests on that the person hasn't confirmed, and the
 approval below confirms it or sends the change back. A line marked `→ superseded by D<m>` is no
 assumption the build rests on: show it as one line beside D<m>, the default that replaced it
-(`D2, superseded by D4: …`), never as its own open item. Then each reviewer's verdict from the highest
+(`D2, superseded by D4: …`), never as its own open item. Show each open default with its `- OPTION:`
+and `- WHY:` lines as the ledger holds them, the default first. Then, as a list of its own, each
+line marked `→ settled by the approver:` with its reason (`Settled by the approver: D3: … (spec R4
+forbids it)`): neither decided nor assumed, never an open item and never the person's word. Then
+each reviewer's verdict from the highest
 round. A `CHANGES` your own passes confirm is a finding like any other; one they don't is said so,
 with why. Then the agents' findings in `findings.md` (each section whose `By:` names a factory
 role), under the verdicts and counted apart from ship's own: `findings`' `agents` count, never in

@@ -1144,6 +1144,7 @@ def test_without_transcripts_only_the_commits_numbers_are_written() -> None:
     done = metrics.rework([], s, FACTORY, 80, 2)
     assert set(done) == {"final", "rounds", "changes", "escalate", "blocking", "defaults",
                          "defaults_open", "reviews"}, "absent, never a zero"  # fmt: skip
+    assert "defaults_settled" not in metrics.rework([], s, None, 80, 2), "by hand: no key"
     first = metrics.happy([], s, FACTORY, 2, done)
     assert set(first.values()) - {0} == {"unknown"}
 
@@ -1194,6 +1195,7 @@ def test_sdlcs_copies_of_the_factorys_patterns_match_its_own() -> None:
     assert sdlc.FACTORY_STEP == factory.STEP
     assert sdlc.FACTORY_AGENT_TIMEOUT == factory.AGENT_TIMEOUT
     assert sdlc.FACTORY_RECONSIDER == factory.RECONSIDER
+    assert sdlc.FACTORY_SETTLED == factory.SETTLED
 
 
 SUPERSEDED_LEDGER = """\
@@ -1230,6 +1232,39 @@ def test_a_superseded_default_is_counted_but_not_open(tmp_path: Path) -> None:
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
     found = sdlc._factory_files(tmp_path, name)
     assert (found["blocking"], found["defaults"], found["defaults_open"]) == (1, 3, 1)
+
+
+def test_a_settled_default_is_counted_apart(tmp_path: Path) -> None:
+    """137 R11: a line the approver settled is a default, no open one, and `defaults_settled`;
+    its sub-lines are no lines of the ledger."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    spec = importlib.util.spec_from_file_location("sdlc_settled", ROOT / "scripts" / "sdlc.py")
+    sdlc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sdlc)
+    name = "008-reopen-drafts"
+    git("init", "-q", "-b", "main")
+    (tmp_path / "README.md").write_text("a repo\n", encoding="utf-8")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+    git("checkout", "-q", "-b", name)
+    folder = tmp_path / ".sdlc" / "work" / name
+    folder.mkdir(parents=True)
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    ledger = SUPERSEDED_LEDGER + (
+        "  - OPTION: keep it — the card says what happened; one more badge\n"
+        "- [x] D5 (code round 2, default): Page at 50? → settled by the approver: spec R2\n"
+    )
+    (folder / "decisions.md").write_text(ledger, encoding="utf-8", newline="\n")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "built")
+    found = sdlc._factory_files(tmp_path, name)
+    assert (found["blocking"], found["defaults"], found["defaults_open"],
+            found["defaults_settled"]) == (1, 4, 1, 1)  # fmt: skip
+    done = metrics.rework([], {}, {**FACTORY, "defaults_settled": 1}, None, 2)
+    assert done["defaults_settled"] == 1
 
 
 def test_both_intent_yes_answers_read_as_approval() -> None:

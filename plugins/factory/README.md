@@ -69,6 +69,12 @@ reviewing, and deciding whether to escalate.
   the supervisor says it's ready to ship. Ask it what's ready, and it lists every such change in
   the order to ship them, a change after what it `depends_on`, with the others that touch the same
   paths. The supervisor never ships: you land them.
+- **`/sdlc-factory:decide NNN`**, on one change at `stage: test`: its open decisions and assumed
+  defaults, one at a time, each with its background, the default, the alternatives the agent
+  weighed and why it chose the default, asked in a dialog with the default first. After one
+  approval it writes your answers into `decisions.md` (`→ decided:`), as the supervisor does, and
+  says what's next: decide again, rebuild (an answer the build doesn't follow), or ship. It reads
+  through `factory.py ask`, which writes nothing, and starts no agent.
 - **`/sdlc-factory:land [NNN…]`**, from a session of its own in the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and
   the nits its intent or spec names by id retired, committed, brought up to date with the base branch and closed, through `sdlc`'s own `ship`,
@@ -86,7 +92,7 @@ reviewing, and deciding whether to escalate.
   the last review round any other way is a signal, and the commit says so (`unreviewed=<n>`).
   One approval covers the batch, and it **passes itself when no change in it carries a risk
   signal** (a sensitive or irreversible path, `impact: major`, an ESCALATE, an open or assumed
-  decision, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
+  decision, a default the approver settled, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
   read, a fix made while landing, acceptance checks, skills' cases in scope, undone notes, nits
   to file),
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
@@ -215,15 +221,29 @@ spec.
 
 An agent that reaches a call that is yours (a trade-off the spec leaves open, a policy, scope)
 raises it instead of guessing: `- DECISION: [blocking] ...` or `- DECISION: [default] ...`, with the
-options and its recommendation. They're gathered into the change's ledger,
-`.sdlc/work/NNN-slug/decisions.md`, each with an id (`D1`, `D2`, …).
+options and its recommendation, each option under its line with its pros and cons and why the
+agent chose its own:
+
+```
+- DECISION: [default] Page the drafts list at 50?
+  - OPTION: 50 — one screen's worth; a long list needs a second page
+  - OPTION: 100 — fewer pages; a slower first paint
+  - WHY: the spec's list view shows 50
+```
+
+They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, each with an id
+(`D1`, `D2`, …), its alternatives kept under its line.
 
 - **Blocking**: the run pauses, and the session running it, the only one that can talk to you,
   asks you. Your answer is written into the ledger (`- [x] D1 ... → decided: ...`) and the agent is
   resumed with it.
 - **Default**: the run goes on with the agent's stated default, marked as assumed. The approver
-  escalates while any is unconfirmed, and `/sdlc:ship` shows every one, so your approval there
-  confirms it or sends the change back. A later default that replaces one names it,
+  weighs each one: one the spec, the code or a round settles, it settles, and the ledger ticks it
+  `→ settled by the approver: <reason>`, its call and never your word, still shown to you at the
+  landing (a signal of its own, so a batch holding one never passes itself) and at ship; one it
+  can't, it escalates to you, and the change is escalated while any is. `/sdlc-factory:decide
+  NNN` then asks you each open one, one at a time, with the alternatives; `/sdlc:ship` shows every
+  one, so your approval there confirms it or sends the change back. A later default that replaces one names it,
   `- DECISION: [default] (supersedes D2) ...`, and the ledger ticks D2 `→ superseded by D4`: no
   longer assumed, shown beside the default that replaced it. A decided line can't be superseded.
 
@@ -265,7 +285,7 @@ its own folder, fixture copy and server, so a round's two start together.
   build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for, by its id
-  decisions.md                  the ledger of the calls that are yours
+  decisions.md                  the ledger of the calls that are yours, each one's options under it
   decision.md                   opens DECISION: READY or DECISION: ESCALATE
   decision-<n>.md               an escalated run's decision, kept as it was when it was sent back
   build/round-<N>.restart.md    RESTART: decision-<n>.md, and WORDS: R<k> with your words: round N

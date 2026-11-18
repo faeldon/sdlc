@@ -65,6 +65,17 @@ A failure that is really the person's call (the spec is silent on what the outpu
 not a CHANGE: raise it as `- DECISION: [blocking] ...` with the options and your recommendation.
 Read `decisions.md` first: an answered decision is settled.
 
+Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your
+recommendation first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
+keeps them under the line, and the approver and the person weigh it from them:
+
+```
+- DECISION: [blocking] Should a draft reopened twice keep both edits? Recommend the newest.
+  - OPTION: the newest — what the person saw last; the older edit is lost
+  - OPTION: both, merged — nothing lost; a merge the spec never describes
+  - WHY: the spec's reopen keeps one draft
+```
+
 Then `## Notes`: each check in `checks.md` and what you expect of it, and anything you couldn't
 run and why. **End with `## Evidence`:** every command you ran, as `$ <command>`, the tail of what
 it printed, and `exit: <n>`, a read included (`head`, `cat`, `ls`). A result without its `$` line

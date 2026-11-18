@@ -513,7 +513,10 @@ rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's comm
 read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
 decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
 approach` (its `decision.md` holds that section) and, with no decision line at all in its ledger,
-`read the escalation`; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
+`read the escalation` (a default the approver settled, `→ settled by the approver:`, is no decision
+line here and never counted as an answer, nor as a default to confirm), the line ending with
+`/sdlc-factory:decide NNN`, where the person answers them one at a time, while it holds a
+decision or a default; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
 but whose stage never moved. `status` reads only what it already reads, so a problem only the
 board finds (a reply that isn't a review, a findings file that won't read) is on the board alone.
 
@@ -539,7 +542,8 @@ A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps
 `--continue` or `--abort` as its next step, saying that `--abort` keeps the resolved work under
 `refs/sdlc/end/<branch>`. A card with a file that won't read names that as its next step, at any
 stage. Its next step follows its `needs you:` line: a decision still to make (`decide D<n>`) is
-named first, before the problem a card also has, or before `/sdlc:ship` on an escalation. A stop
+named first, before the problem a card also has; on an escalation at `test`, a decision or
+default to confirm makes it `/sdlc-factory:decide NNN for D2 and 1 default`, then `/sdlc:ship`. A stop
 record that won't read is a stop, its next step `read runs/stopped.md`, on the board as in
 `/sdlc:status`.
 Each card gives the change's tier,

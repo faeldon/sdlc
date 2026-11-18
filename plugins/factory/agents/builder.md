@@ -91,8 +91,14 @@ turns out to have wrong. Don't guess at one, and don't bury it in a comment. Rai
 each, in your report:
 
 ```
-- DECISION: [blocking] Keep reopened drafts forever, or 30 days? Options: forever; 30 days. Recommend 30 days: the spec's storage limit.
+- DECISION: [blocking] Keep reopened drafts forever, or 30 days? Recommend 30 days.
+  - OPTION: 30 days — within the spec's storage limit; an old draft is gone
+  - OPTION: forever — nothing is lost; storage grows without bound
+  - WHY: the spec's storage limit
 - DECISION: [default] Page the drafts list at 50? Going ahead with 50 unless told otherwise.
+  - OPTION: 50 — one screen's worth; a long list needs a second page
+  - OPTION: 100 — fewer pages; a slower first paint
+  - WHY: the spec's list view shows 50
 ```
 
 - **`[blocking]`**: you can't go on without the answer. Stop at a point where the tree still
@@ -101,7 +107,10 @@ each, in your report:
 - **`[default]`**: you can go on with a stated default without much to undo if it's wrong. Say the
   default, build on it, and keep going. It is recorded as assumed until the person confirms it.
 
-Each line says the question, the options, and your recommendation with its reason. A decision
+Each line says the question and your recommendation or default. Under it go its alternatives:
+two to four indented `- OPTION: <option> — <its pros and cons>` lines, your own first, then one
+`- WHY:` line saying why you chose it. `factory.py decisions` files them under the line in the
+ledger, where the approver and the person weigh it from them. A decision
 already answered in `.sdlc/work/NNN-slug/decisions.md` (a ticked line, `→ decided: ...`) is settled:
 build on the answer, never re-raise it.
 

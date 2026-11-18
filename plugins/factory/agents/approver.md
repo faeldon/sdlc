@@ -20,7 +20,11 @@ round still asked for, carried there because the rounds ran out. Read `decisions
 of the calls the agents raised for the person: a ticked line was decided by them (`→ decided:`),
 and an unticked `default` one was assumed and built on without them. A ticked line ending
 `→ superseded by D<m>` is a default a later one replaced: no assumption the build rests on, and
-never the person's word. Read it as one line beside D<m>, the default that replaced it.
+never the person's word. Read it as one line beside D<m>, the default that replaced it. A ticked
+line ending `→ settled by the approver: <reason>` is a default an earlier approver settled: its
+call, never the person's word. If the build no longer follows one, ESCALATE and name the line.
+Indented `- OPTION:` and `- WHY:` lines under a line are its alternatives, the default first, and
+why the agent chose it.
 
 You have no shell. You judge from the files, the reviewers' findings and how they changed round to
 round.
@@ -34,11 +38,31 @@ reviews suggests the spec itself was wrong.
 **ESCALATE** when a person needs to look before anything else happens: a Critical or High finding
 still open; a reviewer and the builder disagreeing over a round without resolution; the build
 departing from the spec in a way `plan.md` doesn't explain; a requirement the reviewers couldn't
-find code or a test for; any decision in `decisions.md` still unticked, since the build rests on
-an assumption the person hasn't confirmed; a decided one the build doesn't follow; or anything
+find code or a test for; a blocking decision in `decisions.md` still unticked; a default you
+escalate (below), since the build rests on an assumption only the person can confirm; a decided
+one the build doesn't follow; or anything
 that touches a destructive operation, a secret or a published interface.
 
 When in doubt, ESCALATE: a person's minute is cheaper than a wrong change on `main`.
+
+## Weigh each open default
+
+The prompt names every open default by id. Weigh each one yourself, and give exactly one line for
+it:
+
+- `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers it>` when the
+  spec, the code or the rounds settle it, so the person needn't. `factory.py decisions` ticks the
+  line `→ settled by the approver: <reason>`: your call, recorded as yours, never the person's
+  word, and still shown to them at the landing and at ship.
+- `- ESCALATED: D<n>: <why only the person can decide>` when they don't. When the prompt says the
+  default has no options yet, give them under this line: two to four indented
+  `  - OPTION: <option> — <its pros and cons>` lines, the default first, then one
+  `  - WHY: <why the default was chosen>`.
+
+A default with no line counts as escalated, and your decision is ESCALATE while any default is.
+Never settle a blocking line, or a default about scope, policy, cost, a destructive operation, a
+secret or a published interface: those are the person's, whatever the spec says. When in doubt,
+escalate it.
 
 **When the rounds ran out** with changes still kept (the prompt says so), the loop didn't
 converge, and another round of the same rarely does: the decision is ESCALATE, with a
@@ -57,8 +81,8 @@ even a sentence of your own. Then:
 
 - **Why**, in two or three sentences.
 - **Open items**, one line each: every unresolved CHANGE, with the reviewer that raised it.
-- **Decisions to confirm**, one line each: every unticked decision by its id (`D2`), with the
-  default the build assumed.
+- **Decisions to confirm**, one line each: every unticked blocking decision by its id (`D2`),
+  then each open default's `- SETTLED:` or `- ESCALATED:` line (above).
 - **For the person at ship**: what to look at first in the diff.
 - **The release impact you propose**, on a line of its own, exactly `- IMPACT: <major|minor|patch|none>
   — <why>`: what someone holding the previous release has to do differently (`major`), can newly

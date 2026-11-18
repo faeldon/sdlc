@@ -54,8 +54,12 @@ is the person's (a trade-off the spec leaves open, a policy, scope), it raises a
 line instead of guessing, and `factory.py decisions` gathers every one into the change's ledger,
 `.sdlc/work/NNN-slug/decisions.md`. A **blocking** one pauses that change alone: the supervisor
 asks the person, writes the answer into the ledger, and the builder carries on with it. A
-**default** one lets the run go on with the agent's stated default, recorded as assumed; the
-approver escalates while any is unconfirmed, and `/sdlc:ship` shows them all.
+**default** one lets the run go on with the agent's stated default, recorded as assumed, with
+the alternatives the agent weighed under its line. The approver weighs each open default: one the
+spec, the code or a round settles it marks `SETTLED`, and `decisions` ticks it `→ settled by the
+approver:`, its call and never the person's word; one it can't, it escalates, and it escalates the
+change while any default is. `/sdlc:ship` shows them all, and `/sdlc-factory:decide NNN` walks
+the person through what is left, one at a time.
 
 **Under the factory, the plan is accepted by approving this run.** The builder writes `plan.md` and
 builds on it without a person reading it first, which plan mode would otherwise require; it may
@@ -181,7 +185,8 @@ resumed for round `round`, rewriting `plan.md` against the spec before it builds
 
 With a `restart`, show first, naming the change: the decision's first reason, its `## Reconsider
 the approach` section word for word (or that it has none), and the decisions still assumed in its
-`decisions.md` (an unconfirmed default is a common reason to escalate, and the person may want to
+`decisions.md`, with the defaults the approver settled named apart as its calls, never as
+assumed (an escalated default is a common reason to escalate, and the person may want to
 answer it before the rebuild); then that `decision.md` will be kept as `archive`, and that the
 builder starts afresh at round `round`, told the approver's reasons.
 
@@ -462,7 +467,9 @@ verdicts (or that no gate is configured), each round's verdicts by reviewer and
 how many changes the verifier kept and dropped, the decision and its first reason, the decisions
 the person made during the run and those still assumed (by id, with the default the build rests
 on; a line marked `→ superseded by D<m>` is no assumption, shown as one line beside D<m>, the
-default that replaced it, never counted as open), what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
+default that replaced it, never counted as open), the defaults the approver settled, apart from
+those still assumed, each with its reason (the approver's calls, never the person's), and with any still open, that
+`/sdlc-factory:decide <NNN>` asks them one at a time; what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
 what the run cost: the `cost` that `stage <NNN> test` printed, its `usd` total and the split
 `by_role` and `by_model`, called the API-equivalent cost Claude Code reported (on a subscription,
 where the spend went, not a bill), with `unknown` runs said when there are any. Say plainly that

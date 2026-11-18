@@ -2766,6 +2766,49 @@ def test_a_blocking_decision_needs_its_id() -> None:
     assert sdlc.needs_of(_rec(stage="test", decision="READY", pending=_d("D1"))) == []
 
 
+WEIGHED = (
+    "# Decisions\n\n"
+    "- [x] D1 (code round 1, default): Log the draft id? → settled by the approver: spec R4\n"
+    "- [ ] D2 (builder round 1, default): Page the drafts list at 50?\n"
+    "  - OPTION: 50 — one screen's worth; a second page past it\n"
+    "  - OPTION: 100 — fewer pages; a slower first paint\n"
+    "  - WHY: the spec's list view shows 50\n"
+)
+
+
+@pytest.mark.portable
+def test_a_ledger_with_alternatives_is_not_garbled(tmp_path) -> None:
+    """137 R2: the indented OPTION and WHY lines are no lines of the ledger, and no open box."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "decisions.md").write_text(
+        "".join(ln + "\n" for ln in WEIGHED.splitlines() if not ln.startswith("  ")),
+        encoding="utf-8",
+    )
+    weighed = tmp_path / "weighed"
+    weighed.mkdir()
+    (weighed / "decisions.md").write_text(WEIGHED, encoding="utf-8")
+    a, b = sdlc.factory_reading(plain), sdlc.factory_reading(weighed)
+    assert (b["pending"], b["assumed"], b["problems"]) == (a["pending"], a["assumed"], [])
+    assert [d["id"] for d in b["assumed"]] == ["D2"]
+
+
+@pytest.mark.portable
+def test_an_escalation_with_only_settled_defaults_is_not_answered(tmp_path) -> None:
+    """137 R10: an approver's call is never the person's answer, so a ledger holding only settled
+    lines leaves the escalation to be read."""
+    (tmp_path / "decision.md").write_text("DECISION: ESCALATE\n\nWhy.\n", encoding="utf-8")
+    (tmp_path / "decisions.md").write_text(WEIGHED.split("- [ ] D2")[0], encoding="utf-8")
+    found = sdlc.factory_reading(tmp_path)
+    assert found["ledger_lines"] == 0 and found["problems"] == [], found
+    rec = _rec(stage="test", **{k: found[k] for k in ("decision", "assumed", "ledger_lines")})
+    assert sdlc.needs_of(rec) == ["read the escalation"] and sdlc.answered(rec) is False
+    (tmp_path / "decisions.md").write_text(WEIGHED, encoding="utf-8")
+    found = sdlc.factory_reading(tmp_path)
+    rec = _rec(stage="test", **{k: found[k] for k in ("decision", "assumed", "ledger_lines")})
+    assert sdlc.needs_of(rec) == ["confirm 1 default"], "only the open default"
+
+
 @pytest.mark.portable
 def test_an_escalation_needs_what_its_ledger_holds() -> None:
     """R4: what the ledger and decision still hold, in order; an empty ledger needs reading."""
