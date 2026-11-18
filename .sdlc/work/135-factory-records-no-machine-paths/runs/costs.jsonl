@@ -1,8 +1,0 @@
-{"session": "14c8668d-4f81-4c72-92ae-1b9afe2028f9", "role": "builder", "model": "opus", "cost_usd": 0.943716, "duration_ms": 423613, "turns": 29, "in": 54, "out": 14319, "cache_create": 52481, "cache_read": 1186360}
-{"session": "71a82400-5a37-4b33-929a-76df70cfab3c", "role": "code", "model": "haiku", "cost_usd": 0.02141014, "duration_ms": 130356, "turns": 12, "in": 24, "out": 15191, "cache_create": 48333, "cache_read": 414564}
-{"session": "f65ced8a-85ea-4dac-875d-27a94e24b17b", "role": "verifier", "model": "sonnet", "cost_usd": 0.0844678, "duration_ms": 10300, "turns": 5, "in": 10, "out": 837, "cache_create": 17098, "cache_read": 76858}
-{"session": "14c8668d-4f81-4c72-92ae-1b9afe2028f9", "role": "builder", "model": "opus", "cost_usd": 1.1982433999999997, "duration_ms": 173825, "turns": 10, "in": 18, "out": 3571, "cache_create": 9816, "cache_read": 522537}
-{"session": "a71209cc-0863-44b1-ab8f-e0d9def91631", "role": "code", "model": "haiku", "cost_usd": 0.00669934, "duration_ms": 58454, "turns": 5, "in": 10, "out": 3724, "cache_create": 19756, "cache_read": 88514}
-{"session": "90e36279-5643-41bc-8ac8-0330cf4483e0", "role": "approver", "model": "opus", "cost_usd": 0.26122280000000003, "duration_ms": 23511, "turns": 12, "in": 8, "out": 2539, "cache_create": 24647, "cache_read": 66174}
-{"session": "4e1a7d2c-7b4e-4a51-a3c2-5c27f2dd753e", "role": "behaviour", "model": "haiku", "cost_usd": 0.02319962, "duration_ms": 198478, "turns": 18, "in": 24, "out": 17920, "cache_create": 49243, "cache_read": 438862}
-{"session": "52274060-fa40-4e3d-8441-190ca21daf95", "role": "behaviour", "model": "haiku", "cost_usd": 0.017734899999999998, "duration_ms": 149330, "turns": 14, "in": 18, "out": 14953, "cache_create": 38619, "cache_read": 253280}
