@@ -23,10 +23,10 @@ target = "github"
 attribution = false
 
 [review]
-# The manifests (what installs), the shared permissions and attribution, the trackers (what
-# touches a host's GitHub), the gates themselves, local and CI, and close, the push, the main lock
-# and the factory's landing (where a mistake costs a host's work or history): changes here get the
-# deep review.
+# Changes here get the deep review. The manifests decide what installs. The shared settings hold
+# the permissions and attribution. The trackers touch a host's GitHub. check.sh and the workflows
+# are the gates themselves, local and CI. Close, the push, the main lock and the factory's landing
+# are where a mistake costs a host's work or history.
 sensitive = [
   ".claude-plugin/",
   ".claude/settings.json",
@@ -56,6 +56,10 @@ after_bump = "uv lock"
 # by `area: setup`, `area: new` and `area: close` (O1) and `lost-work` (O2). Stops (O3) are
 # already in retro's own metrics.
 evidence = ["uv run --quiet --script .sdlc/evidence.py"]
+# Function-level hotspots for the architecture pass: each top-level function in the four scripts,
+# with the commits since the last retrospective that rewrote some of it and its size, read from
+# the base branch.
+indicators = ["uv run --quiet --script .sdlc/function-heat.py"]
 # Per-test run times for the pruning pass: the suite run once, its JUnit report printed alone on
 # stdout. The report goes to a temp file, so the tree stays clean for `retro-commit`; pytest's own
 # output goes to /dev/null, and `;` lets a red suite still print its times.

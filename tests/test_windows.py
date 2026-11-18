@@ -30,6 +30,8 @@ SCRIPTS = [
     *sorted((REPO / "scripts" / "trackers").glob("*.py")),
     REPO / "plugins" / "factory" / "scripts" / "factory.py",
     REPO / "plugins" / "factory" / "scripts" / "landing.py",
+    # This repo's own retro indicator, which the retrospective runs on Windows as anywhere.
+    REPO / ".sdlc" / "function-heat.py",
 ]
 GIT_ID = {
     "GIT_AUTHOR_NAME": "t",
