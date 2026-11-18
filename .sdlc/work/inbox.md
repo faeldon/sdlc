@@ -390,3 +390,18 @@ the README should say it isn't.
 Severity: low
 Paths: plugins/factory/scripts/factory.py, plugins/factory/README.md
 Theme: factory
+
+## [2026-11-18-42] [bug] An agent's record can cite a change by its bare number and fail the gate
+
+An agent's record can cite a change by its bare number and fail the gate: 140's behaviour check
+ran `ls` on its own folder as a glob, `.sdlc/work/NNN*/…` with the number in place of NNN, and
+filed it in its ## Evidence, which matches test_nothing_local's `work/\d{3,}\b(?!-)` rule; the
+approver's decision and the code and test reviews then quoted the same glob while describing the
+failure, so the record kept re-committing it (2026-11-18, 7 lines in 4 files fixed by hand). The
+gate ran before the behaviour check wrote it, so only the reviewers' own suite runs saw it. When
+factory.py files any agent's reply it should write a change's own folder glob or bare number
+(`work/NNN*`, `work/NNN/`) as its full NNN-slug, as _placeholders() does for machine paths.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Theme: factory
