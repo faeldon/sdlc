@@ -43,6 +43,7 @@
     "retro.evidence",
     "retro.indicators",
     "retro.test_paths",
+    "retro.test_times",
     "review.irreversible",
     "review.sensitive"
   ],

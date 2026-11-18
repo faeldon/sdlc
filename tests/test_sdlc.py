@@ -2238,6 +2238,20 @@ def test_evidence_must_be_a_list_of_commands(tmp_path: Path) -> None:
     assert "retro.evidence must be a list of commands" in warnings
 
 
+def test_test_times_must_be_a_list_of_commands(tmp_path: Path) -> None:
+    """130 R1: `retro.test_times` is checked as `evidence` is: a string is a warning, never a
+    crash, and a list of commands is read."""
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
+    config = tmp_path / ".sdlc" / "config.toml"
+    config.write_text('[retro]\ntest_times = "cat junit.xml"\n', "utf-8")
+    cfg, warnings, _ = sdlc.load_config(tmp_path)
+    assert "retro.test_times must be a list of commands" in warnings
+    assert cfg["retro"]["test_times"] == []
+    config.write_text('[retro]\ntest_times = ["cat junit.xml"]\n', "utf-8")
+    cfg, warnings, _ = sdlc.load_config(tmp_path)
+    assert (cfg["retro"]["test_times"], warnings) == (["cat junit.xml"], [])
+
+
 @pytest.mark.parametrize(
     ("serves", "stage", "error"),
     [

@@ -45,12 +45,35 @@ EVIDENCE_TIMEOUT = 60
 EVIDENCE_LIMIT = 20_000
 
 
+# A `retro.test_times` command's limits: a suite's JUnit report runs to megabytes, and a run that
+# makes it can take minutes. A report cut at the limit is a failure, never a partial read.
+TIMES_TIMEOUT = 600
+
+
+TIMES_LIMIT = 5_000_000
+
+
+# A test is slow when it takes at least this many times the suite's median, and this many seconds.
+SLOW_OVER = 10
+
+
+SLOW_LEAST = 1.0
+
+
 # Signals the process doc names that history doesn't record, and what would record them.
 UNMEASURED = [
     {
         # Ship's side is recorded (`Sdlc-Findings` on its commit); "later" isn't yet.
         "signal": "findings caught at ship vs. found later",
         "needs": "a later change to say which earlier change it fixes",
+    },
+    {
+        "signal": "a test a newer one repeats",
+        "needs": "per-test coverage: which lines each test runs",
+    },
+    {
+        "signal": "a test that passes for the wrong reason",
+        "needs": "mutation results: which tests still pass when the code they test is broken",
     },
 ]
 
@@ -119,10 +142,15 @@ def _release_of(home: Path, cfg: dict, sha: str) -> str | None:
     return (tags or "").splitlines()[0] if tags else None
 
 
-def _evidence(home: Path, commands: list[str]) -> list[dict]:
+def _evidence(
+    home: Path, commands: list[str], timeout: float | None = None, limit: int | None = None
+) -> list[dict]:
     """Each evidence command's output, run from the repo root, one after another. Passed through
     unread: what it means is the host's, and the retrospective's to judge. A command that fails or
-    hangs is a row saying so, never a failed retrospective."""
+    hangs is a row saying so, never a failed retrospective. The limits are `EVIDENCE_TIMEOUT` and
+    `EVIDENCE_LIMIT` unless given, read when it runs."""
+    timeout = EVIDENCE_TIMEOUT if timeout is None else timeout
+    limit = EVIDENCE_LIMIT if limit is None else limit
     rows = []
     for command in commands:
         row: dict = {"command": command, "exit": None, "output": "", "truncated": False}
@@ -131,10 +159,10 @@ def _evidence(home: Path, commands: list[str]) -> list[dict]:
             # Output that isn't UTF-8 (a binary export, a stray byte) is replaced, not raised.
             ran = subprocess.run(
                 sdlc._sh(command), cwd=home, capture_output=True, encoding="utf-8",
-                errors="replace", timeout=EVIDENCE_TIMEOUT,
+                errors="replace", timeout=timeout,
             )  # fmt: skip
         except subprocess.TimeoutExpired:
-            row["error"] = f"timed out after {EVIDENCE_TIMEOUT}s"
+            row["error"] = f"timed out after {timeout}s"
             rows.append(row)
             continue
         except OSError as e:
@@ -142,13 +170,72 @@ def _evidence(home: Path, commands: list[str]) -> list[dict]:
             rows.append(row)
             continue
         row["exit"] = ran.returncode
-        row["output"] = ran.stdout[:EVIDENCE_LIMIT]
-        row["truncated"] = len(ran.stdout) > EVIDENCE_LIMIT
+        row["output"] = ran.stdout[:limit]
+        row["truncated"] = len(ran.stdout) > limit
         if ran.returncode != 0:
             why = ran.stderr.strip()[:500] or "no output"
             row["error"] = f"exited {ran.returncode}: {why}"
         rows.append(row)
     return rows
+
+
+def _times(home: Path, commands: list[str]) -> dict:
+    """The suite's run times, from `retro.test_times`: each command's JUnit XML report through
+    `_evidence()` at `TIMES_TIMEOUT` and `TIMES_LIMIT`, read by `indicators.junit_times()`, every
+    command's cases pooled. `unset` with no command, `failed` when none gave a case, else `ok`
+    with the counts, the median and the `TOP` slowest, `slow` those at least `SLOW_OVER` times
+    the median and `SLOW_LEAST` seconds. Each command's row says what it gave, never its output."""
+    if not commands:
+        return {"state": "unset", "commands": []}
+    rows, cases = [], []
+    for ran in _evidence(home, commands, timeout=TIMES_TIMEOUT, limit=TIMES_LIMIT):
+        row = {k: ran[k] for k in ("command", "exit", "error", "truncated")} | {"cases": None}
+        if ran["truncated"] and not row["error"]:
+            row["error"] = f"truncated at {TIMES_LIMIT} characters"
+        if not row["error"]:
+            read = indicators.junit_times(ran["output"])
+            row["error"] = read["error"]
+            if not read["error"]:
+                row["cases"] = len(read["cases"])
+                cases += read["cases"]
+        rows.append(row)
+    if not cases:
+        return {"state": "failed", "commands": rows}
+    timed = [c for c in cases if not c["skipped"] and c["seconds"] is not None]
+    total = sum(c["seconds"] for c in timed)
+    mid = statistics.median(c["seconds"] for c in timed) if timed else None
+    ranked = sorted(timed, key=lambda c: (-c["seconds"], c["test"]))[: indicators.TOP]
+    slowest = [
+        {"test": c["test"], "file": c["file"], "seconds": round(c["seconds"], 3),
+         "share": round(c["seconds"] / total, 3)}
+        for c in ranked
+    ]  # fmt: skip
+    slow = [
+        r for r in slowest if mid and r["seconds"] >= SLOW_OVER * mid and r["seconds"] >= SLOW_LEAST
+    ]
+    return {
+        "state": "ok",
+        "commands": rows,
+        "tests": len(cases),
+        "skipped": sum(1 for c in cases if c["skipped"]),
+        "untimed": sum(1 for c in cases if not c["skipped"] and c["seconds"] is None),
+        "seconds": round(total, 3),
+        "median": None if mid is None else round(mid, 3),
+        "slowest": slowest,
+        "slow": slow,
+    }
+
+
+def _tests(home: Path, cfg: dict, lookback: tuple | None) -> dict:
+    """What the pruning pass reads: the suite's run times (`_times()`); the tests whose code moved
+    without them over `lookback` (`_lookback()`), None without one, as with no base branch; and
+    whether a pass is `due`, when any test is slow or drifted."""
+    times = _times(home, cfg["retro"]["test_times"])
+    drifted = None
+    if lookback is not None:
+        _, rows, present = lookback
+        drifted = indicators.drifted_tests(rows, _kind(cfg), _skip(home), present)
+    return {"times": times, "drifted": drifted, "due": bool(times.get("slow") or drifted)}
 
 
 def _product(
@@ -922,6 +1009,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     product = (
         None if doc is None else _product(home, cfg, doc, changes, a["open"], direction, bases)
     )
+    lookback = _lookback(home, trunk) if trunk else None
     return {
         "since": since,
         "today": today.isoformat(),
@@ -959,8 +1047,9 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,
         "prose": prose_metrics(home, cfg),
-        "architecture": _architecture(home, cfg, since, changes, kind),
+        "architecture": _architecture(home, cfg, since, changes, kind, lookback),
         "spend": _spend(home, cfg, changes, diffs),
+        "tests": _tests(home, cfg, lookback),
     }
 
 
@@ -1064,29 +1153,39 @@ def _line_counts(home: Path, ref: str) -> dict[str, int]:
     return indicators.grep_counts(sdlc._git(home, "grep", "-I", "-c", "", ref) or "", ref)
 
 
+def _skip(home: Path):
+    """The paths the architecture and pruning passes leave out: change folders and the register."""
+    register = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
+    return lambda path: path.startswith(sdlc.CHANGE_FOLDERS) or path == register
+
+
+def _lookback(home: Path, trunk: str) -> tuple[list[dict], list[tuple[str, list]], set | None]:
+    """The last `ARCH_LOOKBACK` closed changes, past the boundary, oldest first; each one's name
+    and numstat rows; and every path on the base branch, None when the listing fails. Read once,
+    for the architecture pass and the pruning pass both."""
+    recent = sdlc.closed_changes(home, None, trunk, read=False)[-ARCH_LOOKBACK:]
+    rows = [(rec["name"], _change_rows(home, rec)[1]) for rec in recent]
+    # Quoted as numstat quotes its paths (git's default), so the two compare.
+    listed = sdlc._git(home, "ls-tree", "-r", "--name-only", trunk)
+    return recent, rows, None if listed is None else set(listed.splitlines())
+
+
 def _architecture(
-    home: Path, cfg: dict, since: dict | None, changes: list[dict], kind
+    home: Path, cfg: dict, since: dict | None, changes: list[dict], kind, lookback=None
 ) -> dict | None:
     """What the architecture pass reads: size per tier over the window; hotspots and co-change
-    over the last `ARCH_LOOKBACK` closed changes, past the boundary; the largest files and each
+    over `lookback` (`_lookback()`, read here when not given); the largest files and each
     kind's totals now and at the last retrospective; and the host's `retro.indicators` output,
     through `_evidence()`. None without a base branch."""
     trunk = cfg["git"]["base"]
     if not trunk:
         return None
-    register = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
-
-    def skip(path: str) -> bool:
-        return path.startswith(sdlc.CHANGE_FOLDERS) or path == register
-
-    recent = sdlc.closed_changes(home, None, trunk, read=False)[-ARCH_LOOKBACK:]
-    lookback = [_change_rows(home, rec)[1] for rec in recent]
+    skip = _skip(home)
+    recent, named, present = lookback or _lookback(home, trunk)
+    lookback = [rows for _, rows in named]
     now = _line_counts(home, trunk)
-    # Every path on the base branch, so a hotspot with no lines to count reads as binary or
-    # empty when it's there, and as gone when it isn't. Quoted as numstat quotes the hotspots'
-    # paths (git's default), so the two compare; a listing that fails leaves `gone` unknown.
-    listed = sdlc._git(home, "ls-tree", "-r", "--name-only", trunk)
-    present = None if listed is None else set(listed.splitlines())
+    # `present`: every path on the base branch, so a hotspot with no lines to count reads as
+    # binary or empty when it's there, and as gone when it isn't; None leaves `gone` unknown.
     then = _line_counts(home, since["sha"]) if since else None
     tests, docs = cfg["retro"]["test_paths"], cfg["retro"]["doc_paths"]
     return {

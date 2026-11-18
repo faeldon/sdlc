@@ -135,7 +135,8 @@ path kept for good (whatever reads what history holds) is not a shim. REFERENCE.
 **Retrospectives: `retro()`.** Read-only but for its report, and bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes, holding the direction
 doc, the register, the product doc and the report, nothing else. It runs the host's
-`retro.evidence` and `retro.indicators` (`_evidence()`, the only place they run), so `retro` is
+`retro.evidence`, `retro.indicators` and `retro.test_times` (`_evidence()`, the only place they
+run), so `retro` is
 not in `READ_ONLY`. Rework across changes is only what a change declares (`_rework()`); blame's
 matches are questions, never counted. `scripts/retro.py`'s docstring; REFERENCE.md,
 *Retrospectives* and *The product doc*.

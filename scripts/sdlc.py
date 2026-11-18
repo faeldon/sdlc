@@ -241,6 +241,10 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # What the architecture pass reads besides git: host commands printing measures only a
         # language can tell (complexity, dependency cycles), run by `retro` from the repo root.
         "indicators": [],
+        # Host commands each printing a JUnit XML report of the test suite on stdout (run it, `cat`
+        # a report the gate left, fetch CI's), run by `retro` from the repo root: the run times
+        # the pruning pass reads. The format, never the runner, is the plugin's.
+        "test_times": [],
         # The paths that are tests, and docs, when the conventions (`scripts/indicators.py`)
         # misread the host's layout: `dir/` prefixes or globs. Unset, the conventions.
         "test_paths": [],
@@ -312,7 +316,7 @@ DOC_TEMPLATES = (
 # The [docs] keys that hold a list of paths.
 DOC_LISTS = ("read_before_design", "context")
 # Every key, in any section, that holds a list of paths, or of commands, rather than a string.
-COMMAND_LISTS = ("evidence", "indicators")
+COMMAND_LISTS = ("evidence", "indicators", "test_times")
 REVIEW_LISTS = ("sensitive", "irreversible")
 KIND_LISTS = ("test_paths", "doc_paths")
 LIST_KEYS = (*DOC_LISTS, "version_files", *COMMAND_LISTS, *REVIEW_LISTS, *KIND_LISTS)

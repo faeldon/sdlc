@@ -165,12 +165,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-17-87] [idea] Retro proposes a pruning pass over the test suite
-
-Left undone by 118-retro-spend-indicators, carried forward when it landed: R11, at ship: file the suite-pruning pass as a seed through `/sdlc:idea` (`inbox-commit`, on the base branch, never this branch), carrying 2026-11-12-2's third bullet: nothing looks at the tests already in the suite again (one whose code was rewritten, one a newer test repeats, one that passes for the wrong reason, the slowest). Needs per-test run times and a test-to-code map no host records today (spec, *Alternatives rejected*).
-See .sdlc/work/118-retro-spend-indicators/notes.md in its commit.
-Raised 2026-11-17.
-
 ## [2026-11-18-2] [idea] Ship's security pass at the factory's depth
 
 Left undone by 114-one-review, carried forward when it shipped: gap: security: ship checks only secrets, plus the fresh reviewer on a sensitive path; it has no security pass at the depth of the factory's `reviewer-security`.

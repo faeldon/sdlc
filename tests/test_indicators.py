@@ -318,3 +318,103 @@ def test_spend_ranks_the_tools() -> None:
         {"name": "Bash:make", "calls": 6, "errors": 3, "error_share": 0.5, "changes": 2},
     ]
     assert [t["name"] for t in tools["most_errors"]] == ["Bash:make"]
+
+
+# ---------------------------------------------------------------- the pruning pass (130)
+
+SUITES = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" tests="4">
+<testcase classname="tests.test_drafts" name="test_reopen" file="tests/test_drafts.py" time="1.25"/>
+<testcase classname="tests.test_drafts" name="test_save" time="nope"/>
+<testcase name="test_titles" file="tests/test_titles.py" time="0.5"/>
+<testsuite name="nested"><testcase classname="tests.test_sync" name="test_sync" time="0.1">
+<skipped message="not on this platform"/></testcase></testsuite>
+</testsuite></testsuites>
+"""
+
+
+def test_junit_times_reads_every_testcase() -> None:
+    """130 R4: every `<testcase>` at any depth, under `<testsuites>` or a bare `<testsuite>`; an
+    id from `classname`, else `file`; a missing or bad `time` is None, never 0."""
+    out = indicators.junit_times(SUITES)
+    assert out["error"] is None
+    assert out["cases"] == [
+        {"test": "tests.test_drafts::test_reopen", "file": "tests/test_drafts.py",
+         "seconds": 1.25, "skipped": False},
+        {"test": "tests.test_drafts::test_save", "file": None, "seconds": None, "skipped": False},
+        {"test": "tests/test_titles.py::test_titles", "file": "tests/test_titles.py",
+         "seconds": 0.5, "skipped": False},
+        {"test": "tests.test_sync::test_sync", "file": None, "seconds": 0.1, "skipped": True},
+    ]  # fmt: skip
+    bare = (
+        '<testsuite><testcase classname="a" name="b"/>'
+        '<testcase classname="a" name="c" time="0"/></testsuite>'
+    )
+    cases = indicators.junit_times(bare)["cases"]
+    assert [(c["test"], c["seconds"]) for c in cases] == [("a::b", None), ("a::c", None)]
+
+
+@pytest.mark.parametrize("text", ["", "not xml", "<testsuite>", "<testsuites/>", "<a><b/></a>"])
+def test_junit_that_does_not_parse_is_an_error_not_a_raise(text: str) -> None:
+    out = indicators.junit_times(text)
+    assert out["cases"] == [] and out["error"], out
+
+
+def _change(*paths: str) -> list:
+    return [(p, 1, 0) for p in paths]
+
+
+TESTED = {"tests/test_drafts.py", "src/drafts.py", "src/store.py", "src/sync.py"}
+
+
+def test_a_test_whose_code_moved_without_it_is_drifted() -> None:
+    """130 R7: the code beside a test's last touch changed in three later changes without it."""
+    lookback = [
+        ("001-reopen-drafts", _change("tests/test_drafts.py", "src/drafts.py", "src/store.py")),
+        ("002-a", _change("src/drafts.py")),
+        ("003-b", _change("src/store.py", "src/sync.py")),
+        ("004-c", _change("src/drafts.py", "src/store.py")),
+    ]
+    rows = indicators.drifted_tests(lookback, indicators.classify, _none, TESTED)
+    assert rows == [
+        {"file": "tests/test_drafts.py", "last_change": "001-reopen-drafts",
+         "code": ["src/drafts.py", "src/store.py"], "later": 3},
+    ]  # fmt: skip
+    assert indicators.drifted_tests(lookback[:3], indicators.classify, _none, TESTED) == []
+
+
+def test_a_test_moved_with_its_code_is_not_drifted() -> None:
+    lookback = [
+        ("001-a", _change("tests/test_drafts.py", "src/drafts.py")),
+        ("002-b", _change("src/drafts.py")),
+        ("003-c", _change("src/drafts.py")),
+        ("004-d", _change("src/drafts.py", "tests/test_drafts.py")),
+        ("005-e", _change("src/drafts.py")),
+    ]
+    assert indicators.drifted_tests(lookback, indicators.classify, _none, TESTED) == []
+
+
+def test_a_deleted_test_is_never_drifted() -> None:
+    lookback = [("001-a", _change("tests/test_gone.py", "src/drafts.py"))]
+    lookback += [(f"00{n}-x", _change("src/drafts.py")) for n in range(2, 6)]
+    assert indicators.drifted_tests(lookback, indicators.classify, _none, TESTED) == []
+    rows = indicators.drifted_tests(
+        lookback, indicators.classify, _none, TESTED | {"tests/test_gone.py"}
+    )
+    assert [r["file"] for r in rows] == ["tests/test_gone.py"]
+
+
+def test_a_change_too_large_to_pair_drifts_nothing() -> None:
+    huge = [f"src/m{n}.py" for n in range(indicators.PAIR_FILES_MAX)]
+    lookback = [("001-reformat", _change("tests/test_drafts.py", *huge))]
+    lookback += [(f"00{n}-x", _change(*huge)) for n in range(2, 6)]
+    present = TESTED | set(huge)
+    assert indicators.drifted_tests(lookback, indicators.classify, _none, present) == []
+
+
+def test_drift_skips_what_skip_says_and_reads_only_tests() -> None:
+    lookback = [("001-a", _change("tests/test_drafts.py", "README.md", ".sdlc/x.py"))]
+    lookback += [(f"00{n}-x", _change("README.md", ".sdlc/x.py")) for n in range(2, 6)]
+    skip = lambda p: p.startswith(".sdlc/")  # noqa: E731
+    present = TESTED | {"README.md", ".sdlc/x.py"}
+    assert indicators.drifted_tests(lookback, indicators.classify, skip, present) == []

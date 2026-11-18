@@ -104,6 +104,15 @@ What `retro` gives:
   and how many `times`; `tools` lists the names `most_called` and with `most_errors`, each with
   its `error_share` and `changes`. `recorded` changes carry tool calls and words; `unrecorded`
   ones (`why` says why) are in no call or word figure, never zero.
+- `tests`: what the pruning pass reads. `times` comes from the host's `retro.test_times`
+  commands, each printing a JUnit XML report: its `state` is `unset` (no command), `failed`
+  (no command gave a test case; each row in `commands` says why) or `ok`, with the counts
+  (`tests`, `skipped`, `untimed`), the total `seconds`, the `median`, the ten `slowest` (each with
+  its `share` of the total) and `slow`, those at least ten times the median and a second.
+  `drifted` names each test whose code moved without it over the same 30 changes as
+  `architecture`: the change that last touched it (`last_change`), the `code` files beside it
+  there that changed since, and in how many `later` changes; null with no base branch. `due` is
+  true when any test is `slow` or `drifted`.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
   `done`, `dropped` or `revised`, with `serves`: the outcomes a goal's line ends with, `(O1, O3)`,
   or the goals and outcomes a milestone's `Serves:` line names), its format `problems`, the `next_ids` to give new ones, and
@@ -225,6 +234,15 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay
    that theme down in a single change, never a seed per nit. The `[nit]` entries themselves are
    ship's to edit, never this skill's.
+
+   Then the test suite. When `tests.due`, a pruning pass is one finding, and its disposition is
+   one seed, never a seed per test, naming each candidate and why it is one: a `slow` test with
+   its seconds, its share and its multiple of the median; a `drifted` test with its last change,
+   the code that moved since and `later`. The seed proposes looking again at each one (merge,
+   rewrite, move or delete it) in a later change, whose review decides. This skill reads no test
+   file for it: `tests` is the evidence. With `times.state` `failed`, say which command failed
+   and why. A test `unmeasured` names (one a newer one repeats, one that passes for the wrong
+   reason) is never guessed at.
 
    Then `bugs`: what got through. Weigh each escape against the introducing change's tier: a
    Tier 1 that let a high-severity bug through says the tier rule let something risky skip its
@@ -382,7 +400,9 @@ next retrospective's boundary.
 Give the commit, the direction doc's path, the report's path, the status changes, the seeds added, the priority and
 theme lines set, and the proposed intent titles with `run /sdlc:intent to open it`. Name each
 retire candidate with `/sdlc:idea <id>`, for the person to retire, or not, one at a time. With no product doc, end with: `No product doc,
-so no product pass: run /sdlc:setup product to add one.` Then stop.
+so no product pass: run /sdlc:setup product to add one.` When `tests.times.state` isn't `ok`, end
+with: `No test times, so the pruning pass rests on history alone: set retro.test_times to run it
+on run times too.` Then stop.
 
 ## Out of scope
 
@@ -392,4 +412,5 @@ so no product pass: run /sdlc:setup product to add one.` Then stop.
 - Quoting evidence output into the direction doc, the product doc or `.sdlc/work/inbox.md`: findings
   are written in this skill's own words, and a line of evidence goes in only when the human
   approves that line at the WAIT. Evidence can hold what a host's users did.
+- Editing or deleting a test: the pruning pass is a seed, and pruning is a later change.
 - Opening intents, cutting releases, pushing anything.

@@ -1354,6 +1354,26 @@ def test_the_retro_skill_names_the_coverage_fields() -> None:
         assert word in step0, word
 
 
+def test_the_retro_proposes_pruning_as_one_seed_and_edits_no_test() -> None:
+    """130 R11: the pruning pass is one finding whose disposition is one seed naming every
+    candidate and why, read from `tests` alone; the retrospective never edits or deletes a test."""
+    text = BY_ID["sdlc:retro"].read_text(encoding="utf-8")
+    step0 = " ".join(text.split("## Step 0")[1].split("## Step 1")[0].split())
+    for word in ("`tests`", "`times`", "`drifted`", "`due`", "`slow`", "`retro.test_times`"):
+        assert word in step0, word
+    passes = " ".join(text.split("## Step 2")[1].split("## Step 3")[0].split())
+    for phrase in ("pruning pass", "`tests.due`", "one seed", "never a seed per test",
+                   "multiple of the median", "`later`", "reads no test file"):  # fmt: skip
+        assert phrase in passes, phrase
+    step7 = " ".join(text.split("## Step 7")[1].split("## Out of scope")[0].split())
+    assert (
+        "No test times, so the pruning pass rests on history alone: set retro.test_times to run "
+        "it on run times too." in step7
+    )
+    out = " ".join(text.split("## Out of scope")[1].split())
+    assert "editing or deleting a test" in out.lower()
+
+
 def test_intent_proposes_what_a_change_serves_and_its_gate_names_it() -> None:
     """Asking which outcomes a change serves was most of intent's stops beyond its gate, though the
     seed usually said: intent proposes the line in its draft, and the retrospective still counts

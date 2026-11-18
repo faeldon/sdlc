@@ -235,7 +235,7 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     assert set(out) >= {
         "since", "changes", "dropped", "dropped_at_counts", "problems", "rework",
         "rework_questions", "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
-        "architecture",
+        "architecture", "tests",
     }  # fmt: skip
     assert _state(root) == before
 
@@ -1607,6 +1607,207 @@ def test_nothing_but_retro_runs_evidence(tmp_path: Path, capsys, monkeypatch) ->
     capsys.readouterr()
     _retro(root)
     assert (root / "ran-evidence").exists()
+
+
+# ---------------------------------------------------------------- test times (130)
+
+
+def _junit(path: Path, seconds: list[float | None], skipped: int = 0) -> Path:
+    """A JUnit XML report with a case per entry of `seconds` (None: no `time`), and `skipped`
+    skipped ones, neutral ids."""
+    rows = [
+        f'<testcase classname="tests.test_drafts" name="test_{n}" file="tests/test_drafts.py"'
+        + ("" if s is None else f' time="{s}"')
+        + "/>"
+        for n, s in enumerate(seconds)
+    ]
+    rows += [
+        f'<testcase classname="tests.test_sync" name="test_skip_{n}" time="0.2">'
+        "<skipped/></testcase>"
+        for n in range(skipped)
+    ]
+    path.write_text(
+        '<?xml version="1.0"?>\n<testsuites><testsuite name="t">\n'
+        + "\n".join(rows)
+        + "\n</testsuite></testsuites>\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_test_times_get_their_own_limits(tmp_path: Path, monkeypatch) -> None:
+    """R3: a suite's report runs to megabytes and minutes; the evidence limits never cut it."""
+    monkeypatch.setattr(sdlc.retro, "EVIDENCE_LIMIT", 10)
+    monkeypatch.setattr(sdlc.retro, "EVIDENCE_TIMEOUT", 0.2)
+    monkeypatch.setattr(sdlc.retro, "TIMES_LIMIT", 100_000)
+    monkeypatch.setattr(sdlc.retro, "TIMES_TIMEOUT", 10)
+    _junit(tmp_path / "junit.xml", [0.5, 0.25])
+    times = sdlc.retro._times(tmp_path, ["sleep 0.5; cat junit.xml"])
+    (row,) = times["commands"]
+    assert (row["error"], row["truncated"], row["cases"]) == (None, False, 2), row
+    assert times["state"] == "ok"
+    (row,) = sdlc.retro._evidence(tmp_path, ["sleep 0.5; cat junit.xml"])
+    assert "timed out after 0.2s" in row["error"], "evidence keeps its own limits"
+
+
+def test_times_unset_failed_and_ok(tmp_path: Path) -> None:
+    """R5: no commands is `unset`; no command giving a case is `failed`, each row saying why; one
+    that gives cases is `ok`, a failing one beside it still listed."""
+    assert sdlc.retro._times(tmp_path, []) == {"state": "unset", "commands": []}
+    (tmp_path / "bad.xml").write_text("not xml", encoding="utf-8")
+    _junit(tmp_path / "junit.xml", [2.0, 1.0, None], skipped=2)
+    failed = sdlc.retro._times(tmp_path, ["exit 4", "cat bad.xml"])
+    assert failed["state"] == "failed"
+    assert [r["error"].split(":")[0] for r in failed["commands"]] == ["exited 4", "not JUnit XML"]
+    ok = sdlc.retro._times(tmp_path, ["exit 4", "cat junit.xml"])
+    assert ok["state"] == "ok"
+    assert [r["cases"] for r in ok["commands"]] == [None, 5]
+    assert (ok["tests"], ok["skipped"], ok["untimed"]) == (5, 2, 1)
+    assert (ok["seconds"], ok["median"]) == (3.0, 1.5)
+    assert ok["slowest"][0] == {
+        "test": "tests.test_drafts::test_0", "file": "tests/test_drafts.py", "seconds": 2.0,
+        "share": 0.667,
+    }  # fmt: skip
+    assert [r["test"] for r in ok["slowest"]] == ["tests.test_drafts::test_0",
+                                                  "tests.test_drafts::test_1"]  # fmt: skip
+
+
+def test_a_truncated_report_is_a_failure_not_a_partial_read(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(sdlc.retro, "TIMES_LIMIT", 200)
+    _junit(tmp_path / "junit.xml", [1.0] * 20)
+    times = sdlc.retro._times(tmp_path, ["cat junit.xml"])
+    (row,) = times["commands"]
+    assert times["state"] == "failed" and row["truncated"] is True and row["cases"] is None
+    assert "truncated" in row["error"]
+
+
+@pytest.mark.parametrize(
+    ("slowest", "named"),
+    [(4.0, True), (3.9, False), (0.9, False)],
+)
+def test_slow_needs_ten_times_the_median_and_a_second(tmp_path, slowest, named) -> None:
+    """R5: `slow` is a slowest row at least `SLOW_OVER` times the median and `SLOW_LEAST` seconds;
+    twenty cases at 0.4 s and 0.09 s set the median."""
+    rest = [0.4] * 20 if slowest > 1 else [0.09] * 20
+    _junit(tmp_path / "junit.xml", [slowest, *rest])
+    times = sdlc.retro._times(tmp_path, ["cat junit.xml"])
+    assert [r["seconds"] for r in times["slow"]] == ([slowest] if named else [])
+    assert times["slowest"][0]["seconds"] == slowest
+
+
+def test_the_tests_block_stays_small_however_large_the_suite(tmp_path: Path) -> None:
+    """R6: 5,000 cases, and the block holds aggregates, at most `TOP` rows and no raw output."""
+    root = _repo(tmp_path)
+    _junit(root / "junit.xml", [round(0.001 * n, 3) for n in range(1, 5001)])
+    _config(root, '[retro]\ntest_times = ["cat junit.xml"]\n')
+    out = _retro(root)
+    assert out["tests"]["times"]["tests"] == 5000
+    assert "output" not in out["tests"]["times"]["commands"][0]
+    assert len(json.dumps(out["tests"])) < 8000
+
+
+def _drifting(root: Path, test: str = "tests/test_drafts.py") -> None:
+    """A test closed beside its code, then three changes that move the code without it."""
+    _close(root, "001-reopen-drafts", files=(test, "src/drafts.py"))
+    for n, slug in enumerate(("draft-titles", "draft-sync", "keep-one-draft"), 2):
+        _close(root, f"00{n}-{slug}", files=("src/drafts.py",))
+
+
+def test_drift_follows_the_hosts_test_paths(tmp_path: Path) -> None:
+    """R8: kinds are told the host's way, from the lookback the architecture pass reads."""
+    root = _repo(tmp_path)
+    _drifting(root, "checks/drafts.sh")
+    assert _retro(root)["tests"]["drifted"] == []
+    _config(root, '[retro]\ntest_paths = ["checks/"]\n')
+    assert _retro(root)["tests"]["drifted"] == [
+        {"file": "checks/drafts.sh", "last_change": "001-reopen-drafts",
+         "code": ["src/drafts.py"], "later": 3},
+    ]  # fmt: skip
+
+
+def test_no_base_branch_means_no_drift(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _drifting(root)
+    cfg = sdlc.load_config(root)[0]
+    cfg["git"]["base"] = None
+    assert sdlc.retro._tests(root, cfg, None)["drifted"] is None
+
+
+def test_due_is_slow_or_drifted(tmp_path: Path) -> None:
+    """R9: a pruning pass is due exactly when a test is slow or drifted."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("tests/test_drafts.py", "src/drafts.py"))
+    assert _retro(root)["tests"]["due"] is False
+    _junit(root / "junit.xml", [5.0, *[0.1] * 20])
+    _config(root, '[retro]\ntest_times = ["cat junit.xml"]\n')
+    tests = _retro(root)["tests"]
+    assert (tests["due"], tests["drifted"], len(tests["times"]["slow"])) == (True, [], 1)
+    _config(root, "")
+    for n, slug in enumerate(("draft-titles", "draft-sync", "keep-one-draft"), 2):
+        _close(root, f"00{n}-{slug}", files=("src/drafts.py",))
+    tests = _retro(root)["tests"]
+    assert (tests["due"], tests["times"]["state"], len(tests["drifted"])) == (True, "unset", 1)
+
+
+def test_the_unmeasured_test_signals_are_listed(tmp_path: Path) -> None:
+    signals = [u["signal"] for u in _retro(_repo(tmp_path))["unmeasured"]]
+    assert "a test a newer one repeats" in signals
+    assert "a test that passes for the wrong reason" in signals
+
+
+def test_retro_with_test_times_writes_nothing(tmp_path: Path, capsys) -> None:
+    """R10: the retrospective runs the host's report and leaves the tree as it found it."""
+    root = _repo(tmp_path)
+    _junit(root / "junit.xml", [5.0, *[0.1] * 20])
+    _config(root, '[retro]\ntest_times = ["cat junit.xml"]\n')
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a report")
+    _drifting(root)
+    before = _state(root)
+    assert sdlc.retro.cmd_retro(root) == 0
+    tests = json.loads(capsys.readouterr().out)["tests"]
+    assert tests["due"] and tests["times"]["state"] == "ok" and tests["drifted"]
+    assert _state(root) == before
+
+
+def test_retro_commit_refuses_a_changed_test_file(tmp_path: Path, capsys) -> None:
+    """R10: a test edited beside the direction doc is a stray path, refused before anything."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", files=("tests/test_drafts.py", "src/drafts.py"))
+    _direction(root)
+    (root / "tests" / "test_drafts.py").write_text("pruned\n", encoding="utf-8")
+    before = _state(root)
+    assert sdlc.retro.cmd_retro_commit(root, date(2026, 10, 24)) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    assert any("also changed: tests/test_drafts.py" in r for r in refusals), refusals
+    assert _state(root) == before
+
+
+def test_reference_names_test_times_and_its_format() -> None:
+    """R12: the sample, the commands `sdlc.py` runs, and *Retrospectives*' contract."""
+    text = (ROOT / "docs" / "REFERENCE.md").read_text(encoding="utf-8")
+    sample = text.split("[retro]\n")[1].split("\n[")[0]
+    assert "test_times = [" in sample
+    runs = " ".join(text.split("The commands `sdlc.py` runs itself")[1].split(")")[0].split())
+    assert "`retro.test_times`" in runs
+    retros = " ".join(text.split("## Retrospectives")[1].split("\n## ")[0].split())
+    for needed in ("`retro.test_times`", "JUnit XML", "`<testcase>`", "600", "5,000,000",
+                   "`tests`", "`drifted`", "`slow`", "`due`", "pruning pass"):  # fmt: skip
+        assert needed in retros, needed
+
+
+def test_nothing_but_retro_runs_test_times(tmp_path: Path, capsys, monkeypatch) -> None:
+    """R2: `check`, `status`, `config`, `readiness` and `retro --report` never run it."""
+    root = _repo(tmp_path)
+    _config(root, '[retro]\ntest_times = ["touch ran-times"]\n')
+    monkeypatch.chdir(root)
+    for argv in (["check"], ["status"], ["config"], ["readiness"], ["retro", "--report"]):
+        monkeypatch.setattr("sys.argv", ["sdlc.py", *argv])
+        sdlc.main()
+        assert not (root / "ran-times").exists(), f"{argv} ran test_times"
+    capsys.readouterr()
+    _retro(root)
+    assert (root / "ran-times").exists()
 
 
 # ---------------------------------------------------------------- architecture

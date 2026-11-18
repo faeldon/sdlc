@@ -18,6 +18,8 @@ runs git and hands the text here.
     blame_commits(text)                       -> [sha]                      `git blame --porcelain`
     comment_lines(text, include)              -> {added, comment_lines, unknown_lines}  `-U0`
     spend(rows)                               -> {tiers, outliers, tools, recorded, unrecorded}
+    junit_times(text)                         -> {cases, error}             a JUnit XML report
+    drifted_tests(lookback, kind, skip, present) -> [row]
 
 A kind is told by path alone, so no language is assumed: a host whose layout the conventions
 misread names its own (`retro.test_paths`, `retro.doc_paths`).
@@ -32,6 +34,8 @@ never guessed at.
 from __future__ import annotations
 
 import itertools
+import math
+import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Callable
 from fnmatch import fnmatchcase
@@ -51,6 +55,10 @@ PAIR_LEAST = 3
 # A change touching more files than this (a mass rename, a reformat) is left out of the pairs: it
 # would couple everything to everything, and its pairs grow with the square of its size.
 PAIR_FILES_MAX = 50
+# How many later changes must touch a test's code, without the test, before the test is drifted.
+DRIFT_LEAST = 3
+# How many of a drifted test's code files its row names.
+DRIFT_CODE_MAX = 5
 
 Row = tuple[str, int | None, int | None]
 
@@ -393,3 +401,72 @@ def spend(rows: list[dict]) -> dict:
             )[:TOP],
         },
     }
+
+
+def _seconds(value: str | None) -> float | None:
+    """A `time` attribute as seconds: None when missing, not a number, or not above 0, since a
+    runner that didn't time a case may write 0."""
+    try:
+        seconds = float(value) if value is not None else None
+    except ValueError:
+        return None
+    return seconds if seconds is not None and math.isfinite(seconds) and seconds > 0 else None
+
+
+def junit_times(text: str) -> dict:
+    """Every `<testcase>` of a JUnit XML report, at any depth, with its id (`classname::name`, or
+    `file::name` without a classname), `file`, `seconds` and whether it was `skipped`. Text that
+    isn't XML, or holds no test case, is an `error`, never a raise."""
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as e:
+        return {"cases": [], "error": f"not JUnit XML: {e}"}
+    cases = []
+    for case in root.iter("testcase"):
+        name = case.get("name") or ""
+        owner = case.get("classname") or case.get("file")
+        cases.append(
+            {
+                "test": f"{owner}::{name}" if owner else name,
+                "file": case.get("file"),
+                "seconds": _seconds(case.get("time")),
+                "skipped": case.find("skipped") is not None,
+            }
+        )
+    if not cases:
+        return {"cases": [], "error": "no <testcase> in the report"}
+    return {"cases": cases, "error": None}
+
+
+def drifted_tests(
+    lookback: list[tuple[str, list[Row]]],
+    kind: Callable[[str], str],
+    skip: Callable[[str], bool],
+    present: set[str] | None,
+    top: int = TOP,
+) -> list[dict]:
+    """The tests whose code moved without them. `lookback` is `[(change, rows)]`, oldest first; a
+    change of more than `PAIR_FILES_MAX` files is left out, as in `co_change()`. For each test
+    file still in `present` (every path when None), its code is the code files its last change
+    touched, and `later` the changes after that touching any of them: drifted at `DRIFT_LEAST`,
+    with the code touched since (at most `DRIFT_CODE_MAX`), the most `later` first."""
+    changes = []
+    for name, rows in lookback:
+        files = _files(rows, skip)
+        if len(files) <= PAIR_FILES_MAX:
+            changes.append((name, files))
+    last: dict[str, int] = {}
+    for i, (_, files) in enumerate(changes):
+        for path in files:
+            if kind(path) == "tests" and (present is None or path in present):
+                last[path] = i
+    rows = []
+    for test, i in last.items():
+        code = {p for p in changes[i][1] if kind(p) == "code"}
+        since = [files & code for _, files in changes[i + 1 :]]
+        later = sum(1 for moved in since if moved)
+        if later >= DRIFT_LEAST:
+            moved = sorted(set().union(*since))[:DRIFT_CODE_MAX]
+            rows.append({"file": test, "last_change": changes[i][0], "code": moved, "later": later})
+    rows.sort(key=lambda r: (-r["later"], r["file"]))
+    return rows[:top]

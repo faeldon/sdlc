@@ -68,6 +68,7 @@ due_after_days = 14                         # the default: days since the oldest
 after_releases = 2                          # the default: releases before status says Retro due; 0 = only a major one
 evidence = ["./scripts/usage-summary.sh"]   # optional: what users did, printed for the product pass; only with a product doc
 indicators = ["./scripts/complexity.sh"]    # optional: measures only a language can tell, printed for the architecture pass
+test_times = ["cat build/junit.xml"]        # optional: each prints a JUnit XML report on stdout, read for the pruning pass
 test_paths = ["checks/"]                    # optional: the paths that are tests, replacing the conventions; `dir/` prefixes or globs
 doc_paths = ["handbook/"]                   # optional: the paths that are docs, replacing the conventions
 
@@ -99,7 +100,7 @@ The placeholders:
   a command the human types, is dropped when close runs it, since `sh` would read it as "not".
 
 The commands `sdlc.py` runs itself (`release.after_bump`, `release.prepare`, `release.publish`,
-`retro.evidence`, `retro.indicators`, a project field's `command` lookup, `archive.command`,
+`retro.evidence`, `retro.indicators`, `retro.test_times`, a project field's `command` lookup, `archive.command`,
 `commands.close_cleanup` under `close_cleanup_runs`, and each acceptance check) run as `sh -c "<command>"` from the repo root on every platform: `/bin/sh` on macOS and
 Linux, and on Windows the `sh` on `PATH`, Git for Windows', never `cmd.exe`. So one config means
 the same thing in every session, and the same as the skills' own commands, which Claude Code runs
@@ -898,6 +899,27 @@ kind's files and lines, each now and at the last retrospective, with the growth 
 times the gate: a host that wants it, or complexity or dependency cycles, names a command in
 `retro.indicators`, run as `retro.evidence` is (with or without a product doc) and passed through
 as `host`.
+
+Its `tests` is what the pruning pass reads. `times` comes from `retro.test_times`: commands each
+printing a JUnit XML report of the suite on stdout, the format nearly every runner can write
+(pytest's `--junitxml`, jest-junit, go-junit-report, Surefire, Gradle, cargo-nextest), so the
+plugin never learns which runner a host uses. A command may run the suite, `cat` a report the
+gate left, or fetch CI's. Each runs as `retro.evidence` does, but stopped after 600 seconds rather
+than 60 and kept up to 5,000,000 characters rather than 20,000; a report cut at that limit is a
+failure, never read in part. Every `<testcase>` is read at any depth, its id `classname::name` (or
+`file::name`), its `time` in seconds (a missing, unreadable or zero `time` is `untimed`), and a
+`<skipped>` child counted apart and never timed. The cases of every command are pooled. `state` is
+`unset` with no command, `failed` when no command gave a test case (each row in `commands` says
+why: its exit, a timeout, a cut report, or XML that doesn't parse), and `ok` otherwise, with the
+counts, the total `seconds`, the `median`, the ten `slowest` with each one's share of the total,
+and `slow`: those at least ten times the median and at least a second. No command's output is
+kept. `drifted` reads the same 30 changes as `architecture`: a test file still on the base branch
+whose last change also touched code files that three or more later changes moved without it,
+with that change, the code and how many `later` (null with no base branch). `due` is true when
+any test is `slow` or `drifted`, and `/sdlc:retro` then proposes a pruning pass: one seed naming
+every candidate and why. The retrospective never edits or deletes a test; pruning is a later
+change, reviewed at ship. A test a newer one repeats, or one that passes for the wrong reason, is
+in `unmeasured`: it needs per-test coverage or mutation results no host records here.
 
 Its `spend` sets what each closed change in the window spent beside its size. Each change's row
 (printed only with `--metrics`) holds its tier, its added code lines, how many of them are line
