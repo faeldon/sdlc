@@ -2,7 +2,7 @@
 
 `preflight`'s `branches` names this file when its `passes` part says `ui` applies. That is when the
 base branch's `.sdlc/factory.toml` has a complete `[ui]`, the diff touches its `paths`, and the
-change isn't a factory run, whose own UI and UX reviewers ran.
+change isn't a factory run, whose own reviewers ran.
 
 ## Step 3
 
@@ -28,5 +28,7 @@ says `UI review: ran` and `UX review: ran`. A reviewer that can't run gets `skip
 line instead.
 
 **With no shots,** neither reviewer runs. The note says `UI review: skipped, <why>` and `UX review:
-skipped, <why>`, with `passes.ui.why` as the why, and Step 4 says so too. A skip is no stop: the
-question names it, and `sdlc.py ship` stamps the change. It refuses only a note that says neither.
+skipped, <why>`, with `passes.ui.why` as the why, and Step 4 says so too. With `sdlc-factory`
+enabled, the why names the command that takes them, `factory.py shots NNN --round 1 --role ui`:
+the person runs it and reruns ship, and ship never runs it. A skip is no stop: the question names
+it, and `sdlc.py ship` stamps the change. It refuses only a note that says neither.

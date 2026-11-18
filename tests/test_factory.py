@@ -1674,7 +1674,8 @@ def test_a_change_kept_twice_escalates_before_the_rounds_run_out(tmp_path, capsy
     # A round before with no `verified.md` kept nothing, so the same change is kept once.
     root = _change(tmp_path / "unverified")
     (_kept_again(root) / "reviews" / "round-1" / "verified.md").unlink()
-    assert _verdicts(root, capsys)["stuck"] == []
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["stuck"]) == ("rework", []), out
 
 
 def test_an_untestable_requirement_escalates_after_its_round(tmp_path, capsys) -> None:
@@ -3600,7 +3601,8 @@ def test_a_reply_citing_its_own_change_by_number_is_filed_by_its_full_name(
 ) -> None:
     """Bug 2026-11-18-42: an agent that cites its own change's folder by bare number or glob
     has it filed as the full folder name, which the gate's scan accepts; another change's number,
-    a longer number and a path already named in full are left as the agent wrote them."""
+    a longer number, a path already named in full and a `*` followed by more of a name (nit
+    2026-11-18-62) are left as the agent wrote them, but for the scan's placeholder."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     # Built from parts: written whole, each citation is the shape the scan refuses in this file.
@@ -3611,6 +3613,7 @@ def test_a_reply_citing_its_own_change_by_number_is_filed_by_its_full_name(
         f"$ cat .sdlc/{w}{n}/intent.md\nid: 008\nexit: 0\n"
         f"Seen in {w}{n}, and in {w}{n}* too.\n"
         f"Already whole: {w}{NAME}/plan.md, {w}{n}9, {w}009 and {w}{n}-*.\n"
+        f"Not a glob: {w}{n}*x.\n"
     )
     monkeypatch.setenv("FAKE_CLAUDE_REPLY", reply)
     code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
@@ -3620,6 +3623,7 @@ def test_a_reply_citing_its_own_change_by_number_is_filed_by_its_full_name(
     assert f"$ cat .sdlc/{w}{NAME}/intent.md\n" in filed
     assert f"Seen in {w}{NAME}, and in {w}{NAME} too.\n" in filed
     assert f"Already whole: {w}{NAME}/plan.md, {w}<{n}9>, {w}<009> and {w}{n}-*.\n" in filed
+    assert f"Not a glob: {w}<{n}>*x.\n" in filed, "never backtracked off its `*`"
     assert "Built it.\n\n## Evidence\n" in filed and "round-1.md\nexit: 0\n" in filed
     assert _forbidden_shapes().search(filed) is None, filed
     assert (folder / "build" / "round-1.md").is_file()
@@ -3661,6 +3665,32 @@ def test_a_record_quoting_the_tests_fixtures_is_filed_in_a_form_the_scan_accepts
     _gate(root, capsys)
     record = factory.gate_path(root / ".sdlc" / "work" / NAME, 1).read_text(encoding="utf-8")
     assert f"{w}<046>*" in record and _forbidden_shapes().search(record) is None, record
+
+
+def test_a_reply_quoting_a_local_term_is_filed_as_a_placeholder(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """Nit 2026-11-18-72: the scan also refuses each regex in the main checkout's gitignored
+    `.sdlc/terms.local`, so a reply quoting one is filed with it as `<term>`, from the change's
+    own worktree, where the file has no copy. A line written by hand is named by `defuse` and
+    the approver by its path and line, never the term, and `defuse` rewrites it."""
+    root, tree = _from_main(tmp_path)
+    folder = tree / ".sdlc" / "work" / NAME
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "terms.local").write_text("# kept out\n\n\\bstale widgets\\b\n")
+    reply = "Built it for Stale Widgets.\n\n## Evidence\n\n$ grep x\nstale widgets\nexit: 0\n"
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", reply)
+    code, out = _run(capsys, factory.cmd_agent, tree, "008", "build", None, None)
+    assert code == 0, out
+    filed = (tree / out["to"]).read_text(encoding="utf-8")
+    assert "Built it for <term>.\n" in filed and "\n<term>\nexit: 0\n" in filed, filed
+    assert "widgets" not in filed.lower()
+    (folder / "notes.md").write_text("Seen in stale widgets first.\n", encoding="utf-8")
+    assert factory.forbidden_lines(folder, tree) == ["notes.md:1"]
+    code, out = _run(capsys, factory.cmd_defuse, tree, "008")
+    assert code == 0 and out["changed"] == ["notes.md"] and out["left"] == [], out
+    assert (folder / "notes.md").read_text(encoding="utf-8") == "Seen in <term> first.\n"
+    assert "widgets" not in json.dumps(out)
 
 
 def test_an_approver_s_decision_stops_on_a_folder_the_scan_would_refuse(
@@ -4952,8 +4982,8 @@ def test_a_port_a_wildcard_listener_holds_is_lost() -> None:
 
 
 def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -> None:
-    """111 C1: a serve that exits before answering on a port that still binds failed on its own,
-    not to another process: one start, no retry, and its exit is the problem."""
+    """A serve that exits before answering, on a port that still binds, failed on its own, not
+    because another process took the port: one start, no retry, and its exit is the problem."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     starts = tmp_path / "starts"

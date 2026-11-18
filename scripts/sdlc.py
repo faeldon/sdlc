@@ -2957,9 +2957,9 @@ def _hand_placeholders(text: str, root: Path) -> str:
     resolved (macOS prints `/private/var` for `/var`), and in its POSIX form too, only as a whole
     path: never inside a longer one. Then the login name, where no letter or digit borders it
     inside a path a mark begins, is `USER_MARK`, and never in prose. Last, each shape the repo's
-    scan refuses is its placeholder (`HAND_DEFUSE`). A copy of `factory.py`'s
-    `_placeholders()`, pinned to it by a test: the record is committed with the change, and a
-    machine's layout never reaches its history."""
+    scan refuses is its placeholder (`HAND_DEFUSE`), and each local term `TERM_MARK`. A copy of
+    `factory.py`'s `_placeholders()`, pinned to it by a test: the record is committed with the
+    change, and a machine's layout never reaches its history."""
     listed = _git(root, "worktree", "list", "--porcelain") or ""
     checkouts = [Path(line[len("worktree ") :]) for line in listed.splitlines()
                  if line.startswith("worktree ")]  # fmt: skip
@@ -2978,7 +2978,28 @@ def _hand_placeholders(text: str, root: Path) -> str:
         text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
     for shape, mark in HAND_DEFUSE:
         text = re.sub(shape, mark, text, flags=re.IGNORECASE)
+    for term in _hand_terms(checkouts[0] if checkouts else root):
+        text = re.sub(term, TERM_MARK, text, flags=re.IGNORECASE)
     return text
+
+
+def _hand_terms(home: Path) -> list[str]:
+    """The regexes in the main checkout's `HAND_TERMS_FILE`, one a line, blank lines and `#`
+    comments skipped, and a line that isn't a regex left out. A copy of `factory.py`'s
+    `_terms()`, pinned to it by `tests/test_hand_gate.py`."""
+    path = home / HAND_TERMS_FILE
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    except (OSError, UnicodeDecodeError):
+        return []
+    terms = []
+    for line in (line.strip() for line in lines):
+        try:
+            if line and not line.startswith("#") and re.compile(line):
+                terms.append(line)
+        except re.error:
+            continue
+    return terms
 
 
 # The shapes the repo's own scan refuses, each with the placeholder a filed record writes
@@ -2989,6 +3010,10 @@ HAND_DEFUSE = (
     (r"/home/[\w.-]+/", "/home/<name>/"),
     (r"~/[\w-]+/", "~/<dir>/"),
 )
+# The scan's own terms, in the main checkout's gitignored file, and the mark a record writes
+# for one. Copies of `factory.py`'s `TERMS_FILE` and `TERM_MARK`, pinned by the same test.
+HAND_TERMS_FILE = Path(".sdlc", "terms.local")
+TERM_MARK = "<term>"
 
 
 # The factory's gate slots, which a hand gate shares while `sdlc-factory` is enabled, so the two
@@ -8267,7 +8292,8 @@ def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
     """Which of ship's passes apply to change `path`, each `{"applies", "why"}`, `ui` with the
     `shots` it can read (`_current_shots()`): `security` on a deep diff (`risk`), `behaviour` on a
     Tier 2 with a filled spec, `ui` when the base branch's `[ui]` is complete and the diff touches
-    its paths. `why` says why one doesn't apply, or why `ui` has no shots. Writes nothing."""
+    its paths. `why` says why one doesn't apply, or why `ui` has no shots, with none taken the
+    command that takes them when `sdlc-factory` is enabled. Writes nothing."""
     home = main_root(root)
     trunk = load_config(home)[0]["git"]["base"]
 
@@ -8300,8 +8326,12 @@ def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
         out["ui"] = no("the diff touches no [ui] path")
     else:
         shots, why = _current_shots(checkout_of(path), path.name, ui, changed)
+        # Only a pointer: ship never starts a server or takes a screenshot itself.
         if why == NO_SHOTS and not factory_enabled(home)[0]:
             why = f"{why}: sdlc-factory isn't enabled, so none can be taken"
+        elif why == NO_SHOTS:
+            ident = path.name.split("-", 1)[0]
+            why = f"{why}: take them with factory.py shots {ident} --round 1 --role ui"
         out["ui"] = {"applies": True, "why": why, "shots": shots}
     return out
 
@@ -10500,7 +10530,9 @@ def main() -> int:
         }  # fmt: skip
         rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
     for rec in a["ready"]:
-        # A shipped change whose landing stopped waits on the person, as on the board.
+        # A shipped change whose landing stopped waits on the person, as on the board. At
+        # `shipped`, `needs_of()` reads only `problems` and `land_stop`: a field it comes to read
+        # there must be added to this `reading` too.
         folder = work_dir(Path(rec["worktree"])) / rec["branch"]
         reading = {"stage": rec["kind"], "problems": [], "land_stop": factory_land_stop(folder)}
         rec["needs"] = needs_of(reading)

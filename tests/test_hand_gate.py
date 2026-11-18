@@ -255,7 +255,8 @@ def test_the_copies_are_the_factorys() -> None:
 
 def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
     """R5: the main checkout, then the change's checkout, then home, then the temp directory and
-    the login name inside a marked path, from inside a worktree."""
+    the login name inside a marked path, from inside a worktree; then the scan's shapes, and the
+    terms in the main checkout's `.sdlc/terms.local` (nit 2026-11-18-72)."""
     monkeypatch.setenv("HOME", str(repo.parent))
     temp = repo.parent / "T"
     temp.mkdir()
@@ -274,12 +275,17 @@ def test_the_placeholders_are_the_factorys(repo, monkeypatch) -> None:
         "someone/x, /home/"
         "someone/x and ~/"
         "code/x\n"
+        "built for Stale Widgets\n"
     )
+    (repo / ".sdlc").mkdir(exist_ok=True)
+    (repo / ".sdlc" / "terms.local").write_text("# kept out\n\\bstale widgets\\b\n")
     ours = sdlc._hand_placeholders(text, tree)
     assert ours == factory._placeholders(text, tree)
     assert str(repo) not in ours and f"{sdlc.HOME_MARK}/cache/venv" in ours
     assert "pytest-of-drafter" not in ours and "as drafter said" in ours
     assert "work/<046>*, /Users/<name>/x, /home/<name>/x and ~/<dir>/x" in ours
+    assert "built for <term>\n" in ours and sdlc.TERM_MARK == factory.TERM_MARK
+    assert sdlc.HAND_TERMS_FILE == factory.TERMS_FILE
     shapes = [shape for shape, _ in sdlc.HAND_DEFUSE]
     assert shapes == [shape for shape, _ in factory.DEFUSE]
 

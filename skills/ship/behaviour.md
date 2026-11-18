@@ -1,7 +1,7 @@
 # Ship — the behaviour check
 
 `preflight`'s `branches` names this file when its `passes` part says `behaviour` applies: a Tier 2
-change with a filled `spec.md`, not a factory run, whose own behaviour reviewer ran.
+change with a filled `spec.md`, not a factory run, whose own reviewers ran.
 
 ## Step 3
 

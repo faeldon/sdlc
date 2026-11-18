@@ -568,6 +568,16 @@ def test_preflight_passes_ui(change, capsys) -> None:
     assert out["passes"]["ui"]["applies"] is True and "ui.md" in out["branches"]
     assert out["passes"]["ui"]["shots"] == []
     assert out["passes"]["ui"]["why"].startswith("no screenshots of this change")
+    # With the factory enabled, the why points at the command that takes them (seed
+    # 2026-11-18-57); ship never runs it.
+    settings = root / ".claude" / "settings.local.json"
+    settings.parent.mkdir(exist_ok=True)
+    for on, why in ((False, "sdlc-factory isn't enabled, so none can be taken"),
+                    (True, "take them with factory.py shots 001 --round 1 --role ui")):  # fmt: skip
+        enabled = {"enabledPlugins": {"sdlc-factory@sdlc": on}}
+        settings.write_text(json.dumps(enabled), encoding="utf-8")
+        out = _passes_of(capsys, root)["passes"]["ui"]
+        assert out["why"] == f"no screenshots of this change: {why}", out
     (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
     assert _passes_of(capsys, root)["passes"]["ui"]["applies"] is False, "factory"
 

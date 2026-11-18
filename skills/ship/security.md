@@ -1,8 +1,7 @@
 # Ship — the security review
 
-`preflight`'s `branches` names this file when its `passes` part says `security` applies: the diff
-touches a path `config`'s `review.sensitive` names, and the change isn't a factory run, whose own
-security reviewer ran.
+`preflight`'s `branches` names this file when its `passes` part says `security` applies: a deep
+diff, and the change isn't a factory run, whose own reviewers ran.
 
 ## Step 3
 

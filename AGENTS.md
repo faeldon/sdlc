@@ -26,12 +26,13 @@ repo owner's, under git's configured user, and the only trailers it carries are 
 ## Commands
 
 ```bash
-./check.sh                                   # the full gate: ruff check, ruff format --check, pytest -n auto, claude plugin validate --strict
+./check.sh                                   # the full gate: ruff check, ruff format --check,
+                                             # pytest -n auto, claude plugin validate --strict
 uv run --group dev pytest -q -n auto         # tests only, across the machine's cores (pytest-xdist)
 uv run --group dev pytest -q -m portable     # what CI's Windows job runs
 uv run --group dev pytest tests/test_sdlc.py::test_name -q   # one test
 uv run --group dev ruff format .             # fix formatting
-claude --plugin-dir <path-to-clone>              # load the plugin in a session without the marketplace
+claude --plugin-dir <path-to-clone>          # load the plugin in a session without the marketplace
 ```
 
 The plugin is read in place only when its marketplace is registered from the clone's path
@@ -106,10 +107,11 @@ tracker*; what a host sees: REFERENCE.md, *Trackers* and *The project doc*.
 
 **Writes before a WAIT.** Four, each a named exception to confirm-before-writing: ship's `base`
 and `resolve`, which move only the change's own branch and print the undo; the factory's
-`fresh`, which is those two, run through `sdlc.py` by its build and spec skills before the spec-writer drafts, and leaves the
-worktree as it found it on a conflict; and ship's `findings.md`, which decides nothing. Never a stash (the stack is shared across worktrees), and
-never a merge of `main` into the branch, which close would put on `main`'s first-parent line,
-where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
+`fresh`, which is those two, run through `sdlc.py` by its build and spec skills before the
+spec-writer drafts, and leaves the worktree as it found it on a conflict; and ship's `findings.md`,
+which decides nothing. Never a stash (the stack is shared across worktrees), and never a merge of
+`main` into the branch, which close would put on `main`'s first-parent line, where
+`closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 
 **Closing: `cmd_close()`.** Every git step is one git refuses when something would be lost, and a
 rerun resumes where a failed step stopped. A refused push is `push_failed` and a failed cleanup
@@ -248,23 +250,22 @@ steps itself (`_run_loop()`, each a subprocess of the script, `RUN_STEPS` and no
 ejecting only a gate's fault and stopping at every other ejection, `accept` and a refused push,
 under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
 `TRAIN_RUN_ENV`) that a second `--run`, `--begin`, `--eject` and `--stop` refuse while held, and
-`--cancel` stops it between steps; `fresh` moves a change's branch onto the base before a build or a spec, through
-`sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run, only on the
-person's blocking answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`, once, its
-round counted as a restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots, locks in the git common
-dir, never `sdlc.lock`; its gate passes itself only when no change carries a risk signal, recorded as
-`Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.
-`verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder
-report and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its
-`exit:` but a read that shows its output, which only the script judges (`is_read()`); a reply
-missing it, holding verdict or decision lines that disagree, none of them first (`opening()`,
-`preamble()`, `decision_preamble()`), or a `verified.md` the script can't read, is the one stop a
-run mends, once a round for each role, a
-landing round counting as its own (`agent --task mend` or `--task land-mend`, recorded in
-`runs/mended`). No agent but the builder runs
-`checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever
-a run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`) is
-kept as `decision-<n>.md`, never written over, and its new run counts its rounds from the round
+`--cancel` stops it between steps; `fresh` moves a change's branch onto the base before a build or a
+spec, through `sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run,
+only on the person's blocking answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`,
+once, its round counted as a restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots,
+locks in the git common dir, never `sdlc.lock`; its gate passes itself only when no change carries a
+risk signal, recorded as `Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops),
+never as the person's. `verdicts` decides from the rounds alone and reads no state file but
+`runs/mended`. A builder report and a behaviour check end with `## Evidence` (`read_evidence()`),
+every command with its `exit:` but a read that shows its output, which only the script judges
+(`is_read()`); a reply missing it, holding verdict or decision lines that disagree, none of them
+first (`opening()`, `preamble()`, `decision_preamble()`), or a `verified.md` the script can't read,
+is the one stop a run mends, once a round for each role, a landing round counting as its own
+(`agent --task mend` or `--task land-mend`, recorded in `runs/mended`). No agent but the builder
+runs `checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is
+ever a run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`)
+is kept as `decision-<n>.md`, never written over, and its new run counts its rounds from the round
 its `build/round-<R>.restart.md` names. The eval and the review write only under
 `.sdlc/reports/`, and never the register.
 
@@ -275,13 +276,14 @@ Changing a skill or the script usually means satisfying these, so know them befo
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
   `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
-  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's `spec`, `build`, `eval`, `review`, `land` and `decide`) have exactly one heading
-  containing `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog
-  (2–4 answers, publish's `no` first, only a chosen yes approves) and as text where none can be
-  shown (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in a gated span as the
-  gate. A skill's side files (any other `*.md` in its folder) are part of it: `SKILL.md` names
-  each, none holds frontmatter, a gate, a commit or `sdlc.py ship`, and the rules below cover
-  their commands too. Every call to a script is literally
+  `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's
+  `spec`, `build`, `eval`, `review`, `land` and `decide`) have exactly one heading containing
+  `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog (2–4
+  answers, publish's `no` first, only a chosen yes approves) and as text where none can be shown
+  (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in a gated span as the gate.
+  A skill's side files (any other `*.md` in its folder) are part of it: `SKILL.md` names each, none
+  holds frontmatter, a gate, a commit or `sdlc.py ship`, and the rules below cover their commands
+  too. Every call to a script is literally
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/<script>`, never a host interpreter,
   where `<script>` is the plugin's own: `sdlc.py`, or `factory.py` for `sdlc-factory`. Each skill
   must run its script's `config` and name the config keys listed in `READS_CONFIG`.
@@ -296,8 +298,8 @@ Changing a skill or the script usually means satisfying these, so know them befo
   and `${CLAUDE_PLUGIN_ROOT}` included). Tests check every command in a bash block has a rule and
   every rule is used. Keep bash blocks to plain commands joined by `&&`, `||`, `;` or `|`: no
   `if`, loops or brace groups, which rules can't cover precisely; put that logic in `sdlc.py`.
-- **Nothing about a project or a workspace** (`tests/test_nothing_local.py`): nothing anywhere in the
-  repo, tests and docs included, may cite a project the plugin has been used in (by name, by
+- **Nothing about a project or a workspace** (`tests/test_nothing_local.py`): nothing anywhere in
+  the repo, tests and docs included, may cite a project the plugin has been used in (by name, by
   calling it the original host, or by citing a change from its history by folder number), or say
   how the author's machine is laid out (a home directory path; write `<path-to-clone>`).
   `PATTERNS` describe shapes and name nothing, since a name listed there would be the one mention
@@ -334,8 +336,8 @@ Changing a skill or the script usually means satisfying these, so know them befo
   commands), since the default is the locale's code page; never `shell=True`, but `_sh()`, which
   is `sh -c` everywhere (`trackers/command.py`'s copy is pinned to it, as `factory.py`'s
   `_utf8_streams` is to `sdlc.py`'s); every `write_text`, and every `open()` that writes text,
-  passes `newline="\n"`; a repo path shown or compared with git's output is `as_posix()`. A test that
-  must pass on Windows is marked `portable`: CI's Windows job (`.github/workflows/check.yml`)
+  passes `newline="\n"`; a repo path shown or compared with git's output is `as_posix()`. A test
+  that must pass on Windows is marked `portable`: CI's Windows job (`.github/workflows/check.yml`)
   runs only those, since the rest lean on shebang fakes Windows can't run.
 - The manifest name must stay `sdlc` (it namespaces every skill), and the license `MIT`,
   matching `LICENSE`.

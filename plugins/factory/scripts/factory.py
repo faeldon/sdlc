@@ -2085,7 +2085,11 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
 
 
 def stop_text(
-    change: str, way: str, problems: list[str], stuck: list[str] = (), untestable: list[str] = ()
+    change: str,
+    way: str,
+    problems: list[str],
+    stuck: list[str] | tuple = (),
+    untestable: list[str] | tuple = (),
 ) -> str:
     """`runs/stopped.md`'s text: the way on, its short sentence, the longer one (`WAYS_WHY`), each
     problem on a line of its own, and under them the reasons the run had stopped early, if it had
@@ -2998,7 +3002,7 @@ def _placeholders(text: str, root: Path) -> str:
     path: never inside a longer one, so `/tmp` leaves `/var/tmp` and `/tmpfoo` as they are. Then
     the login name, where no letter or digit borders it inside a path a mark begins, is
     `USER_MARK`, and never in prose, where a short name can be an ordinary word. Last, each shape
-    the repo's scan refuses is its placeholder (`_defused()`)."""
+    the repo's scan refuses, its local terms included, is its placeholder (`_defused()`)."""
     checkouts = _all_checkouts(root)
     for path, mark in (
         (checkouts[0] if checkouts else root, CLONE_MARK),
@@ -3013,7 +3017,7 @@ def _placeholders(text: str, root: Path) -> str:
         name = re.compile(rf"(?<![A-Za-z0-9]){re.escape(login)}(?![A-Za-z0-9])")
         marked = "|".join(re.escape(m) for m in (CLONE_MARK, HOME_MARK, TMP_MARK))
         text = re.sub(rf"(?:{marked})[^\s'\"]*", lambda m: name.sub(USER_MARK, m[0]), text)
-    return _defused(text)
+    return _defused(text, root)
 
 
 # The shapes `tests/test_nothing_local.py` refuses anywhere in the repo (its `PATTERNS`, pinned
@@ -3028,20 +3032,52 @@ DEFUSE = (
 )
 
 
-def _defused(text: str) -> str:
+# The scan's own terms: one regex a line in the main checkout's gitignored file, never committed,
+# and `TERM_MARK` where a filed record quotes one. Only the mark is ever written or printed.
+TERMS_FILE = Path(".sdlc", "terms.local")
+TERM_MARK = "<term>"
+
+
+def _terms(root: Path | None) -> list[str]:
+    """The regexes in the main checkout's `TERMS_FILE`, as `tests/test_nothing_local.py` reads
+    them: one a line, blank lines and `#` comments skipped. None without `root` or the file, or
+    for a line that isn't a regex."""
+    if root is None:
+        return []
+    checkouts = _all_checkouts(root)
+    path = (checkouts[0] if checkouts else root) / TERMS_FILE
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    except (OSError, UnicodeDecodeError):
+        return []
+    terms = []
+    for line in (line.strip() for line in lines):
+        try:
+            if line and not line.startswith("#") and re.compile(line):
+                terms.append(line)
+        except re.error:
+            continue
+    return terms
+
+
+def _defused(text: str, root: Path | None = None) -> str:
     """`text` with each shape the repo's own scan refuses (`DEFUSE`) written as its placeholder,
-    so a record the factory files, a gate's output, an agent's reply or a nit taken from one,
-    never fails the gate it is committed under."""
+    and, given `root`, each of its terms (`_terms()`) as `TERM_MARK`, so a record the factory
+    files, a gate's output, an agent's reply or a nit taken from one, never fails the gate it is
+    committed under."""
     for shape, mark in DEFUSE:
         text = re.sub(shape, mark, text, flags=re.IGNORECASE)
+    for term in _terms(root):
+        text = re.sub(term, TERM_MARK, text, flags=re.IGNORECASE)
     return text
 
 
-def forbidden_lines(folder: Path) -> list[str]:
-    """Each line of a file in the change's folder that a shape in `DEFUSE` matches, as
-    `<path>:<line>`, the text never quoted: what the repo's scan would refuse once it is
-    committed."""
-    pattern = re.compile("|".join(shape for shape, _ in DEFUSE), re.IGNORECASE)
+def forbidden_lines(folder: Path, root: Path | None = None) -> list[str]:
+    """Each line of a file in the change's folder that a shape in `DEFUSE` matches, or, given
+    `root`, one of its terms (`_terms()`), as `<path>:<line>`, the text never quoted: what the
+    repo's scan would refuse once it is committed."""
+    shapes = [shape for shape, _ in DEFUSE] + _terms(root)
+    pattern = re.compile("|".join(shapes), re.IGNORECASE)
     found = []
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
         try:
@@ -3062,14 +3098,14 @@ def cmd_defuse(root: Path, ident: str) -> int:
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     changed = []
-    for rel in sorted({line.rsplit(":", 1)[0] for line in forbidden_lines(folder)}):
+    for rel in sorted({line.rsplit(":", 1)[0] for line in forbidden_lines(folder, root)}):
         path = folder / rel
         text = path.read_text(encoding="utf-8")
-        new = _defused(_own_folder(text, folder.name))
+        new = _defused(_own_folder(text, folder.name), root)
         if new != text:
             path.write_text(new, encoding="utf-8", newline="\n")
             changed.append(rel)
-    left = forbidden_lines(folder)
+    left = forbidden_lines(folder, root)
     return emit({"change": folder.name, "changed": changed, "left": left}, 1 if left else 0)
 
 
@@ -3077,9 +3113,10 @@ def _own_folder(text: str, name: str) -> str:
     """`text` with each citation of the change's own folder by its bare number, `work/NNN`,
     `work/NNN/…` or the glob `work/NNN*`, written as its full name `work/NNN-slug`, which the
     repo's own scan accepts in a committed record. Another change's number, a longer one and a
-    citation already followed by `-` are left as they are."""
+    citation already followed by `-` are left as they are, as is `work/NNN*x`: the `*` is taken
+    possessively, never backtracked off for the lookahead to pass on it."""
     number = name.split("-", 1)[0]
-    return re.sub(rf"\bwork/{re.escape(number)}\*?(?![\w-])", f"work/{name}", text)
+    return re.sub(rf"\bwork/{re.escape(number)}\*?+(?![\w-])", f"work/{name}", text)
 
 
 # Each of `gate_jobs` slots is a lock on a file of its own in the git common dir, which every
@@ -4297,7 +4334,8 @@ def cmd_agent(
         return emit({**out, "problem": problem}, 1)
     target.parent.mkdir(parents=True, exist_ok=True)
     # The last reply that holds the role's answer, else the last: a background task's notice
-    # answered after the verdict never replaces it (`holds()`).
+    # answered after the verdict never replaces it (`holds()`). `replies[-1]` is safe: `_claude()`
+    # returns a non-empty list whenever it returns no problem.
     reply = next((r for r in reversed(replies) if holds(role, r)), replies[-1])
     # The reply is committed with the change: an agent quoting a command's output never files
     # this machine's paths, only the marks (`_placeholders()`), cites its own change's folder by
@@ -4316,7 +4354,7 @@ def cmd_agent(
             f.write(f"{role} {rnd}\n")
     # The approver's decision ends the build: a line the repo's scan would refuse, anywhere in
     # the folder the change will commit, is said now, not first at the landing's gate.
-    if task == "approve" and (lines := forbidden_lines(folder)):
+    if task == "approve" and (lines := forbidden_lines(folder, root)):
         why = f"the folder holds lines the repo's scan refuses: {', '.join(lines[:5])}"
         more = f" and {len(lines) - 5} more" if len(lines) > 5 else ""
         return emit(

@@ -73,7 +73,10 @@ Then, for each required change, one line:
 A finding that is really the person's call (the spec doesn't say what should happen, or a fix
 trades one user's need against another's) is not a CHANGE: raise it as `- DECISION: [blocking]
 ...` or `[default] ...` with the options and your recommendation. Read `decisions.md` first: an
-answered decision is settled. A default that replaces an earlier one of yours or another agent's names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
+answered decision is settled. A default that replaces an earlier one of yours or another agent's
+names it: `- DECISION: [default] (supersedes D<n>) <the new default>`, and the earlier line is
+marked superseded. Only an open default can be superseded: a ticked line with `→ decided:` is the
+person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your own
 default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
