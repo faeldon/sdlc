@@ -240,7 +240,8 @@ copies of its parsing (`risk_paths()` and the regexes included), pinned by tests
 judge have no Write; only the builder and the resolver edit (the builder's sub-agents only
 `Agent(Explore, Plan)`; the resolver, a train conflict's own agent, only the files the conflict
 names, which `resolve --continue` checks), and no agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
-gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
+gate` and `check`, through one function (`_run_check()`), the only places it runs a host's command,
+the base branch's `[commands] check`. Landing is
 the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
 (`sdlc_path()`): a batch lands as a train (`cmd_train()`, its state `TRAIN_STATE` in the git
 common dir, never in a tree), each change committed by `land` (which no longer runs `base`),

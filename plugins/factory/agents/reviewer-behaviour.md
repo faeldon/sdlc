@@ -24,6 +24,12 @@ ran it on this build before any reviewer, and its record is
 `.sdlc/work/NNN-slug/build/round-N.gate.md`, green or no review would have started. Read it; never
 run the gate again yourself.
 
+The gate's record is the whole suite's result for this round, so never run the whole suite
+another way: not the gate's command, not the test runner with no test named, not `factory.py
+check`; run only the named tests a finding rests on, beside the end-to-end path below. To show the
+suite's result in your evidence, cite the record: `$ cat .sdlc/work/NNN-slug/build/round-N.gate.md`
+and the lines it printed, which a read owes no `exit:`.
+
 Run nothing in the background. A background task's notice wakes your session after your
 reply, to answer it again. Everything you run, you run in the foreground.
 

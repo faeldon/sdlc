@@ -859,6 +859,8 @@ def test_a_train_conflict_goes_to_the_resolver_with_every_change(tmp_path, capsy
         assert f"git show {pre[tree.name]}:.sdlc/work/{tree.name}/{spec}" in prompt, prompt
         assert f"git show {pre[tree.name]}`" in prompt, prompt
     assert "README.md" in prompt and "## Evidence" in prompt
+    ident = trees[1].name.split("-", 1)[0]
+    assert f"factory.py check {ident}`: it waits for a gate slot." in prompt, "155 R6"
     calls: list[list[str]] = []
 
     def fake(argv: list[str], cwd: Path):

@@ -21,7 +21,7 @@ The change folder `.sdlc/work/NNN-slug/`: `intent.md` always, `spec.md` for a Ti
 numbered requirements are what you build, and what the reviewers check you against). For a Tier 1
 change the intent's **Approach** section is the spec. Read the repo's instructions (`CLAUDE.md`,
 `.claude/CLAUDE.md` or `AGENTS.md`, and whatever file they import) for its commands, conventions
-and invariants, and run its gate the way it says.
+and invariants, and how to run one named test.
 
 ## First: the plan (Tier 2)
 
@@ -52,7 +52,15 @@ For each slice:
    test you never saw fail proves nothing. A bug fix starts with the test that reproduces the bug.
 2. **Green.** The least code that makes it pass. Simplest thing first: no abstraction with one
    caller, no configuration nobody sets, no feature the spec didn't ask for.
-3. **Refactor**, with the tests green, then run the repo's gate.
+3. **Refactor**, with the tests green, then run the slice's own tests by name, not the whole
+   suite.
+
+The script's gate runs the whole suite on your build before any reviewer reads it (*A red gate*),
+so a whole-suite run only for your report repeats it, and on a machine running several builds at
+once it slows every gate. When you do want a full run (a change that reaches across the repo, a
+lint the slice's tests don't cover), use the `check` command your prompt names: it runs the repo's
+gate in one of the gate slots, waiting its turn. Run it in the foreground with the Bash tool's
+longest timeout; never a bare `[commands] check` or the test runner with no test named.
 
 Keep the tree working after every slice. Touch only what the slice needs; a refactor or cleanup
 you notice on the way goes into `notes.md` as an unticked `- [ ]` line, not into this change.
@@ -147,7 +155,7 @@ When the supervisor resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/v
 verifier has checked every `- CHANGE:` the reviewers asked for against the code, and its
 `- KEPT:` lines are the ones to address. Address each one, or, if a change is wrong after all, say
 why in `notes.md` rather than ignoring it. A `- DROPPED:` line is not yours to act on. Rerun the
-tests and the gate.
+tests the kept changes touch, by name; the gate runs again on the rework.
 
 ## A red gate
 
@@ -160,9 +168,10 @@ gate runs again. Two fixes a round; a third red gate stops the change for the pe
 
 ## What you return
 
-A short report: the slices built, the tests added and what they prove, the gate's result (its test
-count), what changed in `plan.md`, and anything left in `notes.md`. In a rework round, one line per
-`- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
+A short report: the slices built, the tests added and what they prove, the named tests you ran and
+their counts, what changed in `plan.md`, and anything left in `notes.md`. Leave the gate's result
+to `build/round-N.gate.md`, which the script writes after your report. In a rework round, one line
+per `- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
 skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.
 
 A requirement no test the repo can run could show (one judged by eye, or one that needs a live
@@ -170,19 +179,19 @@ service the repo can't start) gets one line, `- UNTESTABLE: R<n>: <why>`. Once i
 reviewed, the run goes to the approver and then the person rather than to another rework, so the
 only cost of a wrong claim is an escalation. It never stands in for a test you chose not to write.
 
-**End it with `## Evidence`:** every command a claim above rests on (the gate, the tests, anything
+**End it with `## Evidence`:** every command a claim above rests on (the tests you ran, anything
 you say passed or failed), each as the command on a `$ ` line, the tail of what it printed, and
 `exit: <n>`:
 
 ```
 ## Evidence
 
-$ ./check.sh
-1271 passed in 121.72s
+$ uv run pytest -q tests/test_drafts.py
+14 passed in 0.82s
 exit: 0
 ```
 
-Claim no result this section doesn't show: "the gate passes" with no `$` line for the gate is a
-claim, not a result. A failing command goes in too, with its exit. The skill's script refuses a
+Claim no result this section doesn't show: "the suite passes" with no `$` line for it is a claim,
+not a result. A failing command goes in too, with its exit. The skill's script refuses a
 report without this section, or with a command missing its `exit:` unless it is a read that shows
 its output, and the run stops there.

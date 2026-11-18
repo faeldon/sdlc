@@ -46,15 +46,16 @@ never a second: a `subagent` event's `behaviour` holds `BEHAVIOURS` as counts an
 calls by `_prompt_name()`, both None when counting raised. `edits=` is its `EDIT_TOOLS` calls,
 `shell_edits=` its `Bash` commands that write a file by a named shape (`_shell()`), `bg=` those that
 went to the background (a result's `toolUseResult.backgroundTaskId`, or a trailing `&`),
-`tool_errors=` its results with `is_error`, `test_runs=` its runs of the host's check, the hand gate
-or a `TEST_RUNNERS` program, and `broke=` the test runs whose output matches `BROKE_RE` with an edit
-since the run before. `read_events(models=)` maps a factory session's id to the model
-`runs/costs.jsonl` records for it, the event's `model`; a sub-agent's run has none. Each is written
-at the end of the role's `Sdlc-Role` line: `model=` (sorted, `,`-joined, each `_model_word()`, left
-off with none known), then the six counts; and one `Sdlc-Calls: <role> <name>=<n> …` line a role,
-read back as `calls`. A role whose counting failed keeps none of them, and `Sdlc-Coverage` gains
-` behaviour=failed`. A role line without `edits=` was closed before they were counted, or its
-counting failed: unrecorded, never zero. Every count is a lower bound: a shape not named is missed.
+`tool_errors=` its results with `is_error`, `test_runs=` its runs of the host's check, the hand
+gate, the factory's `check` or a `TEST_RUNNERS` program, and `broke=` the test runs whose output
+matches `BROKE_RE` with an edit since the run before. `read_events(models=)` maps a factory
+session's id to the model `runs/costs.jsonl` records for it, the event's `model`; a sub-agent's run
+has none. Each is written at the end of the role's `Sdlc-Role` line: `model=` (sorted, `,`-joined,
+each `_model_word()`, left off with none known), then the six counts; and one `Sdlc-Calls: <role>
+<name>=<n> …` line a role, read back as `calls`. A role whose counting failed keeps none of them,
+and `Sdlc-Coverage` gains ` behaviour=failed`. A role line without `edits=` was closed before they
+were counted, or its counting failed: unrecorded, never zero. Every count is a lower bound: a shape
+not named is missed.
 
 A `question` is an `AskUserQuestion` call and its `answer` what the person chose, as a class like
 a typed reply, with the seconds the dialog waited: theirs, never the agent's. Every gate asks in a
@@ -127,6 +128,9 @@ ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 STAGE_LINE_RE = re.compile(r"^stage:\s*([a-z]+)\s*$", re.M)
 # A run of the gate by hand, `sdlc.py gate NNN`, wherever the plugin is installed: a `check`.
 HAND_GATE_RE = re.compile(r"scripts/sdlc\.py\s+gate(?:\s|$)")
+# An agent's full run through the factory's `check NNN`, the same command in a gate slot: a
+# `check` too. Never its `land-check` or `gate`, which the script runs itself.
+FACTORY_CHECK_RE = re.compile(r"scripts/factory\.py['\"]?\s+check(?:\s|$)")
 # A change's branch: its number and slug (`sdlc.py`'s `DIR_RE`).
 DIR_RE = re.compile(r"^\d{3,}-[a-z0-9][a-z0-9-]*$")
 APPROVE_RE = re.compile(
@@ -681,9 +685,11 @@ def _shell(command: str, check: str | None) -> tuple[bool, bool, bool]:
     """What a `Bash` command did, by its shape alone: whether it wrote a file (a redirect outside
     `SCRATCH`, `tee`, `sed -i`, `perl -i`, `patch`, `git apply`, or an inline interpreter script
     that writes), whether it went to the background (`… &`), and whether it ran tests (the host's
-    check, the hand gate, or `TEST_RUNNERS`). Each is a lower bound: a shape not named is missed."""
+    check, the hand gate, the factory's `check`, or `TEST_RUNNERS`). Each is a lower bound: a shape
+    not named is missed."""
     line = command.strip()
     test = bool(check and line.startswith(check)) or bool(HAND_GATE_RE.search(line))
+    test = test or bool(FACTORY_CHECK_RE.search(line))
     writes = False
     # A heredoc's body is text, never shell: blanked, and read only as an interpreter's script.
     for m in HEREDOC_RE.finditer(command):
@@ -938,9 +944,11 @@ def read_events(
                             dialogs[str(block.get("id"))] = ts
                         elif name == "Bash":
                             # The gate, alone or piped on (`./check.sh 2>&1 | tail`), or run
-                            # by hand through `sdlc.py gate`, which runs the base branch's.
+                            # through `sdlc.py gate` or `factory.py check`, which run the base
+                            # branch's.
                             line = str(inp.get("command", "")).strip()
-                            if (check and line.startswith(check)) or HAND_GATE_RE.search(line):
+                            ran = HAND_GATE_RE.search(line) or FACTORY_CHECK_RE.search(line)
+                            if (check and line.startswith(check)) or ran:
                                 checks[str(block.get("id"))] = ts
                         elif name == "Agent":
                             agents.add(str(block.get("id")))

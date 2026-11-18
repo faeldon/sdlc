@@ -1540,7 +1540,8 @@ def test_rework_hands_the_builder_its_cheap_nits(tmp_path, capsys) -> None:
     prompt, _, _ = factory._task(root, folder, state, "rework", "builder", None)
     assert prompt.endswith(
         "- code: code fix 1\nAlso make these nits, each weighed cheap and worth it:\n"
-        "- code: src/a.py:1: cheap\n- test: [cost] tests/t.py:3: one fixture"
+        "- code: src/a.py:1: cheap\n- test: [cost] tests/t.py:3: one fixture\n\n"
+        + factory.check_line(folder)
     )
     assert "later" not in prompt, "an M nit is filed, never handed on"
     _build_report(root, 2)
@@ -2176,6 +2177,20 @@ def test_a_silent_read_still_needs_its_exit() -> None:
         "## Evidence\n\n```\n$ cmp a b\n\n```\n",
     ):
         assert factory.read_evidence(text, "r") == ["r: `cmp a b` has no `exit:` line"], text
+
+
+@pytest.mark.portable
+def test_evidence_citing_the_gate_record_is_a_read() -> None:
+    """155 R10: a reviewer's evidence may cite the gate's record by reading it, which owes no
+    exit; a run of `factory.py check` is a command like any other, and owes its own."""
+    record = ".sdlc/work/008-reopen-drafts/build/round-1.gate.md"
+    for cite in (f"cat {record}", f"head -n 3 {record}"):
+        text = f"## Evidence\n\n$ {cite}\nGATE: PASS\n"
+        assert factory.read_evidence(text, "r") == [], cite
+    run = "uv run --quiet --script <path-to-clone>/plugins/factory/scripts/factory.py check 008"
+    assert factory.read_evidence(f"## Evidence\n\n$ {run}\n12 passed\n", "r") == [
+        f"r: `{run}` has no `exit:` line"
+    ]
 
 
 def test_a_builders_read_needs_no_exit(tmp_path, capsys) -> None:
@@ -4503,7 +4518,8 @@ def test_the_restart_prompt_carries_the_persons_words(tmp_path, capsys, claude) 
     assert record == "RESTART: decision-1.md\nWORDS: R1\n"
     assert factory.read_ledger(folder) == [], "a restart's words are no decision the loop waits on"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
-    assert code == 0 and claude()[-1]["argv"][1].endswith(f"The person adds: {words}")
+    told = claude()[-1]["argv"][1]
+    assert code == 0 and told.endswith(f"The person adds: {words}\n\n{factory.check_line(folder)}")
 
 
 def test_the_round_limit_counts_from_the_restart(tmp_path, capsys) -> None:
@@ -4878,6 +4894,186 @@ def test_a_factory_gate_waits_for_a_hand_gates_slot(tmp_path) -> None:
     assert gate.returncode == 0, (out, err)
     got = json.loads(out)
     assert got["waited"] >= 0.5 and got["slot"] == 0, got
+
+
+# ---------------------------------------------------- agents' full runs take a slot too (155)
+
+
+def test_check_runs_the_base_branchs_command_and_exits_with_its_code(tmp_path, capfd) -> None:
+    """155 R1: the base branch's `[commands] check`, never the checkout's, its output straight
+    through and its exit code the command's."""
+    root = _change(tmp_path)
+    _gate_config(root, "echo base-ran; exit 3")
+    (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "echo mine"\n')
+    code = factory.cmd_check(root, "008")
+    out = capfd.readouterr().out
+    assert code == 3 and "base-ran" in out and "mine" not in out, out
+
+
+@pytest.mark.parametrize("case", ["no base", "no check", "no change"])
+def test_check_refuses_and_runs_nothing(tmp_path, capfd, case) -> None:
+    """155 R2: no base branch, no `[commands] check` on it, or no such change: a refusal, in
+    `gate`'s words, and the command never runs."""
+    root = _change(tmp_path)
+    stamp = tmp_path / "ran"
+    if case != "no check":
+        _gate_config(root, f'touch "{stamp.as_posix()}"')
+    if case == "no base":
+        _git(root, "branch", "-q", "-m", "main", "trunk")
+    ident = "099" if case == "no change" else "008"
+    code = factory.cmd_check(root, ident)
+    out = json.loads(capfd.readouterr().out)
+    assert code == 1 and out["refusals"], out
+    why = {"no base": "no base branch", "no check": "has no [commands] check", "no change": "099"}
+    assert why[case] in out["refusals"][0], out
+    assert not stamp.exists()
+
+
+def test_two_checks_with_one_slot_run_one_after_the_other(tmp_path) -> None:
+    """155 R3: two `check` runs at once in two worktrees, with `gate_jobs = 1`: the second waits
+    for the first's slot and says so."""
+    root = _change(tmp_path)
+    log, stamp = tmp_path / "stamps.log", tmp_path / "stamp.py"
+    stamp.write_text(STAMP, encoding="utf-8")
+    py = Path(sys.executable).as_posix()
+    run = f'"{py}" "{stamp.as_posix()}" {{}} "{log.as_posix()}"'
+    _gate_config(root, f"{run.format('start')} && sleep 1 && {run.format('end')}")
+    _on_main(root, "gate_jobs = 1\n")
+    other = _second_change(root, tmp_path)
+    checks = [
+        subprocess.Popen([sys.executable, str(FACTORY_PY), "check", ident], cwd=tree,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+        for tree, ident in ((root, "008"), (other, "009"))
+    ]  # fmt: skip
+    done = [c.communicate(timeout=60) for c in checks]
+    assert [c.returncode for c in checks] == [0, 0], done
+    times: dict[str, dict[str, float]] = {}
+    for line in log.read_text(encoding="utf-8").splitlines():
+        where, what, when = line.split()
+        times.setdefault(where, {})[what] = float(when)
+    (a, b) = times.values()
+    assert not (a["start"] < b["end"] and b["start"] < a["end"]), times
+    waiting = [err for _, err in done if "waiting for a gate slot (1 of 1 in use)" in err]
+    assert len(waiting) == 1, done
+
+
+def test_a_check_waits_for_a_gates_slot(tmp_path) -> None:
+    """155 R3: a slot a gate holds is one `check` waits for: gates and checks share the slots."""
+    import time
+
+    root = _change(tmp_path)
+    _gate_config(root, "echo checked")
+    child = subprocess.Popen(
+        [sys.executable, "-c", HOLD, str(FACTORY_PY), str(root)],
+        stdout=subprocess.PIPE, encoding="utf-8",
+    )  # fmt: skip
+    try:
+        assert child.stdout.readline().strip() == "held 0"
+        check = subprocess.Popen(
+            [sys.executable, str(FACTORY_PY), "check", "008"], cwd=root,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+        )  # fmt: skip
+        line = check.stderr.readline()
+        assert f"{NAME}: waiting for a gate slot (1 of 1 in use)" in line, line
+        time.sleep(0.5)
+        assert check.poll() is None, "it ran while the gate held the slot"
+    finally:
+        child.kill()
+        child.wait()
+    out, err = check.communicate(timeout=60)
+    assert check.returncode == 0 and "checked" in out, (out, err)
+
+
+def test_a_killed_check_frees_its_slot(tmp_path) -> None:
+    """155 R4: the slot is a lock on `check`'s own descriptor, never inherited by the command it
+    runs, so killing `check` frees it even while the command lives on."""
+    import time
+
+    root = _change(tmp_path)
+    started = tmp_path / "started"
+    _gate_config(root, f'touch "{started.as_posix()}"; sleep 30')
+    check = subprocess.Popen(
+        [sys.executable, str(FACTORY_PY), "check", "008"], cwd=root, start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        deadline = time.monotonic() + 30
+        while not started.exists():
+            assert time.monotonic() < deadline, "the command never started"
+            time.sleep(0.05)
+        check.kill()
+        check.wait()
+        start = time.monotonic()
+        with factory.gate_slot(root, 1, NAME) as (slot, _):
+            assert slot == 0
+        assert time.monotonic() - start < 2, "the slot outlived its check"
+    finally:
+        import contextlib
+        import signal
+
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(check.pid, signal.SIGKILL)
+
+
+def test_a_check_past_the_timeout_is_killed(tmp_path, capfd, monkeypatch) -> None:
+    """155 R4: past `GATE_TIMEOUT` the command is killed, said on stderr, and `check` fails."""
+    root = _change(tmp_path)
+    _gate_config(root, "exec sleep 5")
+    monkeypatch.setattr(factory, "GATE_TIMEOUT", 0.5)
+    code = factory.cmd_check(root, "008")
+    assert code != 0 and "timed out after 0.5s" in capfd.readouterr().err
+
+
+def test_a_green_check_writes_nothing_and_never_clears_the_gate(tmp_path, capfd) -> None:
+    """155 R5: a green `check` writes no record, leaves the folder as it was, and `verdicts`
+    still asks for the gate: the script's gate stays the one proof of the suite."""
+    root = _change(tmp_path)
+    _gate_config(root, "true")
+    _build_report(root, 1)
+    rel = ".sdlc/work/" + NAME
+    assert _verdicts(root, capfd)["next"] == "gate"
+    before = _git(root, "status", "--porcelain", "--untracked-files=all", "--", rel)
+    capfd.readouterr()
+    assert factory.cmd_check(root, "008") == 0
+    assert _git(root, "status", "--porcelain", "--untracked-files=all", "--", rel) == before
+    assert not list((root / rel / "build").glob("*.gate.md"))
+    capfd.readouterr()
+    assert _verdicts(root, capfd)["next"] == "gate"
+
+
+def test_the_builders_prompts_name_the_check_command(tmp_path, capsys) -> None:
+    """155 R6: every prompt the builder is sent names the full `check` command, this factory's
+    own script by its absolute path; no reviewer's, verifier's or approver's does."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    line = f"uv run --quiet --script {factory.FACTORY_SCRIPT.as_posix()} check 008"
+    assert factory.FACTORY_SCRIPT.is_absolute()
+
+    def prompt(state: dict, task: str, role: str, decided: str | None = None) -> str:
+        planned = factory._task(root, folder, state, task, role, decided)
+        assert not isinstance(planned, str), planned
+        return planned[0]
+
+    state, _ = factory.loop_state(root, "008", None)
+    assert state["next"] == "build"
+    assert line in prompt(state, "build", "builder")
+    assert line in prompt({**state, "next": "fix", "round": 1}, "fix", "builder")
+    _build_report(root, 1, "- DECISION: [default] Page at 50.\n")
+    _run(capsys, factory.cmd_decisions, root, "008")
+    path = folder / "decisions.md"
+    path.write_text(path.read_text().replace("- [ ] D1", "- [x] D1").replace(
+        "50.", "50. → decided: 50"))  # fmt: skip
+    _round(root, 1, code="CHANGES")
+    _verified(root, 1, kept=["code: code fix 1"])
+    state, _ = factory.loop_state(root, "008", None)
+    assert state["next"] == "rework", state
+    assert line in prompt(state, "rework", "builder")
+    assert line in prompt(state, "decided", "builder", "D1")
+    assert line in prompt(state, "mend", "builder")
+    for task, role, step in (("review", "code", "review"), ("verify", "verifier", "verify"),
+                             ("approve", "approver", "approve")):  # fmt: skip
+        told = prompt({**state, "next": step, "missing": ["code"]}, task, role)
+        assert "check 008" not in told, (task, told)
 
 
 def test_a_landing_verifiers_answer_names_its_landing_round(tmp_path) -> None:

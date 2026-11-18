@@ -167,11 +167,16 @@ spec.
   change for you. Light runs are gated like full ones. The gate's command can't be changed by the
   change, but the script it runs (a `check.sh`) is in the change's tree: list it in
   `[review] sensitive` to have an edit to it reviewed at the full depth and named at ship.
-- **One gate at a time, by default.** Gates from every worktree of the repo share `gate_jobs`
-  slots (1 unless the base branch's `factory.toml` says more), so parallel runs' checks don't
-  fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1 of 1 in
+- **One gate at a time, by default.** Gates and `check` runs from every worktree share
+  `gate_jobs` slots (1 unless the base branch's `factory.toml` says more), so parallel runs'
+  checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1 of 1 in
   use)`, and its wait is not in its `Seconds:`. A gate run by hand (`sdlc.py gate`) shares the
   same slots, waiting at most 30 minutes for one.
+- **Agents leave the whole suite to the gate.** The builder runs each slice's tests by name, and
+  the reviewers read the gate's record rather than run the suite again. A full run an agent still
+  wants goes through `factory.py check NNN`, which its prompt names: the base branch's `[commands]
+  check` in the change's worktree, in a gate slot, its output and exit the command's. It records
+  nothing, so it never stands in for the gate.
 - **Verified before reworked.** After each round with a `CHANGES` verdict, the `verifier` checks
   every `- CHANGE:` against the code and keeps or drops it, with why. The builder reworks only what
   it keeps; `/sdlc:ship` shows what it dropped.
@@ -454,8 +459,9 @@ answers, the ledger, the depth the diff calls for, and which step the loop takes
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
 `stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
 `upgrade`); the gate
-itself, the base branch's check run on each build and recorded attempt by attempt (`gate`, the
-one place it runs a host's command), each holding one of `gate_jobs` slots, an OS lock on
+itself, the base branch's check run on each build and recorded attempt by attempt (`gate`), and an
+agent's full run of it that records nothing (`check`), through one function (`_run_check()`), the
+only places it runs a host's command, each holding one of `gate_jobs` slots, an OS lock on
 `sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends, and
 that `sdlc.py gate`, the gate run by hand, takes too, through pinned copies; the
 change brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`);

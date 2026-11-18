@@ -1281,6 +1281,60 @@ def test_the_script_gates_each_build_before_any_reviewer() -> None:
     assert "build/round-N.gate.md" in flat and "never run the gate again yourself" in flat
 
 
+def _evidence_commands(prompt: str) -> list[str]:
+    """The `$` lines of the fenced `## Evidence` example an agent's prompt shows."""
+    example = prompt.split("```\n## Evidence\n", 1)[1].split("```", 1)[0]
+    return [line[2:] for line in example.splitlines() if line.startswith("$ ")]
+
+
+def test_the_builder_leaves_the_whole_suite_to_the_gate() -> None:
+    """155 R7: the builder runs each slice's tests by name, leaves the whole suite to the gate
+    that runs next, takes a full run only through the `check` its prompt names, and reports the
+    named tests it ran, its Evidence example one of them."""
+    builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
+    flat = " ".join(builder.split())
+    for phrase in (
+        "then run the slice's own tests by name, not the whole suite",
+        "The script's gate runs the whole suite on your build before any reviewer reads it",
+        "a whole-suite run only for your report repeats it",
+        "use the `check` command your prompt names",
+        "never a bare `[commands] check` or the test runner with no test named",
+        "the named tests you ran and their counts",
+        "Leave the gate's result to `build/round-N.gate.md`",
+    ):
+        assert phrase in flat, phrase
+    commands = _evidence_commands(builder)
+    assert commands and "./check.sh" not in commands, commands
+
+
+def test_the_reviewers_read_the_gate_for_the_whole_suite() -> None:
+    """155 R8: each reviewer that may run tests takes the gate's record as the suite's result,
+    never runs the whole suite another way, and runs only the named tests a finding rests on; the
+    behaviour check still runs the spec's end-to-end path."""
+    for role in ("code", "test", "behaviour"):
+        text = (FACTORY / "agents" / f"reviewer-{role}.md").read_text(encoding="utf-8")
+        flat = " ".join(text.split())
+        assert "The gate's record is the whole suite's result for this round" in flat, role
+        assert (
+            "never run the whole suite another way: not the gate's command, not the test runner "
+            "with no test named, not `factory.py check`" in flat
+        ), role
+        assert "run only the named tests a finding rests on" in flat, role
+    behaviour = (FACTORY / "agents" / "reviewer-behaviour.md").read_text(encoding="utf-8")
+    assert "**The end-to-end path** the spec or Approach describes" in behaviour
+
+
+def test_the_resolver_runs_the_conflicts_tests_and_check_for_a_full_run() -> None:
+    """155 R9: the resolver runs the tests the conflict touched by name, a full run only through
+    the `check` its prompt names, and its Evidence example is no bare `./check.sh`."""
+    resolver = (FACTORY / "agents" / "resolver.md").read_text(encoding="utf-8")
+    flat = " ".join(resolver.split())
+    assert "Run the tests the conflict touched, by name" in flat
+    assert "for a full run, the `check` command your prompt names" in flat
+    commands = _evidence_commands(resolver)
+    assert commands and "./check.sh" not in commands, commands
+
+
 def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None:
     """The builder and the behaviour check end every reply with `## Evidence`, `$` lines and
     exits; the behaviour check reads checks.md and never runs it, since an agent may have written

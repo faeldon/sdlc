@@ -1528,14 +1528,19 @@ def test_a_shell_edit_is_known_by_its_command(command: str, writes: bool) -> Non
         ("cargo test", None, True),
         ("npm test", None, True),
         ('uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py gate 012', None, True),
+        ("uv run --quiet --script /x/plugins/factory/scripts/factory.py check 155", None, True),
+        ("uv run --quiet --script '/a b/scripts/factory.py' check 155", None, True),
+        ("uv run --quiet --script /x/scripts/factory.py land-check", None, False),
+        ("uv run --quiet --script /x/scripts/factory.py gate 155", None, False),
         ("grep pytest x", None, False),
         ("cat pytest.ini", None, False),
         ("go build ./...", None, False),
     ],
 )
 def test_a_test_run_is_known_by_its_program(command: str, check, test: bool) -> None:
-    """R5: the host's check, the hand gate, or a known runner past `uv run`, `npx`, `python -m`
-    and `VAR=`: never a word that only names one."""
+    """R5: the host's check, the hand gate, the factory's `check` (155 R11), or a known runner past
+    `uv run`, `npx`, `python -m` and `VAR=`: never a word that only names one, nor the factory's
+    `gate` or `land-check`, which the script runs, not an agent."""
     assert metrics._shell(command, check)[2] is test
 
 

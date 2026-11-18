@@ -29,6 +29,10 @@ ran it on this build before any reviewer, and its record is
 no review would have started. Read it for the gate's result and its test count; never run the
 gate yourself.
 
+The gate's record is the whole suite's result for this round, so never run the whole suite
+another way: not the gate's command, not the test runner with no test named, not `factory.py
+check`; run only the named tests a finding rests on.
+
 Run nothing in the background. A background task's notice wakes your session after your
 reply, to answer it again. A test you run to check a claim is a named one, run in the foreground.
 

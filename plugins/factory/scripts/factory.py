@@ -24,6 +24,7 @@ close keep one implementation.
     uv run --script factory.py ask 008 --answered D2,D3
     uv run --script factory.py verdicts 008 --head 1a2b3c4 --record
     uv run --script factory.py gate 008
+    uv run --script factory.py check 008
     uv run --script factory.py carry 008
     uv run --script factory.py stage 008 test
     uv run --script factory.py write-spec 008
@@ -61,7 +62,8 @@ takes the train's steps itself through those same commands, holding a lock on
 `sdlc-factory-train.cancel` beside it, which the loop removes; `fresh`, before a
 run, moves the change's own branch onto the base through `sdlc.py base` and `resolve`, and
 commits nothing that stays. `gate` also holds a lock on a slot file,
-`sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written; `sdlc.py gate`,
+`sdlc-factory-gate-<k>.lock` in the git common dir, made once and never written, and so does
+`check`, an agent's full run of the same command, which writes nothing; `sdlc.py gate`,
 the gate run by hand, takes the same lock files while this plugin is enabled. A command about
 one change runs in its worktree, found from the main checkout when the supervisor runs there
 (`change_root()`).
@@ -3200,6 +3202,45 @@ def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, 
             os.close(fd)
 
 
+def _run_check(root: Path, command: str, capture: bool) -> subprocess.CompletedProcess:
+    """Run the base branch's `[commands] check` in `root`, within `GATE_TIMEOUT`: the one place
+    this script runs a host's command, for `gate` (`capture`, its output into the record) and
+    `check` (its output straight through to the caller). Raises what `subprocess.run` raises."""
+    if capture:
+        return subprocess.run(
+            _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
+        )  # fmt: skip
+    return subprocess.run(_sh(command), cwd=root, stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT)
+
+
+def cmd_check(root: Path, ident: str) -> int:
+    """Run the base branch's `[commands] check` in the change's worktree, as `gate` does, holding
+    one of the same `gate_jobs` slots while it runs, its output straight through and its exit code
+    the command's: an agent's full run of the suite, waiting its turn with the gates. Writes
+    nothing and proves nothing to the script: the gate's record stays the one proof of a build."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    base = _base(root)
+    if base is None:
+        return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
+    command = _base_check(root, base)
+    if command is None:
+        why = "the base branch's .sdlc/config.toml has no [commands] check"
+        return emit({"refusals": [why]}, 1)
+    jobs = load_config(root)[0]["gate_jobs"]
+    with gate_slot(root, jobs, folder.name):
+        sys.stdout.flush()
+        try:
+            return _run_check(root, command, capture=False).returncode
+        except subprocess.TimeoutExpired:
+            print(f"{folder.name}: timed out after {GATE_TIMEOUT}s", file=sys.stderr, flush=True)
+        except OSError as e:
+            print(f"{folder.name}: didn't run: {e}", file=sys.stderr, flush=True)
+    return 1
+
+
 def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
     add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
@@ -3237,10 +3278,7 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
         before = _tree_hashes(root, base)
         start = time.monotonic()
         try:
-            done = subprocess.run(
-                _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
-                stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT,
-            )  # fmt: skip
+            done = _run_check(root, command, capture=True)
             code, output = done.returncode, done.stdout + done.stderr
             exit_text = str(code)
         except subprocess.TimeoutExpired as e:
@@ -3817,6 +3855,18 @@ def run_cost(folder: Path) -> dict:
     }  # fmt: skip
 
 
+def check_line(folder: Path) -> str:
+    """The sentence that tells the builder and the resolver how to run the whole suite in a gate
+    slot: this factory's own `check`, by its absolute path, which is never committed (a reply
+    quoting it is filed through `_placeholders()`)."""
+    script = shlex.quote(FACTORY_SCRIPT.as_posix())
+    ident = folder.name.split("-", 1)[0]
+    return (
+        f"A full run of the suite, when you want one, is `uv run --quiet --script {script} check "
+        f"{ident}`: it waits for a gate slot."
+    )
+
+
 def _task(
     root: Path,
     folder: Path,
@@ -3831,7 +3881,26 @@ def _task(
     never `spec.md`, which waits for the person's yes), and whether the reply is added to that
     file: or why it can't run now.
     The wording is the build's own; every builder report goes to `build/round-<R+1>.md`, `<R>`
-    the highest review round so far, unless it answers a decision before its round's review."""
+    the highest review round so far, unless it answers a decision before its round's review.
+    Every prompt the builder is sent ends with `check_line()`; the landing's add their own."""
+    planned = _task_prompt(root, folder, state, task, role, decided, revise, recheck)
+    builder = TASK_ROLE.get(task) == "builder" or (task == "mend" and role == "builder")
+    if isinstance(planned, str) or task in LAND_TASKS or not builder:
+        return planned
+    prompt, target, append = planned
+    return f"{prompt}\n\n{check_line(folder)}", target, append
+
+
+def _task_prompt(
+    root: Path,
+    folder: Path,
+    state: dict,
+    task: str,
+    role: str,
+    decided: str | None,
+    revise: str | None = None,
+    recheck: bool = False,
+) -> tuple[str, Path | None, bool] | str:
     rel = folder.relative_to(root).as_posix()
     head = f"Change folder: {rel}. Worktree: {root}. "
     step = TASK_STEP.get(task)
@@ -4091,7 +4160,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
                     f"{INBOX.as_posix()}, and they stay deleted: don't keep them."
                 )
         return (
-            prompt,
+            f"{prompt}\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -4125,7 +4194,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             "Resolve each so every change in the train keeps what it was built to do: read each "
             "change's spec and diff with git show (reads only), edit only those files, run no "
             "other git command, then report what you kept from each side, ending with "
-            "## Evidence.\n" + "\n".join(listed),
+            "## Evidence.\n" + "\n".join(listed) + f"\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -4136,7 +4205,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
         return (
             head + f"The person asked for a fix while landing this change: {ask} Make it, editing "
             "only what the fix needs; run no git command, then report what you changed, ending "
-            "with ## Evidence.",
+            f"with ## Evidence.\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
             False,
         )
@@ -4427,6 +4496,8 @@ def ready(root: Path) -> list[dict]:
 # carries a risk signal (`land-check`), recorded on each change's commit as `Sdlc-Landed: by=auto`.
 
 FACTORY_ROOT = Path(__file__).resolve().parents[1]
+# This script, as the builder and the resolver are told to run its `check` (`check_line()`).
+FACTORY_SCRIPT = Path(__file__).resolve()
 SDLC_TIMEOUT = 3600
 # The environment a landing step runs `sdlc.py` in: without a flag that would stop close handing
 # itself to the main checkout's script, or ship to the change's own, and without this session's
@@ -7760,6 +7831,10 @@ def main() -> int:
     p_gate = sub.add_parser("gate", help="run the base branch's gate on the newest build")
     p_gate.add_argument("id")
     p_gate.add_argument("--land", action="store_true", help="on the change as a landing rebased it")
+    p_run = sub.add_parser(
+        "check", help="the base branch's check, in a gate slot, recording nothing"
+    )
+    p_run.add_argument("id")
     p_shots = sub.add_parser("shots", help="screenshot the change's pages for its UI reviewers")
     p_shots.add_argument("id")
     p_shots.add_argument("--round", dest="round", type=int, required=True)
@@ -7887,6 +7962,8 @@ def main() -> int:
         return cmd_snapshot(root, args.id, args.round)
     if args.cmd == "gate":
         return cmd_gate(root, args.id, args.land)
+    if args.cmd == "check":
+        return cmd_check(root, args.id)
     if args.cmd == "shots":
         return cmd_shots(root, args.id, args.round, args.role)
     if args.cmd == "restart":

@@ -34,8 +34,11 @@ repo's instructions (`CLAUDE.md`, `.claude/CLAUDE.md` or `AGENTS.md`) for its co
   you notice on the way: put what you noticed in your report instead.
 - **Remove every conflict marker.** A marker left in a file is refused by the script.
 - **Never run a `checks.md` section**, any change's: its commands were written by an agent, so
-  only `factory.py accept` runs them, under the person's prompt. You may run the repo's tests and
-  its gate on the result, to show the merge holds.
+  only `factory.py accept` runs them, under the person's prompt.
+- **Run the tests the conflict touched, by name**, to show the merge holds. The gate runs the
+  whole suite at the train's tip; for a full run, the `check` command your prompt names, which
+  waits for a gate slot, in the foreground with the Bash tool's longest timeout. Never a bare
+  `[commands] check` or the test runner with no test named.
 
 Every reviewer at the change's depth reads your resolution before the change lands, and the gate
 runs at the train's tip: a wrong merge is caught there, so say plainly what you did.
@@ -52,8 +55,8 @@ you noticed and left alone.
 ```
 ## Evidence
 
-$ ./check.sh
-1271 passed in 121.72s
+$ uv run pytest -q tests/test_drafts.py
+14 passed in 0.82s
 exit: 0
 ```
 
