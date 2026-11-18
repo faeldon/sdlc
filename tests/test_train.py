@@ -799,6 +799,37 @@ def test_a_kept_landing_change_ejects_only_its_change(tmp_path, capsys) -> None:
 
 
 @needs_uv
+def test_a_change_landed_again_by_hand_on_the_base_is_reviewed_afresh(tmp_path, capsys) -> None:
+    """A change ejected by its landing review, fixed and brought up to date with the base by hand,
+    then landed again: already in place, its stack moves nothing, and the new landing opens a
+    round of its own, never judged by the ejected round's kept change."""
+    root, trees = _three(tmp_path, check="true")
+    _begin(root, capsys)
+
+    def review(folder: Path, n: int, role: str) -> None:
+        asks = folder.name == trees[1].name and role == "behaviour"
+        text = _verdict(role, "CHANGES", ("bb.txt:1: say more",)) if asks else _verdict(role)
+        (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
+
+    def verify(folder: Path, verdict: dict) -> None:
+        _verified(folder, verdict["round"], kept=_asked(verdict))
+
+    first = _drive(root, capsys, review=review, verify=verify)[-1]
+    assert [e["change"] for e in first["ejected"]] == [trees[1].name], first
+    folder = _folder(trees[1])
+    ejected_round = factory.land_round(folder)
+    code, out, said = factory._sdlc(["resolve", trees[1].name], trees[1])
+    assert code == 0 and out["state"] == "clean", said
+    _begin(root, capsys, "person", trees[1].name)
+    readings = _drive(root, capsys)
+    last = readings[-1]
+    assert last["next"] == "done" and last["landed"] == [trees[1].name], last
+    assert not last["ejected"], last["ejected"]
+    rounds = {r["verdict"]["round"] for r in readings if r.get("next") == "review"}
+    assert rounds == {ejected_round + 1}, "reviewed in a round of its own"
+
+
+@needs_uv
 def test_failing_acceptance_checks_as_stacked_eject_only_that_change(tmp_path, capsys) -> None:
     """R8: change 2's acceptance check passes on its own but fails once stacked on change 1
     (whose file it forbids): the check runs again on its stacked commit, and 2 alone is ejected,
@@ -944,6 +975,47 @@ def test_a_train_conflict_goes_to_one_agent_with_every_change(tmp_path, capsys, 
 
 
 # ------------------------------------------------------------- the base moves under the train (R10)
+
+
+@needs_uv
+def test_a_train_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> None:
+    """2026-11-18-20, in the train: a stray file refusing the stack, a stack git refuses and
+    markers left after `resolve --continue` each record a plain line naming the way on, git's or
+    the script's raw words under it, and the refusal keeps the raw words."""
+
+    def stop(tree: Path) -> list[str]:
+        return factory.read_land_step(
+            (_folder(tree) / factory.LAND_STEP).read_text(encoding="utf-8")
+        )["problems"]
+
+    for sub in ("three", "two"):
+        (tmp_path / sub).mkdir()
+    root, _ = _three(tmp_path / "three", check="true")
+    _begin(root, capsys)
+    out = _drive(root, capsys, until=lambda r: r.get("next") == "stack")[-1]
+    tree, num = Path(out["worktree"]), out["change"].split("-")[0]
+    (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
+    code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto=out["onto"])
+    assert code == 1 and done["refusals"][0].startswith("uncommitted outside"), done
+    plain, raw = stop(tree)
+    assert (
+        "stray.txt" in plain and f"/sdlc-factory:land {num}" in plain and raw == done["refusals"][0]
+    )
+    (tree / "stray.txt").unlink()
+    code, done = _run(capsys, factory.cmd_resolve, tree, num, False, onto="0" * 40)
+    assert code == 1 and done["refusals"][0].startswith("git rebase --onto"), done
+    plain, raw = stop(tree)
+    assert plain.startswith("stacking it onto") and f"/sdlc-factory:land {num}" in plain
+    assert raw == done["refusals"][0]
+
+    root, (_, second) = _conflicting(tmp_path / "two")
+    _begin(root, capsys)
+    _drive(root, capsys, until=lambda r: r.get("next") == "resolve")
+    code, done = _run(capsys, factory.cmd_resolve, second, "002", True)
+    assert code == 1 and "conflict markers left" in done["refusals"][0], "not resolved yet"
+    plain, raw = stop(second)
+    assert "sdlc.py resolve 002 --continue" in plain, "a plain line first"
+    assert raw.startswith("conflict markers left in: README.md"), "the raw text"
 
 
 def _file_an_idea(root: Path, capsys, n: int) -> None:

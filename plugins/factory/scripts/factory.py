@@ -5041,6 +5041,15 @@ def land_round(folder: Path) -> int:
     return max((int(n) for n in found if n.isdigit()), default=0)
 
 
+def _fresh_round(folder: Path, mine: dict) -> None:
+    """Open a landing round for a train's change already in place, when its newest round is an
+    earlier train's (`rounds_before`, from `train --begin`): a change brought up to date by hand
+    after an ejection would otherwise be judged by that landing's replies. A stack that moves a
+    change opens its round itself."""
+    if (n := land_round(folder)) and n == mine.get("rounds_before"):
+        (folder / "reviews" / f"land-{n + 1}").mkdir(parents=True, exist_ok=True)
+
+
 def filed_nit(text: str, change: str, nit: dict) -> bool:
     """Whether the register `text` already holds `nit` for `change`: a `[nit]` entry whose
     `Raised by:` names the change and whose body holds the nit's text. Never by title alone."""
@@ -5782,12 +5791,18 @@ def _train_begin(main: Path, cfg: dict, idents: list[str], by: str | None) -> in
     if unmatched:
         return emit({"refusals": [f"not ready to land: {', '.join(unmatched)}"]}, 1)
     tip = _git(main, "rev-parse", f"refs/heads/{base}") or ""
+    # The landing round each change already has, from an earlier train: this train never judges
+    # a change by that round's replies (`_fresh_round()` opens a new one).
+    before = {}
+    for r in picked:
+        tree = Path(r["worktree"])
+        before[r["change"]] = land_round(tree / work_rel(tree) / r["change"])
     state = {
         "base": base, "by": by, "order": [r["change"] for r in picked],
         "changes": {
             r["change"]: {"worktree": r["worktree"], "pre": None, "on": None, "stacked": None,
                           "stacking": None, "landed": None, "ejected": None, "failed": None,
-                          "fault": None}
+                          "fault": None, "rounds_before": before[r["change"]]}
             for r in picked
         },
         "base_tip": tip, "expected": tip, "moves": 0, "gates": [], "ejections": [],
@@ -5873,6 +5888,7 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         head = _git(tree, "rev-parse", f"refs/heads/{name}") or ""
         if not _stacked(state, name):
             if mine.get("on") == onto and not mine.get("stacked"):
+                _fresh_round(tree / work_rel(tree) / name, mine)
                 mine["stacked"] = head  # already there: it never moved
             else:
                 return done("stack", name, onto=onto)
@@ -6106,10 +6122,12 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
             return emit({"refusals": [f"{folder.name} isn't committed yet: run land first"]}, 1)
         if _rebasing(root):
             return emit({"refusals": ["a rebase is under way: resolve --continue"]}, 1)
+        num = folder.name.split("-")[0]
         if why := _amend_record(root, folder):
-            return _land_refused(root, folder, {}, why)
+            return _land_refused(root, folder, {}, why, _amend_plain(why, num))
         head = _git(root, "rev-parse", "HEAD") or ""
         if mine["on"] == onto:
+            _fresh_round(folder, mine)
             mine["stacked"], mine["stacking"] = head, None
             write_train(root, state)
             return emit({"change": folder.name, "state": "current", "head": head[:12]})
@@ -6133,7 +6151,11 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
             mine["stacking"] = None
             write_train(root, state)
             why = f"git rebase --onto {onto[:12]} failed: {done.stderr.strip()[-300:]}"
-            return _land_refused(root, folder, {}, why)
+            plain = (
+                f"stacking it onto {onto[:12]} failed: run git status in its worktree to see why, "
+                f"then rerun /sdlc-factory:land {num}"
+            )
+            return _land_refused(root, folder, {}, why, plain)
         if files:
             _record_land(root, folder, "stack")
             return emit({"change": folder.name, "state": "conflict", "conflicted": files,

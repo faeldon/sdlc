@@ -36,3 +36,16 @@ Theme: robustness
 Cost: S
 Value: low
 By: code
+
+## F3. [important] [correctness] The train's stack refusals record git's raw words with no plain line, and the plain line on markers lost its test
+
+141's outcome is a plain line over every landing stop's raw text. Before the rebase, 141 gave the
+landing's own rebase a plain line for `_amend_record()`'s refusal (`_amend_plain()`) and for a
+failed rebase. The resolution moved that rebase into 139's train, `resolve --onto`, and dropped
+both: each records only `why`, so the board shows git's words. The test of the plain line on
+"conflict markers left" was in a test 139 rewrote, so it went too, though the code kept the line.
+
+Evidence: plugins/factory/scripts/factory.py:6126 and :6153, `_land_refused(root, folder, {}, why)` with no `plain`; the four assertions a2c05df added to tests/test_land.py:201-204, absent from the resolved file
+Class: merge dropped a side (conflict.md), in the train's refusals only
+Disposition: fixed
+Fix: at factory.py:6126 pass `_amend_plain(why, folder.name.split("-")[0])`; at :6153 pass `f"stacking it onto {onto[:12]} failed: run git status in its worktree to see why, then rerun /sdlc-factory:land {num}"`; in tests/test_train.py, a test that a stray file in a stacking change's worktree, a failed stack and markers left after `resolve --continue` each record a plain line naming the way on, the raw text under it
