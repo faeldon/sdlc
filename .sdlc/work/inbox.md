@@ -33,17 +33,6 @@ Raised 2026-10-25.
 Theme: docs
 Priority: low
 
-## [2026-10-25-2] [idea] Decide at intent whether a change reaches hosts
-
-This repo is the plugin's testbed, so whatever it builds for itself should reach hosts in some
-form, but whether, and how generically, is decided late and implicitly today (010's `after_bump`
-was settled mid-intent; 008 and 009 changed this repo alone). Ask it at intent as its own question
-(plugin only, host-facing, or both, with this repo as the first user) and record it, so the spec
-designs for the host from the start and ship can check the change delivered on it. Raised
-2026-10-25.
-Theme: intent
-Priority: low
-
 ## [2026-10-25-3] [idea] A glossary of the process's terms
 
 The plugin's words (change, tier, stage, gate, WAIT, stop, seed, nit, finding, impact, landed,
