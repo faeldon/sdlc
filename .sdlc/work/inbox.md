@@ -134,6 +134,7 @@ every command), so it can't be committed or replayed elsewhere. The likely desig
 out of git, captured per machine before a run, and approve cases skipped while theirs is missing.
 See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
+Priority: low
 
 ## [2026-11-17-59] [idea] The page's tests read its source; nothing runs the drawer's trap in a browser. A headless check would need a dependency the gate doesn't have.
 
