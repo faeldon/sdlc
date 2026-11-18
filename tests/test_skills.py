@@ -1071,13 +1071,17 @@ def test_the_factory_depends_on_sdlc_and_shares_its_version() -> None:
     assert factory["license"] == "MIT"
 
 
-# Each agent's tools: only the builder may change files. A reviewer or the approver that could
-# Edit or Write would be a second builder nobody asked for, and the spec-writer's draft must reach
-# the person before anything is written.
+# Each agent's tools: only the builder and the resolver may change files, the resolver only the
+# files a conflict names. A reviewer or the approver that could Edit or Write would be a second
+# builder nobody asked for, and the spec-writer's draft must reach the person before anything is
+# written.
 AGENT_TOOLS = {
     "spec-writer": {"Read", "Grep", "Glob"},
-    # The only editor; its sub-agents may only be the read-only kinds, so it stays the only one.
+    # The one that builds; its sub-agents may only be the read-only kinds, so they never edit.
     "builder": {"Read", "Grep", "Glob", "Edit", "Write", "Bash", "Agent(Explore, Plan)"},
+    # It edits only a train's conflicted files, which `resolve --continue` checks: no Write, so no
+    # new file through its own tools, and no sub-agent.
+    "resolver": {"Read", "Grep", "Glob", "Edit", "Bash"},
     "reviewer-code": {"Read", "Grep", "Glob", "Bash"},
     "reviewer-security": {"Read", "Grep", "Glob", "Bash"},
     # It runs the suite; never checks.md, which it reads like a test.
@@ -1304,6 +1308,7 @@ NEVER_RUNS_CHECKS = {
     "reviewer-behaviour": "**Never run them yourself**",
     "reviewer-test": "**Never run a check yourself**",
     "verifier": "but never a `checks.md` section's commands",
+    "resolver": "**Never run a `checks.md` section**",
 }
 
 

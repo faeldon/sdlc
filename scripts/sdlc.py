@@ -4391,7 +4391,17 @@ def _change_trees(root: Path) -> list[tuple[Path, str]]:
 
 
 def _unmerged(tree: Path) -> list[str]:
-    return (_git(tree, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+    """The files a rebase left unmerged in `tree`, each as it is named (`-z`): never git's quoted
+    form of a path holding non-ASCII characters, which no file is called (bug 2026-11-18-73), and
+    never through `_git()`, whose strip would take a leading space. Empty when git fails."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(tree), "diff", "--name-only", "--diff-filter=U", "-z"],
+            capture_output=True, encoding="utf-8", check=True,
+        )  # fmt: skip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    return [p for p in done.stdout.split("\0") if p]
 
 
 def _settle_last_id(tree: Path) -> None:

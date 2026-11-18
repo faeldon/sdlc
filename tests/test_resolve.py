@@ -176,3 +176,29 @@ def test_an_inbox_commit_on_the_base_never_stops_an_open_change_s_rebase(tmp_pat
 
     control = _run(trees["002"], "base", "002")
     assert control.returncode == 1 and _json(control)["resolvable"] is True, control.stdout
+
+
+def test_a_conflict_in_a_non_ascii_path_is_resolved(tmp_path: Path) -> None:
+    """149 R14 (bug 2026-11-18-73): a conflicted file whose name holds non-ASCII characters is
+    listed as it is, never git's quoted form, and `--continue` stages it by that name and goes
+    on."""
+    root = tmp_path / "host"
+    name = "docs/café.md"
+    _write(root / name, "one\ntwo\nthree\n")
+    _write(root / ".gitignore", ".claude/worktrees/\n")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    made = _run(root, "new", "thing", "--tier", "1", "--worktree")
+    assert made.returncode == 0, made.stdout + made.stderr
+    tree = root / ".claude" / "worktrees" / "001-thing"
+    _write(tree / name, "one, as the change says\ntwo\nthree\n")
+    _write(root / name, "one, as main says\ntwo\nthree\n")
+    _git(root, "commit", "-q", "-am", "main moves")
+
+    started = _json(_run(tree, "resolve", "001"))
+    assert started["state"] == "conflict" and started["conflicted"] == [name], started
+    _write(tree / name, "one, as main says and as the change says\ntwo\nthree\n")
+    done = _json(_run(tree, "resolve", "001", "--continue"))
+    assert done["state"] == "clean" and name in done["resolved"], done
+    assert (tree / name).read_text(encoding="utf-8").startswith("one, as main says and as")

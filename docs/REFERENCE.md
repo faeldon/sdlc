@@ -576,7 +576,7 @@ A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps
 or not, with a
 `rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
 `--continue` or `--abort` as its next step, saying that `--abort` keeps the resolved work under
-`refs/sdlc/end/<branch>`; a factory landing whose builder is resolving the conflict says so, its
+`refs/sdlc/end/<branch>`; a factory landing whose agent is resolving the conflict says so, its
 next step to wait for it, or `/sdlc-factory:land NNN` if its session ended. A card with a file
 that won't read names that as its next step, at any
 stage. Its next step follows its `needs you:` line: a decision still to make (`decide D<n>`) is

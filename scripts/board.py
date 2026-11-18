@@ -117,7 +117,7 @@ CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The acceptance checks and the
 # skills' cases run before the commit, at the ship's position, and the checks again after the
-# commit (`recheck`) at a position of their own after the gate; the builder resolving a conflict or
+# commit (`recheck`) at a position of their own after the gate; an agent resolving a conflict or
 # making the person's fix sits at the rebase, as does a train stacking the change or a change
 # waiting its turn in one, a mend at the review, each with its own label. A `stop`, and a train's
 # `eject`, mark the step it stopped after (an `eject` naming none sits at the gate, where most
@@ -184,7 +184,7 @@ def _rebasing(root: Path) -> set[str]:
 def _on_board(root: Path, rebasing: set[str] | None = None) -> list[Path]:
     """The folders the board shows: every open change's, and a shipped or dropped one's while its
     worktree stands, which is what `status` lists as ready to close, or while a rebase is stopped
-    in it (a landing's, on a conflict its builder resolves), when `ready_to_close()` can't see
+    in it (a landing's, on a conflict its agent resolves), when `ready_to_close()` can't see
     its branch."""
     closing = {r["branch"] for r in sdlc.ready_to_close(root)}
     closing |= _rebasing(root) if rebasing is None else rebasing
@@ -740,8 +740,8 @@ def step_samples(
     them); each run of reviewer rows one review round, as long as its slowest, since they run
     together; each verifier's a verification; the first approver's the approval. What follows the
     approver is the landing's: its review rounds and verifications as `land-review` and
-    `land-verify`, its gates (`land_gates`) as `land-gate`, and its builder rows (a resolve or a
-    fix, which the rows can't tell apart) not at all. A row without an integer `duration_ms` is
+    `land-verify`, its gates (`land_gates`) as `land-gate`, and its builder and resolver rows (a
+    resolve or a fix) not at all. A row without an integer `duration_ms` is
     skipped. The landing's other steps (`LAND_TIMES_STEPS`) come from `land_times`, its
     `runs/land-times.jsonl`; an open-ended one is never timed."""
     out: dict[str, list[float]] = {s: [] for s in TRACK}
@@ -823,7 +823,7 @@ def next_action(entry: dict) -> str:
     """What a person runs next on the change, from its stage and tier, and for a factory run its
     decision and the decisions its `needs` still holds (`sdlc.needs_of()`, so the step follows the
     card's `needs you:` line): the step `status` and each skill's report name. The first state a
-    card holds names it, highest first: a factory landing's builder resolving a conflict, a
+    card holds names it, highest first: a factory landing's agent resolving a conflict, a
     stopped rebase, a missing stage, any other problem (with
     a decision that still waits named before it), a stopped landing, a landing under way, shipped
     or dropped, a factory stop, a decision
@@ -833,14 +833,14 @@ def next_action(entry: dict) -> str:
     stage, tier = entry.get("seen") or entry["stage"], entry["tier"]
     landing = entry.get("progress") or {}
     # A stopped rebase comes first: until it ends, no step of the stage's applies, and its
-    # conflicted files may be what won't read. A factory landing's builder resolves its own
+    # conflicted files may be what won't read. A factory landing's agent resolves its own
     # (the record names `resolve`, no stop): the person waits, or lands it again if its session
     # ended. Any other, `sdlc.py resolve` finishes or undoes, and an undo keeps what was resolved
     # under `refs/sdlc/end/<branch>` (`sdlc.RESOLVE_REFS`).
     resolving = landing.get("kind") == "land" and landing.get("step") == "resolve"
     if entry.get("rebasing") and resolving and not landing.get("stopped"):
         return (
-            "its builder is resolving a conflict: wait for it, or "
+            "its agent is resolving a conflict: wait for it, or "
             f"/sdlc-factory:land {entry['id']} if its session ended"
         )
     if entry.get("rebasing"):

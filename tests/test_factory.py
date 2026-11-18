@@ -2538,6 +2538,31 @@ def test_each_role_runs_on_its_model(role, tier, level, model) -> None:
     assert factory.model_for(role, cfg, tier, level) == "fable", "factory.models wins"
 
 
+def test_the_resolver_has_a_model_of_its_own(tmp_path, capsys) -> None:
+    """149 R7: the resolver runs on sonnet at either depth and tier unless `[models] resolver`
+    names another, which `start`'s `models_at` shows and no warning calls unknown; the builder's
+    model never reaches it."""
+    cfg, _ = factory.load_config(Path("/nonexistent"))
+    assert {factory.model_for("resolver", cfg, t, d) for t in (1, 2, None)
+            for d in ("light", "full")} == {"sonnet"}  # fmt: skip
+    cfg["models"] = {"builder": "haiku"}
+    assert factory.model_for("resolver", cfg, 1, "full") == "sonnet", "never the builder's"
+    root, tree = _from_main(tmp_path)
+    _, out = _run(capsys, factory.cmd_start, tree, "008", "build")
+    assert {out["models_at"][d]["resolver"] for d in ("light", "full")} == {"sonnet"}
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "factory.toml").write_text(
+        '[models]\nresolver = "opus"\nbuilder = "haiku"\n', encoding="utf-8"
+    )
+    _git(root, "add", ".sdlc/factory.toml")
+    _git(root, "commit", "-q", "-m", "models")
+    cfg, warnings = factory.load_config(tree)
+    assert not any("unknown role" in w for w in warnings), warnings
+    assert factory.model_for("resolver", cfg, 1, "light") == "opus"
+    _, out = _run(capsys, factory.cmd_start, tree, "008", "build")
+    assert {out["models_at"][d]["resolver"] for d in ("light", "full")} == {"opus"}
+
+
 def test_the_agents_mode_is_the_base_branchs(tmp_path) -> None:
     root = _change(tmp_path)
     _git(root, "checkout", "-q", "main")
@@ -3822,6 +3847,19 @@ def test_measuring_reads_which_sessions_were_the_factorys_agents(tmp_path) -> No
     found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
     assert found == {"s-1": "builder", "s-2": "builder", "s-3": "reviewer-code",
                      "s-4": "reviewer-ui", "s-5": "reviewer-ux"}  # fmt: skip
+
+
+def test_a_resolver_session_is_its_own_role(tmp_path) -> None:
+    """149 R12: a session in `runs/resolver.sessions` is named `resolver`, never `builder`."""
+    root = _change(tmp_path)
+    runs = root / ".sdlc" / "work" / NAME / "runs"
+    runs.mkdir()
+    (runs / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    (runs / "resolver.sessions").write_text("s-2\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "the run")
+    found = sdlc._agent_sessions(root, NAME, f".sdlc/work/{NAME}")
+    assert found == {"s-1": "builder", "s-2": "resolver"}
 
 
 def test_ready_lists_what_can_ship_in_the_order_to_ship_it(tmp_path, capsys) -> None:

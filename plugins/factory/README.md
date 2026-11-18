@@ -82,8 +82,8 @@ reviewing, and deciding whether to escalate.
   the nits its intent or spec names by id retired, committed, and landed as a **train**, through
   `sdlc`'s own `ship` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it,
   never a copy). The train stacks each change on the one before it, in order, on the base
-  branch; a stack that conflicts goes to one landing agent, the builder given every change's
-  spec and diff, and every reviewer at that change's depth checks the resolution before it
+  branch; a stack that conflicts goes to the `resolver`, an agent of its own given every change's
+  spec and diff, which may edit only the conflicted files, and every reviewer at that change's depth checks the resolution before it
   lands. The base branch's gate runs once, at the stack's tip; a red tip is bisected by prefix
   and the change at fault is ejected, back to its commit as it was before the train with the
   reason and the gate file in its commit, while the rest land; nothing of it reaches the base
@@ -126,7 +126,8 @@ reviewing, and deciding whether to escalate.
 The builder may start read-only `Explore` and `Plan` sub-agents of its own while it plans or
 reworks, to read code across the repo; they never write, so it stays the only editor. Each
 reviewer runs on sonnet at either depth and tier, but the security reviewer, which runs on opus
-like the builder and the approver (*Why these defaults*, below, says why). The supervisor runs on
+like the builder and the approver (*Why these defaults*, below, says why); the resolver runs on
+sonnet, its runs recorded under its own role, apart from the builder's. The supervisor runs on
 whatever model your session does.
 
 Two more skills stand outside any change, each run only when you ask, behind one approval that
@@ -275,9 +276,12 @@ They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, e
 | `reviewer-ui` | how the change looks: theme fit, spacing, contrast, overflow at phone width, from screenshots | no |
 | `reviewer-ux` | how it works for a person: the task, empty, loading and error states, labels, reach | no |
 | `verifier` | keeps or drops each requested change, checked against the code | no |
+| `resolver` | resolves a landing train's conflicted files, keeping every change's intent | only those files |
 | `approver` | READY or ESCALATE, for the person at ship | no |
 
-Only the builder edits. The others return text, and the skill writes it to the change's folder.
+Only the builder and the resolver edit, the resolver only the files a conflict names:
+`factory.py resolve --continue` refuses a resolution that changed any other file. The others
+return text, and the skill writes it to the change's folder.
 
 **The UI and UX reviewers** run only in a repo that declares a front end (`[ui]`, below), and only
 on a round whose diff touches its `paths`; once one round runs them, the later ones do too. They

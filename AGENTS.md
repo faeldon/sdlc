@@ -236,8 +236,9 @@ and the gate slots' lock files, for the hand gate (`_hand_slot()`), and the base
 and the screenshot sets under `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`,
 `_current_shots()`), never running `factory.py`: each reads the other's files with
 copies of its parsing (`risk_paths()` and the regexes included), pinned by tests. Agents that
-judge have no Write; only the builder edits (its sub-agents only `Agent(Explore, Plan)`), and no
-agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
+judge have no Write; only the builder and the resolver edit (the builder's sub-agents only
+`Agent(Explore, Plan)`; the resolver, a train conflict's own agent, only the files the conflict
+names, which `resolve --continue` checks), and no agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
 gate` the one place it runs a host's command, the base branch's `[commands] check`. Landing is
 the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
 (`sdlc_path()`): a batch lands as a train (`cmd_train()`, its state `TRAIN_STATE` in the git

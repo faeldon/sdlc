@@ -1,0 +1,4 @@
+# Decisions
+
+- [x] R1 (person, revise): fold -73 into 149 (bug 2026-11-18-73, resolve --continue misses non-ASCII conflicted paths; added as spec R14 and `fixes:`)
+- [x] D1 (approver round 2, look): the change touches published interfaces that every factory host sees. It adds a new `[models] resolver` config key (sonnet by default), adds a new value, `resolver`, to the `Sdlc-Role` metrics trailer, and changes the AGENTS.md rule that only the builder edits. It also adds a new refusal in `resolve --continue`: any resolution that edits outside its conflicted files is refused. That covers the builder's single-change `resolve` and a person's hand resolution too, and a host whose tests leave untracked files behind. All of it adds to existing contracts and the approved spec names each one, but the build itself should get a look before it reaches `main`. → decided: seen

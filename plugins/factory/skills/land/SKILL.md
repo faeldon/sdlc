@@ -188,7 +188,7 @@ commands, and only one loop runs at a time (the run lock). The steps:
 - **`stack`**: `resolve <NNN> --onto <onto>`, the change rebased onto the stacked commit of the
   change before it (the base branch's tip for the first), its records amended in first;
   `.sdlc/last-id` settles itself (the higher number).
-- **`resolve`**: the stack conflicts. One landing agent, the builder in a fresh session, told
+- **`resolve`**: the stack conflicts. The resolver, an agent of its own in a fresh session, told
   every change in the train, its spec and its diff, resolves the files (`agent <NNN> --task
   train-resolve`); the script stages them with the agent's reply and continues the rebase
   (`resolve <NNN> --continue`). A resolved conflict is reviewed again by every reviewer at the

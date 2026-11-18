@@ -118,7 +118,7 @@ CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 # Every role a model can be set for, and the reviewers a repo can choose among.
 ROLES = (
     "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "verifier",
-    "approver",
+    "approver", "resolver",
 )  # fmt: skip
 REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
 # The reviewers that look at the page a change shows, from `factory.py shots`: never chosen in
@@ -152,11 +152,13 @@ MAX_ROUNDS = 5
 MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
 # The model each role runs on unless `factory.models` sets one: what builds, decides or looks for
 # exploits on the strongest; the other reviewers (`SCALED`) on `sonnet` at either depth and tier,
-# since a light round on `haiku` passed what its landing then kept (README, *Why these defaults*).
+# since a light round on `haiku` passed what its landing then kept (README, *Why these defaults*);
+# the resolver on `sonnet`, since merging two finished changes is narrower work than building one,
+# and the gate and the landing review read what it merged.
 # The supervisor is the person's own session, never set here.
 FIXED_MODELS = {
     "spec-writer": "opus", "builder": "opus", "security": "opus", "verifier": "sonnet",
-    "approver": "opus",
+    "approver": "opus", "resolver": "sonnet",
 }  # fmt: skip
 SCALED = ("code", "test", "behaviour", "ui", "ux")
 # The stages a factory step moves a change between. `shipped` stays `sdlc ship`'s alone.
@@ -3474,7 +3476,7 @@ LAND_TIMES = Path("runs") / "land-times.jsonl"
 # The steps a landing records: `checks` and `cases` (its acceptance checks and skills' cases,
 # before its commit; after a rebase the checks run inside the gate's step), `ship` (its commit),
 # `rebase` (a landing again), `stack` (the train stacking it), `wait` (a train's change waiting its
-# turn), `resolve` (the builder on a conflict), `fix` (the builder on the person's fix), `gate`,
+# turn), `resolve` (an agent on a conflict), `fix` (the builder on the person's fix), `gate`,
 # `recheck` (the acceptance checks again, after the commit), `review`, `mend`, `verify`, `close`,
 # `eject` (the train put it back, a stop with its reason) and `stop`.
 LAND_STEPS = (
@@ -3524,17 +3526,18 @@ TASKS = (
 TASK_ROLE = {
     "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
     "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
-    "train-resolve": "builder", "land-fix": "builder", "land-verify": "verifier",
+    "train-resolve": "resolver", "land-fix": "builder", "land-verify": "verifier",
 }  # fmt: skip
 # The landing's tasks: the builder resolving a rebase's conflicts or making a fix the person asked
-# for, the review of the change as it now stands on the base branch, and the mend of a landing
-# reply `land-verdicts` names. Never steps of the build's loop, so `verdicts` names none.
+# for, the resolver resolving a train's, the review of the change as it now stands on the base
+# branch, and the mend of a landing reply `land-verdicts` names. Never steps of the build's loop,
+# so `verdicts` names none.
 LAND_TASKS = ("resolve", "train-resolve", "land-fix", "land-review", "land-verify", "land-mend")
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
 TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
              "rework": "rework", "approve": "approve"}  # fmt: skip
 # What the builder resumes on when a task carries on its own session. Never `train-resolve`: the
-# landing agent is a session of its own, with every change in the train, not one change's builder.
+# resolver is a session of its own, with every change in the train, not one change's builder.
 RESUMES = ("fix", "rework", "decided", "mend", "resolve", "land-fix")
 MEND = (
     "Your reply has no ## Evidence, or a command without its exit: run what your claims rest on "
@@ -4055,12 +4058,12 @@ def _task(
 
 def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Path, bool] | str:
     """The landing's prompts: the builder, resumed, resolving the files a rebase left conflicted,
-    or making the fix the person asked for at landing (`build/land-<n>.ask.md`); the builder in a
-    fresh session as the train's one landing agent (`train-resolve`), told every change in the
-    train, its spec and its diff, for a conflict while stacking; a reviewer
+    or making the fix the person asked for at landing (`build/land-<n>.ask.md`); the resolver in a
+    fresh session of its own (`train-resolve`), told every change in the train, its spec and its
+    diff, for a conflict while stacking; a reviewer
     reading the change's diff from the commit the round rebased it onto (`_land_diff()`); the
     verifier on what they asked for, against that diff. Each reply goes under
-    `reviews/land-<n>/`, the builder's to `build/land-<n>.md`."""
+    `reviews/land-<n>/`, the builder's and the resolver's to `build/land-<n>.md`."""
     n = land_round(folder)
     if not n:
         return "no landing round is under way: run land first"
@@ -4156,7 +4159,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             return f"land-review needs --role, one of {', '.join(REVIEWERS)}"
         resolved = (folder / "runs" / "land-resolved").is_file()
         why = (
-            f"its conflicts resolved by the builder, in build/land-{n}.md"
+            f"its conflicts resolved while landing, in build/land-{n}.md"
             if resolved
             else ("with no conflict")
         )
@@ -4254,6 +4257,9 @@ def cmd_agent(
         return emit({"refusals": [refusal]}, 1)
     cfg, _ = load_config(root)
     folder, _ = find_change(root, ident)
+    if task == "train-resolve" and role not in (None, "resolver"):
+        why = f"train-resolve runs the resolver, never the {role}: drop --role, or pass resolver"
+        return emit({"refusals": [why]}, 1)
     role = role or TASK_ROLE.get(task)
     if task == "review" and role not in REVIEWERS:
         return emit({"refusals": [f"review needs --role, one of {', '.join(REVIEWERS)}"]}, 1)
@@ -5657,11 +5663,11 @@ def _commit_failed(root: Path, folder: Path) -> bool:
     return frontmatter(_git(root, "show", f"HEAD:{rel}") or "").get("stage") != "shipped"
 
 
-def _dirty(root: Path) -> list[str] | None:
-    """Every path `root` has uncommitted, untracked ones included, read from `git status
-    --porcelain -z` as it printed it: never through `_git()`, whose strip takes the first entry's
-    leading space (` M path`) and so a character of its path. A rename's old path is skipped.
-    None when git fails."""
+def _status_entries(root: Path) -> list[tuple[str, str]] | None:
+    """Each entry `git status --porcelain -z --untracked-files=all` prints for `root`, as its
+    two-letter `XY` code and its path, read as git printed it: never through `_git()`, whose strip
+    takes the first entry's leading space (` M path`) and so a character of its path. A rename's
+    old path is skipped. None when git fails."""
     try:
         done = subprocess.run(
             ["git", "-C", str(root), "status", "--porcelain", "-z", "--untracked-files=all"],
@@ -5669,16 +5675,43 @@ def _dirty(root: Path) -> list[str] | None:
         )  # fmt: skip
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
-    entries, paths = done.stdout.split("\0"), []
+    entries, found = done.stdout.split("\0"), []
     i = 0
     while i < len(entries):
         entry = entries[i]
         if len(entry) > 3:
-            paths.append(entry[3:])
+            found.append((entry[:2], entry[3:]))
             if entry[0] in "RC":
                 i += 1
         i += 1
-    return paths
+    return found
+
+
+def _dirty(root: Path) -> list[str] | None:
+    """Every path `root` has uncommitted, untracked ones included (`_status_entries()`). None
+    when git fails."""
+    entries = _status_entries(root)
+    return None if entries is None else [path for _, path in entries]
+
+
+# `git status`'s codes for an unmerged path: the files a conflict left for its resolution.
+UNMERGED = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
+
+
+def _stray(root: Path, records: list[str]) -> list[str] | None:
+    """The paths a resolution changed outside its conflicted files and the change's landing
+    `records` (root-relative POSIX paths), from one `_status_entries()` listing: an entry that
+    isn't unmerged whose worktree column isn't blank, or an untracked one (`??`). What the
+    replayed commit staged cleanly (worktree column blank) is the commit's own and passes. None
+    when git fails."""
+    entries = _status_entries(root)
+    if entries is None:
+        return None
+    allowed = {*records, *(path for xy, path in entries if xy in UNMERGED)}
+    return [
+        path for xy, path in entries
+        if xy not in UNMERGED and (xy == "??" or xy[1] != " ") and path not in allowed
+    ]  # fmt: skip
 
 
 def _amend_record(root: Path, folder: Path, also: list[str] = ()) -> str | None:
@@ -5754,7 +5787,7 @@ def cmd_land_close(root: Path, ident: str) -> int:
         if LANDING_RESOLVED in resolution_signals(root, folder, cfg):
             why = f"landed by=auto, and {LANDING_RESOLVED}: no landing review has passed it"
             plain = (
-                "the landing passed itself, but its builder resolved a conflict that no landing "
+                "the landing passed itself, but it resolved a conflict that no landing "
                 "review has passed: read the resolution (runs/land-resolved names the files), "
                 f"then /sdlc:close {num} by hand"
             )
@@ -6798,7 +6831,17 @@ def _run_loop(main: Path) -> int:
 
 
 def _conflicted(root: Path) -> list[str]:
-    return (_git(root, "diff", "--name-only", "--diff-filter=U") or "").splitlines()
+    """The files a rebase left unmerged in `root`, each as it is named (`-z`): never git's quoted
+    form of a path holding non-ASCII characters, which no file is called (bug 2026-11-18-73), and
+    never through `_git()`, whose strip would take a leading space. Empty when git fails."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=U", "-z"],
+            capture_output=True, encoding="utf-8", check=True,
+        )  # fmt: skip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    return [p for p in done.stdout.split("\0") if p]
 
 
 def _rebasing(root: Path) -> bool:
@@ -6814,10 +6857,14 @@ def _rebasing(root: Path) -> bool:
     return False
 
 
-# The change's own records a builder's resolve run writes mid-rebase (its cost line, its step and
-# the time of the step it left, `_record_land()`'s `LAND_TIMES`, a fresh session's id): staged by
-# `--continue`, so they go into the rebased commit and the rebase never refuses on them.
-RESOLVE_RECORDS = (COSTS, LAND_STEP, LAND_TIMES, Path("runs") / "builder.sessions")
+# The change's own records a resolve run writes mid-rebase, the builder's or the resolver's (its
+# cost line, its step and the time of the step it left, `_record_land()`'s `LAND_TIMES`, a fresh
+# session's id): staged by `--continue`, so they go into the rebased commit and the rebase never
+# refuses on them.
+RESOLVE_RECORDS = (
+    COSTS, LAND_STEP, LAND_TIMES, Path("runs") / "builder.sessions",
+    Path("runs") / "resolver.sessions",
+)  # fmt: skip
 
 
 COUNTER = ".sdlc/last-id"
@@ -6861,7 +6908,7 @@ def _rebase_settling(
 
 
 def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> int:
-    """A rebase that conflicts, left for the builder: exactly one of `--onto` and `--continue`.
+    """A rebase that conflicts, left for an agent: exactly one of `--onto` and `--continue`.
     `--onto <commit>` in a train is the train's stack: the change's own commits (from `on`, where
     the train found them) rebased onto `onto`, the commit of the change before it or the base's
     tip, its dirty records amended in first, a landing round opened when it moves: `current`
@@ -6869,14 +6916,15 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     `--onto` takes only the base branch, by name or by its tip: the change's own commits, from
     their merge base with it, rebased onto it, with no train state and no landing round: `current`,
     `stacked` or `conflict`. Either way `.sdlc/last-id` settles itself (`_rebase_settling()`).
-    `--continue` checks no conflict marker is left in the conflicted files, writes
-    `runs/land-resolved`, stages the files, the marker, the landing agent's reply and the other
+    `--continue` checks no conflict marker is left in the conflicted files and that nothing
+    outside them and the change's landing records changed (`_stray()`), writes
+    `runs/land-resolved`, stages the files, the marker, the agent's reply and the other
     records (`RESOLVE_RECORDS`), and continues, so the rebased commit holds them and the worktree is
     clean; on a second conflict it aborts, which takes the staged marker with it.
-    Every git step is this script's: the builder only edits the files it is given. A conflicted
-    register loses, before it is staged, every entry the landing deleted from it, whatever the
-    builder kept: the change's `idea:` and `fixes:` entries and the nits it retired, each by id
-    (`dropped`). The marker reads `land-<n>`, the round under way, then the files. It is
+    Every git step is this script's: the resolver, or the builder, only edits the files it is
+    given. A conflicted register loses, before it is staged, every entry the landing deleted from
+    it, whatever the agent kept: the change's `idea:` and `fixes:` entries and the nits it retired,
+    each by id (`dropped`). The marker reads `land-<n>`, the round under way, then the files. It is
     a resolved conflict no reviewer has seen until round `n`'s review passes
     (`resolution_signals()`)."""
     if cont == (onto is not None):
@@ -6960,13 +7008,32 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     if marked:
         num = folder.name.split("-")[0]
         plain = (
-            f"the builder left conflict markers in {', '.join(marked)}: remove them in its "
+            f"the resolution left conflict markers in {', '.join(marked)}: remove them in its "
             f"worktree, then sdlc.py resolve {num} --continue finishes the rebase (or --abort "
             f"undoes it, for /sdlc:ship {num} by hand)"
         )
         why = f"conflict markers left in: {', '.join(marked)}"
         return _land_refused(root, folder, {}, why, plain)
-    # What the landing deleted from the register stays deleted, whatever the builder kept: the
+    # Only the conflicted files and the change's landing records may have changed: the script, not
+    # the prompt, holds a resolution to the files it was given (149 R8, R9), whoever resolved it.
+    n = land_round(folder)
+    marker = folder / "runs" / "land-resolved"
+    own = (*RESOLVE_RECORDS, marker.relative_to(folder), Path("build") / f"land-{n}.md")
+    records = [(folder / r).relative_to(root).as_posix() for r in own]
+    stray = _stray(root, records)
+    if stray is None:
+        return _land_refused(root, folder, {}, "git status failed in the change's worktree")
+    if stray:
+        num = folder.name.split("-")[0]
+        listed = ", ".join(stray)
+        why = f"edited outside its conflicted files: {listed}"
+        plain = (
+            f"the resolution changed {listed}, outside the conflicted files: undo those edits in "
+            f"its worktree (git checkout -- <path>, or delete a new file), then factory.py resolve "
+            f"{num} --continue, or eject {num} from the train"
+        )
+        return _land_refused(root, folder, {}, why, plain)
+    # What the landing deleted from the register stays deleted, whatever the agent kept: the
     # change's own seeds and the bugs it fixes, by id, and the nits it retired (`named_nits()`).
     dropped: list[str] = []
     if INBOX.as_posix() in files:
@@ -6976,16 +7043,14 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     for f in files:
         _git(root, "add", "--", f)
     # The resolution's marker, written before the rebase goes on, so it goes into the rebased
-    # commit with the landing agent's reply and the worktree is left clean (R14); an abort below
+    # commit with the resolver's reply and the worktree is left clean (R14); an abort below
     # takes the staged marker with it.
-    n = land_round(folder)
-    marker = folder / "runs" / "land-resolved"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(f"land-{n}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n")
-    # The builder's resolve run added its cost line to this tracked file mid-rebase: the change's
+    # The agent's resolve run added its cost line to this tracked file mid-rebase: the change's
     # own record, so it goes into the rebased commit, or `--continue` refuses on it.
-    # So did the builder's step, `resolve`, in the landing's step record.
-    for record in (*RESOLVE_RECORDS, marker.relative_to(folder), Path("build") / f"land-{n}.md"):
+    # So did the agent's step, `resolve`, in the landing's step record.
+    for record in own:
         if (folder / record).is_file():
             _git(root, "add", "--", (folder / record).relative_to(root).as_posix())
     done = subprocess.run(["git", "-C", str(root), "rebase", "--continue"], capture_output=True,
@@ -7712,7 +7777,9 @@ def main() -> int:
     p_agent = sub.add_parser("agent", help="run one agent session for a step, and file its reply")
     p_agent.add_argument("id")
     p_agent.add_argument("--task", choices=TASKS, required=True)
-    p_agent.add_argument("--role", choices=[*REVIEWERS, "builder", "approver", "verifier"])
+    p_agent.add_argument(
+        "--role", choices=[*REVIEWERS, "builder", "approver", "verifier", "resolver"]
+    )
     sub.add_parser("sdlc-path", help="the sdlc.py of this factory's own version, which land runs")
     p_check = sub.add_parser("land-check", help="the batch to land, its signals, and whether clear")
     p_check.add_argument("ids", nargs="*")

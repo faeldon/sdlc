@@ -795,12 +795,13 @@ def test_a_reply_still_unreadable_after_its_mend_ejects_only_that_change(tmp_pat
 
 
 def _conflicting(
-    tmp_path: Path, check: str | None = "true", tier2: bool = False
+    tmp_path: Path, check: str | None = "true", tier2: bool = False, extra: dict | None = None
 ) -> tuple[Path, list[Path]]:
-    """Two ready changes that edit README's first line: stacking the second conflicts."""
+    """Two ready changes that edit README's first line: stacking the second conflicts. `extra` is
+    more the second writes, which merges without a conflict."""
     root = _repo(tmp_path, check)
     first = _ready(root, "first", {"README.md": "first's one\ntwo\nthree\n"})
-    second = _ready(root, "second", {"README.md": "second's one\ntwo\nthree\n"},
+    second = _ready(root, "second", {"README.md": "second's one\ntwo\nthree\n", **(extra or {})},
                     tier=2 if tier2 else 1)  # fmt: skip
     return root, [first, second]
 
@@ -835,18 +836,20 @@ def test_a_train_resolution_is_reviewed_before_it_closes(tmp_path, capsys) -> No
 
 
 @needs_uv
-def test_a_train_conflict_goes_to_one_agent_with_every_change(tmp_path, capsys, monkeypatch):
-    """R3: the conflict goes to the builder as `train-resolve`, a fresh session whose prompt names
-    every change in the train, its spec (`spec.md`, or `intent.md` at Tier 1) and its diff; its
-    session id lands in change 2's `runs/builder.sessions`; the counter still settles itself."""
-    root, trees = _conflicting(tmp_path, tier2=True)
+def test_a_train_conflict_goes_to_the_resolver_with_every_change(tmp_path, capsys, monkeypatch):
+    """R3 (147), 149 R1-R3, R9, R10: the conflict goes to the resolver as `train-resolve`, a fresh
+    session whose prompt names every change in the train, its spec (`spec.md`, or `intent.md` at
+    Tier 1) and its diff; its session id and cost land under `resolver`, the builder's records
+    untouched; a file the commit staged cleanly passes the fence, as the rebase left it; the
+    counter still settles itself."""
+    root, trees = _conflicting(tmp_path, tier2=True, extra={"notes.txt": "second's notes\n"})
     _begin(root, capsys)
     readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
     last = readings[-1]
     assert last["change"] == trees[1].name and last["files"] == ["README.md"], last
     folder = _folder(trees[1])
     pre = {n: c["pre"] for n, c in last["changes"].items()}
-    prompt, target, append = factory._land_task(trees[1], folder, "train-resolve", "builder")
+    prompt, target, append = factory._land_task(trees[1], folder, "train-resolve", "resolver")
     assert target == folder / "build" / "land-1.md" and append is False
     for tree in trees:
         intent = _git(tree, "show", f"{pre[tree.name]}:.sdlc/work/{tree.name}/intent.md")
@@ -861,26 +864,118 @@ def test_a_train_conflict_goes_to_one_agent_with_every_change(tmp_path, capsys, 
     def fake(argv: list[str], cwd: Path):
         calls.append(argv)
         _resolving(trees[1], ["README.md"])
-        return 0, "Kept both lines.\n\n## Evidence\n\n$ true\nexit: 0\n", None, None
+        figures = {"usd": 0.25, "duration_ms": 900, "turns": 2}
+        return 0, "Kept both lines.\n\n## Evidence\n\n$ true\nexit: 0\n", None, figures
 
     monkeypatch.setattr(factory, "_claude", fake)
-    sessions = folder / "runs" / "builder.sessions"
-    before = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
+    runs = folder / "runs"
+    builder = runs / "builder.sessions"
+    before = builder.read_bytes() if builder.is_file() else None
+    costs = runs / "costs.jsonl"
+    rows_before = costs.read_text(encoding="utf-8").splitlines() if costs.is_file() else []
+    untouched = (trees[1] / "notes.txt").read_bytes()
     code, out = _run(capsys, factory.cmd_agent, trees[1], "002", "train-resolve", None, None)
-    assert code == 0 and out["role"] == "builder", out
-    assert "--session-id" in calls[0] and "--resume" not in calls[0], "never a resumed session"
+    assert code == 0 and out["role"] == "resolver" and out["model"] == "sonnet", out
+    argv = calls[0]
+    assert "--session-id" in argv and "--resume" not in argv, "never a resumed session"
+    assert argv[argv.index("--agent") + 1] == "sdlc-factory:resolver", argv
+    assert argv[argv.index("--model") + 1] == "sonnet", argv
     session = out["session"]
-    assert sessions.read_text(encoding="utf-8").split() == [*before, session]
-    assert "sdlc-factory:builder" in calls[0]
+    assert (runs / "resolver.sessions").read_text(encoding="utf-8").split() == [session]
+    assert (builder.read_bytes() if builder.is_file() else None) == before, "builder's untouched"
+    rows = costs.read_text(encoding="utf-8").splitlines()
+    assert rows[: len(rows_before)] == rows_before
+    added = [json.loads(r) for r in rows[len(rows_before) :]]
+    assert [(r["role"], r["model"], r["session"]) for r in added] == [
+        ("resolver", "sonnet", session)
+    ], added
     code, out = _run(capsys, factory.cmd_resolve, trees[1], "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
+    assert (trees[1] / "notes.txt").read_bytes() == untouched, "R10: left as the rebase left it"
     assert (trees[1] / ".sdlc" / "last-id").read_text(encoding="utf-8").strip() == "002"
     dirty = _git(trees[1], "status", "--porcelain").splitlines()
-    assert not any("builder.sessions" in d for d in dirty), "the session id went into the commit"
-    committed = _git(trees[1], "show", f"HEAD:.sdlc/work/{trees[1].name}/runs/builder.sessions")
-    assert committed.split()[-1] == session
+    assert not any("resolver.sessions" in d for d in dirty), "the session id went into the commit"
+    committed = _git(trees[1], "show", f"HEAD:.sdlc/work/{trees[1].name}/runs/resolver.sessions")
+    assert committed.split() == [session]
     readings = drive_train(factory, root, capsys)
     assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
+
+
+@needs_uv
+def test_a_train_conflict_in_a_non_ascii_path_resolves(tmp_path, capsys) -> None:
+    """149 R14 (bug 2026-11-18-73): stacking conflicts in a file whose name holds non-ASCII
+    characters; the conflict names it as it is, never git's quoted form, and `--continue` stages it
+    by that name and continues."""
+    name = "docs/café.md"
+    root = _repo(tmp_path, "true")
+    (root / "docs").mkdir()
+    (root / name).write_text("one\ntwo\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a non-ASCII file")
+    _ready(root, "first", {name: "first's one\ntwo\n"})
+    second = _ready(root, "second", {name: "second's one\ntwo\n"})
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    assert readings[-1]["files"] == [name], readings[-1]
+    assert factory._conflicted(second) == [name]
+    (second / name).write_text("first's one, and second's\ntwo\n", encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_resolve, second, "002", True)
+    assert (code, out["state"], out["resolved"]) == (0, "resolved", [name]), out
+    assert _git(second, "show", f"HEAD:{name}").startswith("first's one, and second's")
+
+
+@needs_uv
+def test_train_resolve_runs_no_role_but_the_resolver(tmp_path, capsys, monkeypatch) -> None:
+    """149 R4: `train-resolve --role builder` is refused before any session starts or any
+    `.sessions` file is written; `--role resolver` is the one it takes."""
+    root, trees = _conflicting(tmp_path)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        factory, "_claude", lambda argv, cwd: calls.append(argv) or (1, "", "x", None)
+    )
+    runs = _folder(trees[1]) / "runs"
+    before = sorted(p.name for p in runs.glob("*.sessions"))
+    for role in ("builder", "code", "verifier"):
+        code, out = _run(capsys, factory.cmd_agent, trees[1], "002", "train-resolve", role, None)
+        assert code == 1 and "resolver" in out["refusals"][0], out
+    assert not calls and sorted(p.name for p in runs.glob("*.sessions")) == before
+
+
+@needs_uv
+def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
+    """149 R8, R9: a resolution that also edits a tracked file the conflict didn't name, or
+    leaves an untracked one, is refused by `--continue`, naming it, with nothing staged, no
+    marker, and the rebase left under way; undone, the same resolution goes through, the file
+    the replayed commit staged cleanly passing as the commit's own."""
+    root, trees = _conflicting(tmp_path, extra={"notes.txt": "second's notes\n"})
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    _resolving(tree, ["README.md"])
+    marker = folder / "runs" / "land-resolved"
+
+    def refused(stray: str) -> None:
+        code, out = _run(capsys, factory.cmd_resolve, tree, "002", True)
+        assert code == 1 and out["state"] == "refused", out
+        assert stray in out["refusals"][0] and "outside its conflicted files" in out["refusals"][0]
+        assert not marker.exists(), "no marker"
+        assert factory._rebasing(tree), "the rebase is left under way"
+        assert factory._conflicted(tree) == ["README.md"], "nothing staged"
+        step = factory.read_land_step((folder / factory.LAND_STEP).read_text(encoding="utf-8"))
+        assert any("resolve 002 --continue" in p for p in step["problems"]), step
+
+    (tree / "LICENSE.txt").write_text("not the conflict's\n", encoding="utf-8")
+    refused("LICENSE.txt")
+    (tree / "LICENSE.txt").unlink()
+    with (tree / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write("# touched\n")
+    refused(".gitignore")
+    _git(tree, "checkout", "--", ".gitignore")
+    code, out = _run(capsys, factory.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert _git(tree, "show", "HEAD:notes.txt") == "second's notes"
 
 
 # ------------------------------------------------------------- the base moves under the train (R10)
@@ -1525,7 +1620,7 @@ def test_train_run_starts_a_rounds_reviewers_together(tmp_path, capsys, monkeypa
     root, trees = _conflicting(tmp_path)
     second = trees[1].name
     resolved = {"README.md": "first's one, and second's\ntwo\nthree\n"}
-    plan = {f"{second}:builder": {"write": resolved}}
+    plan = {f"{second}:resolver": {"write": resolved}}
     for role in factory.DEFAULTS["reviewers"]:
         plan[f"{second}:reviewer-{role}"] = {"sleep": 1}
     calls = fake_claude(tmp_path, monkeypatch, plan)

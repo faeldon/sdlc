@@ -1213,7 +1213,7 @@ PRECEDENCE = [
     # 145 R25: a factory landing's builder resolving the conflict a rebase stopped on.
     ("landing conflict",
      {"rebasing": True, "progress": {"kind": "land", "stopped": False, "step": "resolve"}},
-     "its builder is resolving a conflict: wait for it, or /sdlc-factory:land 016 if its session "
+     "its agent is resolving a conflict: wait for it, or /sdlc-factory:land 016 if its session "
      "ended"),
     ("rebasing", {"rebasing": True},
      "a rebase is stopped in its worktree: resolve its conflicts, then "
@@ -1421,7 +1421,7 @@ def test_a_shipped_change_whose_landing_rebase_is_stopped_keeps_its_card(repo) -
     assert card["progress"]["kind"] == "land" and _states(card) == LANDS["resolve"]
     # 145 R25: the factory's builder is on it, so the card says so, never the hand-run resolve.
     assert card["next"] == (
-        "its builder is resolving a conflict: wait for it, or /sdlc-factory:land 030 if its "
+        "its agent is resolving a conflict: wait for it, or /sdlc-factory:land 030 if its "
         "session ended"
     )
     assert card["column"] == "landing"

@@ -2282,6 +2282,7 @@ def test_a_fix_asked_at_landing_is_built_gated_and_reviewed_at_depth(
     monkeypatch.setattr(factory, "_claude", _builder_edits(tree, captured))
     code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-fix", None, None)
     assert (code, out["to"]) == (0, f".sdlc/work/{tree.name}/build/land-1.md"), out
+    assert out["role"] == "builder", "149 R11: a fix stays the builder's, never the resolver's"
     argv = captured["argv"]
     prompt = argv[argv.index("-p") + 1]
     assert FIX_WORDS in prompt and "run no git command" in prompt and "## Evidence" in prompt
