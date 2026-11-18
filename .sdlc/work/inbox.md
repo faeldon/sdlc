@@ -148,90 +148,6 @@ rewrote close's lock and the landing at light depth with no security review. Ope
 Theme: factory
 Raised 2026-11-18.
 
-## [2026-11-18-53] [idea] Reflow AGENTS.md's remaining lines past 100 columns
-
-Left undone by 142-pay-down-todays-nits, carried forward when it landed: `AGENTS.md` has other lines past 100 columns (12, 29, 34, the *Writes before a WAIT* paragraph at 109-110, 223, 232-233, 238, 255, 276, 314), outside 2026-11-18-25's scope.
-See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-54] [idea] Replace the "111 C1" review label in test_a_server_that_fails_on_its_own_is_started_once with the rule it pins
-
-Left undone by 142-pay-down-todays-nits, carried forward when it landed: `tests/test_factory.py`'s `test_a_server_that_fails_on_its_own_is_started_once` docstring cites "111 C1", another review-only label no reader can resolve.
-See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-55] [idea] Wrap the supersedes sentence in reviewer-code.md and reviewer-ux.md
-
-Left undone by 142-pay-down-todays-nits, carried forward when it landed: `plugins/factory/agents/reviewer-code.md:94` and `reviewer-ux.md:67`, the `supersedes` sentence, are single long lines.
-See .sdlc/work/142-pay-down-todays-nits/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-56] [nit] the new "unverified" case asserts only `stuck == []`.
-
-Raised by the code review of 142-pay-down-todays-nits, round 1: tests/test_factory.py:1676: the new "unverified" case asserts only `stuck == []`. Also asserting `next == "rework"` would pin the full outcome, as the neighbouring cases do.
-
-Theme: tests
-Paths: tests/test_factory.py
-Cost: S
-Value: low
-Raised by: 142-pay-down-todays-nits (correctness)
-
-## [2026-11-18-57] [idea] Tell a hand-built change how to take screenshots for ship's UI review
-
-Left undone by 143-ship-review-parity, carried forward when it landed: Say in `ui.md`, or in `passes.ui.why` when `sdlc-factory` is enabled, how a hand-built change takes its screenshots (`factory.py shots`), once the person decides whether ship should point at a command that starts a dev server.
-See .sdlc/work/143-ship-review-parity/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-58] [nit] the line says "whose own behaviour reviewer ran" and security.md and ui.md say the same of their factory reviewers.
-
-Raised by the code review of 143-ship-review-parity, round 1: skills/ship/behaviour.md:3: the line says "whose own behaviour reviewer ran" and security.md and ui.md say the same of their factory reviewers. Only the factory case is meant, so "a factory run, whose own reviewers ran" would match `_passes_report()`'s wording.
-
-Theme: docs
-Paths: skills/ship/behaviour.md
-Cost: S
-Value: low
-Raised by: 143-ship-review-parity (correctness)
-
-## [2026-11-18-59] [nit] it says the pass applies when the diff touches a `review.sensitive` path.
-
-Raised by the code review of 143-ship-review-parity, round 1: skills/ship/security.md:3: it says the pass applies when the diff touches a `review.sensitive` path. The script keys on `risk.deep`, so the sentence is only as exact as `deep` is. Say "a deep diff" to follow R2.
-
-Theme: docs
-Paths: skills/ship/security.md
-Cost: S
-Value: low
-Raised by: 143-ship-review-parity (correctness)
-
-## [2026-11-18-48] [nit] `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem.
-
-Raised by the code review of 140-agent-replies-that-file-right, round 1: plugins/factory/scripts/factory.py:3840: `replies[-1]` is a safe fallback only because `_claude()` guarantees a non-empty list when it returns no problem. A one-line comment saying so would help.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 140-agent-replies-that-file-right (correctness)
-
-## [2026-11-18-51] [nit] `stop_text` types `stuck` and `untestable` as `list[str] = ()`.
-
-Raised by the code review of 141-board-landing-track-truth, round 1: plugins/factory/scripts/factory.py:1956: `stop_text` types `stuck` and `untestable` as `list[str] = ()`. The annotation says list while the default is a tuple. `list[str] | tuple = ()` or `None` would match what callers pass.
-
-Theme: style
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 141-board-landing-track-truth (correctness)
-
-## [2026-11-18-52] [nit] `status`'s `needs_of` call for ready (shipped) changes builds a minimal `reading` dict by hand.
-
-Raised by the code review of 141-board-landing-track-truth, round 1: scripts/sdlc.py:9986: `status`'s `needs_of` call for ready (shipped) changes builds a minimal `reading` dict by hand. A test pins the resulting output, so this is fine. If `needs_of` later reads more fields at `shipped`, this site is easy to miss.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 141-board-landing-track-truth (correctness)
-
 ## [2026-11-18-60] [idea] Status groups its sections by the board's columns
 
 status groups its sections by the board's columns (Planned, Designing, Building, Ready, Landing,
@@ -239,35 +155,6 @@ Needs you), so the board and status use one vocabulary. Raised by 145-escalation
 whose spec left status as it is: it reshapes status's output for every host, a change of its own.
 Theme: board
 Raised 2026-11-18.
-
-## [2026-11-18-62] [nit] `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`.
-
-Raised by the code review of 144-factory-records-and-models, round 1: plugins/factory/scripts/factory.py:2822: `work/<008>*x` is rewritten to `work/008-slug*x`, because the regex backtracks off the `*` and the lookahead then passes on `*`. The shape is unrealistic, but `(?![\w-])` after an optional `\*?` could be made possessive or tightened
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 144-factory-records-and-models (correctness)
-
-## [2026-11-18-63] [nit] the re-wrapped paragraph leaves one over-long line (`serve`, `shoot` and `paths` …)
-
-Raised by the code review of 144-factory-records-and-models, round 1: plugins/factory/README.md:383: the re-wrapped paragraph leaves one over-long line (`serve`, `shoot` and `paths` …)
-
-Theme: docs
-Paths: plugins/factory/README.md
-Cost: S
-Value: low
-Raised by: 144-factory-records-and-models (correctness)
-
-## [2026-11-18-72] [nit] A record quoting a term from .sdlc/terms.local is still filed as written
-
-DEFUSE covers the scan's PATTERNS only; the scan also refuses each regex in the main checkout's gitignored terms file, so a reply quoting one still reaches a landing's gate as written.
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: M
-Value: low
-Raised by: 144-factory-records-and-models (correctness)
 
 ## [2026-11-18-64] [nit] `bg` only looks for a trailing `&` at the end of the whole command.
 
@@ -419,3 +306,17 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 154-landing-fix-before-gate (correctness)
+
+## [2026-11-18-81] [idea] Wrap the reviewer agents' other lines past 100 columns
+
+Left undone by 150-pay-down-batch-nits, carried forward when it shipped: `plugins/factory/agents/reviewer-code.md` and `reviewer-ux.md` keep other lines past 100 columns (each frontmatter `description`, and the "Under a decision's line" paragraph after the `supersedes` sentence -55 wrapped), outside -55's scope.
+See .sdlc/work/150-pay-down-batch-nits/notes.md in its commit.
+Theme: docs
+Raised 2026-11-18.
+
+## [2026-11-18-82] [idea] Rewrap the factory README's lines past 100 columns
+
+Left undone by 150-pay-down-batch-nits, carried forward when it shipped: `plugins/factory/README.md` keeps about twenty other lines past 100 columns, outside -63's scope (the one paragraph it named).
+See .sdlc/work/150-pay-down-batch-nits/notes.md in its commit.
+Theme: docs
+Raised 2026-11-18.
