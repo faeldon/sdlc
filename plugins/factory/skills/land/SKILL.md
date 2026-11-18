@@ -146,15 +146,16 @@ For each change in the batch, one at a time:
 
    It refuses, before writing anything, a change whose checks haven't passed on it as it stands
    or whose cases haven't run. On `--by person` it writes each disposition (a carried item's seed
-   in the register, ticked `→ seed: <id>`; a bug filed there with its `Severity:` and `Paths:`,
+   held in the change's `entries.md`, ticked `→ seed: <id>`; a bug held there with its `Severity:` and `Paths:`,
    ticked `→ bug: <id>`; a dropped one ticked `→ dropped: <reason>`), files each nit to file as a
    `[nit]` entry with its `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` lines (its
    `filed_nits`, ids from the same `next-entry` call; one already filed for the change is never
    filed twice), and ticks each assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship`
-   (stamped shipped, its seed dropped, every path staged), deletes from the register each open
+   (stamped shipped, every path staged), adds a `Retire` line to `entries.md` for each open
    nit its intent or spec names by id (its `retired_nits`), commits with the change's composed
    message (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as
-   ship's), and runs `sdlc.py base`. Landed before, it adds the earlier landing's record to its
+   ship's), and runs `sdlc.py base`. The change's branch never edits the register: close files
+   what `entries.md` holds, and retires the seed, the bugs and the nits, in its `Close` commit. Landed before, it adds the earlier landing's record to its
    commit first, so it rebases again when the base moved since. Its
    `state`: `current` (go to 4), `rebased` (the base moved: 2), `conflict` (3), or a refusal,
    which stops this change and every one after it. Every rule of this step applies to each
@@ -275,7 +276,7 @@ Say whether the gate passed itself or the person approved it. Then each change: 
 next, usually `/sdlc:ship NNN` from its worktree), excluded, or not reached. For a landed change,
 each acceptance check and its result (and again after a rebase), the cases' score or why they
 were skipped (run before any rebase), each undone item's disposition and where it went (the
-seed's id in the register), and each decision confirmed. Say what was pushed,
+seed's id, in the register once it closed), and each decision confirmed. Say what was pushed,
 or that nothing was, and that nothing was tagged.
 
 ## Out of scope

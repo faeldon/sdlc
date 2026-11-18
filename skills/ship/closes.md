@@ -16,6 +16,7 @@ is left. Show the `closes:` line as it becomes.
 ## Step 6
 
 Then the issues it closes, exactly as approved: take each one this change didn't resolve off the
-intent's `closes:` line, and append its seed to the register with its `Issue: #N` line and its
-`Split from <NNN-slug>:` line. The seed lands with the change; the `sync` below lets the issue go
-from the change's issue, and `/sdlc:close` tells it which seed it stays open as.
+intent's `closes:` line, and add its seed to the change's `entries.md` with its `Issue: #N` line
+and its `Split from <NNN-slug>:` line. `/sdlc:close` files the seed in the register in its `Close`
+commit; until then it is the issue's record where it is. The `sync` below lets the issue go from
+the change's issue, and `/sdlc:close` tells it which seed it stays open as.

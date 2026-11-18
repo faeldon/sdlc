@@ -360,7 +360,15 @@ downgrade. The factory runs it when the person's answer to a blocking decision s
 to Tier 2` (`plugins/factory/README.md`). Once a change
 lands, `/sdlc:close` takes its folder off `main` in a commit of its own, so `.sdlc/work/` never fills up
 with finished changes: the change's commit keeps them in history. `.sdlc/work/inbox.md` is committed
-too; a closed seed is deleted from it, history keeping that as well. Every entry there is a
+too; a closed seed is deleted from it, history keeping that as well. A change's branch never edits
+it, so no landing conflicts on it: what `/sdlc:ship` or the factory's landing files (carried seeds,
+bugs, nits, a seed split off an issue) and each nit it retires (a `Retire <id>: <reason>` line) is
+held in the change's own `.sdlc/work/NNN-slug/entries.md`, committed with it, and `/sdlc:close`
+files those entries and deletes the seed the intent's `idea:` names, the bugs its `fixes:` names and
+the retired nits in the change's `Close` commit, under the lock `inbox-commit` takes. Close checks
+the file before it merges, and refuses one it can't read or a held id the register holds with
+other text; a rerun files nothing twice. `ship` refuses while the register has uncommitted edits,
+and `/sdlc:drop` while `entries.md` holds an entry, which a drop would never file. Every entry there is a
 seed, and its tag is its kind: `[idea]`, `[bug]` or `[nit]` (the process doc's "Seeds, and the
 changes they become" says what each is, and the change types they grow into). Any other tag reads
 as an idea, and `[seed]`, what ideas were tagged before they had their own, does so for good.
@@ -437,7 +445,8 @@ the change took the issue on, and sends one that left the line back to triage, w
 changes are done, from the main checkout's `.sdlc/work/inbox.md` and direction doc. A
 missing file adds nothing. Each entry's heading starts with its id, `## [2026-10-25-3] [idea] Title`:
 the day it came in and a count, from `sdlc.py next-entry`, which counts every checkout's register
-and every commit that ever held one, so an id is never handed out twice. A heading without its
+and every change's `entries.md`, and every commit that ever held either, so an id is never handed
+out twice. A heading without its
 count, a bare date, is not an entry. An `idea:`, `After:` or `Groups:` line names an
 entry by its id, written bare, or by its title, quoted, and titles are read for good, since the
 intents in history name seeds by them; `check` reports an id used twice. Two optional forms in

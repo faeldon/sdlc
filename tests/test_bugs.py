@@ -593,20 +593,22 @@ def test_a_bug_an_open_change_fixes_leaves_next_up_and_the_count(
     assert "■ Bugs: 1 open (high 1)" in capsys.readouterr().out
 
 
-def test_ship_removes_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path, capsys) -> None:
+def test_close_retires_each_bug_the_change_fixes_and_nothing_else(tmp_path: Path) -> None:
+    """134 R4: ship leaves the register alone; close's plan removes each bug `fixes:` names, and
+    says which it couldn't find."""
     entries = [
         _bug("2026-10-01-1", "One"),
         _bug("2026-10-01-2", "Two"),
         _bug("2026-10-01-3", "Three"),
     ]
     root = _repo(tmp_path, *entries)
-    _fixing(root, "2026-10-01-1, 2026-10-01-3, 2026-10-01-9")
-    assert sdlc.cmd_ship(root, "001") == 0
-    out = capsys.readouterr().out
-    assert "removed bug 2026-10-01-1" in out and "removed bug 2026-10-01-3" in out
-    assert "no bug to remove: .sdlc/work/inbox.md has no entry 2026-10-01-9" in out
-    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    assert inbox == "# Inbox\n\n" + entries[1].rstrip("\n") + "\n", "the last one trails no gap"
+    folder = _fixing(root, "2026-10-01-1, 2026-10-01-3, 2026-10-01-9")
+    register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    plan = sdlc.register_plan(
+        register, (folder / "intent.md").read_text("utf-8"), sdlc.held_entries("")
+    )
+    assert plan["retire"] == ["2026-10-01-1", "2026-10-01-3"] and plan["gone"] == ["2026-10-01-9"]
+    assert plan["text"] == "# Inbox\n\n" + entries[1].rstrip("\n") + "\n", "no gap trailing"
 
 
 def test_close_s_trailer_describes_each_fix_from_the_branch(tmp_path: Path) -> None:
@@ -935,9 +937,10 @@ def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
     _fixing(root, '"One"')
     errors = sdlc.analyze(root)["open"][0]["errors"]
     assert "fixes: 'One' isn't an id: name each bug by its YYYY-MM-DD-n" in errors
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert "no bug to remove" in capsys.readouterr().out
-    assert "2026-10-01-1" in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    intent = (root / ".sdlc" / "work" / "001-keep-drafts" / "intent.md").read_text("utf-8")
+    register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    plan = sdlc.register_plan(register, intent, sdlc.held_entries(""))
+    assert plan["retire"] == [] and plan["text"] == register, "a title retires nothing"
 
 
 def test_bugs_names_the_change_that_fixes_each(tmp_path: Path, capsys) -> None:
@@ -954,17 +957,16 @@ def test_bugs_names_the_change_that_fixes_each(tmp_path: Path, capsys) -> None:
 
 
 @pytest.mark.parametrize("ref", ["2026-10-01-1", '"One"'], ids=["id", "title"])
-def test_ship_deletes_an_untagged_seed_its_idea_line_names(tmp_path: Path, capsys, ref) -> None:
-    """100 R6: nothing tags a seed now, so ship deletes the one `idea:` names whatever its tag,
+def test_close_retires_an_untagged_seed_its_idea_line_names(tmp_path: Path, ref) -> None:
+    """100 R6: nothing tags a seed now, so close retires the one `idea:` names whatever its tag,
     by id or by a quoted title, and leaves the rest."""
     root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _idea("2026-10-02-1", "Two"))
     folder = _fixing(root, "")
     intent = folder / "intent.md"
     text = intent.read_text(encoding="utf-8").replace("idea:\n", f"idea: {ref}\n")
-    intent.write_text(text, encoding="utf-8")
-    assert sdlc.cmd_ship(root, "001") == 0, capsys.readouterr().out
-    inbox = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
-    assert inbox == "# Inbox\n\n" + _idea("2026-10-02-1", "Two"), "every other entry as it was"
+    register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    plan = sdlc.register_plan(register, text, sdlc.held_entries(""))
+    assert plan["text"] == "# Inbox\n\n" + _idea("2026-10-02-1", "Two"), "every other as it was"
 
 
 def test_check_is_quiet_on_an_untagged_seed_a_change_names(tmp_path: Path) -> None:

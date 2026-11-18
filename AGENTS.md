@@ -113,7 +113,9 @@ where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 
 **Closing: `cmd_close()`.** Every git step is one git refuses when something would be lost, and
 a rerun resumes where a failed step stopped. A refused push is `push_failed` and a failed cleanup
-`cleanup_failed`, never a failed close: the change has landed. The host's `close_cleanup` is read
+`cleanup_failed`, never a failed close: the change has landed. The `Close` commit removes the
+folder and, in the same commit, files and retires the change's register entries
+(`_close_commit()`, `register_plan()`), so its first parent is still the change's commit. The host's `close_cleanup` is read
 from the base branch's config as it was before the merge (`_config_at()`), so a change can't turn
 on its own, and it is the one thing close deletes beyond the change's own folder, worktree and
 branch, only behind the question's yes. In this repo, close hands itself to `main`'s script and
@@ -158,7 +160,10 @@ own, never a change number. A reference is an id, bare, or a title, quoted (`ref
 `same_ref()`); titles are read for good, but never match an entry by title alone.
 `inbox-commit` (`cmd_inbox_commit()`) is the only code that commits the register on its own,
 always on the base branch in the main checkout, so an entry never rides on a change's branch,
-where a drop would lose it. `sdlc.py` only reads nits, and the skills write them. Release,
+where a drop would lose it and every landing would conflict on it. What ship and the factory's
+landing file or retire is held in the change's `entries.md` (`held_entries()`, the factory's
+copies pinned), and close commits it into the register only inside the `Close` commit, under the
+same `_main_lock()`; `ship` refuses an uncommitted register edit, and `drop` a held entry. `sdlc.py` only reads nits, and the skills write them. Release,
 publish and measuring never read the register
 (`test_release_publish_and_measuring_never_read_the_register`). Entries, bugs, nits and their
 ranking: REFERENCE.md, *`.sdlc/work/` and worktrees*.

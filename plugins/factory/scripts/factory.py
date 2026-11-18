@@ -4202,10 +4202,49 @@ def named_nits(root: Path, folder: Path, text: str | None = None) -> list[str]:
     return [i for i in found if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", named)]
 
 
-def retire_nits(root: Path, ids: list[str]) -> None:
-    """Delete each nit `ids` names from the checkout's register, as `/sdlc:ship` does: the
-    change's commit carries the deletion."""
-    drop_entries(root, ids)
+# What a landing files and retires, held in the change's folder until `sdlc.py close` lands it
+# in the `Close` commit: copies of `sdlc.py`'s `ENTRIES` and `RETIRE_LINE_RE`, pinned by tests.
+ENTRIES = "entries.md"
+RETIRE_RE = re.compile(r"^Retire (\d{4}-\d{2}-\d{2}-\d+):\s*(.*)$")
+
+
+def held_text(folder: Path) -> str:
+    """The change's `entries.md`, or the title it starts from: `# NNN-slug — entries`."""
+    path = folder / ENTRIES
+    return path.read_text(encoding="utf-8") if path.is_file() else f"# {folder.name} — entries\n"
+
+
+def retired_ids(folder: Path) -> list[str]:
+    """The nits the change's `entries.md` retires: each `Retire <id>:` line before its first
+    entry."""
+    found = []
+    for line in held_text(folder).splitlines():
+        if line.startswith("## "):
+            break
+        if m := RETIRE_RE.match(line.strip()):
+            found.append(m.group(1))
+    return found
+
+
+def retire_nits(folder: Path, ids: list[str]) -> None:
+    """A `Retire <id>: taken in by <change>` line in the change's `entries.md` for each nit `ids`
+    names that it doesn't retire yet, after its title and any earlier ones, before its first
+    entry: close deletes each from the register in the `Close` commit, as it does for
+    `/sdlc:ship`. The branch's register is never edited."""
+    new = [i for i in dict.fromkeys(ids) if i not in retired_ids(folder)]
+    if not new:
+        return
+    lines = held_text(folder).splitlines()
+    at = next((n for n, line in enumerate(lines) if line.startswith("## ")), len(lines))
+    while at > 1 and not lines[at - 1].strip():
+        at -= 1
+    retire = [f"Retire {i}: taken in by {folder.name}" for i in new]
+    gap = [""] if at > 0 and not RETIRE_RE.match(lines[at - 1].strip()) else []
+    rest = lines[at:]
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    out = lines[:at] + gap + retire + ([""] + rest if rest else [])
+    (folder / ENTRIES).write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
 
 
 # A register entry's heading, `## [<id>] [<tag>] <title>`, by its id; a heading at level one or
@@ -4466,10 +4505,11 @@ def filed_nit(text: str, change: str, nit: dict) -> bool:
 def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None]:
     """What the person's yes approved for change `folder`'s undone notes, its agents' nits and its
     assumed decisions, written in its worktree before `sdlc.py ship`, every edit by line: each
-    carried item appended to the register as an `[idea]` seed, each approved bug as a `[bug]` with
-    its `Severity:` and `Paths:` and no `Introduced by:`, and each nit to file (`land_parts()`'s
-    `nits`) as a `[nit]` with its `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` (ids from
-    one `next-entry` call; the register created from its template when missing), each item ticked
+    carried item appended to the change's `entries.md` (never the register, which close files it
+    into) as an `[idea]` seed, each approved bug as a `[bug]` with its `Severity:` and `Paths:`
+    and no `Introduced by:`, and each nit to file (`land_parts()`'s `nits`) as a `[nit]` with its
+    `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` (ids from one `next-entry` call; the
+    file started with its title when missing), each item ticked
     `→ seed: <id>` or `→ bug: <id>`, each dropped one ticked `→ dropped: <reason>`, and each
     assumed decision ticked as confirmed. What a rerun finds ticked, or filed (`filed_nit()`), it
     never writes again. The ids of the nits it filed, and None or why nothing was
@@ -4480,16 +4520,8 @@ def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None
     notes, ids, filed = folder / "notes.md", [], []
     nits = parts["nits"]
     if seeds or nits:
-        _, config, said = _sdlc(["config"], root)
-        register = ((config or {}).get("work") or {}).get("register")
-        template = (((config or {}).get("templates") or {}).get("inbox.md") or {}).get("path")
-        if not register:
-            return [], f"sdlc.py config names no register: {said.strip()[-300:]}"
-        register = Path(register)
-        if not register.is_file() and not (template and Path(template).is_file()):
-            return [], f"no register at {register.name}, and no template to start one from"
-        text = (register.read_text(encoding="utf-8") if register.is_file()
-                else Path(template).read_text(encoding="utf-8"))  # fmt: skip
+        held = folder / ENTRIES
+        text = held_text(folder)
         nits = [n for n in nits if not filed_nit(text, folder.name, n)]
     if seeds or nits:
         want = len(seeds) + len(nits)
@@ -4519,8 +4551,7 @@ def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None
                 f"Value: {nit['value']}\nRaised by: {folder.name} ({nit['pass']})\n"
             )
             filed.append(entry_id)
-        register.parent.mkdir(parents=True, exist_ok=True)
-        register.write_text(text, encoding="utf-8", newline="\n")
+        held.write_text(text, encoding="utf-8", newline="\n")
     if parts["undone"]:
         lines = notes.read_text(encoding="utf-8").splitlines()
         given = iter(ids)
@@ -4545,7 +4576,7 @@ def _dispose(root: Path, folder: Path, pre: dict) -> tuple[list[str], str | None
 
 def cmd_land(root: Path, ident: str, by: str) -> int:
     """Land change `ident`'s first half, in its worktree: the approver's impact on `intent.md`,
-    `sdlc.py ship` (stamped, the seed dropped, every path staged), the commit with
+    `sdlc.py ship` (stamped, every path staged; the seed is retired at close), the commit with
     `land_message()`, then `sdlc.py base`; `filed_nits`, the `[nit]` entries the person's yes filed
     (`_dispose()`). Its `state`: `current` (nothing to review again),
     `rebased` (the base moved: the gate and the spec's path run again before close), `conflict`
@@ -4604,11 +4635,11 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
             why = f"sdlc.py ship refused: {said.strip()[-500:]}"
             plain = SHIP_REFUSED.format(id=folder.name.split("-")[0])
             return _land_refused(root, folder, out, why, plain)
-        # The nits the change took in leave the register in its own commit, as ship's skill
-        # deletes them: after ship, so every refusal of its comes before this write.
+        # The nits the change took in are retired at close, from `Retire` lines in its
+        # `entries.md`: after ship, so every refusal of its comes before this write.
         if nits:
-            retire_nits(root, nits)
-            _git(root, "add", "--", INBOX.as_posix())
+            retire_nits(folder, nits)
+            _git(root, "add", "--", (folder / ENTRIES).relative_to(root).as_posix())
         if why := _land_commit(root, folder, by, nits, unreviewed):
             plain = "its commit failed: the landing's output gives git's words; rerun it once fixed"
             return _land_refused(root, folder, out, why, plain)
@@ -4621,8 +4652,11 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
             why = f"sdlc.py ship refused: {said.strip()[-500:]}"
             plain = SHIP_REFUSED.format(id=folder.name.split("-")[0])
             return _land_refused(root, folder, out, why, plain)
-        before = _git(root, "show", f"HEAD:{INBOX.as_posix()}")
-        nits = [n for n in named_nits(root, folder, before) if n not in named_nits(root, folder)]
+        # The nits it takes in, retired as the first run would have, whether or not it got that far.
+        nits = named_nits(root, folder)
+        if nits:
+            retire_nits(folder, nits)
+            _git(root, "add", "--", (folder / ENTRIES).relative_to(root).as_posix())
         if why := _land_commit(root, folder, by, nits, unreviewed):
             plain = "its commit failed: the landing's output gives git's words; rerun it once fixed"
             return _land_refused(root, folder, out, why, plain)

@@ -2034,8 +2034,9 @@ def test_a_seed_split_off_at_ship_is_told_where_it_stays_at_close(tmp_path, gh, 
     folder = _open(root)
     _filed(gh, 15, labels=("triaged",), parent=1)
     tree = sdlc.checkout_of(folder)
-    (tree / ".sdlc" / "work" / "inbox.md").write_text(
-        "# Inbox\n\n## [2026-10-26-1] [idea] Reopen drafts too\n\n"
+    # 134: held in the change's folder, and filed by close's `Close` commit.
+    (folder / "entries.md").write_text(
+        "# 001-thing — entries\n\n## [2026-10-26-1] [idea] Reopen drafts too\n\n"
         "Split from 001-thing: reopening isn't covered.\n\nIssue: #15\n",
         encoding="utf-8",
     )

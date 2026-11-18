@@ -324,8 +324,8 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
 
     shipped = _run(tree, "ship", "001")
     assert shipped.returncode == 0, shipped.stderr
-    assert f"removed bug {bug_id}" in shipped.stdout
-    assert ".sdlc/work/inbox.md" in _git(tree, "diff", "--cached", "--name-only").splitlines()
+    assert f"close retires bug {bug_id}" in shipped.stdout
+    assert ".sdlc/work/inbox.md" not in _git(tree, "diff", "--cached", "--name-only").splitlines()
     _git(tree, "commit", "-q", "-m", "ship 001")
 
     closed = _run(root, "close", "001")
@@ -334,6 +334,7 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
     today = bug_id.rsplit("-", 1)[0]
     assert f"Sdlc-Fixes: {bug_id} severity=high reported={today} introduced_by=unknown" in body
     assert bug_id not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert ".sdlc/work/inbox.md" in _git(root, "show", "--name-only", "--format=").splitlines()
     bugs = json.loads(_run(root, "retro").stdout)["bugs"]
     assert bugs["fixed"] == {"high": 1} and bugs["open"] == [] and bugs["unattributed"] == 1
 

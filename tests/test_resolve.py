@@ -115,6 +115,13 @@ def test_a_conflict_with_the_base_is_resolved_shipped_and_closed(tmp_path: Path)
     asked = _run(tree, "preflight", "001", "--question")
     assert "with the conflicts in" in asked.stdout and "README.md" in asked.stdout, asked.stderr
 
+    # 134 R11: the change's entry, edited into the register the old way, is refused at ship;
+    # moved to its `entries.md`, close files it.
+    refused = _run(tree, "ship", "001")
+    assert refused.returncode == 1 and "never edits the register" in refused.stderr, refused
+    _write(folder / "entries.md", "# 001-thing — entries\n\n"
+           "## [2026-11-02-1] [idea] The change's idea\n\nOurs.\n")  # fmt: skip
+    _git(tree, "checkout", "-q", "--", ".sdlc/work/inbox.md")
     shipped = _run(tree, "ship", "001")
     assert shipped.returncode == 0, shipped.stdout + shipped.stderr
     _git(tree, "commit", "-q", "-m", "ship 001")

@@ -1952,15 +1952,20 @@ def next_entry_ids(home: Path, day: str, count: int = 1) -> list[str]:
     """The next `count` register ids for entries dated `day` (`YYYY-MM-DD-n`): one past the highest
     `n` that day in the register of every checkout of the repo, uncommitted edits included, and in
     every commit on any branch that ever added or removed one, so an id deleted since is never
-    handed out again. A space of its own: never a change number, never the tracker's."""
+    handed out again; and in every change's `entries.md`, on disk and in any commit, so an id
+    held until close is never handed out twice. A space of its own: never a change number, never
+    the tracker's."""
     heading = re.compile(rf"^[+-]?##\s*\[{re.escape(day)}-(\d+)\]")
     texts = []
     for checkout in dict.fromkeys([main_root(home), *(p for p, _ in worktrees(home))]):
-        try:
-            texts.append((work_dir(checkout) / INBOX).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
-            continue
+        # The register, and what each change there holds to file at close (`ENTRIES`).
+        for path in [work_dir(checkout) / INBOX, *work_dir(checkout).glob(f"*/{ENTRIES}")]:
+            try:
+                texts.append(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
     paths = [f"{w}/{name}" for w in (WORK, HISTORY_WORK) for name in (INBOX, OLD_INBOX)]
+    paths.append(f"{WORK}/*/{ENTRIES}")
     log = _git(home, "log", "--all", "-p", "--format=", "-G", rf"\[{day}-", "--", *paths)
     texts.append(log or "")
     used = [int(m.group(1)) for t in texts for line in t.splitlines() if (m := heading.match(line))]
@@ -3350,8 +3355,10 @@ def cmd_ship(
     fixed: list[str] | tuple[str, ...] = (),
     through: str | None = None,
 ) -> int:
-    """Stamp a change shipped, delete the seed its `idea:` names from the register, and stage
-    everything its checkout has uncommitted but `leave`, for /sdlc:ship to commit. Runs after
+    """Stamp a change shipped and stage everything its checkout has uncommitted but `leave`, for
+    /sdlc:ship to commit. The register is never edited here: close retires the seeds and bugs the
+    change names and files what its `entries.md` holds (`register_plan()`), so ship refuses an
+    uncommitted edit to it and says what close will do. Runs after
     ship's WAIT; every refusal comes before the first write, and a rerun is harmless. Never
     commits. After a yes to `Fix …, then commit`, `fixed` names the findings the yes approved
     fixing and `through` the highest id the question was asked over: it refuses unless each of
@@ -3476,6 +3483,17 @@ def cmd_ship(
             file=sys.stderr,
         )
         return 1
+    # The register rides no change's branch: an edit to it here is an entry filed the old way.
+    edited = ideas.resolve().relative_to(tree.resolve()).as_posix() if ideas.parent.is_dir() else ""
+    if edited in dirty:
+        print(
+            f"⚠  {edited} has uncommitted edits: a change's branch never edits the register. Move "
+            f"each new entry, and a `Retire <id>: <reason>` line for each nit it retires, to "
+            f"{_shown(path, root)}/{ENTRIES}, which close files, or file it now with /sdlc:idea; "
+            f"then `git restore {edited}` and re-run. Not stamping.",
+            file=sys.stderr,
+        )
+        return 1
     held = [p for p in leave if p in staged]
     if held:
         print(
@@ -3499,26 +3517,24 @@ def cmd_ship(
         f"■ shipped {path.name}  (stage: shipped, {stamp}): commit {_shown(path, root)}/ with "
         "the change"
     )
-    # Each entry once, however many values name it, and the last first, so the line each earlier
-    # one starts at still holds.
-    for start in sorted({lines[0] for lines in seeds.values() if lines}, reverse=True):
-        _drop_seed(ideas, start)
+    # What close will do to the register, in the `Close` commit: nothing here edits it.
+    reg = f"{work_rel(root)}/{ideas.name}"
     for idea, lines in seeds.items():
         if lines:
-            print(f"  removed seed {entry_ref(idea)[1]!r} from {work_rel(root)}/{ideas.name}")
+            print(f"  close retires seed {entry_ref(idea)[1]!r} from {reg}")
         else:
-            print(
-                f"  no seed to remove: {work_rel(root)}/{ideas.name} has no entry named "
-                f"{entry_ref(idea)[1]!r}"
-            )
-    # Each bug the change fixes leaves with it, found afresh after every deletion.
+            print(f"  no seed to retire: {reg} has no entry named {entry_ref(idea)[1]!r}")
     for fixed in frontmatter_list(stamped, "fixes") or []:
-        lines = _seed_lines(ideas, fixed) if ENTRY_ID_RE.match(fixed) else []
-        if lines:
-            _drop_seed(ideas, lines[0])
-            print(f"  removed bug {fixed} from {work_rel(root)}/{ideas.name}")
+        if ENTRY_ID_RE.match(fixed) and _seed_lines(ideas, fixed):
+            print(f"  close retires bug {fixed} from {reg}")
         else:
-            print(f"  no bug to remove: {work_rel(root)}/{ideas.name} has no entry {fixed}")
+            print(f"  no bug to retire: {reg} has no entry {fixed}")
+    if (path / ENTRIES).is_file():
+        held = held_entries((path / ENTRIES).read_text(encoding="utf-8"))
+        print(
+            f"  close files {len(held['ids'])} entr{'y' if len(held['ids']) == 1 else 'ies'} and "
+            f"retires {len(held['retire'])} nit(s) from {_shown(path, root)}/{ENTRIES}"
+        )
     paths, err = _stage_change(tree, leave)
     if err:
         print(f"⚠  git add failed: {err}. Fix it and re-run ship.", file=sys.stderr)
@@ -3553,21 +3569,9 @@ def _seed_lines(ideas: Path, idea: str) -> list[int]:
     ]
 
 
-def _drop_seed(ideas: Path, start: int) -> None:
-    """Delete the entry whose heading is line `start`, through the line before the next `## ` (or
-    the end), as lines, so every other entry stays byte for byte."""
-    lines = ideas.read_text(encoding="utf-8").splitlines(keepends=True)
-    end = next((n for n in range(start + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
-    before, after = lines[:start], lines[end:]
-    if not after:  # the last entry: no blank line left trailing the one before it
-        while before and not before[-1].strip():
-            before.pop()
-    ideas.write_text("".join(before + after), encoding="utf-8", newline="\n")
-
-
 def _entry_spans(lines: list[str]) -> dict[str, tuple[int, int]]:
     """Each entry's lines in a register, by id: from its heading through the line before the next
-    `## ` outside a fence, or the end, the span `_drop_seed()` deletes."""
+    `## ` outside a fence, or the end."""
     spans: dict[str, tuple[int, int]] = {}
     current: tuple[str, int] | None = None
     fenced = False
@@ -3612,6 +3616,119 @@ def _splice_entries(target: str, source: str, ids: list[str]) -> str:
             text = "".join(lines).rstrip("\n")
             lines = (text + "\n\n").splitlines(keepends=True) + chunk if text else chunk
     return "".join(lines)
+
+
+# What a change files and retires in the register, held in its own folder until close lands it
+# in the `Close` commit (`register_plan()`): `Retire <id>: <reason>` lines, then entries as the
+# register holds them. `factory.py` writes it with copies of these, pinned by tests.
+ENTRIES = "entries.md"
+RETIRE_LINE_RE = re.compile(r"^Retire (\d{4}-\d{2}-\d{2}-\d+):\s*(.*)$")
+
+
+def held_entries(text: str) -> dict:
+    """A change's `entries.md` as close reads it: each `Retire` line before the first entry, as
+    (id, reason); each entry's id in order, and its lines (`chunks`) as close appends them; and
+    `problems`, what makes the file unreadable (a stray line before the first entry, a `## ` line
+    that isn't an entry's heading, an id held twice), each naming its line."""
+    lines = text.splitlines(keepends=True)
+    out: dict = {"retire": [], "ids": [], "chunks": {}, "problems": []}
+    fenced, seen = False, False
+    for n, raw in enumerate(lines, 1):
+        line = raw.rstrip("\n")
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        if fenced and seen:
+            continue
+        if line.startswith("## "):
+            heading = _heading_entry(line)
+            if heading is None:
+                out["problems"].append(f"line {n}: a `## ` line that isn't an entry's heading")
+            elif heading["id"] in out["ids"]:
+                out["problems"].append(f"line {n}: {heading['id']} is held twice")
+            else:
+                out["ids"].append(heading["id"])
+            seen = True
+        elif not seen and line.strip() and not line.startswith(("# ", ">")):
+            if m := RETIRE_LINE_RE.match(line.strip()):
+                out["retire"].append((m.group(1), m.group(2).strip()))
+            else:
+                out["problems"].append(
+                    f"line {n}: neither a `Retire <id>: <reason>` line nor an entry"
+                )
+    spans = _entry_spans(lines)
+    for i in out["ids"]:
+        if i in spans:
+            s, e = spans[i]
+            out["chunks"][i] = "".join(lines[s:e]).rstrip("\n") + "\n"
+    return out
+
+
+def _without_entry(lines: list[str], start: int) -> list[str]:
+    """`lines` without the entry whose heading is line `start`, through the line before the next
+    `## ` (or the end): no blank line left trailing the one before it when it was the last."""
+    end = next((n for n in range(start + 1, len(lines)) if lines[n].startswith("## ")), len(lines))
+    before, after = lines[:start], lines[end:]
+    if not after:
+        while before and not before[-1].strip():
+            before.pop()
+    return before + after
+
+
+def register_plan(register: str, intent: str, held: dict) -> dict:
+    """What close makes of the register text `register` for a change whose intent is `intent`,
+    holding `held` (`held_entries()`): every seed its `idea:` names (by id or title, as ship
+    matches them), every bug its `fixes:` names and every nit a `Retire` line names, removed, then
+    each held entry appended, every other line byte for byte. Returns the new `text`, the refs
+    retired (`retire`), the ids filed (`file`), what was already gone (`gone`), the held entries
+    the register holds word for word already (`skipped`, a rerun's), and `refusals`: a held file
+    that can't be read, a title naming two entries, a held id the register holds otherwise."""
+    plan: dict = {"text": register, "retire": [], "file": [], "gone": [], "skipped": [],
+                  "refusals": [f"{ENTRIES}: {p}" for p in held["problems"]]}  # fmt: skip
+    lines = register.splitlines(keepends=True)
+    spans = _entry_spans(lines)
+    starts: list[int] = []
+    for idea in intent_ideas(intent):
+        found = [n for n, line in enumerate(lines)
+                 if (h := _heading_entry(line.rstrip("\n"))) and ref_matches(idea, h)]  # fmt: skip
+        if len(found) > 1:
+            plan["refusals"].append(
+                f"the register has {len(found)} entries named {entry_ref(idea)[1]!r}: retitle "
+                "one, or name the seed by its id"
+            )
+        elif found:
+            plan["retire"].append(idea)
+            starts.append(found[0])
+        else:
+            plan["gone"].append(idea)
+    by_id = [f for f in frontmatter_list(intent, "fixes") or [] if ENTRY_ID_RE.match(f)]
+    by_id += [i for i, _ in held["retire"]]
+    for i in dict.fromkeys(by_id):
+        if i in spans:
+            plan["retire"].append(i)
+            starts.append(spans[i][0])
+        else:
+            plan["gone"].append(i)
+    for start in sorted(set(starts), reverse=True):
+        lines = _without_entry(lines, start)
+    text = "".join(lines)
+    left = _entry_spans(lines)
+    for i in held["ids"]:
+        chunk = held["chunks"].get(i, "")
+        if i in left:
+            s, e = left[i]
+            if "".join(lines[s:e]).rstrip("\n") + "\n" == chunk:
+                plan["skipped"].append(i)
+            else:
+                plan["refusals"].append(
+                    f"{ENTRIES} holds {i}, which the register holds with other text: give the "
+                    "held entry a new id from `next-entry`"
+                )
+            continue
+        text = text.rstrip("\n")
+        text = f"{text}\n\n{chunk}" if text else chunk
+        plan["file"].append(i)
+    plan["text"] = text
+    return plan
 
 
 def _stage_change(tree: Path, leave: list[str] | tuple[str, ...]) -> tuple[list[str], str | None]:
@@ -3718,6 +3835,14 @@ def cmd_drop(root: Path, ident: str | None, check_only: bool = False) -> int:
         report["refusals"].append(
             f"{rel}/intent.md has no `## {DROPPED}` section saying why, or it's still a prompt"
         )
+    # A `Drop` commit keeps the base's tree, so an entry held here would never be filed.
+    if (path / ENTRIES).is_file():
+        held = held_entries((path / ENTRIES).read_text(encoding="utf-8", errors="replace"))
+        if held["ids"]:
+            report["refusals"].append(
+                f"{rel}/{ENTRIES} holds {', '.join(held['ids'])}, which a drop would never file: "
+                "file each with /sdlc:idea, delete it from the file, and re-run"
+            )
     owned = {f".sdlc/{f}" for f in STATE_FILES}
     dirty = _dirty_paths(tree)
     stray = [p for p in dirty if not p.startswith(f"{rel}/") and p not in owned]
@@ -4670,6 +4795,16 @@ def _drop_record(
     return None
 
 
+def _branch_register_plan(main: Path, branch: str, register: str) -> dict:
+    """`register_plan()` for the shipped change on `branch`, against the register text
+    `register`: its intent and its `entries.md` as the change's own commit holds them, so what
+    lands is what was shipped, never a worktree's later edit."""
+    rel = f"{work_rel(main)}/{branch}"
+    intent = _git(main, "show", f"{branch}:{rel}/intent.md") or ""
+    held = _git(main, "show", f"{branch}:{rel}/{ENTRIES}")
+    return register_plan(register, intent, held_entries(held or ""))
+
+
 def _close_commit(
     main: Path,
     branch: str,
@@ -4678,30 +4813,50 @@ def _close_commit(
     trailers: list[str] | None = None,
     closes: str | None = None,
 ) -> str | None:
-    """Remove the change's folder from `main` in a commit of its own; why not, or None. A folder
-    `main` no longer tracks was removed by an earlier run, which is done, so a rerun writes no
-    second set of trailers. `trailers` end the message, where git reads them as trailers;
-    `closes`, the tracker's line for closing its issue on the push, ends the paragraph before."""
+    """Remove the change's folder from `main` in a commit of its own, with the change's register
+    edits (`_branch_register_plan()`): why not, or None. The register is read, written and
+    committed under `_main_lock()`, which `inbox-commit` takes, so an entry filed meanwhile is
+    kept. A folder `main` no longer tracks was removed by an earlier run, register and all, which
+    is done, so a rerun writes no second set of trailers or entries. `trailers` end the message,
+    where git reads them as trailers; `closes`, the tracker's line for closing its issue on the
+    push, ends the paragraph before."""
     folder = f"{work_rel(main)}/{branch}"
     if not _git(main, "ls-files", folder):
         return None
     said = f"Its artifacts are in {sha}" + (f", and archived to {where}." if where else ".")
-    for args in (
-        ["rm", "-r", "-q", folder],
-        [
-            "commit", "-q", "-m", f"Close {branch}",
-            "-m", said + (f"\n{closes}" if closes else ""),
-            *(["-m", "\n".join(trailers)] if trailers else []),
-        ],
-    ):  # fmt: skip
-        made = subprocess.run(
-            ["git", "-C", str(main), *args], capture_output=True, encoding="utf-8"
-        )
-        if made.returncode != 0:
-            # Put the folder back, or the rerun that finishes this would find main dirty.
-            _git(main, "reset", "-q", "HEAD", "--", folder)
-            _git(main, "checkout", "-q", "--", folder)
-            return f"git {args[0]} failed: {made.stderr.strip() or made.stdout.strip()}"
+    register = register_path(work_dir(main))
+    reg = f"{work_rel(main)}/{register.name}"
+    with _main_lock(main):
+        before = register.read_text(encoding="utf-8") if register.is_file() else None
+        plan = _branch_register_plan(main, branch, before or "")
+        if plan["refusals"]:
+            return "; ".join(plan["refusals"])
+        wrote = plan["text"] != (before or "")
+        if wrote:
+            register.parent.mkdir(parents=True, exist_ok=True)
+            register.write_text(plan["text"], encoding="utf-8", newline="\n")
+        for args in (
+            *([["add", "--", reg]] if wrote else []),
+            ["rm", "-r", "-q", folder],
+            [
+                "commit", "-q", "-m", f"Close {branch}",
+                "-m", said + (f"\n{closes}" if closes else ""),
+                *(["-m", "\n".join(trailers)] if trailers else []),
+            ],
+        ):  # fmt: skip
+            made = subprocess.run(
+                ["git", "-C", str(main), *args], capture_output=True, encoding="utf-8"
+            )
+            if made.returncode != 0:
+                # Put the folder and the register back, or the rerun that finishes this would
+                # find main dirty.
+                _git(main, "reset", "-q", "HEAD", "--", folder, *([reg] if wrote else []))
+                _git(main, "checkout", "-q", "--", folder)
+                if wrote and before is None:
+                    register.unlink(missing_ok=True)
+                elif wrote:
+                    register.write_text(before, encoding="utf-8", newline="\n")
+                return f"git {args[0]} failed: {made.stderr.strip() or made.stdout.strip()}"
     return None
 
 
@@ -4893,6 +5048,15 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
             f"{trunk} has moved past {branch}'s base, so it can't fast-forward; rebase {branch} "
             f"onto {trunk} in its worktree and ship again"
         )
+    # What the `Close` commit does to the register, checked before anything is written: against
+    # the base's register now, and again under the lock when it is written.
+    if kind == "shipped" and not (
+        landed and not _git(main, "ls-files", f"{work_rel(main)}/{branch}")
+    ):
+        reg = f"{work_rel(main)}/{register_path(work_dir(main)).name}"
+        planned = _branch_register_plan(main, branch, _git(main, "show", f"{trunk}:{reg}") or "")
+        report["register"] = {k: planned[k] for k in ("file", "retire", "gone")}
+        report["refusals"] += [f"register: {r}" for r in planned["refusals"]]
     if report["refusals"]:
         return emit(1)
     start = BASE_REF + branch
@@ -7277,12 +7441,13 @@ def cmd_inbox_commit(
 def _open_claims(home: Path) -> list[tuple[str, str]]:
     """(reference, change) for each entry an open change builds or fixes, from its `idea:` and
     `fixes:` lines, which are all that mark an entry taken: nothing edits the register for it, so
-    the base branch's register shows such an entry as it was filed. A dropped change claims
-    nothing, so its seed is open again with no edit."""
+    the base branch's register shows such an entry as it was filed. A shipped change claims its
+    entries until close retires them; a dropped change claims nothing, so its seed is open again
+    with no edit."""
     claims = []
     for p in change_dirs(home):
         rec = load_change(p, home)
-        if rec["stage"] in ("shipped", "dropped"):
+        if rec["stage"] == "dropped":
             continue
         claims += [(r, p.name) for r in [*ideas_of(rec), *rec["fixes"]] if r]
     return claims
@@ -7491,7 +7656,8 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
     `comment`, `marker`, `parent`, and `close` reason when a verdict closed it, and `filed` (the
     entry id, change name or verdict that records it). A verdict outranks a change, and a change
     an entry: the newest decision about an issue is the one its filer follows. From the base
-    branch's committed register when `committed_only`, else from every checkout's too.
+    branch's committed register when `committed_only`, else from every checkout's too, and every
+    change's `entries.md` there.
 
     The one reader of all three records (an entry's `Issue:` line, a change's `closes:`, an
     `Sdlc-Triaged:` trailer), and the one that decides: the tracker's `mark()`, `unmark()` and
@@ -7503,10 +7669,14 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
     texts = [_git(home, "show", f"{trunk}:{register}") or ""] if trunk else []
     if not committed_only:
         for checkout in dict.fromkeys([home, *(p for p, _ in worktrees(home))]):
-            try:
-                texts.append(register_path(work_dir(checkout)).read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                continue
+            # The register, and each change's held entries: a seed split off at ship is its
+            # issue's record from then, filed at close.
+            work = work_dir(checkout)
+            for path in [register_path(work), *sorted(work.glob(f"*/{ENTRIES}"))]:
+                try:
+                    texts.append(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError):
+                    continue
     out: dict[int, dict] = {}
     for text in texts:
         for e in parse_entries(text):

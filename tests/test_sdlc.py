@@ -2303,7 +2303,7 @@ def test_serves_is_read_as_text(tmp_path: Path) -> None:
     assert sdlc.load_change(folder, tmp_path)["serves"] == ["O01", "none"]
 
 
-# ---------------------------------------------------------------- ship's landing edits
+# ---------------------------------------------------------------- what close does to the register
 
 IDEAS = (
     "# Ideas\n\n> Seeds, not a backlog.\n\n"
@@ -2314,11 +2314,22 @@ IDEAS = (
 
 
 def _seeded(tmp_path: Path, idea: str, ideas: str = IDEAS) -> tuple[Path, Path]:
-    """A change in a real repo, ready to ship, whose `idea:` is `idea`, beside `ideas`."""
+    """A change in a real repo, ready to ship, whose `idea:` is `idea`, beside `ideas`, which the
+    repo has committed."""
     root = _repo(tmp_path)
+    register = root / ".sdlc" / "work" / "inbox.md"
+    register.parent.mkdir(parents=True, exist_ok=True)
+    register.write_text(ideas, encoding="utf-8")
+    _git(root, "add", "--", ".sdlc/work/inbox.md")
+    _git(root, "commit", "-q", "-m", "a register")
     d = _change(root, "001-reopen-drafts", _fm(stage="build", impact="patch", idea=idea))
-    (root / ".sdlc" / "work" / "inbox.md").write_text(ideas, encoding="utf-8")
     return root, d
+
+
+def _planned(idea: str, ideas: str = IDEAS, held: str = "", fixes: str = "") -> dict:
+    """What close would make of `ideas` for a change whose `idea:` is `idea`, holding `held`."""
+    intent = _fm(stage="shipped", idea=idea, **({"fixes": fixes} if fixes else {}))
+    return sdlc.register_plan(ideas, intent, sdlc.held_entries(held))
 
 
 def _staged(root: Path) -> list[str]:
@@ -2334,10 +2345,10 @@ def _staged(root: Path) -> list[str]:
         "Reopen drafts → work/001-reopen-drafts/",
     ],
 )
-def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, idea) -> None:
-    root, _ = _seeded(tmp_path, idea)
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+def test_close_retires_the_seed_its_idea_names_and_nothing_else(idea) -> None:
+    plan = _planned(idea)
+    assert plan["refusals"] == [] and len(plan["retire"]) == 1 and plan["gone"] == []
+    assert plan["text"] == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01-1] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n"
@@ -2345,59 +2356,47 @@ def test_ship_deletes_the_seed_its_idea_names_and_nothing_else(tmp_path: Path, i
 
 
 @pytest.mark.parametrize("tag", ["idea", "seed"])
-def test_ship_deletes_an_idea_or_an_older_seed_by_its_id(tmp_path: Path, tag: str) -> None:
+def test_close_retires_an_idea_or_an_older_seed_by_its_id(tag: str) -> None:
     ideas = (
         f"# Inbox\n\n## [2026-10-02-1] [{tag}] Reopen drafts\n\nThe one.\n\n"
         "## [2026-10-03-1] [idea] Share drafts\n\nThe last.\n"
     )
-    root, _ = _seeded(tmp_path, "2026-10-02-1", ideas)
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    assert _planned("2026-10-02-1", ideas)["text"] == (
         "# Inbox\n\n## [2026-10-03-1] [idea] Share drafts\n\nThe last.\n"
     )
 
 
-def test_ship_matches_a_heading_that_carries_a_pointer(tmp_path: Path) -> None:
+def test_close_matches_a_heading_that_carries_a_pointer() -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
-    root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert "Reopen drafts" not in (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "Reopen drafts" not in _planned("Reopen drafts", ideas)["text"]
 
 
-def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer(tmp_path) -> None:
+def test_an_idea_without_the_heading_marker_finds_a_heading_with_a_pointer() -> None:
     ideas = IDEAS.replace("Reopen drafts\n", "Reopen drafts → work/001-reopen-drafts/\n")
-    root, _ = _seeded(tmp_path, '"[2026-10-02] [seed] Reopen drafts"', ideas)
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    assert _planned('"[2026-10-02] [seed] Reopen drafts"', ideas)["text"] == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-01-1] [seed] Keep drafts\n\nThe first.\n\n"
         "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n"
     )
 
 
-def test_a_title_holding_an_arrow_is_kept_whole(tmp_path: Path) -> None:
+def test_a_title_holding_an_arrow_is_kept_whole() -> None:
     ideas = IDEAS.replace("[seed] Keep drafts", "[seed] Map intent").replace(
         "Reopen drafts\n", "Map intent → spec\n"
     )
-    root, _ = _seeded(tmp_path, "Map intent → spec", ideas)
-    assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    text = _planned("Map intent → spec", ideas)["text"]
     assert "Map intent → spec" not in text and "## [2026-10-01-1] [seed] Map intent\n" in text
 
 
-def test_a_body_line_shaped_like_a_heading_is_never_a_seed(tmp_path: Path) -> None:
+def test_a_body_line_shaped_like_a_heading_is_never_a_seed() -> None:
     ideas = IDEAS.replace("The first.", "[2026-10-02] [seed] Reopen drafts, as said.").replace(
         "[building] Reopen drafts", "[building] Rename drafts"
     )
-    root, _ = _seeded(tmp_path, "Reopen drafts", ideas)
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == ideas
+    assert _planned("Reopen drafts", ideas)["text"] == ideas
 
 
-def test_ship_deletes_the_last_seed_without_a_trailing_blank_line(tmp_path: Path) -> None:
-    root, _ = _seeded(tmp_path, "Share drafts")
-    assert sdlc.cmd_ship(root, "001") == 0
-    text = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+def test_close_retires_the_last_seed_without_a_trailing_blank_line() -> None:
+    text = _planned("Share drafts")["text"]
     assert text.endswith("Two lines.\n") and "Share drafts" not in text
 
 
@@ -2418,22 +2417,21 @@ def test_idea_names_one_seed_or_a_theme_s_several(tmp_path: Path, line: str, ide
     assert rec["ideas"] == ideas and rec["idea"] == (ideas or [""])[0]
 
 
-def test_ship_deletes_every_seed_a_theme_s_change_took(tmp_path: Path, capsys) -> None:
+def test_close_retires_every_seed_a_theme_s_change_took() -> None:
     """R5: a change that took two seeds removes both; the one between them stays."""
-    root, _ = _seeded(tmp_path, "[2026-10-01-1, 2026-10-03-1]")
-    assert sdlc.cmd_ship(root, "001") == 0
-    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == (
+    plan = _planned("[2026-10-01-1, 2026-10-03-1]")
+    assert plan["text"] == (
         "# Ideas\n\n> Seeds, not a backlog.\n\n"
         "## [2026-10-02-1] [building] Reopen drafts\n\nThe one being built.\nTwo lines.\n"
     )
-    out = capsys.readouterr().out
-    assert "removed seed '2026-10-01-1'" in out and "removed seed '2026-10-03-1'" in out
+    assert plan["retire"] == ["2026-10-01-1", "2026-10-03-1"]
 
 
 def test_an_ambiguous_second_seed_refuses_before_any_write(tmp_path: Path, capsys) -> None:
     """R5: every seed is found before any is deleted, so the first isn't lost to the second's
-    refusal."""
+    refusal; ship refuses on it, and so would close."""
     ideas = IDEAS + "\n## [2026-10-04-1] [seed] Share drafts\n\nA twin.\n"
+    assert _planned('[2026-10-01-1, "Share drafts"]', ideas)["refusals"]
     root, d = _seeded(tmp_path, '[2026-10-01-1, "Share drafts"]', ideas)
     assert sdlc.cmd_ship(root, "001") == 1
     assert "2 entries named 'Share drafts'" in capsys.readouterr().err
@@ -2453,12 +2451,20 @@ def test_two_seeds_with_the_idea_s_title_refuse_before_any_write(tmp_path: Path,
 
 
 @pytest.mark.parametrize("ideas", [None, IDEAS.replace("Reopen", "Rename")])
-def test_ship_with_no_seed_to_remove_says_so_and_ships_twice(tmp_path: Path, capsys, ideas):
-    root, d = _seeded(tmp_path, "Reopen drafts", ideas or "")
-    if ideas is None:
-        (root / ".sdlc" / "work" / "inbox.md").unlink()
+def test_close_with_no_seed_to_remove_says_so(ideas) -> None:
+    plan = _planned("Reopen drafts", ideas or "")
+    assert plan["refusals"] == [] and plan["gone"] == ["Reopen drafts"]
+    assert plan["text"] == (ideas or "")
+
+
+def test_ship_leaves_the_seed_for_close_and_says_so(tmp_path: Path, capsys) -> None:
+    """R1: ship deletes nothing from the register; it says what close will retire, and a rerun
+    after a refused commit is harmless."""
+    root, d = _seeded(tmp_path, "Reopen drafts")
     assert sdlc.cmd_ship(root, "001") == 0
-    assert "no seed to remove" in capsys.readouterr().out
+    assert "close retires seed 'Reopen drafts'" in capsys.readouterr().out
+    assert (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == IDEAS
+    assert ".sdlc/work/inbox.md" not in _staged(root)
     assert sdlc.cmd_ship(root, "001") == 0, "a rerun after a refused commit"
     assert "stage: shipped" in (d / "intent.md").read_text(encoding="utf-8")
 
@@ -2473,6 +2479,70 @@ def test_ship_with_no_idea_mentions_no_seed(tmp_path: Path, capsys) -> None:
     )
 
 
+# ---------------------------------------------------------------- a change's held entries
+
+HELD = (
+    "# 001-reopen-drafts — entries\n\n"
+    "Retire 2026-10-01-1: taken in by 001-reopen-drafts\n\n"
+    "## [2026-10-09-1] [idea] Page the drafts\n\nLeft undone.\n\n"
+    "## [2026-10-09-2] [nit] Terse wording\n\nSay more.\n\n```\n## not a heading\n```\n"
+)
+
+
+def test_held_entries_read_their_retirements_and_their_entries() -> None:
+    held = sdlc.held_entries(HELD)
+    assert held["problems"] == []
+    assert held["retire"] == [("2026-10-01-1", "taken in by 001-reopen-drafts")]
+    assert held["ids"] == ["2026-10-09-1", "2026-10-09-2"]
+    assert held["chunks"]["2026-10-09-2"].endswith("```\n## not a heading\n```\n")
+
+
+@pytest.mark.parametrize(
+    "text, said",
+    [
+        ("# t\n\nstray words\n", "line 3"),
+        ("# t\n\nRetire soon: why\n", "line 3"),
+        ("# t\n\n## Not an entry\n", "line 3"),
+        ("# t\n\n## [2026-10-09-1] [idea] A\n\n## [2026-10-09-1] [idea] B\n", "twice"),
+    ],
+)
+def test_a_held_file_that_cant_be_read_says_where(text: str, said: str) -> None:
+    problems = sdlc.held_entries(text)["problems"]
+    assert problems and said in problems[0], problems
+
+
+def test_close_files_each_held_entry_and_retires_each_named_nit() -> None:
+    ideas = IDEAS.replace("[seed] Keep drafts", "[nit] Keep drafts")
+    plan = _planned("2026-10-02-1", ideas, HELD)
+    assert plan["refusals"] == []
+    assert plan["file"] == ["2026-10-09-1", "2026-10-09-2"]
+    assert plan["retire"] == ["2026-10-02-1", "2026-10-01-1"]
+    assert plan["text"] == (
+        "# Ideas\n\n> Seeds, not a backlog.\n\n"
+        "## [2026-10-03-1] [seed] Share drafts\n\nThe last.\n\n"
+        "## [2026-10-09-1] [idea] Page the drafts\n\nLeft undone.\n\n"
+        "## [2026-10-09-2] [nit] Terse wording\n\nSay more.\n\n```\n## not a heading\n```\n"
+    )
+
+
+def test_close_skips_what_the_base_holds_word_for_word_and_refuses_what_it_holds_otherwise():
+    """R6: a rerun's state is skipped; the same id with other text is refused."""
+    done = _planned("", _planned("", IDEAS, HELD)["text"], HELD)
+    assert done["refusals"] == [] and done["file"] == []
+    assert done["skipped"] == ["2026-10-09-1", "2026-10-09-2"]
+    assert done["gone"] == ["2026-10-01-1"], "a retirement already done is reported, not refused"
+    other = IDEAS + "\n## [2026-10-09-1] [idea] Someone else's\n\nx\n"
+    refused = _planned("", other, HELD)["refusals"]
+    assert refused and "2026-10-09-1" in refused[0]
+
+
+def test_close_retires_each_bug_the_change_fixes_and_says_which_are_gone() -> None:
+    ideas = IDEAS.replace("[seed] Share drafts", "[bug] Share drafts")
+    plan = _planned("", ideas, fixes="[2026-10-03-1, 2026-10-01-9]")
+    assert plan["retire"] == ["2026-10-03-1"] and plan["gone"] == ["2026-10-01-9"]
+    assert plan["text"].endswith("Two lines.\n")
+
+
 def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, capsys) -> None:
     root, _ = _seeded(tmp_path, "Reopen drafts")
     (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
@@ -2483,8 +2553,8 @@ def test_ship_stages_the_change_and_leaves_what_it_is_told_to(tmp_path: Path, ca
     head = _git(root, "rev-parse", "HEAD")
     assert sdlc.cmd_ship(root, "001", ["unrelated.txt"]) == 0
     assert _staged(root) == [
-        ".sdlc/last-id", ".sdlc/work/001-reopen-drafts/intent.md", ".sdlc/work/inbox.md",
-        "drafts.py", "with space.txt",
+        ".sdlc/last-id", ".sdlc/work/001-reopen-drafts/intent.md", "drafts.py",
+        "with space.txt",
     ]  # fmt: skip
     assert "  staged with space.txt" in capsys.readouterr().out
     assert _git(root, "rev-parse", "HEAD") == head, "ship never commits"
@@ -2503,8 +2573,7 @@ def test_ship_stages_beside_a_deletion_already_staged(tmp_path: Path, capsys) ->
     (root / "drafts.py").write_text("x = 1\n", encoding="utf-8")
     assert sdlc.cmd_ship(root, "001") == 0
     assert _staged(root) == [
-        ".sdlc/work/001-reopen-drafts/intent.md", ".sdlc/work/inbox.md",
-        "drafts.py", "gone.txt", "half.txt",
+        ".sdlc/work/001-reopen-drafts/intent.md", "drafts.py", "gone.txt", "half.txt",
     ]  # fmt: skip
     assert _git(root, "diff", "--name-only") == "", "the later edit is staged too"
     assert "  staged gone.txt" in capsys.readouterr().out

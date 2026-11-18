@@ -325,6 +325,17 @@ def _folder(tree: Path) -> Path:
     return tree / ".sdlc" / "work" / tree.name
 
 
+def _held(tree: Path) -> Path:
+    """134: a root whose register is the change's `entries.md`, so `sdlc.py`'s own readers read
+    what the landing holds for close to file."""
+    held = tree.parent / f"{tree.name}-held"
+    (held / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    source = _folder(tree) / factory.ENTRIES
+    text = source.read_text(encoding="utf-8") if source.is_file() else ""
+    (held / ".sdlc" / "work" / "inbox.md").write_text(text, encoding="utf-8")
+    return held
+
+
 def _config(root: Path, text: str) -> None:
     """The base branch's `.sdlc/config.toml`, committed on main before any change is made."""
     (root / ".sdlc").mkdir(exist_ok=True)
@@ -705,7 +716,9 @@ def test_a_landing_whose_commit_failed_commits_on_rerun(tmp_path, capsys) -> Non
     assert _git(tree, "status", "--porcelain") == "", "nothing left uncommitted"
     shipped = _git(tree, "show", f"HEAD:{intent.relative_to(tree).as_posix()}")
     assert "stage: shipped" in shipped
-    assert "2026-11-17-11" not in _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
+    assert _git(tree, "show", "HEAD:.sdlc/work/inbox.md") == REGISTER.rstrip("\n"), "134 R1"
+    held = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/entries.md")
+    assert f"Retire 2026-11-17-11: taken in by {tree.name}" in held
 
 
 REGISTER = """# Ideas
@@ -730,9 +743,10 @@ Paths: README.md
 
 @needs_uv
 def test_a_landing_retires_the_nits_its_intent_names(tmp_path, capsys) -> None:
-    """2026-11-17-32: a change whose intent names an open nit by id lands with that nit gone from
-    the register, in its own commit, and a `Retired nits:` paragraph, as `/sdlc:ship` does. An id
-    is matched whole: `2026-11-17-1` is not named by `2026-11-17-11`, and stays."""
+    """2026-11-17-32, 134 R3: a change whose intent names an open nit by id lands with a `Retire`
+    line for it in its `entries.md` and a `Retired nits:` paragraph, and close deletes it from the
+    register, as for `/sdlc:ship`. An id is matched whole: `2026-11-17-1` is not named by
+    `2026-11-17-11`, and stays."""
     root = _repo(tmp_path)
     (root / ".sdlc" / "work").mkdir(parents=True)
     (root / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
@@ -750,6 +764,12 @@ def test_a_landing_retires_the_nits_its_intent_names(tmp_path, capsys) -> None:
     assert (code, out["state"], out["retired_nits"]) == (0, "current", ["2026-11-17-11"]), out
     message = _git(tree, "log", "-1", "--format=%B")
     assert f"Retired nits:\n- 2026-11-17-11: taken in by {tree.name}" in message, message
+    # 134 R3: the branch's register keeps the nit; its `entries.md` retires it at close.
+    assert _git(tree, "show", "HEAD:.sdlc/work/inbox.md") == REGISTER.rstrip("\n")
+    held = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/entries.md").splitlines()
+    assert held[0] == f"# {tree.name} — entries"
+    assert f"Retire 2026-11-17-11: taken in by {tree.name}" in held
+    assert factory.retired_ids(_folder(tree)) == ["2026-11-17-11"]
     code, out = _run(capsys, factory.cmd_land_close, tree, "001")
     assert code == 0 and "merge" in out["done"], out
     register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
@@ -1095,7 +1115,7 @@ def test_a_landing_carries_drops_and_confirms_once(tmp_path, capsys) -> None:
     def written() -> tuple[str, str, list[dict]]:
         notes = (folder / "notes.md").read_text(encoding="utf-8")
         decisions = (folder / "decisions.md").read_text(encoding="utf-8")
-        return notes, decisions, sdlc.inbox_entries(tree)
+        return notes, decisions, sdlc.inbox_entries(_held(tree))
 
     notes, decisions, entries = written()
     assert [(e["status"], e["title"]) for e in entries] == [("idea", "Page the list")]
@@ -1118,7 +1138,9 @@ def test_a_landing_carries_drops_and_confirms_once(tmp_path, capsys) -> None:
     body = _git(tree, "log", "-1", "--format=%B")
     assert f"Carried forward:\n- Page the list → {seed}\n" in body
     assert "Dropped:\n- Rename the flag: the flag went away in round 2\n" in body
-    assert ".sdlc/work/inbox.md" in _git(tree, "show", "--name-only", "--format="), "committed"
+    names = _git(tree, "show", "--name-only", "--format=").splitlines()
+    assert f".sdlc/work/{tree.name}/entries.md" in names, "committed, held for close"
+    assert ".sdlc/work/inbox.md" not in names, "134 R1: the register never rides the branch"
 
 
 NOTES = (
@@ -1153,7 +1175,7 @@ def test_a_carried_note_keeps_its_continuation_lines(tmp_path, capsys) -> None:
     assert "dropped" in undone[1], "a proposal on the note's first line still matches"
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert (code, out["state"]) == (0, "current"), out
-    entry = next(e for e in sdlc.inbox_entries(tree) if e["status"] == "idea")
+    entry = next(e for e in sdlc.inbox_entries(_held(tree)) if e["status"] == "idea")
     assert CARRIED in " ".join(entry["text"]), entry
     notes = (folder / "notes.md").read_text(encoding="utf-8")
     assert f"- [x] Page the drafts list. Fifty a page would match the → seed: {entry['id']}\n" in (
@@ -1280,7 +1302,7 @@ def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
     (folder / "findings.md").write_text(OPEN_FINDING, encoding="utf-8")
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert code == 1 and "sdlc.py ship refused" in out["refusals"][0], out
-    bugs, problems = sdlc.bug_entries(tree)
+    bugs, problems = sdlc.bug_entries(_held(tree))
     assert problems == [] and len(bugs) == 1
     [bug] = bugs
     assert (bug["title"], bug["severity"], bug["paths"]) == (
@@ -1292,14 +1314,14 @@ def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
     assert bug["text"].startswith(f"Found by the review of {tree.name}. {PRE}")
     notes = (folder / "notes.md").read_text(encoding="utf-8")
     assert f"- [x] {PRE} → bug: {bug['id']}\n" in notes
-    register = (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    register = (folder / factory.ENTRIES).read_text(encoding="utf-8")
 
     (folder / "findings.md").write_text(
         OPEN_FINDING.replace("Disposition: open", "Disposition: fixed"), encoding="utf-8"
     )
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert (code, out["state"]) == (0, "current"), out
-    assert (tree / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8") == register, (
+    assert (folder / factory.ENTRIES).read_text(encoding="utf-8") == register, (
         "a rerun files nothing twice"
     )
     body = _git(tree, "log", "-1", "--format=%B")
@@ -1395,7 +1417,7 @@ def test_a_landing_files_the_nits_sdlc_reads(tmp_path, capsys) -> None:
     _nit(folder, "code", TERSE)
     code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
     assert (code, out["state"]) == (0, "current"), out
-    nits, problems = sdlc.nit_entries(tree)
+    nits, problems = sdlc.nit_entries(_held(tree))
     assert problems == [] and len(nits) == 1
     [nit] = nits
     assert out["filed_nits"] == [nit["id"]]
@@ -1406,10 +1428,11 @@ def test_a_landing_files_the_nits_sdlc_reads(tmp_path, capsys) -> None:
     assert nit["text"].startswith(
         f"Raised by the code review of {tree.name}, round 1: README.md:1: terse wording. Say what"
     )
-    [bug] = sdlc.bug_entries(tree)[0]
-    seeds = [e["id"] for e in sdlc.inbox_entries(tree) if e["status"] == "idea"]
+    [bug] = sdlc.bug_entries(_held(tree))[0]
+    seeds = [e["id"] for e in sdlc.inbox_entries(_held(tree)) if e["status"] == "idea"]
     assert len({nit["id"], bug["id"], *seeds}) == 3, "one next-entry call, three ids"
-    assert ".sdlc/work/inbox.md" in _git(tree, "show", "--name-only", "--format=").splitlines()
+    names = _git(tree, "show", "--name-only", "--format=").splitlines()
+    assert f".sdlc/work/{tree.name}/entries.md" in names and ".sdlc/work/inbox.md" not in names
 
 
 @needs_uv
@@ -1423,12 +1446,12 @@ def test_a_landing_rerun_files_each_nit_once(tmp_path, capsys) -> None:
     pre, _ = factory._preflight(folder, tree)
     filed, refused = factory._dispose(tree, folder, pre)
     assert refused is None and len(filed) == 2
-    register = tree / ".sdlc" / "work" / "inbox.md"
+    register = folder / factory.ENTRIES
     once = register.read_text(encoding="utf-8")
     assert once.count("] [nit] terse wording.") == 2, "one title, two nits: both filed"
     assert factory._dispose(tree, folder, pre) == ([], None)
     assert register.read_text(encoding="utf-8") == once
-    assert len(sdlc.nit_entries(tree)[0]) == 2
+    assert len(sdlc.nit_entries(_held(tree))[0]) == 2
 
 
 @needs_uv
@@ -1566,9 +1589,10 @@ Paths: README.md
 
 
 def _resolving(tmp_path: Path, capsys, edit: tuple[str, str]) -> tuple[Path, Path]:
-    """A change landed over a register that names its seed, the bug it fixes and a nit it takes
-    in, its rebase left conflicted in the register by the base branch's `edit` to it, and the
-    builder's resolution: the base branch's register, everything the landing deleted kept."""
+    """A change landed before 134 over a register that names its seed, the bug it fixes and a nit
+    it takes in, its commit deleting them, its rebase left conflicted in the register by the base
+    branch's `edit` to it, and the builder's resolution: the base branch's register, everything
+    the landing deleted kept."""
     root = _repo(tmp_path)
     (root / ".sdlc" / "work").mkdir(parents=True)
     register = root / ".sdlc" / "work" / "inbox.md"
@@ -1583,6 +1607,9 @@ def _resolving(tmp_path: Path, capsys, edit: tuple[str, str]) -> tuple[Path, Pat
     assert factory.frontmatter(text).get("idea") == "2026-11-17-6", text
     code, out = _run(capsys, factory.cmd_land, tree, "001", "auto")
     assert (code, out["state"]) == (0, "current"), out
+    # A branch landed before 134, whose commit deleted what it took from the register itself.
+    factory.drop_entries(tree, ["2026-11-17-5", "2026-11-17-6", "2026-11-17-7"])
+    _git(tree, "commit", "-q", "--amend", "-a", "--no-edit")
     landed = _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
     assert "2026-11-17-6" not in landed and "2026-11-17-5" not in landed, landed
     register.write_text(OWN.replace(*edit), encoding="utf-8")
@@ -2476,3 +2503,119 @@ def test_a_landing_stopped_by_a_tool_records_plain_words(tmp_path, capsys) -> No
     assert stop["problems"] == [
         "its commit failed: the landing's output gives git's words; rerun it once fixed"
     ]
+
+
+# ---------------------------------------------------------------- the register never rides (134)
+
+
+def _landed_holding(tmp_path: Path, capsys) -> tuple[Path, Path]:
+    """A change landed by the person over a committed register: a carried seed, a filed bug, a
+    nit its review raised and a nit its intent takes in, all held in its `entries.md`."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a register")
+    tree = _ready(root, "noted", "noted's one")
+    folder = _folder(tree)
+    (folder / "notes.md").write_text(f"# Notes\n\n- [ ] {PRE}\n- [ ] Page the list\n")
+    (folder / "decision.md").write_text(
+        "DECISION: READY\n\nFine.\n\n- IMPACT: minor — a test change\n" + BUG
+    )
+    _nit(folder, "code", TERSE)
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text(encoding="utf-8") + "\nTakes in nit 2026-11-17-11.\n")
+    code, out = _run(capsys, factory.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "current"), out
+    return root, tree
+
+
+@needs_uv
+def test_a_landing_leaves_the_register_as_the_base_has_it(tmp_path, capsys) -> None:
+    """134 R1: the landing's commit names no register path."""
+    root, tree = _landed_holding(tmp_path, capsys)
+    assert ".sdlc/work/inbox.md" not in _git(tree, "show", "--name-only", "--format=").splitlines()
+    assert _git(tree, "show", "HEAD:.sdlc/work/inbox.md") == REGISTER.rstrip("\n")
+    assert _git(tree, "status", "--porcelain") == ""
+
+
+@needs_uv
+def test_a_landing_holds_its_carried_seeds_bugs_and_nits(tmp_path, capsys) -> None:
+    """134 R2: every entry the yes filed is in the change's `entries.md`, whole, and committed;
+    none in the branch's register."""
+    root, tree = _landed_holding(tmp_path, capsys)
+    held = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/entries.md")
+    tags = [e["status"] for e in sdlc.parse_entries(held)]
+    assert sorted(tags) == ["bug", "idea", "nit"], held
+    register = _git(tree, "show", "HEAD:.sdlc/work/inbox.md")
+    for e in sdlc.parse_entries(held):
+        assert e["id"] not in register and e["title"] not in register
+
+
+@needs_uv
+def test_the_entries_factory_holds_are_the_ones_close_files(tmp_path, capsys) -> None:
+    """134 R13: `sdlc.py` reads what `_dispose()` and `retire_nits()` wrote, with its own parsing,
+    which the factory's copies match; and close files every entry and retires the nit."""
+    assert factory.ENTRIES == sdlc.ENTRIES
+    assert factory.RETIRE_RE.pattern == sdlc.RETIRE_LINE_RE.pattern
+    root, tree = _landed_holding(tmp_path, capsys)
+    folder = _folder(tree)
+    held = sdlc.held_entries((folder / factory.ENTRIES).read_text(encoding="utf-8"))
+    assert held["problems"] == [], held
+    assert [i for i, _ in held["retire"]] == factory.retired_ids(folder) == ["2026-11-17-11"]
+    ids = held["ids"]
+    assert len(ids) == 3
+    code, out = _run(capsys, factory.cmd_land_close, tree, "001")
+    assert code == 0 and "merge" in out["done"], out
+    assert out["register"]["file"] == ids and "2026-11-17-11" in out["register"]["retire"], out
+    register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert [e["id"] for e in sdlc.parse_entries(register)][-3:] == ids
+    assert "2026-11-17-11" not in register
+    said = " ".join(sdlc.nit_entries(root)[1] + sdlc.bug_entries(root)[1])
+    assert not any(i in said for i in ids), "each filed entry reads clean"
+
+
+@needs_uv
+def test_two_factory_landings_never_conflict_on_the_register(tmp_path, capsys) -> None:
+    """134 R5, the factory's way: two changes from one base, each taking a seed and carrying one
+    forward, landed one after the other with an idea filed between. The second's rebase meets no
+    register conflict, and every entry is there once."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(OWN, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a register")
+    trees = []
+    for slug, seed in (("first", "2026-11-17-6"), ("second", "2026-11-17-7")):
+        tree = _ready(root, slug, f"{slug}'s one")
+        if slug == "second":
+            (tree / "README.md").write_text("one\ntwo\nsecond's three\n", encoding="utf-8")
+        folder = _folder(tree)
+        intent = folder / "intent.md"
+        intent.write_text(intent.read_text("utf-8").replace("idea:", f"idea: {seed}", 1))
+        (folder / "notes.md").write_text(f"# Notes\n\n- [ ] Carry {slug}'s rest\n")
+        trees.append(tree)
+    for n, tree in enumerate(trees, 1):
+        num = f"{n:03d}"
+        code, out = _run(capsys, factory.cmd_land, tree, num, "person")
+        if out["state"] == "conflict":
+            code, out = _run(capsys, factory.cmd_resolve, tree, num, False)
+            assert (code, out["conflicted"], out["state"]) == (0, [], "clean"), out
+        assert code == 0 and out["state"] in ("current", "rebased", "clean"), out
+        if out["state"] != "current":
+            _review_passes(capsys, tree)
+        code, out = _run(capsys, factory.cmd_land_close, tree, num)
+        assert code == 0 and "merge" in out["done"], out
+        if n == 1:
+            register = root / ".sdlc" / "work" / "inbox.md"
+            register.write_text(
+                register.read_text("utf-8") + "\n## [2026-11-18-9] [idea] Filed between\n\nx\n"
+            )
+            assert sdlc.cmd_inbox_commit(root) == 0
+            capsys.readouterr()
+    entries = sdlc.inbox_entries(root)
+    titles = [e["title"] for e in entries]
+    for title in ("Carry first's rest", "Carry second's rest", "Filed between"):
+        assert titles.count(title) == 1, titles
+    assert "The change's own seed" not in titles and "A bug the change fixes" not in titles
+    assert len({e["id"] for e in entries}) == len(entries), "no id twice"

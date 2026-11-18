@@ -260,11 +260,13 @@ def test_a_malformed_issue_line_is_refused_not_dropped(tmp_path: Path, capsys) -
     assert "first: 2026-11-01-1's Issue: line isn't #N, …" in out["refusals"]
 
 
-def test_a_shipped_change_no_longer_claims_its_seed(tmp_path: Path, capsys) -> None:
+def test_a_shipped_change_claims_its_seed_until_it_closes(tmp_path: Path, capsys) -> None:
+    """134 R10: the seed stays in the register until close retires it, so a shipped change still
+    holds it, and no batch takes it meanwhile."""
     root = _repo(tmp_path)
     _open(root, "009", "done", idea="2026-11-01-4", stage="shipped")
-    code, _ = _groups(root, capsys, "2026-11-01-4 as again tier 1")
-    assert code == 0
+    code, out = _groups(root, capsys, "2026-11-01-4 as again tier 1")
+    assert code == 1 and out["refusals"] == ["again: 2026-11-01-4 is taken by 009-done"]
 
 
 def test_groups_writes_nothing_and_needs_no_prompt(tmp_path: Path, capsys) -> None:

@@ -27,8 +27,9 @@ git log -p ORIG_HEAD..<git.base> -- <file>
 
 Then merge it by one rule: **both sides' intent survives.** Keep what each side added. Where both
 changed the same lines, write the lines that carry both meanings, never one side's text with the
-other's dropped. In `.sdlc/work/inbox.md`, keep every entry either side holds, except one that
-either side deleted (a shipped seed, a filed nit), and keep each entry whole. Never take one side
+other's dropped. In `.sdlc/work/inbox.md`, which only a branch shipped before entries were held
+in `entries.md` edits, keep every entry either side holds, except one that either side deleted (a
+shipped seed, a filed nit), and keep each entry whole. Never take one side
 of a file wholesale, and never leave a conflict marker. Then:
 
 ```bash

@@ -46,5 +46,6 @@ for it.
 the `[nit]` entry they give, shown as **Nits** shows one: the section's title, its line, `Theme:`,
 `Cost:` and `Value:` as written, `Paths:` the path its `Evidence:` names (without the line), and
 `Raised by: <NNN-slug> (<pass>)` with its heading's pass. Its id comes in the same `next-entry`
-call as every other entry, and the question is asked with `--nits`. The section itself stays as
-written: filing it re-dispositions nothing.
+call as every other entry, it is held in the change's `entries.md` with the others, and the
+question is asked with `--nits`. The section itself stays as written: filing it re-dispositions
+nothing.

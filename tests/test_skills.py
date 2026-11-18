@@ -537,6 +537,27 @@ def test_intent_never_edits_the_register() -> None:
             assert said not in text, f"{name} still says {said!r}"
 
 
+def test_no_skill_ships_an_entry_into_the_register() -> None:
+    """134 R14: ship and the factory's landing hold what they file and retire in the change's
+    `entries.md`, which close files in its `Close` commit; neither tells anyone to append to or
+    delete from the register while shipping, which every landing would conflict on."""
+    files = [*(ROOT / "skills" / "ship").glob("*.md"),
+             ROOT / "plugins" / "factory" / "skills" / "land" / "SKILL.md"]  # fmt: skip
+    wrong = re.compile(
+        r"(append|appended|delete|deletes|deleted)[^.]{0,60}(to|from|in) (the register|"
+        r"`\.sdlc/work/inbox\.md`)|seed dropped|drops the seed|`ship` does\.|register after its "
+        r"last one|`ship` deletes|`\.sdlc/work/inbox\.md` when Step 6",
+        re.I,
+    )
+    for path in files:
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        found = wrong.search(text)
+        assert found is None, f"{path.relative_to(ROOT)} still says {found.group(0)!r}"
+    ship = " ".join((ROOT / "skills" / "ship" / "SKILL.md").read_text("utf-8").split())
+    assert "never edits the register" in ship and "`entries.md`" in ship
+    assert "Retire <id>: <reason>" in ship
+
+
 def test_status_reads_next_up_s_two_groups() -> None:
     """062 R8: status recommends what's ready before a seed no one ranked, and never decides for
     the person whether a seed is worth building."""
@@ -682,9 +703,9 @@ def test_nits_are_offered_early_recorded_at_ship_and_counted_by_retro() -> None:
     assert "the nits shown recorded in .sdlc/work/inbox.md" in wait
     present = ship.split("## Step 4")[1].split("## Step 5")[0]
     assert "sdlc.py next-entry --count <N>" in present and "[nit]" in present
-    land = ship.split("## Step 6")[1].split("## Step 7")[0]
-    assert 'templates["inbox.md"]' in land
-    assert "`.sdlc/work/inbox.md` when Step 6" in " ".join(land.split())
+    land = " ".join(ship.split("## Step 6")[1].split("## Step 7")[0].split())
+    assert "never edits the register" in land and "Retire <id>: <reason>" in land, "134"
+    assert "into `entries.md`" in land and "`entries.md` with it" in land
     assert "Retired nits:" in ship
     for name in ("intent", "spec"):
         assert "sdlc.py nits --touching" in text[name], name
@@ -949,7 +970,7 @@ _MD_NAMES = {
 }  # fmt: skip
 # The files a skill names that the factory's agents write into a change's folder, with no copy in
 # the repo to find: the run's verdict and the person's calls it raised.
-WRITTEN_ELSEWHERE = {"decision.md", "decisions.md", "conflicts.md"}
+WRITTEN_ELSEWHERE = {"decision.md", "decisions.md", "conflicts.md", "entries.md"}
 
 
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)

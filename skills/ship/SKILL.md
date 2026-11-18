@@ -301,7 +301,7 @@ confirmed.
 **How to recover** (`recover.md`), **agent verdicts** (`factory.md`), **undone items**
 (`undone.md`) and **issues it closes** (`closes.md`): each when `branches` names its file.
 
-**Ids.** Take an id for every entry this ship would add to `.sdlc/work/inbox.md`, the new nits, the
+**Ids.** Take an id for every entry this ship would file in `.sdlc/work/inbox.md`, the new nits, the
 pre-existing bugs, the seeds undone items are carried to and the seeds issues are split off as,
 all in one call, `<N>` being how many, so no two share one:
 
@@ -317,7 +317,7 @@ message after the body, one `- <id>: <reason>` line each. A listed nit the diff 
 stays, and needs no mention.
 
 **Bugs fixed.** When the intent has a `fixes:` line, name each bug it lists, by id and title from
-`.sdlc/work/inbox.md`: `sdlc.py ship` deletes those entries with the commit, and `/sdlc:close` records
+`.sdlc/work/inbox.md`: `/sdlc:close` deletes those entries in its `Close` commit, and records
 each as an `Sdlc-Fixes:` trailer. A listed bug the diff doesn't fix is an **Important** finding:
 the line comes out, or the fix goes in.
 
@@ -392,17 +392,18 @@ was raised. A failing gate, that refusal, or a fix that needs any other change t
 (its body, `How to recover:`, an entry) is a stop: show what happened and ask Step 5's question
 again. The yes approved the fixes described, not whatever they turned into.
 
-**The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`. Write
-entries there, never into a second file beside it, which would hide every entry the first one
-holds.
+**The change's branch never edits the register** (`config`'s `work.register`,
+`.sdlc/work/inbox.md`), and `sdlc.py ship` refuses an uncommitted edit to it. Every entry this ship
+files goes, whole, into the change's `.sdlc/work/NNN-slug/entries.md`, committed with it, which
+`/sdlc:close` files in its `Close` commit: a `# NNN-slug — entries` title, then a `Retire <id>:
+<reason>` line per retired nit, then each `## [<id>] [<tag>] <title>` entry as the register will
+hold it. The seed `idea:` names and the bugs `fixes:` names are never listed: close reads them.
 
 First the undone items (`undone.md`), then the issues it closes (`closes.md`), each exactly as
 approved, when `branches` names its file.
 
-Then the nits and the pre-existing bugs, exactly as approved: append each new entry to the
-register after its last one, and delete each retired nit, heading to the line before the next
-`## `. If it doesn't exist, `Write` it at that path first from `templates["inbox.md"]` in
-`config`, as it is, then append. `findings.md` is already as approved: nothing here edits it.
+Then the nits and the pre-existing bugs, exactly as approved, into `entries.md` (`Write` it first
+with its title when missing). `findings.md` is already as approved: nothing here edits it.
 
 Then make the approved context edits, exactly as shown, in this checkout: they land in the same
 commit as the code they describe.
@@ -411,8 +412,8 @@ Then set the approved impact on the `impact:` line of `intent.md`'s frontmatter.
 
 If the change came from a `.sdlc/work/inbox.md` seed and the built thing deviated from the sketch, say
 how in `notes.md`, starting it from `templates["notes.md"]` in `config` if the change has none.
-`Write` is for those files only, `findings.md` in Step 3, and `.sdlc/work/inbox.md`'s first time: everything else this step
-changes already exists, and is edited in place. Never delete the seed's entry by hand: `ship` does.
+`Write` is for those files only, `findings.md` in Step 3, and `entries.md`'s first time: everything else this step
+changes already exists, and is edited in place. Never delete the seed's entry by hand: close does.
 
 **When `config`'s `git.attribution` is `false`**, the commit carries the approved message and
 nothing more: no `Co-Authored-By:` line naming an agent and no "Generated with" line, whatever the
@@ -423,7 +424,7 @@ Then, with a `--leave <path>` for each path Step 0's approval set apart, and `--
 --through F5` after a yes that fixed:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship <NNN>   # stamps, drops the seed, stages
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship <NNN>   # stamps and stages
 git status --short                                                           # confirm nothing unrelated got staged
 git commit -m "<approved message>"
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # the issue, as committed
@@ -433,11 +434,10 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync <NNN>   # t
 commit. "Nothing to sync" is fine. A failure never undoes the commit: report what it printed, and
 that `sdlc.py sync <NNN>` can be rerun; `/sdlc:close` renders the issue a last time anyway.
 
-`ship` stamps the folder shipped, deletes the entry the change's `idea:` names and each bug its
-`fixes:` names from `.sdlc/work/inbox.md` (saying so when one isn't there), and stages every path the checkout has
-uncommitted but the ones left out: the change's code, its folder, `.sdlc/work/inbox.md` when Step 6
-edited it, the context docs it edited, and any `.sdlc/last-id` its `new` wrote (the
-counter, which reaches `main` this way). It prints each path it staged, and never commits. The
+`ship` stamps the folder shipped, says what close will retire (the seed `idea:` names, each bug
+`fixes:` names) and file from `entries.md`, and stages every path the checkout has uncommitted but
+the ones left out: the change's code, its folder (`entries.md` with it), the context docs it
+edited, and any `.sdlc/last-id` its `new` wrote (the counter, which reaches `main` this way). It prints each path it staged, and never commits. The
 commit message names `NNN-slug`, which is how the commit and its folder find each other.
 
 If `ship` refuses over an undone item, one was missed: give it the disposition the human approved.

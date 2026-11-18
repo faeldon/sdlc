@@ -7,7 +7,8 @@ change's `notes.md`.
 
 **Undone items.** For each item Step 0 listed, propose one of these dispositions:
 
-- **carry it forward:** a new `.sdlc/work/inbox.md` seed, with a short title of its own;
+- **carry it forward:** a new seed, filed in `.sdlc/work/inbox.md` when the change closes, with a
+  short title of its own;
 - **file it as a bug:** only for an item starting `pre-existing:` (a fault a reviewer found in code
   the change didn't touch, as a factory run carries one): proposed in the shape this step gives a
   Pre-existing finding, `## [<id>] [bug] <title>` with its `Severity:` (one of the process doc's
@@ -25,11 +26,11 @@ others. Each carried seed and each bug takes an id from Step 4's `next-entry` ca
 
 First, the undone items, exactly as approved:
 
-- **Carried:** append each seed to the register as `## [<id>] [idea] <its title>`, with the id
-  Step 4 took for it. If it doesn't exist, `Write` it at that path first from
-  `templates["inbox.md"]` in `config`, as it is, then append. Its body says what is left to do and points at
+- **Carried:** add each seed to the change's `entries.md` (in `SKILL.md`'s shape) as
+  `## [<id>] [idea] <its title>`, with the id Step 4 took for it; close files it in the register.
+  Its body says what is left to do and points at
   `.sdlc/work/NNN-slug/notes.md` in this change's commit. Then tick the item in place:
   `- [x] <text> → seed: <id>`.
-- **Filed as a bug:** append it with the pre-existing bugs, as Step 6 files those, with the id
+- **Filed as a bug:** add it to `entries.md` with the pre-existing bugs, as Step 6 files those, with the id
   Step 4 took for it, then tick it: `- [x] <text> → bug: <id>`.
 - **Dropped:** tick it as `- [x] <text> → dropped: <the reason>`.
