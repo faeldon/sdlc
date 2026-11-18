@@ -437,7 +437,9 @@ entries are on the base branch. An issue the marking labelled whose record went 
 `Issue:` line removed by hand) goes back to triage, with a comment saying so, unless a commit
 the base branch hasn't pushed closes it (every commit on it, with no remote-tracking ref): that
 one is left for the push. `intake` lists as `dangling` an issue labelled `triaged` that nothing
-records anymore, which includes one whose send-back failed, or that waits on that push. `sdlc.py
+records anymore, which includes one whose send-back failed, or that waits on that push, flagged
+`waits_on_push` so triage leaves it be (null for each, with `dangling_unread`, when the unpushed
+commits can't be read, and triage offers none). `sdlc.py
 sync` marks a change's own `closes:` issues as soon as its intent names them, so a filer hears
 the change took the issue on, and sends one that left the line back to triage, with a comment saying so, unless another record holds it now.
 

@@ -53,7 +53,10 @@ there is nothing to read.
   committed, so Step 5's `inbox-commit` comes first, and `mark-triaged` after it. One flagged
   `replied` was waiting on its author, who has answered.
 - **`dangling`**: open issues labelled `triaged` that nothing in the repo records anymore. Offer each
-  to be triaged again, as if new.
+  to be triaged again, as if new. An issue an unpushed commit closes (`waits_on_push: true`) is
+  waiting on the push: never offer it again. Tell the person it's waiting on the push, which
+  `/sdlc:publish` or close will do. With `dangling_unread` set, no issue can be told apart
+  (`waits_on_push: null`): offer none of them, and say why.
 - **`severities`**: the process doc's words (`docs.process`, its section on bugs, else the
   plugin's guide, `docs.process.guide`), most severe first.
 - **`open_changes`**: the changes still being built, each with its intent's path and its
@@ -213,7 +216,8 @@ second file beside it.
 ## Step 6 — Report and stop
 
 Give the commit, each issue's verdict, and anything `mark-triaged` or `sync` listed as failed with
-the command to rerun. Then the next action: `/sdlc:intent <id>` for an entry the human wants built
+the command to rerun. Name each dangling issue that is waiting on the push, which `/sdlc:publish`
+or close will do, and, with `dangling_unread`, that no dangling issue was offered, and why. Then the next action: `/sdlc:intent <id>` for an entry the human wants built
 now, or nothing, and `/sdlc:status` puts the new entries forward with the rest.
 
 ## Out of scope

@@ -2089,3 +2089,83 @@ def test_a_stopped_landing_drops_the_ready_look() -> None:
     stopped = css.index(".card.landing-stopped {")
     assert stopped > ready and "var(--stop)" in css[stopped : css.index("}", stopped)]
     assert re.search(r'key: "close", label: "Ready to close", who: "[^"]*landing', script)
+
+
+# ---------------------------------------------------------------- the drawer's file (138)
+
+# The drawer's ids, each a stand-in node, and a `fetch` whose responses the test releases in the
+# order it names: `steps` is a list of ("show", path) and ("answer", path) moves.
+_DRAWER_RUN = r"""
+El.prototype.replaceChildren = function (...ns) { this.kids = []; this.append(...ns); };
+Object.defineProperty(El.prototype, "children", {
+  get() { return this.kids.filter((k) => k instanceof El); },
+});
+const ids = {};
+const $ = (id) => (ids[id] ??= new El("div"));
+const waiting = {};
+globalThis.fetch = (url) => new Promise((resolve) => {
+  const path = new URLSearchParams(url.split("?")[1]).get("path");
+  waiting[path] = () => resolve({ ok: true, status: 200, text: async () => input.files[path] });
+});
+const input = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const tick = () => new Promise((r) => setTimeout(r, 0));
+(async () => {
+  for (const [move, path] of input.steps) {
+    if (move === "show") show("005-share", path);
+    else waiting[path]();
+    await tick();
+  }
+  process.stdout.write(JSON.stringify({ doc, pane: $("d-doc"), raw: $("d-raw").hidden }));
+})();
+"""
+
+
+def _drawer(files: dict[str, str], steps: list[tuple[str, str]]) -> dict:
+    """The page's `show()` and `paint()`, run under node over the stand-in DOM."""
+    _, script = _page_parts()
+    helper = re.search(r"^function h\(tag, attrs, \.\.\.children\) \{.*?^\}$", script, re.S | re.M)
+    section = re.search(r"^// ---- markdown\b.*?^// ---- end markdown$", script, re.S | re.M)
+    drawer = re.search(r"^let open = null;$.*?^async function show\(.*?^\}$", script, re.S | re.M)
+    assert helper and section and drawer, "h(), the markdown section, paint() and show()"
+    program = "\n".join(
+        ['"use strict";', _FAKE_DOM, helper.group(0), section.group(0), drawer.group(0)]
+        + [_DRAWER_RUN]
+    )
+    out = subprocess.run(
+        ["node", "-e", program],
+        input=json.dumps({"files": files, "steps": steps}),
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return json.loads(out.stdout)
+
+
+@needs_node
+def test_a_stale_response_never_paints_over_the_newer_file() -> None:
+    """2026-11-18-9: two files clicked quickly, the older answering last, show the newer."""
+    files = {"intent.md": "# Intent\n\nthe older file\n", "notes.md": "the newer file\n"}
+    steps = [("show", "intent.md"), ("show", "notes.md"), ("answer", "notes.md")]
+    run = _drawer(files, steps + [("answer", "intent.md")])
+    assert run["doc"]["path"] == "notes.md"
+    assert _text(run["pane"]) == "the newer file"
+    in_order = _drawer(files, [("show", "intent.md"), ("answer", "intent.md")])
+    assert in_order["doc"]["path"] == "intent.md" and "the older file" in _text(in_order["pane"])
+
+
+@needs_node
+def test_an_empty_file_says_so() -> None:
+    """2026-11-18-8: an empty file draws a note, never a blank pane, and no Raw toggle; one
+    holding only whitespace is as empty (138 C2)."""
+    cases = [
+        ("intent.md", ""),
+        ("build/round-1.files", ""),
+        ("notes.md", "\n"),
+        ("a.md", " \n\t\n"),
+    ]
+    for path, text in cases:
+        run = _drawer({path: text}, [("show", path), ("answer", path)])
+        assert run["doc"] == {"path": path, "text": text}
+        assert _text(run["pane"]) == "This file is empty.", path
+        assert _nodes(run["pane"], "pre"), "in the pane's plain style, as an empty folder's note"
+        assert run["raw"] is True, "nothing raw to show"

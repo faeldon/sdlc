@@ -117,7 +117,7 @@ its `name` beside it, `O1 (Unaided setup)`.
 
 Ask literally:
 
-> `Write this as .sdlc/work/NNN-<slug>/spec.md, advance the change to stage: design, update its issue and then start plan mode? (yes / revise a requirement / rethink the design)`
+> `Write this as .sdlc/work/NNN-<slug>/spec.md, advance the change to stage: design, update its issue and then start plan mode? (yes / revise a requirement)`
 
 Leave out ` update its issue` (keeping the comma) when `config` says `archive.target` is `none`.
 Starting plan mode approves nothing: the plan is approved when plan mode ends, as always. It is in

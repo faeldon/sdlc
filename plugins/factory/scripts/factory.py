@@ -272,17 +272,17 @@ FINDINGS_HEAD = """\
 # Findings
 
 > What a change's review found, one `## ` section a finding, committed with the change.
-> `/sdlc:ship` writes it after every review, and the factory's `carry` writes its agents' findings
-> into it; `By:` names who raised one: `fresh` for ship's fresh-context reviewer, a factory role
-> (`code`, `test`, …) for an agent, and no line on ship's own. A rerun keeps each id, marks one the
-> diff no longer shows `fixed`, and never raises again one the person answered `wrong`,
-> `intentional` or `minor`; an agent's `wrong` is its verifier's, never the person's, and the same
-> fault worded differently is one more. `sdlc.py` reads each heading and its `Evidence:`, `Class:`,
-> `Disposition:`, `Reason:`, `By:` and `Fix:` lines, counts ship's own alone into the
-> `Sdlc-Findings` trailer (its `agents=` says how many it left out), words ship's question from
-> the ones proposed `fix`, and `ship` refuses while one is still `open` or `fix`. On a diff that
-> touches a sensitive path, this note also says `Fresh review: ran`, or `Fresh review: skipped,
-> <why>`.
+> `/sdlc:ship` writes it after every review, and the factory's `carry`, and its landing's rounds,
+> write their agents' findings into it; `By:` names who raised one: `fresh` for ship's
+> fresh-context reviewer, a factory role (`code`, `test`, …) for an agent, and no line on ship's
+> own. A rerun keeps each id, marks one the diff no longer shows `fixed`, and never raises again
+> one the person answered `wrong`, `intentional` or `minor`; an agent's `wrong` is its verifier's,
+> never the person's, and the same fault worded differently is one more. `sdlc.py` reads each
+> heading and its `Evidence:`, `Class:`, `Disposition:`, `Reason:`, `By:` and `Fix:` lines, counts
+> ship's own alone into the `Sdlc-Findings` trailer (its `agents=` says how many it left out),
+> words ship's question from the ones proposed `fix`, and `ship` refuses while one is still `open`
+> or `fix`. On a diff that touches a sensitive path, this note also says `Fresh review: ran`, or
+> `Fresh review: skipped, <why>`.
 """
 # What `carry` writes for each agent finding: its `By:` is the role, its `Class:` names the round,
 # and a nit's `Reason:` says no one weighed it.
@@ -922,6 +922,15 @@ def build_question(start: dict, check: str | None, sensitive: list[str]) -> str:
     return f"{opening}{gate}{review}{tail} (yes / {revise}change the reviewers or rounds / no)"
 
 
+def spec_question(root: Path, change: str) -> str:
+    """The spec gate's question, worded here as `build_question()` is, so the skill never words
+    its own: the folder its yes writes `spec.md` into, and the stage it moves to."""
+    return (
+        f"Write this as {work_rel(root)}/{change}/spec.md and advance the change to stage: design? "
+        "(yes / revise a requirement)"
+    )
+
+
 def cmd_start(root: Path, ident: str, purpose: str) -> int:
     """Whether a factory step may start on this change now, and what it will run with."""
     cfg, warnings = load_config(root)
@@ -963,8 +972,10 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         )
         if purpose == "spec" and tier == 1:
             out["refusals"].append("a Tier 1 change has no spec: its intent's Approach is the spec")
-    # The build gate's question, worded by the script; the spec skill asks its own. Its gate and
-    # depth clauses are the base branch's, so with none it refuses rather than say there is no gate.
+    # Each gate's question, worded by the script. The build gate's gate and depth clauses are the
+    # base branch's, so with none it refuses rather than say there is no gate.
+    if purpose == "spec" and not out["refusals"]:
+        out["question"] = spec_question(root, folder.name)
     if purpose == "build" and not out["refusals"] and out["base"] is None:
         out["refusals"].append("no base branch: set [git] base in .sdlc/config.toml")
     if purpose == "build" and not out["refusals"]:

@@ -4507,12 +4507,21 @@ def test_the_build_question_carries_on_an_upgraded_run(tmp_path, capsys) -> None
 def test_no_build_question_for_a_refusal_or_a_spec(tmp_path, capsys) -> None:
     root = _change(tmp_path, 2, "test")
     assert _question(root, capsys) is None, "a test change with no decision is refused"
-    _, out = _run(capsys, factory.cmd_start, _change(tmp_path / "b", 2, "plan"), "008", "spec")
-    assert out["question"] is None, "the spec skill asks its own"
+    _, out = _run(capsys, factory.cmd_start, _change(tmp_path / "b", 1, "plan"), "008", "spec")
+    assert out["refusals"] and out["question"] is None, "a Tier 1 change has no spec to ask about"
     code, out = _run(
         capsys, factory.cmd_start, _change(tmp_path / "c", branch="main-ish"), "008", "build"
     )
     assert code == 1 and out["question"] is None, "no worktree of its own"
+
+
+def test_start_words_the_spec_question(tmp_path, capsys) -> None:
+    """2026-11-18-10: the spec gate's question is the script's, as the build gate's is."""
+    _, out = _run(capsys, factory.cmd_start, _change(tmp_path, 2, "plan"), "008", "spec")
+    assert out["question"] == (
+        f"Write this as .sdlc/work/{NAME}/spec.md and advance the change to stage: design? "
+        "(yes / revise a requirement)"
+    )
 
 
 def test_no_build_question_without_a_base_branch(tmp_path, capsys) -> None:

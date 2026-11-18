@@ -38,7 +38,7 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py start <NNN> -
 not this change's worktree, a Tier 1 change, a stage past `plan`. **If there are refusals, show
 them and stop.** For a Tier 1 change, say its intent's Approach stands in for a spec, and that
 `/sdlc-factory:build` can start from it. `start` also gives `base`, the branch the change lands
-on, and `behind`, how many of its commits the change lacks.
+on, `behind`, how many of its commits the change lacks, and `question`, Step 2's question.
 
 With no refusals, bring the change up to date before the spec-writer reads it, with the call
 `/sdlc-factory:build` makes:
@@ -84,9 +84,11 @@ question left for the person is theirs to answer now, or to leave open in the in
 
 ## Step 2 — WAIT for explicit approval
 
-Ask literally:
+Ask `start`'s `question` literally, as printed; never word your own, nor copy the sample here.
+The script words it, as it does the build gate's, so what the yes approves is the folder it names.
+What it prints reads like this, the change's folder in place of `NNN-<slug>`:
 
-> `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement / rethink the design)`
+> `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement)`
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a

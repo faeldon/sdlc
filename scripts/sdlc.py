@@ -7735,7 +7735,9 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
 def cmd_intake(root: Path) -> int:
     """What /sdlc:triage reads, as JSON: the open issues no change claims and triage hasn't
     labelled, each with `filed` naming the record the repo already holds for it (so a rerun only
-    labels it) or null; the `dangling` ones, labelled `triaged` with no record; the severities;
+    labels it) or null; the `dangling` ones, labelled `triaged` with no record, each saying
+    whether an unpushed commit closes it (`waits_on_push`, null with `dangling_unread` when
+    those commits can't be read); the severities;
     and the open changes an issue could go to. Writes nothing."""
     home = main_root(root)
     cfg = load_config(home)[0]
@@ -7776,7 +7778,17 @@ def cmd_intake(root: Path) -> int:
     ]
     out["more"] = more
     dangling, err = found.dangling(set(records))
-    out["dangling"] = dangling if dangling is not None else []
+    # One a commit the base branch hasn't pushed closes lost its record to that commit's close:
+    # it waits on the push, and isn't triage's again. Unread, none is said not to wait: each is
+    # null, and `dangling_unread` says why, so triage offers none of them on a guess.
+    closed_by = getattr(found, "closed_by", None)
+    closing = unpushed_closes(home, cfg, closed_by) if dangling and closed_by else None
+    if dangling and closing is None:
+        out["dangling_unread"] = "couldn't read the commits the base branch hasn't pushed"
+    out["dangling"] = [
+        {**d, "waits_on_push": None if closing is None else d.get("number") in closing}
+        for d in dangling or []
+    ]
     if err:
         out["dangling_error"] = err
     print(json.dumps(out, indent=2, ensure_ascii=False))

@@ -1749,6 +1749,21 @@ def test_intake_lists_only_what_no_one_has_recorded(tmp_path, gh, capsys) -> Non
     assert [d["number"] for d in out["dangling"]] == [50], "triaged with no record"
 
 
+def test_intake_never_says_nothing_waits_when_it_can_t_read_the_unpushed_commits(
+    tmp_path, gh, capsys, monkeypatch
+) -> None:
+    """138 C1: with the unpushed commits unread, no dangling issue is said not to wait on the
+    push: each says `waits_on_push: null`, and `dangling_unread` says why, so triage offers none."""
+    root = _repo(tmp_path)
+    _filed(gh, 50, labels=("triaged",))
+    monkeypatch.setattr(sdlc, "unpushed_closes", lambda *a: None)
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert code == 0 and [(d["number"], d["waits_on_push"]) for d in out["dangling"]] == [
+        (50, None)
+    ], out
+    assert out["dangling_unread"] == "couldn't read the commits the base branch hasn't pushed"
+
+
 def test_intake_with_no_tracker_reads_nothing(tmp_path, capsys) -> None:
     root = _repo(tmp_path, github=False)
     code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
@@ -1889,6 +1904,33 @@ def test_a_full_pass_leaves_an_issue_an_unpushed_commit_closes(tmp_path, gh, cap
         "<!-- sdlc:withdrawn:001-thing -->\n"
         "001-thing no longer takes this issue on; it is open for triage again."
     )
+
+
+def test_intake_says_a_dangling_issue_an_unpushed_commit_closes_waits_on_the_push(
+    tmp_path, gh, capsys
+) -> None:
+    """2026-11-18-12: a closed change's issue has lost its record until the push closes it, so
+    intake flags it, and triage never offers it again; once pushed, it is dangling like any."""
+    root = _repo(tmp_path)
+    folder = _open(root)
+    _filed(gh, 50)
+    _set(folder, "depends_on:\n", "depends_on:\ncloses: [50]\n")
+    code, out = _sync(root, capsys, "001")
+    assert code == 0 and {"name": "triaged"} in _issue(gh, 50)["labels"], out
+    _set(folder, "impact:\n", "impact: none\n")
+    assert sdlc.cmd_ship(root, "001") == 0
+    tree = sdlc.checkout_of(folder)
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "ship 001-thing")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert code == 0 and [(d["number"], d["waits_on_push"]) for d in out["dangling"]] == [
+        (50, True)
+    ], out
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert [(d["number"], d["waits_on_push"]) for d in out["dangling"]] == [(50, False)], out
 
 
 def test_mark_triaged_points_an_attached_issue_at_its_change(tmp_path, gh, capsys) -> None:

@@ -574,26 +574,37 @@ let doc = null;
 // Whether a markdown file shows as its raw text, as the person last chose.
 let raw = false;
 
+// Which request the drawer waits on: a response to an older one is never shown.
+let asking = 0;
+
 function paint() {
-  const md = Boolean(doc && doc.text !== null && /\.md$/i.test(doc.path));
+  // An empty file, or one of only whitespace, has nothing to render, nor raw text to toggle to:
+  // it says so instead.
+  const empty = Boolean(doc && doc.text !== null && doc.text.trim() === "");
+  const md = Boolean(doc && doc.text !== null && !empty && /\.md$/i.test(doc.path));
   $("d-raw").hidden = !md;
   $("d-raw").setAttribute("aria-pressed", String(raw));
   $("d-doc").replaceChildren(md && !raw
     ? h("div", { class: "md" }, renderMarkdown(doc.text, { base: doc.path, files: open ? open.files : [] }))
-    : h("pre", {}, doc ? doc.text ?? doc.note : "…"));
+    : h("pre", {}, !doc ? "…" : empty ? "This file is empty." : doc.text ?? doc.note));
 }
 
 async function show(change, path) {
   for (const b of $("d-files").children) b.setAttribute("aria-current", String(b.dataset.path === path));
+  const ask = ++asking;
   doc = null;
   paint();
+  let got;
   try {
     const res = await fetch(`/file?change=${encodeURIComponent(change)}&path=${encodeURIComponent(path)}`,
       { cache: "no-store" });
-    doc = res.ok ? { path, text: await res.text() } : { path, text: null, note: `${path} can't be read (${res.status}).` };
+    got = res.ok ? { path, text: await res.text() } : { path, text: null, note: `${path} can't be read (${res.status}).` };
   } catch (e) {
-    doc = { path, text: null, note: `${path} can't be read.` };
+    got = { path, text: null, note: `${path} can't be read.` };
   }
+  // Another file was asked for since: its own response paints the pane.
+  if (ask !== asking) return;
+  doc = got;
   paint();
 }
 
@@ -608,7 +619,7 @@ function openDrawer(name) {
   $("scrim").hidden = $("drawer").hidden = false;
   const first = c.files.includes("intent.md") ? "intent.md" : c.files[0];
   if (first) show(c.change, first);
-  else { doc = { path: "", text: null, note: "This folder holds no file yet." }; paint(); }
+  else { asking++; doc = { path: "", text: null, note: "This folder holds no file yet." }; paint(); }
   $("d-close").focus();
 }
 
