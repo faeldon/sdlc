@@ -194,30 +194,6 @@ Left undone by 133-board-tracks-landing, carried forward when it landed: ux: the
 See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-21] [idea] A landing train: one integration of the batch, one gate, one conflict resolution
-
-A landing train: /sdlc-factory:land stacks the batch on a landing branch in order, one landing
-agent (opus, with every change's spec and diff) resolves conflicts once across the batch, the gate
-runs once at the tip, failures are bisected to eject the change at fault, and main is
-fast-forwarded with each change's own commit and Close commit kept on its first-parent line.
-Evidence 2026-11-18: four landing conflicts, two moves, and 131 re-conflicting in factory.py
-against 129 after a move. Weigh it at the retro once the register fix has landed and the remaining
-conflicts are counted.
-Theme: landing
-Raised 2026-11-18.
-
-## [2026-11-18-23] [idea] Close holds the main lock from its merge to its Close commit
-
-Left undone by 134-register-never-conflicts, carried forward when it landed: Close takes `_main_lock()` only around its register write and `Close` commit, not from its merge: an `inbox-commit` that lands between the two puts a `File` commit between the change's commit and its `Close`, where `closed_changes()` reads the `Close`'s first parent as the change. That hazard predates this change (the folder's removal had it too); holding the lock from the merge would close it, at the cost of blocking `/sdlc:idea` through the archive step.
-See .sdlc/work/134-register-never-conflicts/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-24] [idea] A threaded test that close and inbox-commit contend for the register lock
-
-Left undone by 134-register-never-conflicts, carried forward when it landed: `test_close_and_inbox_commit_keep_both_entries` (R7) files the idea between close's check and its locked write, so it proves the reread under the lock, not two processes racing for it. A threaded test, like `claim()`'s, would prove the lock itself.
-See .sdlc/work/134-register-never-conflicts/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-25] [nit] the new *Closing* lines and the *The register* paragraph (around line 166) run past the file's ~100-column wrap, so reflow them
 
 Raised by the code review of 134-register-never-conflicts, round 1: AGENTS.md:118-119: the new *Closing* lines and the *The register* paragraph (around line 166) run past the file's ~100-column wrap, so reflow them
@@ -416,4 +392,22 @@ commits this month), so listing them would make nearly every run full depth; 139
 rewrote close's lock and the landing at light depth with no security review. Open it after the
 139–147 batch and the release, so the move is made on quiet code.
 Theme: factory
+Raised 2026-11-18.
+
+## [2026-11-18-44] [idea] Fold `factory.py resolve`'s base-branch rebase into `--onto <base>`
+
+Left undone by 139-landing-train, carried forward when it landed: `factory.py resolve` without `--onto` still rebases onto the base branch: no skill runs it that way now (the land skill always stacks with `--onto`), and only the register-conflict tests in `tests/test_land.py` exercise it. Fold it into `--onto <base>` or drop it once those tests are rewritten over a train.
+See .sdlc/work/139-landing-train/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-45] [idea] Stage the landing agent's reply and `land-resolved` with `RESOLVE_RECORDS`
+
+Left undone by 139-landing-train, carried forward when it landed: After `resolve --continue`, the landing agent's reply (`build/land-<n>.md`) and the `runs/land-resolved` marker stay uncommitted until the close amends them, as before the train; staging them with the other mid-rebase records (`RESOLVE_RECORDS`) would leave the tree clean after every stack.
+See .sdlc/work/139-landing-train/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-46] [idea] One shared test helper that drives a landing train
+
+Left undone by 139-landing-train, carried forward when it landed: `tests/test_train.py`'s `_drive()` and `tests/test_land.py`'s `_land_train()` both drive a train as the skill does; one helper in a shared test module would do.
+See .sdlc/work/139-landing-train/notes.md in its commit.
 Raised 2026-11-18.
