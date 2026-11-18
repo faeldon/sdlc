@@ -469,3 +469,12 @@ Paths: .sdlc/config.toml
 Cost: S
 Value: low
 Raised by: 158-list-risky-modules (correctness)
+
+## [2026-11-18-103] [bug] A second repo's dashboard reports another repo's board as its own
+
+A second repo's /sdlc:dashboard reports "serving: already" on 5170 when another repo's board holds it: _is_board() (scripts/board.py:1015) checks only state.json's "board": "sdlc" marker, never which repo the board shows, so a host's dashboard points at another repo's board. Expected: "already" only for the same repo root; another repo's board is a refusal naming the port, and the skill starts on another --port. To see it: start a board in one repo with `sdlc.py board --port 5170`, then run /sdlc:dashboard in another.
+
+Severity: low
+Paths: scripts/board.py, skills/dashboard/SKILL.md
+Introduced by: 075-factory-dashboard
+Theme: board
