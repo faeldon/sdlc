@@ -142,77 +142,6 @@ Left undone by 099-board-page-fixes, carried forward when it landed: The page's 
 See .sdlc/work/099-board-page-fixes/notes.md in its commit.
 Raised 2026-11-17.
 
-## [2026-11-18-17] [idea] Move a stopped landing's card to Needs you
-
-Left undone by 133-board-tracks-landing, carried forward when it landed: A stopped landing shows on its card but keeps its column; moving it to Needs you would mean `sdlc.needs_of()` (shared with `status`) reading `runs/land-step.md`.
-See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-18] [idea] Record a landing step for factory.py accept
-
-Left undone by 133-board-tracks-landing, carried forward when it landed: `factory.py accept` during a landing records no step: the track shows the gate's position until review starts.
-See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-19] [idea] A stopped landing at shipped names /sdlc:close by hand, not /sdlc:ship
-
-Left undone by 133-board-tracks-landing, carried forward when it landed: ui: scripts/board.py:731: a landing that stopped at `close` on a card already at `shipped` reads `or /sdlc:ship 012 by hand`. That change is already committed, so `/sdlc:ship` is the wrong step. The by-hand way on for a shipped card is `/sdlc:close NNN`. Use `/sdlc:close` when the stage is in `CLOSED`, and `/sdlc:ship` otherwise. The stop at `close` is recorded in `factory.py:4515` after the ship commit, so this case is reachable. No screenshot shows a stopped landing, so this is from the code, not the image.
-See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-20] [idea] Plain words for every landing stop reason on the board
-
-Left undone by 133-board-tracks-landing, carried forward when it landed: ux: the stop reasons are still raw git or tool text on the landing paths. They reach the card as `landing stopped: …` without plain words: factory.py:4449 (`git status couldn't be read`), :4453 (`uncommitted outside the change's folder: <paths>`), :4456 (`HEAD isn't the landing's commit, so its record has nothing to be amended into`), :4459, :4483 and :4486 (`landed by=auto, and …`, where `by=auto` is jargon), and the `_amend_record` text passed at :4362, :4498 and :4509. Give each a `plain` line that says what failed and what to do, as `SHIP_REFUSED` and the commit-failed line already do, and keep the raw words in the output.
-See .sdlc/work/133-board-tracks-landing/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-32] [bug] The board drops a shipped change while its landing's rebase is stopped on a conflict
-
-`_on_board()` keeps a shipped folder only when `ready_to_close()` lists its branch, and a stopped
-rebase detaches the worktree's HEAD, so the card vanishes exactly while the builder resolves the
-conflict (138, 2026-11-18). It should keep a shipped folder whose branch is rebasing, which
-`state()` already computes. To see it: land a change whose rebase conflicts, and open the board
-while `factory.py resolve` has the rebase stopped.
-
-Severity: low
-Paths: scripts/board.py
-Theme: board
-
-## [2026-11-18-27] [bug] A needs-you card says "decide D1 in the factory's supervisor" without saying what D1 is or where to go
-
-Found by the review of 138-board-drawer-and-loose-ends.
-pre-existing: scripts/board.py:626: a card reads "decide D1 in the factory's supervisor". A person doesn't know what the supervisor is or where to go. This change doesn't touch that text.
-
-Severity: low
-Paths: scripts/board.py
-
-## [2026-11-18-33] [idea] Show an early stop's reason (stuck/untestable) on the board's card and in runs/stopped.md
-
-Left undone by 136-factory-rounds-that-catch-enough, carried forward when it landed: The board's step track and `runs/stopped.md` don't show `stuck` or `untestable`: an early stop reads on the board as a plain `approve`. Worth a line on the card once the retro's counts show how often it happens.
-See .sdlc/work/136-factory-rounds-that-catch-enough/notes.md in its commit.
-Raised 2026-11-18.
-
-## [2026-11-18-38] [idea] The board labels build rounds B1, B2, not R1, R2
-
-The board labels build rounds R1, R2, which clashes with requirements (R1–R17 in a spec) and the
-ledger's R<n> for the person's words. Label build rounds B1, B2 and keep landing rounds L1,
-matching build/round-<n> and reviews/land-<n>; display labels only, nothing written to files
-changes.
-Theme: board
-Raised 2026-11-18.
-
-## [2026-11-18-39] [bug] The board's landing track shows nothing while a landing runs its checks or cases
-
-The board's landing track shows nothing while a landing runs its acceptance checks or skills'
-cases: `factory.py accept` and `cases` record no step in `runs/land-step.md`, so the card still
-shows the build track until `land` ships it (134 and 137, 2026-11-18). They should record a
-`checks`/`cases` step before `ship`. To see it: land a change with skills' cases in scope, and
-open the board while `factory.py cases` runs.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py, scripts/board.py
-Theme: board
-
 ## [2026-11-18-40] [idea] Evaluate the Fable builder experiment
 
 Evaluate the Fable builder experiment: the 139–143 batch ran its builder on claude-fable-5-1
@@ -348,3 +277,35 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 140-agent-replies-that-file-right (correctness)
+
+## [2026-11-18-49] [idea] Board says "builder is resolving a conflict" on a factory landing mid-rebase
+
+Left undone by 141-board-landing-track-truth, carried forward when it landed: A shipped change whose landing rebase is stopped shows the hand-run `sdlc.py resolve` line as its next step while the factory's builder is resolving the conflict (`next_action()` puts `rebasing` first): a landing-aware line ("its builder is resolving a conflict: wait for it") would be truer. Left for a change of its own, since `PRECEDENCE` and `BOTH` pin the order.
+See .sdlc/work/141-board-landing-track-truth/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-50] [idea] Landing track shows post-rebase `accept` as its own step after the gate
+
+Left undone by 141-board-landing-track-truth, carried forward when it landed: `factory.py accept` run after a rebase (inside a landing round) records no step: the track stays at `gate`, which it runs beside. A `checks` position after the gate would need the record to say where it sits.
+See .sdlc/work/141-board-landing-track-truth/notes.md in its commit.
+Raised 2026-11-18.
+
+## [2026-11-18-51] [nit] `stop_text` types `stuck` and `untestable` as `list[str] = ()`.
+
+Raised by the code review of 141-board-landing-track-truth, round 1: plugins/factory/scripts/factory.py:1956: `stop_text` types `stuck` and `untestable` as `list[str] = ()`. The annotation says list while the default is a tuple. `list[str] | tuple = ()` or `None` would match what callers pass.
+
+Theme: style
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 141-board-landing-track-truth (correctness)
+
+## [2026-11-18-52] [nit] `status`'s `needs_of` call for ready (shipped) changes builds a minimal `reading` dict by hand.
+
+Raised by the code review of 141-board-landing-track-truth, round 1: scripts/sdlc.py:9986: `status`'s `needs_of` call for ready (shipped) changes builds a minimal `reading` dict by hand. A test pins the resulting output, so this is fine. If `needs_of` later reads more fields at `shipped`, this site is easy to miss.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 141-board-landing-track-truth (correctness)
