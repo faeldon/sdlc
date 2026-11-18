@@ -77,6 +77,7 @@ missing facts, as `needs-info` does), and what `drift` and `uninstall` make of a
 setup extended rather than created. Raised 2026-10-26, after running setup on a host with its own
 templates.
 Theme: intake
+Priority: low
 
 ## [2026-10-26-11] [idea] Uninstall offers to clean the plugin's mentions out of a host
 
@@ -122,6 +123,7 @@ What 2026-10-26-5 first set out to do, left once 047 found no prompt recorded he
 `Sdlc-Prompt` lines, give each recurring prompt that isn't asking on purpose the `allowed-tools`
 rule its skill lacks, or move its logic into `sdlc.py`. See .sdlc/work/047-cut-extra-stops/notes.md.
 Theme: permissions
+Priority: low
 Raised 2026-11-10.
 
 ## [2026-11-13-1] [idea] Approve-path cases for the skill evals
@@ -172,12 +174,14 @@ Raised by: 146-measure-how-agents-work (correctness)
 
 Left undone by 147-landing-runs-unattended, carried forward when it landed: The board could read the run lock (`sdlc-factory-train-run.lock`) to say a landing is running unattended, rather than inferring it from `runs/land-step.md` alone; the spec left the board unchanged.
 See .sdlc/work/147-landing-runs-unattended/notes.md in its commit.
+Theme: landing
 Raised 2026-11-18.
 
 ## [2026-11-18-67] [idea] A Windows test for a killed train run
 
 Left undone by 147-landing-runs-unattended, carried forward when it landed: `test_a_killed_train_run_resumes` kills a process group, so it doesn't run on Windows; a Windows kill test would need `CREATE_NEW_PROCESS_GROUP` and `taskkill /T`.
 See .sdlc/work/147-landing-runs-unattended/notes.md in its commit.
+Theme: tests
 Raised 2026-11-18.
 
 ## [2026-11-18-68] [nit] `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it.
@@ -224,6 +228,7 @@ Raised by: 147-landing-runs-unattended (correctness)
 
 Left undone by 152-board-drawer-browser-test, carried forward when it landed: pre-existing: .github/workflows/check.yml:13: no `permissions:` block; set `permissions: contents: read` so a compromised dev dependency running in CI can't use a write-scoped token
 See .sdlc/work/152-board-drawer-browser-test/notes.md in its commit.
+Theme: ci
 Raised 2026-11-18.
 
 ## [2026-11-18-75] [nit] the header comment line now runs to 166 characters; the rest of the file wraps near 100.
@@ -349,3 +354,46 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 151-status-by-board-states (correctness)
+
+## [2026-11-18-88] [idea] Pay down the tests nits in one change
+
+Five `[nit]` entries are open under `tests` (2026-11-18-64, -70, -71, -79 and -85), which is the threshold the process guide sets for paying a theme down. Two of them are slow polls in the train's kill test (-71 and -79, about 49 seconds here). One change takes all five, and its review decides each.
+Theme: tests
+Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-89] [idea] Pay down the style nits in one change
+
+Five `[nit]` entries are open under `style` (2026-11-18-65, -75, -77, -78 and -83), which is the threshold. Four are lines past the 100-column wrap, the same work as ideas 2026-11-18-81 and -82. One change takes the five nits, and the two ideas with them if they are still open.
+Theme: style
+Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-90] [idea] A pruning pass over the tests that drifted
+
+Retro's `tests.drifted` names ten test files whose code moved without them over the last 30 changes:
+- the board fixture `012-draft-publish` (seven files), last touched by 133, while `factory.py`, `board.py` and `board.html` changed in 17 later changes;
+- `tests/test_config_resolution.py` and `tests/test_indicators.py`, last touched by 130, with 17 later changes;
+- `tests/test_adoption.py`, last touched by 134, with 16 later changes.
+
+A later change looks at each one again (merge, rewrite, move or delete it), and its review decides. There are no run times to weigh, because `retro.test_times` is unset.
+Theme: tests
+Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-91] [idea] Agents stop calling sleep, which the harness refuses
+
+`Bash:sleep` failed 18 of the 19 times it was called (error share 0.95), across 12 of the 41 changes that recorded tool calls. The harness refuses a foreground sleep, so each call is a spent turn. The agents that wait on something (the builder and the behaviour reviewer, most likely) should be told how to wait instead: poll with a bounded command, or hand the wait back to the script.
+Theme: factory
+Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-92] [idea] Name the skill an after-gate stop follows
+
+`metrics.extra` counts 15 `after_gate` stops across 11 changes: messages the person typed after a WAIT was answered. A kind that recurs means some skill could ask it in its WAIT. The retrospective can't say which skill, because the stop records no skill. Recording the skill whose gate it followed, on the `Close` trailer, would let the next retrospective name it.
+Theme: metrics
+Raised by the retrospective of 2026-11-18.
+
+## [2026-11-18-93] [idea] The review doc names a doc's claim left false by the change
+
+Five changes' Important findings share one class: a context or reference doc still states a rule the change altered, or one place restates a rule changed in another. These are 072 F1, 077 F1, 127 F1, 128 F1 and F2, and 130 F1, and all were fixed before landing. The proposed bullet for `.sdlc/REVIEW.md`, *The ways this repo's code fails*:
+
+- **A doc's claim the change made false.** A sentence in `AGENTS.md`, `docs/REFERENCE.md`, `docs/CONTRIBUTING.md` or a README that names the function, the command or the rule this diff changed, and still says what it did before. Grep the docs for each name the diff touches.
+Theme: review
+Raised by the retrospective of 2026-11-18.
