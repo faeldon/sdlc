@@ -4618,6 +4618,12 @@ FACTORY_STOP_NEEDS = {
 # `factory_first_build()` reads to tell a builder writing `plan.md` right now from a stale run.
 FACTORY_STEP = Path("runs") / "step.md"
 FACTORY_STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
+# The step a landing is at, written by each landing command as it starts (`factory.py`'s
+# `_record_land()`): a `stop`, and a train's `eject`, name the step it stopped after and why.
+# Copies, pinned by a test: `FACTORY_LAND_STOPS` is the board's `LAND_STOPS`.
+FACTORY_LAND_STEP = Path("runs") / "land-step.md"
+FACTORY_LAND_STOPS = ("stop", "eject")
+FACTORY_AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 FACTORY_ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 FACTORY_AGENT_TIMEOUT = 3 * 3600
 # A run upgraded to Tier 2 part way: `build/round-<P>.upgraded.md`, round P the upgraded run's
@@ -4649,6 +4655,28 @@ def factory_stop(folder: Path) -> dict | None:
         return {"way": None, "next": f"read {FACTORY_STOPPED.as_posix()}", "problems": [why]}
     found = [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m]
     return {"way": way.group(1), "next": nxt[0], "problems": found}
+
+
+def factory_land_stop(folder: Path) -> dict | None:
+    """The stop a factory landing recorded in `folder`'s `runs/land-step.md`, a `stop` or a train's
+    `eject` (`FACTORY_LAND_STOPS`, as the board reads them): the step it stopped after (`after`,
+    None when the record names none) and its problems as the factory worded them, the plain line
+    first. None for a landing under way, no record, or one that won't read: a landing is the
+    factory's until its record says it stopped, so `status` never says it did on a guess; the
+    board reads a garbled record as a problem of its own."""
+    try:
+        lines = (folder / FACTORY_LAND_STEP).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    lines = lines.splitlines()
+    step = FACTORY_STEP_RE.match(lines[0]) if lines else None
+    if not step or step.group(1) not in FACTORY_LAND_STOPS:
+        return None
+    after = [m.group(1) for m in map(FACTORY_AFTER_RE.match, lines) if m]
+    return {
+        "after": after[0] if after else None,
+        "problems": [m.group(1) for m in map(FACTORY_PROBLEM_RE.match, lines) if m],
+    }
 
 
 def factory_first_build(folder: Path) -> bool:
@@ -4738,14 +4766,18 @@ def factory_reading(folder: Path) -> dict:
 
 def needs_of(rec: dict) -> list[str]:
     """What a change needs from the person, as short texts, from fields already read: `stage`,
-    `tier`, `problems`, `stopped`, `decision`, `reconsider`, `pending`, `assumed`, `ledger_lines`
-    and `spec_filled`. The one place the rules live, so the board and `status` can't disagree;
-    it reads nothing itself. Every problem first, at any stage; a closed change nothing more; at
-    `build` a stop, then each blocking decision; at `test` with an ESCALATE what its ledger and
-    decision still hold, or, with no ledger line at all, the escalation itself; a Tier 2 at `plan`
-    whose `spec.md` is written but whose stage never moved, its approval."""
+    `tier`, `problems`, `stopped`, `land_stop`, `decision`, `reconsider`, `pending`, `assumed`,
+    `ledger_lines` and `spec_filled`. The one place the rules live, so the board and `status`
+    can't disagree; it reads nothing itself. Every problem first, at any stage; at `test` or
+    `shipped`, the landing's stages, a stopped landing (`land_stop`, `factory_land_stop()`),
+    naming the step it stopped after; a closed change nothing more; at `build` a stop, then each
+    blocking decision; at `test` with an ESCALATE what its ledger and decision still hold, or,
+    with no ledger line at all, the escalation itself; a Tier 2 at `plan` whose `spec.md` is
+    written but whose stage never moved, its approval."""
     needs = [f"fix: {p}" for p in rec.get("problems") or []]
     stage = rec.get("stage")
+    if stage in ("test", "shipped") and (stop := rec.get("land_stop")):
+        needs.append(f"landing stopped at {stop.get('after') or 'a step'}")
     if stage in ("shipped", "dropped"):
         return needs
     pending = [f"decide {d['id']}" for d in rec.get("pending") or []]
@@ -9791,7 +9823,10 @@ def print_status(a: dict) -> None:
         print(f"\n■ Ready to close: {len(a['ready'])}")
         for rec in a["ready"]:
             mark = "  (dropped)" if rec.get("kind") == "dropped" else ""
-            if rec.get("behind") and rec.get("kind") != "dropped":
+            if rec.get("needs"):
+                # A landing that stopped after its commit: the board's words, not a rebase's.
+                mark = f"  ({', '.join(rec['needs'])})"
+            elif rec.get("behind") and rec.get("kind") != "dropped":
                 mark = f"  (behind {a.get('trunk')} by {rec['behind']}: rebase and ship again)"
             print(f"    {rec['id']}  {rec['slug']:<28} → /sdlc:close {rec['id']}{mark}")
 
@@ -9911,7 +9946,7 @@ def print_status(a: dict) -> None:
 
     # Last, so the answer to "what needs me?" is the line the eye ends on.
     print("\n■ What needs me")
-    waiting = [rec for rec in a["open"] if rec.get("needs")]
+    waiting = [rec for rec in a["open"] + (a.get("ready") or []) if rec.get("needs")]
     if not waiting:
         print("    nothing")
     for rec in waiting:
@@ -10354,8 +10389,15 @@ def main() -> int:
         reading = rec | seen | {
             "problems": rec["errors"] + seen["problems"],
             "spec_filled": "spec.md" in rec["artifacts"] and "spec.md" not in rec["unfilled"],
+            # A landing stopped before its commit; one stopped after is in the ready list.
+            "land_stop": factory_land_stop(folder) if rec["stage"] == "test" else None,
         }  # fmt: skip
         rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
+    for rec in a["ready"]:
+        # A shipped change whose landing stopped waits on the person, as on the board.
+        folder = work_dir(Path(rec["worktree"])) / rec["branch"]
+        reading = {"stage": rec["kind"], "problems": [], "land_stop": factory_land_stop(folder)}
+        rec["needs"] = needs_of(reading)
     a["all"] = getattr(args, "all", False)
     open_ids = [f"{r['id']}-{r['slug']}" for r in a["open"]]
     a["release"] = unreleased(home, cfg, open_ids, read=bool(cfg["release"]["version_files"]))

@@ -179,8 +179,9 @@ def test_a_blocking_decision_or_an_unreadable_reply_needs_the_person(repo) -> No
     assert [d["text"] for d in four["pending"]] == ["purge after 30 or 90 days?"]
     assert any("round-1/code.md" in p for p in four["problems"])
     assert four["next"] == (
-        "decide D1 in the factory's supervisor, and fix what its problems name"
-    ), "the problem, as its column (098), and the decision that still waits (110)"
+        "decide D1 in the session running /sdlc-factory:build 004 (rerun it if that session "
+        "ended), and fix what its problems name"
+    ), "the problem, as its column (098), and the decision that still waits (110); 2026-11-18-27"
 
 
 def _worktree(
@@ -754,6 +755,34 @@ def test_an_upgrade_pauses_the_step_track(repo, step) -> None:
 
 
 @pytest.mark.portable
+def test_an_early_stop_shows_on_the_card(repo) -> None:
+    """2026-11-18-33: a run that stopped early (its record's `- STUCK:` and `- UNTESTABLE:` lines)
+    says so on its `approve` step and names each reason, rather than reading as a plain approve;
+    a run with none reads as before."""
+    stuck, line = "code: src/a.py:1: rename a", "R4: judged by eye, no test can show it"
+    folder = _run_at(repo, "approve", rnd=2)
+    card = _cards(repo)["016-draft-tags"]
+    assert card["progress"]["early"] is None
+    assert card["progress"]["steps"][-1]["label"] == "approve"
+    out = {"next": "approve", "round": 2, "limit": 3, "reviewers": FULL, "stuck": [stuck],
+           "untestable": [line]}  # fmt: skip
+    _write(folder / factory.STEP, factory.step_text(out, "2026-11-17T10:00:00Z"))
+    card = _cards(repo)["016-draft-tags"]
+    progress = card["progress"]
+    assert progress["early"] == {"stuck": [stuck], "untestable": [line]}
+    assert _states(card) == TRACKS["approve"] and progress["step"] == "approve"
+    assert progress["steps"][-1]["label"] == "approve (stuck, untestable)"
+    out["untestable"] = []
+    _write(folder / factory.STEP, factory.step_text(out, "2026-11-17T10:00:00Z"))
+    assert _cards(repo)["016-draft-tags"]["progress"]["steps"][-1]["label"] == "approve (stuck)"
+    assert card["column"] == "build" and card["needs"] == [], "the approver is still to decide"
+    script = _page_parts()[1]
+    row = re.search(r"function progressRow\(p\) \{(.*?)\n\}", script, re.S).group(1)
+    assert re.search(r"p\.early.*stuck.*\"flag\".*stopped early", row, re.S), row
+    assert re.search(r"p\.early.*untestable.*\"flag\".*stopped early", row, re.S), row
+
+
+@pytest.mark.portable
 def test_a_decision_or_a_stop_overrides_the_record(repo) -> None:
     """R4: a valid decision is every step done, at the stage it belongs to (098); a stop shown
     has no track at all."""
@@ -816,7 +845,7 @@ def test_a_garbled_step_record_is_a_problem(repo) -> None:
 def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
     """R7: the board's copies are `factory.py`'s, and its writer reads back through the board."""
     for name in ("STEP_RE", "ROUND_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "AFTER_RE",
-                 "SECONDS_RE"):  # fmt: skip
+                 "SECONDS_RE", "STUCK_RE", "UNTESTABLE_RE"):  # fmt: skip
         assert getattr(board, name).pattern == getattr(factory, name).pattern, name
     assert board.STEP == factory.STEP and board.REVIEWER_ROLES == factory.REVIEWERS
     gate = (ROOT / "plugins" / "factory" / "scripts" / "factory.py").read_text(encoding="utf-8")
@@ -824,10 +853,19 @@ def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
     for out in (
         {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"]},
         {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"]},
+        {
+            "next": "approve",
+            "round": 2,
+            "limit": 3,
+            "reviewers": FULL,
+            "stuck": ["code: a"],
+            "untestable": ["R4: by eye"],
+        },
     ):
         text = factory.step_text(out, "2026-11-17T10:00:00Z", "rework")
         assert board.read_step(text) == factory.read_step(text)
         assert board.read_step(text)["reviewers"] == out["reviewers"]
+    assert board.read_step(text)["stuck"] == ["code: a"], "the early stop's reason reads back"
 
 
 def _row(role: str, seconds: float | None) -> tuple[str, dict]:
@@ -1180,7 +1218,7 @@ PRECEDENCE = [
     ("stopped", {"stopped": {"next": "read runs/step.md, then rerun the build"}},
      "read runs/step.md, then rerun the build"),
     ("decision pending", {"stage": "build", "pending": ["D1"], "needs": ["decide D1"]},
-     "decide D1 in the factory's supervisor"),
+     "decide D1 in the session running /sdlc-factory:build 016 (rerun it if that session ended)"),
     ("escalation pending",
      {"stage": "test", "decision": "ESCALATE", "needs": ["decide D2", "confirm 1 default"]},
      "/sdlc-factory:decide 016 for D2 and 1 default, then /sdlc:ship, or /sdlc-factory:land with "
@@ -1202,7 +1240,8 @@ PRECEDENCE = [
 # won't read, so the card says so, the decision first, as its `needs you:` line holds it.
 BOTH = {
     ("problems", "decision pending"):
-        "decide D1 in the factory's supervisor, and fix what its problems name",
+        "decide D1 in the session running /sdlc-factory:build 016 (rerun it if that session "
+        "ended), and fix what its problems name",
     ("problems", "escalation pending"): "decide D2, and fix what its problems name",
     # 133: a landing stopped on a change already shipped is closed by hand, not shipped again.
     ("landing stopped", "closed"):
@@ -1251,7 +1290,10 @@ def test_a_card_with_a_problem_and_a_decision_names_both(repo) -> None:
     the decision waits too, never only the problem."""
     four = _cards(repo)["004-draft-purge"]
     assert four["problems"] and four["needs"][-1] == "decide D1", four["needs"]
-    assert four["next"] == "decide D1 in the factory's supervisor, and fix what its problems name"
+    assert four["next"] == (
+        "decide D1 in the session running /sdlc-factory:build 004 (rerun it if that session "
+        "ended), and fix what its problems name"
+    )
 
 
 @pytest.mark.portable
@@ -1327,6 +1369,27 @@ def test_a_change_being_rebased_keeps_its_card(repo) -> None:
     assert _git(tree, "branch", "--show-current") == "", "the rebase is still under way"
     _git(tree, "rebase", "--abort")
     assert _cards(repo)[name]["rebasing"] is False
+
+
+def test_a_shipped_change_whose_landing_rebase_is_stopped_keeps_its_card(repo) -> None:
+    """2026-11-18-32: a landing's rebase stopped on a conflict detaches the worktree's HEAD, so
+    `ready_to_close()` no longer lists the shipped change; its card stays, rebasing, on the
+    landing track at its rebase, and its files are still served."""
+    folder = _landing_at(repo, "resolve")
+    tree = sdlc.checkout_of(folder)
+    _write(repo / "src" / "land.py", "main's own\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "main moves")
+    stopped = subprocess.run(["git", "-C", str(tree), "rebase", "main"], capture_output=True,
+                             encoding="utf-8")  # fmt: skip
+    assert stopped.returncode != 0 and _git(tree, "branch", "--show-current") == ""
+    assert not sdlc.ready_to_close(repo), "the detached worktree is no longer listed"
+    card = _cards(repo)["030-draft-land"]
+    assert card["rebasing"] is True and card["stage"] == "shipped" and card["problems"] == []
+    assert card["progress"]["kind"] == "land" and _states(card) == LANDS["resolve"]
+    assert board.file_at(repo, "030-draft-land", "intent.md") is not None
+    _git(tree, "rebase", "--abort")
+    assert _cards(repo)["030-draft-land"]["rebasing"] is False
 
 
 @pytest.mark.portable
@@ -2009,6 +2072,8 @@ def _landing_at(
 
 
 LANDS = {
+    "checks": ["current", "todo", "todo", "todo", "todo", "todo"],
+    "cases": ["current", "todo", "todo", "todo", "todo", "todo"],
     "ship": ["current", "todo", "todo", "todo", "todo", "todo"],
     "rebase": ["done", "current", "todo", "todo", "todo", "todo"],
     "resolve": ["done", "current", "todo", "todo", "todo", "todo"],
@@ -2024,7 +2089,8 @@ LANDS = {
     "eject": ["done", "done", "stopped", "todo", "todo", "todo"],
 }
 LABELS = {"resolve": ("rebase", "resolving"), "fix": ("rebase", "fixing"),
-          "mend": ("review", "mending"), "stack": ("rebase", "stacking")}  # fmt: skip
+          "mend": ("review", "mending"), "stack": ("rebase", "stacking"),
+          "checks": ("ship", "checks"), "cases": ("ship", "cases")}  # fmt: skip
 STOPS = ("eject",)
 
 
@@ -2048,7 +2114,9 @@ def test_a_landing_card_shows_its_landing_track(repo, step) -> None:
     labels = {s["name"]: s["label"] for s in progress["steps"]}
     if step in LABELS:
         assert labels[LABELS[step][0]] == LABELS[step][1]
-    assert card["column"] == "close" and progress["plan"] is None
+    # 141: a stopped landing (a train's ejection too) needs the person; else it waits on close.
+    assert card["column"] == ("needs-you" if step in STOPS else "close"), step
+    assert progress["plan"] is None
 
 
 @pytest.mark.portable
@@ -2135,6 +2203,14 @@ def test_a_train_member_shows_its_place_and_an_ejection(repo) -> None:
                                                       "todo"]  # fmt: skip
     assert progress["problems"] == [why] and progress["train"] == "2 of 3"
     assert "the landing stopped at gate" in card["next"], card["next"]
+    # `status` reads the eject as the board does, so the two never disagree on it.
+    stop = sdlc.factory_land_stop(folder)
+    assert stop == card["land_stop"] == {"after": "gate", "problems": [why]}, "as status reads it"
+    assert (
+        "landing stopped at gate"
+        in sdlc.needs_of({"stage": "test", "decision": None, "land_stop": stop})
+        and card["column"] == "needs-you"
+    ), card
     html = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
     assert "in a train" in html and "p.train" in html, "the page shows the place"
     _landing_at(repo, "gate", name="031-draft-plain")
@@ -2158,6 +2234,18 @@ def test_landing_typical_times_come_from_closed_factory_runs(repo) -> None:
     _landing_at(repo, "gate", since="2000-01-01T00:00:00Z")
     progress = _cards(repo)["030-draft-land"]["progress"]
     assert (progress["typical"], progress["fraction"], progress["samples"]) == (40, 0.95, 3)
+
+
+@pytest.mark.portable
+def test_rounds_are_labelled_b_and_landings_l() -> None:
+    """2026-11-18-38: the page labels build rounds `B1`, `B2` (never `R`, a requirement's or the
+    ledger's letter) and landing rounds `L1`: display labels only, no file is named otherwise."""
+    script = _page_parts()[1]
+    rounds = re.search(r"function roundRow\(r\) \{(.*?)\n\}", script, re.S).group(1)
+    assert "`B${r.round}`" in rounds and "R${" not in rounds
+    row = re.search(r"function progressRow\(p\) \{(.*?)\n\}", script, re.S).group(1)
+    assert "`B${p.round}" in row and "L${p.round}" in row and "R${" not in row
+    assert "R${" not in script, "no round label reads R anywhere on the page"
 
 
 @pytest.mark.portable
@@ -2196,16 +2284,81 @@ def test_a_landing_card_names_the_landing_not_close(repo) -> None:
 
 
 @pytest.mark.portable
-def test_a_stopped_landing_drops_the_ready_look() -> None:
-    """133 round 1: a stopped landing's card keeps its column but not its column's ready styling:
-    it takes a stop's edge, set after the column's so it wins."""
+def test_a_stopped_landing_is_in_needs_you(repo) -> None:
+    """2026-11-18-17: a landing that stopped moves its card to Needs you, before its commit and
+    after, its `needs you:` line naming the step it stopped after, and its next step the way on
+    (2026-11-18-19: `/sdlc:close` by hand on a shipped card, `/sdlc:ship` before). The page needs
+    no look of its own for it: the column's is the stop's."""
+    why = "sdlc.py close failed: run /sdlc:close 030 by hand to see why"
+    folder = _landing_at(repo, "stop", after="close", problems=(why,))
+    card = _cards(repo)["030-draft-land"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["landing stopped at close"]), card
+    assert card["land_stop"] == {"after": "close", "problems": [why]}
+    assert card["next"] == (
+        "the landing stopped at close: fix what it names, then /sdlc-factory:land 030, or "
+        "/sdlc:close 030 by hand"
+    )
+    assert sdlc.factory_land_stop(folder) == card["land_stop"], "as status reads it"
+    _landing_at(repo, "stop", stage="test", after="ship", problems=("it broke",),
+                name="031-draft-early")  # fmt: skip
+    card = _cards(repo)["031-draft-early"]
+    assert (card["column"], card["needs"]) == ("needs-you", ["landing stopped at ship"]), card
+    assert card["next"].endswith("/sdlc-factory:land 031, or /sdlc:ship 031 by hand")
+    running = _cards(repo)
+    _landing_at(repo, "review", name="032-draft-running")
+    card = _cards(repo)["032-draft-running"]
+    assert (card["column"], card["needs"], card["land_stop"]) == ("close", [], None)
+    assert running, "a landing under way keeps its column"
     css, script = _page_parts()
-    assert re.search(r'c\.progress && c\.progress\.kind === "land" && c\.progress\.stopped', script)
-    assert '" landing-stopped"' in script
-    ready = css.index(".card.ready {")
-    stopped = css.index(".card.landing-stopped {")
-    assert stopped > ready and "var(--stop)" in css[stopped : css.index("}", stopped)]
+    assert "landing-stopped" not in css and "landing-stopped" not in script
     assert re.search(r'key: "close", label: "Ready to close", who: "[^"]*landing', script)
+
+
+@pytest.mark.portable
+def test_the_landing_stop_is_read_as_status_reads_it(repo) -> None:
+    """141: `sdlc.py`'s reading of a stop in `runs/land-step.md` is a pinned copy of the factory's,
+    None for a landing under way or no record, and never raises on one that won't read."""
+    assert sdlc.FACTORY_LAND_STEP == factory.LAND_STEP
+    assert sdlc.FACTORY_AFTER_RE.pattern == factory.AFTER_RE.pattern
+    assert sdlc.FACTORY_LAND_STOPS == board.LAND_STOPS, "a stop to the board is one to status"
+    folder = _landing_at(repo, "stop", after="gate", problems=("the gate failed", "exit 1"))
+    assert sdlc.factory_land_stop(folder) == {"after": "gate", "problems": ["the gate failed",
+                                                                            "exit 1"]}  # fmt: skip
+    out = {"step": "verify", "round": 1, "moves": 0, "limit": 3}
+    _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2026-11-18T10:00:00Z"))
+    assert sdlc.factory_land_stop(folder) is None
+    _write(folder / factory.LAND_STEP, "landing, probably\n")
+    assert sdlc.factory_land_stop(folder) is None
+    (folder / factory.LAND_STEP).unlink()
+    assert sdlc.factory_land_stop(folder) is None
+
+
+@pytest.mark.portable
+def test_status_lists_a_stopped_landing_under_what_needs_me(repo, monkeypatch, capsys) -> None:
+    """141: `status` reads the landing's stop as the board does: a shipped change whose landing
+    stopped is marked on its Ready to close line and listed under `■ What needs me`, as is one
+    stopped before its commit; a landing under way is neither."""
+    why = "sdlc.py close failed: run /sdlc:close 030 by hand to see why"
+    _landing_at(repo, "stop", after="close", problems=(why,))
+    _landing_at(repo, "stop", stage="test", after="ship", problems=("it broke",),
+                name="031-draft-early")  # fmt: skip
+    _landing_at(repo, "review", name="032-draft-running")
+    out, a = _status(repo, monkeypatch, capsys)
+    tail = out.split("■ What needs me\n", 1)[1].splitlines()
+    assert tail == [
+        "    004  decide D1",
+        "    031  landing stopped at ship",
+        "    030  landing stopped at close",
+    ], tail
+    ready = out.split("■ Ready to close: ", 1)[1].split("\n■", 1)[0]
+    assert (
+        "030  draft-land                   → /sdlc:close 030  (landing stopped at close)" in ready
+    )
+    assert "032  draft-running                → /sdlc:close 032\n" in ready
+    cards = _cards(repo)
+    for rec in a["open"]:
+        card = cards[f"{rec['id']}-{rec['slug']}"]
+        assert rec["needs"] == [n for n in card["needs"] if not n.startswith("fix: ")], rec["id"]
 
 
 # ---------------------------------------------------------------- the drawer's file (138)

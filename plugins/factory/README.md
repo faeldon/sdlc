@@ -310,9 +310,13 @@ its own folder, fixture copy and server, so a round's two start together.
   runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role
                                 and model
   runs/stopped.md               while the run is stopped: STOPPED: ship, mend or rerun, the NEXT:
-                                step in a few words, a longer sentence saying why, and each
-                                - PROBLEM: as verdicts worded it; removed by the first reading
-                                that finds the cause gone
+                                step in a few words, a longer sentence saying why, each
+                                - PROBLEM: as verdicts worded it, and, for a run that had
+                                stopped early, its - STUCK: and - UNTESTABLE: lines; removed by
+                                the first reading that finds the cause gone
+  runs/step.md                  the step the supervisor's last reading named, for the board's
+                                track, with - STUCK: and - UNTESTABLE: lines when the run
+                                stopped early
 ```
 
 **What a run cost, while it runs.** Every agent run's result reports its cost and tokens, and
@@ -442,8 +446,9 @@ the one place it runs `claude`); an approved spec draft copied into `spec.md` by
 batch, its signals and its question (`land-check`), the train and its next step (`train`, with
 `--begin`, `--eject` and `--stop`), each change's landing (`land`, `resolve --onto`, `land-fix`,
 `land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
-the board's landing track (`land-verdicts --record` adds a stop and why), its acceptance checks and skills' cases (`accept`, `cases`, never
-pre-approved);
+the board's landing track (`land-verdicts --record` adds a stop and why, a plain line over the
+tool's words), its acceptance checks and skills' cases (`accept`, `cases`, never
+pre-approved, each recording its step before the commit);
 for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
 code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
 imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads

@@ -537,7 +537,9 @@ approach` (its `decision.md` holds that section) and, with no decision line at a
 `read the escalation` (a default the approver settled, `→ settled by the approver:`, is no decision
 line here and never counted as an answer, nor as a default to confirm), the line ending with
 `/sdlc-factory:decide NNN`, where the person answers them one at a time, while it holds a
-decision or a default; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
+decision or a default; `landing stopped at <step>` for a factory landing that stopped
+(`runs/land-step.md`), at `test` before its commit or on a shipped change, whose Ready to close
+line says so too; and `approve its spec` for a Tier 2 at `plan` whose `spec.md` is written
 but whose stage never moved. `status` reads only what it already reads, so a problem only the
 board finds (a reply that isn't a review, a findings file that won't read) is on the board alone.
 
@@ -548,7 +550,8 @@ dropped one whose worktree still stands, and **Needs you** for one with a file t
 any stage, or whatever else it needs from the person, each card naming it on a `needs you:` line
 (the texts `/sdlc:status`'s `■ What needs me` gives, above): a run that stopped or a blocking
 decision at `build`, an ESCALATE at `test` while its ledger holds an unticked line, asks to
-reconsider the approach, or holds no decision at all, and a written spec waiting on its approval.
+reconsider the approach, or holds no decision at all, a landing that stopped, before its commit
+or after, and a written spec waiting on its approval.
 An escalation whose every ledger line is ticked moves to Ready to ship, badged `escalated:
 answered`; an open `- [ ]` line the ledger can't read is a problem, so it never counts as an
 answer. The stage is the only mark that the person has answered a stop or a blocking decision, so a change they shipped,
@@ -558,32 +561,39 @@ file of its folder, and is in Build again. A change built by hand moves on from 
 by what it has touched: to Build once its branch or worktree changes a path outside `.sdlc/work/`,
 to Test once ship's review has written its `findings.md` or its gate run by hand is green on the
 build as it stands (below), with a `gate green` or `gate red` badge while that record is current.
-A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, with a
+A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, shipped
+or not, with a
 `rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
 `--continue` or `--abort` as its next step, saying that `--abort` keeps the resolved work under
 `refs/sdlc/end/<branch>`. A card with a file that won't read names that as its next step, at any
 stage. Its next step follows its `needs you:` line: a decision still to make (`decide D<n>`) is
 named first, before the problem a card also has; on an escalation at `test`, a decision or
-default to confirm makes it `/sdlc-factory:decide NNN for D2 and 1 default`, then `/sdlc:ship`. A stop
+default to confirm makes it `/sdlc-factory:decide NNN for D2 and 1 default`, then `/sdlc:ship`; a blocking decision at
+`build` names the session running `/sdlc-factory:build NNN`, which asks it again when rerun. A stop
 record that won't read is a stop, its next step `read runs/stopped.md`, on the board as in
 `/sdlc:status`.
 Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
-each round's verdicts, the verifier's answers, its decisions and what its agents cost, and a step
+each round's verdicts, the verifier's answers, its decisions and what its agents cost, each build
+round labelled `B<n>` (a landing's `L<n>`), and a step
 track of the round under way (build, gate, reviews *n/m*, verify, rework, approve) read from the
-`runs/step.md` its supervisor's `verdicts --record` writes. The current step shows how long it has
+`runs/step.md` its supervisor's `verdicts --record` writes; a run that stopped early reads
+`approve (stuck)` or `(untestable)` there, each reason a line on the card. The current step shows how long it has
 run against the median time that step took at that tier in the last 20 closed factory changes, a
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
 them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
 has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A change the factory
-is landing shows the landing's track instead (ship, rebase or resolving, gate, review, verify,
+is landing shows the landing's track instead (its checks or cases, then ship, rebase or resolving,
+gate, review, verify,
 close), from the `runs/land-step.md` each landing command writes as it starts its step: the
 landing round, how often the base branch has moved out of `[land] moves`, the gate, review and
 verify timed against closed changes' landings, and a stopped landing marked at its step with why,
 in Ready to ship before its commit and Ready to close after. Its next step names the landing, not
-`/sdlc:close` or `/sdlc:ship`, while it runs; once it stops, the card loses its column's ready look
-and names the way on: fix what it names, then `/sdlc-factory:land`, or `/sdlc:ship` by hand. A
+`/sdlc:close` or `/sdlc:ship`, while it runs; once it stops, the card is in Needs you (`landing
+stopped at <step>`), each reason a plain line with the tool's own words under it, and names the way
+on: fix what it names, then `/sdlc-factory:land`, or by hand `/sdlc:ship` before its commit and
+`/sdlc:close` after. A
 click opens
 any file in the change's folder, a markdown file rendered (its text never parsed as HTML; a link
 followed only to the web, in a new tab, or to another file of the change) with a `Raw` toggle for

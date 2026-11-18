@@ -3985,6 +3985,37 @@ def test_record_writes_the_step_it_read(tmp_path, capsys) -> None:
 
 
 @pytest.mark.portable
+def test_record_writes_an_early_stops_reason(tmp_path, capsys) -> None:
+    """2026-11-18-33: a run stopped early, `stuck` (a change its verifier kept two rounds running)
+    or `untestable` (the requirements its builder says no test can show), has the reason in
+    `runs/step.md` as `- STUCK:` and `- UNTESTABLE:` lines `read_step()` reads back, for the
+    board's card; a run not stopped early has none; a stop's record carries them too."""
+    root = tmp_path / "repo"
+    _kept_again(_change(tmp_path))
+    _, out = _record(root, capsys, _head(root))
+    assert (out["next"], out["stuck"]) == ("approve", ["code: src/a.py:1: rename a"])
+    text = (root / ".sdlc" / "work" / NAME / factory.STEP).read_text(encoding="utf-8")
+    assert "\n- STUCK: code: src/a.py:1: rename a\n" in text, text
+    got = factory.read_step(text)
+    assert (got["stuck"], got["untestable"]) == (["code: src/a.py:1: rename a"], [])
+    line = "R4: the drawer reads well: judged by eye, no test can show it"
+    root = _change(tmp_path / "untestable")
+    _build_report(root, 1, f"- UNTESTABLE: {line}\n")
+    _round(root, 1)
+    _, out = _record(root, capsys, _head(root))
+    assert (out["next"], out["untestable"]) == ("approve", [line])
+    got = _fields(root)
+    assert (got["stuck"], got["untestable"]) == ([], [line])
+    root = _change(tmp_path / "plain")
+    _round(root, 1)
+    _, out = _record(root, capsys, _head(root))
+    assert out["next"] == "approve" and _fields(root)["stuck"] == [] == _fields(root)["untestable"]
+    stop = factory.stop_text(NAME, "rerun", ["it broke"], stuck=["code: a"], untestable=[line])
+    assert stop.endswith(f"- PROBLEM: it broke\n- STUCK: code: a\n- UNTESTABLE: {line}\n"), stop
+    assert factory.stop_text(NAME, "rerun", ["it broke"]).endswith("- PROBLEM: it broke\n")
+
+
+@pytest.mark.portable
 def test_the_step_record_keeps_its_since_while_the_step_holds(
     tmp_path, capsys, monkeypatch
 ) -> None:

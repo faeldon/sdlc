@@ -65,6 +65,8 @@ COSTS = Path("runs") / "costs.jsonl"
 STOPPED = Path("runs") / "stopped.md"
 STEP = Path("runs") / "step.md"
 STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
+STUCK_RE = re.compile(r"^- STUCK: (.+?)\s*$")
+UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(.+?)\s*$")
 ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
 REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
@@ -98,17 +100,25 @@ AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "a
 PAUSES = ("decide", "upgrade", "spec")
 CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its six positions, and where each step the record
-# names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The builder resolving a conflict or
+# names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The acceptance checks and the
+# skills' cases run before the commit, at the ship's position; the builder resolving a conflict or
 # making the person's fix sits at the rebase, as does a train stacking the change, a mend at the
 # review, each with its own label. A `stop`, and a train's `eject`, mark the step it stopped
 # after (an `eject` naming none sits at the gate, where most come from). Only the steps history
 # can time are timed.
 LAND_TRACK = ("ship", "rebase", "gate", "review", "verify", "close")
 LAND_AT = {
-    "ship": 0, "rebase": 1, "stack": 1, "resolve": 1, "fix": 1, "gate": 2, "review": 3,
-    "mend": 3, "verify": 4, "close": 5, "eject": 2,
+    "checks": 0, "cases": 0, "ship": 0, "rebase": 1, "stack": 1, "resolve": 1, "fix": 1,
+    "gate": 2, "review": 3, "mend": 3, "verify": 4, "close": 5, "eject": 2,
 }  # fmt: skip
-LAND_LABEL = {"resolve": "resolving", "fix": "fixing", "mend": "mending", "stack": "stacking"}
+LAND_LABEL = {
+    "checks": "checks",
+    "cases": "cases",
+    "resolve": "resolving",
+    "fix": "fixing",
+    "mend": "mending",
+    "stack": "stacking",
+}
 LAND_STOPS = ("stop", "eject")
 LAND_TIMED = ("gate", "review", "verify")
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
@@ -131,21 +141,29 @@ def state(root: Path) -> dict:
     issues = _issue_base(home, cfg)
     now = datetime.now(UTC).timestamp()
     history = typical_times(home, trunk)
-    # A rebase detaches its worktree's HEAD; `_change_trees()` reads the branch from its record.
-    rebasing = {b for _, b in sdlc._change_trees(home)} - {b for _, b in sdlc.worktrees(home)}
+    rebasing = _rebasing(home)
     return {
         "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
         "changes": [
             _entry(root, home, f, trunk, issues, now, history, rebasing=f.name in rebasing)
-            for f in _on_board(root)
+            for f in _on_board(root, rebasing)
         ],
     }  # fmt: skip
 
 
-def _on_board(root: Path) -> list[Path]:
+def _rebasing(root: Path) -> set[str]:
+    """The branches a rebase is stopped on: it detaches the worktree's HEAD, so `worktrees()` no
+    longer names them, and `_change_trees()` reads each from the rebase's own record."""
+    return {b for _, b in sdlc._change_trees(root)} - {b for _, b in sdlc.worktrees(root)}
+
+
+def _on_board(root: Path, rebasing: set[str] | None = None) -> list[Path]:
     """The folders the board shows: every open change's, and a shipped or dropped one's while its
-    worktree stands, which is what `status` lists as ready to close."""
+    worktree stands, which is what `status` lists as ready to close, or while a rebase is stopped
+    in it (a landing's, on a conflict its builder resolves), when `ready_to_close()` can't see
+    its branch."""
     closing = {r["branch"] for r in sdlc.ready_to_close(root)}
+    closing |= _rebasing(root) if rebasing is None else rebasing
     return [f for f in sdlc.change_dirs(root) if sdlc._stage(f) not in CLOSED or f.name in closing]
 
 
@@ -234,6 +252,14 @@ def _entry(
                 "plan.md", lambda: _plan_hint(entry, folder, home, trunk), None
             )
     entry["seen"] = read("its progress", lambda: _seen(entry, folder, home, trunk), None)
+    # A landing that stopped, as `sdlc.factory_land_stop()` reads it for `status`: from the track
+    # already read, so the card and its column come from one reading of the record.
+    landing = entry.get("progress") or {}
+    entry["land_stop"] = (
+        {"after": landing["after"], "problems": landing["problems"]}
+        if landing.get("kind") == "land" and landing.get("stopped")
+        else None
+    )
     entry["problems"] = problems
     entry["spec_filled"] = "spec.md" in entry["artifacts"] and "spec.md" not in entry["unfilled"]
     # What it needs from the person, by the rules `status` reads too, and whether an escalation
@@ -411,6 +437,8 @@ def read_step(text: str) -> dict | None:
         "limit": int(limit) if limit else None,
         "reviewers": [n.strip() for n in (names or "").split(",") if n.strip()],
         "since": field(SINCE_RE), "after": field(AFTER_RE),
+        "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
+        "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
     }  # fmt: skip
 
 
@@ -436,8 +464,10 @@ def _progress(
     path = folder / STEP
     # The approver's decision is the run's end only at the stages it belongs to, as in `column()`:
     # a change put back to `build` is building again, whatever `decision.md` still says.
+    blank = {"round": None, "limit": None, "reviewers": [], "since": None, "stuck": [],
+             "untestable": []}  # fmt: skip
     if entry.get("decision") and entry["stage"] in ("test", *CLOSED):
-        rec = {"step": "done", "round": None, "limit": None, "reviewers": [], "since": None}
+        rec = {**blank, "step": "done"}
     elif path.is_file():
         rec = read_step(path.read_text(encoding="utf-8", errors="replace"))
         if rec is None:
@@ -445,8 +475,7 @@ def _progress(
             return None
     elif (folder / "runs" / "builder.sessions").is_file() and not entry.get("built"):
         mtime = (folder / "runs" / "builder.sessions").stat().st_mtime
-        rec = {"step": "build", "round": 1, "limit": None, "reviewers": [], "since": None}
-        rec["at"] = mtime
+        rec = {**blank, "step": "build", "round": 1, "at": mtime}
     else:
         return None
     step = rec["step"]
@@ -459,6 +488,13 @@ def _progress(
     if at is None:
         return None
     rnd = rec["round"] or (max(entry.get("built") or [0]) or None)
+    # A run stopped early: the record's reasons, and the words the approve step says them in.
+    early = (
+        {"stuck": rec["stuck"], "untestable": rec["untestable"]}
+        if rec["stuck"] or rec["untestable"]
+        else None
+    )
+    kinds = [k for k in ("stuck", "untestable") if early and early[k]]
     steps = []
     for i, name in enumerate(TRACK):
         state = "done" if i < at else "todo" if i > at else "paused" if paused else "current"
@@ -467,6 +503,8 @@ def _progress(
             label = "fixing"
         if name == "review" and rnd and rec["reviewers"]:
             label = f"reviews {_reviewed(folder, rnd)}/{len(rec['reviewers'])}"
+        if name == "approve" and kinds:
+            label = f"approve ({', '.join(kinds)})"
         steps.append({"name": name, "state": state, "label": label})
     running = step in AT
     start = rec.get("at") or _since(rec["since"])
@@ -479,7 +517,7 @@ def _progress(
         fraction = round(min(elapsed / typical, CAP), 3)
     return {
         "kind": "build", "steps": steps, "round": rnd, "limit": rec["limit"], "step": step,
-        "paused": paused, "stopped": False, "problems": [], "moves": None,
+        "paused": paused, "stopped": False, "problems": [], "moves": None, "early": early,
         "elapsed": elapsed, "typical": typical if fraction is not None else None,
         "fraction": fraction, "samples": found["samples"] if fraction is not None else None,
         "plan": None,
@@ -545,7 +583,7 @@ def _land_progress(
         "kind": "land", "steps": steps, "round": rec["round"], "limit": rec["limit"],
         "moves": rec["moves"], "step": step, "after": rec["after"] if stopped else None,
         "train": f"{rec['train']['k']} of {rec['train']['n']}" if rec["train"] else None,
-        "paused": False, "stopped": stopped,
+        "paused": False, "stopped": stopped, "early": None,
         "problems": rec["problems"], "elapsed": elapsed,
         "typical": typical if fraction is not None else None, "fraction": fraction,
         "samples": found["samples"] if fraction is not None else None, "plan": None,
@@ -738,10 +776,15 @@ def next_action(entry: dict) -> str:
     if entry["problems"] and stage is None:
         return "fix intent.md's frontmatter"
     # The decisions its `needs` still holds: a blocking one at `build`, answered in the session
-    # running the factory, or one an escalation at `test` still needs, answered in `decide`.
+    # running `/sdlc-factory:build` (which asks it again when rerun; `/sdlc-factory:decide`
+    # refuses a run still building), or one an escalation at `test` still needs, answered in
+    # `decide`.
     ids = [n.removeprefix("decide ") for n in entry.get("needs") or [] if n.startswith("decide ")]
     decide = f"decide {', '.join(ids)}" + (
-        " in the factory's supervisor" if stage == "build" else ""
+        f" in the session running /sdlc-factory:build {entry['id']} (rerun it if that session "
+        "ended)"
+        if stage == "build"
+        else ""
     )
     # A problem is the card's column at any stage (`column()`), so it is the next step too.
     if entry["problems"]:
@@ -793,19 +836,18 @@ def next_action(entry: dict) -> str:
 
 
 def column(entry: dict) -> str:
-    """The board's column: a file that won't read first, at any stage; then a shipped or dropped
-    change, waiting on close whatever the factory's files still say; then Needs you exactly when
-    `sdlc.needs_of()` names something (a stop or a blocking decision at `build`, an escalation's
-    open ledger at `test`, a written spec whose stage never moved), since a factory signal counts
-    only at the stage it belongs to; then the approver's decision at `test`, an escalation by now
-    answered, as Ready to ship; else how far it has got."""
+    """The board's column: a file that won't read first, at any stage; then Needs you exactly
+    when `sdlc.needs_of()` names something (a stop or a blocking decision at `build`, an
+    escalation's open ledger at `test`, a stopped landing at `test` or `shipped`, a written spec
+    whose stage never moved), since a factory signal counts only at the stage it belongs to; then
+    a shipped or dropped change, waiting on close whatever the factory's files still say; then
+    the approver's decision at `test`, an escalation by now answered, as Ready to ship; else how
+    far it has got."""
     stage = entry["stage"]
-    if entry["problems"]:
+    if entry["problems"] or entry.get("needs"):
         return "needs-you"
     if stage in CLOSED:
         return "close"
-    if entry.get("needs"):
-        return "needs-you"
     if stage == "test" and entry.get("decision") in ("READY", "ESCALATE"):
         return "ready"
     return entry.get("seen") or stage or "needs-you"

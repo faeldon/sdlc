@@ -64,8 +64,6 @@ main.board {
 .card:hover, .card:focus-visible { border-color: var(--accent); outline: none; }
 .card.needs-you { border-left: 3px solid var(--stop); }
 .card.ready { border-left: 3px solid var(--accent); background: var(--ready-bg); }
-/* A stopped landing keeps its column, but never its column's ready look. */
-.card.landing-stopped { border-left: 3px solid var(--stop); background: var(--panel); }
 .card-top { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .num { font-weight: 600; font-variant-numeric: tabular-nums; }
 .badge {
@@ -409,7 +407,8 @@ function money(cost) {
 }
 
 function roundRow(r) {
-  const chips = [h("span", { class: "r" }, `R${r.round}`)];
+  // `B` for a build round: `R` is a requirement's letter, and the ledger's for the person's words.
+  const chips = [h("span", { class: "r" }, `B${r.round}`)];
   chips.push(h("span", { class: "chip", title: "builder report" }, r.built ? "build" : "build …"));
   for (const [role, v] of Object.entries(r.reviews)) {
     const text = v.verdict === "CHANGES" ? `${role} ${v.changes}` : role;
@@ -438,7 +437,7 @@ const STEP_WORDS = { done: "✓ ", current: "now: ", paused: "waiting on you: ",
 function progressRow(p) {
   const land = p.kind === "land";
   const round = land ? `landing${p.round ? ` L${p.round}` : ""}`
-    : p.round ? `R${p.round}${p.limit ? ` of ${p.limit}` : ""}` : null;
+    : p.round ? `B${p.round}${p.limit ? ` of ${p.limit}` : ""}` : null;
   const steps = p.steps.map((s) => h("span", { class: `step ${s.state}` },
     `${STEP_WORDS[s.state] || ""}${s.label}`));
   const parts = [h("div", { class: "track" }, round ? h("span", { class: "r" }, round) : null, steps)];
@@ -455,6 +454,9 @@ function progressRow(p) {
   if (land && p.train) parts.push(h("div", { class: "meta" }, `${p.train} in a train`));
   if (land && p.moves) parts.push(h("div", { class: "meta" }, `base moved ${p.moves} of ${p.limit || "?"} times`));
   for (const why of p.problems || []) parts.push(h("div", { class: "flag" }, `landing stopped: ${why}`));
+  // A run stopped early goes to the approver with rounds left: each reason, in plain words.
+  for (const s of (p.early && p.early.stuck) || []) parts.push(h("div", { class: "flag" }, `stopped early: kept two rounds running: ${s}`));
+  for (const u of (p.early && p.early.untestable) || []) parts.push(h("div", { class: "flag" }, `stopped early: no test can show ${u}`));
   return h("div", { class: "progress" }, parts);
 }
 
@@ -482,8 +484,7 @@ function card(c) {
   const chip = !c.decision ? null
     : c.stage === "test" ? c.decision
     : c.stage === "shipped" || c.stage === "dropped" ? `was ${c.decision}` : null;
-  const landingStopped = c.progress && c.progress.kind === "land" && c.progress.stopped;
-  return h("button", { class: `card ${c.column}${landingStopped ? " landing-stopped" : ""}`, type: "button", "data-change": c.change },
+  return h("button", { class: `card ${c.column}`, type: "button", "data-change": c.change },
     h("div", { class: "card-top" },
       h("span", { class: "num" }, c.id),
       h("span", { class: `badge ${c.mode}` }, factory ? "factory" : "by hand"),

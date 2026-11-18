@@ -1099,6 +1099,37 @@ def test_factory_cases_writes_the_note_ship_reads_or_stops(tmp_path, capsys, mon
 
 
 @needs_uv
+def test_accept_and_cases_record_their_landing_step(tmp_path, capsys, monkeypatch) -> None:
+    """2026-11-18-39: before the landing's commit, `accept` records `checks` and `cases` records
+    `cases` in `runs/land-step.md`, so the board's track shows them rather than the build's; after
+    the commit the checks run inside the gate's step, and the record is left as it stands."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "stepped", "stepped's one")
+    folder = _folder(tree)
+    (folder / "checks.md").write_text(CHECKS, encoding="utf-8")
+    reply = {"code": 0, "data": {"passed": True, "checks": [], "problems": []}}
+    monkeypatch.setattr(factory, "_sdlc", lambda args, cwd: (reply["code"], reply["data"], ""))
+    assert _land_step(folder) is None
+    code, out = _run(capsys, factory.cmd_accept, tree, "001")
+    assert (code, out["verdict"]) == (0, "PASS"), out
+    step = _land_step(folder)
+    assert (step["step"], step["round"], step["moves"]) == ("checks", None, 0), step
+    assert "checks" in factory.LAND_STEPS and "cases" in factory.LAND_STEPS
+    reply["data"] = {"skipped": "plugin eval is unavailable: early access"}
+    code, out = _run(capsys, factory.cmd_cases, tree, "001")
+    assert code == 0 and _land_step(folder)["step"] == "cases"
+    intent = folder / "intent.md"
+    intent.write_text(
+        intent.read_text(encoding="utf-8").replace("stage: test", "stage: shipped"),
+        encoding="utf-8",
+    )
+    before = (folder / factory.LAND_STEP).read_text(encoding="utf-8")
+    reply["data"] = {"passed": True, "checks": [], "problems": []}
+    assert _run(capsys, factory.cmd_accept, tree, "001")[0] == 0
+    assert (folder / factory.LAND_STEP).read_text(encoding="utf-8") == before, "the gate's step"
+
+
+@needs_uv
 def test_land_refuses_a_change_whose_checks_or_cases_havent_run(
     tmp_path, capsys, monkeypatch
 ) -> None:
@@ -2406,6 +2437,44 @@ def _committed_step(tree: Path, folder: Path, rev: str = "HEAD") -> dict | None:
     return factory.read_land_step(_git(tree, "show", f"{rev}:{rel}"))
 
 
+@pytest.mark.portable
+def test_every_landing_stop_has_a_plain_line_over_its_raw_text(tmp_path, capsys) -> None:
+    """2026-11-18-20: a stop a tool's words caused is recorded with a plain line first, saying what
+    failed and what to do, the raw text under it, and the output keeps the raw words. Each of
+    `_amend_record()`'s whys has one, naming the way on and none of git's words; a stop at the
+    landing's close the same; the bound on the base branch's moves names `/sdlc:close`, since the
+    change is committed by then (`/sdlc:ship` only as what brings it up to date first)."""
+    folder = tmp_path / ".sdlc" / "work" / "012-draft-land"
+    (folder / "runs").mkdir(parents=True)
+    why = "HEAD isn't the landing's commit, so its record has nothing to be amended into"
+    plain = factory._amend_plain(why, "012")
+    code, out = _run(capsys, factory._land_refused, tmp_path, folder, {"state": "x"}, why, plain)
+    assert (code, out["state"], out["refusals"]) == (1, "refused", [why])
+    stop = _land_step(folder)
+    assert (stop["step"], stop["problems"]) == ("stop", [plain, why])
+    code, out = _run(capsys, factory._land_refused, tmp_path, folder, {}, why)
+    assert out["refusals"] == [why] and _land_step(folder)["problems"] == [why], "no plain: as is"
+    raws = (
+        "git status couldn't be read",
+        "uncommitted outside the change's folder: stray.txt, other.txt",
+        why,
+        "the landing's record couldn't be added to the commit",
+        "something new",
+    )
+    for raw in raws:
+        line = factory._amend_plain(raw, "012")
+        assert line and line != raw and "/sdlc" in line and "012" in line, (raw, line)
+        assert "HEAD" not in line and "amend" not in line, line
+    assert "stray.txt, other.txt" in factory._amend_plain(raws[1], "012"), "the paths, named"
+    code, out = _run(capsys, factory._close_stopped, tmp_path, folder, "raw close words", "plain")
+    assert code == 1 and out["refusals"] == ["raw close words"]
+    assert _land_step(folder)["problems"] == ["plain", "raw close words"]
+    (folder / factory.LAND_MOVES).write_text("abc\n", encoding="utf-8")
+    cfg = {"land": {"moves": 1}}
+    bound = factory._record_move(tmp_path, folder, cfg)
+    assert bound and "/sdlc:close 012" in bound and "ship it by hand" not in bound, bound
+
+
 @needs_uv
 def test_a_landing_records_each_step_it_takes(tmp_path, capsys, monkeypatch) -> None:
     """133: each landing command writes the step it runs to `runs/land-step.md` as it starts, its
@@ -2523,7 +2592,8 @@ def test_the_landing_step_record_reads_back_what_it_writes() -> None:
 @needs_uv
 def test_a_landing_stopped_by_a_tool_records_plain_words(tmp_path, capsys) -> None:
     """133 round 1: the record a person reads on the board says what failed and how to see why;
-    the tool's own words stay in the landing's output."""
+    the tool's own words stay in the landing's output, and (141) under the plain line in the
+    record."""
     root = _repo(tmp_path)
     tree = _ready(root, "hooked", "hooked's one")
     _hook(root, "hook says no")
@@ -2531,9 +2601,10 @@ def test_a_landing_stopped_by_a_tool_records_plain_words(tmp_path, capsys) -> No
     assert code == 1 and "hook says no" in out["refusals"][0], out
     stop = _land_step(_folder(tree))
     assert (stop["step"], stop["after"]) == ("stop", "ship"), stop
-    assert stop["problems"] == [
+    assert stop["problems"][0] == (
         "its commit failed: the landing's output gives git's words; rerun it once fixed"
-    ]
+    )
+    assert len(stop["problems"]) == 2 and "hook says no" in stop["problems"][1], stop
 
 
 # ---------------------------------------------------------------- the register never rides (134)

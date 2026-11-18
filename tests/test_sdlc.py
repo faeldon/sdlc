@@ -2766,6 +2766,28 @@ def test_a_blocking_decision_needs_its_id() -> None:
     assert sdlc.needs_of(_rec(stage="test", decision="READY", pending=_d("D1"))) == []
 
 
+@pytest.mark.portable
+def test_a_landing_stop_needs_the_person() -> None:
+    """141: a landing that stopped (`land_stop`, from `runs/land-step.md`) needs the person at the
+    landing's stages, `test` before its commit and `shipped` after, naming the step it stopped
+    after; a problem still comes first, and at any other stage the record is history."""
+    stop = {"after": "close", "problems": ["sdlc.py close refused"]}
+    assert sdlc.needs_of(_rec(stage="shipped", land_stop=stop)) == ["landing stopped at close"]
+    assert sdlc.needs_of(_rec(stage="test", land_stop=stop | {"after": "ship"})) == [
+        "landing stopped at ship"
+    ]
+    assert sdlc.needs_of(_rec(stage="test", land_stop=stop | {"after": None})) == [
+        "landing stopped at a step"
+    ]
+    rec = _rec(stage="shipped", problems=["findings.md couldn't be read"], land_stop=stop)
+    assert sdlc.needs_of(rec) == ["fix: findings.md couldn't be read", "landing stopped at close"]
+    for stage in ("plan", "design", "build", "dropped"):
+        assert sdlc.needs_of(_rec(stage=stage, land_stop=stop)) == [], stage
+    assert sdlc.needs_of(_rec(stage="shipped", land_stop=None)) == []
+    [need] = sdlc.needs_of(_rec(stage="shipped", land_stop=stop))
+    assert "," not in need, "status joins a change's needs with one"
+
+
 WEIGHED = (
     "# Decisions\n\n"
     "- [x] D1 (code round 1, default): Log the draft id? → settled by the approver: spec R4\n"
