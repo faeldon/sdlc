@@ -245,3 +245,12 @@ hard to judge. Have the approver weigh the defaults itself and escalate only wha
 for those, show the default beside the alternatives that were considered, with pros and cons.
 Theme: factory
 Raised 2026-11-18.
+
+## [2026-11-18-14] [idea] Factory rounds that are enough, and that stop early on a fault no round can fix
+
+Build and landing rounds run out, and escalate or force a ship by hand: decide whether to raise the
+round limits or the reviewer and rework models (124 and 125 stopped at landing on findings light
+haiku rounds missed). Escalate early when every round fails on the same error, or on something that
+can't be tested, instead of running more rounds.
+Theme: factory
+Raised 2026-11-18.
