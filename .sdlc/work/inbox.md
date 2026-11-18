@@ -129,18 +129,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 Priority: low
 
-## [2026-11-18-43] [idea] Move close, push, the lock and the landing into modules the deep review can name
-
-Move close, push and the main lock out of scripts/sdlc.py, and the landing out of
-plugins/factory/scripts/factory.py, into modules of their own (as retro.py and board.py are), each
-loaded by path with its docstring as its contract, and list those modules in [review] sensitive.
-Today the deep review matches paths, and those two files are touched by most changes (60 and 50
-commits this month), so listing them would make nearly every run full depth; 139-landing-train
-rewrote close's lock and the landing at light depth with no security review. Open it after the
-139–147 batch and the release, so the move is made on quiet code.
-Theme: factory
-Raised 2026-11-18.
-
 ## [2026-11-18-64] [nit] `bg` only looks for a trailing `&` at the end of the whole command.
 
 Raised by the code review of 146-measure-how-agents-work, round 1: scripts/metrics.py:306: `bg` only looks for a trailing `&` at the end of the whole command. A multi-line command that backgrounds a middle line, such as `a &\nb`, isn't counted. The spec calls every count a lower bound, so this is allowed. Saying so in the docstring or adding a test would settle it.
@@ -478,3 +466,13 @@ Severity: low
 Paths: scripts/board.py, skills/dashboard/SKILL.md
 Introduced by: 075-factory-dashboard
 Theme: board
+
+## [2026-11-18-104] [nit] the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push).
+
+Raised by the test review of 153-risky-code-in-its-own-modules, round 1: tests/test_sdlc.py:1921: the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push). It plants only two, and the other two live in `test_work_folder.py` and presumably `test_skills.py`.
+
+Theme: tests
+Paths: tests/test_sdlc.py
+Cost: S
+Value: low
+Raised by: 153-risky-code-in-its-own-modules (correctness)
