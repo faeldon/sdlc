@@ -132,43 +132,6 @@ See .sdlc/work/053-skill-evals/notes.md in 053's commit.
 Theme: tests
 Priority: low
 
-## [2026-11-18-67] [idea] A Windows test for a killed train run
-
-Left undone by 147-landing-runs-unattended, carried forward when it landed: `test_a_killed_train_run_resumes` kills a process group, so it doesn't run on Windows; a Windows kill test would need `CREATE_NEW_PROCESS_GROUP` and `taskkill /T`.
-See .sdlc/work/147-landing-runs-unattended/notes.md in its commit.
-Theme: tests
-Raised 2026-11-18.
-
-## [2026-11-18-69] [nit] after a SIGKILL of the loop, an orphaned agent subprocess can still be running when a rerun starts, because the lock descriptor isn't inherited.
-
-Raised by the code review of 147-landing-runs-unattended, round 1: plugins/factory/scripts/factory.py:6330: after a SIGKILL of the loop, an orphaned agent subprocess can still be running when a rerun starts, because the lock descriptor isn't inherited. The only guard is that the same step named twice stops the loop. A comment saying so, or a test, would help.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: M
-Value: low
-Raised by: 147-landing-runs-unattended (correctness)
-
-## [2026-11-18-70] [nit] R4's stops for a non-zero step exit, an agent `problem`, `resolve` with no conflicted files and a `land.moves` stop have no test of their own.
-
-Raised by the test review of 147-landing-runs-unattended, round 1: tests/test_train.py: R4's stops for a non-zero step exit, an agent `problem`, `resolve` with no conflicted files and a `land.moves` stop have no test of their own. The spec lists four R4 tests and all four exist, so the gap is only in what R4's list promises.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: M
-Value: low
-Raised by: 147-landing-runs-unattended (correctness)
-
-## [2026-11-18-71] [nit] the kill test waits up to 120 s (600 polls of 0.2 s) for the stand-in reviewer to start, which is slow on a loaded machine but not flaky.
-
-Raised by the test review of 147-landing-runs-unattended, round 1: tests/test_train.py:1468: the kill test waits up to 120 s (600 polls of 0.2 s) for the stand-in reviewer to start, which is slow on a loaded machine but not flaky.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 147-landing-runs-unattended (correctness)
-
 ## [2026-11-18-74] [idea] Limit CI's GITHUB_TOKEN to contents: read in check.yml
 
 Left undone by 152-board-drawer-browser-test, carried forward when it landed: pre-existing: .github/workflows/check.yml:13: no `permissions:` block; set `permissions: contents: read` so a compromised dev dependency running in CI can't use a write-scoped token
@@ -226,16 +189,6 @@ Cost: M
 Value: low
 Raised by: 152-board-drawer-browser-test (correctness)
 
-## [2026-11-18-80] [nit] `any((folder / "reviews" / f"land-{n}").iterdir())` raises if the round's folder is missing; `land_round` presumably only counts existing folders, so it is safe today.
-
-Raised by the code review of 154-landing-fix-before-gate, round 1: plugins/factory/scripts/factory.py:5880: `any((folder / "reviews" / f"land-{n}").iterdir())` raises if the round's folder is missing; `land_round` presumably only counts existing folders, so it is safe today. Guarding with `.is_dir()` would make that explicit
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 154-landing-fix-before-gate (correctness)
-
 ## [2026-11-18-81] [idea] Wrap the reviewer agents' other lines past 100 columns
 
 Left undone by 150-pay-down-batch-nits, carried forward when it shipped: `plugins/factory/agents/reviewer-code.md` and `reviewer-ux.md` keep other lines past 100 columns (each frontmatter `description`, and the "Under a decision's line" paragraph after the `supersedes` sentence -55 wrapped), outside -55's scope.
@@ -256,26 +209,6 @@ Raised by the code review of 149-landing-resolver-agent, round 1: AGENTS.md:237:
 
 Theme: style
 Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 149-landing-resolver-agent (correctness)
-
-## [2026-11-18-84] [nit] in `cmd_resolve --continue`, `_stray()` runs before the register is pruned, which is what the spec says.
-
-Raised by the code review of 149-landing-resolver-agent, round 1: plugins/factory/scripts/factory.py:6966: in `cmd_resolve --continue`, `_stray()` runs before the register is pruned, which is what the spec says. If `.sdlc/last-id` is still modified in the worktree after `_rebase_settling()`, it would count as stray. Spec R9 says it is staged, and a test covers the clean path, so I'm only flagging it. A test where a conflicting stack also touches `last-id` would settle it.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 149-landing-resolver-agent (correctness)
-
-## [2026-11-18-85] [nit] the fence test mixes tracked and untracked strays in one flow.
-
-Raised by the test review of 149-landing-resolver-agent, round 1: tests/test_train.py:976: the fence test mixes tracked and untracked strays in one flow. A failure message won't say which case broke, so the `refused` helper could take a label
-
-Theme: tests
-Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 149-landing-resolver-agent (correctness)
@@ -317,16 +250,6 @@ Raised by the code review of 155-agent-test-runs-share-the-slot, round 1: plugin
 
 Theme: style
 Paths: plugins/factory/README.md
-Cost: S
-Value: low
-Raised by: 155-agent-test-runs-share-the-slot (correctness)
-
-## [2026-11-18-98] [nit] the new R3 and R4 tests carry no `@pytest.mark.portable` even though the spec says "marked `portable` where they use no shebang fakes".
-
-Raised by the test review of 155-agent-test-runs-share-the-slot, round 1: tests/test_factory.py:4900: the new R3 and R4 tests carry no `@pytest.mark.portable` even though the spec says "marked `portable` where they use no shebang fakes". The two-checks test uses `sleep` and `sh`, so leaving them unmarked is probably right, but the spec's intent is unclear.
-
-Theme: tests
-Paths: tests/test_factory.py
 Cost: S
 Value: low
 Raised by: 155-agent-test-runs-share-the-slot (correctness)
@@ -489,16 +412,6 @@ Cost: S
 Value: low
 Raised by: 163-factory-records-reader (correctness)
 
-## [2026-11-18-68] [nit] `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it.
-
-Raised by the code review of 147-landing-runs-unattended, round 1: plugins/factory/scripts/factory.py:6291: `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it. The `RUN_STOPS` tuple (line 6163) looks unused; remove it or use it for the `accept` and `stop` branches.
-
-Theme: refactor
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 147-landing-runs-unattended (correctness)
-
 ## [2026-11-19-12] [bug] A landing retires every nit its Approach or Requirements names, taken in or not
 
 A landing retires every nit its intent's Approach or spec's Requirements names by id, even one named to say it isn't taken: named_nits() (plugins/factory/scripts/factory.py, NIT_SECTIONS) matches any whole id in those sections. 165's Approach listed its wave plan and retired 2026-11-19-1, -5 and -6; 166's said "-68 … left to R3, none is taken in here" and retired 2026-11-18-68, all as "taken in". Expected: only nits the change says it takes in are retired, e.g. a "Nits taken in:" line, or ids the diff's review confirms. To see it: name an open nit's id in a Tier 1 intent's Approach as not taken, land the change, and the Close commit retires it.
@@ -599,3 +512,33 @@ Paths: scripts/metrics.py
 Cost: S
 Value: low
 Raised by: 170-trust-band (contract)
+
+## [2026-11-19-23] [nit] `_killed_at_its_gate` waits up to 120 s for the gate to start, while the POSIX test it twins waits 60 s; neither is a defect, but the two differ for no stated reason
+
+Raised by the test review of 171-factory-run-state, round 1: tests/test_train.py:1830: `_killed_at_its_gate` waits up to 120 s for the gate to start, while the POSIX test it twins waits 60 s; neither is a defect, but the two differ for no stated reason
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 171-factory-run-state (correctness)
+
+## [2026-11-19-24] [nit] R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s.
+
+Raised by the code review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s. Change R14 to 120 s, since startup here takes about 60 s.
+
+Theme: docs
+Paths: .sdlc/work/171-factory-run-state/spec.md
+Cost: S
+Value: med
+Raised by: 171-factory-run-state (correctness)
+
+## [2026-11-19-25] [nit] R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s.
+
+Raised by the test review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s. Reword R14 to 120 s so the spec matches the code.
+
+Theme: docs
+Paths: .sdlc/work/171-factory-run-state/spec.md
+Cost: S
+Value: med
+Raised by: 171-factory-run-state (correctness)
