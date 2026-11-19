@@ -521,21 +521,6 @@ Cost: S
 Value: low
 Raised by: 181-landing-nits-and-fixes (correctness)
 
-## [2026-11-19-50] [bug] The factory's spec-writer doesn't write a `Nits taken in:` line
-
-Since 181, a landing retires a nit only when its id is on a `Nits taken in:` line in the intent's
-Approach or the spec's Requirements. 181 taught skills/intent, skills/intent/batch.md, skills/spec
-and the land skill to write that line, but not the factory's spec-writer: neither
-plugins/factory/agents/spec-writer.md nor plugins/factory/prompts/spec.md mentions it. Seen on 175:
-its draft took in nits 2026-11-19-19 and -21 in R13 and R14 by prose only, so its landing would
-have left both open; caught by hand and revised. Expected: the spec-writer puts every nit the spec
-takes in on a `Nits taken in:` line in its Requirements.
-
-Severity: low
-Paths: plugins/factory/agents/spec-writer.md, plugins/factory/prompts/spec.md
-Introduced by: 181-landing-nits-and-fixes
-Theme: landing
-
 ## [2026-11-19-51] [nit] no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
 
 Raised by the test review of 178-comment-health, round 1: tests/test_comment_health.py: no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
@@ -545,3 +530,13 @@ Paths: tests/test_comment_health.py
 Cost: S
 Value: low
 Raised by: 178-comment-health (correctness)
+
+## [2026-11-19-52] [nit] the `# 183` comments on the two new `places` entries add nothing, since git blame already says where they came from.
+
+Raised by the code review of 183-spec-writer-nits-marker, round 1: tests/test_skills.py:1939: the `# 183` comments on the two new `places` entries add nothing, since git blame already says where they came from.
+
+Theme: style
+Paths: tests/test_skills.py
+Cost: S
+Value: low
+Raised by: 183-spec-writer-nits-marker (correctness)

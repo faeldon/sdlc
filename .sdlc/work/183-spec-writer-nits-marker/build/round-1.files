@@ -1,5 +1,0 @@
-34bb5a41b14b4716475f2f654eebd892201579e300cbd5db980969f7d615ddc7  plugins/factory/agents/spec-writer.md
-eeca700bf0d2aac8f8271388c5913bd15b886be41df1742778035f48d235dcfe  plugins/factory/prompts/spec.md
-10429d18e584e05816d1324d6ac00bf72d039ed10cf46cb587291269c0a6aa8c  tests/prompts/spec-upgraded.txt
-829522891e8820165f673dd1b1fc5f2e345a85c35dcc93ed9d4c16a5b44e5ac2  tests/prompts/spec.txt
-836bbe5eec276fa2c4f00d6ced50425424d965b05d9d0eb2f8736df965753a43  tests/test_skills.py
