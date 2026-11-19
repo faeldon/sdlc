@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2431,6 +2432,23 @@ def test_a_change_without_a_usable_opened_says_so(
     assert sdlc.metrics.parse_trailers(body)["coverage"].endswith(f" {word}")
 
 
+def test_a_change_opened_after_its_close_says_bad_opened(tmp_path, gh, capsys, monkeypatch):
+    """172 R7 (nit 2026-11-19-4): an `opened:` that reads as a time, but one after the close,
+    gives no lead time: the coverage says `lead=bad-opened`, and every other line lands."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(sdlc.closing, "datetime", _Frozen)
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T14:00Z")
+    intent = _git(root, "show", f"{name}:.sdlc/work/{name}/intent.md")
+    assert sdlc.closing.opened_at(intent) > CLOSED_AT, "a time that parses, not a malformed one"
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and not _on_main(root, name), out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert "Sdlc-Lead" not in body and "Sdlc-Totals:" in body and "Sdlc-Happy:" in body
+    assert sdlc.metrics.parse_trailers(body)["coverage"].endswith(" lead=bad-opened")
+    assert "errors" not in out["measure"], "a refused time is no error"
+
+
 def test_timing_that_fails_drops_only_its_own_line(tmp_path, gh, capsys, monkeypatch) -> None:
     """162 R11: a raising reader costs the `Sdlc-Lead` line alone."""
     monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
@@ -2446,6 +2464,7 @@ def test_timing_that_fails_drops_only_its_own_line(tmp_path, gh, capsys, monkeyp
     body = _git(root, "log", "-1", "--format=%B", "main")
     assert "Sdlc-Lead" not in body and "Sdlc-Totals:" in body and "Sdlc-Happy:" in body
     assert "Sdlc-Coverage: none: no transcripts for this repo lead=failed" in body
+    assert out["measure"]["errors"] == ["lead: RuntimeError: a run file shape nobody planned for"]
 
 
 def test_a_dropped_change_records_no_lead(tmp_path, gh, capsys) -> None:
@@ -2539,3 +2558,68 @@ def test_close_reads_the_run_rows_the_factory_writes(tmp_path, monkeypatch) -> N
     factory._record_land(root, folder, "ship")
     times = (folder / factory.LAND_TIMES).read_text(encoding="utf-8")
     assert sdlc.factory_records.land_sinces(times) == [at("12:00:00")]
+
+
+# ---------------------------------------------------------------- close's output, pinned (172)
+
+CLOSE_OUTPUT = ROOT / "tests" / "fixtures" / "close-output.json"
+
+
+def _normal(text: str, tmp_path: Path) -> str:
+    """`text` with what differs run to run replaced: temp paths, shas, and the clock's numbers in
+    `Sdlc-Totals` and `Sdlc-Lead`."""
+    for path in sorted({str(tmp_path.resolve()), str(tmp_path)}, key=len, reverse=True):
+        text = text.replace(path, "<tmp>")
+    text = re.sub(r"\b[0-9a-f]{7,40}\b", "<sha>", text)
+    return re.sub(
+        r"(Sdlc-(?:Totals|Lead): )([^\"\n]*)",
+        lambda m: m[1] + re.sub(r"\d+(\.\d+)?", "N", m[2]),
+        text,
+    )
+
+
+def _pinned(root: Path, tmp_path: Path, code: int, out: dict) -> dict:
+    """What a person sees of a close: its report as printed, its exit, and main's newest commit."""
+    return {
+        "code": code,
+        "report": _normal(json.dumps(out, indent=2, ensure_ascii=False), tmp_path).splitlines(),
+        "commit": _normal(_git(root, "log", "-1", "--format=%B", "main"), tmp_path).splitlines(),
+        "tree": _git(root, "ls-tree", "-r", "--name-only", "main").splitlines(),
+    }
+
+
+def _pushed_repo(tmp_path: Path) -> Path:
+    """A repo whose close pushes `main` to a bare `origin` on disk."""
+    root = _repo(tmp_path, github=False)
+    _config(root, '[git]\npush = ["close"]\n')
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "push on close")
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(tmp_path / "remote.git"))
+    _git(root, "remote", "add", "origin", str(tmp_path / "remote.git"))
+    _git(root, "push", "-q", "origin", "main")
+    return root
+
+
+def _close_scenario(scenario: str, tmp_path: Path, capsys, monkeypatch) -> list[dict]:
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    root = _pushed_repo(tmp_path) if scenario == "pushed" else _repo(tmp_path)
+    if scenario == "dropped":
+        _dropped(root)
+    else:
+        _shipped(root, extra=BIG if scenario == "rerun" else None)
+    runs = []
+    if scenario == "rerun":
+        monkeypatch.setenv("FAKE_GH_FAIL_FLAG", "--add-label")
+        runs.append(_pinned(root, tmp_path, *_close(root, capsys, "001")))
+        monkeypatch.delenv("FAKE_GH_FAIL_FLAG")
+    runs.append(_pinned(root, tmp_path, *_close(root, capsys, "001", check=scenario == "check")))
+    return runs
+
+
+@pytest.mark.parametrize("scenario", ["shipped", "dropped", "check", "rerun", "pushed"])
+def test_close_output_is_unchanged(tmp_path, gh, capsys, monkeypatch, scenario) -> None:
+    """172 R4: splitting close into named steps changed nothing a person sees: the report as
+    printed (its keys in order), the exit, and the commit and tree it leaves, as recorded from
+    the close before the split."""
+    runs = _close_scenario(scenario, tmp_path, capsys, monkeypatch)
+    assert runs == json.loads(CLOSE_OUTPUT.read_text(encoding="utf-8"))[scenario]

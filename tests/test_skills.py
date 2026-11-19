@@ -515,14 +515,22 @@ def test_only_the_named_steps_push() -> None:
     assert len(git_push.findall(source)) == len(git_push.findall(body)) == 1, "a push outside"
     call = next(line for line in body.splitlines() if git_push.search(line))
     assert "force" not in call and '"-f"' not in call, call
-    callers = {
-        name
-        for text in sources
-        for name in re.findall(r"\ndef (\w+)\(", text)
-        if name != "_push" and "_push(" in _function(text, name).replace("def _push(", "")
-    }
-    assert callers == {"cmd_publish", "cmd_close", "cmd_release"}, callers
-    for name in ("cmd_close", "cmd_release"):
+
+    def callers_of(callee: str) -> set[str]:
+        call = re.compile(rf"(?<!\w){callee}\(")
+        return {
+            name
+            for text in sources
+            for name in re.findall(r"\ndef (\w+)\(", text)
+            if name != callee and call.search(_function(text, name).replace(f"def {callee}(", ""))
+        }
+
+    # Close pushes in its own `push` step (172), which only its run of the steps calls, once
+    # `_close_preview()` has read `git.push` through `_push_plan()`.
+    callers = callers_of("_push")
+    assert callers == {"cmd_publish", "_step_push", "cmd_release"}, callers
+    assert callers_of("_step_push") == {"_run_close_steps"}
+    for name in ("_close_preview", "cmd_release"):
         text = _defining(sources, name)
         assert "_push_plan(" in _function(text, name), f"{name} pushes without git.push"
 

@@ -484,6 +484,22 @@ def test_a_failed_case_reruns_once_alone(tmp_path: Path, monkeypatch, capsys) ->
     assert json.loads((run / "scope.json").read_text(encoding="utf-8"))["note"] == out["note"]
 
 
+@pytest.mark.parametrize(
+    "spent, ceiling",
+    [(0.65, "4.35"), (0.30000000000000004, "4.7"), (0.305, "4.69")],
+)
+def test_the_rerun_ceiling_keeps_its_last_cent(
+    tmp_path: Path, monkeypatch, capsys, spent: float, ceiling: str
+) -> None:
+    """172 R9 (nit 2026-11-18-100): the rerun's ceiling is the cap less what was spent, to the
+    cent: float noise never costs a cent, and a real fraction of one still rounds down."""
+    fail = _a_result(spent, ship=[_a_run(0.5, failing=("x",))], close=[_a_run(1.0)])
+    calls = _run_cases(tmp_path, monkeypatch, [(1, fail), (1, _a_result(0.1, ship=[_a_run(1.0)]))])
+    sdlc.cmd_run_cases(tmp_path, "053")
+    rerun = calls[1]
+    assert rerun[rerun.index("--max-cost-usd") + 1] == ceiling
+
+
 def test_a_rerun_that_passes_passes_the_run(tmp_path: Path, monkeypatch, capsys) -> None:
     """156 R5: failed then passed exits 0, the case `passed on rerun` in the output and note."""
     fail = _a_result(1.0, ship=[_a_run(0.5, failing=("x",))], close=[_a_run(1.0)])

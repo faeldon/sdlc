@@ -47,6 +47,24 @@ CLOSING_NAMES = {
     "_ff_deletions",
     "_push",
     "_push_plan",
+    # 172 R3: close's steps, and the stages around them.
+    "_Close",
+    "_step_merge",
+    "_step_verify",
+    "_step_measure",
+    "_step_archive",
+    "_step_remove_folder",
+    "_step_tell_issues",
+    "_step_record",
+    "_step_remove_worktree",
+    "_step_delete_branch",
+    "_step_push",
+    "_step_cleanup",
+    "_close_target",
+    "_close_refusals",
+    "_close_preview",
+    "_close_steps",
+    "_run_close_steps",
 }
 
 # R2's named entries: land, land-check, train, resolve and land-verdicts, with the train's state.
@@ -220,6 +238,24 @@ def test_the_named_code_lives_in_its_module(script: Path, module: Path, names: s
 def test_close_push_and_the_lock_live_in_closing() -> None:
     """R1, by its own name."""
     test_the_named_code_lives_in_its_module(SDLC_PY, CLOSING_PY, CLOSING_NAMES)
+
+
+def test_close_is_a_sequence_of_named_steps() -> None:
+    """172 R1, R2: `cmd_close` is a short run of named steps, with no step nested inside it, and
+    no function in `closing.py` is long enough to make a review of it a long read."""
+    functions = _functions(_tree(CLOSING_PY))
+    close = functions["cmd_close"]
+    nested = [n.name for n in ast.walk(close) if n is not close and isinstance(n, ast.FunctionDef)]
+    assert not nested, f"cmd_close defines {nested}: make each a top-level step"
+    body = close.body[1:] if ast.get_docstring(close) else close.body
+    lines = body[-1].end_lineno - body[0].lineno + 1
+    assert lines <= 40, f"cmd_close's body is {lines} lines, over 40"
+    long = {
+        name: node.end_lineno - node.lineno + 1
+        for name, node in functions.items()
+        if node.end_lineno - node.lineno + 1 > 100
+    }
+    assert not long, f"over 100 lines: {long}"
 
 
 def test_the_landing_lives_in_landing() -> None:

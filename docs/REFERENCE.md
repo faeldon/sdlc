@@ -1287,7 +1287,8 @@ commit holds (`runs/costs.jsonl`'s `started` and `ended`, `runs/land-times.jsonl
 a close on another machine still records them (`source=runs`). A change built by hand is ready
 at ship's commit, and its close is its landing, so it has no `landing`. Without run times, the
 transcripts give the agents' runs (`source=transcripts`); without those, the line holds `lead`
-and `ready_wait` (with `landing` for a factory change) alone (`source=git`). A part that can't be
+and `ready_wait` alone for a change built by hand, and `lead` and `landing` for a factory change,
+where with no approver run nothing says when it was ready (`source=git`). A part that can't be
 known is left out, never 0. A change with no `opened:` (one opened before it was written) gets
 no line, and `Sdlc-Coverage` says ` lead=none` (` lead=bad-opened` for a value that doesn't fit,
 ` lead=failed` when timing it failed); a dropped change has none.

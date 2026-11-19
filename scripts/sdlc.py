@@ -49,6 +49,7 @@ import fnmatch
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shlex
@@ -3909,7 +3910,9 @@ def cmd_run_cases(root: Path, ident: str | None, keep: bool = False) -> int:
     for case, first in sorted(runs.items()) if scope == "change" else []:
         if not any(r["failed"] and not r["environment"] for r in first):
             continue
-        ceiling = int((float(CASE_CAP["change"][1]) - spent) * 100) / 100
+        # Whole cents, rounded down, once float noise below a millionth of one is gone: 5 less
+        # 0.65 leaves 4.35, never 4.34.
+        ceiling = math.floor(round((float(CASE_CAP["change"][1]) - spent) * 100, 6)) / 100
         if ceiling <= 0:
             reruns[case] = CAP_WHY
             continue

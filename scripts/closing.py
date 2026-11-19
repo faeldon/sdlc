@@ -2,7 +2,9 @@
 
 What lives here is where a mistake costs a host its work or its history: `cmd_close()` (the merge,
 the `Close` commit, the register's entries filed and retired in it, the measure step's trailers, the
-cleanup, the handoff to the merged script), `_main_lock()` and its family (`_lock_path()`,
+cleanup, the handoff to the merged script), run as named steps (`_step_merge()` …
+`_step_cleanup()`, each taking the `_Close` that holds what they share, listed by `_close_steps()`
+and run under the lock by `_run_close_steps()`), `_main_lock()` and its family (`_lock_path()`,
 `_lock_depth()`, `_inherit_lock()`, `LOCK_HELD_ENV`), and `_push()` with `_push_plan()`. This
 repo lists the file in `[review] sensitive`, read from the base branch, so a change touching it is
 reviewed at full depth with the security reviewer, while a change elsewhere in `sdlc.py` can stay
@@ -365,10 +367,18 @@ def _lead_marks(
 
 
 def _lead_line(
-    main: Path, branch: str, folder: str, text: str, factory: bool, events: list[dict]
+    main: Path,
+    branch: str,
+    folder: str,
+    text: str,
+    factory: bool,
+    events: list[dict],
+    errors: list[str] | None = None,
 ) -> tuple[str | None, str | None]:
     """The `Sdlc-Lead` line for a landing change, or None and the word `Sdlc-Coverage` gains
-    instead (`lead=none`, `lead=bad-opened`, `lead=failed`). Never raises."""
+    instead (`lead=none`, `lead=bad-opened`, `lead=failed`). Never raises: what made it fail is
+    added to `errors`, as `lead: <type>: <message>`, so a programming error is seen in close's
+    report rather than hidden behind `lead=failed`."""
     if sdlc.frontmatter_list(text, "opened") is None:
         return None, "lead=none"
     opened = opened_at(text)
@@ -382,7 +392,9 @@ def _lead_line(
         if not parts:
             return None, "lead=bad-opened"
         return sdlc.metrics.lead_trailer(parts, source), None
-    except Exception:
+    except Exception as e:
+        if errors is not None:
+            errors.append(f"lead: {type(e).__name__}: {str(e)[:200]}")
         return None, "lead=failed"
 
 
@@ -433,9 +445,12 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         # Lead time, only for a change that lands: a dropped one never did.
         lead = None
         if sdlc.frontmatter_list(text, "stage") != ["dropped"]:
-            lead, missing = _lead_line(main, branch, folder, text, way == "factory", events)
+            errors: list[str] = []
+            lead, missing = _lead_line(main, branch, folder, text, way == "factory", events, errors)
             if missing:
                 summary["coverage"] += f" {missing}"
+            if errors:
+                summary["errors"] = errors
         # What ran underneath: Claude Code's versions and the models, from the events and the
         # factory roles' rows, and this plugin's version. A failure drops only this line.
         try:
@@ -715,6 +730,39 @@ def _carries_others(main: Path, branch: str, trunk: str) -> list[str]:
     return sorted(found)
 
 
+class _Close:
+    """What close's steps share, in place of the locals one long function held: the change and
+    its settings, the refs and plans the preview works out, and the report every step writes
+    into. Each `_step_*` takes it and returns an error, or None. A plain class, not a dataclass:
+    this file is loaded by path and never registered in `sys.modules`, where `dataclass` looks
+    up a class's module."""
+
+    def __init__(
+        self,
+        main: Path,
+        report: dict,
+        check_only: bool,
+        cfg: dict,
+        own_repo: bool,
+        unavailable: str | None,
+    ) -> None:
+        self.main, self.report, self.check_only, self.cfg = main, report, check_only, cfg
+        self.own_repo = own_repo  # the plugin's own repo, where close hands off
+        self.unavailable = unavailable  # why there is no archive, or None
+        self.tree: Path | None = None
+        self.branch = ""  # empty while no one change is found
+        self.folder: Path | None = None
+        self.kind: str | None = None
+        self.trunk = ""
+        self.landed = False
+        self.sha = "?"
+        self.start = ""  # the start ref, `BASE_REF` + the branch
+        self.plan: dict = {}  # the push plan
+        self.wipe: dict | None = None  # the cleanup plan
+        self.kept: dict = {}  # a drop's `reached` and `reason`
+        self.captured: list[str] = []  # the measure step's trailers
+
+
 def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     """Land a shipped change, mirror it, remove its folder, its worktree and its branch; or, for
     a dropped one, mirror it, record it on main in a `Drop` commit, and remove its worktree and
@@ -726,15 +774,18 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     `push_failed`, never a failed close, and last `cleanup`. A dropped change's `record`
     (`_drop_record()`) stands in for the merge and the folder's removal. The fast-forward
     deletes from the main checkout's disk each tracked file the change removed
-    (`_ff_deletions()`), which close's question names; close never restores one.
+    (`_ff_deletions()`), which close's question names; close never restores one. Each step is
+    its own function (`_step_merge()` … `_step_cleanup()`) on a `_Close`, which holds what they
+    share; `_close_target()` finds the change, `_close_refusals()` and `_close_preview()` check
+    and work out everything before anything is written, `_close_steps()` lists the steps for a
+    shipped or a dropped change, and `_run_close_steps()` runs them under the lock.
 
     Every git step is one git refuses when something would be lost: `merge --ff-only`,
     `worktree remove` without --force, `branch -d`. The folder is removed only once the change's
     commit, which holds it, is on `main`: history is the copy, and the tracker a mirror of it. A
     dropped change's folder never reaches main's tree; its `Drop` merge makes its commits
     reachable from main before the branch goes. A rerun resumes: the merge is a no-op, the archive
-    reuses its issue, a removed folder or a recorded drop is skipped. All preconditions are
-    checked before anything is written.
+    reuses its issue, a removed folder or a recorded drop is skipped.
 
     In the plugin's own repo, the close is run by main's script, then by the code its merge
     brought (`_handoff()`), so a change to close runs on its own close, and a stale copy of the
@@ -764,6 +815,32 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         argv = [*([ident] if ident else []), *(["--check"] if check_only else [])]
         report = {"change": ident, "main_checkout": str(main), "refusals": [], "done": []}
         return _handoff(main, argv, "home", report | {"skipped": []})
+    c = _close_target(root, main, ident, check_only, own)
+    if not c.branch or _close_refusals(c):
+        return _emit(c.report, 1)
+    _close_preview(c)
+    steps = _close_steps(c)
+    if check_only:
+        names = [name for name, _ in steps] + (["push"] if c.plan["on"] else [])
+        names += ["cleanup"] if c.wipe and c.wipe["runs"] else []
+        c.report["skipped"] = [f"{name} (--check)" for name in names]
+        return _emit(c.report, 0)
+    return _run_close_steps(c, steps)
+
+
+def _emit(report: dict, code: int) -> int:
+    """Print close's report, its keys in the order the steps wrote them, and return `code`."""
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return code
+
+
+def _close_target(
+    root: Path, main: Path, ident: str | None, check_only: bool, own_repo: bool
+) -> _Close:
+    """The change close was asked for, in a `_Close` with the report begun; its `branch` is
+    empty when no change was named or the name matches no worktree, or several, which the
+    report's refusals then say. An archive set up wrong is a refusal said here, checked with
+    the rest by `_close_refusals()`."""
     cfg, _, _ = sdlc.load_config(main)
     trees = [(t, b) for t, b in sdlc.worktrees(root) if sdlc.DIR_RE.match(b)]
     if ident is None:
@@ -779,32 +856,39 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         "done": [],
         "skipped": [],
     }
+    c = _Close(main, report, check_only, cfg, own_repo, unavailable)
     # Nowhere to mirror to is an answer; a target set up wrong is a refusal.
     if unavailable and cfg["archive"]["target"] in ("none", "github"):
         report["archive"]["kept_because"] = unavailable
     elif unavailable:
         report["refusals"].append(f"archive: {unavailable}")
 
-    def emit(code: int) -> int:
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        return code
-
     if not ident:
         report["refusals"].append(
             "no change named, and this checkout isn't on an NNN-slug branch: give its number"
         )
-        return emit(1)
+        return c
     if len(found) != 1:
         report["refusals"].append(
             f"{ident!r} matches {'no' if not found else len(found)} worktree(s)"
             + (f": {', '.join(b for _, b in found)}" if found else "")
         )
-        return emit(1)
-    tree, branch = found[0]
-    folder = sdlc.work_dir(tree) / branch
-    kind = sdlc._stage(folder)
-    report.update(change=branch, worktree=str(tree), branch=branch, kind=kind)
+        return c
+    c.tree, c.branch = found[0]
+    c.folder = sdlc.work_dir(c.tree) / c.branch
+    c.kind = sdlc._stage(c.folder)
+    report.update(change=c.branch, worktree=str(c.tree), branch=c.branch, kind=c.kind)
+    return c
 
+
+def _close_refusals(c: _Close) -> bool:
+    """Whether close refuses the change, each reason added to the report's refusals: not shipped
+    or dropped with its reason, a worktree or main checkout not clean, a base branch close
+    can't use, a branch that can't fast-forward or carries another change, or a register its
+    `Close` commit couldn't write. Checked before anything is written; merged already is a
+    rerun's state, not a refusal."""
+    main, tree, branch, folder, kind = c.main, c.tree, c.branch, c.folder, c.kind
+    report = c.report
     if kind not in ("shipped", "dropped"):
         report["refusals"].append(
             f"{branch} isn't shipped: {folder}/intent.md with stage: shipped is missing. Run "
@@ -816,16 +900,16 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         )
     if sdlc._git(tree, "status", "--porcelain") not in ("", None):
         report["refusals"].append(f"{tree} has uncommitted or untracked files")
-    trunk = cfg["git"]["base"]
-    if why := sdlc.trunk_refusal(main, trunk, cfg["git"]["base_source"]):
+    c.trunk = trunk = c.cfg["git"]["base"]
+    if why := sdlc.trunk_refusal(main, trunk, c.cfg["git"]["base_source"]):
         report["refusals"].append(why)
-        return emit(1)
+        return True
     if sdlc._git(main, "branch", "--show-current") != trunk:
         report["refusals"].append(f"the main checkout ({main}) isn't on {trunk}")
     if sdlc._git(main, "status", "--porcelain", "--untracked-files=no") not in ("", None):
         report["refusals"].append(f"the main checkout ({main}) has uncommitted changes")
     # Merged already is a rerun's state, not a refusal.
-    landed = sdlc._git(main, "merge-base", "--is-ancestor", branch, trunk) is not None
+    c.landed = landed = sdlc._git(main, "merge-base", "--is-ancestor", branch, trunk) is not None
     if kind == "dropped":
         # A dropped change is recorded whatever the base has done since: nothing of it lands.
         if landed and not _drop_commit(main, branch, trunk):
@@ -855,11 +939,18 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
         )
         report["register"] = {k: planned[k] for k in ("file", "retire", "gone")}
         report["refusals"] += [f"register: {r}" for r in planned["refusals"]]
-    if report["refusals"]:
-        return emit(1)
-    start = sdlc.BASE_REF + branch
+    return bool(report["refusals"])
+
+
+def _close_preview(c: _Close) -> None:
+    """What close will do, worked out before any step runs, into `c` and its report: the start
+    ref (written unless `--check`), the cleanup's plan, what the fast-forward deletes, whom the
+    change reaches, and the push's plan with what it sends."""
+    main, tree, branch, kind, trunk, landed = c.main, c.tree, c.branch, c.kind, c.trunk, c.landed
+    report, cfg = c.report, c.cfg
+    c.start = start = sdlc.BASE_REF + branch
     tip = sdlc._git(main, "rev-parse", "--verify", "-q", trunk)
-    if kind == "shipped" and not check_only and not landed and tip:
+    if kind == "shipped" and not c.check_only and not landed and tip:
         # Until the merge, `trunk`'s tip is where the change starts, so a ref an earlier run left
         # before a failed merge is brought up to it; once merged, a rerun keeps it. A failure
         # only leaves the trailer out.
@@ -873,177 +964,53 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
     else:
         at = sdlc._config_at(main, start)
     if wipe := _cleanup_plan(at, cfg, branch.split("-")[0]):
-        report["cleanup"] = wipe
+        report["cleanup"] = c.wipe = wipe
     # What the fast-forward deletes from the main checkout, for the question to name: a file the
     # change stopped tracking goes from disk there too, whatever the ignore rules now say.
     if kind == "shipped" and not landed:
         report["deletes"] = _ff_deletions(main, tree, trunk, branch)
     # A check writes no start ref, so it previews from where the close would write it.
-    preview = tip if check_only and not landed else None
-    if own and kind == "shipped" and (reaches := _reaches(main, branch, preview)):
+    preview = tip if c.check_only and not landed else None
+    if c.own_repo and kind == "shipped" and (reaches := _reaches(main, branch, preview)):
         report["reaches"] = reaches
     # What the push of the base branch sends, newest first: the Close or Drop commit while this run
     # has yet to write it, the change's own commits not on the base branch yet, then everything the
     # base branch already holds that the remote doesn't. A dropped branch may be behind the base
     # branch, and a rerun may find the merge done, so it's never read from the branch's tip alone.
-    report["push"] = plan = _push_plan(main, cfg, "close")
+    report["push"] = c.plan = plan = _push_plan(main, cfg, "close")
     if plan["on"] and plan["unpushed"] is not None:
         if kind == "dropped":
             written = bool(_drop_commit(main, branch, trunk))
         else:
             written = landed and not sdlc._git(main, "ls-files", f"{sdlc.work_rel(main)}/{branch}")
-        own = (sdlc._git(main, "log", "--format=%h %s", f"{trunk}..{branch}") or "").splitlines()
+        ahead = (sdlc._git(main, "log", "--format=%h %s", f"{trunk}..{branch}") or "").splitlines()
         coming = [] if written else [f"(new) {'Drop' if kind == 'dropped' else 'Close'} {branch}"]
-        plan["unpushed"]["ahead"] = coming + own + plan["unpushed"]["ahead"]
+        plan["unpushed"]["ahead"] = coming + ahead + plan["unpushed"]["ahead"]
+    c.sha = sdlc._git(main, "rev-parse", "--short", branch) or "?"
 
-    sha = sdlc._git(main, "rev-parse", "--short", branch) or "?"
-    kept: dict = {}
 
-    def merge() -> str | None:
-        return sdlc._git_err(main, "merge", "--ff-only", "-q", branch)
-
-    def verify() -> str | None:
-        # The copy that counts: the change's own commit, in main's history once it lands.
-        intent = f"{sdlc.work_rel(main)}/{branch}/intent.md"
-        text = sdlc._git(main, "show", f"{branch}:{intent}")
-        try:
-            ok = text is not None and frontmatter.loads(text).get("stage") == kind
-        except Exception:
-            ok = False
-        if not ok:
-            return f"{branch}'s commit doesn't hold {intent}, {kind}"
-        if kind == "dropped":
-            if not sdlc.dropped_reason(text):
-                return f"{branch}'s commit has no `## {sdlc.DROPPED}` section in its intent.md"
-            kept["reached"] = (sdlc.frontmatter_list(text, "dropped_at") or [""])[0] or "unknown"
-            kept["reason"] = sdlc.first_paragraph(sdlc._body_of(text), sdlc.DROPPED)
-        return None
-
-    captured: list[str] = []
-
-    def measure() -> str | None:
-        # Never a refusal: a change that can't be measured still lands, and says why.
-        try:
-            summary, lines = measure_change(main, branch, cfg)
-        except Exception as e:
-            summary, lines = {"coverage": f"none: capture failed: {type(e).__name__}"}, []
-            lines = [f"Sdlc-Coverage: {summary['coverage']}"]
-        captured[:] = lines
-        report["measure"] = {"coverage": summary["coverage"], "trailers": lines}
-        return None
-
-    def mirror() -> str | None:
-        if unavailable:
-            return None
-        change = sdlc._tracker_change(main, folder, sha)
-        mirror_to = sdlc.tracker(main, cfg)
-        where, err = mirror_to.archive(change)
-        report["archive"]["location"] = where
-        # What the tracker says about closing its issue: a line for the Close commit, so the
-        # push closes it, or why it closed it now, and any issue on the change's `closes:` line
-        # it couldn't close or let go. Only a tracker that has them sets them.
-        for key in ("closes", "closed_because", "closes_errors"):
-            if getattr(mirror_to, key, None):
-                report["archive"][key] = getattr(mirror_to, key)
-        return err
-
-    def remove_folder() -> str | None:
-        where, closes = report["archive"]["location"], report["archive"].get("closes")
-        fixes = fix_trailers(main, branch)
-        if fixes:
-            report["fixes"] = fixes
-        at = sdlc._git(main, "rev-parse", "--verify", "-q", start)
-        based = [f"{sdlc.BASE_KEY}: {at}"] if at else []
-        return _close_commit(main, branch, sha, where, captured + based + fixes, closes)
-
-    def tell_issues() -> None:
-        # The entries the change brought to main, a seed split off at ship among them, are
-        # committed now, so their issues are told where to follow. Never a refusal, and after the
-        # lock is let go: the tracker's calls are no part of the span it guards.
-        if unavailable:
-            return
-        found = sdlc.tracker(main, cfg)
-        if hasattr(found, "mark"):
-            marked = sdlc.mark_issues(main, found)
-            if marked["done"] or marked["failed"]:
-                report["intake"] = marked
-
-    def record() -> str | None:
-        if _drop_commit(main, branch, trunk):
-            return None  # recorded by an earlier run that stopped before removing the worktree
-        where = report["archive"]["location"]
-        return _drop_record(main, branch, sha, where, kept["reached"], kept["reason"], captured)
-
-    def git_step(*args: str):
-        return lambda: sdlc._git_err(main, *args)
-
-    def delete_branch() -> str | None:
-        err = sdlc._git_err(main, "branch", "-d", branch)
-        # Its start is on the `Close` commit now; a ref left behind is said, never refused.
-        if err is None and sdlc._git(main, "rev-parse", "--verify", "-q", start):
-            gone = sdlc._git_err(main, "update-ref", "-d", start)
-            if gone:
-                report["base_ref"] = f"{start} kept: {gone}"
-        # A resolution's refs (`cmd_resolve()`) go with the branch, the work they kept landed.
-        for kind in sdlc.RESOLVE_REFS if err is None else ():
-            ref = sdlc._resolve_ref(kind, branch)
-            kept = sdlc._git(main, "rev-parse", "--verify", "-q", ref) and sdlc._git_err(
-                main, "update-ref", "-d", ref
-            )
-            if kept:
-                report.setdefault("resolve_refs", []).append(f"{ref} kept: {kept}")
-        return err
-
-    def push() -> None:
-        # Never a refusal: the change has landed, and publish pushes what this couldn't. In `done`
-        # only once it went, so `done` never says main is on the remote when it isn't.
-        sent = sdlc._unpushed(main, cfg)
-        if err := _push(main, plan["remote"], f"refs/heads/{trunk}"):
-            report["push_failed"] = (
-                f"{err}; /sdlc:publish pushes it, or set [git] push = [] to leave it to publish"
-            )
-            return
-        plan["closed"] = sent["closes"] if sent else []
-        report["done"].append("push")
-
-    def cleanup() -> None:
-        # Never a refusal, like the push: the change has landed and its worktree is gone, so a
-        # rerun can't find it to run this twice. In `done` only once it exited 0.
-        err = None
-        try:
-            ran = subprocess.run(
-                sdlc._sh(wipe["command"]), cwd=main, capture_output=True, encoding="utf-8",
-                errors="replace", timeout=CLEANUP_TIMEOUT, stdin=subprocess.DEVNULL,
-            )  # fmt: skip
-            if ran.returncode != 0:
-                said = (ran.stderr.strip() or ran.stdout.strip())[-500:] or "no output"
-                err = f"exited {ran.returncode}: {said}"
-        except subprocess.TimeoutExpired:
-            err = f"timed out after {CLEANUP_TIMEOUT}s"
-        except OSError as e:
-            err = f"didn't run: {e}"
-        if err:
-            report["cleanup_failed"] = err
-        else:
-            report["done"].append("cleanup")
-
-    if kind == "dropped":
-        landing = [("verify", verify), ("measure", measure), ("archive", mirror)]
-        landing.append(("record", record))
+def _close_steps(c: _Close) -> list[tuple[str, object]]:
+    """The steps for the change's kind, as `(name, step)`, the names the report shows. Built on
+    each call, never at load, so nothing evaluated at load reads `sdlc`."""
+    if c.kind == "dropped":
+        landing = [("verify", _step_verify), ("measure", _step_measure), ("archive", _step_archive)]
+        landing.append(("record", _step_record))
     else:
-        landing = [("merge", merge), ("verify", verify), ("measure", measure)]
-        landing += [("archive", mirror), ("remove folder", remove_folder)]
-    steps = [
+        landing = [("merge", _step_merge), ("verify", _step_verify), ("measure", _step_measure)]
+        landing += [("archive", _step_archive), ("remove folder", _step_remove_folder)]
+    return [
         *landing,
-        ("remove worktree", git_step("worktree", "remove", str(tree))),
-        ("delete branch", delete_branch),
+        ("remove worktree", _step_remove_worktree),
+        ("delete branch", _step_delete_branch),
     ]
-    if check_only:
-        names = [name for name, _ in steps] + (["push"] if plan["on"] else [])
-        names += ["cleanup"] if wipe and wipe["runs"] else []
-        report["skipped"] = [f"{name} (--check)" for name in names]
-        return emit(0)
 
+
+def _run_close_steps(c: _Close, steps: list[tuple[str, object]]) -> int:
+    """Run the steps in order, under `_main_lock()` from the first until the `Close` or `Drop`
+    commit; then the push, or the nudge, and the cleanup. A step that fails stops the close with
+    what's left skipped (exit 1), a close run from inside the worktree stops before removing it
+    (exit 3), and a merge that brings new scripts hands the rest to them (`_handoff()`)."""
+    main, tree, branch, trunk, report = c.main, c.tree, c.branch, c.trunk, c.report
     inside = Path.cwd().resolve().is_relative_to(tree.resolve())
     before = sdlc._git(main, "rev-parse", trunk)
     # The lock, from the first landing step (the merge) until the `Close` or `Drop` commit is
@@ -1061,29 +1028,172 @@ def cmd_close(root: Path, ident: str | None, check_only: bool = False) -> int:
                     f"worktree kept: this process runs inside {tree}. Run /sdlc:close "
                     f"{branch.split('-')[0]} from the main checkout to finish."
                 )
-                return emit(3)
-            if name == "archive" and unavailable:
+                return _emit(report, 3)
+            if name == "archive" and c.unavailable:
                 continue
-            err = step()
+            err = step(c)
             if err:
                 report["skipped"] = [n for n, _ in steps[i:]]
                 report["refusals"].append(f"{name} failed: {err}")
-                return emit(1)
+                return _emit(report, 1)
             report["done"].append(name)
             if name == "remove folder":
                 hold.close()
-                tell_issues()
-            if name == "merge" and own and _merged_scripts(main, before, trunk):
+                _step_tell_issues(c)
+            if name == "merge" and c.own_repo and _merged_scripts(main, before, trunk):
                 # The rest runs as the code this merge brought.
                 report["skipped"] = [n for n, _ in steps[i + 1 :]]
                 return _handoff(main, [branch], "merged", report)
-    if plan["on"]:
-        push()
-    elif nudge := sdlc._nudge(main, cfg):
+    if c.plan["on"]:
+        _step_push(c)
+    elif nudge := sdlc._nudge(main, c.cfg):
         report["unpushed"] = nudge
-    if wipe and wipe["runs"]:
-        cleanup()
-    return emit(0)
+    if c.wipe and c.wipe["runs"]:
+        _step_cleanup(c)
+    return _emit(report, 0)
+
+
+def _step_merge(c: _Close) -> str | None:
+    return sdlc._git_err(c.main, "merge", "--ff-only", "-q", c.branch)
+
+
+def _step_verify(c: _Close) -> str | None:
+    # The copy that counts: the change's own commit, in main's history once it lands.
+    intent = f"{sdlc.work_rel(c.main)}/{c.branch}/intent.md"
+    text = sdlc._git(c.main, "show", f"{c.branch}:{intent}")
+    try:
+        ok = text is not None and frontmatter.loads(text).get("stage") == c.kind
+    except Exception:
+        ok = False
+    if not ok:
+        return f"{c.branch}'s commit doesn't hold {intent}, {c.kind}"
+    if c.kind == "dropped":
+        if not sdlc.dropped_reason(text):
+            return f"{c.branch}'s commit has no `## {sdlc.DROPPED}` section in its intent.md"
+        c.kept["reached"] = (sdlc.frontmatter_list(text, "dropped_at") or [""])[0] or "unknown"
+        c.kept["reason"] = sdlc.first_paragraph(sdlc._body_of(text), sdlc.DROPPED)
+    return None
+
+
+def _step_measure(c: _Close) -> str | None:
+    # Never a refusal: a change that can't be measured still lands, and says why.
+    try:
+        summary, lines = measure_change(c.main, c.branch, c.cfg)
+    except Exception as e:
+        summary, lines = {"coverage": f"none: capture failed: {type(e).__name__}"}, []
+        lines = [f"Sdlc-Coverage: {summary['coverage']}"]
+    c.captured[:] = lines
+    c.report["measure"] = {"coverage": summary["coverage"], "trailers": lines}
+    # What failed while measuring, only when something did, so a healthy report is unchanged.
+    if summary.get("errors"):
+        c.report["measure"]["errors"] = summary["errors"]
+    return None
+
+
+def _step_archive(c: _Close) -> str | None:
+    if c.unavailable:
+        return None
+    change = sdlc._tracker_change(c.main, c.folder, c.sha)
+    mirror_to = sdlc.tracker(c.main, c.cfg)
+    where, err = mirror_to.archive(change)
+    c.report["archive"]["location"] = where
+    # What the tracker says about closing its issue: a line for the Close commit, so the
+    # push closes it, or why it closed it now, and any issue on the change's `closes:` line
+    # it couldn't close or let go. Only a tracker that has them sets them.
+    for key in ("closes", "closed_because", "closes_errors"):
+        if getattr(mirror_to, key, None):
+            c.report["archive"][key] = getattr(mirror_to, key)
+    return err
+
+
+def _step_remove_folder(c: _Close) -> str | None:
+    where, closes = c.report["archive"]["location"], c.report["archive"].get("closes")
+    fixes = fix_trailers(c.main, c.branch)
+    if fixes:
+        c.report["fixes"] = fixes
+    at = sdlc._git(c.main, "rev-parse", "--verify", "-q", c.start)
+    based = [f"{sdlc.BASE_KEY}: {at}"] if at else []
+    return _close_commit(c.main, c.branch, c.sha, where, c.captured + based + fixes, closes)
+
+
+def _step_tell_issues(c: _Close) -> None:
+    # The entries the change brought to main, a seed split off at ship among them, are
+    # committed now, so their issues are told where to follow. Never a refusal, and after the
+    # lock is let go: the tracker's calls are no part of the span it guards.
+    if c.unavailable:
+        return
+    found = sdlc.tracker(c.main, c.cfg)
+    if hasattr(found, "mark"):
+        marked = sdlc.mark_issues(c.main, found)
+        if marked["done"] or marked["failed"]:
+            c.report["intake"] = marked
+
+
+def _step_record(c: _Close) -> str | None:
+    if _drop_commit(c.main, c.branch, c.trunk):
+        return None  # recorded by an earlier run that stopped before removing the worktree
+    where = c.report["archive"]["location"]
+    return _drop_record(
+        c.main, c.branch, c.sha, where, c.kept["reached"], c.kept["reason"], c.captured
+    )
+
+
+def _step_remove_worktree(c: _Close) -> str | None:
+    return sdlc._git_err(c.main, "worktree", "remove", str(c.tree))
+
+
+def _step_delete_branch(c: _Close) -> str | None:
+    main, branch, start, report = c.main, c.branch, c.start, c.report
+    err = sdlc._git_err(main, "branch", "-d", branch)
+    # Its start is on the `Close` commit now; a ref left behind is said, never refused.
+    if err is None and sdlc._git(main, "rev-parse", "--verify", "-q", start):
+        gone = sdlc._git_err(main, "update-ref", "-d", start)
+        if gone:
+            report["base_ref"] = f"{start} kept: {gone}"
+    # A resolution's refs (`cmd_resolve()`) go with the branch, the work they kept landed.
+    for which in sdlc.RESOLVE_REFS if err is None else ():
+        ref = sdlc._resolve_ref(which, branch)
+        left = sdlc._git(main, "rev-parse", "--verify", "-q", ref) and sdlc._git_err(
+            main, "update-ref", "-d", ref
+        )
+        if left:
+            report.setdefault("resolve_refs", []).append(f"{ref} kept: {left}")
+    return err
+
+
+def _step_push(c: _Close) -> None:
+    # Never a refusal: the change has landed, and publish pushes what this couldn't. In `done`
+    # only once it went, so `done` never says main is on the remote when it isn't.
+    sent = sdlc._unpushed(c.main, c.cfg)
+    if err := _push(c.main, c.plan["remote"], f"refs/heads/{c.trunk}"):
+        c.report["push_failed"] = (
+            f"{err}; /sdlc:publish pushes it, or set [git] push = [] to leave it to publish"
+        )
+        return
+    c.plan["closed"] = sent["closes"] if sent else []
+    c.report["done"].append("push")
+
+
+def _step_cleanup(c: _Close) -> None:
+    # Never a refusal, like the push: the change has landed and its worktree is gone, so a
+    # rerun can't find it to run this twice. In `done` only once it exited 0.
+    err = None
+    try:
+        ran = subprocess.run(
+            sdlc._sh(c.wipe["command"]), cwd=c.main, capture_output=True, encoding="utf-8",
+            errors="replace", timeout=CLEANUP_TIMEOUT, stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+        if ran.returncode != 0:
+            said = (ran.stderr.strip() or ran.stdout.strip())[-500:] or "no output"
+            err = f"exited {ran.returncode}: {said}"
+    except subprocess.TimeoutExpired:
+        err = f"timed out after {CLEANUP_TIMEOUT}s"
+    except OSError as e:
+        err = f"didn't run: {e}"
+    if err:
+        c.report["cleanup_failed"] = err
+    else:
+        c.report["done"].append("cleanup")
 
 
 def _reaches(main: Path, branch: str, start: str | None = None) -> dict | None:
