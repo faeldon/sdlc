@@ -1072,6 +1072,26 @@ no `tools=` or `words=` (closed before they were counted, or measured from histo
 `metrics.transcripts` off) is `recorded: false`, counted in `unrecorded` with its reason in `why`,
 and is in no call figure: its comment lines still count, since git gives them.
 
+Its `autonomy` is how often the factory needed the person, read from the records each factory
+run left in its change's own commit (`decision.md`, each `decision-<n>.md` a restart kept,
+`decisions.md` and `runs/mended`), never from a trailer, so it counts every factory change in the
+window, however long ago it landed. `factory` and `by_hand` say how many of each closed; a change
+built by hand (no `decision.md`) is in no other figure, never a zero. Every figure carries `n`, the
+count it is over, and a rate or per-change figure is null when `n` is 0. `escalations`: the
+`DECISION: ESCALATE`s, current and archived (`total`), the changes with any, and `per_change`; a
+decision file no answer reads leaves its change out of `n` and is a problem naming the change and
+the file. `asked`: the questions the person answered, `blocking` decisions, `default`s they kept
+or changed and `look`s they cleared, and `per_change`. `kept_default`: `rate` is kept over kept
+and changed; `confirmed`, the defaults the landing's one yes confirmed, and `settled`, those the
+approver settled, sit beside it and never enter it. `auto_landed`: from each change's own
+`Sdlc-Landed`, `auto` (the landing's gate passed itself), `person`, or `shipped` (no line: shipped
+by hand), with `share`, auto over `n`. `spurious_stops`: the mends, the one stop a run clears
+without the person, a build's (`build`) apart from a landing's (`landing`), the changes with any,
+and `per_change`. `looks`: `seen` (answered `seen`), `checked` (any other answer) and `open`, with
+`seen_share`. `overturned` has no count: no record holds an approver's settled call the person
+overturned, and it is in `unmeasured`, as a factory stop that cleared with nothing changed is. The
+report doesn't show these yet.
+
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there
@@ -1146,7 +1166,11 @@ put in prose), `interrupt`, `fix` (asking for the review's own findings to be fi
 as ship's question offers: never a revise), or `unprompted`, one `Sdlc-Extra: <stage>
 after_gate=<n> revise=<n> asked=<n> unprompted=<n> interrupt=<n> fix=<n> harness=<n> command=<n>`
 line for each stage with any; a line from before `fix` reads it as 0. A `Close` commit without
-`harness=` counted both as stops, and `/sdlc:retro` reads its kinds as unrecorded.
+`harness=` counted both as stops, and `/sdlc:retro` reads its kinds as unrecorded. Each gated
+skill with an `after_gate` stop also gets `Sdlc-AfterGate: <skill> stops=<n>`, naming the skill
+whose WAIT the stop followed; `/sdlc:retro` adds them up as `metrics.extra.after_gate_by`, and
+counts the `after_gate` stops of a commit without the lines, closed before them, as
+`after_gate_unnamed`, never under a skill.
 
 Beside the stops, never among them, it records the tool prompts the person answered: a tool use
 they were asked to allow and allowed or rejected, never their own questions or plan approvals

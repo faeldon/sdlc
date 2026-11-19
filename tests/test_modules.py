@@ -335,6 +335,7 @@ def test_the_factory_never_loads_sdlc_py(path: Path) -> None:
 # 163: the factory's records, read in core through one pure module.
 RECORDS_PY = ROOT / "scripts" / "factory_records.py"
 BOARD_PY = ROOT / "scripts" / "board.py"
+RETRO_PY = ROOT / "scripts" / "retro.py"
 
 # R3: every copy of the factory's record parsing, in the module.
 RECORD_NAMES = {
@@ -349,13 +350,14 @@ RECORD_NAMES = {
     "LAND_STEPS", "AGENT_TIMEOUT", "RECONSIDER", "VERIFIED", "COSTS", "LAND_TIMES", "PAUSES",
     "REVIEWERS", "OPEN_BOX", "NO_DECISION", "GARBLED_LEDGER", "HAND_GATE", "CLONE_MARK",
     "HOME_MARK", "TMP_MARK", "USER_MARK", "TERM_MARK", "DEFUSE", "TERMS_FILE", "DECISION_FILE",
-    "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS",
+    "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS", "ARCHIVE_RE", "MENDED", "KEPT_ANSWER",
+    "CONFIRMED", "SUPERSEDED", "LOOK_SEEN",
     # readers
     "opening", "no_verdict", "read_stop", "read_land_stop", "landing", "first_build",
     "upgraded_build", "newest_round", "reasons", "reading", "read_step", "read_land_step",
     "read_land_times", "cost", "card_reading", "reviewed", "builder_started", "run_counts",
     "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
-    "_terms", "placeholders", "timed_rows", "land_sinces",
+    "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -491,8 +493,9 @@ def test_factory_records_is_pure_and_loaded_once() -> None:
 
 def test_the_board_and_close_read_records_through_sdlc() -> None:
     """163 R2: the board and close reach the module as `sdlc.factory_records`, never loading or
-    naming it on their own, so they and `status` read through one module object."""
-    for path in (BOARD_PY, CLOSING_PY):
+    naming it on their own, so they and `status` read through one module object; retro too (169
+    R10)."""
+    for path in (BOARD_PY, CLOSING_PY, RETRO_PY):
         tree = _tree(path)
         assert not _loads_of(tree, "factory_records"), f"{path.name} loads the module"
         assert "factory_records" not in _named(tree), f"{path.name} names it bare"
@@ -500,6 +503,7 @@ def test_the_board_and_close_read_records_through_sdlc() -> None:
     sdlc = _load("sdlc_records_bound_test", SDLC_PY)
     assert sdlc.factory_records is sdlc._load_board().sdlc.factory_records
     assert sdlc.factory_records is sdlc.closing.sdlc.factory_records
+    assert sdlc.factory_records is sdlc.retro.sdlc.factory_records
 
 
 def test_the_record_readers_live_in_factory_records() -> None:
@@ -507,7 +511,7 @@ def test_the_record_readers_live_in_factory_records() -> None:
     core's own rules over the records stay in `sdlc.py`."""
     defined = _defined(_tree(RECORDS_PY))
     assert not RECORD_NAMES - defined, f"the module lacks {sorted(RECORD_NAMES - defined)}"
-    for path in (SDLC_PY, CLOSING_PY, BOARD_PY):
+    for path in (SDLC_PY, CLOSING_PY, BOARD_PY, RETRO_PY):
         left = (RECORD_NAMES | OLD_NAMES) & _defined(_tree(path))
         left -= {name for script, name in UNRELATED if script == path.name}
         assert not left, f"{path.name} still defines {sorted(left)}"
@@ -563,3 +567,12 @@ def test_every_shared_name_is_the_factorys() -> None:
         name for name in shared if _shape(getattr(records, name)) != _shape(getattr(factory, name))
     )
     assert not drift, f"these differ from factory.py's: {drift}"
+
+
+def test_look_seen_is_the_decide_skills_answer() -> None:
+    """169 R10: `LOOK_SEEN` is core's own name for the answer the decide skill writes on a look the
+    person acknowledged as it stood, so it is pinned to that skill's words, not to `factory.py`."""
+    records = _load("factory_records_look", RECORDS_PY)
+    skill = (ROOT / "plugins" / "factory" / "skills" / "decide" / "SKILL.md").read_text("utf-8")
+    assert f"`→ decided: {records.LOOK_SEEN}`" in skill
+    assert f"`{records.KEPT_ANSWER}`" in skill

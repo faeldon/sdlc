@@ -4514,9 +4514,10 @@ def held_by_rebase(root: Path) -> list[dict]:
     """Shipped or dropped changes a stopped rebase holds (a landing's, on a conflict its builder
     resolves), shaped as `ready_to_close()`'s: their worktree's HEAD is detached, so it can't see
     them, and the board keeps their cards (`rebasing_branches()`). Read-only."""
-    held = rebasing_branches(root)
+    trees = _change_trees(root)
+    held = rebasing_branches(root, trees)
     out = []
-    for tree, branch in _change_trees(root):
+    for tree, branch in trees:
         m = DIR_RE.match(branch)
         if branch not in held or not m:
             continue
@@ -5108,10 +5109,12 @@ def touched_paths(entry: dict, folder: Path, home: Path, trunk: str | None) -> l
     return [p for p in paths if p]
 
 
-def rebasing_branches(root: Path) -> set[str]:
+def rebasing_branches(root: Path, trees: list[tuple[Path, str]] | None = None) -> set[str]:
     """The branches a rebase is stopped on: it detaches the worktree's HEAD, so `worktrees()` no
-    longer names them, and `_change_trees()` reads each from the rebase's own record."""
-    return {b for _, b in _change_trees(root)} - {b for _, b in worktrees(root)}
+    longer names them, and `_change_trees()` reads each from the rebase's own record. `trees` is
+    that list when the caller already has it."""
+    trees = _change_trees(root) if trees is None else trees
+    return {b for _, b in trees} - {b for _, b in worktrees(root)}
 
 
 def _change_base(
@@ -5810,15 +5813,16 @@ def closed_changes(
             at = f"{close_sha}^:{work_rel(home)}/{name}/intent.md"
             text = _git(home, "show", at) if read else None
             rec = _change_record(name, text, parent, closed=True, read=read)
-            # What close measured, on its own commit, and what ship's review found, on the
-            # change's: both trailers.
-            rec["metrics"] = rec["findings"] = None
+            # What close measured, on its own commit, and what ship's review found and who
+            # landed it (a factory landing's `Sdlc-Landed`), on the change's: all trailers.
+            rec["metrics"] = rec["findings"] = rec["landed"] = None
             if read:
                 rec["metrics"] = metrics.parse_trailers(
                     _git(home, "show", "-s", "--format=%B", close_sha)
                 )
                 own = metrics.parse_trailers(_git(home, "show", "-s", "--format=%B", parent))
                 rec["findings"] = (own or {}).get("findings")
+                rec["landed"] = (own or {}).get("landed")
             found.append(
                 {**rec, "close_sha": close_sha, "close_date": close_date, "close_at": close_at}
             )
@@ -9457,13 +9461,15 @@ STATUS_TILDE = "    ~ = scaffolded from the template, not written yet"
 
 def _by_state(a: dict) -> dict[str, tuple[list[dict], list[dict]]]:
     """Each state's open changes and its changes waiting on close, by each record's `column`, in
-    `analyze()`'s order. A record read without one (a caller printing `analyze()` alone) sits by
-    its stage, as `column()` places a change with nothing more to read."""
+    `analyze()`'s order. A record read without one (a caller printing `analyze()` alone) sits
+    where `column()` places it with nothing more to read than its stage and its errors."""
     shown: dict[str, tuple[list[dict], list[dict]]] = {
         key: ([], []) for key in (*(k for k, _ in STATUS_STATES), "needs-you")
     }
     for rec in a["open"]:
-        key = rec.get("column") or BY_STAGE.get(rec["stage"] or "", "needs-you")
+        key = rec.get("column") or column(
+            {"stage": rec["stage"], "problems": rec.get("errors") or [], "mode": "manual"} | rec
+        )
         shown[key][0].append(rec)
     for rec in a.get("ready") or []:
         shown[rec.get("column") or "landing"][1].append(rec)

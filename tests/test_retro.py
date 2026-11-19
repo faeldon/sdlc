@@ -95,13 +95,15 @@ def _close(
     rewrite: tuple[str, ...] = (),
     trailers: tuple[str, ...] = (),
     texts: dict[str, str] | None = None,
+    own: tuple[str, ...] = (),
 ) -> None:
     """A change's own commit, with its intent and the files it touches, then its `Close`. `later`
     is a second commit on the change, touching those files, before it closes; `before` a first
     one, without its folder. `based` writes where the change started on the `Close`, as close
     does. Each file gets the change's name appended, but those in `rewrite`, which it replaces
     whole. `reworks` is the intent's line; `trailers` go on the `Close`; `texts` are files the
-    change's own commit writes whole, beside the rest. `fixes` is the intent's `fixes:` line."""
+    change's own commit writes whole, beside the rest. `fixes` is the intent's `fixes:` line;
+    `own` are trailers on that commit."""
     start = _git(root, "rev-parse", "HEAD")
     when = f"{closed}T12:00:00"
     for rel in before:
@@ -134,7 +136,8 @@ def _close(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
     _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", f"ship {name}", when=when)
+    _git(root, "commit", "-q", "-m", f"ship {name}", *(["-m", "\n".join(own)] if own else []),
+         when=when)  # fmt: skip
     if later:
         for rel in later:
             path = root / rel
@@ -2024,6 +2027,44 @@ def test_retro_reads_extra_stop_kinds_only_where_close_classified_them(tmp_path:
     }
 
 
+def _classified(root: Path, name: str, design: int, ship: int, named: tuple = ()) -> None:
+    """A change whose `Close` commit classified its extra stops, with `design` and `ship`
+    `after_gate` stops and the `Sdlc-AfterGate` lines in `named`."""
+    _close(root, name, tier=2)
+    close = _git(root, "log", "-1", "--format=%B")
+    _git(root, "commit", "-q", "--amend", "-m", close + "\n\n" + "\n".join([
+        "Sdlc-Mode: manual",
+        "Sdlc-Totals: elapsed=60 agent=20 response=5 away=0 blocked=0 stops=8 required=5 "
+        "target=6 allowance=1 prompts=0 prompt_modes=auto harness=0 command=0",
+        f"Sdlc-Extra: design after_gate={design} revise=0 asked=0 unprompted=0 interrupt=0 fix=0 "
+        "harness=0 command=0",
+        f"Sdlc-Extra: ship after_gate={ship} revise=0 asked=0 unprompted=0 interrupt=0 fix=0 "
+        "harness=0 command=0",
+        *named,
+    ]))  # fmt: skip
+
+
+def test_retro_names_the_skill_an_after_gate_stop_followed(tmp_path: Path) -> None:
+    """169 R12: each skill's after-gate stops add up from the `Sdlc-AfterGate` lines; a commit
+    closed before them keeps its stops in the kinds, unnamed, never under a skill."""
+    root = _repo(tmp_path)
+    _classified(root, "001-keep-one-draft", 1, 2)  # before the lines
+    _classified(
+        root,
+        "002-draft-titles",
+        1,
+        1,
+        ("Sdlc-AfterGate: sdlc:ship stops=1", "Sdlc-AfterGate: sdlc:spec stops=1"),
+    )
+    _classified(root, "003-draft-dates", 0, 3, ("Sdlc-AfterGate: sdlc:ship stops=3",))
+    extra = _retro(root)["metrics"]["extra"]
+    assert extra["kinds"]["after_gate"] == {"count": 8, "changes": 3}
+    assert extra["after_gate_by"] == {
+        "sdlc:ship": {"count": 4, "changes": 2}, "sdlc:spec": {"count": 1, "changes": 1},
+    }  # fmt: skip
+    assert extra["after_gate_unnamed"] == 3
+
+
 # ---------------------------------------------------------------- the process views and report
 
 TOTALS = "Sdlc-Totals: elapsed={elapsed} agent={agent} response=10 away=0 blocked=0 stops=3"
@@ -2742,3 +2783,169 @@ def test_without_a_value_band_the_window_is_as_before() -> None:
     process = _views([])
     text = sdlc.retro.render_report("{{window}}", process)
     assert "Work mix" not in text and "Time to users" not in text
+
+
+# ---------------------------------------------------------------- how often the factory asked (169)
+
+READY = "DECISION: READY\n\nThe build holds.\n"
+ESCALATE = "DECISION: ESCALATE\n\n- ESCALATED: D1: the retention call\n"
+
+
+def _run(files: dict[str, str]):
+    """`show` and `listing` over a change folder held as `{rel: text}`, as retro's are at a
+    change's own commit."""
+
+    def show(rel: str) -> str | None:
+        return files.get(rel)
+
+    def listing(rel: str) -> str:
+        prefix = f"{rel}/" if rel else ""
+        return "\n".join(sorted(p for p in files if p.startswith(prefix)))
+
+    return show, listing
+
+
+def test_autonomy_counts_are_none_for_a_change_built_by_hand() -> None:
+    """169 R1: no decision file is a change built by hand: None, never a dict of zeros."""
+    hand = {"intent.md": "# 001\n", "findings.md": "# Findings\n"}
+    assert sdlc.factory_records.autonomy_counts(*_run(hand)) is None
+    counts = sdlc.factory_records.autonomy_counts(*_run({**hand, "decision.md": READY}))
+    assert isinstance(counts, dict) and counts["escalations"] == 0
+
+
+def test_autonomy_counts_every_escalation_current_and_archived() -> None:
+    """169 R2: each archived `decision-<n>.md` is a past escalation, read as the current one is."""
+    files = {"decision.md": READY, "decision-1.md": ESCALATE, "decision-2.md": ESCALATE,
+             "reviews/round-1/decision-3.md": ESCALATE}  # fmt: skip
+    counts = sdlc.factory_records.autonomy_counts(*_run(files))
+    assert counts["escalations"] == 2 and counts["unread"] == []
+    alone = sdlc.factory_records.autonomy_counts(*_run({"decision.md": ESCALATE}))
+    assert alone["escalations"] == 1
+
+
+LEDGER = """\
+# Decisions
+
+- [x] D1 (builder round 1, default): Page at 50? → decided: the assumed default, confirmed
+  - OPTION: 50 — one screen
+- [x] D2 (builder round 1, default): Keep 30 days? → decided: the assumed default, confirmed when landing
+- [x] D3 (builder round 1, default): Sort by date? → decided: by title, as the list reads
+- [x] D4 (builder round 2, default): Badge? → settled by the approver: the spec's R3 says so
+- [x] D5 (builder round 1, default): Old badge? → superseded by D6
+- [ ] D6 (builder round 2, default): New badge?
+- [x] D7 (builder round 1, blocking): Forever or 30 days? → decided: 30 days
+- [ ] D8 (builder round 2, blocking): Upgrade?
+- [x] D9 (approver round 1, look): the screenshot → decided: seen
+- [x] D10 (approver round 1, look): the copy → decided: read every label
+- [ ] D11 (approver round 2, look): the colours
+- [x] R1 (person, restart): start over
+not a ledger line
+"""  # noqa: E501
+
+
+def test_autonomy_counts_read_each_ledger_answer_by_its_mark() -> None:
+    """169 R3: a landing's blanket yes is never a kept default (`KEPT_ANSWER` is a prefix of
+    `CONFIRMED`), and an approver's settled or superseded line is never the person's answer."""
+    fr = sdlc.factory_records
+    assert fr.CONFIRMED.startswith(fr.KEPT_ANSWER)
+    counts = fr.autonomy_counts(*_run({"decision.md": READY, "decisions.md": LEDGER}))
+    assert counts["defaults"] == {
+        "kept": 1, "confirmed": 1, "changed": 1, "settled": 1, "superseded": 1, "open": 1,
+    }  # fmt: skip
+    assert counts["blocking"] == {"answered": 1, "open": 1}
+    assert counts["looks"] == {"seen": 1, "checked": 1, "open": 1}
+
+
+def test_autonomy_counts_tell_a_landing_mend_from_a_build_mend() -> None:
+    """169 R4: `runs/mended` holds `<role> <n>` for a build's mend and `<role> land-<n>` for a
+    landing's; a line of neither shape is skipped."""
+    mended = "builder 1\napprover 2\ncode land-1\nbuilder\nreviewer round-2\n\nverifier land-x\n"
+    files = {"decision.md": READY, "runs/mended": mended}
+    assert sdlc.factory_records.autonomy_counts(*_run(files))["mends"] == {"build": 2, "landing": 1}
+    plain = sdlc.factory_records.autonomy_counts(*_run({"decision.md": READY}))
+    assert plain["mends"] == {"build": 0, "landing": 0}
+
+
+def _factory(root: Path, name: str, files: dict[str, str], **kw) -> None:
+    """A factory change closed with `files` in its folder, `{rel: text}`, as its run left them."""
+    _close(root, name, tier=2, texts={f".sdlc/work/{name}/{r}": t for r, t in files.items()}, **kw)
+
+
+def _autonomy(root: Path) -> dict:
+    return _retro(root)["autonomy"]
+
+
+def test_retro_autonomy_leaves_hand_built_changes_out(tmp_path: Path) -> None:
+    """169 R6: a window of changes built by hand has no factory figure: every `n` 0 and every rate
+    or per-change figure null, never 0."""
+    root = _repo(tmp_path)
+    _close(root, "001-keep-one-draft")
+    _close(root, "002-draft-titles", texts={".sdlc/work/002-draft-titles/findings.md": "# F\n"})
+    out = _autonomy(root)
+    assert (out["factory"], out["by_hand"]) == (0, 2)
+    figures = [v for v in out.values() if isinstance(v, dict)]
+    assert figures and all(f["n"] == 0 for f in figures), out
+    nulls = ("per_change", "rate", "share", "seen_share")
+    assert all(f[k] is None for f in figures for k in nulls if k in f), out
+    assert out["overturned"]["count"] is None
+
+
+def test_retro_autonomy_counts_auto_landed_from_the_change_commit(tmp_path: Path) -> None:
+    """169 R7, R16: `Sdlc-Landed` on the change's own commit says who landed it; one on the
+    `Close` commit alone is a change shipped by hand. Escalations, asks and mends add up over the
+    factory changes only, and retro writes nothing."""
+    root = _repo(tmp_path)
+    _factory(root, "001-keep-one-draft", {"decision.md": READY}, own=("Sdlc-Landed: by=auto",))
+    _factory(root, "002-draft-titles", {"decision.md": ESCALATE, "decision-1.md": ESCALATE,
+             "decisions.md": LEDGER, "runs/mended": "builder 1\ncode land-1\n"},
+             own=("Sdlc-Landed: by=person unreviewed=0",))  # fmt: skip
+    _factory(root, "003-draft-dates", {"decision.md": READY}, trailers=("Sdlc-Landed: by=auto",))
+    _close(root, "004-by-hand")
+    before = _state(root)
+    out = _autonomy(root)
+    assert _state(root) == before
+    assert (out["factory"], out["by_hand"]) == (3, 1)
+    assert out["auto_landed"] == {"auto": 1, "person": 1, "shipped": 1, "share": 0.33, "n": 3}
+    assert out["escalations"] == {"total": 2, "changes": 1, "per_change": 0.67, "n": 3}
+    assert out["spurious_stops"] == {
+        "build": 1, "landing": 1, "changes": 1, "per_change": 0.67, "n": 3,
+    }  # fmt: skip
+    assert out["asked"] == {"blocking": 1, "default": 2, "look": 2, "per_change": 1.67, "n": 3}
+    assert out["looks"] == {"seen": 1, "checked": 1, "open": 1, "seen_share": 0.5, "n": 2}
+
+
+def test_retro_autonomy_rates_kept_defaults_without_the_landings_yes(tmp_path: Path) -> None:
+    """169 R8 (R3 through `retro()`): the kept-default rate is kept over kept and changed; the
+    landing's confirmation and the approver's settled calls sit beside it."""
+    root = _repo(tmp_path)
+    _factory(root, "001-keep-one-draft", {"decision.md": READY, "decisions.md": LEDGER})
+    kept = _autonomy(root)["kept_default"]
+    assert kept == {"kept": 1, "changed": 1, "rate": 0.5, "n": 2, "confirmed": 1, "settled": 1}
+
+
+def test_retro_autonomy_says_a_decision_it_cannot_read(tmp_path: Path) -> None:
+    """169 R5, R16: a decision with no answer the script reads leaves its change out of the
+    escalations' `n`, and is a problem naming the change and the file, never zero escalations."""
+    root = _repo(tmp_path)
+    _factory(root, "001-keep-one-draft", {"decision.md": ESCALATE})
+    _factory(root, "002-draft-titles", {"decision.md": READY, "decision-1.md": "no answer\n"})
+    before = _state(root)
+    out = _retro(root)
+    assert _state(root) == before
+    assert out["autonomy"]["escalations"] == {"total": 1, "changes": 1, "per_change": 1.0, "n": 1}
+    said = [p for p in out["problems"] if "002-draft-titles" in p]
+    assert said and "decision-1.md" in said[0], out["problems"]
+
+
+def test_retro_says_what_autonomy_cannot_count(tmp_path: Path) -> None:
+    """169 R9: an overturned settled call and a stop that cleared by itself leave no record, so
+    both are listed as unmeasured with what would record them, and `overturned` has no count."""
+    root = _repo(tmp_path)
+    _factory(root, "001-keep-one-draft", {"decision.md": READY, "decisions.md": LEDGER})
+    out = _retro(root)
+    signals = {u["signal"]: u for u in out["unmeasured"]}
+    for signal in ("an approver's settled call the person overturned",
+                   "a factory stop that cleared with nothing changed"):  # fmt: skip
+        assert signal in signals and signals[signal]["needs"], signals
+    over = out["autonomy"]["overturned"]
+    assert over["count"] is None and over["n"] == 0 and over["unmeasured"]

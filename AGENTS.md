@@ -70,8 +70,8 @@ directories on `sys.path`. `retro.py`, `board.py` and `closing.py` are bound to 
 `sdlc.py`'s globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them;
 `board.py` loads only when `board` runs. The factory's `landing.py` is bound the same way to
 `factory.py`'s, as `factory.<name>`. `metrics.py`, `indicators.py` and `factory_records.py` are
-pure: no subprocess and no import of `sdlc.py`; the board and close reach `factory_records.py`
-through their binding, as `sdlc.factory_records`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
+pure: no subprocess and no import of `sdlc.py`; the board, close and retro reach
+`factory_records.py` through their binding, as `sdlc.factory_records`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
 them: a function lives there when it is close's, the push's, the lock's or the landing's, or only
 code there calls it (`tests/test_modules.py`). Each module's docstring is its contract.
 

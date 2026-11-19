@@ -3097,3 +3097,34 @@ def test_shipping_dropping_and_upgrading_keep_opened(tmp_path, capsys) -> None:
     code, out = _upgrade(root, capsys)
     assert code == 0, out
     assert "\nopened: 2026-10-01T08:30Z\n" in intent.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- status's nits (169)
+
+
+def test_held_by_rebase_walks_the_change_trees_once(tmp_path: Path, monkeypatch) -> None:
+    """169 R13: `held_by_rebase()` reads every change's checkout once, and hands the list to
+    `rebasing_branches()` rather than having it walk them again."""
+    calls = []
+
+    def trees(root: Path) -> list:
+        calls.append(root)
+        return [(tmp_path / "wt", "030-draft-land")]
+
+    monkeypatch.setattr(sdlc, "_change_trees", trees)
+    monkeypatch.setattr(sdlc, "worktrees", lambda root: [])
+    monkeypatch.setattr(sdlc, "_stage", lambda folder: "shipped")
+    held = sdlc.held_by_rebase(tmp_path)
+    assert [h["branch"] for h in held] == ["030-draft-land"]
+    assert len(calls) == 1, calls
+    assert sdlc.rebasing_branches(tmp_path) == {"030-draft-land"}, "alone, it still walks them"
+
+
+@pytest.mark.parametrize("mode", ["factory", "manual"])
+@pytest.mark.parametrize("stage", sdlc.STAGES)
+def test_by_state_places_a_record_without_a_column_as_column_does(stage: str, mode: str) -> None:
+    """169 R14: a record read without a `column` sits where `column()` puts it: one rule."""
+    rec = {"stage": stage, "mode": mode, "errors": []}
+    shown = sdlc._by_state({"open": [rec]})
+    [key] = [k for k, (recs, _) in shown.items() if recs]
+    assert key == sdlc.column({"stage": stage, "problems": [], "mode": mode})

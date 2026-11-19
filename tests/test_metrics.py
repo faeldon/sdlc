@@ -465,6 +465,33 @@ def test_extra_kinds_round_trip_through_the_trailers(tmp_path: Path) -> None:
     assert back["stages"]["design"]["extra"] == 1
 
 
+def test_an_after_gate_stop_names_the_skill_whose_gate_it_followed(tmp_path: Path) -> None:
+    """169 R11: each `after_gate` stop keeps the gated skill whose span it fell in, written as one
+    `Sdlc-AfterGate` line a skill and read back; the `Sdlc-Extra` lines are as they were."""
+    events = _events(tmp_path, [
+        *_spec_session(), turn(10, 1), user(11, "now plan it"),
+        cmd(20, "sdlc:ship"), turn(21, 1), user(22, "yes"),
+        turn(23, 1), user(24, "and the next one"), turn(25, 1), user(26, "then close it"),
+    ])  # fmt: skip
+    s = _summary(events)
+    assert s["after_gate"] == {"sdlc:spec": 1, "sdlc:ship": 2}
+    lines = metrics.trailers(s)
+    assert [x for x in lines if x.startswith("Sdlc-AfterGate:")] == [
+        "Sdlc-AfterGate: sdlc:ship stops=2", "Sdlc-AfterGate: sdlc:spec stops=1",
+    ]  # fmt: skip
+    extra = [x for x in lines if x.startswith("Sdlc-Extra:")]
+    assert extra == [
+        "Sdlc-Extra: design after_gate=1 revise=0 asked=0 unprompted=1 interrupt=0 fix=0 "
+        "harness=0 command=0",
+        "Sdlc-Extra: ship after_gate=2 revise=0 asked=0 unprompted=0 interrupt=0 fix=0 "
+        "harness=0 command=0",
+    ]
+    back = metrics.parse_trailers("\n".join(lines))
+    assert back["after_gate"] == {"sdlc:ship": {"stops": 2}, "sdlc:spec": {"stops": 1}}
+    plain = metrics.trailers(_summary(_events(tmp_path / "b", _spec_session())))
+    assert not any(x.startswith("Sdlc-AfterGate") for x in plain), "none written for none"
+
+
 def test_the_factorys_build_gate_comes_first_and_its_decisions_are_questions(tmp_path) -> None:
     events = _events(tmp_path, [
         cmd(0, "sdlc-factory:build", "12"),

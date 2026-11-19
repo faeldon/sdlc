@@ -1,0 +1,8 @@
+{"step": "ship", "round": null, "seconds": 21.0, "since": "2026-11-19T04:28:40Z"}
+{"step": "stack", "round": 1, "seconds": 2.0, "since": "2026-11-19T04:29:01Z"}
+{"step": "resolve", "round": 1, "seconds": 663.0, "since": "2026-11-19T04:29:03Z"}
+{"step": "gate", "round": 1, "seconds": 891.0, "since": "2026-11-19T04:40:06Z"}
+{"step": "gate", "round": 1, "seconds": 891.0, "since": "2026-11-19T04:40:06Z"}
+{"step": "gate", "round": 1, "seconds": 891.0, "since": "2026-11-19T04:40:06Z"}
+{"step": "review", "round": 1, "seconds": 1044.0, "since": "2026-11-19T04:54:57Z"}
+{"step": "wait", "round": 1, "seconds": 21.0, "since": "2026-11-19T05:12:21Z"}

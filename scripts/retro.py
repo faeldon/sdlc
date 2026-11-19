@@ -62,6 +62,10 @@ SLOW_OVER = 10
 SLOW_LEAST = 1.0
 
 
+# The autonomy figure no record holds: see `UNMEASURED`.
+OVERTURNED = "an approver's settled call the person overturned"
+
+
 # Signals the process doc names that history doesn't record, and what would record them.
 UNMEASURED = [
     {
@@ -76,6 +80,17 @@ UNMEASURED = [
     {
         "signal": "a test that passes for the wrong reason",
         "needs": "mutation results: which tests still pass when the code they test is broken",
+    },
+    {
+        # The decide skill never asks one, and a hand edit of the ledger has no defined shape.
+        "signal": OVERTURNED,
+        "needs": "a ledger mark the person's answer writes when it overturns an approver's settled "
+        "call",
+    },
+    {
+        # `runs/stopped.md` is removed when its cause clears, and `runs/step.md` overwritten.
+        "signal": "a factory stop that cleared with nothing changed",
+        "needs": "a committed log of each stop the factory records, and what cleared it",
     },
 ]
 
@@ -726,9 +741,12 @@ def _extra_report(captured: list[dict]) -> dict:
     """The extra stops across the window, from each `Close` commit's `Sdlc-Extra` lines: each
     kind's count and how many changes it came from, and the harness entries and other commands
     left out of the stops. Only commits that carry `harness=` on `Sdlc-Totals` are `recorded`: an
-    older one counted those as `extra`, unclassified, and is never read here as none."""
+    older one counted those as `extra`, unclassified, and is never read here as none. Each skill's
+    `after_gate` stops come from the `Sdlc-AfterGate` lines (`after_gate_by`); a recorded commit
+    without them names no skill, and its `after_gate` stops are `after_gate_unnamed`."""
     kinds = {k: {"count": 0, "changes": 0} for k in sdlc.metrics.EXTRA_KINDS}
-    recorded = harness = command = 0
+    by_skill: dict[str, dict] = {}
+    recorded = harness = command = unnamed = 0
     for c in captured:
         m = c["metrics"]
         if not isinstance(m["totals"].get("harness"), int):
@@ -740,7 +758,116 @@ def _extra_report(captured: list[dict]) -> dict:
             n = sum((s.get(kind) or 0) for s in (m.get("extra") or {}).values())
             row["count"] += n
             row["changes"] += 1 if n else 0
-    return {"recorded": recorded, "kinds": kinds, "harness": harness, "command": command}
+        named = m.get("after_gate") or {}
+        if not named:
+            unnamed += sum((s.get("after_gate") or 0) for s in (m.get("extra") or {}).values())
+        for skill, fields in named.items():
+            row = by_skill.setdefault(skill, {"count": 0, "changes": 0})
+            row["count"] += fields.get("stops") or 0
+            row["changes"] += 1
+    return {
+        "recorded": recorded, "kinds": kinds, "harness": harness, "command": command,
+        "after_gate_by": dict(sorted(by_skill.items())), "after_gate_unnamed": unnamed,
+    }  # fmt: skip
+
+
+def _records_at(home: Path, rec: dict):
+    """`show` and `listing` over a closed change's folder at its own commit, as
+    `factory_records` takes them: `show(rel)` the file `<folder>/<rel>`, or None; `listing(rel)`
+    every path under `<folder>/<rel>`, one a line, relative to the folder."""
+    sha, folder = rec["sha"], f"{sdlc.work_rel(home)}/{rec['name']}"
+
+    def show(rel: str) -> str | None:
+        return sdlc._git(home, "show", f"{sha}:{folder}/{rel}")
+
+    def listing(rel: str) -> str:
+        listed = sdlc._git(home, "ls-tree", "-r", "--name-only", sha, f"{folder}/{rel}") or ""
+        return "\n".join(path[len(folder) + 1 :] for path in listed.splitlines())
+
+    return show, listing
+
+
+def _share(part: int, n: int) -> float | None:
+    """`part / n` to two places, or None when there is nothing to divide by."""
+    return round(part / n, 2) if n else None
+
+
+def _autonomy(home: Path, changes: list[dict]) -> tuple[dict, list[str]]:
+    """How often the window's factory changes needed the person, from the records each run left
+    in its change's commit (`factory_records.autonomy_counts()`), and a problem for each decision
+    file no answer reads. A change built by hand counts only in `by_hand`: every figure is over
+    the factory changes, carries its `n`, and is null, never 0, when `n` is 0."""
+    problems: list[str] = []
+    found = []
+    for rec in changes:
+        counts = sdlc.factory_records.autonomy_counts(*_records_at(home, rec))
+        if counts is not None:
+            found.append((rec, counts))
+        for rel in (counts or {}).get("unread") or []:
+            problems.append(
+                f"{rec['name']}: {rel} holds no answer the script reads, so its escalations "
+                "aren't counted"
+            )
+    n = len(found)
+    read = [c for _, c in found if not c["unread"]]
+    esc = sum(c["escalations"] for c in read)
+
+    def get(part: str, key: str) -> int:
+        return sum(c[part][key] for _, c in found)
+
+    asked = get("blocking", "answered") + get("defaults", "kept") + get("defaults", "changed")
+    asked += get("looks", "seen") + get("looks", "checked")
+    ruled = get("defaults", "kept") + get("defaults", "changed")
+    looked = get("looks", "seen") + get("looks", "checked")
+    by = Counter(((rec.get("landed") or {}).get("by") or "shipped") for rec, _ in found)
+    mends = get("mends", "build") + get("mends", "landing")
+    return {
+        "factory": n,
+        "by_hand": len(changes) - n,
+        "escalations": {
+            "total": esc,
+            "changes": sum(1 for c in read if c["escalations"]),
+            "per_change": _share(esc, len(read)),
+            "n": len(read),
+        },
+        "asked": {
+            "blocking": get("blocking", "answered"),
+            "default": ruled,
+            "look": looked,
+            "per_change": _share(asked, n),
+            "n": n,
+        },
+        "kept_default": {
+            "kept": get("defaults", "kept"),
+            "changed": get("defaults", "changed"),
+            "rate": _share(get("defaults", "kept"), ruled),
+            "n": ruled,
+            "confirmed": get("defaults", "confirmed"),
+            "settled": get("defaults", "settled"),
+        },
+        "overturned": {"count": None, "n": 0, "unmeasured": OVERTURNED},
+        "auto_landed": {
+            "auto": by["auto"],
+            "person": by["person"],
+            "shipped": n - by["auto"] - by["person"],
+            "share": _share(by["auto"], n),
+            "n": n,
+        },
+        "spurious_stops": {
+            "build": get("mends", "build"),
+            "landing": get("mends", "landing"),
+            "changes": sum(1 for _, c in found if any(c["mends"].values())),
+            "per_change": _share(mends, n),
+            "n": n,
+        },
+        "looks": {
+            "seen": get("looks", "seen"),
+            "checked": get("looks", "checked"),
+            "open": get("looks", "open"),
+            "seen_share": _share(get("looks", "seen"), looked),
+            "n": looked,
+        },
+    }, problems
 
 
 def _no_findings() -> dict:
@@ -1415,6 +1542,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             (sdlc._git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
         )
         rec["files"] = len(files)
+    autonomy, unread = _autonomy(home, changes)
+    problems += unread
     diffs = _diffs(home, changes, bases)
     rework, questions, unnamed = _rework(home, trunk, changes, bases, diffs)
     problems += unnamed
@@ -1467,6 +1596,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
         "releases": sdlc._release_tags(home, cfg, since),
         "unmeasured": UNMEASURED,
+        "autonomy": autonomy,
         "direction": direction,
         "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,

@@ -5,8 +5,8 @@ files a run leaves (its decision, ledger, rounds, gate records, step and landing
 sessions) and parses them with copies of `factory.py`'s own parsing. Every such copy the core holds
 lives here, and nothing else in core opens one of those files its own way or spells its name
 (`tests/test_modules.py`, which also pins the copies). `status`, the hand gate and `check` read
-through it in `sdlc.py`, and the board and close's measure step through `sdlc`'s binding, as
-`sdlc.factory_records.<name>`.
+through it in `sdlc.py`, and the board, close's measure step and the retrospective's `autonomy`
+through `sdlc`'s binding, as `sdlc.factory_records.<name>`.
 
 What moves here: a constant, regex or path copied from `factory.py`, under the name `factory.py`
 gives it, so one test pins every name the two share (`test_every_shared_name_is_the_factorys`);
@@ -17,10 +17,10 @@ copies of what isn't a run's record (`factory.toml`'s slots and `[ui]`).
 
 Pure, like `metrics.py`: loaded by path once, by `sdlc.py`, with no `sdlc` bound into it, no
 subprocess and nothing done at load but defining names. It reads files on disk in a change folder.
-A record that must come from git history (close's measure step reads the branch) comes in through
-the caller's callables: `show(rel) -> str | None` reads `<folder>/<rel>`, and `listing(rel) -> str`
-lists every path under `<folder>/<rel>`, one a line, relative to the folder. The module never runs
-git.
+A record that must come from git history (close's measure step reads the branch, the
+retrospective a closed change's own commit) comes in through the caller's callables:
+`show(rel) -> str | None` reads `<folder>/<rel>`, and `listing(rel) -> str` lists every path under
+`<folder>/<rel>`, one a line, relative to the folder. The module never runs git.
 
 Two readers of the ledger sit side by side, as they were before they moved: `reading()`, what
 `status` and `needs_of()` read, and `card_reading()`, a board card's. Merging them would change a
@@ -42,6 +42,10 @@ from pathlib import Path
 # The files, by name: the approver's decision and the ledger in the folder, a builder's sessions.
 DECISION_FILE = "decision.md"
 LEDGER_FILE = "decisions.md"
+# An escalated decision a restart kept, `decision-<n>.md` beside the current one: a past escalation.
+ARCHIVE_RE = re.compile(r"^decision-(\d+)\.md$")
+# The mends `agent` filed: `<role> <round>` for a build's, `<role> land-<n>` for a landing's.
+MENDED = Path("runs") / "mended"
 BUILDER_SESSIONS = Path("runs") / "builder.sessions"
 SESSIONS = ".sessions"
 
@@ -59,6 +63,14 @@ DECIDED = " → decided: "
 # The mark `factory.py decisions` ticks a default with when the approver settled it: never the
 # person's answer, so no reader counts it as one.
 SETTLED = " → settled by the approver: "
+# A default a later one replaced, ticked by `decisions` (never the person's answer); the answer
+# `/sdlc-factory:decide` writes when the person keeps a default; the one the landing writes on
+# every default still open at its yes, which `KEPT_ANSWER` is a prefix of; and a look the person
+# acknowledged as it stood, as the decide skill words it (core's own name: `factory.py` has none).
+SUPERSEDED = " → superseded by "
+KEPT_ANSWER = "the assumed default, confirmed"
+CONFIRMED = "the assumed default, confirmed when landing"
+LOOK_SEEN = "seen"
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 VERIFIED = "verified.md"
@@ -591,6 +603,60 @@ def run_counts(show, listing) -> dict | None:
             1 for p in gates for line in (show(p) or "").splitlines() if GATE_FAIL_RE.match(line)
         )
     return found
+
+
+def autonomy_counts(show, listing) -> dict | None:
+    """How often the run needed the person, from what it left in the change's commit: the
+    escalations (the current decision and each restart's archive, `ARCHIVE_RE`), each ledger line
+    by its mark, and the mends (`MENDED`), a build's apart from a landing's. A decision file whose
+    answer `opening()` can't read is listed in `unread` and never counted. None for a change built
+    by hand (no `decision.md`). Never raises."""
+    decision = show(DECISION_FILE)
+    if decision is None:
+        return None
+    archives = sorted(
+        path
+        for path in (listing("") or "").splitlines()
+        if "/" not in path and ARCHIVE_RE.match(path)
+    )
+    escalations, unread = 0, []
+    for rel, text in [(DECISION_FILE, decision), *((p, show(p)) for p in archives)]:
+        answer = opening((text or "").splitlines(), DECISION_RE)
+        if answer is None:
+            unread.append(rel)
+        elif answer[1].group(1) == "ESCALATE":
+            escalations += 1
+    defaults = dict.fromkeys(("kept", "changed", "confirmed", "settled", "superseded", "open"), 0)
+    blocking = {"answered": 0, "open": 0}
+    looks = {"seen": 0, "checked": 0, "open": 0}
+    for e in filter(None, map(LEDGER_RE.match, (show(LEDGER_FILE) or "").splitlines())):
+        kind, text = e.group(4), e.group(5)
+        answer = text.split(DECIDED, 1)[1].strip() if DECIDED in text else ""
+        if kind == "default":
+            mark = (
+                "superseded" if SUPERSEDED in text
+                else "settled" if SETTLED in text
+                else "open" if e.group(1) == " "
+                else "confirmed" if answer == CONFIRMED
+                else "kept" if answer == KEPT_ANSWER
+                else "changed"
+            )  # fmt: skip
+            defaults[mark] += 1
+        elif kind == "blocking":
+            blocking["open" if e.group(1) == " " else "answered"] += 1
+        else:
+            mark = "open" if e.group(1) == " " else "seen" if answer == LOOK_SEEN else "checked"
+            looks[mark] += 1
+    mends = {"build": 0, "landing": 0}
+    for line in (show(MENDED.as_posix()) or "").splitlines():
+        if re.fullmatch(r"\S+ \d+", line):
+            mends["build"] += 1
+        elif re.fullmatch(r"\S+ land-\d+", line):
+            mends["landing"] += 1
+    return {
+        "escalations": escalations, "unread": unread, "blocking": blocking,
+        "defaults": defaults, "looks": looks, "mends": mends,
+    }  # fmt: skip
 
 
 def session_roles(show, listing) -> dict[str, str]:

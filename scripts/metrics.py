@@ -93,7 +93,9 @@ question, its offered answers after it or not (`_ends_with_question()`), `interr
 interrupted turn, and `unprompted` for the rest; a line from before `fix` reads it as 0. They are
 written as `Sdlc-Extra` lines, with `harness=` and `command=` on `Sdlc-Totals`: a `Close` commit
 without those counted harness entries and other commands as `extra`, and is read as
-unclassified, never as none.
+unclassified, never as none. Each gated skill with an `after_gate` stop gets its own line,
+`Sdlc-AfterGate: <skill> stops=<n>`, read back as `after_gate: {skill: {"stops": n}}`: a `Close`
+commit without one names no skill for its `after_gate` stops, never 0 of them.
 
 Lead time, from the change's `opened:` to its close, and where it went, on a line of its own:
 
@@ -1108,6 +1110,7 @@ def summarize(
                 stop["kind"] = "question"
             elif after:
                 stop["why"] = "after_gate"
+                stop["skill"] = span["skill"]
             elif stop["reply"] in ("revise", "fix"):
                 stop["why"] = stop["reply"]
         stops.extend(span["stops"])
@@ -1243,6 +1246,7 @@ def summarize(
                 stages[seg["stage"]]["agent"] += hi - lo
                 placed += hi - lo
         stages[last]["agent"] += max(0.0, seconds - placed)
+    after_gate: dict[str, int] = {}
     for stop in stops:
         stage = stages[stop["stage"]]
         stage[stop["kind"]] += 1
@@ -1250,6 +1254,8 @@ def summarize(
             stage["reply"].append(stop["reply"])
         elif stop["kind"] == "extra":
             stage["kinds"][stop.get("why") or "unprompted"] += 1
+            if stop.get("why") == "after_gate":
+                after_gate[stop["skill"]] = after_gate.get(stop["skill"], 0) + 1
 
     plan_made = any(e["kind"] == "plan" and e["action"] == "exit" for e in events)
     required = list(REQUIRED.get((way, tier), REQUIRED[("manual", 2)]))
@@ -1308,6 +1314,8 @@ def summarize(
         "tools": by_tool,
         "blocked": blocked_by,
         "stops": stops,
+        # Each gated skill's stops typed after its WAIT was answered (`Sdlc-AfterGate`).
+        "after_gate": after_gate,
         "segments": segments,
         "required": required,
     }
@@ -1598,6 +1606,8 @@ def trailers(summary: dict) -> list[str]:
         fields = {**s["kinds"], "harness": s["harness"], "command": s["command"]}
         if any(fields.values()):
             lines.append(f"Sdlc-Extra: {name} {_pairs(fields)}")
+    for skill, n in sorted((summary.get("after_gate") or {}).items()):
+        lines.append(f"Sdlc-AfterGate: {_word(skill)} stops={n}")
     for dep, seconds in sorted(summary["blocked"].items()):
         lines.append(f"Sdlc-Blocked: {_word(dep)} minutes={_minutes(seconds)}")
     return lines
@@ -1726,6 +1736,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out.setdefault("calls", {})[name] = fields
         elif key == "extra" and name:
             out.setdefault("extra", {})[name] = fields
+        elif key == "aftergate" and name:
+            out.setdefault("after_gate", {})[name] = fields
         elif key == "blocked" and name:
             out["blocked"][name] = fields.get("minutes", 0)
         elif key == "review" and name:
