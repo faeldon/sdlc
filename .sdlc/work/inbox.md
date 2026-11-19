@@ -272,16 +272,6 @@ Cost: S
 Value: low
 Raised by: 168-work-mix-and-follow-through (correctness)
 
-## [2026-11-19-19] [nit] `autonomy_counts` counts a ledger line with the `SUPERSEDED` and `SETTLED` marks under `defaults` only.
-
-Raised by the code review of 169-decisions-and-stops-counted, round 1: scripts/factory_records.py:643: `autonomy_counts` counts a ledger line with the `SUPERSEDED` and `SETTLED` marks under `defaults` only. A superseded or settled blocking or look line gets no such check. It falls under answered or checked, which is probably right, since the approver settles defaults only. A one-line comment would make that explicit
-
-Theme: docs
-Paths: scripts/factory_records.py
-Cost: S
-Value: low
-Raised by: 169-decisions-and-stops-counted (correctness)
-
 ## [2026-11-19-20] [nit] R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone.
 
 Raised by the test review of 169-decisions-and-stops-counted, round 1: tests/test_retro.py:2606: R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone. A test with `confirmed` or `settled` lines that outnumber the rest would fail if the denominator changed.
@@ -291,16 +281,6 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 169-decisions-and-stops-counted (correctness)
-
-## [2026-11-19-21] [nit] `_none_reason()`'s `(\s+\S+=\S*)+$` backtracks badly on a hand-written `Sdlc-Coverage` with many `a=b=c` tokens; use `(\s+[^\s=]+=\S*)+$`
-
-Raised by the security review of 170-trust-band, round 1: scripts/retro.py:384: `_none_reason()`'s `(\s+\S+=\S*)+$` backtracks badly on a hand-written `Sdlc-Coverage` with many `a=b=c` tokens; use `(\s+[^\s=]+=\S*)+$`
-
-Theme: robustness
-Paths: scripts/retro.py
-Cost: S
-Value: med
-Raised by: 170-trust-band (contract)
 
 ## [2026-11-19-23] [nit] `_killed_at_its_gate` waits up to 120 s for the gate to start, while the POSIX test it twins waits 60 s; neither is a defect, but the two differ for no stated reason
 
@@ -372,14 +352,6 @@ Raised by: 173-style-paydown (correctness)
 
 Scorecard S9: lead time, throughput, cost and escape rate, factory against by hand. Pillars:
 Speed, Autonomy.
-Theme: retro
-Raised 2026-11-19.
-
-## [2026-11-19-34] [idea] Pipeline and risk figures
-
-Scorecard S10: gate seconds and slot-wait trend, red-gate rate, train figures (gates, ejections,
-bisections, base moves, accept stops, conflicts), mends, full-depth share, unreviewed landings.
-Pillars: Speed, Quality.
 Theme: retro
 Raised 2026-11-19.
 
@@ -540,3 +512,13 @@ Paths: tests/test_skills.py
 Cost: S
 Value: low
 Raised by: 183-spec-writer-nits-marker (correctness)
+
+## [2026-11-19-53] [nit] `bisections` and `accept_stops` have no `per_change`.
+
+Raised by the code review of 175-pipeline-figures, round 1: scripts/retro.py:1098: `bisections` and `accept_stops` have no `per_change`. `gates` and `base_moves` do. This is optional and the spec doesn't ask for it.
+
+Theme: docs
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 175-pipeline-figures (correctness)
