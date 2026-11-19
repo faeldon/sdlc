@@ -1382,7 +1382,8 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     cfg, _ = factory.load_config(root)
     # A round a stack opened, which no reviewer has answered yet, takes the fix itself, so its
     # review reads it at the run's depth (154); one answered takes it only once it has passed.
-    answered = n and any((folder / "reviews" / f"land-{n}").iterdir())
+    # A round counted, its folder gone by now, is one no reviewer has answered (nit -80).
+    answered = n and (d := folder / "reviews" / f"land-{n}").is_dir() and any(d.iterdir())
     untouched = n and factory.land_ask(folder, n) is None and not answered
     if n and not untouched and land_verdict(root, folder, cfg, n)["next"] != "pass":
         why = f"landing round {n} hasn't passed: a fix is asked only after it does"
@@ -2214,6 +2215,11 @@ def _run_end(main: Path, reading: dict, undos: list[dict], stopped: dict | None 
     return factory.emit({**out, "stopped": stopped}, 1)
 
 
+# A SIGKILL of the loop alone, not its process group, leaves the step it started running (nit
+# 2026-11-18-69): an agent, a gate or a close lives on as an orphan. The run lock is held on the
+# loop's own descriptor, which no child inherits, so it goes with the loop, and a second `--run`
+# can start while the orphan still writes. The one guard is the loop's own: the same step named
+# twice with nothing changed stops it. The way out is to kill the group, as the kill tests do.
 def _run_loop(main: Path) -> int:
     """Read the train, take the step it names, read again: until `done`, or the first stop
     (R4), a cancel between steps (R7), or the same step named twice with nothing changed."""

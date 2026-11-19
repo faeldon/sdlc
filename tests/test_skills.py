@@ -1881,10 +1881,10 @@ def test_build_brings_the_change_up_to_date_before_its_spec_writer() -> None:
 
 
 def test_the_build_skill_handles_every_step_verdicts_names() -> None:
-    """112 R14: every step `factory.py`'s `loop_state()` can name has a bullet in the build
-    skill's loop, saying what the supervisor does there: a step with none is one it has no move
-    for, which is how a hand step creeps in."""
-    source = (FACTORY / "scripts" / "factory.py").read_text(encoding="utf-8")
+    """112 R14: every step `loop_state()` (in `run_state.py`, 171) can name has a bullet in the
+    build skill's loop, saying what the supervisor does there: a step with none is one it has no
+    move for, which is how a hand step creeps in."""
+    source = (FACTORY / "scripts" / "run_state.py").read_text(encoding="utf-8")
     body = source.split("def loop_state(", 1)[1].split("\ndef ", 1)[0]
     steps = set(re.findall(r'out\["next"\](?:, [^=]+)? = "([a-z]+)"', body))
     assert {"build", "decide", "upgrade", "spec", "stop", "done"} <= steps, steps

@@ -923,7 +923,7 @@ def test_the_approver_is_asked_to_weigh_each_open_default(tmp_path, capsys) -> N
     path.write_text(path.read_text().replace("- [ ] D3", "- [x] D3").replace(
         "30 days?", "30 days? → decided: 30"))  # fmt: skip
     _round(root, 1)
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert state["next"] == "approve", state
     prompt, target, _ = factory._task(root, root / ".sdlc" / "work" / NAME, state, "approve",
                                       "approver", None)  # fmt: skip
@@ -1112,7 +1112,7 @@ def test_the_verify_prompt_numbers_each_change_once(tmp_path, capsys) -> None:
     _review(root, 1, "security", "VERDICT: PASS")
     _review(root, 1, "behaviour", "VERDICT: PASS", "src/c.py:4: not asked, the verdict passed")
     folder = root / ".sdlc" / "work" / NAME
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, target, _ = factory._task(root, folder, state, "verify", "verifier", None)
     listed = [line for line in prompt.splitlines() if line.startswith("- ")]
     assert listed == [
@@ -1172,7 +1172,7 @@ def test_an_answer_by_id_takes_the_reviewers_text(tmp_path, capsys) -> None:
     ]
     _, carried = _run(capsys, factory.cmd_carry, root, "008")
     assert carried["added"] == ["code: src/b.py:3: split it"]
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, _, _ = factory._task(
         root, root / ".sdlc" / "work" / NAME, state, "rework", "builder", None
     )
@@ -1279,7 +1279,7 @@ def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
         "verdict": "PASS", "changes": [], "preexisting": [],
         "nits": [{"text": "[cost] src/b.py:1: a helper with one caller", **unweighed}],
     }  # fmt: skip
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, _, _ = factory._task(root, folder, state, "verify", "verifier", None)
     assert "a long line" not in prompt and "one caller" not in prompt
     assert [line for line in prompt.splitlines() if line.startswith("- ")] == [
@@ -1538,7 +1538,7 @@ def test_rework_hands_the_builder_its_cheap_nits(tmp_path, capsys) -> None:
     _nits(root, 1, "code", "src/a.py:1: cheap {style S med}", "src/b.py:2: later {style M low}")
     _nits(root, 1, "test", "[cost] tests/t.py:3: one fixture {tests S med}")
     _verified(root, 1, kept=["code: code fix 1"])
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert state["next"] == "rework"
     assert state["handed"] == [
         {"role": "code", "text": "src/a.py:1: cheap"},
@@ -1552,7 +1552,7 @@ def test_rework_hands_the_builder_its_cheap_nits(tmp_path, capsys) -> None:
     )
     assert "later" not in prompt, "an M nit is filed, never handed on"
     _build_report(root, 2)
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert (state["next"], state["round"]) == ("review", 2)
     prompt, _, _ = factory._task(root, folder, state, "review", "code", None)
     assert (
@@ -1569,7 +1569,7 @@ def test_a_round_with_only_nits_is_never_reworked(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     _round(root, 1)
     _nits(root, 1, "code", "src/a.py:1: cheap {style S med}")
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert (state["next"], state["handed"]) == ("approve", [])
     assert all(r["verdict"] == "PASS" for r in state["rounds"][0]["reviews"].values())
 
@@ -1578,7 +1578,7 @@ def test_a_round_with_only_nits_is_never_reworked(tmp_path, capsys) -> None:
     _nits(root, 3, "code", "src/a.py:1: cheap {style S med}")
     assert _restart(root, capsys)[0] == 0
     _build_report(root, 4)
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert (state["next"], state["round"], state["handed"]) == ("review", 4, [])
 
 
@@ -1739,7 +1739,7 @@ def test_an_early_escalation_names_its_reason_to_the_approver(tmp_path, capsys) 
     untestable lines, and asked to name its next step; a run with nothing kept is asked neither."""
     folder = _kept_again(_change(tmp_path))
     root = tmp_path / "repo"
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, _, _ = factory._task(root, folder, state, "approve", "approver", None)
     assert (
         " Round 2 kept again what round 1 kept: code: src/a.py:1: rename a; nothing a further "
@@ -1751,14 +1751,14 @@ def test_an_early_escalation_names_its_reason_to_the_approver(tmp_path, capsys) 
     folder = root / ".sdlc" / "work" / NAME
     _build_report(root, 1, f"- UNTESTABLE: {line}\n")
     _round(root, 1)
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, _, _ = factory._task(root, folder, state, "approve", "approver", None)
     assert f" The builder reports these requirements can't be tested: {line}." in prompt, prompt
     assert NEXT_STEP in prompt and "kept again" not in prompt
     root = _change(tmp_path / "plain")
     folder = root / ".sdlc" / "work" / NAME
     _round(root, 1)
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     prompt, _, _ = factory._task(root, folder, state, "approve", "approver", None)
     assert NEXT_STEP not in prompt and "can't be tested" not in prompt
 
@@ -1781,7 +1781,7 @@ def test_the_review_prompt_asks_for_an_undone_kept_change_word_for_word(tmp_path
     _build_report(root, 2)
     (folder / "build" / "round-1.files").write_text("", encoding="utf-8")
     (folder / "build" / "round-2.files").write_text("", encoding="utf-8")
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert (state["next"], state["round"]) == ("review", 2), state
     prompt, _, _ = factory._task(root, folder, state, "review", "code", None)
     assert "Kept last round: code: code fix 1." in prompt
@@ -3584,7 +3584,10 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
     assert code == 0 and (out["verdict"], out["attempt"]) == ("PASS", 2)
     record = (folder / "build" / "round-1.gate.md").read_text(encoding="utf-8")
     assert record.startswith("GATE: PASS\n") and record.count("## Attempt ") == 2
-    assert [a["verdict"] for a in factory.read_gate(folder, 1)["attempts"]] == ["FAIL", "PASS"]
+    assert [a["verdict"] for a in factory.run_state.read_gate(folder, 1)["attempts"]] == [
+        "FAIL",
+        "PASS",
+    ]
     out = _verdicts(root, capsys)
     assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
 
@@ -3610,9 +3613,9 @@ def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch)
         assert path not in record, path
     assert "    Validating marketplace manifest: <path-to-clone>/.claude-plugin/" in record
     assert "    [gw0] crashed under <home>/.cache/uv/venv" in record
-    assert [(a["verdict"], a["exit"]) for a in factory.read_gate(folder, 1)["attempts"]] == [
-        ("FAIL", "1")
-    ]
+    assert [
+        (a["verdict"], a["exit"]) for a in factory.run_state.read_gate(folder, 1)["attempts"]
+    ] == [("FAIL", "1")]
 
 
 def test_the_gate_records_no_temp_path_or_user_name(tmp_path, capsys, monkeypatch) -> None:
@@ -4363,7 +4366,7 @@ def test_the_step_record_never_reaches_the_loop(tmp_path, capsys) -> None:
     assert reading() == bare
     _step(root).write_text("garbled \x00 text\n", encoding="utf-8")
     assert reading() == bare
-    source = inspect.getsource(factory.loop_state)
+    source = inspect.getsource(factory.run_state.loop_state)
     assert "STEP" not in source and "read_step" not in source
 
 
@@ -5004,6 +5007,7 @@ def test_check_refuses_and_runs_nothing(tmp_path, capfd, case) -> None:
     assert not stamp.exists()
 
 
+@pytest.mark.portable
 def test_two_checks_with_one_slot_run_one_after_the_other(tmp_path) -> None:
     """155 R3: two `check` runs at once in two worktrees, with `gate_jobs = 1`: the second waits
     for the first's slot and says so."""
@@ -5032,6 +5036,7 @@ def test_two_checks_with_one_slot_run_one_after_the_other(tmp_path) -> None:
     assert len(waiting) == 1, done
 
 
+@pytest.mark.portable
 def test_a_check_waits_for_a_gates_slot(tmp_path) -> None:
     """155 R3: a slot a gate holds is one `check` waits for: gates and checks share the slots."""
     import time
@@ -5061,7 +5066,8 @@ def test_a_check_waits_for_a_gates_slot(tmp_path) -> None:
 
 def test_a_killed_check_frees_its_slot(tmp_path) -> None:
     """155 R4: the slot is a lock on `check`'s own descriptor, never inherited by the command it
-    runs, so killing `check` frees it even while the command lives on."""
+    runs, so killing `check` frees it even while the command lives on. Not portable: it starts
+    `check` with `start_new_session` and cleans up with `killpg`, which Windows has neither of."""
     import time
 
     root = _change(tmp_path)
@@ -5091,7 +5097,9 @@ def test_a_killed_check_frees_its_slot(tmp_path) -> None:
 
 
 def test_a_check_past_the_timeout_is_killed(tmp_path, capfd, monkeypatch) -> None:
-    """155 R4: past `GATE_TIMEOUT` the command is killed, said on stderr, and `check` fails."""
+    """155 R4: past `GATE_TIMEOUT` the command is killed, said on stderr, and `check` fails. Not
+    portable: what is killed is an `sh` that `exec`s `sleep`, whose kill CI's Windows job, where
+    Git for Windows' `sh` starts `sleep` as a process of its own, can't show."""
     root = _change(tmp_path)
     _gate_config(root, "exec sleep 5")
     monkeypatch.setattr(factory, "GATE_TIMEOUT", 0.5)
@@ -5099,6 +5107,7 @@ def test_a_check_past_the_timeout_is_killed(tmp_path, capfd, monkeypatch) -> Non
     assert code != 0 and "timed out after 0.5s" in capfd.readouterr().err
 
 
+@pytest.mark.portable
 def test_a_green_check_writes_nothing_and_never_clears_the_gate(tmp_path, capfd) -> None:
     """155 R5: a green `check` writes no record, leaves the folder as it was, and `verdicts`
     still asks for the gate: the script's gate stays the one proof of the suite."""
@@ -5129,7 +5138,7 @@ def test_the_builders_prompts_name_the_check_command(tmp_path, capsys) -> None:
         assert not isinstance(planned, str), planned
         return planned[0]
 
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert state["next"] == "build"
     assert line in prompt(state, "build", "builder")
     assert line in prompt({**state, "next": "fix", "round": 1}, "fix", "builder")
@@ -5140,7 +5149,7 @@ def test_the_builders_prompts_name_the_check_command(tmp_path, capsys) -> None:
         "50.", "50. → decided: 50"))  # fmt: skip
     _round(root, 1, code="CHANGES")
     _verified(root, 1, kept=["code: code fix 1"])
-    state, _ = factory.loop_state(root, "008", None)
+    state, _ = factory.run_state.loop_state(root, "008", None)
     assert state["next"] == "rework", state
     assert line in prompt(state, "rework", "builder")
     assert line in prompt(state, "decided", "builder", "D1")

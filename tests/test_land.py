@@ -2497,6 +2497,25 @@ def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
 
 
 @needs_uv
+def test_a_fix_asked_with_its_land_round_folder_gone_is_not_a_traceback(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """171 R9 (nit 2026-11-18-80): a landing round counted with its `reviews/land-<n>/` folder
+    gone by the time the ask reads it is one no reviewer has answered: the ask opens it, never a
+    `FileNotFoundError`. `land_round()` counts only folders that exist, so it is stood in for."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "gone", "gone's one")
+    folder = tree / ".sdlc" / "work" / tree.name
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "committed"), out
+    assert not (folder / "reviews" / "land-1").exists()
+    monkeypatch.setattr(factory, "land_round", lambda folder: 1)
+    code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", _asked(folder), False)
+    assert (code, out["round"]) == (0, 1), out
+    assert FIX_WORDS in (folder / "build" / "land-1.ask.md").read_text(encoding="utf-8")
+
+
+@needs_uv
 def test_a_fix_is_asked_by_its_line_in_decisions_md_never_on_a_command_line(
     tmp_path, capsys
 ) -> None:

@@ -20,6 +20,7 @@ SDLC_PY = ROOT / "scripts" / "sdlc.py"
 CLOSING_PY = ROOT / "scripts" / "closing.py"
 FACTORY_PY = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
 LANDING_PY = ROOT / "plugins" / "factory" / "scripts" / "landing.py"
+RUN_STATE_PY = ROOT / "plugins" / "factory" / "scripts" / "run_state.py"
 
 # R1's named entries: the lock family, close and its own helpers, and the push.
 CLOSING_NAMES = {
@@ -97,6 +98,31 @@ LANDING_NAMES = {
     "land_verdict",
 }
 
+# 171 R1: the build loop's one reading, and every function only it calls.
+RUN_STATE_NAMES = {
+    "loop_state",
+    "early_stop",
+    "settled",
+    "_untouched",
+    "cheap_nits",
+    "reworked",
+    "_gate_state",
+    "read_gate",
+    "decision_preamble",
+}
+
+# 171 R7: `verdicts` and the records it writes, which the board's copies follow, stay.
+VERDICTS_NAMES = {
+    "cmd_verdicts",
+    "cli_verdicts",
+    "stop_text",
+    "early_lines",
+    "step_text",
+    "read_step",
+    "_record_step",
+    "STOPPED",
+}
+
 # script, module, what the script calls the module, what the module calls the script, R's names,
 # and the other modules bound to the script, whose `<script>.<name>` calls count as the script's.
 PAIRS = [
@@ -109,7 +135,18 @@ PAIRS = [
         [ROOT / "scripts" / "retro.py", ROOT / "scripts" / "board.py"],
         id="closing",
     ),
-    pytest.param(FACTORY_PY, LANDING_PY, "landing", "factory", LANDING_NAMES, [], id="landing"),
+    pytest.param(
+        FACTORY_PY, LANDING_PY, "landing", "factory", LANDING_NAMES, [RUN_STATE_PY], id="landing"
+    ),
+    pytest.param(
+        FACTORY_PY,
+        RUN_STATE_PY,
+        "run_state",
+        "factory",
+        RUN_STATE_NAMES,
+        [LANDING_PY],
+        id="run_state",
+    ),
 ]
 
 
@@ -167,6 +204,7 @@ def _load(name: str, path: Path):
     [
         pytest.param(SDLC_PY, CLOSING_PY, CLOSING_NAMES, id="closing"),
         pytest.param(FACTORY_PY, LANDING_PY, LANDING_NAMES, id="landing"),
+        pytest.param(FACTORY_PY, RUN_STATE_PY, RUN_STATE_NAMES, id="run_state"),
     ],
 )
 def test_the_named_code_lives_in_its_module(script: Path, module: Path, names: set[str]) -> None:
@@ -187,6 +225,28 @@ def test_close_push_and_the_lock_live_in_closing() -> None:
 def test_the_landing_lives_in_landing() -> None:
     """R2, by its own name."""
     test_the_named_code_lives_in_its_module(FACTORY_PY, LANDING_PY, LANDING_NAMES)
+
+
+def test_the_run_state_lives_in_run_state() -> None:
+    """171 R1, R7, by its own name: the run's reading lives in `run_state.py`, while `verdicts`
+    and the records it writes, which the board's copies are pinned to, stay in `factory.py`."""
+    test_the_named_code_lives_in_its_module(FACTORY_PY, RUN_STATE_PY, RUN_STATE_NAMES)
+    left = VERDICTS_NAMES - _defined(_tree(FACTORY_PY))
+    assert not left, f"factory.py no longer defines {sorted(left)}"
+    taken = VERDICTS_NAMES & _defined(_tree(RUN_STATE_PY))
+    assert not taken, f"run_state.py took {sorted(taken)}"
+
+
+def test_run_state_defines_no_constant() -> None:
+    """171 R4: every constant, regex and path the run's reading uses stays in `factory.py`, where
+    `test_every_shared_name_is_the_factorys` compares `factory_records.py`'s copies; the module's
+    one top-level assignment is its binding."""
+    assigned = [
+        ast.unparse(node)
+        for node in _tree(RUN_STATE_PY).body
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign)
+    ]
+    assert assigned == ["factory = None"], assigned
 
 
 @pytest.mark.parametrize("script, module, modvar, binding, names, siblings", PAIRS)
@@ -262,6 +322,7 @@ def test_the_modules_are_bound_live() -> None:
     assert sdlc.closing.sdlc.__dict__ is vars(sdlc)
     factory = _load("factory_modules_test", FACTORY_PY)
     assert factory.landing.factory.__dict__ is vars(factory)
+    assert factory.run_state.factory.__dict__ is vars(factory)
 
 
 def _at_load(tree: ast.Module):
@@ -284,6 +345,7 @@ def _at_load(tree: ast.Module):
     [
         pytest.param(CLOSING_PY, "sdlc", id="closing"),
         pytest.param(LANDING_PY, "factory", id="landing"),
+        pytest.param(RUN_STATE_PY, "factory", id="run_state"),
     ],
 )
 def test_the_modules_read_nothing_while_loading(module: Path, binding: str) -> None:
@@ -305,10 +367,10 @@ def test_the_modules_read_nothing_while_loading(module: Path, binding: str) -> N
     assert not early, f"{module.name} reads {binding} while loading: {early}"
 
 
-@pytest.mark.parametrize("path", [FACTORY_PY, LANDING_PY], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [FACTORY_PY, LANDING_PY, RUN_STATE_PY], ids=lambda p: p.name)
 def test_the_factory_never_loads_sdlc_py(path: Path) -> None:
-    """R9: `factory.py` and `landing.py` never import `sdlc.py` nor load it by path; the factory
-    runs `sdlc.py` as a process (`_sdlc()`), and copies what it parses."""
+    """R9, 171 R8: `factory.py`, `landing.py` and `run_state.py` never import `sdlc.py` nor load
+    it by path; the factory runs `sdlc.py` as a process (`_sdlc()`), and copies what it parses."""
     tree = _tree(path)
     imported = {
         alias.name

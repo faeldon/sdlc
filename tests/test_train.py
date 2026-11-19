@@ -956,6 +956,32 @@ def test_train_resolve_runs_no_role_but_the_resolver(tmp_path, capsys, monkeypat
 
 
 @needs_uv
+def test_a_stack_conflicting_on_last_id_too_resolves(tmp_path, capsys) -> None:
+    """171 R11 (nit 2026-11-18-84): a stack that conflicts on both README.md and `.sdlc/last-id`
+    (each change numbered locally, the base holding no counter) goes to the resolver with
+    README.md alone; it writes only that, and `--continue` goes through, the counter holding the
+    higher number: `_settle_counter()` staged it before `_stray()` reads the status, so the fence
+    never counts it."""
+    root, trees = _conflicting(tmp_path)
+    counter = ".sdlc/last-id"
+    assert _git(root, "ls-tree", "--name-only", "main", counter) == "", "the base has none"
+    assert [(t / counter).read_text(encoding="utf-8").strip() for t in trees] == ["001", "002"]
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree = trees[1]
+    assert readings[-1]["files"] == ["README.md"], readings[-1]
+    sides = [_git(tree, "show", f"{rev}:{counter}") for rev in ("HEAD", "REBASE_HEAD")]
+    assert sides == ["001", "002"], "both sides added the counter: it conflicted"
+    status = {line[3:]: line[:2] for line in _git(tree, "status", "--porcelain").splitlines()}
+    assert status[counter][1] == " ", ("settled and staged, never left to the resolver", status)
+    _resolving(tree, ["README.md"])
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert _git(tree, "show", f"HEAD:{counter}") == "002"
+    assert (tree / counter).read_text(encoding="utf-8").strip() == "002"
+
+
+@needs_uv
 def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
     """149 R8, R9: a resolution that also edits a tracked file the conflict didn't name, or
     leaves an untracked one, is refused by `--continue`, naming it, with nothing staged, no
@@ -968,22 +994,23 @@ def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
     _resolving(tree, ["README.md"])
     marker = folder / "runs" / "land-resolved"
 
-    def refused(stray: str) -> None:
+    def refused(label: str, stray: str) -> None:
         code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
-        assert code == 1 and out["state"] == "refused", out
-        assert stray in out["refusals"][0] and "outside its conflicted files" in out["refusals"][0]
-        assert not marker.exists(), "no marker"
-        assert factory.landing._rebasing(tree), "the rebase is left under way"
-        assert factory._conflicted(tree) == ["README.md"], "nothing staged"
+        assert code == 1 and out["state"] == "refused", (label, out)
+        why = out["refusals"][0]
+        assert stray in why and "outside its conflicted files" in why, (label, why)
+        assert not marker.exists(), f"{label}: no marker"
+        assert factory.landing._rebasing(tree), f"{label}: the rebase is left under way"
+        assert factory._conflicted(tree) == ["README.md"], f"{label}: nothing staged"
         step = factory.read_land_step((folder / factory.LAND_STEP).read_text(encoding="utf-8"))
-        assert any("resolve 002 --continue" in p for p in step["problems"]), step
+        assert any("resolve 002 --continue" in p for p in step["problems"]), (label, step)
 
     (tree / "LICENSE.txt").write_text("not the conflict's\n", encoding="utf-8")
-    refused("LICENSE.txt")
+    refused("untracked", "LICENSE.txt")
     (tree / "LICENSE.txt").unlink()
     with (tree / ".gitignore").open("a", encoding="utf-8") as f:
         f.write("# touched\n")
-    refused(".gitignore")
+    refused("tracked", ".gitignore")
     _git(tree, "checkout", "--", ".gitignore")
     code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
@@ -1363,6 +1390,75 @@ def test_the_loop_runs_only_its_named_commands() -> None:
     assert set(factory.landing.RUN_STOPS) == {"accept", "stop"}
 
 
+def _stubbed_loop(
+    tmp_path: Path, capsys, monkeypatch, reading: dict, result: dict | None = None
+) -> tuple[int, dict, list]:
+    """`train --run` over a train that names `reading` once and `done` after, its steps' commands
+    answering `result` (exit 0 and no JSON when None), with no process started: the loop's own
+    stops, apart from the commands they follow. Returns its exit, its JSON and the groups run."""
+    readings = iter([reading, {"next": "done"}])
+    ran: list = []
+    monkeypatch.setattr(
+        factory.landing, "_run_one", lambda main, argv, cwd: (0, next(readings), "")
+    )
+
+    def group(main: Path, members: list) -> list[dict]:
+        ran.append(members)
+        answer = {"code": 0, "said": "", "out": None, **(result or {})}
+        return [{"argv": argv, **answer} for argv, _ in members]
+
+    monkeypatch.setattr(factory.landing, "_run_group", group)
+    capsys.readouterr()
+    code = factory.landing._run_loop(tmp_path)
+    return code, json.loads(capsys.readouterr().out), ran
+
+
+def _step(nxt: str, **parts) -> dict:
+    return {"next": nxt, "change": "002-bb", "worktree": "nowhere", "by": "auto", **parts}
+
+
+@pytest.mark.portable
+def test_train_run_stops_at_a_failed_step(tmp_path, capsys, monkeypatch) -> None:
+    """171 R13 (nit 2026-11-18-70): a step whose command exits non-zero stops the loop, naming
+    the exit, and runs nothing after it."""
+    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, _step("commit"), {"code": 2})
+    assert code == 1 and len(ran) == 1, (out, ran)
+    assert out["stopped"]["next"] == "commit" and out["stopped"]["reason"] == "exit 2", out
+    assert factory.landing.PUT_BACK in out["stopped"]["way_on"], out
+
+
+@pytest.mark.portable
+def test_train_run_stops_at_an_agents_problem(tmp_path, capsys, monkeypatch) -> None:
+    """171 R13: an agent whose JSON holds `problem`, though it exited 0, stops the loop, naming
+    the problem."""
+    problem = {"out": {"problem": "the verifier's reply holds no KEPT or DROPPED line"}}
+    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, _step("verify"), problem)
+    assert code == 1 and len(ran) == 1, (out, ran)
+    assert out["stopped"]["reason"] == problem["out"]["problem"], out
+
+
+@pytest.mark.portable
+def test_train_run_stops_at_a_resolve_with_no_conflict(tmp_path, capsys, monkeypatch) -> None:
+    """171 R13: `resolve` named with no conflicted file stops the loop before any agent starts,
+    telling the person to run git status in the change's worktree."""
+    reading = _step("resolve", files=[])
+    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, reading)
+    assert code == 1 and ran == [], (out, ran)
+    assert "with no conflicted file" in out["stopped"]["reason"], out
+    assert out["stopped"]["way_on"].startswith("run git status in its worktree"), out
+
+
+@pytest.mark.portable
+def test_train_run_stops_at_the_trains_stop(tmp_path, capsys, monkeypatch) -> None:
+    """171 R13: a train that reads `stop` (past `land.moves`) stops the loop with the train's own
+    reason, and the way on puts every change not landed back."""
+    why = "main moved 4 times while landing, past land.moves (3)"
+    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, _step("stop", reason=why))
+    assert code == 1 and ran == [], (out, ran)
+    assert out["stopped"]["reason"] == why, out
+    assert factory.landing.PUT_BACK in out["stopped"]["way_on"], out
+
+
 @needs_uv
 def test_train_run_never_runs_a_prompted_command(tmp_path, capsys, monkeypatch) -> None:
     """147 R3: a change with an acceptance check not yet run stops the loop at its commit, whose
@@ -1671,10 +1767,9 @@ def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )  # fmt: skip
     started = Path(str(flag) + ".started")
-    for _ in range(600):
-        if started.exists() or loop.poll() is not None:
-            break
-        time.sleep(0.2)
+    deadline = time.monotonic() + 120  # the loop's startup takes a minute or more under load
+    while not started.exists() and loop.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert started.exists(), "the reviewer never started"
     os.killpg(loop.pid, signal.SIGKILL)
     loop.wait(30)
@@ -1687,3 +1782,82 @@ def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
         touched = _git(root, "show", "--format=", "--name-only", own).splitlines()
         assert all(not p.startswith(".sdlc/work/") or p.startswith(f".sdlc/work/{name}/")
                    for p in touched), (name, touched)  # fmt: skip
+
+
+# A host's `[commands] check` that blocks for good on its first call, writing `<flag>.started`,
+# and passes once `<flag>` exists: a loop killed at its gate, with no shebang file to start.
+BLOCKING_CHECK = """\
+import pathlib, sys, time
+flag = pathlib.Path(sys.argv[1])
+if not flag.exists():
+    pathlib.Path(sys.argv[1] + ".started").touch()
+    while not flag.exists():
+        time.sleep(0.1)
+"""
+
+
+def _killed_at_its_gate(tmp_path: Path, capsys, popen: dict, kill) -> None:
+    """A `train --run` started with `popen`, killed by `kill(proc)` while the host's check blocks
+    at the tip's gate, then run again: the second run gates afresh and ends `done`, each change
+    closed once, and no `Close` commit carries another change's folder. The behaviour checks the
+    stacked changes owe are written as the agent would reply, so no agent starts."""
+    script, flag = tmp_path / "gate.py", tmp_path / "blocked"
+    script.write_text(BLOCKING_CHECK, encoding="utf-8")
+    py = Path(sys.executable).as_posix()
+    root, trees = _three(tmp_path, check=f'"{py}" "{script.as_posix()}" "{flag.as_posix()}"')
+    _begin(root, capsys)
+    loop = subprocess.Popen(
+        [sys.executable, str(SCRIPT), "train", "--run"], cwd=root,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen,
+    )  # fmt: skip
+    started = Path(str(flag) + ".started")
+    deadline = time.monotonic() + 120
+    while not started.exists() and loop.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert started.exists(), f"the gate never started (exit {loop.poll()})"
+    kill(loop)
+    loop.wait(30)
+    flag.touch()
+    for tree in trees:
+        for land in (_folder(tree) / "reviews").glob("land-*"):
+            (land / "behaviour.md").write_text(verdict(factory, "behaviour"), encoding="utf-8")
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    names = [t.name for t in trees]
+    closes = [s for s in _first_parent(root) if s.startswith("Close ")]
+    assert closes == [f"Close {n}" for n in reversed(names)], closes
+    for name, own in _closes(root).items():
+        touched = _git(root, "show", "--format=", "--name-only", own).splitlines()
+        assert all(not p.startswith(".sdlc/work/") or p.startswith(f".sdlc/work/{name}/")
+                   for p in touched), (name, touched)  # fmt: skip
+
+
+@needs_uv
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="kills a process group")
+def test_a_train_run_killed_at_its_gate_resumes(tmp_path, capsys) -> None:
+    """171 R17's body on POSIX, so the Windows test's path through the gate is shown here too: a
+    loop killed with its process group while the host's check blocks resumes."""
+    _killed_at_its_gate(
+        tmp_path, capsys, {"start_new_session": True},
+        lambda proc: os.killpg(proc.pid, signal.SIGKILL),
+    )  # fmt: skip
+
+
+@needs_uv
+@pytest.mark.portable
+@pytest.mark.skipif(os.name != "nt", reason="kills a process tree with taskkill, on Windows")
+def test_a_killed_train_run_resumes_on_windows(tmp_path, capsys) -> None:
+    """171 R17 (idea 2026-11-18-67): `train --run` in a process group of its own, killed with its
+    whole tree by `taskkill /T /F` while the host's check blocks at the gate, leaves state a
+    second run resumes from. It blocks at the gate, not at an agent: the fake `claude` is a
+    shebang file Windows can't start."""
+
+    def kill(proc: subprocess.Popen) -> None:
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True, encoding="utf-8", errors="replace",
+        )  # fmt: skip
+
+    _killed_at_its_gate(
+        tmp_path, capsys, {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}, kill
+    )
