@@ -166,16 +166,6 @@ See .sdlc/work/147-landing-runs-unattended/notes.md in its commit.
 Theme: tests
 Raised 2026-11-18.
 
-## [2026-11-18-68] [nit] `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it.
-
-Raised by the code review of 147-landing-runs-unattended, round 1: plugins/factory/scripts/factory.py:6291: `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it. The `RUN_STOPS` tuple (line 6163) looks unused; remove it or use it for the `accept` and `stop` branches.
-
-Theme: refactor
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 147-landing-runs-unattended (correctness)
-
 ## [2026-11-18-69] [nit] after a SIGKILL of the loop, an orphaned agent subprocess can still be running when a rerun starts, because the lock descriptor isn't inherited.
 
 Raised by the code review of 147-landing-runs-unattended, round 1: plugins/factory/scripts/factory.py:6330: after a SIGKILL of the loop, an orphaned agent subprocess can still be running when a rerun starts, because the lock descriptor isn't inherited. The only guard is that the same step named twice stops the loop. A comment saying so, or a test, would help.
@@ -360,12 +350,6 @@ A later change looks at each one again (merge, rewrite, move or delete it), and 
 Theme: tests
 Raised by the retrospective of 2026-11-18.
 
-## [2026-11-18-91] [idea] Agents stop calling sleep, which the harness refuses
-
-`Bash:sleep` failed 18 of the 19 times it was called (error share 0.95), across 12 of the 41 changes that recorded tool calls. The harness refuses a foreground sleep, so each call is a spent turn. The agents that wait on something (the builder and the behaviour reviewer, most likely) should be told how to wait instead: poll with a bounded command, or hand the wait back to the script.
-Theme: factory
-Raised by the retrospective of 2026-11-18.
-
 ## [2026-11-18-92] [idea] Name the skill an after-gate stop follows
 
 `metrics.extra` counts 15 `after_gate` stops across 11 changes: messages the person typed after a WAIT was answered. A kind that recurs means some skill could ask it in its WAIT. The retrospective can't say which skill, because the stop records no skill. Recording the skill whose gate it followed, on the `Close` trailer, would let the next retrospective name it.
@@ -379,15 +363,6 @@ Five changes' Important findings share one class: a context or reference doc sti
 - **A doc's claim the change made false.** A sentence in `AGENTS.md`, `docs/REFERENCE.md`, `docs/CONTRIBUTING.md` or a README that names the function, the command or the rule this diff changed, and still says what it did before. Grep the docs for each name the diff touches.
 Theme: review
 Raised by the retrospective of 2026-11-18.
-
-## [2026-11-18-95] [bug] A builder's "UNTESTABLE: none." stops the run as untestable
-
-A builder that writes `- UNTESTABLE: none.` is read as having one untestable requirement named "none.": `UNTESTABLE_RE` (plugins/factory/scripts/factory.py:201) captures any text, so `early_stop()` stops the run and the approver must ESCALATE a change with no gap. 155's round 1 showed it: three PASSes, a green gate, and an ESCALATE whose only reasons were this stop and a look. `none` (with or without a period) should mean no untestable requirements.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py
-Introduced by: 136-factory-rounds-that-catch-enough
-Theme: factory
 
 ## [2026-11-18-96] [nit] the rewrapped "One gate at a time" bullet leaves one line over the wrap width
 
@@ -551,3 +526,13 @@ Paths: tests/test_modules.py
 Cost: S
 Value: low
 Raised by: 163-factory-records-reader (correctness)
+
+## [2026-11-19-10] [nit] the edited line runs to 136 characters, while the rest of the paragraph wraps at about 97; re-wrap it.
+
+Raised by the code review of 166-untestable-none-and-waits, round 1: plugins/factory/README.md:203: the edited line runs to 136 characters, while the rest of the paragraph wraps at about 97; re-wrap it.
+
+Theme: docs
+Paths: plugins/factory/README.md
+Cost: S
+Value: med
+Raised by: 166-untestable-none-and-waits (correctness)
