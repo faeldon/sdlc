@@ -280,26 +280,6 @@ Cost: S
 Value: low
 Raised by: 149-landing-resolver-agent (correctness)
 
-## [2026-11-18-86] [nit] `a["ready"]` now adds `held_by_rebase(home)`.
-
-Raised by the code review of 151-status-by-board-states, round 1: scripts/sdlc.py:10620: `a["ready"]` now adds `held_by_rebase(home)`. That function calls `_change_trees` and `worktrees`, which `rebasing_branches` also calls, so `status` walks the worktree list twice. It's cheap, but `held_by_rebase` could take the branches as an argument.
-
-Theme: refactor
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 151-status-by-board-states (correctness)
-
-## [2026-11-18-87] [nit] `_by_state` falls back to `BY_STAGE` for a record with no `column`, and silently drops a stage `column()` would place elsewhere, such as `test`.
-
-Raised by the code review of 151-status-by-board-states, round 1: scripts/sdlc.py:10010: `_by_state` falls back to `BY_STAGE` for a record with no `column`, and silently drops a stage `column()` would place elsewhere, such as `test`. Nothing reads such a record today.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 151-status-by-board-states (correctness)
-
 ## [2026-11-18-88] [idea] Pay down the tests nits in one change
 
 Five `[nit]` entries are open under `tests` (2026-11-18-64, -70, -71, -79 and -85), which is the threshold the process guide sets for paying a theme down. Two of them are slow polls in the train's kill test (-71 and -79, about 49 seconds here). One change takes all five, and its review decides each.
@@ -321,12 +301,6 @@ Retro's `tests.drifted` names ten test files whose code moved without them over 
 
 A later change looks at each one again (merge, rewrite, move or delete it), and its review decides. There are no run times to weigh, because `retro.test_times` is unset.
 Theme: tests
-Raised by the retrospective of 2026-11-18.
-
-## [2026-11-18-92] [idea] Name the skill an after-gate stop follows
-
-`metrics.extra` counts 15 `after_gate` stops across 11 changes: messages the person typed after a WAIT was answered. A kind that recurs means some skill could ask it in its WAIT. The retrospective can't say which skill, because the stop records no skill. Recording the skill whose gate it followed, on the `Close` trailer, would let the next retrospective name it.
-Theme: metrics
 Raised by the retrospective of 2026-11-18.
 
 ## [2026-11-18-93] [idea] The review doc names a doc's claim left false by the change
@@ -591,3 +565,23 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 168-work-mix-and-follow-through (correctness)
+
+## [2026-11-19-19] [nit] `autonomy_counts` counts a ledger line with the `SUPERSEDED` and `SETTLED` marks under `defaults` only.
+
+Raised by the code review of 169-decisions-and-stops-counted, round 1: scripts/factory_records.py:643: `autonomy_counts` counts a ledger line with the `SUPERSEDED` and `SETTLED` marks under `defaults` only. A superseded or settled blocking or look line gets no such check. It falls under answered or checked, which is probably right, since the approver settles defaults only. A one-line comment would make that explicit
+
+Theme: docs
+Paths: scripts/factory_records.py
+Cost: S
+Value: low
+Raised by: 169-decisions-and-stops-counted (correctness)
+
+## [2026-11-19-20] [nit] R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone.
+
+Raised by the test review of 169-decisions-and-stops-counted, round 1: tests/test_retro.py:2606: R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone. A test with `confirmed` or `settled` lines that outnumber the rest would fail if the denominator changed.
+
+Theme: tests
+Paths: tests/test_retro.py
+Cost: S
+Value: low
+Raised by: 169-decisions-and-stops-counted (correctness)
