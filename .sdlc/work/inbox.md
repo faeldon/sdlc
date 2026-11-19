@@ -574,3 +574,11 @@ extend, each answered by a read-only sub-agent on its pillar's data, in the fixe
 After S14 (184, landed). From docs/RETRO-SCORECARD.md's seeds.
 Theme: retro
 Raised 2026-11-20.
+
+## [2026-11-20-6] [idea] The person's experience at the retrospective (S16)
+
+S16: The person's experience — one rating and one line asked at the retrospective's approval,
+recorded in its report. A change to a WAIT, so Tier 2. After S14 (184, landed). From
+docs/RETRO-SCORECARD.md's seeds.
+Theme: retro
+Raised 2026-11-20.
