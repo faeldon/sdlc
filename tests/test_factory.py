@@ -116,7 +116,7 @@ def _build_report(root: Path, n: int, *lines: str) -> None:
 
 
 def _verified(root: Path, n: int, kept: list[str] = (), dropped: list[str] = ()) -> None:
-    """The verifier's answer for round `n`: each `role: change` kept, or dropped with a reason."""
+    """The arbiter's answer for round `n`: each `role: change` kept, or dropped with a reason."""
     folder = root / ".sdlc" / "work" / NAME / "reviews" / f"round-{n}"
     folder.mkdir(parents=True, exist_ok=True)
     lines = [f"- KEPT: {k}\n" for k in kept] + [
@@ -186,7 +186,7 @@ def test_light_is_a_table_checked_like_the_top_level(tmp_path: Path) -> None:
 
 def test_max_runs_is_shown_before_the_cost_is_approved() -> None:
     """At the full depth, whatever the diff turns out to need: the builder, the approver, and each
-    round's reviewers, verifier, builder resume and the builder's two fixes of a red gate."""
+    round's reviewers, arbiter, builder resume and the builder's two fixes of a red gate."""
     cfg = {"reviewers": ["code", "security", "test"], "rounds": 3, "models": {}}
     assert factory.max_runs(cfg) == 2 + 3 * (3 + 2 + 2)
 
@@ -310,7 +310,7 @@ def test_an_incomplete_round_is_reviewed_again_for_the_missing(tmp_path, capsys)
 def test_changes_rework_until_the_rounds_run_out(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     _round(root, 1, security="CHANGES")
-    assert (_verdicts(root, capsys)["next"], _verdicts(root, capsys)["round"]) == ("verify", 1)
+    assert (_verdicts(root, capsys)["next"], _verdicts(root, capsys)["round"]) == ("arbitrate", 1)
     _verified(root, 1, kept=["security: security fix 1"])
     assert (_verdicts(root, capsys)["next"], _verdicts(root, capsys)["round"]) == ("rework", 1)
     # The step the first version got wrong: once the builder has reworked, round 2 is reviewed,
@@ -1069,7 +1069,7 @@ def test_sdlc_reads_a_factory_built_change_like_any_other(tmp_path) -> None:
 def test_a_change_is_verified_before_any_rework(tmp_path, capsys) -> None:
     root = _change(tmp_path)
     _round(root, 1, code="CHANGES", security="CHANGES")
-    assert _verdicts(root, capsys)["next"] == "verify"
+    assert _verdicts(root, capsys)["next"] == "arbitrate"
     _verified(root, 1, kept=["code: code fix 1"], dropped=["security: security fix 1"])
     out = _verdicts(root, capsys)
     assert (out["next"], out["round"]) == ("rework", 1)
@@ -1113,7 +1113,7 @@ def test_the_verify_prompt_numbers_each_change_once(tmp_path, capsys) -> None:
     _review(root, 1, "behaviour", "VERDICT: PASS", "src/c.py:4: not asked, the verdict passed")
     folder = root / ".sdlc" / "work" / NAME
     state, _ = factory.run_state.loop_state(root, "008", None)
-    prompt, target, _ = factory._task(root, folder, state, "verify", "verifier", None)
+    prompt, target, _ = factory._task(root, folder, state, "arbitrate", "arbiter", None)
     listed = [line for line in prompt.splitlines() if line.startswith("- ")]
     assert listed == [
         "- C1: code: src/a.py:2: name it",
@@ -1137,7 +1137,7 @@ def test_the_landings_verify_prompt_numbers_as_its_read_does(tmp_path) -> None:
     }
     for role, text in texts.items():
         (land / f"{role}.md").write_text(text, encoding="utf-8")
-    prompt, _, _ = factory._land_task(root, folder, "land-verify", "verifier")
+    prompt, _, _ = factory._land_task(root, folder, "land-arbitrate", "arbiter")
     listed = [line for line in prompt.splitlines() if line.startswith("- ")]
     assert listed == ["- C1: code: src/a.py:2: name it", "- C2: test: src/a.py:1: test it"]
     (land / "verified.md").write_text("- KEPT: code: C1: x\n- DROPPED: test: C2: y — z\n")
@@ -1181,7 +1181,7 @@ def test_an_answer_by_id_takes_the_reviewers_text(tmp_path, capsys) -> None:
 
 
 def test_an_answer_in_its_own_words_resolves_by_its_lead(tmp_path, capsys) -> None:
-    """A round as the factory's first real run wrote it: one change, dropped, the verifier's
+    """A round as the factory's first real run wrote it: one change, dropped, the arbiter's
     summary of it in place of the reviewer's two sentences. Its files, as they are."""
     root = _change(tmp_path)
     _build_report(root, 1)
@@ -1258,7 +1258,7 @@ def test_a_finding_takes_its_tagged_pass_else_its_roles(role, text, found) -> No
 
 def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
     """A reviewer's `- NIT:` lines are read apart from its changes: they never make a verdict
-    CHANGES, never reach the verifier and are never reworked."""
+    CHANGES, never reach the arbiter and are never reworked."""
     root = _change(tmp_path)
     _build_report(root, 1)
     _review(root, 1, "code", "VERDICT: CHANGES", "src/a.py:2: name it")
@@ -1280,7 +1280,7 @@ def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
         "nits": [{"text": "[cost] src/b.py:1: a helper with one caller", **unweighed}],
     }  # fmt: skip
     state, _ = factory.run_state.loop_state(root, "008", None)
-    prompt, _, _ = factory._task(root, folder, state, "verify", "verifier", None)
+    prompt, _, _ = factory._task(root, folder, state, "arbitrate", "arbiter", None)
     assert "a long line" not in prompt and "one caller" not in prompt
     assert [line for line in prompt.splitlines() if line.startswith("- ")] == [
         "- C1: code: src/a.py:2: name it"
@@ -1390,7 +1390,7 @@ def _nits(root: Path, n: int, role: str, *nits: str) -> None:
 
 
 def _reworked(root: Path, *nits: str) -> Path:
-    """Round 1: code asks for a change the verifier keeps and raises `nits`; round 2, the rework,
+    """Round 1: code asks for a change the arbiter keeps and raises `nits`; round 2, the rework,
     every reviewer passes and raises none."""
     _round(root, 1, code="CHANGES")
     _nits(root, 1, "code", *nits)
@@ -1638,7 +1638,7 @@ def test_an_exhausted_run_must_escalate_and_ask_to_reconsider(tmp_path, capsys) 
 
 
 def _kept_again(root: Path, rounds: int = 2, change: str = "src/a.py:1: rename a") -> Path:
-    """`rounds` full rounds whose code reviewer asks for `change` each time and the verifier keeps
+    """`rounds` full rounds whose code reviewer asks for `change` each time and the arbiter keeps
     it, the rest passing."""
     for n in range(1, rounds + 1):
         _build_report(root, n)
@@ -1650,7 +1650,7 @@ def _kept_again(root: Path, rounds: int = 2, change: str = "src/a.py:1: rename a
 
 
 def test_a_change_kept_twice_escalates_before_the_rounds_run_out(tmp_path, capsys) -> None:
-    """136 R3: the verifier keeping the same `(role, change)` in two rounds of one run means a
+    """136 R3: the arbiter keeping the same `(role, change)` in two rounds of one run means a
     further round won't move it: round 2 of 3 goes to the approver, `exhausted` and `stuck` set,
     and only an ESCALATE with its section will do."""
     folder = _kept_again(_change(tmp_path))
@@ -1694,7 +1694,7 @@ def test_an_untestable_requirement_escalates_after_its_round(tmp_path, capsys) -
     root = _change(tmp_path)
     _build_report(root, 1, f"- UNTESTABLE: {line}\n")
     _round(root, 1, code="CHANGES")
-    assert _verdicts(root, capsys)["next"] == "verify", "verified first, as any round is"
+    assert _verdicts(root, capsys)["next"] == "arbitrate", "verified first, as any round is"
     _verified(root, 1, kept=["code: code fix 1"])
     out = _verdicts(root, capsys)
     assert (out["next"], out["round"], out["exhausted"]) == ("approve", 1, True), out
@@ -1840,7 +1840,7 @@ def test_what_earlier_rounds_answered_is_settled_and_a_repeat_is_named(tmp_path,
     _review(root, 2, "test", "VERDICT: PASS")
     _review(root, 2, "behaviour", "VERDICT: PASS")
     out = _verdicts(root, capsys)
-    assert out["next"] == "verify"
+    assert out["next"] == "arbitrate"
     assert out["settled"] == ["code: src/a.py:1: add a doc", "code: src/a.py:1: rename a"]
     assert out["repeats"] == ["code: src/a.py:1: add a doc"]
     assert out["untouched"] == ["code: README.md:1: old"], "pre-existing, never reworked"
@@ -1848,7 +1848,7 @@ def test_what_earlier_rounds_answered_is_settled_and_a_repeat_is_named(tmp_path,
 
 def test_a_change_asking_for_a_new_file_is_never_pre_existing(tmp_path, capsys) -> None:
     """The test reviewer's usual ask names a file that doesn't exist yet: the change is to create
-    it, so it reaches the verifier as any other, never as pre-existing."""
+    it, so it reaches the arbiter as any other, never as pre-existing."""
     root = _change(tmp_path)
     (root / "src").mkdir()
     (root / "src" / "a.py").write_text("a = 1\n")
@@ -2611,7 +2611,7 @@ def test_a_tier_two_at_plan_starts_with_a_spec_draft_and_shows_its_models(tmp_pa
     [("code", 1, "light", "sonnet"), ("test", 1, "full", "sonnet"),
      ("behaviour", 2, "light", "sonnet"), ("security", 1, "light", "opus"),
      ("builder", 1, "light", "opus"), ("approver", 1, "light", "opus"),
-     ("verifier", 1, "light", "sonnet"), ("spec-writer", 2, "full", "opus")],
+     ("arbiter", 1, "light", "sonnet"), ("spec-writer", 2, "full", "opus")],
 )  # fmt: skip
 def test_each_role_runs_on_its_model(role, tier, level, model) -> None:
     """136 R2: the scaled reviewers run on sonnet at either depth and tier, haiku nowhere unless
@@ -2761,7 +2761,7 @@ def test_the_ui_reviewers_join_on_a_ui_path_at_either_depth(tmp_path, capsys) ->
     out = _verdicts(root, capsys)
     assert out["depth"] == "light", "UI reviews never make a run full"
     assert out["missing"] == [*light, "ui", "ux"], "a run that looked at the page keeps looking"
-    # Each round: four reviewers, the two UI ones, the verifier, the rework and two gate fixes.
+    # Each round: four reviewers, the two UI ones, the arbiter, the rework and two gate fixes.
     assert factory.max_runs(factory.load_config(root)[0]) == 2 + 3 * (4 + 2 + 2 + 2)
 
 
@@ -3050,9 +3050,9 @@ def test_holds_picks_each_role_s_answer() -> None:
     assert factory.holds("behaviour", "Ran it.\nVERDICT: PASS")
     assert not factory.holds("code", "My verdict stands: PASS.")
     assert factory.holds("approver", "DECISION: READY") and not factory.holds("approver", "Ready.")
-    assert factory.holds("verifier", "- KEPT: code: C1: real")
-    assert factory.holds("verifier", "- DROPPED: code: C1: x — not there")
-    assert not factory.holds("verifier", "Nothing to keep.")
+    assert factory.holds("arbiter", "- KEPT: code: C1: real")
+    assert factory.holds("arbiter", "- DROPPED: code: C1: x — not there")
+    assert not factory.holds("arbiter", "Nothing to keep.")
     assert factory.holds("builder", "Built.\n\n## Evidence\n$ ./check.sh\nexit: 0")
     assert not factory.holds("builder", "Built.")
     assert factory.holds("spec-writer", "---\nid: 008\n---\n# 008")
@@ -3061,11 +3061,11 @@ def test_holds_picks_each_role_s_answer() -> None:
 
 @pytest.mark.portable
 def test_no_reviewer_runs_the_gate_or_waits_in_the_background() -> None:
-    """140 R9: every reviewer and the verifier is told the gate is the script's, where its record
+    """140 R9: every reviewer and the arbiter is told the gate is the script's, where its record
     is, and to start nothing in the background, whose notice wakes the session after its reply;
     none is told to run the gate."""
     agents = Path(__file__).parents[1] / "plugins" / "factory" / "agents"
-    files = [*sorted(agents.glob("reviewer-*.md")), agents / "verifier.md"]
+    files = [*sorted(agents.glob("reviewer-*.md")), agents / "arbiter.md"]
     assert len(files) == len(factory.REVIEWERS) + 1
     runs_gate = re.compile(r"(?<!never )\brun (?:the repo's )?(?:tests or )?(?:the )?gate\b", re.I)
     for path in files:
@@ -3107,7 +3107,7 @@ def test_a_verdict_after_prose_is_read(tmp_path, capsys) -> None:
     assert reply.read_text(encoding="utf-8") == text, "read in place, never rewritten"
     reply.write_text("Status: reviewed\nVERDICT: CHANGES\n- CHANGE: code fix 1\n", "utf-8")
     out = _verdicts(root, capsys)
-    assert out["next"] == "verify" and out["rounds"][0]["reviews"]["code"]["changes"] == [
+    assert out["next"] == "arbitrate" and out["rounds"][0]["reviews"]["code"]["changes"] == [
         "code fix 1"
     ], out
     reply.write_text("VERDICT: PASS\n", encoding="utf-8")
@@ -3150,13 +3150,13 @@ def test_the_hand_back_says_what_the_run_cost(tmp_path, capsys) -> None:
     rows = [
         {"session": "s-1", "role": "builder", "model": "opus", "cost_usd": 1.0},
         {"session": "s-2", "role": "code", "model": "sonnet", "cost_usd": 0.25},
-        {"session": "s-3", "role": "verifier", "model": "sonnet", "cost_usd": 0.125},
+        {"session": "s-3", "role": "arbiter", "model": "sonnet", "cost_usd": 0.125},
     ]
     text = "".join(json.dumps(r) + "\n" for r in rows)
     (folder / "runs" / "costs.jsonl").write_text(text, encoding="utf-8")
     code, out = _run(capsys, factory.cmd_stage, root, "008", "test")
     assert code == 0 and out["cost"]["usd"] == 1.375
-    assert out["cost"]["by_role"] == {"builder": 1.0, "code": 0.25, "verifier": 0.125}
+    assert out["cost"]["by_role"] == {"builder": 1.0, "code": 0.25, "arbiter": 0.125}
     assert out["cost"]["by_model"] == {"opus": 1.0, "sonnet": 0.375}
     code, out = _run(capsys, factory.cmd_stage, root, "008", "build")
     assert "cost" not in out, "only the hand-back reports it"
@@ -3268,7 +3268,7 @@ def test_an_approver_s_disagreeing_decisions_are_mended_by_the_approver(
 
 def test_a_verifier_s_unread_answers_are_mended_once(tmp_path, capsys, claude, monkeypatch):
     """109 R10: a verified.md whose answers the script can't read (here in another shape) is a
-    stop the run mends once, resuming the verifier, told what the script found; a second is a
+    stop the run mends once, resuming the arbiter, told what the script found; a second is a
     stop like any other."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
@@ -3276,21 +3276,21 @@ def test_a_verifier_s_unread_answers_are_mended_once(tmp_path, capsys, claude, m
     verified = folder / "reviews" / "round-1" / "verified.md"
     verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
     out = _verdicts(root, capsys)
-    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["verifier"]), out
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["arbiter"]), out
     (folder / "runs").mkdir()
-    (folder / "runs" / "verifier.sessions").write_text("s-v\n", encoding="utf-8")
+    (folder / "runs" / "arbiter.sessions").write_text("s-v\n", encoding="utf-8")
     monkeypatch.setenv("FAKE_CLAUDE_REPLY", "- KEPT: code: C1: code fix 1")
-    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "verifier", None)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "arbiter", None)
     assert code == 0 and out["to"] == f".sdlc/work/{NAME}/reviews/round-1/verified.md", out
     argv = claude()[-1]["argv"]
-    assert argv[-2:] == ["--resume", "s-v"] and "sdlc-factory:verifier" in argv
+    assert argv[-2:] == ["--resume", "s-v"] and "sdlc-factory:arbiter" in argv
     assert "code fix 1 0 times, not once" in argv[1] and "- KEPT: <role>: C<n>:" in argv[1]
     assert verified.read_text(encoding="utf-8") == "- KEPT: code: C1: code fix 1\n"
     assert _verdicts(root, capsys)["next"] == "rework"
     verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
     assert _verdicts(root, capsys)["way"] == "rerun"
     calls = len(claude())
-    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "verifier", None)
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "arbiter", None)
     assert code == 1 and "mended once" in out["refusals"][0] and len(claude()) == calls
 
 
@@ -3906,7 +3906,7 @@ def test_a_reviewed_round_is_never_gated_after_the_fact(tmp_path, capsys) -> Non
     _gate_config(root, "true")
     _round(root, 1, code="CHANGES")
     out = _verdicts(root, capsys)
-    assert (out["next"], out["round"]) == ("verify", 1) and out["problems"] == []
+    assert (out["next"], out["round"]) == ("arbitrate", 1) and out["problems"] == []
 
 
 def test_close_counts_the_red_gates_only_for_a_run_that_had_one(tmp_path, capsys) -> None:
@@ -4315,7 +4315,7 @@ def test_record_writes_the_runs_depth(tmp_path, capsys) -> None:
 
 @pytest.mark.portable
 def test_record_writes_an_early_stops_reason(tmp_path, capsys) -> None:
-    """2026-11-18-33: a run stopped early, `stuck` (a change its verifier kept two rounds running)
+    """2026-11-18-33: a run stopped early, `stuck` (a change its arbiter kept two rounds running)
     or `untestable` (the requirements its builder says no test can show), has the reason in
     `runs/step.md` as `- STUCK:` and `- UNTESTABLE:` lines `read_step()` reads back, for the
     board's card; a run not stopped early has none; a stop's record carries them too."""
@@ -5159,7 +5159,7 @@ def test_a_green_check_writes_nothing_and_never_clears_the_gate(tmp_path, capfd)
 
 def test_the_builders_prompts_name_the_check_command(tmp_path, capsys) -> None:
     """155 R6: every prompt the builder is sent names the full `check` command, this factory's
-    own script by its absolute path; no reviewer's, verifier's or approver's does."""
+    own script by its absolute path; no reviewer's, arbiter's or approver's does."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     line = f"uv run --quiet --script {factory.FACTORY_SCRIPT.as_posix()} check 008"
@@ -5186,7 +5186,7 @@ def test_the_builders_prompts_name_the_check_command(tmp_path, capsys) -> None:
     assert line in prompt(state, "rework", "builder")
     assert line in prompt(state, "decided", "builder", "D1")
     assert line in prompt(state, "mend", "builder")
-    for task, role, step in (("review", "code", "review"), ("verify", "verifier", "verify"),
+    for task, role, step in (("review", "code", "review"), ("arbitrate", "arbiter", "arbitrate"),
                              ("approve", "approver", "approve")):  # fmt: skip
         told = prompt({**state, "next": step, "missing": ["code"]}, task, role)
         assert "check 008" not in told, (task, told)
@@ -5689,7 +5689,7 @@ def test_fresh_holds_an_upgraded_run(tmp_path, capsys, monkeypatch, stage) -> No
 
 @pytest.mark.portable
 def test_the_upgraded_record_pattern_is_a_pinned_copy() -> None:
-    """R12: `sdlc.py`'s `check` reads the record by its own copy of the factory's pattern."""
+    """R12: `sdlc.py`'s `vet` reads the record by its own copy of the factory's pattern."""
     assert sdlc.factory_records.UPGRADED_FILE_RE.pattern == factory.UPGRADED_FILE_RE.pattern
     assert sdlc.factory_records.UPGRADED_FILE_RE.match("round-12.upgraded.md").group(1) == "12"
 
@@ -5718,7 +5718,7 @@ def test_an_upgrade_or_spec_record_keeps_the_step_it_paused_at(tmp_path, capsys)
 # ---------------------------------------------------------------- the build gate's question
 
 TAIL = (
-    "a verifier checks each round's changes, the approver decides, at most 26 agent runs, agents "
+    "an arbiter weighs each round's findings, the approver decides, at most 26 agent runs, agents "
     "in auto, all left uncommitted at stage: test?"
 )
 
@@ -5770,7 +5770,7 @@ def test_the_build_question_names_ui_review_only_when_it_can_run(tmp_path, capsy
     _git(root, "checkout", "-q", NAME)
     clause = (
         "review it in up to 3 rounds, and, on a diff touching web/, *.css, the ui and ux "
-        "reviewers, which start npm run dev, a verifier"
+        "reviewers, which start npm run dev, an arbiter"
     )
     assert (clause in _question(root, capsys)) is (missing is None)
 
@@ -5791,7 +5791,7 @@ def test_the_build_question_sends_an_escalated_change_back(tmp_path, capsys) -> 
     assert _question(root, capsys) == (
         f"Send {NAME} back to the factory: decision.md kept as decision-1.md, the builder rebuilds "
         "from round 4 with the approver's reasons, with no gate configured, code, security, test "
-        "and behaviour review it in up to 3 more rounds, a verifier checks each round's changes, "
+        "and behaviour review it in up to 3 more rounds, an arbiter weighs each round's findings, "
         "the approver decides again, at most 26 agent runs, agents in auto, all left uncommitted "
         "at stage: test? (yes / change the reviewers or rounds / no)"
     )
@@ -5804,8 +5804,8 @@ def test_the_build_question_carries_on_an_upgraded_run(tmp_path, capsys) -> None
         f"Write this spec and carry on {NAME}'s factory run as Tier 2: the builder, resumed, "
         "rewrites plan.md against it and builds round 2, with no gate configured, code, security, "
         "test and behaviour review it in up to 3 more rounds (or code, test and behaviour in up "
-        "to 2 rounds when the diff touches no sensitive path), a verifier checks each round's "
-        "changes, the approver decides, at most 26 more agent runs, agents in auto, all left "
+        "to 2 rounds when the diff touches no sensitive path), an arbiter weighs each round's "
+        "findings, the approver decides, at most 26 more agent runs, agents in auto, all left "
         "uncommitted at stage: test? (yes / revise a requirement / change the reviewers or "
         "rounds / no)"
     )
@@ -6046,14 +6046,14 @@ def test_every_task_has_a_purpose() -> None:
         ("build", "builder", 1, 1, "build"), ("build", "builder", 2, 1, "rework"),
         ("build", "builder", 3, 3, "build"), ("build", "builder", 4, 3, "rework"),
         ("review", "code", 1, 1, "build"), ("review", "code", 2, 1, "rework"),
-        ("verify", "verifier", 1, 1, "build"), ("verify", "verifier", 2, 1, "rework"),
+        ("arbitrate", "arbiter", 1, 1, "build"), ("arbitrate", "arbiter", 2, 1, "rework"),
         ("decided", "builder", 1, 1, "build"), ("decided", "builder", 2, 1, "rework"),
         ("approve", "approver", 1, 1, "build"), ("approve", "approver", 3, 1, "build"),
         ("rework", "builder", 1, 1, "rework"), ("fix", "builder", 1, 1, "gate-fix"),
-        ("mend", "code", 1, 1, "mend"), ("land-mend", "verifier", None, 1, "mend"),
+        ("mend", "code", 1, 1, "mend"), ("land-mend", "arbiter", None, 1, "mend"),
         ("resolve", "builder", None, 1, "land"), ("train-resolve", "resolver", None, 1, "land"),
         ("land-fix", "builder", None, 1, "land"), ("land-review", "code", None, 1, "land"),
-        ("land-verify", "verifier", None, 1, "land"),
+        ("land-arbitrate", "arbiter", None, 1, "land"),
     ],
 )  # fmt: skip
 def test_purpose_by_task_and_round(task, role, rnd, first, purpose) -> None:
@@ -6125,3 +6125,88 @@ def test_a_run_with_no_figures_leaves_the_next_try_its_own_purpose(
     assert code == 0, out
     rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
     assert [(r["task"], r["purpose"]) for r in rows] == [("build", "build"), ("review", "build")]
+
+
+@pytest.mark.parametrize(
+    "argv", [["--task", "review", "--role", "verifier"], ["--task", "verify"],
+             ["--task", "land-verify"]], ids=["role", "task", "land-task"],
+)  # fmt: skip
+def test_the_verifier_role_and_task_are_gone(tmp_path, argv) -> None:
+    """187 R12: the verifier is the arbiter, with no alias: argparse refuses the old names."""
+    run = subprocess.run(
+        [sys.executable, str(FACTORY_PY), "agent", "008", *argv],
+        cwd=tmp_path, capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    assert run.returncode == 2, run.stdout + run.stderr
+    assert "invalid choice" in run.stderr
+    assert "arbiter" in factory.ROLES and "verifier" not in factory.ROLES
+    assert {"arbitrate", "land-arbitrate"} <= set(factory.TASKS)
+    assert not {"verify", "land-verify"} & set(factory.TASKS)
+
+
+def test_models_verifier_is_an_unknown_role() -> None:
+    """187 R16: `[models] verifier` has no shim. It warns like any unknown role, and the arbiter
+    runs on `[models] arbiter` or its default, `sonnet`."""
+    models, warnings = factory._models({"verifier": "opus"})
+    assert any("unknown role 'verifier'" in w for w in warnings), warnings
+    cfg = factory.load_config(Path("/nonexistent"))[0]
+    assert factory.model_for("arbiter", {**cfg, "models": models}, 2, "full") == "sonnet"
+    models, warnings = factory._models({"verifier": "opus", "arbiter": "haiku"})
+    assert factory.model_for("arbiter", {**cfg, "models": models}, 2, "full") == "haiku"
+    assert len(warnings) == 1
+
+
+def test_the_arbiter_writes_verified_md(tmp_path, capsys, claude, monkeypatch) -> None:
+    """187 R13: the arbiter runs as `sdlc-factory:arbiter` on `--task arbitrate`, and its answers
+    land in the round's `verified.md`, which keeps its name."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1, code="CHANGES")
+    assert _verdicts(root, capsys)["next"] == "arbitrate"
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "- KEPT: code: C1: code fix 1")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "arbitrate", None, None)
+    assert code == 0 and out["to"] == f".sdlc/work/{NAME}/reviews/round-1/verified.md", out
+    argv = claude()[-1]["argv"]
+    assert "sdlc-factory:arbiter" in argv
+    assert (folder / "runs" / "arbiter.sessions").is_file()
+    text = (folder / "reviews" / "round-1" / "verified.md").read_text(encoding="utf-8")
+    assert text == "- KEPT: code: C1: code fix 1\n"
+    assert _verdicts(root, capsys)["next"] == "rework"
+
+
+def test_an_old_verifier_mend_counts_for_its_round(tmp_path, capsys) -> None:
+    """187 R14: a `verifier <n>` line in `runs/mended`, written before the rename, is the
+    arbiter's mend for round n, so the run doesn't mend it a second time."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1, code="CHANGES")
+    verified = folder / "reviews" / "round-1" / "verified.md"
+    verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["arbiter"]), out
+    (folder / "runs").mkdir()
+    (folder / "runs" / "mended").write_text("verifier 1\n", encoding="utf-8")
+    assert factory.mended(folder) == {("arbiter", 1)}
+    assert _verdicts(root, capsys)["way"] == "rerun", "mended once already, as the verifier"
+    assert factory.RENAMED == {
+        "verifier": "arbiter",
+        "verify": "arbitrate",
+        "land-verify": "land-arbitrate",
+    }
+
+
+def test_an_old_verifier_session_is_resumed_as_the_arbiter(tmp_path, capsys, claude, monkeypatch):
+    """187 R14: a run in flight when the plugin updated holds `runs/verifier.sessions`; a mend of
+    the arbiter resumes that session rather than refusing for want of `arbiter.sessions`."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _round(root, 1, code="CHANGES")
+    verified = folder / "reviews" / "round-1" / "verified.md"
+    verified.write_text("- **KEPT:** code: C1: code fix 1\n", encoding="utf-8")
+    (folder / "runs").mkdir()
+    (folder / "runs" / "verifier.sessions").write_text("s-v\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "- KEPT: code: C1: code fix 1")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "arbiter", None)
+    assert code == 0, out
+    argv = claude()[-1]["argv"]
+    assert argv[-2:] == ["--resume", "s-v"] and "sdlc-factory:arbiter" in argv

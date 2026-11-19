@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(uv run --quiet --script */scripts/sdlc.py status *)",
-      "Bash(uv run --quiet --script */scripts/sdlc.py check *)",
+      "Bash(uv run --quiet --script */scripts/sdlc.py vet *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py config *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py next *)",
       "Bash(uv run --quiet --script */scripts/sdlc.py undone *)",

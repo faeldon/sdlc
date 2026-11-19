@@ -71,7 +71,7 @@ def test_every_fixture_passes_check(fixture: str, tmp_path: Path) -> None:
     _scaffold(fixture, repo)
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     checked = subprocess.run(
-        ["uv", "run", "--quiet", "--script", str(SCRIPT), "check", "--strict"],
+        ["uv", "run", "--quiet", "--script", str(SCRIPT), "vet", "--strict"],
         cwd=repo, capture_output=True, encoding="utf-8", env=env,
     )  # fmt: skip
     assert checked.returncode == 0, checked.stdout + checked.stderr

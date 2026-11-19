@@ -43,7 +43,7 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
   otherwise skipped with why. Factory: `reviewer-ux`, when the factory's UI review is set up.
   Pass: correctness.
 - **false-positives**: a finding checked against the code before anyone acts on it. Ship: the
-  person answers each finding. Factory: the verifier keeps or drops each required change.
+  person answers each finding. Factory: the arbiter keeps or drops each required change.
 - **pre-existing**: a fault the diff didn't make, filed rather than fixed. Ship: proposed as a
   bug. Factory: carried to the change's notes, and proposed as a bug when it lands.
 - **nits**: the small things, weighed and filed. Ship: weighed and proposed as nit entries.
@@ -52,7 +52,7 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
 - **fresh-eyes**: a reviewer that never saw the session that built it. Ship: the fresh reviewer
   and `sdlc:security` on a sensitive path, and `sdlc:ui` and `sdlc:ux` on a page with current
   screenshots. Factory: every agent.
-- **acceptance**: the change's acceptance checks run. Ship: its checks step. Factory: the
+- **acceptance**: the change's acceptance checks run. Ship: its acceptance step. Factory: the
   landing runs them.
 - **recovery**: how to undo what a revert can't. Ship: `How to recover:`. Factory: the approver's
   way back for each irreversible path.
@@ -109,8 +109,8 @@ not a quiet exception.
 Two apply everywhere:
 
 - **Confirm before writing.** Any new path that writes something real drafts it, shows it, and
-  waits for a yes. Approval is per-invocation, never standing. A write path that doesn't gate is
-  blocking.
+  waits for a yes. Approval is per-invocation, never standing. A write path that doesn't wait for
+  approval is blocking.
 - **No secrets in the repo.** A key, token or password committed in any form is blocking.
 
 ## Pass 3 — Cost and simplification
@@ -141,8 +141,9 @@ Two apply everywhere:
 - **Recommend what to fix now, and say how.** A finding whose fix is small (cost S) and touches
   only files the diff already changes, Important or Nit, is proposed for fixing before the commit,
   with the exact change on a line of its own. The person's yes approves that change, and the
-  commit still waits for the checks and this review to come back clean on it. A fix bigger than
-  that is never folded into a yes: an Important one is fixed and reviewed again first.
+  commit still waits for the gate, the acceptance checks and this review to come back clean on
+  it. A fix bigger than that is never folded into a yes: an Important one is fixed and reviewed
+  again first.
 - **A second reviewer's findings count like any.** On a diff that touches a sensitive path, a
   reviewer that never saw the session that built it reviews the diff too. Each of its findings is
   answered like the review's own, and one that can't be confirmed from its evidence is dismissed

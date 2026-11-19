@@ -192,7 +192,7 @@ DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 # Every role a model can be set for, and the reviewers a repo can choose among.
 ROLES = (
-    "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "verifier",
+    "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "arbiter",
     "approver", "resolver",
 )  # fmt: skip
 REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
@@ -232,7 +232,7 @@ MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"
 # and the gate and the landing review read what it merged.
 # The supervisor is the person's own session, never set here.
 FIXED_MODELS = {
-    "spec-writer": "opus", "builder": "opus", "security": "opus", "verifier": "sonnet",
+    "spec-writer": "opus", "builder": "opus", "security": "opus", "arbiter": "sonnet",
     "approver": "opus", "resolver": "sonnet",
 }  # fmt: skip
 SCALED = ("code", "test", "behaviour", "ui", "ux")
@@ -273,7 +273,7 @@ NIT_VALUES = ("med", "low")
 PASSES = ("correctness", "contract", "cost", "context")
 PASS_TAG_RE = re.compile(r"^\[([a-z]+)\]\s*(.*)$")
 ROLE_PASS = {"security": "contract"}
-# The verifier's answer to each `CHANGE:` of a round, in `reviews/round-<N>/verified.md`: kept for
+# The arbiter's answer to each `CHANGE:` of a round, in `reviews/round-<N>/verified.md`: kept for
 # the builder, or dropped with why (after the last ` — `).
 VERIFIED = "verified.md"
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
@@ -283,7 +283,7 @@ KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(?!\s*(?i:none|n/?a)\.?\s*$)(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 DROP_WHY = " — "
-# An answer may open with its change's id, `C<n>`, as the verify prompt numbers them
+# An answer may open with its change's id, `C<n>`, as the arbitrate prompt numbers them
 # (`asked_changes()`), then say the change in its own words.
 ID_RE = re.compile(r"^C(\d+):\s*(.*)$")
 # What an approver must write when the rounds ran out with changes still kept.
@@ -362,6 +362,8 @@ SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 # How long it waited for a gate slot first (`gate_slot()`'s `waited`, 0.0 for none), for the
 # retrospective's gate figures: an attempt from before the line has no wait, never 0.
 WAITED_RE = re.compile(r"^Waited: (\d+(?:\.\d+)?)\s*$")
+# The heading the gate's output tail follows, each of its lines indented by four spaces.
+TAIL_RE = re.compile(r"^Last \d+ lines of its output:\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -413,7 +415,7 @@ FINDINGS_HEAD = """\
 > write their agents' findings into it; `By:` names who raised one: `fresh` for ship's
 > fresh-context reviewer, a factory role (`code`, `test`, …) for an agent, and no line on ship's
 > own. A rerun keeps each id, marks one the diff no longer shows `fixed`, and never raises again
-> one the person answered `wrong`, `intentional` or `minor`; an agent's `wrong` is its verifier's,
+> one the person answered `wrong`, `intentional` or `minor`; an agent's `wrong` is its arbiter's,
 > never the person's, and the same fault worded differently is one more. `sdlc.py` reads each
 > heading and its `Evidence:`, `Class:`, `Disposition:`, `Reason:`, `By:` and `Fix:` lines, counts
 > ship's own alone into the `Sdlc-Findings` trailer (its `agents=` says how many it left out),
@@ -841,7 +843,7 @@ def work_rel(root: Path) -> str:
 
 def max_runs(cfg: dict) -> int:
     """The most agent runs one build can take, at the full depth: the builder, the approver, and
-    each round's reviewers, verifier, builder resume and the builder's fixes of a red gate. An
+    each round's reviewers, arbiter, builder resume and the builder's fixes of a red gate. An
     upper bound to show before a person approves the cost, whatever depth the diff turns out to
     need. With `[ui]` complete, the UI reviewers are counted in every round, since any round's
     diff can touch its paths."""
@@ -1055,7 +1057,7 @@ def build_question(start: dict, check: str | None, sensitive: list[str]) -> str:
     again = " again" if restart else ""
     runs = f"at most {start['max_runs']}{' more' if upgraded else ''} agent runs"
     tail = (
-        f", a verifier checks each round's changes, the approver decides{again}, {runs}, agents "
+        f", an arbiter weighs each round's findings, the approver decides{again}, {runs}, agents "
         f"in {start['mode']}, all left uncommitted at stage: test?"
     )
     if restart:
@@ -1170,7 +1172,7 @@ def read_rounds(
 ) -> tuple[list[dict], list[str]]:
     """Every `reviews/round-<N>/`, in order (the landing's `reviews/land-<n>/` with `kind`
     `land`): each reviewer's verdict, the changes it asks for, the pre-existing problems it found
-    and its nits, the verifier's answer when there is one, and whether the round is complete for
+    and its nits, the arbiter's answer when there is one, and whether the round is complete for
     `reviewers`, the ones the run's depth expects. A file with no verdict `opening()` reads is a
     problem, never a guess."""
     base = folder / "reviews"
@@ -1248,8 +1250,8 @@ def _disagrees(path: Path, regex: re.Pattern) -> bool:
 def asked_changes(reviews: dict) -> list[tuple[str, str, str]]:
     """The changes a round's `CHANGES` verdicts ask for, as `(id, role, text)`: each `(role,
     text)` once, numbered `C1`… in `REVIEWERS` order (any other role after, by name), then each
-    file's line order. The verify prompt and `read_verified()` both number from here, so an id
-    means the same change to the verifier and to the script."""
+    file's line order. The arbitrate prompt and `read_verified()` both number from here, so an id
+    means the same change to the arbiter and to the script."""
     roles = [r for r in REVIEWERS if r in reviews] + sorted(set(reviews) - set(REVIEWERS))
     asked = dict.fromkeys(
         (role, c)
@@ -1294,7 +1296,7 @@ def _resolve(role: str, text: str, asked: list, label: str) -> tuple[str | None,
 def read_verified(
     path: Path, n: int, reviews: dict, where: str | None = None
 ) -> tuple[dict | None, list[str]]:
-    """The verifier's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Each
+    """The arbiter's `KEPT` and `DROPPED` lines for round `n`, or None before it answered. Each
     answer is resolved to the change it names (`_resolve()`) and carries the reviewer's text, so
     every reader sees the change as it was asked. Every `CHANGE:` the round's `CHANGES` verdicts
     ask for is answered exactly once, and every answer names one: anything else is a problem, so
@@ -2179,7 +2181,7 @@ def stop_text(
 
 def early_lines(stuck: list[str], untestable: list[str]) -> list[str]:
     """The lines a record carries for a run stopped early (`early_stop()`): `- STUCK:` for each
-    change its verifier kept two rounds running, `- UNTESTABLE:` for each requirement its builder
+    change its arbiter kept two rounds running, `- UNTESTABLE:` for each requirement its builder
     says no test can show. For the board's card; the loop never reads them back."""
     lines = [f"- STUCK: {' '.join(s.split())}" for s in stuck or ()]
     return lines + [f"- UNTESTABLE: {' '.join(u.split())}" for u in untestable or ()]
@@ -2370,10 +2372,10 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
       more than `GATE_FIXES` times in a round is a `stop`.
     - `review`: run the reviewers for `round` (all of them, or the `missing` ones), once its
       gate is green or the base branch names none (`gate` null, `gate_why`).
-    - `verify`: run the verifier on `round`'s changes, before any rework.
+    - `arbitrate`: run the arbiter on `round`'s changes, before any rework.
     - `rework`: resume the builder with `round`'s kept changes; its report is
       `build/round-<round+1>.md`. Never when the round stopped the run early (`early_stop()`):
-      `stuck`, the changes its verifier kept two rounds running, or `untestable`, the requirements
+      `stuck`, the changes its arbiter kept two rounds running, or `untestable`, the requirements
       its builder report says no test can show.
     - `approve`: carry what's unresolved to notes.md and run the approver; `exhausted` when the
       rounds ran out with changes kept or the run stopped early, and the approver must escalate.
@@ -2392,7 +2394,7 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
 
     A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
     missing `## Evidence`, verdict lines that disagree in the last round (`preamble()`), the
-    verifier's unread answers in the last round, or decision lines that disagree
+    arbiter's unread answers in the last round, or decision lines that disagree
     (`decision_preamble()`), with the roles to mend in `mend`, `rerun` otherwise. A role is mended
     once a round: one `runs/mended` names for that round no longer counts as mendable.
 
@@ -2405,7 +2407,7 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
 
     Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
     changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
-    raised again), and for the verifier, `repeats` (a change raised again) and `untouched` (one on
+    raised again), and for the arbiter, `repeats` (a change raised again) and `untouched` (one on
     a path the change doesn't touch: pre-existing, never reworked); and `handed`, the cheap nits
     (`cheap_nits()`) a `rework` gives the builder beside its kept changes, or that the `review`
     after it names to the roles that raised them. Nits never make a step: a round with nits and no
@@ -2446,8 +2448,8 @@ def cli_verdicts(root: Path, args) -> int:
 
 
 def cmd_carry(root: Path, ident: str) -> int:
-    """Each change the last complete round still asks for and the verifier kept (every one, in a
-    round from before there was a verifier), every pre-existing problem a reviewer found, and each
+    """Each change the last complete round still asks for and the arbiter kept (every one, in a
+    round from before there was an arbiter), every pre-existing problem a reviewer found, and each
     nit weighed `high` or `L` (`agent_findings()`'s `note`), as an unticked `- [ ]` line in
     notes.md, so `/sdlc:ship` must give each a disposition. Once only: a line already there,
     ticked or not, isn't added again. Then the record: every agent finding of every complete
@@ -2497,7 +2499,7 @@ def cli_carry(root: Path, args) -> int:
 
 
 def reworked_round(rounds: list[dict], n: int) -> bool:
-    """Whether round `n`'s rework ran, read from the rounds alone: its verifier kept a change, and
+    """Whether round `n`'s rework ran, read from the rounds alone: its arbiter kept a change, and
     round `n + 1` was built, but not as a restart's or an upgrade's first round, which starts
     fresh. Its cheap nits (`cheap_nits()`) were handed to the builder then."""
     this = next((r for r in rounds if r["round"] == n), None)
@@ -2509,10 +2511,10 @@ def reworked_round(rounds: list[dict], n: int) -> bool:
 def agent_findings(rounds: list[dict]) -> list[dict]:
     """Every distinct `(role, text)` the complete `rounds` raised, as the record's findings, in
     round order (the build's rounds, then the landing's), then `REVIEWERS` order, then each file's
-    order (its changes, its pre-existing problems, its nits): a change the verifier kept is
+    order (its changes, its pre-existing problems, its nits): a change the arbiter kept is
     `fixed`, or `recorded` while the last complete build round still carries it to notes.md, or
     the last landing round kept it and no later one followed; one it dropped is `wrong` with its
-    why; a pre-existing problem `recorded`. In a round from before there was a verifier, every
+    why; a pre-existing problem `recorded`. In a round from before there was an arbiter, every
     change counts as kept. A change asked under a `PASS` verdict was never asked. The same
     `(role, text)` in a build round and a landing round is one finding, the first.
 
@@ -2735,14 +2737,25 @@ def land_checks_path(folder: Path, n: int) -> Path:
 
 
 def read_gate_file(path: Path) -> dict | None:
-    """A gate file's attempts, oldest first, or None when there is none."""
+    """A gate file's attempts, oldest first, or None when there is none: each its verdict, build,
+    exit, the command it ran (None before the `Command:` line) and its output's tail, unindented
+    ([] for none)."""
     if not path.is_file():
         return None
     attempts: list[dict] = []
+    in_tail = False
     for line in path.read_text(encoding="utf-8").splitlines():
         # The gate's output is indented, so a line of it never reads as a record's.
         if line.startswith("## Attempt "):
-            attempts.append({"verdict": None, "build": None, "exit": None})
+            attempts.append({"verdict": None, "build": None, "exit": None, "command": None,
+                             "tail": []})  # fmt: skip
+            in_tail = False
+        elif in_tail and line.startswith("    "):
+            attempts[-1]["tail"].append(line[4:])
+        elif attempts and line.startswith("Command: "):
+            attempts[-1]["command"] = line[len("Command: ") :].strip()
+        elif attempts and TAIL_RE.match(line):
+            in_tail = True
         elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
             attempts[-1]["verdict"] = m.group(1)
         elif attempts and (m := BUILD_RE.match(line)):
@@ -3411,7 +3424,7 @@ COSTS = Path("runs") / "costs.jsonl"
 PURPOSES = ("spec", "build", "rework", "gate-fix", "mend", "rerun", "land")
 WASTE = ("rework", "gate-fix", "mend", "rerun", "ejected", "dropped")
 RERUNNABLE = (
-    "build", "rework", "review", "verify", "approve", "mend", "land-review", "land-verify",
+    "build", "rework", "review", "arbitrate", "approve", "mend", "land-review", "land-arbitrate",
     "land-mend",
 )  # fmt: skip
 EJECTIONS = Path("runs") / "ejections.jsonl"
@@ -3461,17 +3474,17 @@ LAND_TIMES = Path("runs") / "land-times.jsonl"
 # before its commit; after a rebase the checks run inside the gate's step), `ship` (its commit),
 # `rebase` (a landing again), `stack` (the train stacking it), `wait` (a train's change waiting its
 # turn), `resolve` (an agent on a conflict), `fix` (the builder on the person's fix), `gate`,
-# `recheck` (the acceptance checks again, after the commit), `review`, `mend`, `verify`, `close`,
+# `recheck` (the acceptance checks again, after the commit), `review`, `mend`, `arbitrate`, `close`,
 # `eject` (the train put it back, a stop with its reason) and `stop`.
 LAND_STEPS = (
     "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
-    "review", "mend", "verify", "close", "eject",
+    "review", "mend", "arbitrate", "close", "eject",
 )  # fmt: skip
 # The landing tasks `agent` runs, and the step each records as it starts: the approver judging a
 # changed `checks.md` is the checks' own step after the commit, `recheck`.
 LAND_TASK_STEP = {
     "resolve": "resolve", "train-resolve": "resolve", "land-fix": "fix", "land-review": "review",
-    "land-verify": "verify", "land-mend": "mend", "land-checks": "recheck",
+    "land-arbitrate": "arbitrate", "land-mend": "mend", "land-checks": "recheck",
 }  # fmt: skip
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
 # decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
@@ -3504,40 +3517,47 @@ USAGE_FIELDS = {
     "cache_create": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens",
 }  # fmt: skip
 TASKS = (
-    "spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
-    "train-resolve", "land-fix", "land-review", "land-verify", "land-mend", "land-checks",
+    "spec", "build", "fix", "review", "arbitrate", "rework", "decided", "mend", "approve",
+    "resolve", "train-resolve", "land-fix", "land-review", "land-arbitrate", "land-mend",
+    "land-checks",
 )  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
-    "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
+    "spec": "spec-writer", "build": "builder", "fix": "builder", "arbitrate": "arbiter",
     "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
-    "train-resolve": "resolver", "land-fix": "builder", "land-verify": "verifier",
+    "train-resolve": "resolver", "land-fix": "builder", "land-arbitrate": "arbiter",
     "land-checks": "approver",
 }  # fmt: skip
 # Each task's purpose, but those `purpose_of()` reads from the round (`ROUND_PURPOSE`).
 TASK_PURPOSE = {
     "spec": "spec", "approve": "build", "rework": "rework", "fix": "gate-fix", "mend": "mend",
     "land-mend": "mend", "resolve": "land", "train-resolve": "land", "land-fix": "land",
-    "land-review": "land", "land-verify": "land", "land-checks": "land",
+    "land-review": "land", "land-arbitrate": "land", "land-checks": "land",
 }  # fmt: skip
 # The tasks that are the build in the run's first round and rework after it.
-ROUND_PURPOSE = ("build", "review", "verify", "decided")
+ROUND_PURPOSE = ("build", "review", "arbitrate", "decided")
 # The landing's tasks: the builder resolving a rebase's conflicts or making a fix the person asked
 # for, the resolver resolving a train's, the review of the change as it now stands on the base
 # branch, and the mend of a landing reply `land-verdicts` names. Never steps of the build's loop,
 # so `verdicts` names none.
 LAND_TASKS = (
-    "resolve", "train-resolve", "land-fix", "land-review", "land-verify", "land-mend",
+    "resolve", "train-resolve", "land-fix", "land-review", "land-arbitrate", "land-mend",
     "land-checks",
 )  # fmt: skip
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
-TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
+TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "arbitrate": "arbitrate",
              "rework": "rework", "approve": "approve"}  # fmt: skip
 # What the builder resumes on when a task carries on its own session. Never `train-resolve`: the
 # resolver is a session of its own, with every change in the train, not one change's builder.
 RESUMES = ("fix", "rework", "decided", "mend", "resolve", "land-fix")
 # The mends `agent` has filed, `<role> <round>` a line: the record that holds each to once a round.
 MENDED = Path("runs") / "mended"
+# The names a record from before the verifier became the arbiter holds, each read as the name it
+# has now: a role (`costs.jsonl`'s `role`, `runs/<role>.sessions`, `runs/mended`), a build step
+# (`STEP:`) or a landing step. It reads history, so it stays for good, and only readers apply it;
+# never to `verified.md`, a reviewer's role or `[models]`. `sdlc`'s `factory_records.py` keeps a
+# copy, pinned by a test.
+RENAMED = {"verifier": "arbiter", "verify": "arbitrate", "land-verify": "land-arbitrate"}
 # Every prompt an agent is sent is text in the plugin's own `prompts/<file>.md` (`PROMPTS_DIR`),
 # never a host's: a `# ` title, a `>` note, then one `## <part>` section per piece of text, its
 # placeholders `string.Template`'s (`${name}`, `$$` a literal `$`), so a filled value is never read
@@ -3556,20 +3576,20 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
         "fix": {"main": "round rel"},
         "review": {"main": "round", "upgraded": "decision", "reworked": "reworked kept settled",
                    "raise-again": "", "handed": "handed"},
-        "verify": {"main": "round", "counts": "untouched repeats settled"},
+        "arbitrate": {"main": "round", "counts": "untouched repeats settled"},
         "rework": {"main": "round rel verified", "handed": ""},
         "approve": {"main": "", "upgraded": "round decision", "stuck": "round before stuck",
                     "untestable": "untestable", "next-step": "reconsider", "exhausted": "",
                     "undone": "", "irreversible": "base touched"},
         "decided": {"main": "decided answer", "reviews": "round rel"},
-        "mend": {"evidence": "", "verdict": "", "decision": "", "verify": "problems"},
+        "mend": {"evidence": "", "verdict": "", "decision": "", "arbitrate": "problems"},
         "resolve": {"main": "files", "gone": "gone inbox"},
         "train-resolve": {"main": "count base change files",
                           "change": "name this title pre rel spec", "this": ""},
         "land-fix": {"main": "ask"},
         "land-review": {"main": "round what diff", "rebased": "base why", "resolved": "round",
                         "clean": "", "asked": "round ask"},
-        "land-verify": {"main": "round diff"},
+        "land-arbitrate": {"main": "round diff"},
         "land-checks": {"main": "approved current changed removed"},
     }.items()
 }  # fmt: skip
@@ -3577,9 +3597,9 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
 # mend the landing review's.
 TASK_PROMPTS = {
     "land-mend": ("mend", "land-review"), "mend": ("mend", "review"),
-    **{t: (t,) for t in ("spec", "build", "fix", "review", "verify", "rework", "approve",
+    **{t: (t,) for t in ("spec", "build", "fix", "review", "arbitrate", "rework", "approve",
                          "decided", "resolve", "train-resolve", "land-fix", "land-review",
-                         "land-verify", "land-checks")},
+                         "land-arbitrate", "land-checks")},
 }  # fmt: skip
 PART_RE = re.compile(r"^## ([a-z][a-z0-9-]*)$")
 
@@ -3717,21 +3737,22 @@ def mend_round(state: dict, role: str) -> int:
 
 def mended(folder: Path) -> set[tuple[str, int]]:
     """(role, round) for each mend `agent` has filed, from `runs/mended`: each role is mended once
-    a round, and a second reply that still needs one is a stop like any other."""
+    a round, and a second reply that still needs one is a stop like any other. A role a record
+    from before holds is read as its name now (`RENAMED`)."""
     path = folder / MENDED
     found = set()
     for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
         role, _, rnd = line.partition(" ")
         if rnd.strip().isdigit():
-            found.add((role, int(rnd)))
+            found.add((RENAMED.get(role, role), int(rnd)))
     return found
 
 
 def verdict_mend(folder: Path, state: dict, role: str | None) -> bool:
     """Whether `mend` for `role` resumes that agent's own session to answer in its shape: a
     reviewer whose reply in the last round holds verdict lines that disagree, the approver, or
-    the verifier. A behaviour check owing evidence runs afresh instead."""
-    if role in ("approver", "verifier"):
+    the arbiter. A behaviour check owing evidence runs afresh instead."""
+    if role in ("approver", "arbiter"):
         return True
     rnd = state["rounds"][-1]["round"] if state.get("rounds") else 0
     reply = folder / "reviews" / f"round-{rnd}" / f"{role}.md"
@@ -3830,7 +3851,7 @@ def _claude(argv: list[str], cwd: Path) -> tuple[int, list[str], str | None, dic
 
 def holds(role: str, reply: str, task: str | None = None) -> bool:
     """Whether a reply holds what `role` is asked to give: a reviewer's `VERDICT:` line, the
-    approver's `DECISION:` line (its `CHECKS:` line for `land-checks`), the verifier's `- KEPT:`
+    approver's `DECISION:` line (its `CHECKS:` line for `land-checks`), the arbiter's `- KEPT:`
     or `- DROPPED:` line, the builder's `## Evidence`, or the spec-writer's draft (a bare `---`,
     its frontmatter's opening, as `split_draft()` finds it). It only picks which of a session's
     replies `agent` files, never what the reply says: `verdicts` and `land-verdicts` still read
@@ -3840,7 +3861,7 @@ def holds(role: str, reply: str, task: str | None = None) -> bool:
         return any(map(VERDICT_RE.match, lines))
     if role == "approver":
         return any(map(CHECKS_RE.match if task == "land-checks" else DECISION_RE.match, lines))
-    if role == "verifier":
+    if role == "arbiter":
         return any(KEPT_RE.match(line) or DROPPED_RE.match(line) for line in lines)
     if role == "spec-writer":
         return any(line.rstrip("\r\n") == "---" for line in lines)
@@ -4064,24 +4085,24 @@ def _task_prompt(
         if handed:
             prompt += " " + prompt_part("review", "handed", handed="; ".join(handed))
         return prompt, reviews_dir / f"{role}.md", False
-    if task == "verify":
+    if task == "arbitrate":
         current = next(r for r in state["rounds"] if r["round"] == rnd)
         asked = [f"- {i}: {name}: {c}" for i, name, c in asked_changes(current["reviews"])]
         counts = prompt_part(
-            "verify", "counts",
+            "arbitrate", "counts",
             untouched="; ".join(state["untouched"]) or "none",
             repeats="; ".join(state["repeats"]) or "none",
             settled="; ".join(state["settled"]) or "none",
         )  # fmt: skip
         return (
-            head + prompt_part("verify", "main", round=rnd) + "\n" + "\n".join(asked) + "\n"
+            head + prompt_part("arbitrate", "main", round=rnd) + "\n" + "\n".join(asked) + "\n"
             + counts,
             reviews_dir / VERIFIED,
             False,
         )  # fmt: skip
     if task == "rework":
         # Each kept change in the reviewer's own words, as `read_verified()` resolved it: the
-        # verifier's line is its own summary, by id.
+        # arbiter's line is its own summary, by id.
         current = next(r for r in state["rounds"] if r["round"] == rnd)
         kept = (current["verified"] or {"kept": []})["kept"]
         prompt = (
@@ -4146,15 +4167,15 @@ def _task_prompt(
         target = folder / "build" / f"round-{reviewed + 1}.md"
         return prompt, target, target.is_file() and state["built"] == reviewed + 1
     # mend: the stops a run mends itself, once each: a reviewer resumed to give one verdict first,
-    # the approver one decision, the verifier resumed to answer in its shape, the builder resumed
+    # the approver one decision, the arbiter resumed to answer in its shape, the builder resumed
     # for its evidence, or a new behaviour check for its own.
     if role == "approver":
         return prompt_part("mend", "decision"), folder / "decision.md", False
-    if role == "verifier":
+    if role == "arbiter":
         where = f"reviews/round-{reviewed}/{VERIFIED}"
         found = [p for p in state["problems"] if p.startswith(where)]
         return (
-            prompt_part("mend", "verify", problems="; ".join(found)),
+            prompt_part("mend", "arbitrate", problems="; ".join(found)),
             folder / "reviews" / f"round-{reviewed}" / VERIFIED,
             False,
         )
@@ -4179,7 +4200,7 @@ def _task_prompt(
         )  # fmt: skip
     return (
         f"only the builder and {', '.join(RUNS_THE_CHANGE)} owe evidence; a reviewer, the approver "
-        "and the verifier are mended to answer in their shape"
+        "and the arbiter are mended to answer in their shape"
     )
 
 
@@ -4189,7 +4210,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     fresh session of its own (`train-resolve`), told every change in the train, its spec and its
     diff, for a conflict while stacking; a reviewer
     reading the change's diff from the commit the round rebased it onto (`_land_diff()`); the
-    verifier on what they asked for, against that diff. Each reply goes under
+    arbiter on what they asked for, against that diff. Each reply goes under
     `reviews/land-<n>/`, the builder's and the resolver's to `build/land-<n>.md`."""
     n = land_round(folder)
     if not n:
@@ -4290,9 +4311,10 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
         state = landing.land_verdict(root, folder, cfg, n)
         if state["next"] != "mend" or role not in state.get("mend", []):
             return f"land-verdicts says {state['next']!r}, not a mend for {role}"
-        if role == "verifier":
+        if role == "arbiter":
             gone = [p for p in state["problems"] if p.startswith(f"reviews/land-{n}/{VERIFIED}")]
-            return prompt_part("mend", "verify", problems="; ".join(gone)), where / VERIFIED, False
+            told = prompt_part("mend", "arbitrate", problems="; ".join(gone))
+            return told, where / VERIFIED, False
         if preamble(where / f"{role}.md"):
             return prompt_part("mend", "verdict"), where / f"{role}.md", False
         planned = _land_task(root, folder, "land-review", role)
@@ -4332,7 +4354,7 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
     if (diff := _land_diff(root, base)) is None:
         return _NO_FORK.format(base=base)
     return (
-        head + prompt_part("land-verify", "main", round=n, diff=diff) + "\n" + "\n".join(asked),
+        head + prompt_part("land-arbitrate", "main", round=n, diff=diff) + "\n" + "\n".join(asked),
         where / VERIFIED,
         False,
     )
@@ -4342,7 +4364,7 @@ _NO_FORK = "no fork point between {base} and HEAD: the landing can't be reviewed
 
 
 def _land_diff(root: Path, base: str) -> str | None:
-    """The diff a landing round's reviewers and verifier read: from the commit the round rebased
+    """The diff a landing round's reviewers and arbiter read: from the commit the round rebased
     the change onto, `HEAD`'s merge base with the base branch, which a later move of the branch
     leaves where it is (the amend that adds the landing's record keeps `HEAD`'s parent). Never
     the branch's tip, where a commit that landed since reads as one the change deleted: None when
@@ -4452,12 +4474,16 @@ def cmd_agent(
     upgrade = state.get("upgraded")
     at_p = bool(upgrade) and state["next"] == "build" and state["round"] == upgrade["round"]
     resumed = resumed or (task == "build" and at_p)
-    resumed = resumed or bool(task == "land-mend" and (role == "verifier" or preamble(target)))
+    resumed = resumed or bool(task == "land-mend" and (role == "arbiter" or preamble(target)))
     if resumed:
+        # A run in flight across the rename holds its arbiter's session under the old name.
+        old = [k for k, v in RENAMED.items() if v == agent_name(role)]
+        if not sessions.is_file() and old and (sessions.parent / f"{old[0]}.sessions").is_file():
+            sessions = sessions.parent / f"{old[0]}.sessions"
         ids = sessions.read_text(encoding="utf-8").split() if sessions.is_file() else []
         if not ids:
             first = {"builder": "build", "spec-writer": "spec", "approver": "approve",
-                     "verifier": "verify"}.get(role, "review")  # fmt: skip
+                     "arbiter": "arbitrate"}.get(role, "review")  # fmt: skip
             return emit({"refusals": [f"no {role} session to resume: run --task {first} first"]}, 1)
         session, how = ids[-1], "--resume"
     else:
@@ -4534,7 +4560,7 @@ def cmd_agent(
     "run one agent session for a step, and file its reply",
     arg("id"),
     arg("--task", choices=TASKS, required=True),
-    arg("--role", choices=[*REVIEWERS, "builder", "approver", "verifier", "resolver"]),
+    arg("--role", choices=[*REVIEWERS, "builder", "approver", "arbiter", "resolver"]),
     arg("--decision", help="the decided ledger id, for --task decided"),
     arg("--revise", help="the person's revision in decisions.md (R1), for spec"),
     arg("--recheck", action="store_true", help="send a spec draft back once"),

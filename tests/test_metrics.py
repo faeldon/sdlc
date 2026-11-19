@@ -493,7 +493,7 @@ def test_an_after_gate_stop_names_the_skill_whose_gate_it_followed(tmp_path: Pat
 
 
 def test_close_names_each_skill_it_ran(tmp_path: Path) -> None:
-    """179 R1: one `Sdlc-Skill` line a plugin skill the change's events started, typed or by the
+    """One `Sdlc-Skill` line a plugin skill the change's events started, typed or by the
     Skill tool, each run counted; read back as `skills`. A commit without one is unrecorded."""
     events = _events(tmp_path, [
         cmd(0, "sdlc:spec"), turn(1, 1), user(2, "yes"),

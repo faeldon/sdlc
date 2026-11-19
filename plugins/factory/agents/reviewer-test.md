@@ -64,7 +64,7 @@ reply, to answer it again. A test you run to check a claim is a named one, run i
 ## Later rounds, and what isn't this change's
 
 From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
-(`reworked`), the changes the verifier kept for it, and what is `settled`. Review those paths and
+(`reworked`), the changes the arbiter kept for it, and what is `settled`. Review those paths and
 whether each kept change was done; never raise a settled point again, and never raise something new
 in code an earlier round already passed unless the rework broke it. A kept change the rework didn't
 make, raise again word for word, as the prompt quotes it: the run tells a change kept twice by its

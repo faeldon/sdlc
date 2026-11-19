@@ -28,7 +28,7 @@ than guessing. An unknown key is a warning, so a typo never passes for a setting
 ```toml
 [commands]
 check = "make check"                        # the gate /sdlc:ship runs on this diff; pass or fail
-build = "make integration"                  # a slower gate, run when a changed path matches:
+build = "make integration"                  # the slow gate, run when a changed path matches:
 build_when = "^src/"                        #   a regex over `git diff --name-only`
 scan = "make scan"                          # drift across the whole repo; /sdlc:health runs it
 worktree_setup = "make setup {worktree}"    # after /sdlc:intent makes a worktree, run from the main checkout
@@ -75,7 +75,7 @@ doc_paths = ["handbook/"]                   # optional: the paths that are docs,
 [metrics]
 transcripts = true                          # the default: close reads this repo's transcripts, numbers only
 idle_minutes = 30                           # the default: a longer wait is the person away, not answering
-stop_allowance = 1                          # the default: stops beyond a change's gates its person should expect
+stop_allowance = 1                          # the default: stops beyond a change's approvals its person should expect
 
 [review]
 sensitive = [".github/workflows/", "scripts/release*"]  # optional: paths whose changes get ship's deep review
@@ -247,7 +247,7 @@ The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left t
 - A missing doc is reported, never silently replaced (except the review).
 
 **Three commands, three questions.** `commands.check` is the gate `/sdlc:ship` runs on this diff:
-is it correct, pass or fail. `commands.build` is a slower gate, run when a changed path matches
+is it correct, pass or fail. `commands.build` is the slow gate, run when a changed path matches
 `build_when`. `commands.scan` looks for drift across the whole repo: `/sdlc:health` runs it,
 and it produces findings rather than a pass or fail. A task of your own named `doctor` or `health`
 is usually your scan; setup proposes it for `commands.scan`. It is unrelated to the plugin's
@@ -287,7 +287,7 @@ written from a real artifact.
 adds a seed to a repo with none, and `notes.md` what a change's `notes.md` starts as, when a skill
 or the factory first writes one. None has prompts: its note carries the rules. `checks.md`
 is what a change's acceptance checks start as; its one example section's prompts make an untouched
-copy a scaffold, which `sdlc.py check` reports rather than runs. `findings.md` is the shape of the
+copy a scaffold, which `sdlc.py vet` reports rather than runs. `findings.md` is the shape of the
 file `/sdlc:ship` writes its review's findings into; an override keeps its `## F<n>. [rank]
 [pass] title` headings and `Evidence:`, `Class:`, `Disposition:` and `Reason:` lines, which
 `sdlc.py` counts.
@@ -337,6 +337,16 @@ reads (`TEMPLATE_READS`), or a project or product doc it can't parse: an overrid
 with. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
+
+**`sdlc.py check` is now `sdlc.py vet`.** The command that checks each change folder against its
+tier and stage was renamed with no alias: `sdlc.py check` is gone, and argparse refuses it. A
+host's CI that runs `sdlc.py check --strict` must run `sdlc.py vet --strict` instead. The skills
+call `vet`, so the read-only allow rule `Bash(uv run --quiet --script */scripts/sdlc.py vet *)` is
+missing from a settings file written before: readiness reports it under `permissions.missing`, and
+setup proposes it on its next run. The old `check` rule allows nothing that exists, and setup
+leaves it. The factory's agent that weighs each round's findings is now the arbiter, and
+`[models] verifier` is now `[models] arbiter`, with no shim: the old line is an unknown role,
+warned about, and the arbiter runs on `[models] arbiter` or its default, `sonnet`.
 
 **`/sdlc:setup reset <doc | template | all>`** puts the default back: a doc with its prompts
 filled as a first setup fills them, after a diff of every block of yours it loses; a template
@@ -584,7 +594,11 @@ file of its folder, and is in Building again. A change built by hand moves on fr
 line by what it has touched: to Building once its branch or worktree changes a path outside
 `.sdlc/work/`, to Ready once ship's review has written its `findings.md` or its gate run by hand is
 green on the build as it stands (below), never while that record is current and red, with a
-`gate green` or `gate red` badge while it is current.
+`gate green` or `gate red` badge while it is current, and beside it what the gate ran and how it
+ended, from the record: its command, the last line of its output holding a test runner's count (on
+red with none, its last line), and its exit, as `./check.sh: 3309 passed, exit 0`. A card with
+acceptance checks says how many (`acceptance: 2`), and once a factory landing has run them, how its
+last run went (`acceptance: 2, passed`).
 A change whose worktree is stopped mid-rebase (by `resolve`, or a landing) keeps its card, shipped
 or not, with a
 `rebasing` badge, its branch read from the rebase's own record, and `sdlc.py resolve`'s
@@ -601,17 +615,18 @@ record that won't read is a stop, its next step `read runs/stopped.md`, on the b
 Each card gives the change's tier,
 artifacts, open questions, undone notes, findings, how far behind `main` it is, when it was last
 touched, and the command to run next; a change the factory ran on (its folder holds `runs/`) adds
-each round's verdicts, the verifier's answers, its decisions and what its agents cost, each build
+each round's verdicts, the arbiter's answers, its decisions and what its agents cost, each build
 round labelled `B<n>` (a landing's `L<n>`), and a step
-track of the round under way (build, gate, reviews *n/m*, verify, rework, approve) read from the
+track of the round under way (build, gate, reviews *n/m*, arbitrate, rework, approve) read from the
 `runs/step.md` its supervisor's `verdicts --record` writes; a run that stopped early reads
 `approve (stuck)` or `(untestable)` there, each reason a line on the card. The current step shows how long it has
 run against the median time that step took at that tier in the last 20 closed factory changes, a
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of
 them; a Tier 2's card adds how many of the files `plan.md`'s `## Files to change` names its branch
 has touched (so an overriding `.sdlc/templates/plan.md` keeps that heading). A change the factory
-is landing shows the landing's track instead (its checks or cases, then ship, rebase, resolving,
-stacking or waiting, gate, checks run again after the commit, review, verify, close), from the
+is landing shows the landing's track instead (its acceptance checks or cases, then ship, rebase,
+resolving, stacking or waiting, gate, acceptance run again after the commit, review, arbitrate,
+close), from the
 `runs/land-step.md` each landing command writes as it starts its step: the landing round, how
 often the base branch has moved out of `[land] moves`, a change's place in a train (`2 of 3`) and
 what it waits on there (`waiting to stack on 140`), the current step timed against closed
@@ -739,7 +754,7 @@ setup's read-only rules allow it, `nits` and `findings` too.
 refuses an issue left out.
 
 `.claude/worktrees/` belongs in `.gitignore`, and `.sdlc/work/` must not be in it: `sdlc.py new` refuses
-an ignored `.sdlc/work/`, and `sdlc.py check` flags it. The main checkout stays on `main`: close
+an ignored `.sdlc/work/`, and `sdlc.py vet` flags it. The main checkout stays on `main`: close
 fast-forwards it there, and refuses while it is on another branch or has uncommitted changes.
 
 ## Numbering
@@ -814,7 +829,7 @@ assignees: ./scripts/team.sh     # a command, run from the repo root, printing o
 Its body is prose on how to choose: which milestone a change goes in, who owns what.
 `/sdlc:intent` reads it, offers only the values `sdlc.py lookup` lists, and writes the answers
 into the intent's frontmatter (`milestone:`, `project:`, `assignees:`). `/sdlc:spec` may revise
-them. `sdlc.py check` reports a field the doc doesn't turn on, and a value outside a fixed list;
+them. `sdlc.py vet` reports a field the doc doesn't turn on, and a value outside a fixed list;
 it never asks the tracker, since the gate is offline.
 
 A field the doc turns on is mirrored **exactly**: the intent decides it, and the issue is made to
@@ -845,7 +860,7 @@ reports an open outcome without one. The rest of the doc is prose for people.
 
 With a product doc, every open change's intent says what it serves: `serves: [O1]`, or
 `serves: none` for a change that serves no outcome on purpose (a refactor, process work).
-`sdlc.py check` reports a missing line and an id the doc doesn't have. Each change is held to the
+`sdlc.py vet` reports a missing line and an id the doc doesn't have. Each change is held to the
 product doc on its own branch, so changes opened before the doc landed owe the line only once they
 rebase onto it. `/sdlc:intent` proposes the line in its draft, from the open outcomes only, and
 names them in its question, so the yes is the person's choice. Each one served gets a line in the
@@ -956,7 +971,7 @@ test = "tests/test_config.py::test_old_flag_reads" # optional: the compatibility
 (the next release would) or `unversioned` (no `version_files` to compare with). `/sdlc:release`
 refuses to cut any version at or past a shim's `remove_in`, a `--version` included, until the shim
 and its test are gone and the entry with them. `/sdlc:status` shows the overdue and due ones under
-*Unreleased*; it never counts them as problems, so `check --strict` stays a gate for the change in
+*Unreleased*; it never counts them as problems, so `vet --strict` still refuses only on the change in
 hand. A bad entry is reported, and blocks a release, rather than raised. Without the file nothing
 changes. A path kept for good (the no-manifest drift, and whatever reads what history holds,
 which never migrates) is not a shim and has no entry.
@@ -1191,7 +1206,7 @@ the file. `asked`: the questions the person answered, `blocking` decisions, `def
 or changed and `look`s they cleared, and `per_change`. `kept_default`: `rate` is kept over kept
 and changed; `confirmed`, the defaults the landing's one yes confirmed, and `settled`, those the
 approver settled, sit beside it and never enter it. `auto_landed`: from each change's own
-`Sdlc-Landed`, `auto` (the landing's gate passed itself), `person`, or `shipped` (no line: shipped
+`Sdlc-Landed`, `auto` (the landing's WAIT approved itself), `person`, or `shipped` (no line: shipped
 by hand), with `share`, auto over `n`. `spurious_stops`: the mends, the one stop a run clears
 without the person, a build's (`build`) apart from a landing's (`landing`), the changes with any,
 and `per_change`. `looks`: `seen` (answered `seen`), `checked` (any other answer) and `open`, with
@@ -1355,7 +1370,7 @@ machine, for numbers only: never message text, a path or a session id
 - **away**: waits longer than that.
 
 Waits while a `depends_on:` change is still open count as **blocked**. It also records the stops
-(gates, questions and anything else that waited on the person) against the gates the way of
+(approvals, questions and anything else that waited on the person) against the approvals the way of
 running requires (by hand or by the factory) plus `metrics.stop_allowance`, and tokens per stage and
 per sub-agent role. A factory change owes `intent`, `run`, `ship` and `close`, and `spec` too when
 its spec was approved at a stage of its own. The factory's supervisor is a session in the main
@@ -1364,7 +1379,7 @@ and the dialogs whose question names its `NNN-slug`. Each agent the factory ran 
 own (`runs/<agent>.sessions` in the change's folder; its permission mode is `.sdlc/factory.toml`'s
 `mode`, read from the base branch, see the factory's README) counts as a run of that role, its own
 read-only sub-agents as runs of theirs, never as the person's stages. A change `/sdlc-factory:land`
-landed owes `land` in place of `ship` and `close`: one gate per batch, which passes itself on a
+landed owes `land` in place of `ship` and `close`: one approval per batch, which approves itself on a
 batch with no risk signal (`[land] auto` in `.sdlc/factory.toml`, read from the base branch, default
 on; `[land] batch`, default 5). The batch lands as a train: stacked in order, the base branch's
 check run once at the tip, each change closed in order by close's fast-forward, so the base
@@ -1443,8 +1458,8 @@ the change fixed (no `revise` answer, a `fixed` finding in its `findings.md`), w
 first time and reports apart as `ship_fixed`; a trailer from before has only yes and no. And `Sdlc-Rework` counts the trial and error inside the change (the spec or plan
 edited after their stage, `revise` answers, failed gate runs, ship reruns, lines written against
 lines kept, and for the factory its rounds, verdicts and decisions, with an `Sdlc-Review` line per
-reviewer: its `CHANGES` verdicts, its requests and, from a run with a verifier, how many of them
-the verifier `dropped`; a run from before that has no `dropped`, read as unknown; and
+reviewer: its `CHANGES` verdicts, its requests and, from a run with an arbiter, how many of them
+the arbiter `dropped`; a run from before that has no `dropped`, read as unknown; and
 `gate_fail`, the red attempts of the factory's script gate, which runs `[commands] check` from the
 base branch's `.sdlc/config.toml` on each build before its review and on a change a landing
 rebased, absent for a run with no gate

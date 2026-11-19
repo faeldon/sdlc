@@ -33,7 +33,7 @@ change and those people. A repo names its own failure here, and how it gets past
 | **1 Plan** | Capture why a change is worth making, in your own words | `intent.md` |
 | **2 Design** | Requirements and design, inside the invariants in the policy doc | `spec.md` (Tier 2) |
 | **3 Build** | Claude Code plan mode, then implementation | `plan.md` (Tier 2) |
-| **4 Test** | The gate, and the slower check when the diff calls for it | <the commands> |
+| **4 Test** | The gate, and the slow gate when the diff calls for it | <the commands> |
 | **5 Ship** | A reviewed commit | the commit |
 | **6 Maintain** | `/sdlc:health` runs the scans and tiers what they find | a new `intent.md` |
 
@@ -244,7 +244,7 @@ forty seconds") is asked once for the problem behind it. A repo adds its own her
 ### Stage 2 — Design → `/sdlc:spec`
 
 Tier 2 only. Reads `intent.md` and the invariants in the policy doc, resolves the intent's open
-questions (striking them `~~like this~~` rather than deleting them), drafts `spec.md`, gates, and
+questions (striking them `~~like this~~` rather than deleting them), drafts `spec.md`, waits for approval, and
 advances `stage: design`. **The invariants are this repo's policy.** A spec that can't stay inside
 them is telling you something: change the invariant on purpose, with its own reasoning, or change
 the design.
@@ -255,7 +255,7 @@ No skill; plan mode already *is* this stage, and a skill would only compete with
 session in plan mode, point it at `spec.md` (or the intent's Approach), interrogate the plan,
 approve it, save it as `plan.md`, advance `stage: build`, and implement. **Nothing is implemented
 without an accepted plan.** A Tier 2 change owes `plan.md` from `stage: build` on, and
-`sdlc.py check` says so; for Tier 1 it's worth saving when the plan touches more than a couple of
+`sdlc.py vet` says so; for Tier 1 it's worth saving when the plan touches more than a couple of
 files. When the build departs from the plan, update `plan.md` in the same commit: a plan that no
 longer says what was built misleads the review that reads it.
 
@@ -271,7 +271,7 @@ Advance `stage: test` and run what proves the change. **Two kinds of check, spli
 - **The gate** (`commands.check`): fast, offline and free of side effects, and what `/sdlc:ship`
   runs every time. Offline on purpose: a gate that needs the network gets skipped, and a skipped
   gate still reports green from memory.
-- **The slower check** (`commands.build`): whatever needs real services, real data or real time.
+- **The slow gate** (`commands.build`): whatever needs real services, real data or real time.
   `/sdlc:ship` runs it when a changed path matches `commands.build_when`, and on every change
   when `build_when` is unset.
 
@@ -297,14 +297,14 @@ then fix the code without editing the test.
 A test run that collected nothing is a failure, not a pass: it means discovery broke, and a green
 gate that ran zero tests is the quietest way for a broken change to reach `main`.
 
-#### The gate and the slower check
+#### The gate and the slow gate
 
 Whatever `commands.check` and `commands.build` name in `sdlc.py config`. A repo says here what
 each of its two runs and covers, so a green result can be read as what it is.
 
 ### Stage 5 — Ship → `/sdlc:ship`
 
-Shipping is a reviewed commit: run the gate → the slower check if the diff calls for it → review
+Shipping is a reviewed commit: run the gate → the slow gate if the diff calls for it → review
 the diff → give each undone `- [ ]` a disposition → settle the release `impact:` → **one approval**
 → the approved context-doc edits → `sdlc.py ship` stamps the intent `stage: shipped` → one commit
 naming the change (`Refs #NNN` when its number is a GitHub issue), carrying the code, the context
@@ -321,7 +321,7 @@ recorded, or dismissed with a reason, in the change's `findings.md`, so the revi
 counted.
 
 **Depth follows risk, not the tier.** A diff touching a path the config marks sensitive
-(`[review] sensitive`) gets the deep review: the build check whatever its trigger says, a
+(`[review] sensitive`) gets the deep review: the slow gate whatever its trigger says, a
 fresh-context reviewer that never saw the session that built it, and the paths named in ship's
 question. One touching a path a revert doesn't undo (`[review] irreversible`) carries a `How to
 recover:` paragraph: the command that reverses it, or the fix forward. The tier stays as intent set
@@ -459,7 +459,7 @@ decision, made on purpose with `/sdlc:release 1.0.0`.
 ### Stage 6 — Maintain → `/sdlc:health`
 
 Deterministic detection before a model is asked anything: `commands.scan` runs the repo's scans,
-and `sdlc.py check` finds intent frontmatter that won't parse, artifacts a change's tier and stage
+and `sdlc.py vet` finds intent frontmatter that won't parse, artifacts a change's tier and stage
 owe but lack or never filled in, ideas marked `[building]` with nothing behind them, a `.sdlc/work/` git ignores, and a change counter that doesn't hold a number. `/sdlc:status` shows each open change's age.
 
 Findings go somewhere by **response tier**, a different scale from the change tiers above:
@@ -533,7 +533,7 @@ retrospective, and says which it can't.
   from this repo's session transcripts (numbers only; `metrics.transcripts` turns it off): per
   stage, the clocks (elapsed, agent, the person's response, away and blocked), the stops that
   waited on the person, and tokens. Time that piles up in response and away is the person's
-  queue. Each change's stops are measured against its own gates plus `metrics.stop_allowance`, and
+  queue. Each change's stops are measured against its own approvals plus `metrics.stop_allowance`, and
   those above that are the loop circling.
 - **First time through, and rework within a change.** Close records, beside the cost, whether
   each stage went through first time (`Sdlc-Happy`) and the trial and error inside it

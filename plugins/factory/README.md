@@ -32,15 +32,15 @@ What stays deterministic, and the person's, is manual mode's:
 - **The stages.** `factory.py` refuses a step the change's tier and `stage:` don't allow, and
   moves `stage:` only as far as `test`: `shipped` is `sdlc.py ship`'s alone.
 - **The artifacts.** The agents write the same `spec.md`, `plan.md` and code a person would, in
-  the same folder, and `sdlc.py check` audits them the same way.
+  the same folder, and `sdlc.py vet` vets them the same way.
 - **The depth of review.** It comes from the diff against the base branch's `[review] sensitive`,
   read by the script, never judged by an agent, so a change can't lighten its own review.
-- **The gates.** The supervisor starts nothing before its one WAIT (the spec and the run, or
+- **The approvals.** The supervisor starts nothing before its one WAIT (the spec and the run, or
   `/sdlc-factory:spec`'s for a spec alone), and the run leaves everything uncommitted.
-  `/sdlc:ship` reviews it as it would any change, with its own checks, its WAIT and its one
-  commit, and `/sdlc:close` lands it. Or `/sdlc-factory:land` runs ship's and close's own code for
-  a batch of ready changes, behind one gate that passes itself only when no change in it carries
-  a risk signal, the factory's rounds standing in for ship's review.
+  `/sdlc:ship` reviews it as it would any change, with its own gate and acceptance checks, its
+  WAIT and its one commit, and `/sdlc:close` lands it. Or `/sdlc-factory:land` runs ship's and
+  close's own code for a batch of ready changes, behind one approval that approves itself only
+  when no change in it carries a risk signal, the factory's rounds standing in for ship's review.
 - **The measuring.** Close counts a factory change's rework from the same trailers as one built
   by hand.
 
@@ -53,7 +53,7 @@ reviewing, and deciding whether to escalate.
   writes why    one WAIT: the spec and the run                                  when ready,   lands it
                 builder plans and builds, in its own session                    in order      (WAIT)
                 reviewers, in rounds, at the diff's depth                       (WAIT)
-                verifier checks what they ask for; builder reworks what it keeps
+                arbiter weighs what they ask for; builder reworks what it keeps
                 approver: READY or ESCALATE → "ready to ship"
 ```
 
@@ -117,7 +117,7 @@ reviewing, and deciding whether to escalate.
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
   its one question shows what your yes approves, for each change: each acceptance check's name
   and command, run then through `factory.py accept` behind the harness's own prompt (a failure
-  stops that change and those after it, and a rebased change runs its checks again, by the loop
+  stops that change and those after it, and a rebased change runs its acceptance checks again, by the loop
   itself: unattended only for the commands your yes showed, or, for one changed since, when every
   added or edited command passes the read-only list and the approver judges it harmless, its
   judgement filed in `build/land-<n>.checks.md`; the approver's word alone never runs one), and the
@@ -192,7 +192,7 @@ spec.
   wants goes through `factory.py check NNN`, which its prompt names: the base branch's `[commands]
   check` in the change's worktree, in a gate slot, its output and exit the command's. It records
   nothing, so it never stands in for the gate.
-- **Verified before reworked.** After each round with a `CHANGES` verdict, the `verifier` checks
+- **Weighed before reworked.** After each round with a `CHANGES` verdict, the `arbiter` weighs
   every `- CHANGE:` against the code and keeps or drops it, with why. The builder reworks only what
   it keeps; `/sdlc:ship` shows what it dropped.
 - **Later rounds read the rework.** After every builder report, `factory.py snapshot` hashes what
@@ -209,7 +209,7 @@ spec.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
 - **Stop early when a round can't help.** A run goes to the approver with rounds still left when
-  the verifier keeps the same change, word for word, two rounds running (`stuck`; reviewers raise
+  the arbiter keeps the same change, word for word, two rounds running (`stuck`; reviewers raise
   an undone kept change again in its own words so the script can tell), or when the builder's
   report says a requirement can't be tested (`- UNTESTABLE: R<n>: <why>`, `untestable`; `none` or
   `n/a` there is no requirement), once its round is reviewed. The approver is told which, and must
@@ -228,7 +228,7 @@ spec.
   `build/round-<P>.upgraded.md` and has `sdlc`'s own `sdlc.py upgrade` set `tier: 2` and `stage:
   plan` and scaffold `spec.md` and `plan.md` where they are missing, keeping a plan the builder
   wrote. `verdicts` then names `spec`: the spec-writer drafts it, told the upgrade and that the
-  build so far is in the worktree, and the run asks you to approve it as its gate's question
+  build so far is in the worktree, and the run asks you to approve it as its WAIT's question
   does, before anything builds on it. The builder that raised it is then resumed for round P,
   rewrites `plan.md` against the approved spec, and builds to it. Round P is gated, reviewed
   against the spec and decided like any, its round limit counted from P. Nothing is moved by
@@ -240,7 +240,7 @@ spec.
   nowhere. A test run, a gate or a script always owes its exit. A verdict or decision that
   follows prose is read where it stands (`opening()`). A reply without its evidence, or holding
   answers the script can't read (verdict or decision lines that disagree, none of them first, or
-  a verifier's answers in another shape), goes back to the agent that wrote it once a round, a
+  an arbiter's answers in another shape), goes back to the agent that wrote it once a round, a
   landing round included, and its new reply is written over the old; a second stops the run.
   `agent` files the last of a session's replies that holds its answer, so a background task's
   notice answered after a verdict never replaces it. The gate
@@ -297,7 +297,7 @@ They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, e
 | `reviewer-behaviour` | runs the spec's end-to-end path on a gated build; reads `checks.md`, never runs it | no |
 | `reviewer-ui` | how the change looks: theme fit, spacing, contrast, overflow at phone width, from screenshots | no |
 | `reviewer-ux` | how it works for a person: the task, empty, loading and error states, labels, reach | no |
-| `verifier` | keeps or drops each requested change, checked against the code | no |
+| `arbiter` | keeps or drops each requested change, checked against the code | no |
 | `resolver` | resolves a landing train's conflicted files, keeping every change's intent | only those files |
 | `approver` | READY or ESCALATE, for the person at ship | no |
 
@@ -345,7 +345,7 @@ server, so a round's two start together.
                                 round N is the upgraded run's first
   notes.md                      - [ ] lines for what the last round still kept, and pre-existing ones
   findings.md                   every agent finding of every complete round, the landing's too,
-                                once, By: its role, as fixed, recorded, wrong (the verifier's
+                                once, By: its role, as fixed, recorded, wrong (the arbiter's
                                 drop) or a nit, a nit to file with its Theme:, Cost: and Value::
                                 the same record ship writes, counted apart from ship's own
   runs/spec-draft.md            the spec-writer's draft, whole, which write-spec copies into
@@ -392,7 +392,7 @@ quoted output, as a placeholder (the number in `<` and `>`). The approver's step
 when its folder still holds such a line (one written by hand, or filed before this rule), naming the
 file and line; `factory.py defuse NNN` rewrites it the same way.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
-`CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at
+`CHANGES` verdicts, the changes the arbiter dropped, an `ESCALATE`, a default you overturned at
 ship), so a factory change and one built by hand are measured the same way.
 
 ## Configuration: `.sdlc/factory.toml`
@@ -454,7 +454,7 @@ An agent session can't answer a tool prompt, so a command its mode doesn't allow
 the agent reports it.
 
 A run takes at most `2 + rounds × (reviewers + 4)` agent runs at the full depth (26 with the
-defaults: each round's reviewers, the verifier, the builder's rework and its two fixes of a red
+defaults: each round's reviewers, the arbiter, the builder's rework and its two fixes of a red
 gate; two more a round with `[ui]` set), and the build skill shows the number before you approve
 it, whatever depth the diff turns out to need.
 
@@ -488,9 +488,9 @@ so the next change to these defaults can be decided from a window of runs.
 ## Mechanism
 
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
-stage allows the step, where `HEAD` was, what verdict each review holds, the verifier's
+stage allows the step, where `HEAD` was, what verdict each review holds, the arbiter's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
+`gate`, `fix`, `review`, `arbitrate`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
 `stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
 `upgrade`); the gate itself, the base branch's check run on each build and recorded attempt by
 attempt (`gate`), its `[commands] build` once at a landing train's tip (`gate --land --build`, into

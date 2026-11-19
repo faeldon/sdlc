@@ -38,7 +38,7 @@ saying why.>
 
 ### Stage 4 — Test
 
-#### The gate and the slower check
+#### The gate and the slow gate
 
 <The two commands here, and what each covers.>
 

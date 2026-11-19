@@ -1,6 +1,6 @@
 ---
 name: intent
-description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), gates on confirmation, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work, or several groups of seeds into several changes at once (a batch, its groups separated by `;`).
+description: Open a new change to this repo by capturing why it's worth making — interviews the human, drafts .sdlc/work/NNN-slug/intent.md (Stage 1 of the repo's process doc), waits for approval, then stops. Use when the human wants to start, propose or formalize a change to the code, config or tooling in this repo, or to promote a .sdlc/work/inbox.md seed into committed work, or several groups of seeds into several changes at once (a batch, its groups separated by `;`).
 argument-hint: "[what the change is about, the path to a brief file, or a batch: <id> … as <slug> tier <n>; …]"
 allowed-tools:
   - AskUserQuestion
@@ -83,7 +83,7 @@ explained the problem, so don't make them repeat it.
 **A brief can arrive as a file.** If the argument is a path to a readable file, `Read` it as the
 human's own answers: pre-fill whichever sections below it covers, quote it rather than rephrase it,
 and interview only about what it leaves open. A `tier:` line in a brief is a proposal for Step 2,
-not a decision, and the gate in Step 4 is unchanged — a brief answers questions, it doesn't approve
+not a decision, and the approval in Step 4 is unchanged — a brief answers questions, it doesn't approve
 anything.
 
 The sections are the intent template's (`templates["intent.md"]` in `config`). When its `source` is

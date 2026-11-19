@@ -12,7 +12,7 @@ Starts the board and says where it is. The board is a page served on `127.0.0.1`
 `sdlc.py board`, which reads the change folders on every request, the way `/sdlc:status` does, so
 it stays current while changes move: a change built by hand shows its stage, artifacts, open
 questions, undone notes, findings and the command to run next; one the factory ran on adds its
-rounds' verdicts, the verifier's answers, its decisions and what its agents cost.
+rounds' verdicts, the arbiter's answers, its decisions and what its agents cost.
 
 **Read-only.** The board writes nothing, answers only reads, listens only on this machine, and
 serves only the files inside an open change's own folder. This skill starts it and stops there:

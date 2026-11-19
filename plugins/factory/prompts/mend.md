@@ -17,6 +17,6 @@ Your reply holds VERDICT: lines that disagree, so the script can't read your ver
 
 Your reply holds DECISION: lines that disagree, so the script can't read your decision. Reply again, the whole reply, with one DECISION: line as the first line and nothing before it.
 
-## verify
+## arbitrate
 
 The script couldn't read your answers: ${problems}. Reply again, the whole reply, answering each change exactly once as plain text with no emphasis, `- KEPT: <role>: C<n>: <why>` or `- DROPPED: <role>: C<n>: <the change> — <why>`.

@@ -36,8 +36,7 @@ It declares its own dependencies (the block above), so it runs the same in any r
 
     uv run --script sdlc.py                     # status report (no args)
     uv run --script sdlc.py new reopen-drafts --tier 2
-    uv run --script sdlc.py check --strict      # exit 1 on any problem (for /sdlc:ship)
-    uv run --script sdlc.py check --json
+    uv run --script sdlc.py vet --strict        # exit 1 on any problem (for /sdlc:ship)
     uv run --script sdlc.py ship 001
     uv run --script sdlc.py config
 """
@@ -132,7 +131,7 @@ def _parser(description: str, required: bool) -> argparse.ArgumentParser:
 
 
 HELP_ORDER = (
-    "status", "new", "check", "ship", "next", "undone", "bugs", "inbox-commit", "intake",
+    "status", "new", "vet", "ship", "next", "undone", "bugs", "inbox-commit", "intake",
     "closes", "preflight", "mark-triaged", "needs-info", "next-entry", "nits", "groups", "checks",
     "findings", "accept", "gate", "cases", "run-cases", "drop", "upgrade", "base", "resolve",
     "close", "sync", "lookup", "config", "readiness", "drift", "record", "reset", "uninstall",
@@ -236,7 +235,7 @@ HOST_DIR = ".sdlc"
 CONFIG_KEYS: dict[str, dict[str, object]] = {
     "commands": {
         "check": None,  # the gate /sdlc:ship runs on this diff, pass or fail
-        "build": None,  # a slower gate /sdlc:ship runs when a changed path matches build_when
+        "build": None,  # the slow gate /sdlc:ship runs when a changed path matches build_when
         "build_when": None,  # a regex over the changed paths
         "scan": None,  # drift across the whole repo, run by /sdlc:health: findings, not a pass
         "worktree_setup": None,  # after `new --worktree`, in the main checkout; {worktree}, {main}
@@ -331,7 +330,7 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         "stop_allowance": 1,
     },
     "review": {
-        # Paths whose changes always get /sdlc:ship's deep review: the build check whatever
+        # Paths whose changes always get /sdlc:ship's deep review: the slow gate whatever
         # `build_when` says, a fresh-context reviewer, and the paths named in its question.
         "sensitive": [],
         # Paths a revert doesn't undo (data, a published artifact, what setup copies into hosts),
@@ -408,7 +407,7 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
     """The host's settings over the defaults, the warnings, and whether the file parsed.
 
     An unknown key is a warning rather than ignored: `buld = ...` would otherwise leave a host
-    believing it had configured a build check that never runs."""
+    believing it had configured a slow gate that never runs."""
     cfg = {section: dict(keys) for section, keys in CONFIG_KEYS.items()}
     path = root / HOST_DIR / "config.toml"
     if not path.is_file():
@@ -1002,7 +1001,7 @@ def load_change(
         else:
             rec["depends_on"].append(n)
     # The earlier changes this one fixes, by id: the rework retro counts. Kept as written, since
-    # one may be closed, dropped or open, which `check` settles against history.
+    # one may be closed, dropped or open, which `vet` settles against history.
     for ident in reworks(intent.read_text(encoding="utf-8")):
         if not ident.isdigit():
             rec["errors"].append(f"reworks: {ident!r} isn't a change id")
@@ -1687,7 +1686,7 @@ def nits_summary(nits: list[dict], today: date) -> dict:
     for n in nits:
         t = themes.setdefault(n["theme"], {"count": 0, "oldest": None})
         t["count"] += 1
-        # As dates: a malformed one, which `check` reports, is never the oldest.
+        # As dates: a malformed one, which `vet` reports, is never the oldest.
         try:
             raised = date.fromisoformat(n["raised"])
         except (TypeError, ValueError):
@@ -1935,8 +1934,8 @@ def analyze(root: Path, today: date | None = None) -> dict:
                     }
                 )
         # Not at stage: plan — an intent being drafted is *supposed* to look like the
-        # template, and a tool whose own `new` produces something that instantly fails `check`
-        # teaches you to ignore the check. Age in `status` is what surfaces a stub left here.
+        # template, and a tool whose own `new` produces something that instantly fails `vet`
+        # teaches you to ignore it. Age in `status` is what surfaces a stub left here.
         if stage != "plan" and is_unfilled(folder / "intent.md"):
             problems.append(
                 {
@@ -2067,7 +2066,7 @@ def _read_number(path: Path) -> int | None:
 
 def read_last_id(home: Path) -> int | None:
     """The number in the last-id file: the last id handed out. None when the file is missing or
-    doesn't hold a number, which `check` reports for the second."""
+    doesn't hold a number, which `vet` reports for the second."""
     return _read_number(last_id_path(home))
 
 
@@ -3352,9 +3351,26 @@ def cli_gate(root: Path, home: Path, args) -> int:
     return cmd_gate(root, args.id)
 
 
+# A test runner's count in a gate's output, `3309 passed` or `2 failed, 10 passed`.
+RUNNER_COUNT_RE = re.compile(r"\b\d+ (?:passed|failed)\b")
+
+
+def gate_summary(attempt: dict) -> str | None:
+    """What a gate attempt's output says of how it ended, for the board's badge: the last line of
+    its tail holding a runner's count (`RUNNER_COUNT_RE`); on a red attempt with none, the tail's
+    last non-empty line; on a green one with none, None. The tail is already masked."""
+    tail = [line.strip() for line in attempt.get("tail") or []]
+    counted = [line for line in tail if RUNNER_COUNT_RE.search(line)]
+    if counted:
+        return counted[-1]
+    filled = [line for line in tail if line and line != "(no output)"]
+    return filled[-1] if filled and attempt.get("verdict") == "FAIL" else None
+
+
 def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
     """A change's hand gate record as the board and status read it: None without `build/gate.md`,
-    else its last attempt's `verdict`, `exit` and `seconds`, its `attempts` and `fails`, its
+    else its last attempt's `verdict`, `exit`, `seconds`, `command` and `summary`
+    (`gate_summary()`), its `attempts` and `fails`, its
     `path`, and whether it is `current`: that attempt judged the build as it stands now
     (`hand_build()`), on the change's own branch. A record that won't read is `current: false`
     with a `problems` line, never an exception: it stands for nothing judged."""
@@ -3374,6 +3390,8 @@ def hand_gate(folder: Path, home: Path, trunk: str | None) -> dict | None:
         "verdict": last["verdict"] if last else None,
         "current": False,
         "exit": last["exit"] if last else None,
+        "command": last["command"] if last else None,
+        "summary": gate_summary(last) if last else None,
         "seconds": last["seconds"] if last else None,
         "attempts": len(attempts),
         "fails": sum(a["verdict"] == "FAIL" for a in attempts),
@@ -4076,7 +4094,7 @@ def cmd_ship(
     try:
         post = frontmatter.load(intent)
         impact, named = str(post.get("impact") or ""), intent_ideas(intent.read_text("utf-8"))
-    except Exception:  # malformed YAML: `check` reports it; ship refuses below like any other gap
+    except Exception:  # malformed YAML: `vet` reports it; ship refuses below like any other gap
         impact, named = "", []
     if impact not in IMPACTS:
         print(
@@ -8378,7 +8396,7 @@ def cli_needs_info(root: Path, home: Path, args) -> int:
 # ---------------------------------------------------------------- readiness
 #
 # What /sdlc:setup works from: each thing a repo can set up for this plugin, whether it has, and
-# the commands its own task files suggest for the gate, the slower check and the scans. Reads
+# the commands its own task files suggest for the gate, the slow gate and the scans. Reads
 # only; the skill drafts, the human approves, the skill writes.
 
 # A task name that sounds like one of the commands setup asks about, and the key it suggests. A
@@ -8446,7 +8464,7 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # changes when it updates; a plugin can't ship permission rules of its own. Nothing that writes
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
 READ_ONLY = (
-    "status", "check", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
+    "status", "vet", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
     "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings", "groups",
 )  # fmt: skip
 ALLOW_RULES = [f"Bash(uv run --quiet --script */scripts/sdlc.py {c} *)" for c in READ_ONLY]
@@ -9690,7 +9708,7 @@ def print_status(a: dict) -> None:
             print(f"    ⚠  {w}")
 
     # Nudges, not gates: one line each, only when it applies, and nothing runs. Never a problem:
-    # `check --strict` is a gate, and a plugin update mustn't fail every host's.
+    # `vet --strict` refuses on a problem, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
     if up := a.get("unpushed"):
@@ -9739,10 +9757,11 @@ def cli_status(root: Path, home: Path, args) -> int:
     cfg = load_config(home)[0]
     a["trunk"] = cfg["git"]["base"]
     # A problem here, not in `analyze()`: every change refuses to start without a base branch,
-    # but `check` is a gate, and a repo whose `main` has no commit yet has none to name.
+    # but `vet --strict` refuses on any problem, and a repo whose `main` has no commit yet has
+    # none to name.
     if not a["trunk"]:
         a["problems"].append({"dir": "git.base", "detail": trunk_refusal(home, None)})
-    # Here, not in `analyze()`: a stale base is a nudge, and `check` is a gate.
+    # Here, not in `analyze()`: a stale base is a nudge, and `vet --strict` refuses on any problem.
     for rec in a["open"] + a["ready"]:
         rec["behind"] = behind_trunk(home, f"{rec['id']}-{rec['slug']}", a["trunk"])
     now = datetime.now(UTC).timestamp()
@@ -9798,7 +9817,7 @@ def cli_status(root: Path, home: Path, args) -> int:
     a["retro_due"] = retro_due(home, cfg)
     a["unpushed"] = _nudge(home, cfg)
     a["cases_nudge"] = cases_nudge(_cases_report(home, None))
-    # Here, not in `analyze()`: `check` never reads the registers for what comes next.
+    # Here, not in `analyze()`: `vet` never reads the registers for what comes next.
     a["next_up"] = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
     words = severities(home, cfg)
     fixing = {f for r in a["open"] for f in r.get("fixes") or []}
@@ -9810,11 +9829,11 @@ def cli_status(root: Path, home: Path, args) -> int:
 
 
 @command(
-    "check",
-    "audit artifacts against declared tier/stage",
+    "vet",
+    "vet the change folders against each one's tier and stage",
     arg("--strict", action="store_true", help="exit 1 if any problem is found"),
 )
-def cli_check(root: Path, home: Path, args) -> int:
+def cli_vet(root: Path, home: Path, args) -> int:
     a = analyze(root)
     print(f"■ Problems: {len(a['problems'])}")
     for pr in a["problems"]:

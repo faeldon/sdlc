@@ -5,7 +5,7 @@
 > write their agents' findings into it; `By:` names who raised one: `fresh` for ship's
 > fresh-context reviewer, a factory role (`code`, `test`, …) for an agent, and no line on ship's
 > own. A rerun keeps each id, marks one the diff no longer shows `fixed`, and never raises again
-> one the person answered `wrong`, `intentional` or `minor`; an agent's `wrong` is its verifier's,
+> one the person answered `wrong`, `intentional` or `minor`; an agent's `wrong` is its arbiter's,
 > never the person's, and the same fault worded differently is one more. `sdlc.py` reads each
 > heading and its `Evidence:`, `Class:`, `Disposition:`, `Reason:`, `By:` and `Fix:` lines, counts
 > ship's own alone into the `Sdlc-Findings` trailer (its `agents=` says how many it left out),

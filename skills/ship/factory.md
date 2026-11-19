@@ -7,7 +7,7 @@ by agents (the optional `sdlc-factory` plugin).
 
 A change built by agents has `.sdlc/work/NNN-slug/decision.md`, opening `DECISION: READY` or
 `DECISION: ESCALATE`, and its reviews in `.sdlc/work/NNN-slug/reviews/round-<N>/<role>.md`, each
-opening `VERDICT: PASS` or `VERDICT: CHANGES`, each round's verifier answers in
+opening `VERDICT: PASS` or `VERDICT: CHANGES`, each round's arbiter answers in
 `reviews/round-<N>/verified.md` (`- KEPT:` for the builder, `- DROPPED:` with why), and the person's
 calls the agents raised in `.sdlc/work/NNN-slug/decisions.md` (`- [x]` decided, `- [ ]` assumed,
 `- [x] … → superseded by D<m>` a default a later one replaced, and `- [x] … → settled by the
@@ -27,7 +27,7 @@ Step 1's gate and acceptance checks still run for themselves.
 **The agents' findings.** `findings.md` may already hold sections whose `By:` names a factory role
 (`code`, `security`, `test`, `behaviour`, `ui`, `ux`): the agents' record, written by the factory's
 `carry`. Keep each exactly as written, never re-disposition or renumber it, and number your own
-after the highest id in the file. An agent's `wrong` is its verifier's drop, never the person's
+after the highest id in the file. An agent's `wrong` is its arbiter's drop, never the person's
 answer, so it never stops you raising the same fault as a finding of your own.
 
 ## Step 4

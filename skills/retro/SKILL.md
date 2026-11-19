@@ -159,7 +159,7 @@ What `retro` gives:
     (`Bash:git:push`, `Edit`) with `asked`, `rejected` and the `changes` it came from, the
     permission `modes` the changes ran in, and how many changes `recorded` them (a `Close` commit
     from before has none, never zero);
-  - `extra`, the stops beyond gates and questions, across the window, by kind: `after_gate`
+  - `extra`, the stops beyond approvals and questions, across the window, by kind: `after_gate`
     (typed once the WAIT was answered), `revise` (before it), `asked` (answering a question the
     agent put in prose), `interrupt`, `fix` (asking for the review's own findings to be fixed,
     before the WAIT) and `unprompted`, each with the `changes` it came from; the
@@ -364,7 +364,7 @@ Every finding ends in exactly one of these, or it doesn't go in the report:
   `[review]` is a seed too, its body holding the exact text proposed (the bullet, the path), so
   the change that makes it gets ship's review.
 - **Intent**: a proposed title for `/sdlc:intent`, for one that needs a decision now. Don't open it:
-  that skill has its own gate.
+  that skill has its own approval.
 - **Dropped**: with its reason, which goes under the direction doc's *Dropped findings*.
 
 A finding that duplicates an open change (in `open`) or an existing seed is dropped, naming which.

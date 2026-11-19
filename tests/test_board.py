@@ -346,7 +346,7 @@ def test_the_cost_is_summed_as_the_factory_sums_it(repo) -> None:
 
 
 # 078's round 1, as its run left it on 2026-11-17 (each long line cut at `…`): the reviewer asked
-# for one change, and the verifier dropped it in other words than the reviewer's, so `verdicts`
+# for one change, and the arbiter dropped it in other words than the reviewer's, so `verdicts`
 # found the change answered no times and an answer to a change nobody asked for, and stopped.
 STOP_CHANGE = (
     '.sdlc/REVIEW.md:50: The bullet says "The escapes from 047 and 050 are pinned by …" The commit'
@@ -802,7 +802,7 @@ TRACKS = {
     "gate": ["done", "current", "todo", "todo", "todo", "todo"],
     "fix": ["done", "current", "todo", "todo", "todo", "todo"],
     "review": ["done", "done", "current", "todo", "todo", "todo"],
-    "verify": ["done", "done", "done", "current", "todo", "todo"],
+    "arbitrate": ["done", "done", "done", "current", "todo", "todo"],
     "rework": ["done", "done", "done", "done", "current", "todo"],
     "approve": ["done", "done", "done", "done", "done", "current"],
     "decide": ["done", "done", "paused", "todo", "todo", "todo"],
@@ -976,10 +976,10 @@ def _row(role: str, seconds: float | None) -> tuple[str, dict]:
 
 
 # One closed factory run, in the order its sessions ended: a build, two review rounds with a
-# verification and a rework between them, the approver, then the landing's own review.
+# arbitration and a rework between them, the approver, then the landing's own review.
 RUN = [
     _row("spec-writer", 300), _row("builder", 100), _row("code", 30), _row("test", 50),
-    _row("verifier", 20), _row("builder", 40), _row("code", 10), _row("builder", None),
+    _row("arbiter", 20), _row("builder", 40), _row("code", 10), _row("builder", None),
     _row("test", 12), _row("approver", 15), _row("code", 999), _row("builder", 999),
 ]  # fmt: skip
 
@@ -1022,7 +1022,7 @@ def test_typical_times_come_from_closed_factory_runs(repo) -> None:
     assert samples[("build", 2)] == {"020-draft-a": [100], "021-draft-b": [200],
                                       "022-draft-c": [200]}  # fmt: skip
     assert samples[("review", 2)]["020-draft-a"] == [50, 12], "the slowest of each round"
-    assert samples[("verify", 2)] == {"020-draft-a": [20]}
+    assert samples[("arbitrate", 2)] == {"020-draft-a": [20]}
     assert samples[("rework", 2)] == {"020-draft-a": [40]}, "a row with no duration is skipped"
     assert samples[("approve", 2)]["020-draft-a"] == [15], "the landing's rows are not the run's"
     assert samples[("gate", 2)] == {"020-draft-a": [5.0, 6.0], "021-draft-b": [9.0]}
@@ -1030,7 +1030,7 @@ def test_typical_times_come_from_closed_factory_runs(repo) -> None:
     table = board.typical_times(repo, "main")
     assert table["build/2"] == {"seconds": 200, "samples": 3}
     assert table["review/2"] == {"seconds": 60, "samples": 3}, "the median of every sample"
-    assert "verify/2" not in table and "build/1" not in table, "fewer than 3 changes: no figure"
+    assert "arbitrate/2" not in table and "build/1" not in table, "fewer than 3 changes: no figure"
 
 
 @pytest.mark.portable
@@ -1196,16 +1196,6 @@ def test_the_open_drawer_keeps_tab_inside_it() -> None:
     assert re.search(r'<div class="doc" tabindex="0"[^>]*aria-label="[^"]+"', page), (
         "the scrolling pane is a stop of the trap's, not a way out"
     )
-
-
-@pytest.mark.portable
-def test_the_verifier_chip_says_whose_count_it_is_in_its_text() -> None:
-    """099 (2026-11-17-26): the count names the verifier in the text every user gets, not only in
-    a tooltip."""
-    _, script = _page_parts()
-    chip = re.search(r"if \(r\.verified\) \{(.*?)\n  \}", script, re.S)
-    assert chip
-    assert re.search(r"`verifier: kept \$\{r\.verified\.kept\} · dropped", chip.group(1))
 
 
 def _escalated(root: Path, name: str, stage: str, commit=()) -> Path:
@@ -2228,7 +2218,7 @@ LANDS = {
     "recheck": ["done", "done", "done", "current", "todo", "todo", "todo"],
     "review": ["done", "done", "done", "done", "current", "todo", "todo"],
     "mend": ["done", "done", "done", "done", "current", "todo", "todo"],
-    "verify": ["done", "done", "done", "done", "done", "current", "todo"],
+    "arbitrate": ["done", "done", "done", "done", "done", "current", "todo"],
     "close": ["done", "done", "done", "done", "done", "done", "current"],
     # 139: a train's steps. `stack` sits at the rebase; `eject` is a stop, at the gate when the
     # record names no step it stopped after. 145 R22: `wait`, its turn to come, at the rebase.
@@ -2238,8 +2228,8 @@ LANDS = {
 }
 LABELS = {"resolve": ("rebase", "resolving"), "fix": ("rebase", "fixing"),
           "mend": ("review", "mending"), "stack": ("rebase", "stacking"),
-          "checks": ("ship", "checks"), "cases": ("ship", "cases"),
-          "wait": ("rebase", "waiting"), "recheck": ("checks", "checks")}  # fmt: skip
+          "checks": ("ship", "acceptance"), "cases": ("ship", "cases"),
+          "wait": ("rebase", "waiting"), "recheck": ("acceptance", "acceptance")}  # fmt: skip
 STOPS = ("eject",)
 
 
@@ -2481,14 +2471,14 @@ def test_the_page_says_unattended_only_from_the_lock() -> None:
 
 @pytest.mark.portable
 def test_landing_typical_times_come_from_closed_factory_runs(repo) -> None:
-    """133: the rows after the approver are the landing's: its reviews and verifications, and its
+    """133: the rows after the approver are the landing's: its reviews and arbitrations, and its
     gate from `build/land-<n>.gate.md`; a landing step is timed against them."""
-    rows = [*RUN[:-2], _row("behaviour", 90), _row("verifier", 30), _row("code", 70)]
+    rows = [*RUN[:-2], _row("behaviour", 90), _row("arbiter", 30), _row("code", 70)]
     for name in ("060-draft-a", "061-draft-b", "062-draft-c"):
         _closed(repo, name, 1, rows, land_gates=(40.0,))
     samples = board.history_samples(repo, "main")
     assert samples[("land-review", 1)]["060-draft-a"] == [90, 70]
-    assert samples[("land-verify", 1)]["060-draft-a"] == [30]
+    assert samples[("land-arbitrate", 1)]["060-draft-a"] == [30]
     assert samples[("land-gate", 1)]["060-draft-a"] == [40.0]
     assert samples[("approve", 1)]["060-draft-a"] == [15]
     table = board.typical_times(repo, "main")
@@ -2586,7 +2576,7 @@ def test_the_landing_stop_is_read_as_status_reads_it(repo) -> None:
     assert sdlc.factory_records.read_land_stop(folder) == {"after": "gate",
                                                            "problems": ["the gate failed",
                                                                         "exit 1"]}  # fmt: skip
-    out = {"step": "verify", "round": 1, "moves": 0, "limit": 3}
+    out = {"step": "arbitrate", "round": 1, "moves": 0, "limit": 3}
     _write(folder / factory.LAND_STEP, factory.land_step_text(out, "2026-11-18T10:00:00Z"))
     assert sdlc.factory_records.read_land_stop(folder) is None
     _write(folder / factory.LAND_STEP, "landing, probably\n")
@@ -2985,7 +2975,9 @@ def test_a_recheck_after_the_commit_sits_after_the_gate(repo) -> None:
     progress = _cards(repo)["030-draft-land"]["progress"]
     shown = [s["label"] + (" (current)" if s["state"] == "current" else "")
              for s in progress["steps"]]  # fmt: skip
-    assert shown == ["ship", "rebase", "gate", "checks (current)", "review", "verify", "close"]
+    assert shown == [
+        "ship", "rebase", "gate", "acceptance (current)", "review", "arbitrate", "close"
+    ]  # fmt: skip
 
 
 # ------------------------------------------------------- status by the board's states (151)
@@ -3178,3 +3170,104 @@ def test_the_dashboard_skill_offers_another_port_on_a_refusal() -> None:
     assert "another repo's board" in flat and "something else" in flat, flat
     assert re.search(r"another `--port`", flat) and "5171" in flat, flat
     assert "sdlc.py board --port 5170\n" in step, "the command is unchanged"
+
+
+# ------------------------------------------------------- one meaning per word (187)
+
+
+@pytest.mark.portable
+def test_an_old_verifier_row_counts_as_arbitrate() -> None:
+    """187 R14: a `costs.jsonl` row from before the rename, `role: verifier`, is the arbiter's, in
+    the build's rounds and the landing's alike."""
+    rows = [_row("builder", 100), _row("code", 30), _row("verifier", 20), _row("builder", 40),
+            _row("code", 10), _row("arbiter", 25), _row("approver", 15), _row("code", 70),
+            _row("verifier", 30)]  # fmt: skip
+    costs = "".join(json.dumps({"role": r, **f}) + "\n" for r, f in rows)
+    out = board.step_samples(costs, [])
+    assert out["arbitrate"] == [20, 25]
+    assert out["land-arbitrate"] == [30]
+    assert "verify" not in out and "land-verify" not in out
+
+
+@pytest.mark.portable
+def test_an_old_verify_step_sits_at_arbitrate(repo) -> None:
+    """187 R14, R17: a `STEP: verify` written before the rename sits at the build track's
+    `arbitrate`, and a landing's `verify` at the landing track's."""
+    _run_at(repo, "verify", 1)
+    progress = _cards(repo)["016-draft-tags"]["progress"]
+    assert progress["step"] == "arbitrate"
+    assert [s["name"] for s in progress["steps"]][3] == "arbitrate"
+    assert _states(_cards(repo)["016-draft-tags"]) == TRACKS["arbitrate"]
+    _landing_at(repo, "verify")
+    progress = _cards(repo)["030-draft-land"]["progress"]
+    assert progress["step"] == "arbitrate"
+    assert [s["state"] for s in progress["steps"]] == LANDS["arbitrate"]
+    assert progress["steps"][5]["label"] == "arbitrate"
+
+
+@pytest.mark.portable
+def test_the_tracks_and_chip_say_arbitrate_and_acceptance() -> None:
+    """187 R17: the step tracks' positions and labels, and the round chip, say the new words."""
+    assert board.TRACK == ("build", "gate", "review", "arbitrate", "rework", "approve")
+    assert board.LAND_TRACK == (
+        "ship", "rebase", "gate", "acceptance", "review", "arbitrate", "close"
+    )  # fmt: skip
+    assert board.LAND_LABEL["checks"] == board.LAND_LABEL["recheck"] == "acceptance"
+    assert "arbitrate" in board.LAND_TIMED and "verify" not in board.LAND_AT
+    _, script = _page_parts()
+    chip = re.search(r"if \(r\.verified\) \{(.*?)\n  \}", script, re.S)
+    assert chip and 'title: "the arbiter kept / dropped"' in chip.group(1)
+    assert re.search(r"`arbiter: kept \$\{r\.verified\.kept\} · dropped", chip.group(1))
+    assert "verifier" not in script and "check(s)" not in script
+
+
+@pytest.mark.portable
+def test_a_card_counts_acceptance_and_its_last_run(repo) -> None:
+    """187 R18: a card says `acceptance: N`, and once `build/land-accept.md` holds an attempt,
+    how its last one went; a record with no readable verdict says the count alone."""
+    folder = _landing_at(repo, "checks", stage="test")
+    _write(folder / "checks.md", "# Checks\n\n## It holds\n\n```sh\ntrue\n```\n\n## And this\n\n"
+           "```sh\ntrue\n```\n")  # fmt: skip
+    card = _cards(repo)["030-draft-land"]
+    assert (card["checks"], card["accept"]) == (2, None)
+    attempt = "## Attempt {n}\n\nVerdict: {v}\nBuild: abc\n\n- It holds: exit 0, passed\n"
+    _write(folder / "build" / "land-accept.md", "ACCEPT: FAIL\n\n" + attempt.format(n=1, v="PASS")
+           + "\n" + attempt.format(n=2, v="FAIL"))  # fmt: skip
+    assert _cards(repo)["030-draft-land"]["accept"] == "FAIL"
+    _write(folder / "build" / "land-accept.md", "ACCEPT: PASS\n\n## Attempt 1\n\nBuild: abc\n")
+    assert _cards(repo)["030-draft-land"]["accept"] is None
+    _, script = _page_parts()
+    assert "`acceptance: ${c.checks}`" in script
+    assert re.search(r'c\.accept === "PASS" \? "passed" : "failed"', script)
+
+
+@pytest.mark.parametrize(
+    "command, verdict, summary",
+    [("echo 3309 passed in 9s; echo done", "PASS", "3309 passed in 9s"),
+     ("echo boom; echo; exit 1", "FAIL", "boom"),
+     ("echo all fine", "PASS", None)],
+    ids=["green-count", "red-no-count", "green-no-count"],
+)  # fmt: skip
+def test_the_gate_badge_names_its_command_and_result(repo, capsys, command, verdict, summary):
+    """187 R19: beside `gate green` / `gate red`, the card says what the gate ran and how it
+    ended: the runner's count line, or on red with none the output's last line."""
+    _main_check(repo, command)
+    folder = _worktree(repo, "012-draft-pins", 1, "plan", commit=["src/pins.py"])
+    _hand_gate(sdlc.checkout_of(folder), "012")
+    capsys.readouterr()
+    gate = _cards(repo)["012-draft-pins"]["gate"]
+    assert (gate["verdict"], gate["command"], gate["summary"]) == (verdict, command, summary)
+    assert gate["exit"] == ("0" if verdict == "PASS" else "1")
+    _, script = _page_parts()
+    assert re.search(r"c\.gate\.command \? h\(\"span\", \{ class: \"gate-ran\" \}", script)
+    shown = '`${c.gate.command}: ${c.gate.summary ? c.gate.summary + ", " : ""}exit ${c.gate.exit}`'
+    assert shown in script
+
+
+@pytest.mark.portable
+def test_an_old_gate_record_shows_the_badge_alone(repo) -> None:
+    """187: a hand gate record from before the `Command:` line has no command or summary."""
+    folder = _worktree(repo, "012-draft-pins", 1, "plan", commit=["src/pins.py"])
+    _write(folder / "build" / "gate.md", "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nExit: 0\n")
+    gate = _cards(repo)["012-draft-pins"]["gate"]
+    assert (gate["command"], gate["summary"]) == (None, None)

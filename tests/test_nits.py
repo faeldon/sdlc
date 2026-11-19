@@ -1,4 +1,4 @@
-"""The nits ship approved unfixed, `[nit]` entries in work/inbox.md. `nits` lists them, `check`
+"""The nits ship approved unfixed, `[nit]` entries in work/inbox.md. `nits` lists them, `vet`
 audits them, `retro` counts them by theme and age, and release, publish and measuring never look."""
 
 from __future__ import annotations

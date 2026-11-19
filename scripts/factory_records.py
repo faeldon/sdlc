@@ -4,7 +4,7 @@
 files a run leaves (its decision, ledger, rounds, gate records, step and landing records, costs and
 sessions) and parses them with copies of `factory.py`'s own parsing. Every such copy the core holds
 lives here, and nothing else in core opens one of those files its own way or spells its name
-(`tests/test_modules.py`, which also pins the copies). `status`, the hand gate and `check` read
+(`tests/test_modules.py`, which also pins the copies). `status`, the hand gate and `vet` read
 through it in `sdlc.py`, and the board, close's measure step and the retrospective's `autonomy`
 through `sdlc`'s binding, as `sdlc.factory_records.<name>`.
 
@@ -122,8 +122,11 @@ LAND_STEP = Path("runs") / "land-step.md"
 LAND_STOPS = ("stop", "eject")
 LAND_STEPS = (
     "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
-    "review", "mend", "verify", "close", "eject",
+    "review", "mend", "arbitrate", "close", "eject",
 )  # fmt: skip
+# A name a record from before the verifier became the arbiter holds, read as its name now: a role
+# (`costs.jsonl`'s `role`, `runs/<role>.sessions`), a build step or a landing step. `factory.py`'s.
+RENAMED = {"verifier": "arbiter", "verify": "arbitrate", "land-verify": "land-arbitrate"}
 MOVES_RE = re.compile(r"^MOVES: ?(\d*)\s*$")
 TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
 WAITS_RE = re.compile(r"^WAITS: (.+?)\s*$")
@@ -228,7 +231,7 @@ def landing(folder: Path, stage: str | None) -> tuple[bool, str | None]:
     step = STEP_RE.match(lines[0]) if lines else None
     if not step:
         return False, f"{LAND_STEP.as_posix()} doesn't open with STEP:"
-    name = step.group(1)
+    name = RENAMED.get(step.group(1), step.group(1))
     return name in LAND_STEPS and name not in LAND_STOPS, None
 
 
@@ -237,7 +240,7 @@ def first_build(folder: Path) -> bool:
     `plan.md` now: a builder session started less than `AGENT_TIMEOUT` ago (no session outlives
     it), no builder report yet, no stop recorded, and `runs/step.md` absent (a fresh run builds
     before its first `verdicts --record`) or naming `build` at round 1. Never raises: a file that
-    won't read is no live build, so `check` reports as it would without the factory."""
+    won't read is no live build, so `vet` reports as it would without the factory."""
     try:
         started = (folder / BUILDER_SESSIONS).stat().st_mtime
         if time.time() - started >= AGENT_TIMEOUT:
@@ -378,7 +381,8 @@ def reading(folder: Path) -> dict:
 
 def card_reading(folder: Path, problems: list[str]) -> dict:
     """What a factory run left, as a board card shows it: its rounds, the approver's decision, the
-    ledger and the cost, each file that won't parse a line added to `problems`."""
+    ledger, the cost and the last acceptance run's verdict, each file that won't parse a line
+    added to `problems`."""
     rounds = []
     base = folder / "reviews"
     dirs = [p for p in base.glob("round-*") if p.is_dir() and p.name[6:].isdigit()]
@@ -439,7 +443,18 @@ def card_reading(folder: Path, problems: list[str]) -> dict:
         "rounds": rounds, "built": built, "decision": decision, "pending": pending,
         "assumed": assumed, "cost": cost(folder), "reconsider": reconsider,
         "ledger_lines": ledger_lines, "reasons": read["reasons"], "looks": read["looks"],
+        "accept": accept_verdict(folder),
     }  # fmt: skip
+
+
+def accept_verdict(folder: Path) -> str | None:
+    """The verdict of the last attempt in the landing's acceptance record (`LAND_ACCEPT`), `PASS`
+    or `FAIL`; None before one ran, or when its last attempt has no verdict line."""
+    try:
+        attempts = gate_attempts(folder / LAND_ACCEPT)
+    except OSError:
+        return None
+    return attempts[-1]["verdict"] if attempts else None
 
 
 def reviewed(folder: Path, n: int) -> int:
@@ -569,7 +584,7 @@ def cost(folder: Path) -> dict | None:
 
 def run_counts(show, listing) -> dict | None:
     """What the factory left in the change's commit, as counts: review rounds, each reviewer's
-    `CHANGES` verdicts, change requests and requests the verifier dropped (`dropped`, from each
+    `CHANGES` verdicts, change requests and requests the arbiter dropped (`dropped`, from each
     round's `verified.md`), the approver's decision, the ledger's blocking and default decisions,
     the defaults still open and those the approver settled, and the script gate's red attempts
     (`gate_fail`, only when a gate file exists). None for a change built by hand (no
@@ -589,7 +604,7 @@ def run_counts(show, listing) -> dict | None:
         rounds.add(parts[1])
         lines = (show(path) or "").splitlines()
         if parts[2] == VERIFIED:
-            # The verifier's answers, counted on the reviewer whose request it dropped.
+            # The arbiter's answers, counted on the reviewer whose request it dropped.
             for m in filter(None, map(DROPPED_RE.match, lines)):
                 r = reviews.setdefault(m.group(1), {"changes": 0, "requests": 0})
                 r["dropped"] = r.get("dropped", 0) + 1
@@ -600,7 +615,7 @@ def run_counts(show, listing) -> dict | None:
         r["changes"] += int(bool(verdict) and verdict.group(1) == "CHANGES")
         r["requests"] += sum(1 for line in lines[at + 1 :] if CHANGE_RE.match(line))
     if any(p.endswith(f"/{VERIFIED}") for p in listed.splitlines()):
-        # A run with a verifier says `dropped` for every reviewer, 0 included; one from before
+        # A run with an arbiter says `dropped` for every reviewer, 0 included; one from before
         # it says nothing, so its trailer reads as unknown there, never as nothing dropped.
         for r in reviews.values():
             r.setdefault("dropped", 0)
@@ -741,16 +756,18 @@ def pipeline_counts(show, listing) -> dict | None:
 
 def session_roles(show, listing) -> dict[str, str]:
     """The sessions the factory ran as its agents, by session id, from the change's
-    `runs/<role>.sessions`: one id a line, written by `factory.py agent`. A transcript names no
-    `--agent` role, so this is how measuring tells a builder's session from the person's."""
+    `runs/<role>.sessions`: one id a line, written by `factory.py agent`, a role from before read
+    as its name now (`RENAMED`). A transcript names no `--agent` role, so this is how measuring
+    tells a builder's session from the person's."""
     roles: dict[str, str] = {}
     for path in (listing("runs") or "").splitlines():
         parts = path.split("/")
         if len(parts) != 2 or not parts[1].endswith(SESSIONS):
             continue
+        role = parts[1].removesuffix(SESSIONS)
         for line in (show(path) or "").splitlines():
             if line.strip():
-                roles[line.strip()] = parts[1].removesuffix(SESSIONS)
+                roles[line.strip()] = RENAMED.get(role, role)
     return roles
 
 
@@ -892,6 +909,8 @@ BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
 # The slot wait before the attempt, from 175 on: an attempt without it has no wait, never 0.
 WAITED_RE = re.compile(r"^Waited: (\d+(?:\.\d+)?)\s*$")
+# The heading the gate's output tail follows, each of its lines indented by four spaces.
+TAIL_RE = re.compile(r"^Last \d+ lines of its output:\s*$")
 # The record, in the change's folder: beside the factory's round files, and matched by none of
 # their readers (`round-*`, `*.gate.md`).
 HAND_GATE = Path("build") / "gate.md"
@@ -908,15 +927,25 @@ def gate_attempts(path: Path) -> list[dict]:
 
 def read_gate_attempts(text: str) -> list[dict]:
     """A gate record's attempts, oldest first, each its verdict, build, exit, seconds and slot
-    wait (`waited`, None for an attempt from before the `Waited:` line), read by line as
-    `factory.py`'s `read_gate_file()` reads one: the output is indented, so a line of it never
-    reads as the record's."""
+    wait (`waited`, None for an attempt from before the `Waited:` line), the command it ran
+    (`command`, None before the `Command:` line) and its output's tail, unindented (`tail`, [] for
+    none), read by line as `factory.py`'s `read_gate_file()` reads one: the output is indented,
+    so a line of it never reads as the record's."""
     attempts: list[dict] = []
+    in_tail = False
     for line in text.splitlines():
         if line.startswith("## Attempt "):
             attempts.append(
-                {"verdict": None, "build": None, "exit": None, "seconds": None, "waited": None}
-            )
+                {"verdict": None, "build": None, "exit": None, "seconds": None, "waited": None,
+                 "command": None, "tail": []}
+            )  # fmt: skip
+            in_tail = False
+        elif in_tail and line.startswith("    "):
+            attempts[-1]["tail"].append(line[4:])
+        elif attempts and line.startswith("Command: "):
+            attempts[-1]["command"] = line[len("Command: ") :].strip()
+        elif attempts and TAIL_RE.match(line):
+            in_tail = True
         elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
             attempts[-1]["verdict"] = m.group(1)
         elif attempts and (m := BUILD_RE.match(line)):

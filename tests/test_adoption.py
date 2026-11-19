@@ -235,8 +235,8 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
 
     status = _run(tree, "status")
     assert status.returncode == 0 and "001" in status.stdout, status.stderr
-    check = _run(tree, "check", "--strict")
-    assert check.returncode == 0, check.stdout + check.stderr
+    vet = _run(tree, "vet", "--strict")
+    assert vet.returncode == 0, vet.stdout + vet.stderr
 
     # Ship's one lookup, and its question, in a repo with no tracker and no inbox.
     pre = _run(tree, "preflight", "001")
@@ -344,8 +344,8 @@ def test_a_bare_repo_files_a_bug_and_closes_the_change_that_fixes_it(tmp_path: P
         text.replace("depends_on:\n", f"depends_on:\nfixes: [{bug_id}]\n", 1), encoding="utf-8"
     )
     (tree / "report.txt").write_text("every row\n", encoding="utf-8")
-    check = _run(tree, "check", "--strict")
-    assert check.returncode == 0, check.stdout + check.stderr
+    vet = _run(tree, "vet", "--strict")
+    assert vet.returncode == 0, vet.stdout + vet.stderr
     assert "■ Bugs" not in _run(tree, "status").stdout, "a bug being fixed isn't counted open"
 
     shipped = _run(tree, "ship", "001")
@@ -430,11 +430,11 @@ def test_a_bare_repo_releases_and_publishes_what_it_closed(tmp_path: Path, trunk
 
 def test_before_the_first_change_and_after_the_last_everything_answers(tmp_path: Path) -> None:
     """Close removes each change's folder, so a repo with nothing open is the usual state, not only
-    a new one: `check` has nothing to audit and passes, `status` says nothing is open, and `next`
+    a new one: `vet` has nothing to audit and passes, `status` says nothing is open, and `next`
     says the first change will be 001."""
     _git(tmp_path, "init", "-q", "-b", "main")
-    check = _run(tmp_path, "check", "--strict")
-    assert check.returncode == 0, check.stdout + check.stderr
+    vet = _run(tmp_path, "vet", "--strict")
+    assert vet.returncode == 0, vet.stdout + vet.stderr
     assert _run(tmp_path, "status").returncode == 0
     nxt = _run(tmp_path, "next")
     assert nxt.returncode == 0 and nxt.stdout.strip() == "001"

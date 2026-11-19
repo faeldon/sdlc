@@ -157,7 +157,7 @@ def test_slugify(raw: str, expected: str) -> None:
 
 
 def test_is_unfilled_detects_an_untouched_template(tmp_path: Path) -> None:
-    """The `~` marker in `status` depends on this, and so does `check`'s unfilled-artifact problem.
+    """The `~` marker in `status` depends on this, and so does `vet`'s unfilled-artifact problem.
 
     Without it, a Tier 2 change whose spec.md is still the scaffold is indistinguishable from one
     that was actually written — "looks done, is empty", which is the failure the whole process is
@@ -220,7 +220,7 @@ def test_tier2_at_design_without_spec_is_a_problem(tmp_path: Path) -> None:
 
 def test_tier2_at_plan_without_spec_is_silent(tmp_path: Path) -> None:
     """Deliberate: `sdlc.py new --tier 2` scaffolds a change at stage: plan, and a tool whose own
-    `new` produces something that instantly fails its own `check` teaches you to ignore the check.
+    `new` produces something that instantly fails its own `vet` teaches you to ignore it.
     `status`'s `~` marker and the age column are what surface a stub left here for months."""
     _change(tmp_path, "001-x", _fm(tier=2, stage="plan"))
     a = sdlc.analyze(tmp_path, today=date(2026, 10, 17))
@@ -243,7 +243,7 @@ def test_tier2_at_build_needs_a_plan(tmp_path: Path) -> None:
 
 
 def test_unfilled_spec_at_build_is_a_problem(tmp_path: Path) -> None:
-    """Present-but-empty must not read as done — the distinction `check` exists to draw."""
+    """Present-but-empty must not read as done — the distinction `vet` exists to draw."""
     scaffold = (REPO / "templates" / "spec.md").read_text(encoding="utf-8")
     _change(
         tmp_path,
@@ -632,7 +632,7 @@ def test_ship_refuses_without_a_release_impact_then_ships_once_set(tmp_path: Pat
 
 def test_an_invalid_impact_is_a_frontmatter_error_and_an_empty_one_is_not(tmp_path: Path) -> None:
     """Empty until ship settles it, and absent on changes shipped before 033; only a value outside
-    the four is wrong, so `check --strict` catches a typo before a release reads it."""
+    the four is wrong, so `vet --strict` catches a typo before a release reads it."""
     bad = _change(tmp_path, "001-x", _fm(impact="mnior"))
     assert any("impact must be one of" in e for e in sdlc.load_change(bad, tmp_path)["errors"])
     empty = _change(tmp_path, "002-y", _fm(id="002", slug="y", impact=""))
@@ -1221,7 +1221,7 @@ def test_status_marks_a_stale_base_and_check_ignores_it(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     """Ship stops on the mark before the gate runs; close would refuse the branch anyway. A nudge,
-    never a problem: `check --strict` is a gate."""
+    never a problem: `vet --strict` is a gate."""
     root = _repo(tmp_path)
     assert sdlc.cmd_new(root, "open-one", 1, None, worktree=True) == 0
     _shipped_change(root, "shipped-one")
@@ -1239,7 +1239,7 @@ def test_status_marks_a_stale_base_and_check_ignores_it(
     ready_line = next(ln for ln in out.splitlines() if "shipped-one" in ln and "/sdlc:close" in ln)
     assert "(behind main by 1: rebase and ship again)" in ready_line
 
-    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
     sdlc.main()
     assert "behind main" not in capsys.readouterr().out
 
@@ -1674,12 +1674,12 @@ def test_close_from_inside_the_worktree_merges_then_keeps_it(
 
 
 def test_check_after_the_last_close_still_audits_ideas(tmp_path: Path, capsys, monkeypatch) -> None:
-    """With every folder gone from main, `check` passes, and still flags an orphan seed."""
+    """With every folder gone from main, `vet` passes, and still flags an orphan seed."""
     root = _repo(tmp_path)
     _shipped_change(root)
     monkeypatch.chdir(root)
     assert _close(root, "001", capsys)[0] == 0
-    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
     assert sdlc.main() == 0
     (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
     (root / ".sdlc" / "work" / "inbox.md").write_text(
@@ -2289,7 +2289,7 @@ def test_with_a_product_doc_every_open_change_says_what_it_serves(
 
 
 def test_a_change_owes_serves_only_once_its_own_branch_has_the_product_doc(tmp_path: Path) -> None:
-    """A product doc landing on one branch mustn't fail `check` for changes on others, which have
+    """A product doc landing on one branch mustn't fail `vet` for changes on others, which have
     never seen it: each is checked against the doc its own checkout holds."""
     root = _repo(tmp_path)
     tree = tmp_path / "002-other"
@@ -3128,3 +3128,31 @@ def test_by_state_places_a_record_without_a_column_as_column_does(stage: str, mo
     shown = sdlc._by_state({"open": [rec]})
     [key] = [k for k, (recs, _) in shown.items() if recs]
     assert key == sdlc.column({"stage": stage, "problems": [], "mode": mode})
+
+
+def test_vet_strict_fails_on_a_problem(tmp_path: Path, capsys, monkeypatch) -> None:
+    """`vet` reports the problems and exits 0; `vet --strict` exits 1 on any of them."""
+    root = _repo(tmp_path)
+    monkeypatch.chdir(root)
+    (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(
+        "## [2026-10-01-1] [building] Orphan\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet"])
+    capsys.readouterr()
+    assert sdlc.main() == 0
+    assert "■ Problems: 1" in capsys.readouterr().out
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
+    assert sdlc.main() == 1
+
+
+def test_check_is_no_longer_a_command(tmp_path: Path, capsys, monkeypatch) -> None:
+    """The old name has no alias: argparse refuses it, and the help lists `vet` where it stood."""
+    root = _repo(tmp_path)
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    with pytest.raises(SystemExit) as stop:
+        sdlc.main()
+    assert stop.value.code == 2
+    assert "invalid choice: 'check'" in capsys.readouterr().err
+    assert "check" not in sdlc.HELP_ORDER and "vet" in sdlc.HELP_ORDER

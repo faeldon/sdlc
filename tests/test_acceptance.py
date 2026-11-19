@@ -167,7 +167,7 @@ def test_an_unreadable_file_is_a_problem(repo: Path) -> None:
 def test_check_strict_reports_them(repo: Path, monkeypatch, capsys) -> None:
     _write(repo, _checks("## No command\n\nJust prose.\n"))
     monkeypatch.chdir(repo)
-    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
     assert sdlc.main() == 1
     kinds = [p["kind"] for p in sdlc.analyze(repo)["problems"]]
     assert kinds == ["checks"]

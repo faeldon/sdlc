@@ -647,12 +647,16 @@ def test_no_factory_record_is_named_outside_its_reader() -> None:
 def _comparable(value) -> bool:
     if isinstance(value, tuple):
         return all(_comparable(v) for v in value)
+    if isinstance(value, dict):
+        return all(_comparable(k) and _comparable(v) for k, v in value.items())
     return isinstance(value, str | int | float | Path | re.Pattern)
 
 
 def _shape(value):
     if isinstance(value, tuple):
         return tuple(_shape(v) for v in value)
+    if isinstance(value, dict):
+        return ("dict", tuple(sorted((k, _shape(v)) for k, v in value.items())))
     if isinstance(value, re.Pattern):
         return ("pattern", value.pattern, value.flags)
     return value
@@ -668,12 +672,41 @@ def test_every_shared_name_is_the_factorys() -> None:
         for name in set(vars(records)) & set(vars(factory))
         if not name.startswith("__") and _comparable(getattr(records, name))
     }
-    assert {"LEDGER_RE", "STOPPED", "LAND_STEPS", "NO_DECISION", "REVIEWERS"} <= shared, shared
+    assert {"LEDGER_RE", "STOPPED", "LAND_STEPS", "NO_DECISION", "REVIEWERS", "RENAMED",
+            "TAIL_RE"} <= shared, shared  # fmt: skip
     assert _shape(re.compile("a")) != _shape(re.compile("a", re.I)), "flags count"
     drift = sorted(
         name for name in shared if _shape(getattr(records, name)) != _shape(getattr(factory, name))
     )
     assert not drift, f"these differ from factory.py's: {drift}"
+
+
+# Gate records as `sdlc.py gate` and `factory.py gate` write them, and the fields both readers
+# take from each attempt: a record from before the `Command:` line, a tail, and two attempts.
+GATE_RECORDS = [
+    "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: abc\nExit: 0\n",
+    "GATE: FAIL\n\n## Attempt 1\n\nVerdict: FAIL\nCommand: ./check.sh\nBuild: abc\nExit: 1\n"
+    "Seconds: 3.0\n\nLast 80 lines of its output:\n\n    3 failed, 9 passed\n    \n"
+    "    Exit: 7\n",
+    "GATE: PASS\n\n## Attempt 1\n\nVerdict: FAIL\nCommand: make check\nExit: timeout\n\n"
+    "Last 80 lines of its output:\n\n    (no output)\n\n## Attempt 2\n\nVerdict: PASS\n"
+    "Command: make check\nExit: 0\n\nLast 80 lines of its output:\n\n    12 passed\n",
+]
+
+
+@pytest.mark.parametrize("text", GATE_RECORDS)
+def test_both_gate_readers_read_the_command_and_tail_alike(tmp_path, text) -> None:
+    """187 R19: `read_gate_attempts()` reads each attempt's command and output tail as
+    `factory.py`'s `read_gate_file()` does, so the board's badge says what the factory would."""
+    records = _load("factory_records_gate", RECORDS_PY)
+    factory = _load("factory_records_gate_theirs", FACTORY_PY)
+    path = tmp_path / "gate.md"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    theirs = factory.read_gate_file(path)["attempts"]
+    ours = records.read_gate_attempts(text)
+    keys = ("verdict", "build", "exit", "command", "tail")
+    assert [{k: a[k] for k in keys} for a in ours] == theirs
+    assert all("Exit: 7" not in str(a["exit"]) for a in ours), "a tail line is never the record's"
 
 
 def test_land_ask_re_reads_the_factorys_path(tmp_path) -> None:

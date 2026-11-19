@@ -13,7 +13,7 @@ allowed-tools:
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
@@ -87,7 +87,7 @@ setup wrote. Then prove it:
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record --created <paths created> && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet
 ```
 
 Every item written should now be `ok`, `drift` included unless the human left a `refresh` out. One that isn't is a draft that didn't do what it said: say

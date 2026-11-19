@@ -159,7 +159,7 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
   only, never text. `metrics.transcripts = false` turns it off.
 - **Deeper review where it matters.** List risky paths in `.sdlc/config.toml`'s `[review]`
   (`sensitive`, `irreversible`). A diff touching a sensitive one gets a second, fresh-context
-  reviewer and the build check, named in ship's question; one touching an irreversible one says
+  reviewer and the slow gate, named in ship's question; one touching an irreversible one says
   in its commit how to recover. With neither set, every change ships alike.
 - **Dropping a change.** `/sdlc:drop` closes a change that won't ship: it records why and how far
   it got, closes its issue as not planned, and keeps its commits reachable from `main`.
@@ -176,7 +176,7 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
 
   | Step | By hand | With the factory |
   |---|---|---|
-  | Spec (Tier 2) | `/sdlc:spec` | drafted inside `/sdlc-factory:build`, approved at its gate |
+  | Spec (Tier 2) | `/sdlc:spec` | drafted inside `/sdlc-factory:build`, approved at its WAIT |
   | Plan and build | plan mode, then you | `/sdlc-factory:build` |
   | Ship and close | `/sdlc:ship`, `/sdlc:close` | `/sdlc-factory:land`, or `/sdlc:ship` and `/sdlc:close` |
 

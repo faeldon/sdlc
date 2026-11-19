@@ -9,7 +9,8 @@ after its heading:
   agents/reviewer-security.md  agents/security-auditor.md, skills/security-and-hardening
   agents/reviewer-test.md      agents/test-engineer.md
 
-agents/approver.md, agents/reviewer-ui.md and agents/reviewer-ux.md are written for this plugin. The shape of the loop (a spec-writer, a builder,
+agents/approver.md, agents/arbiter.md, agents/reviewer-ui.md and agents/reviewer-ux.md are written
+for this plugin. The shape of the loop (a spec-writer, a builder,
 parallel reviewers and an approver handing work over through files, in rounds) is the idea behind
 zazencodes' "Software Factory for Claude Code". No text of that repository is used: it carries no
 license.

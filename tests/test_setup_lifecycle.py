@@ -664,7 +664,7 @@ def test_status_nudges_on_old_manifest(repo: Path, plugin: Path, monkeypatch) ->
 def test_check_strict_ignores_drift(repo: Path, plugin: Path) -> None:
     _default(plugin, REVIEW + "\n## Pass 3\n\nNew.\n")
     assert sdlc.drift(repo)["refresh"], "there is drift"
-    assert sdlc.analyze(repo)["problems"] == [], "and it isn't a problem `check` counts"
+    assert sdlc.analyze(repo)["problems"] == [], "and it isn't a problem `vet` counts"
 
 
 # ── Found at review ─────────────────────────────────────────────────────────────────────────

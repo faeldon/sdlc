@@ -57,40 +57,42 @@ CLOSED = ("shipped", "dropped")
 GITHUB_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 # A factory card's step track: the six positions of a round, and where each step the record names
-# sits on it (`fix` is the gate, fixing). A pause (`factory_records.PAUSES`, `factory.py`'s) keeps
-# the position it paused at; `done` is past them all. An estimate never fills its bar past
-# `CAP` while the step runs.
-TRACK = ("build", "gate", "review", "verify", "rework", "approve")
-AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "verify": 3, "rework": 4, "approve": 5}
+# sits on it (`fix` is the gate, fixing; a step from before the verifier became the arbiter is
+# read as its name now, `factory_records.RENAMED`). A pause (`factory_records.PAUSES`,
+# `factory.py`'s) keeps the position it paused at; `done` is past them all. An estimate never
+# fills its bar past `CAP` while the step runs.
+TRACK = ("build", "gate", "review", "arbitrate", "rework", "approve")
+AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "arbitrate": 3, "rework": 4, "approve": 5}
 CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
-# names sits (`factory.py`'s `LAND_STEPS`, pinned by a test). The acceptance checks and the
+# names sits (`factory.py`'s `LAND_STEPS`, pinned by a test), labelled `acceptance` where the
+# record says `checks` or `recheck`, which the landing writes. The acceptance checks and the
 # skills' cases run before the commit, at the ship's position, and the checks again after the
 # commit (`recheck`) at a position of their own after the gate; an agent resolving a conflict or
 # making the person's fix sits at the rebase, as does a train stacking the change or a change
 # waiting its turn in one, a mend at the review, each with its own label. A `stop`, and a train's
 # `eject`, mark the step it stopped after (an `eject` naming none sits at the gate, where most
 # come from).
-LAND_TRACK = ("ship", "rebase", "gate", "checks", "review", "verify", "close")
+LAND_TRACK = ("ship", "rebase", "gate", "acceptance", "review", "arbitrate", "close")
 LAND_AT = {
     "checks": 0, "cases": 0, "ship": 0, "rebase": 1, "stack": 1, "wait": 1, "resolve": 1,
-    "fix": 1, "gate": 2, "recheck": 3, "review": 4, "mend": 4, "verify": 5, "close": 6,
+    "fix": 1, "gate": 2, "recheck": 3, "review": 4, "mend": 4, "arbitrate": 5, "close": 6,
     "eject": 2,
 }  # fmt: skip
 LAND_LABEL = {
-    "checks": "checks",
+    "checks": "acceptance",
     "cases": "cases",
     "resolve": "resolving",
     "fix": "fixing",
     "mend": "mending",
     "stack": "stacking",
     "wait": "waiting",
-    "recheck": "checks",
+    "recheck": "acceptance",
 }
 # The steps whose figures come from the review and gate records history already holds, and those
 # `runs/land-times.jsonl` times. An open-ended step (a conflict, a fix, a mend, a paid case run, a
 # turn in a train) has no typical length: its card shows elapsed time and `running`, never a bar.
-LAND_TIMED = ("gate", "review", "verify")
+LAND_TIMED = ("gate", "review", "arbitrate")
 LAND_TIMES_STEPS = ("ship", "rebase", "stack", "checks", "recheck", "close")
 LAND_OPEN = ("resolve", "fix", "mend", "cases", "wait")
 # Typical times come from the newest `WINDOW` closed factory changes, and a step's figure at a tier
@@ -396,11 +398,13 @@ def _progress(
         rec = {**blank, "step": "build", "round": 1, "at": mtime}
     else:
         return None
-    step = rec["step"]
+    renamed = sdlc.factory_records.RENAMED
+    step = renamed.get(rec["step"], rec["step"])
     if step == "stop":
         return None
     paused = step in sdlc.factory_records.PAUSES
-    at = AT.get(rec.get("after") or "") if paused else AT.get(step)
+    after = renamed.get(rec.get("after") or "", rec.get("after") or "")
+    at = AT.get(after) if paused else AT.get(step)
     if step == "done":
         at = len(TRACK)
     if at is None:
@@ -457,7 +461,9 @@ def _land_progress(
     if rec is None:
         problems.append(f"{sdlc.factory_records.LAND_STEP.as_posix()} doesn't open with STEP:")
         return None
-    step = rec["step"]
+    renamed = sdlc.factory_records.RENAMED
+    step = renamed.get(rec["step"], rec["step"])
+    rec["after"] = renamed.get(rec["after"], rec["after"]) if rec["after"] else rec["after"]
     stopped = step in sdlc.factory_records.LAND_STOPS
     at = LAND_AT.get(rec["after"] or "", LAND_AT.get(step, 0)) if stopped else LAND_AT.get(step)
     if at is None:
@@ -565,12 +571,12 @@ def step_samples(
     """One run's seconds by step, from its `costs.jsonl` rows in the order its sessions ended: the
     first builder's is the build, every later one before the approver a rework (a gate fix among
     them); each run of reviewer rows one review round, as long as its slowest, since they run
-    together; each verifier's a verification; the first approver's the approval. What follows the
-    approver is the landing's: its review rounds and verifications as `land-review` and
-    `land-verify`, its gates (`land_gates`) as `land-gate`, and its builder and resolver rows (a
-    resolve or a fix) not at all. A row without an integer `duration_ms` is
-    skipped. The landing's other steps (`LAND_TIMES_STEPS`) come from `land_times`, its
-    `runs/land-times.jsonl`; an open-ended one is never timed."""
+    together; each arbiter's (a `verifier` row from before the rename too) an arbitration; the
+    first approver's the approval. What follows the approver is the landing's: its review rounds
+    and arbitrations as `land-review` and `land-arbitrate`, its gates (`land_gates`) as
+    `land-gate`, and its builder and resolver rows (a resolve or a fix) not at all. A row without
+    an integer `duration_ms` is skipped. The landing's other steps (`LAND_TIMES_STEPS`) come from
+    `land_times`, its `runs/land-times.jsonl`; an open-ended one is never timed."""
     out: dict[str, list[float]] = {s: [] for s in TRACK}
     out.update({f"land-{s}": [] for s in (*LAND_TIMED, *LAND_TIMES_STEPS)})
     for row in sdlc.factory_records.read_land_times(land_times):
@@ -590,6 +596,7 @@ def step_samples(
         if not isinstance(ms, int) or isinstance(ms, bool):
             continue
         role, seconds = row.get("role"), ms / 1000
+        role = sdlc.factory_records.RENAMED.get(role, role) if isinstance(role, str) else role
         if role in sdlc.factory_records.REVIEWERS:
             together.append(seconds)
             continue
@@ -599,8 +606,8 @@ def step_samples(
         if role == "builder" and not approved:
             out["rework" if built else "build"].append(seconds)
             built = True
-        elif role == "verifier":
-            out[f"{pre}verify"].append(seconds)
+        elif role == "arbiter":
+            out[f"{pre}arbitrate"].append(seconds)
         elif role == "approver" and not approved:
             out["approve"].append(seconds)
             approved, pre = True, "land-"

@@ -1,6 +1,6 @@
 ---
 name: build
-description: Add one change to the factory's supervisor, this session — the spec-writer drafts a Tier 2's spec first, and after one approval the builder plans and implements it in its own session in the change's worktree, reviewers check it in parallel rounds at a depth its diff's risk sets, a verifier checks what they ask for, the builder reworks what it keeps, and the approver writes a READY or ESCALATE decision — every agent in the background, so the supervisor stays free for the next change, and each ends uncommitted at stage test, ready for the person to ship. Use from the main checkout (or the change's worktree) once its intent is written, with sdlc-factory installed, as many times as there are changes to build. Not for committing or shipping (/sdlc:ship, which the person runs), not for drafting a spec alone (/sdlc-factory:spec), and never to merge or push.
+description: Add one change to the factory's supervisor, this session — the spec-writer drafts a Tier 2's spec first, and after one approval the builder plans and implements it in its own session in the change's worktree, reviewers check it in parallel rounds at a depth its diff's risk sets, an arbiter weighs what they ask for, the builder reworks what it keeps, and the approver writes a READY or ESCALATE decision — every agent in the background, so the supervisor stays free for the next change, and each ends uncommitted at stage test, ready for the person to ship. Use from the main checkout (or the change's worktree) once its intent is written, with sdlc-factory installed, as many times as there are changes to build. Not for committing or shipping (/sdlc:ship, which the person runs), not for drafting a spec alone (/sdlc-factory:spec), and never to merge or push.
 argument-hint: "[NNN — the change to add]"
 allowed-tools:
   - Read
@@ -29,8 +29,8 @@ disable-model-invocation: true
 
 Stages 2 to 4 of the change loop, handed to the factory's agents: the spec-writer drafts a Tier 2's
 spec, the builder plans and implements, the script runs the repo's gate on each build before any
-reviewer sees it, specialist reviewers check the work in rounds, a verifier
-checks each change they ask for against the code, the builder reworks what it keeps, and the
+reviewer sees it, specialist reviewers check the work in rounds, an arbiter
+weighs each change they ask for against the code, the builder reworks what it keeps, and the
 approver recommends. One approval starts it; after that it runs without the person until it
 reaches a decision, runs out of rounds, or hits a problem.
 
@@ -84,7 +84,7 @@ unless the repo sets `[light] reviewers`, so name `start`'s
 `light.reviewers`, which says this change's), the
 permission mode the agent sessions run in (`mode`, from the base branch's file, default `auto`),
 each role's model at either depth (`models_at`: `factory.models` where the repo sets one, else
-opus for the spec-writer, builder, security reviewer and approver, sonnet for the verifier and
+opus for the spec-writer, builder, security reviewer and approver, sonnet for the arbiter and
 the resolver, and for the other reviewers sonnet at either depth), the base
 branch's `[ui]` (`ui`: the dev server `serve` starts, the screenshot command `shoot`, the `paths`
 that count as UI, and the `fixture` data the server is given a fresh copy of), and `max_runs`, the most agent runs this can take, counted at the full depth.
@@ -195,7 +195,7 @@ change and its tier; how far it was behind `base` (`behind`) and what `fresh` di
 `from` → `head` and its `undo`, or, when it `held`, that the run resumes `<behind>` commits behind
 `<base>`; the gate command the script will run, from the base branch's
 `.sdlc/config.toml`, or that there is none; the agents that will run (builder, each reviewer at
-each depth, the verifier, approver) with each one's model from `models_at`; the round limits; the
+each depth, the arbiter, approver) with each one's model from `models_at`; the round limits; the
 depth rule above; the permission mode; with `[ui]` set, its `serve` and `paths`, since the dev
 server runs unasked once they agree; and `max_runs`, the factory's own runs, the builder's fixes
 of a red gate included and its sub-agents not, so the cost is in front of them before they agree
@@ -223,12 +223,12 @@ what the run does. Its fullest form without a spec draft, each clause there only
 branch's config names what it says (a `[commands] check`, `[review] sensitive` paths, a `[ui]`
 with `serve`, `shoot` and `paths`):
 
-> `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each round's changes, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
+> `Run the factory on NNN-<slug>: the builder plans and builds it, the base branch's gate <command> runs on each build before any reviewer (up to 2 fixes a round), <reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to <light rounds> when the diff touches no sensitive path), and, on a diff touching <ui paths>, the ui and ux reviewers, which start <serve>, an arbiter weighs each round's findings, the approver decides, at most <max_runs> agent runs, agents in <mode>, all left uncommitted at stage: test? (yes / change the reviewers or rounds / no)`
 
 With a spec draft, or `upgraded`, it opens by asking to write the spec and offers `revise a
 requirement` too; with a `restart`, it sends the change back and names the archive and the round.
 
-On a spec draft, a no leaves the change a Tier 2 at `stage: plan`, which `sdlc.py check` reads as
+On a spec draft, a no leaves the change a Tier 2 at `stage: plan`, which `sdlc.py vet` reads as
 sound; the person comes back to it with `/sdlc-factory:build`, `/sdlc-factory:spec` or
 `/sdlc:spec`.
 
@@ -245,7 +245,7 @@ parentheses, and stop.
 new draft. Words never go in a command line: write them at the end of the change's `decisions.md`
 (`Write` it with a `# Decisions` heading first when it doesn't exist) as a ticked line,
 `- [x] R<n> (person, revise): <their words, as they gave them>`, `<n>` one past the highest `R`
-there. It is the one write before this gate, by a named exception to confirm-before-writing, as
+there. It is the one write before this WAIT, by a named exception to confirm-before-writing, as
 ship's `findings.md` is: it writes only the change's own uncommitted folder, holds only the
 person's words, and decides nothing. Then, in the background:
 
@@ -397,14 +397,14 @@ the next step for that change. A `problem` is a stop, reported for that change a
      reviewer that reviewed an earlier round is told what was reworked, what was kept last round,
      and what is settled, never to be raised again. Take no next step for the change until every
      reviewer of the round has replied.
-   - **`verify`**: the verifier checks every `- CHANGE:` line of the round's `VERDICT: CHANGES`
+   - **`arbitrate`**: the arbiter weighs every `- CHANGE:` line of the round's `VERDICT: CHANGES`
      reviews, with the round's `untouched`, `repeats` and `settled`, as
-     `sdlc-factory:verifier`, into `.sdlc/work/NNN-slug/reviews/round-<round>/verified.md`. A
+     `sdlc-factory:arbiter`, into `.sdlc/work/NNN-slug/reviews/round-<round>/verified.md`. A
      reply that leaves a change unanswered, or answers one twice, is a `stop` on the next call:
      never patch it.
 
      ```bash
-     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task verify
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> --task arbitrate
      ```
 
    - **`rework`**: the builder is told `Round <round>'s changes are verified in
@@ -439,7 +439,7 @@ the next step for that change. A `problem` is a stop, reported for that change a
      disagree, none of them first (that reviewer resumed, asked to reply again with one
      `VERDICT:` line first), the approver's decision lines that disagree (`approver`, resumed for
      one `DECISION:` line first),
-     or answers in `verified.md` the script couldn't read (`verifier`, resumed with what the
+     or answers in `verified.md` the script couldn't read (`arbiter`, resumed with what the
      script found). Each reply is written over the old one.
 
      ```bash
@@ -467,7 +467,7 @@ the next step for that change. A `problem` is a stop, reported for that change a
 Say `NNN-slug is ready to ship (READY|ESCALATE)`, leading with ESCALATE when that is the decision,
 and report: the depth it ran at and why, the rounds it took, each round's gate attempts and their
 verdicts (or that no gate is configured), each round's verdicts by reviewer and
-how many changes the verifier kept and dropped, the decision and its first reason, the decisions
+how many changes the arbiter kept and dropped, the decision and its first reason, the decisions
 the person made during the run and those still assumed (by id, with the default the build rests
 on; a line marked `→ superseded by D<m>` is no assumption, shown as one line beside D<m>, the
 default that replaced it, never counted as open), the defaults the approver settled, apart from

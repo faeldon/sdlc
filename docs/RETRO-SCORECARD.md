@@ -241,7 +241,7 @@ Quality bought with slowness shows up as lead time rising. See Speed.
 - **Review noise:** the share of findings the person answered `wrong`. A noisy pass costs attention.
 - **First-time rate per stage:** how often each stage passes without rework.
 - **Red-gate rate:** builds the gate sent back.
-- **Verifier kept vs dropped:** how many of the reviewers' requested changes were real.
+- **Arbiter kept vs dropped:** how many of the reviewers' requested changes were real.
 - **Nits by theme and age:** debt the reviews recorded but didn't fix.
 
 ## Pillar 3: Autonomy. Am I deciding only what needs me?
@@ -264,7 +264,7 @@ Quality bought with slowness shows up as lead time rising. See Speed.
 - **Status:** needs S3.
 
 ### Supporting: auto-landed share
-- **What:** the share of landings that passed their own gate (`Sdlc-Landed: by=auto`).
+- **What:** the share of landings whose WAIT approved itself (`Sdlc-Landed: by=auto`).
 - **Why:** it shows how much of the work needs no landing decision at all.
 - **Where:** landing trailers.
 - **Status:** captured; needs counting in S3.

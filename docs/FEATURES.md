@@ -47,9 +47,16 @@ graph LR
 
 - **`change`**: one piece of work with a number and a slug (`NNN-slug`), its folder under `.sdlc/work/`, its branch and its worktree, from `/sdlc:intent` until close or drop. Specified: `guide/process.md`. Depends on: `intent.md`.
 - **`seed`**: an entry in the register, tagged `[idea]`, `[bug]` or `[nit]`: a change request no change has taken up yet. Specified: `docs/REFERENCE.md`. Depends on: `inbox.md`.
-- **`gate`**: a check a change must pass before it moves on: the host's `[commands] check` run at ship, or a person's approval at a WAIT. Specified: `guide/process.md`. Depends on: `WAIT`.
+- **`gate`**: the host's commands a change must pass before it moves on, judged by their exit and never by a person: `[commands] check`, and the slow gate when the diff calls for it, run by `/sdlc:ship`, `sdlc.py gate` and the factory's `gate`. Never a person's yes, which is an approval. Specified: `guide/process.md`. Depends on: nothing.
+- **`slow gate`**: `[commands] build`, the second gate, for what needs real services, data or time: run when a changed path matches `commands.build_when`, on a deep review whatever it says, and once at a factory train's tip. Specified: `guide/process.md`. Depends on: `gate`.
 - **`WAIT`**: the one step in a writing skill where it stops and asks the person a literal question in a dialog; only a chosen yes lets it write. Specified: `guide/process.md`. Depends on: nothing.
-- **`stop`**: any time a change's session waited on the person: a gate, a question, or an extra reply; counted at close against the gates the change owed. Specified: `scripts/metrics.py`. Depends on: `gate`, `Sdlc-Stage`.
+- **`approval`**: a person's yes at a WAIT, the only thing that lets a writing skill write; never a gate, which runs a command. A factory landing's WAIT approves itself only on a batch with no risk signal. Specified: `guide/process.md`. Depends on: `WAIT`.
+- **`acceptance checks`**: the commands a change's `checks.md` holds, each proving what only a revert could break, run by `sdlc.py accept` at ship and at a landing; called "acceptance" after a doc's first use and on labels. Never a person's yes, and never the gate. Specified: `docs/REFERENCE.md`. Depends on: `change`.
+- **`vet`**: `sdlc.py vet`, which checks each change folder against its tier and stage, the artifacts it owes and their frontmatter, and with `--strict` exits 1 on a problem. It runs no command of the host's, so it is never a gate. Specified: `docs/REFERENCE.md`. Depends on: `change`.
+- **`arbiter`**: the factory agent that weighs each round's findings, keeping or dropping each change a reviewer asked for against the code, before the builder reworks; its answers are the round's `verified.md`. Never the approver, which decides the whole change at the end. Specified: `plugins/factory/README.md`. Depends on: `factory`, `finding`.
+- **`verification`**: the umbrella for did we build it right: the gates, the reviews, the arbiter and the acceptance checks together. Specified: `guide/review.md`. Depends on: `gate`, `acceptance checks`, `arbiter`, `finding`.
+- **`validation`**: did we build the right thing: the milestones and the product's outcomes, which the retro judges. Never a check of the code. Specified: `guide/process.md`. Depends on: `retro`, `direction`, `outcome`.
+- **`stop`**: any time a change's session waited on the person: an approval, a question, or an extra reply; counted at close against the approvals the change owed. The metrics' own names for it (the stop kind `gate`, `Sdlc-AfterGate`, the `gate=` count) keep their names. Specified: `scripts/metrics.py`. Depends on: `approval`, `Sdlc-Stage`.
 - **`finding`**: one thing a review raised about a change, ranked important, nit or pre-existing, with its evidence and what was done about it. Specified: `templates/findings.md`. Depends on: `findings.md`.
 - **`nit`**: a finding approved unfixed, kept in the register with its cost and value, so later changes pay it down. Specified: `guide/process.md`. Depends on: `finding`, `seed`.
 - **`impact`**: what a change does to someone holding the previous release, settled at ship; a release takes the highest. Specified: `guide/process.md`. Depends on: `change`.
@@ -92,7 +99,7 @@ graph LR
 - **`stage: spike`**: exploration meant to be thrown away, entered from any stage and left by setting the stage it left; owes nothing. Specified: `scripts/sdlc.py`. Depends on: `change`.
 - **`stage: design`**: a Tier 2's spec is being written. Specified: `guide/process.md`. Depends on: `spec.md`.
 - **`stage: build`**: the code is being written, to `plan.md` for a Tier 2. Specified: `guide/process.md`. Depends on: `plan.md`.
-- **`stage: test`**: built; the gate and checks are run, and a factory run waits here for its landing. Specified: `guide/process.md`. Depends on: `gate`.
+- **`stage: test`**: built; the gate and the acceptance checks are run, and a factory run waits here for its landing. Specified: `guide/process.md`. Depends on: `gate`.
 - **`stage: ship`**: reviewed and being committed by `/sdlc:ship`. Specified: `guide/process.md`. Depends on: `/sdlc:ship`.
 - **`stage: shipped`**: committed on its branch, ready for close. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:ship`.
 - **`stage: dropped`**: won't ship; the reason is in its intent. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:drop`.
@@ -160,14 +167,14 @@ graph LR
 - **`Sdlc-Mode`**: how the change was run: by hand or by the factory. Specified: `scripts/metrics.py`. Depends on: `change`.
 - **`Sdlc-Coverage`**: what close measured from, and why a part is missing. Specified: `scripts/metrics.py`. Depends on: `change`.
 - **`Sdlc-Totals`**: the change's clocks, stops, tokens, prompts, words and tool calls. Specified: `scripts/metrics.py`. Depends on: `stop`.
-- **`Sdlc-Stage`**: the same per stage, with its gates and replies. Specified: `scripts/metrics.py`. Depends on: `stage: build`.
+- **`Sdlc-Stage`**: the same per stage, with its approvals (the trailer's `gate=` count, which keeps its name) and replies. Specified: `scripts/metrics.py`. Depends on: `stage: build`.
 - **`Sdlc-Role`**: each agent role's runs, time, tokens, model and behaviour counts. Specified: `scripts/metrics.py`. Depends on: `factory`.
 - **`Sdlc-Calls`**: each role's tool calls by name. Specified: `scripts/metrics.py`. Depends on: `Sdlc-Role`.
 - **`Sdlc-Prompt`**: each tool prompt the person answered. Specified: `scripts/metrics.py`. Depends on: `stop`.
 - **`Sdlc-Tool`**: each tool call by name, a plugin script's by its command, and its errors. Specified: `scripts/metrics.py`. Depends on: `change`.
 - **`Sdlc-Skill`**: each plugin skill the change's sessions ran, and how many times. Specified: `scripts/metrics.py`. Depends on: `/sdlc:intent`.
 - **`Sdlc-Extra`**: the extra stops per stage, by why each happened. Specified: `scripts/metrics.py`. Depends on: `stop`.
-- **`Sdlc-AfterGate`**: the stops typed after a gated skill's WAIT was answered, by skill. Specified: `scripts/metrics.py`. Depends on: `WAIT`.
+- **`Sdlc-AfterGate`**: the stops typed after a skill's WAIT was answered, its approval given, by skill; the key keeps its name. Specified: `scripts/metrics.py`. Depends on: `WAIT`, `approval`.
 - **`Sdlc-Blocked`**: the time spent waiting on a change this one depends on. Specified: `scripts/metrics.py`. Depends on: `change`.
 - **`Sdlc-Lead`**: lead time from opened to close, and where it went. Specified: `scripts/metrics.py`. Depends on: `change`.
 - **`Sdlc-Runtime`**: the Claude Code versions, models and plugin version the change ran on. Specified: `scripts/metrics.py`. Depends on: `change`.
@@ -177,7 +184,7 @@ graph LR
 - **`Sdlc-Spike`**: a spike's time, kept apart from rework. Specified: `scripts/metrics.py`. Depends on: `stage: spike`.
 - **`Sdlc-Base`**: where the change's branch started, so its size is all of its commits. Specified: `scripts/sdlc.py`. Depends on: `change`.
 - **`Sdlc-Findings`**: ship's findings by rank and disposition, on the change's own commit. Specified: `scripts/sdlc.py`. Depends on: `findings.md`.
-- **`Sdlc-Landed`**: who passed a factory landing's gate, the person or the gate itself. Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`.
+- **`Sdlc-Landed`**: who gave a factory landing its approval, the person or the WAIT itself (`by=auto`, which keeps its name). Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`.
 - **`Sdlc-Fixes`**: each bug a change's `fixes:` names, with its severity, when it was reported and the change that introduced it. Specified: `scripts/closing.py`. Depends on: `seed`.
 - **`Sdlc-Retired`**: a bug retired from the register without a fix, with its severity and the reason. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:bug`.
 - **`Sdlc-Triaged`**: an issue's triage verdict, on the register commit that recorded it. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:triage`.

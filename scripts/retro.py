@@ -3395,14 +3395,17 @@ def _spend(home: Path, cfg: dict, changes: list[dict], diffs: dict[str, str]) ->
 def _agents(changes: list[dict]) -> dict:
     """How the window's factory agents worked, from each `Close` commit's `Sdlc-Role` lines:
     grouped by role and model (`unknown` with no `model=`), each group's changes, runs, and the
-    per-change median of each count in `metrics.BEHAVIOURS`. A role line without `edits=` was
+    per-change median of each count in `metrics.BEHAVIOURS`, a role from before read as its name
+    now (`factory_records.RENAMED`: the verifier is the arbiter). A role line without `edits=` was
     closed before they were counted: `unrecorded`, in no group. `changes` holds each change's
     own rows, in close order: `cmd_retro()` prints them only with `--metrics`."""
     counts = sdlc.metrics.BEHAVIOURS
     rows: list[dict] = []
     unrecorded = 0
+    renamed = sdlc.factory_records.RENAMED
     for rec in changes:
         for role, fields in sorted(((rec.get("metrics") or {}).get("roles") or {}).items()):
+            role = renamed.get(role, role)
             if not isinstance(fields.get("edits"), int):
                 unrecorded += 1
                 continue

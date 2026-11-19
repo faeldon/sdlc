@@ -3,7 +3,7 @@
 The plugin's three loops as maps, in `docs/FEATURES.md`'s terms: the **change loop** that takes one
 change from a seed to the base branch, the **release loop** that takes landed changes to users,
 and the **retro loop** that looks across both and sets what comes next. Each stage shows its
-skill, the `sdlc.py` (or `factory.py`) commands the skill runs, its checks, and what it writes.
+skill, the `sdlc.py` (or `factory.py`) commands the skill runs, what it checks, and what it writes.
 A `WAIT:` node is the skill's one approval: nothing it writes is written before the person's
 yes. `guide/process.md` says why each step is there; `tests/test_feature_map.py` fails when a
 skill, a stage or a WAIT is missing from these maps.
@@ -16,14 +16,14 @@ of building, by hand or by the factory, ends at the same ship and close. `/sdlc:
 
 ```mermaid
 flowchart TD
-  setup["/sdlc:setup, once a repo<br/>calls: config, readiness, drift, record, reset, check<br/>writes: .sdlc/config.toml, the process and review docs"]
+  setup["/sdlc:setup, once a repo<br/>calls: config, readiness, drift, record, reset, vet<br/>writes: .sdlc/config.toml, the process and review docs"]
   setup --> wsetup["WAIT: /sdlc:setup"]
   uninstall["/sdlc:uninstall<br/>calls: config, uninstall<br/>removes what setup wrote"] --> wuninstall["WAIT: /sdlc:uninstall"]
   seeds["inbox.md: seeds"] --> intent
   intent["/sdlc:intent<br/>calls: config, status, next, lookup, groups, nits, new, sync"]
   intent --> wintent["WAIT: /sdlc:intent"]
   wintent --> plan["stage: plan<br/>writes: intent.md, the branch and its worktree"]
-  plan -->|Tier 2| spec["/sdlc:spec<br/>calls: config, check, lookup, nits, status, sync"]
+  plan -->|Tier 2| spec["/sdlc:spec<br/>calls: config, vet, lookup, nits, status, sync"]
   plan -->|Tier 2, factory| fspec["/sdlc-factory:spec<br/>calls: config, start, fresh, agent, write-spec, stage"]
   spec --> wspec["WAIT: /sdlc:spec"]
   fspec --> wfspec["WAIT: /sdlc-factory:spec"]
@@ -31,14 +31,14 @@ flowchart TD
   wfspec --> design
   plan -->|Tier 1| build
   design --> build["stage: build<br/>plan mode writes plan.md, then the code, test first"]
-  build -->|factory| fbuild["/sdlc-factory:build<br/>calls: config, start, fresh, agent, gate, verdicts, carry, decisions, stage<br/>builder, reviewers, verifier and approver in rounds"]
+  build -->|factory| fbuild["/sdlc-factory:build<br/>calls: config, start, fresh, agent, gate, verdicts, carry, decisions, stage<br/>builder, reviewers, arbiter and approver in rounds"]
   fbuild --> wfbuild["WAIT: /sdlc-factory:build"]
   build -.->|any stage| spike["stage: spike<br/>thrown away; back to the stage it left"]
   build --> test["stage: test<br/>the gate: the host's check; the hand gate: sdlc.py gate"]
   wfbuild --> test
   test -->|factory decisions| decide["/sdlc-factory:decide<br/>calls: config, ask<br/>writes: decisions.md"]
   decide --> wdecide["WAIT: /sdlc-factory:decide"]
-  test --> ship["/sdlc:ship, stage: ship<br/>calls: config, preflight, check, findings, base, resolve, ship, next-entry, sync<br/>checks: the gate, acceptance checks, review passes"]
+  test --> ship["/sdlc:ship, stage: ship<br/>calls: config, preflight, vet, findings, base, resolve, ship, next-entry, sync<br/>checks: the gate, acceptance checks, review passes"]
   ship --> wship["WAIT: /sdlc:ship"]
   wship --> shipped["stage: shipped<br/>writes: findings.md, the change's commit"]
   test -->|factory batch| land["/sdlc-factory:land<br/>calls: config, train, land-check, accept, cases, sdlc-path<br/>ships and closes each change in a train, the gate at its tip"]
@@ -49,7 +49,7 @@ flowchart TD
   wclose --> landed
   plan -.->|won't ship| drop["/sdlc:drop<br/>calls: config, drop, close<br/>writes: stage: dropped, the Drop commit"]
   drop --> wdrop["WAIT: /sdlc:drop"]
-  status["/sdlc:status and /sdlc:dashboard<br/>calls: status, check, board<br/>read-only"]
+  status["/sdlc:status and /sdlc:dashboard<br/>calls: status, vet, board<br/>read-only"]
 ```
 
 ## The release loop
@@ -79,7 +79,7 @@ flowchart TD
   retro["/sdlc:retro<br/>calls: config, retro, next-entry, retro-commit<br/>five passes: cost, architecture, process, product, direction"]
   retro --> wretro["WAIT: /sdlc:retro"]
   wretro --> written["writes: the direction doc, the product doc's outcomes, seeds, the report; one Retrospective commit"]
-  health["/sdlc:health<br/>calls: config, check<br/>tiers each finding"] --> idea
+  health["/sdlc:health<br/>calls: config, vet<br/>tiers each finding"] --> idea
   idea["/sdlc:idea<br/>calls: config, status, next-entry, inbox-commit"] --> widea["WAIT: /sdlc:idea"]
   bug["/sdlc:bug<br/>calls: config, bugs, next-entry, inbox-commit"] --> wbug["WAIT: /sdlc:bug"]
   triage["/sdlc:triage<br/>calls: config, intake, bugs, next-entry, inbox-commit, mark-triaged, needs-info, sync"] --> wtriage["WAIT: /sdlc:triage"]

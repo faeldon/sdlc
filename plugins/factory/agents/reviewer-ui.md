@@ -52,7 +52,7 @@ looks wrong is not this change's.
 ## Later rounds, and what isn't this change's
 
 From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
-(`reworked`), the changes the verifier kept for it, and what is `settled`: check each kept change in
+(`reworked`), the changes the arbiter kept for it, and what is `settled`: check each kept change in
 the new screenshots, and never raise a settled point again. A kept change the rework didn't make,
 raise again word for word, as the prompt quotes it: the run tells a change kept twice by its words,
 and stops for the person rather than rework it a third time. A round you join for the first time,

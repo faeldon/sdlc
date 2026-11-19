@@ -158,7 +158,7 @@ never back.
 ## Rework rounds
 
 When the supervisor resumes you, it names `.sdlc/work/NNN-slug/reviews/round-N/verified.md`: the
-verifier has checked every `- CHANGE:` the reviewers asked for against the code, and its
+arbiter has checked every `- CHANGE:` the reviewers asked for against the code, and its
 `- KEPT:` lines are the ones to address. Address each one, or, if a change is wrong after all, say
 why in `notes.md` rather than ignoring it. A `- DROPPED:` line is not yours to act on. Rerun the
 tests the kept changes touch, by name; the gate runs again on the rework.

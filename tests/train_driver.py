@@ -19,7 +19,7 @@ from pathlib import Path
 # Every `next` a reading names that the driver takes, `done` and `stop` included.
 DRIVER_STEPS = frozenset(
     {"commit", "stack", "resolve", "gate", "build", "eject", "accept", "checks", "review",
-     "verify", "mend", "fix", "close", "stop", "done"}
+     "arbitrate", "mend", "fix", "close", "stop", "done"}
 )  # fmt: skip
 
 
@@ -42,7 +42,7 @@ def verdict(factory, role: str, says: str = "PASS", changes: tuple[str, ...] = (
 
 
 def verified(factory, folder: Path, n: int, kept=(), dropped=()) -> None:
-    """The verifier's answers, each `<role>: <change>` as the reviewer asked it."""
+    """The arbiter's answers, each `<role>: <change>` as the reviewer asked it."""
     lines = [f"- KEPT: {c}" for c in kept] + [f"- DROPPED: {c}" for c in dropped]
     (folder / "reviews" / f"land-{n}" / factory.VERIFIED).write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
@@ -65,7 +65,7 @@ def drive_train(
     by: str = "auto",
     resolve=None,
     review=None,
-    verify=None,
+    arbitrate=None,
     mend=None,
     fix=None,
     checks=None,
@@ -76,7 +76,7 @@ def drive_train(
     """Run the train as the land skill did, step by step, in process. With `begin`, first begin
     one over those worktrees' changes `by` auto or person, unless one is under way.
     `resolve(tree, files)` writes a resolution; `review(folder, n, role)` a verdict (PASS by
-    default); `verify(folder, verdict)` the verifier's answer (every change dropped by default);
+    default); `arbitrate(folder, verdict)` the arbiter's answer (every change dropped by default);
     `mend(folder, n, role)` the role's reply again (a passing one by default), recorded in
     `runs/mended` as `agent --task land-mend` records it; `fix(tree)` the builder's edit for a
     stored fix, between `land-fix --ask` and `--commit`; `checks(folder, n)` the approver's
@@ -155,9 +155,9 @@ def drive_train(
                 else:
                     reply = folder / "reviews" / f"land-{n}" / f"{role}.md"
                     reply.write_text(verdict(factory, role), encoding="utf-8")
-        elif nxt == "verify":
-            if verify is not None:
-                verify(folder, out["verdict"])
+        elif nxt == "arbitrate":
+            if arbitrate is not None:
+                arbitrate(folder, out["verdict"])
             else:
                 verified(factory, folder, out["verdict"]["round"], dropped=asked(out["verdict"]))
         elif nxt == "mend":
@@ -222,7 +222,7 @@ reply = entry.get("reply")
 if reply is None:
     if agent.startswith("reviewer-"):
         reply = "VERDICT: PASS\\n\\n## Evidence\\n$ true\\nexit: 0\\n"
-    elif agent == "verifier":
+    elif agent == "arbiter":
         reply = "- DROPPED: nothing: nothing asked\\n"
     else:
         reply = "Done.\\n\\n## Evidence\\n\\n$ true\\nexit: 0\\n"
@@ -235,7 +235,7 @@ print(json.dumps({"type": "result", "is_error": False, "result": reply}))
 
 def fake_claude(tmp_path: Path, monkeypatch, plan: dict | None = None):
     """A stand-in `claude` on PATH for the agents `train --run` starts. `plan` maps
-    `<change>:<agent>` or `<agent>` (`reviewer-behaviour`, `verifier`, `builder`) to what it
+    `<change>:<agent>` or `<agent>` (`reviewer-behaviour`, `arbiter`, `builder`) to what it
     does: `reply`, its text (a passing one by default); `write`, files to write in its worktree;
     `sleep`, seconds; `run`, a command (an argv) to run before it replies; `block`, a flag file:
     the first call writes it and `<flag>.started`, then waits for good. Returns a reader of the

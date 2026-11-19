@@ -362,7 +362,7 @@ def test_after_lines_that_can_never_be_met_warn_and_never_fail_check(
     ]
     out = _status(root, capsys, monkeypatch)
     assert f"    ⚠  {warnings[1]}" in out
-    monkeypatch.setattr("sys.argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "vet", "--strict"])
     assert sdlc.main() == 0
 
 
@@ -650,7 +650,7 @@ def test_a_stopped_factory_run_is_marked_on_its_status_line(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     """R10: a stopped run reads `stopped`, never `quiet`, with each problem and the way on under
-    its title; at any stage but `build` its record is read past, and `check` sees no problem."""
+    its title; at any stage but `build` its record is read past, and `vet` sees no problem."""
     root = _repo(tmp_path)
     assert sdlc.cmd_new(root, "share-drafts", 1, None, worktree=True) == 0
     tree = root / ".claude" / "worktrees" / "001-share-drafts"
@@ -672,7 +672,7 @@ def test_a_stopped_factory_run_is_marked_on_its_status_line(
     assert below[1].startswith("⚠ reviews/round-1/verified.md answers code: a change")
     assert below[1].endswith("…") and len(out[at + 3]) <= 100, "one problem, one line"
     assert below[2] == f"→ {STOP_NEXT}"
-    monkeypatch.setattr("sys.argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "vet", "--strict"])
     sdlc.main()
     with_stop = capsys.readouterr().out
     (folder / "runs" / "stopped.md").rename(folder / "runs" / "aside.md")

@@ -1663,7 +1663,7 @@ def test_nothing_but_retro_runs_evidence(tmp_path: Path, capsys, monkeypatch) ->
     root = _repo(tmp_path)
     _product(root, evidence=["touch ran-evidence"])
     monkeypatch.chdir(root)
-    for command in ("check", "status", "config", "readiness"):
+    for command in ("vet", "status", "config", "readiness"):
         monkeypatch.setattr("sys.argv", ["sdlc.py", command])
         sdlc.main()
         assert not (root / "ran-evidence").exists(), f"{command} ran the evidence"
@@ -1860,11 +1860,11 @@ def test_reference_names_test_times_and_its_format() -> None:
 
 
 def test_nothing_but_retro_runs_test_times(tmp_path: Path, capsys, monkeypatch) -> None:
-    """R2: `check`, `status`, `config`, `readiness` and `retro --report` never run it."""
+    """R2: `vet`, `status`, `config`, `readiness` and `retro --report` never run it."""
     root = _repo(tmp_path)
     _config(root, '[retro]\ntest_times = ["touch ran-times"]\n')
     monkeypatch.chdir(root)
-    for argv in (["check"], ["status"], ["config"], ["readiness"], ["retro", "--report"]):
+    for argv in (["vet"], ["status"], ["config"], ["readiness"], ["retro", "--report"]):
         monkeypatch.setattr("sys.argv", ["sdlc.py", *argv])
         sdlc.main()
         assert not (root / "ran-times").exists(), f"{argv} ran test_times"
@@ -2606,6 +2606,27 @@ def test_retro_compares_agents_by_model(tmp_path: Path) -> None:
     assert "Agents by role and model" in report
     assert "| builder | model-a | 1 | 1 | 0 | 28 | 2 | 0 | 4 | 1 |" in report
     assert "| builder | model-b | 2 | 3 | 7 | 1 | 0 | 0 | 4 | 0 |" in report
+
+
+def test_agents_by_role_groups_verifier_with_arbiter(tmp_path: Path) -> None:
+    """187 R14: a `Close` commit from before the rename names the arbiter `verifier`; the retro
+    groups it with the arbiter's, and a `runs/verifier.sessions` file is the arbiter's sessions."""
+    root = _repo(tmp_path)
+    _agent_closed(
+        root, "001-reopen-drafts", "2026-10-02",
+        "verifier runs=1 agent=5 model=model-a " + AGENT_COUNTS.format(0, 0, 0, 0),
+    )  # fmt: skip
+    _agent_closed(
+        root, "002-draft-titles", "2026-10-03",
+        "arbiter runs=2 agent=5 model=model-a " + AGENT_COUNTS.format(0, 0, 0, 0),
+    )  # fmt: skip
+    agents = _retro(root)["spend"]["agents"]
+    assert [(g["role"], g["model"], g["changes"], g["runs"]) for g in agents["groups"]] == [
+        ("arbiter", "model-a", 2, 3)
+    ]
+    files = {"runs/verifier.sessions": "s-1\n", "runs/arbiter.sessions": "s-2\n"}
+    roles = sdlc.factory_records.session_roles(files.get, lambda _: "\n".join(files))
+    assert roles == {"s-1": "arbiter", "s-2": "arbiter"}
 
 
 def test_retro_leaves_agents_from_before_behaviours_out(tmp_path: Path) -> None:

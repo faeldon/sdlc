@@ -939,7 +939,7 @@ def test_setup_asks_what_kind_of_repo_first() -> None:
     for question in ("**Kind:**", "**Who runs it:**", "**Where changes are tracked:**"):
         assert question in step2, f"the profile round asks {question}"
     assert 'target = "none"' in step2, "a local repo mirrors nothing"
-    # readiness reports an unset slower check as missing on a repo that is set up, so the round is
+    # readiness reports an unset slow gate as missing on a repo that is set up, so the round is
     # keyed on the config file alone: a rerun never asks again.
     assert "`config` item is `missing`" in step2
     # The profile is guessed from readiness and the repo's files, never from history or the tracker:
@@ -1126,7 +1126,7 @@ AGENT_TOOLS = {
     "reviewer-ui": {"Read", "Grep", "Glob"},
     "reviewer-ux": {"Read", "Grep", "Glob"},
     # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
-    "verifier": {"Read", "Grep", "Glob", "Bash"},
+    "arbiter": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
 }
 ADAPTED = {"spec-writer", "builder", "reviewer-code", "reviewer-security", "reviewer-test"}
@@ -1264,13 +1264,13 @@ def test_the_spec_draft_reaches_spec_md_only_through_write_spec(name: str) -> No
 
 
 def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
-    """A verifier answers every change before the builder reworks any, the builder addresses only
+    """An arbiter answers every change before the builder reworks any, the builder addresses only
     the kept ones, and the one question states both depths, or the full one alone when the base
     branch lists no sensitive paths."""
     build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
     step3 = build.split("## Step 3")[1].split("## Step 4")[0]
-    assert step3.index("**`verify`**") < step3.index("**`rework`**")
-    assert "sdlc-factory:verifier" in step3 and "verified.md" in step3
+    assert step3.index("**`arbitrate`**") < step3.index("**`rework`**")
+    assert "sdlc-factory:arbiter" in step3 and "verified.md" in step3
     assert "Address every KEPT line" in step3 and "snapshot <NNN> --round <N>" in step3
     assert "## Reconsider the approach" in step3
     wait = build.split("## Step 2")[1].split("## Step 3")[0]
@@ -1278,8 +1278,8 @@ def test_the_build_verifies_before_rework_and_states_its_depths() -> None:
     assert (
         "<reviewers> review it in up to <rounds> rounds (or <light reviewers> in up to "
         "<light rounds> when the diff touches no sensitive path), and, on a diff touching "
-        "<ui paths>, the ui and ux reviewers, which start <serve>, a verifier checks each "
-        "round's changes, the approver decides, at most <max_runs> agent runs" in question
+        "<ui paths>, the ui and ux reviewers, which start <serve>, an arbiter weighs each "
+        "round's findings, the approver decides, at most <max_runs> agent runs" in question
     )
     assert "Ask `start`'s `question` literally, as printed; never word your own." in question
     builder = (FACTORY / "agents" / "builder.md").read_text(encoding="utf-8")
@@ -1407,7 +1407,7 @@ def test_the_agents_that_wait_never_sleep() -> None:
 NEVER_RUNS_CHECKS = {
     "reviewer-behaviour": "**Never run them yourself**",
     "reviewer-test": "**Never run a check yourself**",
-    "verifier": "but never a `checks.md` section's commands",
+    "arbiter": "but never a `checks.md` section's commands",
     "resolver": "**Never run a `checks.md` section**",
 }
 
@@ -1453,7 +1453,7 @@ def test_ship_reads_the_agents_verdicts() -> None:
     ship, factory = _steps("ship"), _steps("ship", "factory.md")
     assert "`factory.md` (a change built by agents, with a `decision.md`)" in ship["0"]
     assert "decision.md" in factory["0"] and "reviews/round-<N>/" in factory["0"]
-    assert "reviews/round-<N>/verified.md" in factory["0"], "what the verifier dropped, and why"
+    assert "reviews/round-<N>/verified.md" in factory["0"], "what the arbiter dropped, and why"
     assert "`## Evidence`" in factory["0"] and "behaviour.md" in factory["0"], "claims, not runs"
     assert "**agent verdicts** (`factory.md`)" in ship["4"]
     assert "**Agent verdicts.**" in factory["4"] and "ESCALATE" in factory["4"]
@@ -1461,7 +1461,7 @@ def test_ship_reads_the_agents_verdicts() -> None:
 
 
 def test_ship_lists_then_runs_the_changes_checks_under_a_prompt() -> None:
-    """After the gate and before the build check: the checks are listed, shown, then run by
+    """After the gate and before the slow gate: the checks are listed, shown, then run by
     `accept`, which ship names without a rule, so the person answers a prompt with them in view."""
     text = BY_ID["sdlc:ship"].read_text(encoding="utf-8")
     step1 = text.split("## Step 1")[1].split("## Step 2")[0]
@@ -1522,7 +1522,7 @@ def test_land_runs_the_cases_before_its_question() -> None:
     assert 'factory.py cases <NNN> --skip "declined at landing"' in step1
     assert step1.index("factory.py cases <NNN>") < step1.index("land-check")
     assert "`noted`" in step1 and "at most $<cap_usd>" in step1
-    assert "accepted as shown" in step1
+    assert "approved as shown" in step1
 
 
 def test_the_gate_and_ci_never_run_the_skills_cases() -> None:
@@ -1936,8 +1936,8 @@ def test_every_place_that_takes_a_nit_in_names_the_marker() -> None:
         ROOT / "skills" / "spec" / "SKILL.md",
         FACTORY / "skills" / "land" / "SKILL.md",
         FACTORY / "README.md",
-        FACTORY / "agents" / "spec-writer.md",  # 183
-        FACTORY / "prompts" / "spec.md",  # 183
+        FACTORY / "agents" / "spec-writer.md",
+        FACTORY / "prompts" / "spec.md",
     ]
     missing = [
         p.relative_to(ROOT).as_posix()

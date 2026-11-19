@@ -60,12 +60,12 @@ docs, not here; if it needs a new key to get there, the key is the change.
 
 ### Stage 4 — Test
 
-#### The gate and the slower check
+#### The gate and the slow gate
 
 Here the gate is `./check.sh`: ruff, the formatter check, pytest, and `claude plugin validate
 --strict`. pytest includes `tests/test_adoption.py`, which runs a change from `new` to `close` in a
 bare scratch repo through `uv run --script`, and `tests/test_archive.py`, which drives GitHub
-through a fake `gh`, so it stays offline. There is no slower check: nothing here needs a real
+through a fake `gh`, so it stays offline. There is no slow gate: nothing here needs a real
 service.
 
 ### Stage 5 — Ship → `/sdlc:ship`
@@ -85,5 +85,5 @@ without it the owner is running a cached copy too. Ship stops before the push.
 #### What the scans watch
 
 No scans are configured yet (`commands.scan` is unset), so `/sdlc:health` runs only
-`sdlc.py check`. The gate already pins the skills' shape and the vocabulary; a scan earns its place
+`sdlc.py vet`. The gate already pins the skills' shape and the vocabulary; a scan earns its place
 when it finds something a test can't, such as a skill whose prose drifted from the script's flags.

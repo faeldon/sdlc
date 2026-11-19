@@ -1,5 +1,5 @@
 """Bugs: `[bug]` entries in work/inbox.md, weighed by the process doc's severity words. `bugs` lists
-them and names the change that last touched a path, `check` audits them, `status` puts them first,
+them and names the change that last touched a path, `vet` audits them, `status` puts them first,
 and `inbox-commit` records what /sdlc:bug or /sdlc:idea wrote, on main, from the main checkout or
 for the entries a change's worktree names."""
 
@@ -981,7 +981,7 @@ def test_close_retires_an_untagged_seed_its_idea_line_names(tmp_path: Path, ref)
 
 def test_check_is_quiet_on_an_untagged_seed_a_change_names(tmp_path: Path) -> None:
     """100 R8: an untagged entry an open change's `idea:` or `fixes:` names is no problem to
-    `check`; only a legacy `[building]` tag with nothing behind it is."""
+    `vet`; only a legacy `[building]` tag with nothing behind it is."""
     root = _repo(tmp_path, _idea("2026-10-01-1", "One"), _bug("2026-10-02-1", "Two"))
     folder = _fixing(root, "2026-10-02-1")
     intent = folder / "intent.md"

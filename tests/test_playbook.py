@@ -75,7 +75,7 @@ PRESCRIPTIONS = [
     (
         "Design",
         "A human decides whether the spec proceeds",
-        [r"drafts `spec\.md`, gates"],
+        [r"drafts `spec\.md`, waits for approval"],
     ),
     (
         "Build",

@@ -438,7 +438,7 @@ def _begin(root: Path, capsys, by: str = "auto", *idents: str) -> dict:
 
 def _keeping(name: str):
     """Stand-ins for a landing round in which change `name`'s behaviour check asks for a change
-    and the verifier keeps it; every other reply passes."""
+    and the arbiter keeps it; every other reply passes."""
 
     def review(folder: Path, n: int, role: str) -> None:
         asks = folder.name == name and role == "behaviour"
@@ -446,10 +446,10 @@ def _keeping(name: str):
         text = text or verdict(factory, role)
         (folder / "reviews" / f"land-{n}" / f"{role}.md").write_text(text, encoding="utf-8")
 
-    def verify(folder: Path, found: dict) -> None:
+    def arbitrate(folder: Path, found: dict) -> None:
         verified(factory, folder, found["round"], kept=asked(found))
 
-    return review, verify
+    return review, arbitrate
 
 
 def _three(tmp_path: Path, check: str | None = None) -> tuple[Path, list[Path]]:
@@ -705,9 +705,9 @@ def test_a_kept_landing_change_ejects_only_its_change(tmp_path, capsys) -> None:
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
 
-    review, verify = _keeping(trees[1].name)
+    review, arbitrate = _keeping(trees[1].name)
 
-    readings = drive_train(factory, root, capsys, review=review, verify=verify)
+    readings = drive_train(factory, root, capsys, review=review, arbitrate=arbitrate)
     last = readings[-1]
     assert last["next"] == "done", last
     assert last["landed"] == [trees[0].name, trees[2].name]
@@ -725,9 +725,9 @@ def test_a_change_landed_again_by_hand_on_the_base_is_reviewed_afresh(tmp_path, 
     root, trees = _three(tmp_path, check="true")
     _begin(root, capsys)
 
-    review, verify = _keeping(trees[1].name)
+    review, arbitrate = _keeping(trees[1].name)
 
-    first = drive_train(factory, root, capsys, review=review, verify=verify)[-1]
+    first = drive_train(factory, root, capsys, review=review, arbitrate=arbitrate)[-1]
     assert [e["change"] for e in first["ejected"]] == [trees[1].name], first
     folder = _folder(trees[1])
     ejected_round = factory.land_round(folder)
@@ -950,7 +950,7 @@ def test_train_resolve_runs_no_role_but_the_resolver(tmp_path, capsys, monkeypat
     )
     runs = _folder(trees[1]) / "runs"
     before = sorted(p.name for p in runs.glob("*.sessions"))
-    for role in ("builder", "code", "verifier"):
+    for role in ("builder", "code", "arbiter"):
         code, out = _run(capsys, factory.cmd_agent, trees[1], "002", "train-resolve", role, None)
         assert code == 1 and "resolver" in out["refusals"][0], out
     assert not calls and sorted(p.name for p in runs.glob("*.sessions")) == before
@@ -1200,9 +1200,9 @@ def test_every_ejection_names_its_cause(tmp_path, capsys) -> None:
     root, trees = _three(tmp_path / "review", check="true")
     _begin(root, capsys)
 
-    review, verify = _keeping(trees[1].name)
+    review, arbitrate = _keeping(trees[1].name)
 
-    readings = drive_train(factory, root, capsys, review=review, verify=verify)
+    readings = drive_train(factory, root, capsys, review=review, arbitrate=arbitrate)
     assert [r["cause"] for r in ejections(readings)] == ["review"]
     assert readings[-1]["ejected"][0]["cause"] == "review"
 
@@ -1323,12 +1323,12 @@ def _committed_step(root: Path, name: str) -> dict:
 
 def _kept_at_two(tmp_path: Path, capsys, monkeypatch) -> tuple[Path, list[Path], dict]:
     """Three changes whose loop stops at the second: its behaviour check asks for a change and
-    the verifier keeps it. Returns the repo, the worktrees and the loop's JSON."""
+    the arbiter keeps it. Returns the repo, the worktrees and the loop's JSON."""
     root, trees = _three(tmp_path, check="true")
     two = trees[1].name
     fake_claude(tmp_path, monkeypatch, {
         f"{two}:reviewer-behaviour": {"reply": KEEPS},
-        f"{two}:verifier": {"reply": "- KEPT: behaviour: bb.txt:1: say more\n"},
+        f"{two}:arbiter": {"reply": "- KEPT: behaviour: bb.txt:1: say more\n"},
     })  # fmt: skip
     _begin(root, capsys)
     code, out, _ = _loop(root, capsys)
@@ -1387,7 +1387,7 @@ def test_the_loop_runs_only_its_named_commands() -> None:
         "land {change} --by {by}", "resolve {change} --onto {onto}",
         "agent {change} --task train-resolve", "resolve {change} --continue",
         "gate {change} --land", "train --eject {change}",
-        "agent {change} --task land-review --role {role}", "agent {change} --task land-verify",
+        "agent {change} --task land-review --role {role}", "agent {change} --task land-arbitrate",
         "agent {change} --task land-mend --role {role}", "land-fix {change} --ask {ask}",
         "agent {change} --task land-fix", "land-fix {change} --commit", "land {change} --close",
         "accept {change}", "agent {change} --task land-checks", "gate {change} --land --build",
@@ -1437,8 +1437,8 @@ def test_train_run_stops_at_a_failed_step(tmp_path, capsys, monkeypatch) -> None
 def test_train_run_stops_at_an_agents_problem(tmp_path, capsys, monkeypatch) -> None:
     """171 R13: an agent whose JSON holds `problem`, though it exited 0, stops the loop, naming
     the problem."""
-    problem = {"out": {"problem": "the verifier's reply holds no KEPT or DROPPED line"}}
-    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, _step("verify"), problem)
+    problem = {"out": {"problem": "the arbiter's reply holds no KEPT or DROPPED line"}}
+    code, out, ran = _stubbed_loop(tmp_path, capsys, monkeypatch, _step("arbitrate"), problem)
     assert code == 1 and len(ran) == 1, (out, ran)
     assert out["stopped"]["reason"] == problem["out"]["problem"], out
 

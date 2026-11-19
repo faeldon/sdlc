@@ -301,7 +301,7 @@ def test_check_strict_ignores_shims(tmp_path: Path, monkeypatch, capsys) -> None
     root = _repo(tmp_path, version="1.2.0")
     _registry(root, SHIM.format(v="1.0.0"))
     assert _unreleased(root)["deprecations"]["overdue"], "there is an overdue shim"
-    code, _ = _main(monkeypatch, capsys, root, "check", "--strict")
+    code, _ = _main(monkeypatch, capsys, root, "vet", "--strict")
     assert code == 0
 
 

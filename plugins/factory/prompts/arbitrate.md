@@ -1,4 +1,4 @@
-# land-verify
+# arbitrate
 
 > The factory fills this file and sends it to the agent word for word: `factory.py` picks each
 > `## ` part a prompt needs, fills its `${name}` placeholders (`$$` is a literal `$`), and joins the
@@ -7,4 +7,8 @@
 
 ## main
 
-Verify landing round ${round} against its diff: ${diff}
+Arbitrate round ${round}.
+
+## counts
+
+Untouched: ${untouched}. Repeats: ${repeats}. Settled: ${settled}.

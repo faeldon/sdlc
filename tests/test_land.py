@@ -560,7 +560,7 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     assert "its acceptance checks run as shown, and again as stacked, committed" in only
     assert "$" not in only and "build" not in only, "185 R10: no build clause unless called for"
     built = factory.landing.land_question([_entry("001-a", build=True), _entry("002-b")], "main")
-    assert "impact, its build check run once at the tip, committed" in built, built
+    assert "impact, its slow gate run once at the tip, committed" in built, built
     assert "acceptance" not in built, "no checks clause without checks"
     assert only.startswith("Land 1 change in this order, 001-a,")
     cases_only = factory.landing.land_question([_entry("001-a", cases=cases)], "main")
@@ -570,7 +570,7 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     for seen in ({"failed": [{"case": "ship-basic", "graders": []}]}, {"skipped": "declined"}):
         accepted = factory.landing.land_question([_entry("001-a", cases={**cases, **seen})], "main")
         assert ("its skills' cases run as shown (at most $5), its failed or skipped skills' cases "
-                "accepted as shown, committed") in accepted, accepted  # fmt: skip
+                "approved as shown, committed") in accepted, accepted  # fmt: skip
     notes = factory.landing.land_question(
         [_entry("001-a", undone=[{"line": 1, "text": "t", "seed": "t"}])], "main")  # fmt: skip
     assert "its undone notes carried or dropped as shown," in notes and "assumed" not in notes
@@ -1034,7 +1034,7 @@ def _verdict(role: str, verdict: str = "PASS", changes: tuple[str, ...] = ()) ->
 @needs_uv
 def test_a_landing_resolution_counts_until_its_review_passes(tmp_path, capsys) -> None:
     """R11: a resolution made while landing is a signal until `land-verdicts` for its round says
-    `pass`: missing a reviewer, or with a change the verifier kept, it still asks. Once passed it
+    `pass`: missing a reviewer, or with a change the arbiter kept, it still asks. Once passed it
     stays passed when the landing's own record moves `HEAD`. A marker with no round, written
     before the round was recorded, always asks."""
     root = _gated(tmp_path)
@@ -1067,7 +1067,7 @@ def test_a_landing_resolution_counts_until_its_review_passes(tmp_path, capsys) -
     (reviews / "verified.md").write_text(
         f"- KEPT: {roles[0]}: README.md:1: keep both\n", encoding="utf-8"
     )
-    assert asks(), "with a change the verifier kept"
+    assert asks(), "with a change the arbiter kept"
     (reviews / "verified.md").unlink()
     (reviews / f"{roles[0]}.md").write_text(_verdict(roles[0]), encoding="utf-8")
     assert not asks(), "every reviewer at the run's depth passed it"
@@ -1156,7 +1156,7 @@ def test_factory_accept_records_sdlc_accepts_verdict(tmp_path, capsys) -> None:
     record = folder / "build" / "land-accept.md"
     assert record.read_text(encoding="utf-8").startswith("ACCEPT: PASS\n")
     assert factory.read_gate_file(record)["attempts"] == [
-        {"verdict": "PASS", "build": build, "exit": None}
+        {"verdict": "PASS", "build": build, "exit": None, "command": None, "tail": []}
     ]
     assert factory.accept_build(tree, folder) == build, "the record is outside what it records"
 
@@ -1290,7 +1290,7 @@ def test_a_failed_case_is_a_signal_not_a_refusal(tmp_path, capsys, monkeypatch) 
                     "failed": [{"case": "ship-basic",
                                 "graders": ["asks-the-question", "never-writes"]}],
                     "environment": ["ship-risky"], "skipped": None, "run": run}  # fmt: skip
-    assert "its failed or skipped skills' cases accepted as shown" in batch["question"]
+    assert "its failed or skipped skills' cases approved as shown" in batch["question"]
     assert (
         f"  - failed: ship-basic (asks-the-question, never-writes), trace in {run}/traces"
         in (batch["shown"])
@@ -2100,7 +2100,7 @@ def _replies(monkeypatch, reply: str, figures: dict | None = None) -> list[list[
 @needs_uv
 def test_a_landing_review_reads_the_change_from_its_rounds_own_base(tmp_path, capsys) -> None:
     """121: a commit that reaches the base branch after the landing rebased the change is never
-    in the diff its reviewers and verifier are told to read, so it never reads as the change's."""
+    in the diff its reviewers and arbiter are told to read, so it never reads as the change's."""
     root, tree = _landing(tmp_path, capsys)
     folder = _folder(tree)
     rebased_onto = _git(root, "rev-parse", "main")
@@ -2111,7 +2111,7 @@ def test_a_landing_review_reads_the_change_from_its_rounds_own_base(tmp_path, ca
     (folder / "reviews" / "land-1" / "code.md").write_text(
         "VERDICT: CHANGES\n- CHANGE: later.txt:1: put it back\n", encoding="utf-8"
     )
-    for task, role in (("land-review", "code"), ("land-verify", "verifier")):
+    for task, role in (("land-review", "code"), ("land-arbitrate", "arbiter")):
         prompt = factory._land_task(tree, folder, task, role)[0]
         assert f"git diff {rebased_onto}...HEAD" in prompt, prompt
         assert moved not in prompt and "may have moved" in prompt, prompt
@@ -2139,7 +2139,7 @@ def test_a_landing_review_with_no_fork_point_is_refused(tmp_path, capsys, monkey
     monkeypatch.setattr(
         factory, "_git", lambda r, *a: None if a[:1] == ("merge-base",) else real(r, *a)
     )
-    for task, role in (("land-review", "code"), ("land-verify", "verifier")):
+    for task, role in (("land-review", "code"), ("land-arbitrate", "arbiter")):
         refused = factory._land_task(tree, folder, task, role)
         assert isinstance(refused, str) and "no fork point between main and HEAD" in refused
 
@@ -2214,7 +2214,7 @@ def test_a_landing_mend_writes_into_its_landing_round(tmp_path, capsys, monkeypa
 @needs_uv
 def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) -> None:
     """109 R3, R10: each role is mended once a landing round; a build round's mend and a
-    landing's never use up each other's. A verifier whose answers can't be read is resumed."""
+    landing's never use up each other's. An arbiter whose answers can't be read is resumed."""
     root, tree = _landing(tmp_path, capsys)
     folder = _folder(tree)
     reviews = folder / "reviews" / "land-1"
@@ -2244,11 +2244,11 @@ def test_a_landing_mend_is_once_a_role_a_round(tmp_path, capsys, monkeypatch) ->
     assert not any("round 1" in p for p in out["problems"]), out
     (reviews / "verified.md").write_text("- **KEPT:** behaviour: C1: keep both\n", encoding="utf-8")
     code, out = _run(capsys, factory.landing.cmd_land_verdicts, tree, "001")
-    assert (out["next"], out["mend"]) == ("mend", ["verifier"]), out
+    assert (out["next"], out["mend"]) == ("mend", ["arbiter"]), out
     assert "reviews/land-1/verified.md" in out["problems"][0], out
-    (folder / "runs" / "verifier.sessions").write_text("s-v\n", encoding="utf-8")
+    (folder / "runs" / "arbiter.sessions").write_text("s-v\n", encoding="utf-8")
     calls = _replies(monkeypatch, "- DROPPED: behaviour: C1: README.md:1: keep both — it does\n")
-    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "verifier", None)
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-mend", "arbiter", None)
     assert (code, out["to"]) == (0, f".sdlc/work/{tree.name}/reviews/land-1/verified.md"), out
     assert calls[0][-2:] == ["--resume", "s-v"] and "- KEPT: <role>: C<n>:" in calls[0][2]
     code, out = _run(capsys, factory.landing.cmd_land_verdicts, tree, "001")
@@ -2292,7 +2292,7 @@ def _agents_sections(text: str) -> list[str]:
 def test_a_landing_writes_its_rounds_findings_into_its_commit(tmp_path, capsys) -> None:
     """127: `land --close` writes the landing rounds' findings into findings.md beside carry's,
     in the same shape, each `Class:` naming its landing round, before the record is amended in: a
-    kept change `fixed`, a dropped one `wrong` with the verifier's why, a pre-existing problem
+    kept change `fixed`, a dropped one `wrong` with the arbiter's why, a pre-existing problem
     `recorded`, each once, and one a build round raised too only once. A rerun (the base moved)
     changes none of the agents' sections, ship's own stays, and the commit has no
     `Sdlc-Findings`."""

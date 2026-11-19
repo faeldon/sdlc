@@ -1,5 +1,5 @@
 """Intake: GitHub issues filed into work/inbox.md as entries carrying `Issue: #N`, or attached to an
-open change's `closes:` line, which close closes when the change lands. `check` audits both."""
+open change's `closes:` line, which close closes when the change lands. `vet` audits both."""
 
 from __future__ import annotations
 

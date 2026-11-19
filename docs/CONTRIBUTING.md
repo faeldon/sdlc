@@ -121,7 +121,7 @@ skill. Each failed run's trace is copied into the run's `traces/`, and each run'
 workspace is removed after; `run-cases --keep` keeps the workspaces too. The run prints, and
 writes into its `scope.json`, each case's verdict with its runs' failing graders and traces, and
 `note`, the `Skill evals:` line ship and the landing write as given. At a landing, a failed,
-environment or skipped case is a signal the question shows, which the person's yes accepts; a
+environment or skipped case is a signal the question shows, which the person's yes approves; a
 declined prompt is `factory.py cases <NNN> --skip <why>`.
 
 A case is a folder in `evals/` with `prompt.md`, `case.yaml` (its `tags` name the skill it tests)

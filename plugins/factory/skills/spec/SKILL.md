@@ -85,7 +85,7 @@ question left for the person is theirs to answer now, or to leave open in the in
 ## Step 2 — WAIT for explicit approval
 
 Ask `start`'s `question` literally, as printed; never word your own, nor copy the sample here.
-The script words it, as it does the build gate's, so what the yes approves is the folder it names.
+The script words it, as it does the build WAIT's, so what the yes approves is the folder it names.
 What it prints reads like this, the change's folder in place of `NNN-<slug>`:
 
 > `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement)`

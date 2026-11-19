@@ -9,7 +9,7 @@ allowed-tools:
   - 'Bash(cd *)'
   - 'Bash(git rev-parse *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet *)'
   - 'Bash(echo *)'
 disable-model-invocation: true
 ---
@@ -46,11 +46,11 @@ If it isn't set, the repo has configured no scans. Run the pipeline's own audit 
 the report that it is the only scan there is:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check; echo "check exit: $?"
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet; echo "vet exit: $?"
 ```
 
 A scan is a different thing from the gate `/sdlc:ship` runs (`commands.check`), and from the
-slower gate it runs when a changed path matches (`commands.build`). Both gates run on this diff and
+slow gate it runs when a changed path matches (`commands.build`). Both gates run on this diff and
 answer "is the code correct", pass or fail. A scan (`commands.scan`) looks for drift across the
 whole repo and produces findings, which is a different question with a different response. A
 clean gate says nothing about what has been quietly drifting for three weeks.
@@ -102,7 +102,7 @@ Report findings, not scan transcripts. If the scans are clean, the whole output 
 ## Step 3 — Route the tier 3 findings
 
 For each, end with a **proposed intent title** and `run /sdlc:intent to open it`. Do not open one —
-the human decides what becomes committed work, and `/sdlc:intent` has its own gate.
+the human decides what becomes committed work, and `/sdlc:intent` has its own approval.
 
 Only here may you read one file to make a proposal concrete, and only the one the finding names. If
 a tier 3 finding duplicates an open change in `sdlc check`'s `open` list, say so and drop it rather

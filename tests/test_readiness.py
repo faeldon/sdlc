@@ -129,6 +129,22 @@ def test_permissions_are_read_from_the_shared_settings(tmp_path: Path, capsys) -
     assert _items(_readiness(root, capsys))["permissions"] == "warn"
 
 
+def test_a_host_with_only_the_check_rule_is_missing_the_vet_rule(tmp_path: Path, capsys) -> None:
+    """A host whose settings hold every rule as it was before `check` became `vet` is told the
+    `vet` rule is missing, so setup proposes it on its next run."""
+    root = _repo(tmp_path)
+    vet = "Bash(uv run --quiet --script */scripts/sdlc.py vet *)"
+    assert vet in sdlc.ALLOW_RULES
+    old = [r.replace(" vet *)", " check *)") for r in sdlc.ALLOW_RULES]
+    settings = root / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"permissions": {"allow": old}}))
+    out = _readiness(root, capsys)
+    assert _items(out)["permissions"] == "missing"
+    assert out["permissions"]["missing"] == [vet]
+    assert out["complete"] is False
+
+
 def test_the_allowlist_covers_only_subcommands_that_read() -> None:
     for writer in ("new", "ship", "close", "release", "publish", "retro-commit", "accept"):
         assert not any(f"sdlc.py {writer} " in r for r in sdlc.ALLOW_RULES)

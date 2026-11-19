@@ -83,7 +83,7 @@ Then one short round, only for what Step 1 couldn't settle:
 
 - **The gate** (`commands.check`): which candidate it is, or the command if none fits. It's the
   gate `/sdlc:ship` runs on this diff, pass or fail: fast, offline, no side effects.
-- **A slower check** (`commands.build` and `commands.build_when`): a slower gate, run when a
+- **The slow gate** (`commands.build` and `commands.build_when`): a second gate, run when a
   changed path matches: anything needing real services or data, and the paths that should trigger
   it. None is a fine answer.
 - **Scans** (`commands.scan`): what looks for drift across the whole repo. `/sdlc:health`
@@ -92,7 +92,7 @@ Then one short round, only for what Step 1 couldn't settle:
   (`commands.worktree_setup`): what a fresh worktree lacks that the repo's tools need. None is fine
   for either.
 - **Risky paths** (`review.sensitive` and `review.irreversible`): the paths whose changes always
-  get `/sdlc:ship`'s deep review (a fresh-context reviewer, the build check whatever `build_when`
+  get `/sdlc:ship`'s deep review (a fresh-context reviewer, the slow gate whatever `build_when`
   says, the paths named in its question), and the paths a revert doesn't undo (migrations, data,
   what's published or copied elsewhere), for which ship's commit says how to recover. Offer
   candidates Step 1 found: CI workflow files, release and install scripts, `migrations/`. Each entry
@@ -141,7 +141,7 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
 - **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process`,
   this repo's answers to the plugin's guide (`docs.process.guide`), which the skills read with it.
   Fill in every line that starts with `<`. Those are where this repo differs: the failure it most
-  needs to stop, its always-Tier-2 carve-outs, its gate and slower check, how a commit reaches its
+  needs to stop, its always-Tier-2 carve-outs, its gate and slow gate, how a commit reaches its
   users. A prompt whose answer is the guide's is deleted, its heading kept. Copy a block of the
   guide in only to change it here. A `<` line left in is a blank the human has to fill.
 - **The review passes** (`docs.review`, `.sdlc/REVIEW.md`): start from `defaults.review`, this

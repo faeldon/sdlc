@@ -129,3 +129,187 @@ def test_the_maps_cite_no_change_and_hold_no_html(path: Path) -> None:
     assert [ln for ln in text.splitlines() if CHANGE_RE.search(ln)] == []
     assert not re.search(r"<(html|div|svg|script)\b", text, re.I)
     assert not list((ROOT / "docs").glob("*.html"))
+
+
+# ---------------------------------------------------------------- one meaning per word (187)
+
+# Each term the vocabulary defines once, saying what it means now and what it never means.
+VOCABULARY = ("gate", "slow gate", "approval", "WAIT", "acceptance checks", "vet", "arbiter",
+              "verification", "validation")  # fmt: skip
+
+
+def test_every_vocabulary_term_has_an_entry() -> None:
+    """187 R6: each term has its entry, and `gate` no longer says it is a person's approval."""
+    entries = _entries()
+    assert [t for t in VOCABULARY if t not in entries] == []
+    assert "approval at a WAIT" not in entries["gate"]
+    for term in ("stop", "Sdlc-Stage", "Sdlc-AfterGate", "Sdlc-Landed"):
+        assert "approval" in entries[term], term
+
+
+# A phrasing that no longer means what it once did, and the word to write instead. Matched in
+# prose only, inline code and fenced blocks stripped, case-insensitively.
+RETIRED_PHRASINGS = (
+    (r"\bverifier\b", "arbiter"),
+    (r"\bhuman gates?\b", "approval"),
+    (r"\bWAIT gates?\b", "approval"),
+    (r"\bapproval gates?\b", "approval"),
+    (r"\bgates? at (a|the|every|each) (WAIT|stage)\b", "approval"),
+    (r"\bgated (skill|span)s?\b", "a skill with a WAIT, the WAIT's span"),
+    (r"\bslower (check|gate)\b", "slow gate"),
+    (r"\baccepted as shown\b", "approved"),
+    (r"\byes accepts\b", "approved"),
+    (r"\b(the|its|a change's|the change's|own) checks\b", "acceptance checks, or acceptance"),
+)
+# A name the code no longer answers to, matched in code and prose alike.
+RETIRED_NAMES = (
+    r"sdlc\.py['\"]?\s+check\b",
+    r"`check --strict`",
+    r"sdlc-factory:verifier",
+    r"\bland-verify\b",
+    r"--task verify\b",
+    r"agents/verifier\.md",
+    r"prompts/(land-)?verify\.md",
+)
+# The one paragraph that names the old command on purpose, to say it is gone: REFERENCE.md's
+# *After an update*, which a host reads to move its CI. Every line of it is exempt, and it must
+# still be there, so the exemption never outlives it.
+RENAME_NOTE = ("docs/REFERENCE.md", "**`sdlc.py check` is now `sdlc.py vet`.**")
+# What history holds is left as it was written: the change folders, the retrospectives and the
+# direction doc they keep.
+PROSE = (
+    "AGENTS.md",
+    "README.md",
+    "docs/*.md",
+    "guide/*.md",
+    "defaults/*.md",
+    "templates/*.md",
+    "skills/**/*.md",
+    "agents/*.md",
+    ".sdlc/SDLC.md",
+    ".sdlc/REVIEW.md",
+    ".sdlc/PRODUCT.md",
+    "plugins/factory/README.md",
+    "plugins/factory/agents/**/*.md",
+    "plugins/factory/prompts/**/*.md",
+    "plugins/factory/skills/**/*.md",
+)
+MANIFESTS = (
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "plugins/factory/.claude-plugin/plugin.json",
+)
+
+
+def _prose_files(root: Path) -> list[Path]:
+    return sorted({p for pattern in PROSE for p in root.glob(pattern) if p.is_file()})
+
+
+def _descriptions(root: Path) -> dict[str, str]:
+    """Each manifest's descriptions, the plugins' entries in the marketplace's included."""
+    import json
+
+    found = {}
+    for rel in MANIFESTS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        texts = [data.get("description")]
+        texts += [p.get("description") for p in data.get("plugins", [])]
+        texts += [(data.get("metadata") or {}).get("description")]
+        found[rel] = "\n".join(t for t in texts if isinstance(t, str))
+    return found
+
+
+def _strip_code(text: str) -> str:
+    """`text` with fenced blocks blanked line for line, then each inline code span, so a line
+    number still names the line it was."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            out.append("")
+            continue
+        out.append("" if fenced else re.sub(r"`+[^`]*`+", "", line))
+    return "\n".join(out)
+
+
+def _retired_phrasings(texts: dict[str, str]) -> list[str]:
+    found = []
+    for name, text in texts.items():
+        for n, line in enumerate(_strip_code(text).splitlines(), 1):
+            for pattern, instead in RETIRED_PHRASINGS:
+                if m := re.search(pattern, line, re.I):
+                    found.append(f"{name}:{n}: {m[0]!r}, write {instead}")
+    return found
+
+
+def _retired_names(texts: dict[str, str]) -> list[str]:
+    found = []
+    for name, text in texts.items():
+        note = False
+        for n, line in enumerate(text.splitlines(), 1):
+            if name == RENAME_NOTE[0] and line.startswith(RENAME_NOTE[1]):
+                note = True
+            elif not line.strip():
+                note = False
+            if note:
+                continue
+            for pattern in RETIRED_NAMES:
+                if m := re.search(pattern, line):
+                    found.append(f"{name}:{n}: {m[0]!r}")
+    return found
+
+
+def _prose(root: Path) -> dict[str, str]:
+    texts = {p.relative_to(root).as_posix(): _text(p) for p in _prose_files(root)}
+    return {**texts, **_descriptions(root)}
+
+
+def test_no_doc_uses_a_retired_phrasing(tmp_path: Path) -> None:
+    """187 R10: no doc, skill, agent or manifest uses a word in a meaning it no longer has. A
+    fixture doc holding each phrasing, in prose and in code, proves each pattern matches prose."""
+    lines = [
+        "The verifier keeps it.", "A human gate.", "Each WAIT gate.", "The approval gates.",
+        "A gate at every stage.", "Gates at the WAIT.", "A gated skill.", "The gated spans.",
+        "The slower check.", "A slower gate.", "Its cases accepted as shown.",
+        "The yes accepts it.", "It runs the checks.", "Its checks pass.", "A change's checks.",
+        "The change's checks.", "Its own checks.",
+    ]  # fmt: skip
+    code = "Not prose: `the verifier`, `Sdlc-AfterGate`.\n\n```sh\nits checks\n```\n"
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "fixture.md").write_text(
+        "\n".join(lines) + "\n" + code, encoding="utf-8", newline="\n"
+    )
+    found = _retired_phrasings(_prose(tmp_path))
+    assert len(found) == len(lines), found
+    assert [int(f.split(":")[1]) for f in found] == list(range(1, len(lines) + 1))
+    assert _retired_phrasings(_prose(ROOT)) == []
+
+
+def test_no_file_names_a_retired_name(tmp_path: Path) -> None:
+    """187 R11: nothing calls a command, agent, task or file by the name it no longer has, in code
+    or prose."""
+    names = [
+        "uv run --script sdlc.py check --strict", "run `check --strict`",
+        "sdlc-factory:verifier", "--task land-verify", "agent 001 --task verify",
+        "agents/verifier.md", "prompts/verify.md", "prompts/land-verify.md",
+    ]  # fmt: skip
+    (tmp_path / "skills" / "x").mkdir(parents=True)
+    (tmp_path / "skills" / "x" / "SKILL.md").write_text(
+        "\n".join(names) + "\nsdlc.py checks 001\nsdlc.py vet --strict\n", encoding="utf-8"
+    )
+    found = _retired_names(_prose(tmp_path))
+    assert sorted({int(f.split(":")[1]) for f in found}) == list(range(1, len(names) + 1)), found
+    assert _retired_names(_prose(ROOT)) == []
+    reference = _text(ROOT / RENAME_NOTE[0])
+    assert any(line.startswith(RENAME_NOTE[1]) for line in reference.splitlines()), (
+        "the note the exemption names is gone: drop the exemption"
+    )
+
+
+def test_agents_md_fits_100_columns() -> None:
+    """187 R20 (nit 2026-11-19-41): no line of AGENTS.md runs past 100 columns."""
+    lines = _text(ROOT / "AGENTS.md").splitlines()
+    assert [n for n, line in enumerate(lines, 1) if len(line) > 100] == []

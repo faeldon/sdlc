@@ -137,7 +137,7 @@ def land_mended(folder: Path, n: int) -> set[str]:
     path = folder / factory.MENDED
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     pairs = (line.partition(" ") for line in lines)
-    return {role for role, _, rnd in pairs if rnd.strip() == f"land-{n}"}
+    return {factory.RENAMED.get(r, r) for r, _, rnd in pairs if rnd.strip() == f"land-{n}"}
 
 
 def cases_failures(record: dict | None) -> dict[str, list[str]]:
@@ -612,7 +612,7 @@ def _cases_signals(cases: dict) -> list[str]:
 def land_question(batch: list[dict], base: str, moves: int | None = None) -> str:
     """The batch's question, worded here so the skill never words its own: a clause for the checks
     (run as shown, and again as stacked), the cases, the base branch's build at the tip (a change
-    whose `build` is true, `build_due()`), for failed or skipped cases accepted as shown, for the
+    whose `build` is true, `build_due()`), for failed or skipped cases approved as shown, for the
     dispositions and confirmations, for the agents' nits to file, and for `How to recover:`, each
     only when some change in the batch has one, and the cases' total ceiling, the cap per change
     with any; what the train does (stacked in this order, gated once at the
@@ -634,9 +634,9 @@ def land_question(batch: list[dict], base: str, moves: int | None = None) -> str
             f"its skills' cases run as shown (at most ${factory.CASE_CAP_USD * with_cases})"
         )
     if any(c.get("build") for c in batch):
-        parts.append("its build check run once at the tip")
+        parts.append("its slow gate run once at the tip")
     if any((c["cases"] or {}).get("failed") or (c["cases"] or {}).get("skipped") for c in batch):
-        parts.append("its failed or skipped skills' cases accepted as shown")
+        parts.append("its failed or skipped skills' cases approved as shown")
     undone = any(c["undone"] for c in batch)
     assumed = any(c["assumed"] for c in batch)
     bugs = any("bug" in u for c in batch for u in c["undone"])
@@ -1836,7 +1836,7 @@ def cmd_train(
     <onto>`), `resolve` (the stack conflicts in `files`: `agent --task train-resolve`, then
     `resolve --continue`), `gate` (`gate <NNN> --land`, at the tip or a bisected prefix),
     `eject` (`train --eject <NNN>`, with its `reason` and `cause`: `gate`, `review` or
-    `refusal`), `accept`, `review`, `verify` and `mend` (as `land-verdicts` names them, in
+    `refusal`), `accept`, `review`, `arbitrate` and `mend` (as `land-verdicts` names them, in
     `verdict`), `fix` (the person's fix stored at `--begin --fix <NNN>=R<n>`, once that change
     sits in the stack, before any gate: `land-fix --ask`, unless `asked`, `agent --task
     land-fix`, `land-fix --commit`),
@@ -2348,7 +2348,7 @@ RUN_UNDER_WAY = "a train --run is under way: wait for it to end, or train --canc
 # Every `next` a train's reading can name.
 TRAIN_STEPS = (
     "commit", "stack", "resolve", "gate", "build", "eject", "accept", "checks", "review",
-    "verify", "mend", "fix", "close", "stop", "done",
+    "arbitrate", "mend", "fix", "close", "stop", "done",
 )  # fmt: skip
 
 
@@ -2366,7 +2366,7 @@ RUN_STEPS = {
     "accept": (("accept", "{change}"),),
     "checks": (("agent", "{change}", "--task", "land-checks"),),
     "review": (("agent", "{change}", "--task", "land-review", "--role", "{role}"),),
-    "verify": (("agent", "{change}", "--task", "land-verify"),),
+    "arbitrate": (("agent", "{change}", "--task", "land-arbitrate"),),
     "mend": (("agent", "{change}", "--task", "land-mend", "--role", "{role}"),),
     "fix": (
         ("land-fix", "{change}", "--ask", "{ask}"), ("agent", "{change}", "--task", "land-fix"),
@@ -2886,10 +2886,10 @@ def cmd_land_verdicts(root: Path, ident: str, record: bool = False) -> int:
     `factory.py accept`, after the gate; a train's reading adds whether they're cleared to run
     unattended, `checks_clearance()`),
     `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
-    the run's depth after a resolved conflict or a fix the person asked for, `fixed`), `verify`
+    the run's depth after a resolved conflict or a fix the person asked for, `fixed`), `arbitrate`
     when one asks for changes, `pass` when none is kept, `mend` when every problem is one the
     agent that wrote it can answer again (a behaviour check's missing `## Evidence` or `exit:`,
-    verdict lines that disagree, the verifier's unread answers), with the roles in `mend`, each
+    verdict lines that disagree, the arbiter's unread answers), with the roles in `mend`, each
     once a landing round (`land_mended()`), or `stop`, with why: a red gate or check, a kept
     change, a reply without a verdict, or a mendable problem beside one of those or after its one
     mend.
@@ -2919,7 +2919,7 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     wanted = list(run["reviewers"]) if resolved or fixed else ["behaviour"]
     reviews, problems = {}, []
     # Kept apart as they're added, by the role that mends each, as `loop_state()` keeps them: a
-    # missing `## Evidence`, verdict lines that disagree, the verifier's unread answers.
+    # missing `## Evidence`, verdict lines that disagree, the arbiter's unread answers.
     mendable: dict[str, list[str]] = {}
     for role in wanted:
         file = path / f"{role}.md"
@@ -2948,7 +2948,7 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     )
     problems += wrong
     if wrong:
-        mendable["verifier"] = wrong
+        mendable["arbiter"] = wrong
     # Each role is mended once a landing round: one already mended is a stop like any other.
     for role in land_mended(folder, n) & set(mendable):
         del mendable[role]
@@ -2984,7 +2984,7 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     elif missing:
         out["next"] = "review"
     elif asks and verified is None:
-        out["next"] = "verify"
+        out["next"] = "arbitrate"
     elif verified and verified["kept"]:
         out["next"], out["problems"] = (
             "stop",

@@ -77,10 +77,10 @@ escalate it.
 converge, and another round of the same rarely does: the decision is ESCALATE, with a
 `## Reconsider the approach` section saying what kept coming back, round to round, and whether the
 spec, the plan or the approach is what should change, not only the code. A run also stops this
-way before its rounds run out, when the verifier kept the same change two rounds running or the
+way before its rounds run out, when the arbiter kept the same change two rounds running or the
 builder reports a requirement it can't test (the prompt names which): then say, in that section,
 the next step you'd take, a requirement to rewrite, a model to try or an approach to change. The
-skill refuses any other decision for such a run. Read each round's `verified.md` too: what the verifier dropped, and
+skill refuses any other decision for such a run. Read each round's `verified.md` too: what the arbiter dropped, and
 why, is part of that story.
 
 ## What you return
@@ -112,8 +112,8 @@ even a sentence of your own. Then:
 - **The release impact you propose**, on a line of its own, exactly `- IMPACT: <major|minor|patch|none>
   — <why>`: what someone holding the previous release has to do differently (`major`), can newly
   do (`minor`), merely gets better (`patch`), or `none` when nothing anyone receives changed.
-  `/sdlc-factory:land` sets it on the change; a missing line, or `major`, keeps its gate the
-  person's.
+  `/sdlc-factory:land` sets it on the change; a missing line, or `major`, keeps its approval
+  the person's.
 - **Each undone item's disposition**, one line per unticked `- [ ]` item in `notes.md`, its text
   exactly as written there: `- UNDONE: <item text> → seed: <title>` to carry it forward as a new
   seed in the register, or `- UNDONE: <item text> → dropped: <reason>` when it is done after all,

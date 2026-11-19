@@ -227,10 +227,10 @@ def _land_review(c: Case, how: str) -> str:
     return c.land("land-review", "code")
 
 
-def _land_verify(c: Case) -> str:
+def _land_arbitrate(c: Case) -> str:
     c.write("reviews/land-1/code.md", "VERDICT: CHANGES\n- CHANGE: src/a.py:1: rename a\n")
     c.write("reviews/land-1/test.md", "VERDICT: PASS\n")
-    return c.land("land-verify", "verifier")
+    return c.land("land-arbitrate", "arbiter")
 
 
 def _land_checks(c: Case) -> str:
@@ -270,10 +270,10 @@ CASES: dict[str, Callable[[Case], str]] = {
     "review-handed": lambda c: c.task(
         _state(next="review", round=2, missing=["code"], handed=HANDED), "review", "code"
     ),
-    "verify": lambda c: c.task(
-        _reviewed(1, next="verify", untouched=["src/z.py"], repeats=["code: x"]),
-        "verify",
-        "verifier",
+    "arbitrate": lambda c: c.task(
+        _reviewed(1, next="arbitrate", untouched=["src/z.py"], repeats=["code: x"]),
+        "arbitrate",
+        "arbiter",
     ),
     "rework": lambda c: c.task(_reviewed(1, next="rework"), "rework", "builder"),
     "rework-handed": lambda c: c.task(
@@ -290,7 +290,7 @@ CASES: dict[str, Callable[[Case], str]] = {
     "decided-builder": lambda c: _decided(c, "builder round 1"),
     "decided-other": lambda c: _decided(c, "code round 1"),
     "mend-approver": lambda c: _mend(c, "approver"),
-    "mend-verifier": lambda c: _mend(c, "verifier"),
+    "mend-arbiter": lambda c: _mend(c, "arbiter"),
     "mend-verdict": lambda c: _mend(c, "code"),
     "mend-builder": lambda c: _mend(c, "builder"),
     "mend-behaviour": lambda c: _mend(c, "behaviour"),
@@ -301,9 +301,9 @@ CASES: dict[str, Callable[[Case], str]] = {
     "land-review": lambda c: _land_review(c, "clean"),
     "land-review-resolved": lambda c: _land_review(c, "resolved"),
     "land-review-asked": lambda c: _land_review(c, "asked"),
-    "land-verify": _land_verify,
+    "land-arbitrate": _land_arbitrate,
     "land-checks": _land_checks,
-    "land-mend-verifier": lambda c: _land_mend(c, "verifier"),
+    "land-mend-arbiter": lambda c: _land_mend(c, "arbiter"),
     "land-mend-verdict": lambda c: _land_mend(c, "code"),
     "land-mend-evidence": lambda c: _land_mend(c, "behaviour"),
 }
@@ -511,7 +511,7 @@ def test_a_crlf_prompt_file_gives_the_same_prompt(tmp_path, monkeypatch) -> None
     for path in copy.glob("*.md"):
         path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     monkeypatch.setattr(factory, "PROMPTS_DIR", copy)
-    for name in ("build-restart-reconsider-words", "verify", "train-resolve"):
+    for name in ("build-restart-reconsider-words", "arbitrate", "train-resolve"):
         told = _render(name, tmp_path, monkeypatch)
         assert "\r" not in told
         assert told == (RECORDED / f"{name}.txt").read_text(encoding="utf-8")

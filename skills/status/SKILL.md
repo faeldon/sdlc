@@ -7,7 +7,7 @@ allowed-tools:
   - Grep
   - Glob
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet *)'
   - 'Bash(echo *)'
 disable-model-invocation: true
 ---
@@ -33,7 +33,7 @@ scaffold a folder, and never start implementing whatever it recommends. It repor
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py status && \
 echo "── check ──" && \
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check --strict; echo "check exit: $?"
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet --strict; echo "vet exit: $?"
 ```
 
 Run it from wherever the session is: `status` lists the open changes in every worktree, each
@@ -86,7 +86,7 @@ nothing left in its groups, and which `After:` lines can never be met (`⚠`).
 **The `~` markers in the artifact column are load-bearing.** `sdlc.py new --tier 2` scaffolds
 `spec.md` and `plan.md` from the plugin's templates, so a change whose spec and plan are still
 empty forms would otherwise be indistinguishable from a written one. `status` marks each unwritten
-artifact — `intent plan~ spec~`. Treat a `~` artifact as absent. `check --strict` stays quiet about
+artifact — `intent plan~ spec~`. Treat a `~` artifact as absent. `vet --strict` stays quiet about
 these at `stage: plan` deliberately (a tool whose own `new` produced something that instantly failed
 its own check would teach you to ignore the check), so `status` is the only place they surface —
 don't re-derive them by grepping for template placeholders, which invites a second threshold that
@@ -135,12 +135,12 @@ Read the stage and tier off the status line; look up the action here. No other s
 | 1 | `intent.md` (its **Approach** section stands in for spec and plan) | Fill in the Approach section |
 | 2 | `intent.md` + `spec.md` + `plan.md` | `/sdlc:spec NNN` for the spec; plan mode for the plan |
 
-`sdlc.py check --strict` is the authority on mismatches. If it exits non-zero, its problems outrank
+`sdlc.py vet --strict` is the authority on mismatches. If it exits non-zero, its problems outrank
 everything in this table — lead the report with them.
 
 **Flags worth calling out**, in this order:
 
-- **`check --strict` problems** — a declared stage with no artifact to back it, or an orphan
+- **`vet --strict` problems** — a declared stage with no artifact to back it, or an orphan
   `[building]` idea. Always first.
 - **Age.** The signal worth watching: an intent sitting at `stage: plan`
   for weeks is an unmade decision, not a queued task. Flag anything ≥ 14 days old, and say that's
@@ -158,7 +158,7 @@ by line. Give them what the tool didn't:
 
 1. **One line of shape** — how many open, how many of them in flight, where they're bunched (e.g.
    "4 open, 3 in flight, the quiet one at `stage: plan`").
-2. **Problems**, if `check --strict` failed. Otherwise skip the heading entirely.
+2. **Problems**, if `vet --strict` failed. Otherwise skip the heading entirely.
 3. **Recommended next** — one item, a quiet open change (`NNN-slug`) or a `Next up` line, with a
    sentence on *why it's the one* (unblocks others, smallest, oldest, already half-built, the
    milestone it moves, marked high) and the exact command to run.
@@ -169,7 +169,7 @@ Pick the recommendation on this order of precedence, stopping at the first that 
 change in flight (marked neither `quiet` nor `stopped`) is never picked: say it's in flight in the
 shape line.
 
-1. Anything `check --strict` flags as broken — fix the pipeline before extending it.
+1. Anything `vet --strict` flags as broken — fix the pipeline before extending it.
 2. A `→ /sdlc:close NNN` line under `Landing` — `/sdlc:close NNN` lands it.
 3. A `stopped` change, or a quiet one already at `stage: build` or later — finish what's started
    before opening more. A stopped one's command is its own `→` line, and its `⚠` lines are the why.

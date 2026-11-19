@@ -75,7 +75,7 @@ writes.
 ## Later rounds, and what isn't this change's
 
 From round 2, when you reviewed an earlier round, the prompt names the paths the rework changed
-(`reworked`), the changes the verifier kept for it, and what is `settled`. Review those paths and
+(`reworked`), the changes the arbiter kept for it, and what is `settled`. Review those paths and
 whether each kept change was done; never raise a settled point again, and never raise something new
 in code an earlier round already passed unless the rework broke it. A kept change the rework didn't
 make, raise again word for word, as the prompt quotes it: the run tells a change kept twice by its
@@ -124,7 +124,7 @@ it. The ledger keeps them under the line, and the approver and the person weigh 
 
 Then `## Notes`: Optional findings and Nits (at most five), each nit on a line of its own as
 `- NIT: path/to/file.py:42: what {<theme> <cost> <value>}` (they never make the verdict CHANGES,
-and no verifier reads them: they are recorded in the change's `findings.md`), what is done well
+and no arbiter reads them: they are recorded in the change's `findings.md`), what is done well
 (at least one), and which tests and commands you ran.
 
 Weigh each nit by the Nits rubric in the repo's process doc (`docs.process` in

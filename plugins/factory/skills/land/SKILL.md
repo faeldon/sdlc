@@ -19,7 +19,7 @@ disable-model-invocation: true
 The last stage of a factory change, for a batch of them at once: what `/sdlc:ship` and
 `/sdlc:close` do for one change built by hand, done for each ready change in order, behind one
 approval. The factory's review rounds stand in for ship's review: the reviewers checked each
-change at its depth, the verifier kept what was real, and the approver decided.
+change at its depth, the arbiter kept what was real, and the approver decided.
 
 **Every step is `sdlc`'s own.** `factory.py` runs the `sdlc.py` of its own version, beside it (the
 clone's, or the marketplace cache's), for `ship` and `close`: the stamp, the staging, the merge,
@@ -31,7 +31,7 @@ close`'s fast-forward, so the base branch's first-parent line reads as a one-at-
 `factory.py train` reads the train's state (in the git common dir, never in a tree) and names
 each next step; after the yes, `factory.py train --run` takes those steps itself, in order, and
 starts the landing's agents, until the batch is landed or a stop needs the person. Each change's commit carries `Sdlc-Landed: by=person`, or `by=auto` when the
-gate passed itself, and no `Sdlc-Findings`, so the retrospective never reads a factory review as
+WAIT approved itself, and no `Sdlc-Findings`, so the retrospective never reads a factory review as
 the person's. What ship asks a person for beyond its review (the acceptance checks, the skills'
 cases, each undone note's disposition, each assumed decision, `How to recover:`) the landing's
 question shows and its yes approves: the approver proposed the dispositions and the recovery, and
@@ -76,7 +76,7 @@ change, with its `title`, `text`, `theme`, `paths`, `cost`, `value`, `pass`, `ro
 or a bug proposed on a severity that isn't the process doc's, with no paths, or on an item that
 isn't `pre-existing:`); `over_limit`, those past `batch`; `question`, the batch's question, worded
 by the script; `shown`, what that question calls `as shown`, rendered by the script for the dialog
-(each change by its title, then its checks, cases, undone notes with their dispositions, assumed
+(each change by its title, then its acceptance checks, cases, undone notes with their dispositions, assumed
 decisions, `How to recover:` lines and agents' nits to file); and `clear`, true when no change in the batch has a
 signal.
 
@@ -94,7 +94,7 @@ nit to file, its `shown` line, `[nit] <title> (<theme>, <cost>, <value>; <paths>
 worktree lands it, and any `over_limit`, which the next landing takes.
 With an empty batch, say why and stop.
 
-**Then each change's skills' cases, before the question,** so its yes accepts what they did
+**Then each change's skills' cases, before the question,** so its yes approves what they did
 rather than what they might do. For each change in the batch whose `cases` has a `scope` and isn't
 `noted` (its `findings.md` says nothing of them yet), say its cases and that the run is paid and
 capped (at most $<cap_usd>), then run it, named here and in no rule, so the harness asks first:
@@ -107,10 +107,10 @@ behind its own prompt: `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/
 run twice, each run being paid. Then run `land-check <NNN…>` again over the batch, so its signals,
 `shown` and question carry each result: under a change's cases, each that failed with its graders
 and where its traces are, each that hit the environment, and a skip with why; and the question,
-`its failed or skipped skills' cases accepted as shown`, whose yes accepts them as `/sdlc:ship`'s
+`its failed or skipped skills' cases approved as shown`, whose yes approves them as `/sdlc:ship`'s
 `wrong` answers one.
 
-**With `clear` true, the gate passes itself.** Say so, `the batch is clear: landing without
+**With `clear` true, the WAIT approves itself.** Say so, `the batch is clear: landing without
 asking`, and go to Step 3 with `--by auto`. A signal is anything the plugin's rules don't let it
 decide alone: a sensitive or irreversible path, `impact: major` or none proposed, an ESCALATE, a
 decision still open or assumed, an issue someone filed (`closes:`), a resolved conflict no
@@ -147,7 +147,7 @@ the person naming which: run Step 0 again with the rest, and ask again. To chang
 disposition, leave that change out and ship it with `/sdlc:ship`. `yes, with a fix` approves the
 batch too, and asks for a fix to one change in it before it is gated: take the change and the
 person's words for the fix from what they typed in Other, or else ask for both as plain text. That
-is not a second gate, and nothing is written until Step 3. Then Step 3, with `--by person`.
+is not a second approval, and nothing is written until Step 3. Then Step 3, with `--by person`.
 
 ## Step 3 — The train, unattended
 
@@ -233,9 +233,9 @@ commands, and only one loop runs at a time (the run lock). The steps:
   `undo` is kept in the loop's output), with the reason and the gate file amended into its
   commit; the rest re-stack and the new tip is gated again. When the first change is at fault
   twice in a row, the base branch's own check is the likelier fault: the train stops.
-- **`review`**, **`verify`**, **`mend`**: the change's landing round, as `land-verdicts` reads it:
+- **`review`**, **`arbitrate`**, **`mend`**: the change's landing round, as `land-verdicts` reads it:
   each missing reviewer, started together (`agent <NNN> --task land-review --role <role>`), the
-  verifier when one asks for changes (`--task land-verify`), or each role a mend names, once a
+  arbiter when one asks for changes (`--task land-arbitrate`), or each role a mend names, once a
   round (`--task land-mend --role <role>`).
 - **`accept`**: the change's acceptance checks again on its commit as stacked (`accept <NNN>`),
   only while the reading clears them, read again from `checks.md` just before the run; a check
@@ -263,7 +263,7 @@ commands, and only one loop runs at a time (the run lock). The steps:
 `cause` (`review`: a landing review that kept a change, a reply still unreadable after its one
 mend, acceptance checks failing as stacked; `refusal`: a landing command's own), a train `stop`
 (the base branch moved past `land.moves`, the first change at fault twice in a row, a worktree
-gone, a red build at the tip), `accept` when its checks aren't cleared (`checks.md` changed since
+gone, a red build at the tip), `accept` when its acceptance checks aren't cleared (`checks.md` changed since
 the yes, and the read-only list or the approver didn't clear it: the reason says which), a
 `commit` whose `before` names what hasn't run, a refused push (the change has landed; `/sdlc:publish` pushes it), a
 command that refuses or an agent session that fails, a cancel, or the same step named twice with
@@ -307,7 +307,7 @@ Then `train --run` with `run_in_background`, as above.
 
 ## Step 4 — Report and stop
 
-Say whether the gate passed itself or the person approved it, how many times the tip was gated
+Say whether the WAIT approved itself or the person approved it, how many times the tip was gated
 and the base branch moved. Then each change: landed (its `Close` commit and where it was
 archived), ejected (why, in the script's words; whether the loop made it on a gate fault, its
 `cause` `gate`, with its undo, or the person resumed past it; and what the person does next:

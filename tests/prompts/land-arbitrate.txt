@@ -1,0 +1,2 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Arbitrate landing round 1 against its diff: `git diff f0f0f0f...HEAD`, from the commit this round rebased the change onto. main may have moved since: a commit on it that isn't in that diff is not the change's, and a move is the script's to catch before the close, never a finding.
+- C1: code: src/a.py:1: rename a

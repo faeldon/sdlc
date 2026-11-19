@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "sdlc",
-  "description": "The SDLC change pipeline as a Claude Code plugin: intent, spec, plan, ship and close, with a human gate at every stage that writes.",
+  "description": "The SDLC change pipeline as a Claude Code plugin: intent, spec, plan, ship and close, with a person's approval at every stage that writes.",
   "owner": {
     "name": "James Faeldon",
     "email": "111378+altcoder@users.noreply.github.com"

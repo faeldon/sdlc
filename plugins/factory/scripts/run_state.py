@@ -151,13 +151,13 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     for role in factory.REVIEWERS if last else ():
         if factory.preamble(folder / "reviews" / f"round-{last['round']}" / f"{role}.md"):
             mendable.setdefault(role, []).append(factory._no_verdict(last["round"], role))
-    # The verifier's answers in the last round the script couldn't read, and the approver's
+    # The arbiter's answers in the last round the script couldn't read, and the approver's
     # decision lines that disagree: each its own agent's to give again.
     if last:
         path = folder / "reviews" / f"round-{last['round']}" / factory.VERIFIED
         _, wrong = factory.read_verified(path, last["round"], last["reviews"])
         if wrong:
-            mendable["verifier"] = wrong
+            mendable["arbiter"] = wrong
     if decision_preamble(folder):
         mendable["approver"] = [factory.NO_DECISION]
     # Each role is mended once a round: one already mended (`runs/mended`) is a stop like any other.
@@ -203,7 +203,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["next"], out["round"] = "review", last["round"]
         out["missing"] = [r for r in run["reviewers"] if r not in last["reviews"]]
     elif changes and last["verified"] is None:
-        out["next"], out["round"] = "verify", last["round"]
+        out["next"], out["round"] = "arbitrate", last["round"]
     elif kept and not stuck and not untestable and last["round"] - first + 1 < run["rounds"]:
         out["next"], out["round"] = "rework", last["round"]
     else:
@@ -224,7 +224,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
 
 def early_stop(folder: Path, rounds: list[dict], first: int) -> tuple[list[str], list[str]]:
     """Why the last round ends the run's rework with rounds still left, from round files alone:
-    `stuck`, each `role: change` its verifier kept that it kept in the round before too, when that
+    `stuck`, each `role: change` its arbiter kept that it kept in the round before too, when that
     round is in this run (at or after `first`, so a restart or an upgrade starts fresh); and
     `untestable`, its builder report's `- UNTESTABLE:` lines. Each only once the round is complete
     and verified, or passed with nothing to verify; empty otherwise."""

@@ -72,6 +72,7 @@ main.board {
 .badge.factory { color: var(--accent); }
 .badge.gate-green { color: var(--accent); }
 .badge.gate-red { color: var(--stop); }
+.gate-ran { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .badge.rebasing { color: var(--changes); }
 .badge.answered { color: var(--accent); }
 .title { margin: 4px 0 6px; overflow-wrap: anywhere; }
@@ -414,8 +415,8 @@ function roundRow(r) {
     chips.push(h("span", { class: `chip ${v.verdict}`, title: `${role}: ${v.verdict}` }, text));
   }
   if (r.verified) {
-    chips.push(h("span", { class: "chip", title: "the verifier kept / dropped" },
-      `verifier: kept ${r.verified.kept} · dropped ${r.verified.dropped}`));
+    chips.push(h("span", { class: "chip", title: "the arbiter kept / dropped" },
+      `arbiter: kept ${r.verified.kept} · dropped ${r.verified.dropped}`));
   }
   return h("div", { class: "round" }, chips);
 }
@@ -471,7 +472,7 @@ function card(c) {
     c.undone.length ? `${c.undone.length} undone` : null,
     Object.keys(c.findings).length
       ? "findings " + Object.entries(c.findings).map(([k, n]) => `${n} ${k}`).join(", ") : null,
-    c.checks ? `${c.checks} check(s)` : null,
+    c.checks ? (c.accept ? `acceptance: ${c.checks}, ${c.accept === "PASS" ? "passed" : "failed"}` : `acceptance: ${c.checks}`) : null,
     c.behind ? `behind by ${c.behind}` : null,
     ago(c.touched_ago),
   ].filter(Boolean).map((t) => h("span", {}, t));
@@ -492,6 +493,9 @@ function card(c) {
       h("span", { class: `badge ${c.mode}` }, factory ? "factory" : "by hand"),
       c.gate && c.gate.current ? h("span", { class: c.gate.verdict === "PASS" ? "badge gate-green" : "badge gate-red" },
         c.gate.verdict === "PASS" ? "gate green" : "gate red") : null,
+      // What the gate ran and how it ended, so the badge never claims the gate is only tests.
+      c.gate && c.gate.current && c.gate.command ? h("span", { class: "gate-ran" },
+        `${c.gate.command}: ${c.gate.summary ? c.gate.summary + ", " : ""}exit ${c.gate.exit}`) : null,
       c.rebasing ? h("span", { class: "badge rebasing" }, "rebasing") : null,
       c.answered ? h("span", { class: "badge answered" }, "escalated: answered") : null,
       chip ? h("span", { class: "badge" }, chip) : null),

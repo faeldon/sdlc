@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Close out a change — run the repo's gate and any build check it configures, review the diff against the repo's review passes, including the change's own folder, then commit the code and the folder together (Stage 5 of the repo's process doc). Use when work on a change to this repo's code, config or tooling is finished and ready to land. It never pushes and never deploys; use /sdlc:status to find the change id first if you don't have it.
+description: Close out a change — run the repo's gate and any slow gate it configures, review the diff against the repo's review passes, including the change's own folder, then commit the code and the folder together (Stage 5 of the repo's process doc). Use when work on a change to this repo's code, config or tooling is finished and ready to land. It never pushes and never deploys; use /sdlc:status to find the change id first if you don't have it.
 argument-hint: "[change id, e.g. 003]"
 allowed-tools:
   - AskUserQuestion
@@ -19,7 +19,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py findings *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py base *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py resolve *)'
-  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py ship *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py sync *)'
   - 'Bash(git status *)'
@@ -32,13 +32,13 @@ disable-model-invocation: true
 
 # Ship — review and land a change
 
-Stage 5 of the repo's change process. Shipping means: the checks pass, the build check passes when
-the diff calls for one, the diff has been reviewed against the repo's review passes, and it lands as
+Stage 5 of the repo's change process. Shipping means: the gate passes, the slow gate passes when
+the diff calls for it, the diff has been reviewed against the repo's review passes, and it lands as
 one commit referencing its change folder. It deploys nothing; anything past the commit is the
 repo's own path, named in its process doc.
 
 **The review is the point, not the commit.** With one author and one reviewer, this skill is the
-only thing standing between a change and `main`. Running the checks and skipping the review passes
+only thing standing between a change and `main`. Running the gate and skipping the review passes
 defeats it entirely.
 
 ## Step 0 — Establish what's shipping (mechanical, no confirmation needed)
@@ -100,7 +100,7 @@ Keep its output in view; the steps below read its parts by name, and run none of
   Step 3 builds on.
 - **`risk`**: the paths this diff touches that `config`'s `review.sensitive` and
   `review.irreversible` name, and `deep`, true when a sensitive one is touched. A deep diff gets
-  the build check whatever `build_when` says (Step 2) and the fresh-context reviewer (Step 3); an
+  the slow gate whatever `build_when` says (Step 2) and the fresh-context reviewer (Step 3); an
   irreversible one gets `How to recover:` in its commit (Step 4). Risk never changes the tier: it
   deepens the review, nothing else. The script reads `[review]` from the base branch's checkout,
   so a change can't lighten its own review by editing it.
@@ -124,7 +124,7 @@ large unrelated diff hiding a real change is how review gets skipped. Each path 
 to commit separately is one Step 6 passes to `sdlc.py ship` as `--leave <path>`, since `ship`
 stages everything else the checkout has uncommitted.
 
-## Step 1 — Run the checks
+## Step 1 — Run the gate
 
 Run `commands.check` from `config`, from the repo root. That is the whole step, and it must exit 0.
 Don't enumerate what it runs here: the repo defines its gate, and adding a check there is an edit
@@ -132,10 +132,10 @@ to the repo, not to this skill.
 
 If `commands.check` is null, the repo has configured no gate. Say so plainly in the report: "no
 check configured" is an answer, and a green report with nothing behind it is not. Then run
-`sdlc.py check --strict` at least, which audits the change folders:
+`sdlc.py vet --strict` at least, which vets the change folders:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py check --strict
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py vet --strict
 ```
 
 **Report the test count the gate printed, if it ran tests,** and what they cover. Say what ran; a
@@ -156,7 +156,7 @@ here, as a failing gate does:** report each failing check's name, `output` and `
 
 **Then the skills' own cases,** in `cases.md`, when `branches` names it.
 
-## Step 2 — If the diff calls for it, run the build check
+## Step 2 — If the diff calls for it, run the slow gate
 
 If `config` sets `commands.build`, run it when any changed path matches `commands.build_when` (a
 regex; with none set, always):
@@ -166,9 +166,9 @@ git diff --name-only HEAD | grep -qE '<build_when>' && <build>
 ```
 
 **On a deep diff (`risk.deep`), run `commands.build` whatever `build_when` says:** a sensitive path
-is reason enough. With no build check configured, say so, as below.
+is reason enough. With no slow gate configured, say so, as below.
 
-The gate is meant to be fast, so it can't tell you everything; the build check is the repo's slower
+The gate is meant to be fast, so it can't tell you everything; the slow gate is the repo's slower
 answer to the questions only a real build can settle. The process doc says what it covers.
 
 Three things to say in the report rather than paper over:
@@ -179,7 +179,7 @@ Three things to say in the report rather than paper over:
 - **Anything it built that has no tests.** If the repo's policy says what must carry a test, check
   it here; the review's contract pass decides how serious a gap is.
 
-If the build check reports building nothing when the diff clearly changed something it covers, say
+If the slow gate reports building nothing when the diff clearly changed something it covers, say
 so and find out why. Silently building nothing and reporting success is the failure mode here.
 
 ## Step 3 — Review the diff — all four passes
@@ -454,7 +454,7 @@ so rather than commit it.
 ## Step 7 — Report and stop
 
 Report: the commit sha and subject, which checks ran and their results, each acceptance check by
-name and its result (or that the change has none), whether the build check ran and what it said, how many findings there were by rank and pass and what became of each, the fixes made inside the yes and what the rerun said of them, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), which passes `branches` named (security, behaviour, UI, UX) ran or were skipped and why, the bugs filed by id, which context docs were updated (or
+name and its result (or that the change has none), whether the slow gate ran and what it said, how many findings there were by rank and pass and what became of each, the fixes made inside the yes and what the rerun said of them, whether the diff was deep and the fresh reviewer ran (and how many of its findings held), which passes `branches` named (security, behaviour, UI, UX) ran or were skipped and why, the bugs filed by id, which context docs were updated (or
 that none needed it), the release impact recorded, each undone item and where it went (the seed's
 title, or dropped and why), the nits recorded and retired by id, and anything else deliberately
 deferred. Be explicit that nothing was pushed and nothing was deployed.

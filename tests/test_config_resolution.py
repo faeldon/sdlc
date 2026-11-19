@@ -383,8 +383,8 @@ def test_with_no_main_and_no_origin_the_base_is_unset(tmp_path: Path, capsys):
 
 
 def test_status_reports_a_missing_base_and_check_doesnt(tmp_path: Path, capsys, monkeypatch):
-    """Status says so, since every change would refuse to start; `check` is a gate, and stays
-    green for a repo that simply has no commit on `main` yet."""
+    """Status says so, since every change would refuse to start; `vet --strict` counts no
+    problem for a repo that simply has no commit on `main` yet."""
     import sys
 
     root = _repo_on(tmp_path, "master")
@@ -393,7 +393,7 @@ def test_status_reports_a_missing_base_and_check_doesnt(tmp_path: Path, capsys, 
     capsys.readouterr()
     sdlc.main()
     assert "git.base: no base branch" in capsys.readouterr().out
-    monkeypatch.setattr(sys, "argv", ["sdlc.py", "check", "--strict"])
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
     assert sdlc.main() == 0
     assert "no base branch" not in capsys.readouterr().out
 

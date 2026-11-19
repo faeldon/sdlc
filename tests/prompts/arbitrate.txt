@@ -1,4 +1,4 @@
-Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Verify round 1.
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Arbitrate round 1.
 - C1: code: src/a.py:1: rename a
 - C2: code: src/b.py:2: split b
 - C3: behaviour: the drafts list is empty after a reload
