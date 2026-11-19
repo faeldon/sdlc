@@ -93,6 +93,13 @@ UNMEASURED = [
         "signal": "a factory stop that cleared with nothing changed",
         "needs": "a committed log of each stop the factory records, and what cleared it",
     },
+    {
+        # A hand commit on the change's branch is the change's own (`_workarounds()`): nothing
+        # tells it from what a command writes there.
+        "signal": "a change's own records edited by hand before it landed",
+        "needs": "a mark each command leaves on the records it writes, so an edit without one "
+        "shows",
+    },
 ]
 
 
@@ -2448,6 +2455,193 @@ def _rework(
     return list(links.values()), questions, problems
 
 
+# ---------------------------------------------------------------- workarounds (180)
+#
+# What the process didn't plan for, read from history: a commit on the base branch no command
+# made, a record edited there by hand, an entry the register held before and gained again, and
+# the factory's overrides each change's own commit records. A reading, not a guard: a hand commit
+# worded as a command's is counted as the command's.
+
+# A release's commit, as `cmd_release` words it.
+RELEASE_SUBJECT_RE = re.compile(r"^Release \d+\.\d+\.\d+$")
+
+
+def _commands_commit(subject: str) -> bool:
+    """Whether a commit on the base branch is one the plugin's commands or skills make there:
+    `Close` or `Drop` a change, a register commit (every `; ` part `File`, `Retire`, `Update` or
+    `Triage`), a release, a retrospective, or setup's and uninstall's own (`SETUP_SUBJECTS`)."""
+    if _closing_subject(subject):
+        return True
+    words = tuple(f"{w} " for w in (*sdlc.INBOX_SUBJECTS, sdlc.TRIAGE_SUBJECT))
+    if all(part.startswith(words) for part in subject.split("; ")):
+        return True
+    if RELEASE_SUBJECT_RE.match(subject) or sdlc.RETRO_RE.match(subject):
+        return True
+    return any(
+        subject == s or (s.endswith(" ") and subject.startswith(s)) for s in sdlc.SETUP_SUBJECTS
+    )
+
+
+def _is_record(path: str) -> bool:
+    """Whether a path git prints is one of the process's records: a change folder or the register
+    (`CHANGE_FOLDERS`), a retrospective's report, the setup manifest or the change counter."""
+    host = sdlc.HOST_DIR
+    return path.startswith((*sdlc.CHANGE_FOLDERS, f"{host}/{RETROS}/")) or path in (
+        sdlc.MANIFEST, f"{host}/{sdlc.LAST_ID}",
+    )  # fmt: skip
+
+
+def _log_blocks(home: Path, *args: str) -> list[tuple[str, str, str, str]]:
+    """`git log --first-parent --reverse` with `args`, each commit as `(sha, short, subject,
+    rest)`, `rest` whatever `args` asked git to print after it (paths, a patch). Paths come
+    unescaped (`core.quotePath=false`), as the record prefixes they are compared with are."""
+    fmt = "--format=%x01%H%x00%h%x00%s"
+    first = ("-c", "core.quotePath=false", "log", "--first-parent", "--reverse", "--no-renames")
+    log = sdlc._git(home, *first, fmt, *args) or ""
+    found = []
+    for block in log.split("\x01")[1:]:
+        head, _, rest = block.partition("\n")
+        sha, short, subject = (head.split("\x00") + ["", ""])[:3]
+        found.append((sha, short, subject, rest))
+    return found
+
+
+def _restored(home: Path, trunk: str, window: set[str]) -> dict:
+    """The entries the register gained in the window that it held before (R3): every first-parent
+    commit to the tip, read in order, keeps the ids the register holds and has ever held; an id a
+    window commit adds that it held once and not now is restored. An id a commit removes and adds
+    is an edit or a move. `n` is every id the window's commits added."""
+    paths = [f"{w}{name}" for w in sdlc.CHANGE_FOLDERS for name in (sdlc.INBOX, sdlc.OLD_INBOX)]
+    held: set[str] = set()
+    ever: set[str] = set()
+    rows, gained = [], 0
+    for sha, short, subject, diff in _log_blocks(home, "-p", trunk, "--", *paths):
+        added, removed = set(), set()
+        for line in diff.splitlines():
+            m = sdlc.ENTRY_RE.match(line[1:]) if line[:1] in ("+", "-") else None
+            if m and not line.startswith(("+++", "---")):
+                (added if line[0] == "+" else removed).add(f"{m.group(1)}-{m.group(2)}")
+        new = added - removed
+        if sha in window:
+            gained += len(new)
+            rows += [
+                {"id": i, "sha": short, "subject": subject}
+                for i in sorted(new)
+                if i in ever and i not in held
+            ]
+        held = (held - removed) | added
+        ever |= added
+    return {"count": len(rows) if gained else None, "n": gained, "rows": rows}
+
+
+def _overrides(home: Path, changes: list[dict], dropped: list[dict]) -> dict:
+    """The factory's overrides (R6), from each closed change's own commit and each dropped one's
+    tip, over the changes a factory run built (a `decision.md`): the train's ejections by cause
+    and its stops by train, from `runs/ejections.jsonl` (a stop row from before it named its
+    train counts once per change), and the fixes the person asked for at landing. Null over 0."""
+    fr = sdlc.factory_records
+    n, fixes = 0, 0
+    causes: Counter = Counter()
+    trains: set = set()
+    for rec in [*changes, *dropped]:
+        show, listing = _records_at(home, rec)
+        if show(fr.DECISION_FILE) is None:
+            continue
+        n += 1
+        fixes += fr.land_asks(listing)
+        for row in fr.ejections(show):
+            cause = str(row.get("cause") or "unknown")
+            if cause != "stop":
+                causes[cause] += 1
+            else:
+                train = row.get("train")
+                trains.add(train if isinstance(train, str) else ("change", rec["name"]))
+    return {
+        "ejections": {
+            "count": sum(causes.values()) if n else None, "by_cause": dict(sorted(causes.items())),
+            "n": n,
+        },
+        "stops": {"count": len(trains) if n else None, "n": n},
+        "fixes": {"count": fixes if n else None, "n": n},
+    }  # fmt: skip
+
+
+def _workarounds(
+    home: Path,
+    cfg: dict,
+    since: dict | None,
+    changes: list[dict],
+    dropped: list[dict],
+    bases: dict[str, str | None],
+) -> tuple[dict, list[str]]:
+    """The Simplicity pillar's workarounds (180), from history alone, and a problem for each change
+    whose start is unknown. Every first-parent commit from the last retrospective (else the
+    adoption commit, else the start) to the base's tip is a closed change's own (`<its
+    base>..<its commit>`), a command's (`_commands_commit()`), or outside the loop: `hand_record`
+    when it touches a record (`_is_record()`), `outside` when not. A change with no start claims
+    only its own commit, and the commits before it back to the last `Close` or `Drop` are
+    `unknown`, never outside. Each count carries its `n` and is null, never 0, when `n` is 0.
+    Read-only: git reads alone."""
+    trunk = cfg["git"]["base"]
+    problems: list[str] = []
+    start = since["sha"] if since else sdlc._adoption_commit(home)
+    commits = _log_blocks(home, "--name-only", f"{start}..{trunk}" if start else trunk)
+    commits = commits if trunk else []
+    line = [sha for sha, *_ in commits]
+    own: set[str] = set()
+    unknown: dict[str, str] = {}
+    for rec in changes:
+        base = bases.get(rec["name"])
+        if base:
+            span = f"{base}..{rec['sha']}"
+            own.update((sdlc._git(home, "rev-list", "--first-parent", span) or "").split())
+            continue
+        sha = sdlc._git(home, "rev-parse", "--verify", "-q", f"{rec['sha']}^{{commit}}")
+        own.add(sha or "")
+        i = line.index(sha) - 1 if sha in line else -1
+        mine = 0
+        while i >= 0 and not _closing_subject(commits[i][2]):
+            if line[i] not in own and not _commands_commit(commits[i][2]):
+                unknown[line[i]] = rec["name"]
+                mine += 1
+            i -= 1
+        if mine:
+            problems.append(
+                f"{rec['name']}: its start is unknown, so {mine} commit(s) before it on {trunk} "
+                "are counted as unknown, not outside"
+            )
+    rows: dict[str, list[dict]] = {"outside": [], "hand_record": [], "unknown": []}
+    for sha, short, subject, paths in commits:
+        if sha in own or _commands_commit(subject):
+            continue
+        row = {"sha": short, "subject": subject}
+        if sha in unknown:
+            rows["unknown"].append({**row, "change": unknown[sha]})
+        elif any(_is_record(p) for p in paths.splitlines() if p):
+            rows["hand_record"].append(row)
+        else:
+            rows["outside"].append(row)
+    n = len(commits)
+    block = {
+        kind: {"count": len(rows[kind]) if n else None, "n": n, "rows": rows[kind]}
+        for kind in ("outside", "hand_record")
+    }
+    block["restored"] = (
+        _restored(home, trunk, set(line)) if trunk else {"count": None, "n": 0, "rows": []}
+    )
+    block["unknown"] = {"count": len(rows["unknown"]), "rows": rows["unknown"]}
+    block["overrides"] = _overrides(home, changes, dropped)
+    return block, problems
+
+
+def _closing_subject(subject: str) -> bool:
+    """Whether a commit closes or drops a change: where one change's commits end on the line."""
+    return any(
+        subject.startswith(p) and sdlc.DIR_RE.match(subject[len(p) :].strip())
+        for p in (sdlc.CLOSE_PREFIX, sdlc.DROP_PREFIX)
+    )
+
+
 def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     """What the retrospective counts: everything since the last one, from history. Read-only."""
     today = today or date.today()
@@ -2513,6 +2707,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     )
     lookback = _lookback(home, trunk) if trunk else None
     value = value_band(home, cfg, since, changes, bases, paths)
+    workarounds, unknown = _workarounds(home, cfg, since, changes, dropped, bases)
+    problems += unknown
     return {
         "since": since,
         "today": today.isoformat(),
@@ -2566,6 +2762,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "cost": _cost(home, changes, dropped),
         "tests": _tests(home, cfg, lookback),
         "surface": surface(home, cfg, changes, since),
+        "simplicity": {"workarounds": workarounds},
         **value,
     }
 

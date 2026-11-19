@@ -380,8 +380,12 @@ Cheap work that escapes isn't cheap. A falling cost with a rising escape rate is
   changes landed outside the loop, records fixed by hand, overrides.
 - **Why:** an opinionated process earns its opinions only while it isn't in the way. A workaround
   is the process saying no to something the person needed.
-- **Where:** stops, `extra`, and workaround tags.
-- **Status:** partly. Needs S6.
+- **Where:** stops, `extra`, and `simplicity.workarounds`: the commits on the base branch no
+  change or command made (`outside`, and `hand_record` for a record), the register entries filed
+  again after they left (`restored`), and the factory's ejections, stopped trains and fixes asked
+  at landing (`overrides`, from each change's `runs/ejections.jsonl` and `build/land-<n>.ask.md`).
+- **Status:** captured by S6, read from history; an edit to a change's own records on its branch
+  is still unmeasured.
 
 ### Supporting: time to a host's first closed change
 - **What:** whether a repo that has never seen the plugin gets from setup to its first closed
@@ -483,7 +487,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 | **S3** | Decisions and stops counted: escalations per change, the kept-default rate, overturned approver calls, auto-landed share, spurious stops and looks. | Autonomy | – |
 | **S4** | Waste tagged in `costs.jsonl` (each run marked by what it was for: build, rework, red-gate fix, ejected, rerun, mend); retro reports waste share and cost per landed change. | Cost | – |
 | **S5** | Feature inventory: retro lists every skill, command and config key with its use in the window, the footprint setup leaves, and the surface's growth per release; unused for N windows becomes a retire candidate. Its list is the feature map, 2026-10-25-3. | Simplicity | – |
-| **S6** | Workarounds tagged: a change landed outside the loop, a record fixed by hand, an override, each recorded so retro counts it. | Simplicity | – |
+| **S6** | Workarounds tagged: a change landed outside the loop, a record fixed by hand, an override, each recorded so retro counts it. **Done: 180.** | Simplicity | – |
 | **S7** | This repo's function-heat indicator, `.sdlc/function-heat.py`, set in `retro.indicators`. **Open as a Tier 1 intent by hand.** | Quality | – |
 | **S8** | Indicators in a structured format (JSON rows), rendered as a table in the report; "no indicators set" said when empty; setup offers the key. | Quality | S7 |
 | **S9** | Figures by way of building: lead time, throughput, cost and escape rate, factory against by hand. | Speed, Autonomy | S1 |
@@ -568,7 +572,7 @@ touches its files.
 
 - **S4**, done: 174.
 - **S5**, with the feature map 2026-10-25-3 and the process map 2026-10-25-1.
-- **S6**, with 2026-11-18-93.
+- **S6**, done, with 2026-11-18-93: 180.
 - **S8**.
 - **S17**, done: 178.
 - **S9**.

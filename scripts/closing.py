@@ -378,7 +378,9 @@ def _lead_line(
     """The `Sdlc-Lead` line for a landing change, or None and the word `Sdlc-Coverage` gains
     instead (`lead=none`, `lead=bad-opened`, `lead=failed`). Never raises: what made it fail is
     added to `errors`, as `lead: <type>: <message>`, so a programming error is seen in close's
-    report rather than hidden behind `lead=failed`."""
+    report rather than hidden behind `lead=failed`. That message is the exception's raw text, for
+    the person running close: it must never become a trailer, which holds numbers and names
+    only."""
     if sdlc.frontmatter_list(text, "opened") is None:
         return None, "lead=none"
     opened = opened_at(text)
@@ -402,7 +404,9 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
     """What a change cost, as a summary and its `Sdlc-*` trailer lines: from this repo's
     transcripts when `metrics.transcripts` allows and they hold the change, else what history
     gives (elapsed since `created`, the way of running), saying why. Never raises: measuring
-    must never stop a change landing."""
+    must never stop a change landing. The summary's `errors`, when there are any, hold raw
+    exception text for the person running close (`_lead_line()`), shown in close's report and
+    never turned into a trailer line."""
     settings = cfg["metrics"]
     folder = f"{sdlc.work_rel(main)}/{branch}"
     text = sdlc._git(main, "show", f"{branch}:{folder}/intent.md") or ""

@@ -1940,16 +1940,24 @@ def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
             })  # fmt: skip
 
 
-def _record_ejection(folder: Path, cause: str) -> None:
+def _record_ejection(folder: Path, cause: str, train: str | None) -> str | None:
     """One row appended to the change's `runs/ejections.jsonl` (`factory.EJECTIONS`) as a train
-    puts it back: when, its landing round, and why (`gate`, `review`, `refusal` or `stop`). The
-    retrospective reads it to count the landing's runs before it as `ejected` (174 R4); the
-    caller amends it into the change's commit with the rest of the landing's record."""
+    puts it back: when, its landing round, why (`gate`, `review`, `refusal` or `stop`), and which
+    train, by its `began` (180 R4), the new key last. The retrospective reads it to count the
+    landing's runs before it as `ejected` (174 R4), and its ejections and stops as overrides
+    (180 R6); the caller amends it into the change's commit with the rest of the landing's record.
+    Recording never blocks the ejection: a row that can't be written comes back as a problem for
+    the caller's output (180 R5), and None once it is written."""
     path = folder / factory.EJECTIONS
-    path.parent.mkdir(parents=True, exist_ok=True)
-    row = {"at": factory._utc_now(), "land": factory.land_round(folder), "cause": cause}
-    with path.open("a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(row) + "\n")
+    row = {"at": factory._utc_now(), "land": factory.land_round(folder), "cause": cause,
+           "train": train}  # fmt: skip
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError as e:
+        return f"couldn't record the {cause} in {factory.EJECTIONS.as_posix()}: {e.strerror or e}"
+    return None
 
 
 def _train_eject(main: Path, state: dict, ident: str) -> int:
@@ -1966,7 +1974,8 @@ def _train_eject(main: Path, state: dict, ident: str) -> int:
     cause = (mine.get("fault_cause") if mine.get("fault") else None) or "refusal"
     tree = Path(mine["worktree"])
     folder = tree / factory.work_rel(tree) / name
-    out = {"change": name, "state": "ejected", "reason": reason, "cause": cause, "undo": None}
+    out = {"change": name, "state": "ejected", "reason": reason, "cause": cause, "undo": None,
+           "problems": []}  # fmt: skip
     undo, why = _put_back(tree, folder, mine)
     if why:
         return factory.emit(
@@ -1974,7 +1983,8 @@ def _train_eject(main: Path, state: dict, ident: str) -> int:
         )
     if mine.get("pre"):
         factory._record_land(tree, folder, "eject", [f"ejected from the train: {reason}"])
-        _record_ejection(folder, cause)
+        if problem := _record_ejection(folder, cause, state.get("began")):
+            out["problems"].append(problem)
         _write_train_record(tree, folder, state, name)
         _amend_record(tree, folder)
     first = train_live(state)[0] == name
@@ -2002,7 +2012,8 @@ def _train_stop(main: Path, state: dict) -> int:
             continue
         if mine.get("pre"):
             factory._record_land(tree, folder, "stop", [f"the train stopped: {reason}"])
-            _record_ejection(folder, "stop")
+            if problem := _record_ejection(folder, "stop", state.get("began")):
+                problems.append(f"{name}: {problem}")
             _amend_record(tree, folder)
         put_back.append({"change": name, "undo": undo,
                          "head": (factory._git(tree, "rev-parse", "HEAD") or "")[:12]})  # fmt: skip
@@ -2318,7 +2329,10 @@ def _run_loop(main: Path) -> int:
                                   f"{PUT_BACK}",
                     })  # fmt: skip
                 if result["argv"][:2] == ["train", "--eject"]:
-                    undos.append({"change": name, "undo": out.get("undo")})
+                    undo = {"change": name, "undo": out.get("undo")}
+                    if out.get("problems"):  # a row the ejection couldn't record (180 R5)
+                        undo["problems"] = out["problems"]
+                    undos.append(undo)
                     print(f"train: ejected {name} ({reading.get('cause')}): undo with "
                           f"{out.get('undo')}", file=sys.stderr, flush=True)  # fmt: skip
 

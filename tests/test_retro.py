@@ -577,6 +577,9 @@ def test_counts_tiers_impacts_and_what_history_cannot_measure(tmp_path: Path) ->
     assert out["tiers"] == {"1": 1, "2": 2}
     assert out["impacts"] == {"patch": 1, "minor": 2}
     assert any("findings caught at ship" in u["signal"] for u in out["unmeasured"])
+    # 180 R13: a hand edit on a change's own branch has no shape history can tell apart.
+    assert any(u["signal"] == "a change's own records edited by hand before it landed"
+               for u in out["unmeasured"])  # fmt: skip
 
 
 def test_releases_are_the_tags_since_the_last_retrospective(tmp_path: Path) -> None:
@@ -3833,3 +3836,173 @@ def test_retro_prints_each_changes_pipeline_only_with_metrics(tmp_path: Path, ca
     sdlc.retro.cmd_retro(root, metrics=True)
     changes = json.loads(capsys.readouterr().out)["pipeline"]["changes"]
     assert [c["name"] for c in changes] == ["001-reopen-drafts"]
+
+
+# ---------------------------------------------------------------- workarounds (180)
+
+
+def _hand(root: Path, subject: str, files: dict[str, str]) -> str:
+    """A commit on the base branch as a person or a command would make it: `files` written whole,
+    `{rel: text}`, under `subject`. Its short sha."""
+    for rel, body in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", subject)
+    return _git(root, "rev-parse", "--short", "HEAD")
+
+
+INBOX_PATH = ".sdlc/work/inbox.md"
+
+
+def _register(*ids: str) -> str:
+    return "# Inbox\n" + "".join(f"\n## [{i}] [idea] Entry {i}\n" for i in ids)
+
+
+def _workarounds(root: Path) -> dict:
+    return _retro(root)["simplicity"]["workarounds"]
+
+
+@pytest.mark.parametrize("hand", [True, False])
+def test_a_hand_commit_on_the_base_is_outside_the_loop(tmp_path: Path, hand: bool) -> None:
+    """180 R1: a commit on the base branch that no change, register commit, release, setup or
+    drop made counts as outside the loop; each command's own commit counts 0."""
+    root = _repo(tmp_path)
+    _record(root)
+    _close(root, "001-reopen-drafts", based=True)
+    _hand(root, "File 2026-10-02-1", {INBOX_PATH: _register("2026-10-02-1")})
+    _hand(root, "File 2026-10-02-2; Triage #4",
+          {INBOX_PATH: _register("2026-10-02-1", "2026-10-02-2")})  # fmt: skip
+    _hand(root, "Release 1.2.0", {"VERSION": "1.2.0\n"})
+    _hand(root, "Refresh the sdlc setup for 1.2.0", {".sdlc/setup.json": "{}\n"})
+    sha = _hand(root, "tidy the readme", {"README.md": "tidied\n"}) if hand else None
+    _drop(root, "002-draft-sync")
+    _close(root, "003-draft-titles", based=True)
+    before = _state(root)
+    out = _workarounds(root)
+    assert _state(root) == before, "read-only (R8)"
+    outside = out["outside"]
+    assert outside["count"] == (1 if hand else 0), outside
+    assert outside["rows"] == ([{"sha": sha, "subject": "tidy the readme"}] if hand else [])
+    assert outside["n"] == (10 if hand else 9), "every first-parent commit in the window"
+    assert out["hand_record"]["count"] == 0 and out["hand_record"]["n"] == outside["n"]
+    assert out["unknown"]["count"] == 0
+
+
+def test_the_window_starts_after_the_repo_took_the_plugin_up(tmp_path: Path) -> None:
+    """180 R1: with no retrospective, the window runs from the adoption commit, and nothing before
+    it, the adoption included, is a workaround."""
+    root = _repo(tmp_path)
+    _hand(root, "an early commit", {"src/drafts.py": "early\n"})
+    _hand(root, "Set the repo up for the sdlc plugin", {".sdlc/config.toml": ""})
+    sha = _hand(root, "tidy the readme", {"README.md": "tidied\n"})
+    _close(root, "001-reopen-drafts", based=True)
+    out = _workarounds(root)
+    assert out["outside"]["rows"] == [{"sha": sha, "subject": "tidy the readme"}]
+    assert out["outside"]["n"] == 3
+
+
+def test_a_hand_commit_to_a_record_is_told_from_one_to_code(tmp_path: Path) -> None:
+    """180 R2: an outside commit touching a record counts as `hand_record`; one touching only code
+    as `outside`."""
+    root = _repo(tmp_path)
+    _record(root)
+    _close(root, "001-reopen-drafts", based=True)
+    fixed = _hand(root, "put the entry back", {INBOX_PATH: _register("2026-10-02-1")})
+    code = _hand(root, "quick fix", {"src/drafts.py": "fixed\n"})
+    out = _workarounds(root)
+    assert out["hand_record"]["rows"] == [{"sha": fixed, "subject": "put the entry back"}]
+    assert out["outside"]["rows"] == [{"sha": code, "subject": "quick fix"}]
+    assert out["hand_record"]["count"] == out["outside"]["count"] == 1
+
+
+def test_an_entry_filed_again_after_it_was_retired_is_restored(tmp_path: Path) -> None:
+    """180 R3: the register gaining an id it held before, from before the window too, is a
+    restoration; a new id is not."""
+    root = _repo(tmp_path)
+    _hand(root, "File 2026-10-02-1", {INBOX_PATH: _register("2026-10-02-1")})
+    _record(root)
+    _close(root, "001-reopen-drafts", based=True, texts={INBOX_PATH: _register()})
+    again = _hand(root, "File 2026-10-02-1", {INBOX_PATH: _register("2026-10-02-1")})
+    _hand(root, "File 2026-10-03-1", {INBOX_PATH: _register("2026-10-02-1", "2026-10-03-1")})
+    _hand(root, "Update 2026-10-03-1",
+          {INBOX_PATH: _register("2026-10-02-1").replace("Entry", "An entry") +
+           "\n## [2026-10-03-1] [idea] Renamed\n"})  # fmt: skip
+    before = _state(root)
+    out = _workarounds(root)["restored"]
+    assert _state(root) == before
+    assert out == {
+        "count": 1, "n": 2,
+        "rows": [{"id": "2026-10-02-1", "sha": again, "subject": "File 2026-10-02-1"}],
+    }  # fmt: skip
+
+
+def test_a_change_with_no_start_leaves_its_commits_unknown(tmp_path: Path, monkeypatch) -> None:
+    """180 R7: with no start, a change claims only its own last commit; the commits before it are
+    unknown, never outside, and a problem names the change."""
+    root = _repo(tmp_path)
+    _record(root)
+    _close(root, "001-reopen-drafts", later=("src/drafts.py",))
+    monkeypatch.setattr(sdlc, "_change_base", lambda *a: None)
+    out = _retro(root)
+    found = out["simplicity"]["workarounds"]
+    assert found["outside"]["count"] == 0 and found["hand_record"]["count"] == 0
+    assert found["unknown"]["count"] == 1
+    assert [r["subject"] for r in found["unknown"]["rows"]] == ["ship 001-reopen-drafts"]
+    assert any(p.startswith("001-reopen-drafts: its start is unknown") for p in out["problems"])
+
+
+def test_with_no_factory_change_the_overrides_are_null(tmp_path: Path) -> None:
+    """180 R7: no change in the window was the factory's, so no override count is 0: each is
+    null over an `n` of 0."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", based=True)
+    over = _workarounds(root)["overrides"]
+    assert over == {
+        "ejections": {"count": None, "by_cause": {}, "n": 0},
+        "stops": {"count": None, "n": 0},
+        "fixes": {"count": None, "n": 0},
+    }
+
+
+def _factory_texts(name: str, rows: list[dict], asks: int = 0, garbled: bool = False) -> dict:
+    """A factory change's records as its own commit holds them: a decision, its ejection rows and
+    `asks` fixes asked at landing."""
+    folder = f".sdlc/work/{name}"
+    lines = [json.dumps(r) for r in rows] + (["not a row"] if garbled else [])
+    texts = {f"{folder}/decision.md": "DECISION: READY\n"}
+    if lines:
+        texts[f"{folder}/runs/ejections.jsonl"] = "\n".join(lines) + "\n"
+    for k in range(1, asks + 1):
+        texts[f"{folder}/build/land-{k}.ask.md"] = "Name the drafts by date.\n"
+    return texts
+
+
+def test_overrides_are_read_from_each_factory_changes_commit(tmp_path: Path) -> None:
+    """180 R6: ejections by cause, stops by train (a row with no train once per change), and the
+    fixes asked at landing, over the factory changes, a dropped one's tip included; a line that
+    doesn't parse is passed over, and a change built by hand isn't in `n`."""
+    root = _repo(tmp_path)
+    t1, t2 = "2026-10-02T09:00:00Z", "2026-10-02T11:00:00Z"
+    row = lambda cause, train=None: {"at": t2, "land": 1, "cause": cause,  # noqa: E731
+                                     **({"train": train} if train else {})}  # fmt: skip
+    landed = {
+        "001-reopen-drafts": ([row("gate", t1), row("stop", t2)], 2),
+        "002-keep-one-draft": ([row("stop", t2), row("review", t2)], 0),
+        "003-draft-titles": ([row("stop")], 0),
+        "004-draft-dates": ([row("stop")], 0),
+    }
+    for name, (rows, asks) in landed.items():
+        texts = _factory_texts(name, rows, asks=asks, garbled=asks > 0)
+        _close(root, name, based=True, texts=texts)
+    _close(root, "005-draft-colours", based=True)
+    _drop(root, "006-draft-sync", texts=_factory_texts("006-draft-sync", [row("refusal", t1)]))
+    before = _state(root)
+    over = _workarounds(root)["overrides"]
+    assert _state(root) == before
+    assert over["ejections"] == {
+        "count": 3, "by_cause": {"gate": 1, "refusal": 1, "review": 1}, "n": 5,
+    }  # fmt: skip
+    assert over["stops"] == {"count": 3, "n": 5}, "train t2 once, and 003 and 004 each once"
+    assert over["fixes"] == {"count": 2, "n": 5}

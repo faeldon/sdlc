@@ -5622,6 +5622,14 @@ BUMPS = ("patch", "minor", "major")
 CLOSE_PREFIX = "Close "
 # A dropped change's record on main: a merge that keeps main's tree (`_drop_record`).
 DROP_PREFIX = "Drop "
+# The commits setup and uninstall make on the base branch by hand, as their skills word them: a
+# subject ending in a space is a prefix (refresh names the plugin's version after it). The
+# retrospective reads them as the plugin's own commits, never a workaround (`_workarounds()`).
+SETUP_SUBJECTS = (
+    "Set the repo up for the sdlc plugin",
+    "Refresh the sdlc setup for ",
+    "Remove the sdlc plugin's setup",
+)
 # Where a change starts, as close keeps it: the base branch's tip before the merge, in a ref of
 # its own between close's runs (so a rerun after the fast-forward still knows it), then as a
 # trailer on the `Close` commit, the ref going with the branch.
@@ -7253,6 +7261,8 @@ RETIRE_REASONS = {
     "nit": (),
 }
 INBOX_SUBJECTS = ("File", "Retire", "Update")
+# The part of a register commit's subject naming the issues triage closed (`_inbox_commit()`).
+TRIAGE_SUBJECT = "Triage"
 # What triage can decide about an issue that closes it there: nothing more will be done. Anything
 # else is filed as an entry or put on a change's `closes:` line, and closes when that lands.
 TRIAGE_VERDICTS = ("resolved", "wontfix", "not-a-bug", "duplicate")
@@ -7498,7 +7508,7 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
         return 1
     parts = [f"{s} {', '.join(i)}" for s, i in actions.items() if i]
     if numbers:
-        parts.append("Triage " + ", ".join(f"#{n}" for n in numbers))
+        parts.append(f"{TRIAGE_SUBJECT} " + ", ".join(f"#{n}" for n in numbers))
     subject = "; ".join(parts)
     if not subject:
         refusals.append(f"nothing to record: {rel} changed, but no entry did")

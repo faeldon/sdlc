@@ -1982,3 +1982,41 @@ def test_the_cores_train_gate_copy_reads_every_gate_line() -> None:
     assert not sdlc.factory_records.TRAIN_GATE_RE.match(text.splitlines()[4]), "TIP GATE: isn't"
     assert sdlc.factory_records.LAND_TRAIN == factory.LAND_TRAIN
     assert not hasattr(factory.landing, "LAND_TRAIN"), "one name, factory.py's"
+
+
+# ------------------------------------------------- an ejection's row names its train (180 R4, R5)
+
+
+@needs_uv
+def test_a_stopped_trains_rows_name_it(tmp_path, capsys) -> None:
+    """180 R4: a stopped train leaves a `stop` row in each committed change's commit, each naming
+    the train by its `began`, 174's three keys first and `train` last."""
+    root, trees = _three(tmp_path)
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
+    moved = [n for n, c in readings[-1]["changes"].items() if c.get("pre")]
+    assert len(moved) >= 2, readings[-1]
+    began = factory.read_train(root)["began"]
+    code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
+    assert code == 0 and out["state"] == "stopped" and out["problems"] == [], out
+    for tree in (t for t in trees if t.name in moved):
+        shown = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/runs/ejections.jsonl")
+        rows = [json.loads(x) for x in shown.splitlines()]
+        assert [(r["cause"], r["train"]) for r in rows] == [("stop", began)], rows
+        assert list(rows[0]) == ["at", "land", "cause", "train"], rows
+
+
+@needs_uv
+def test_an_ejection_that_cant_be_recorded_still_ejects(tmp_path, capsys) -> None:
+    """180 R5: when the row can't be appended (`OSError`, here a directory where the file goes),
+    the change is ejected all the same, its undo printed and the train's state written, and the
+    failure is a problem naming the file."""
+    root, trees = _three(tmp_path, check="test ! -f bb.txt")
+    tree = trees[1]
+    (_folder(tree) / "runs" / "ejections.jsonl").mkdir(parents=True)
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys)
+    assert [e["change"] for e in readings[-1]["ejected"]] == [tree.name]
+    [did] = [r["did"] for r in readings if r.get("next") == "eject"]
+    assert did["state"] == "ejected" and did["undo"], did
+    assert [p for p in did["problems"] if "runs/ejections.jsonl" in p], did

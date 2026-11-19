@@ -1945,3 +1945,16 @@ def test_every_place_that_takes_a_nit_in_names_the_marker() -> None:
         if "Nits taken in:" not in p.read_text(encoding="utf-8")
     ]
     assert not missing, missing
+
+
+def test_setup_subjects_are_the_skills_own() -> None:
+    """180: the retrospective reads setup's and uninstall's commits on the base branch by their
+    subjects (`SETUP_SUBJECTS`), so each is the one its skill commits with; a prefix (ending in a
+    space) is followed by the version the skill names."""
+    text = "".join(
+        (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+        for name in ("setup", "uninstall")
+    )
+    for subject in sdlc.SETUP_SUBJECTS:
+        tail = "<" if subject.endswith(" ") else '"'
+        assert f'-m "{subject}{tail}' in text, subject

@@ -2467,6 +2467,23 @@ def test_timing_that_fails_drops_only_its_own_line(tmp_path, gh, capsys, monkeyp
     assert out["measure"]["errors"] == ["lead: RuntimeError: a run file shape nobody planned for"]
 
 
+def test_measures_errors_never_become_a_trailer(tmp_path, gh, monkeypatch) -> None:
+    """180 R10: `errors` holds the raw exception text for the person running close, and no
+    trailer line `measure_change()` returns carries it."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-10-01T08:50Z")
+    marker = "raw-text-for-the-person-0x5f3a"
+
+    def broken(*_):
+        raise ValueError(marker)
+
+    monkeypatch.setattr(sdlc.closing, "_lead_marks", broken)
+    summary, lines = _measure(root, name)
+    assert summary["errors"] == [f"lead: ValueError: {marker}"]
+    assert lines and not [line for line in lines if marker in line], lines
+
+
 def test_a_dropped_change_records_no_lead(tmp_path, gh, capsys) -> None:
     """162 R12: it never landed."""
     root = _repo(tmp_path)

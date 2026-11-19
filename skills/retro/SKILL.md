@@ -91,6 +91,11 @@ What `retro` gives:
   the changes with no `findings.md` to read, or one that no longer parses: its review's
   `problems` say which sections.
 - `unmeasured`: signals history doesn't record.
+- `simplicity.workarounds`: where the process got in the person's way. `outside` and
+  `hand_record` list the commits on the base branch no change or command made (a record's apart),
+  `restored` the register entries filed again after they left, `unknown` the commits before a
+  change whose start couldn't be found, and `overrides` the factory's ejections by cause, its
+  stopped trains and the fixes asked at landing. Each count carries its `n`, null over none.
 - Trust: `process.lead`, `process.escapes`, `metrics` and `spend` each carry `coverage`
   (`measured` of `of` changes) and `missing_because`. Read a `greyed` one, under half its
   changes, as a hint, never a finding. Before reading any trend, rule out

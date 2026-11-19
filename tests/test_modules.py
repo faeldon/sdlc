@@ -458,6 +458,8 @@ RECORD_NAMES = {
     "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
     "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts", "spend_rows",
     "read_gate_attempts", "resolved_files", "pipeline_counts",
+    # 180: the overrides retro reads, and core's reader of a fix asked at landing.
+    "ejections", "land_asks", "LAND_ASK_RE",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -492,7 +494,7 @@ UNRELATED = {("sdlc.py", "MOVES_RE")}
 RECORD_FILES = (
     "decision.md", "decisions.md", "stopped.md", "step.md", "verified.md", "costs.jsonl",
     "land-times.jsonl", "gate.md", "round-", ".sessions", "ejections.jsonl", "land-train.md",
-    "land-accept.md",
+    "land-accept.md", ".ask.md",
 )  # fmt: skip
 
 
@@ -668,6 +670,17 @@ def test_every_shared_name_is_the_factorys() -> None:
         name for name in shared if _shape(getattr(records, name)) != _shape(getattr(factory, name))
     )
     assert not drift, f"these differ from factory.py's: {drift}"
+
+
+def test_land_ask_re_reads_the_factorys_path(tmp_path) -> None:
+    """180 R11: `LAND_ASK_RE` is core's own name for the file `factory.py`'s `land_ask_path()`
+    writes, so it is pinned to that function, not to a name the two share."""
+    records = _load("factory_records_ask", RECORDS_PY)
+    factory = _load("factory_records_ask_theirs", FACTORY_PY)
+    folder = tmp_path / "001-reopen-drafts"
+    rel = factory.land_ask_path(folder, 3).relative_to(folder).as_posix()
+    assert records.LAND_ASK_RE.match(rel), rel
+    assert records.land_asks(lambda _: f"{rel}\nbuild/round-1.md") == 1
 
 
 def test_look_seen_is_the_decide_skills_answer() -> None:

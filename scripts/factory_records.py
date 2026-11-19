@@ -141,6 +141,9 @@ CONFLICTS = "conflicts.md"
 LAND_TRAIN = Path("runs") / "land-train.md"
 TRAIN_GATE_RE = re.compile(r"^GATE: (\d+) (PASS|FAIL) ([0-9a-f]+) (\S+)\s*$")
 LAND_ACCEPT = Path("build") / "land-accept.md"
+# A fix the person asked for at landing, round <n>, as `factory.py`'s `land_ask_path()` places it,
+# relative to the folder: core's own name, pinned to that function.
+LAND_ASK_RE = re.compile(r"^build/land-(\d+)\.ask\.md$")
 # The parts a row's spend lands in (`spend_rows()`), core's own: each purpose, what became of the
 # change (`ejected`, `dropped`), and a row from before purposes (`untagged`), which is never waste.
 PARTS = (*PURPOSES, "ejected", "dropped", "untagged")
@@ -815,6 +818,19 @@ def timed_rows(text: str) -> list[tuple[datetime, datetime, str]]:
     return out
 
 
+def ejections(show) -> list[dict]:
+    """`runs/ejections.jsonl`'s rows, read through `show`, in order: each time a train put the
+    change back, `{"at", "land", "cause", "train"}` (`train`, the train's `began`, from 180 on). A
+    line that doesn't parse as an object is passed over."""
+    return _json_rows(show(EJECTIONS.as_posix()) or "")
+
+
+def land_asks(listing) -> int:
+    """How many fixes the person asked for at landing: the change's `build/land-<n>.ask.md`
+    files (`LAND_ASK_RE`), read through `listing`."""
+    return sum(1 for path in (listing("build") or "").splitlines() if LAND_ASK_RE.match(path))
+
+
 def spend_rows(show, dropped: bool = False) -> dict:
     """Each agent run's spend in a change's `runs/costs.jsonl`, read through `show`, in order:
     `{"rows": [...], "unknown": n, "untagged": n}`, each row its `usd`, `minutes`, `role`,
@@ -827,10 +843,7 @@ def spend_rows(show, dropped: bool = False) -> dict:
     `dropped` change; `ejected` for a landing's run (`land`) that ended at or before an ejection
     in `runs/ejections.jsonl`; else its purpose. A row naming no session is skipped, as `cost()`
     skips it."""
-    ejections = [
-        t for t in (_run_time(r.get("at")) for r in _json_rows(show(EJECTIONS.as_posix()) or ""))
-        if t
-    ]  # fmt: skip
+    ejected_at = [t for t in (_run_time(r.get("at")) for r in ejections(show)) if t]
     highest: dict[str, float] = {}
     rows, unknown, untagged = [], 0, 0
     for row in _json_rows(show(COSTS.as_posix()) or ""):
@@ -848,7 +861,7 @@ def spend_rows(show, dropped: bool = False) -> dict:
             part, untagged = "untagged", untagged + 1
         elif dropped:
             part = "dropped"
-        elif row.get("land") is not None and ended and any(ended <= at for at in ejections):
+        elif row.get("land") is not None and ended and any(ended <= at for at in ejected_at):
             part = "ejected"
         else:
             part = row["purpose"]

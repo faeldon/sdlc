@@ -1221,6 +1221,28 @@ the landings `Sdlc-Landed` says were the factory's (`auto` or `person`), those w
 counted here: `autonomy.spurious_stops` gives them, a build's apart from a landing's. `changes`,
 each change's own figures, is printed only with `--metrics`. The report doesn't show these yet.
 
+Its `simplicity.workarounds` counts what the process didn't plan for, from history alone, so
+nobody logs a workaround by hand. Every first-parent commit on the base branch in the window (from
+the last retrospective, else the commit that first added `.sdlc/config.toml`, to the tip) is a
+closed change's own (from where it started to its commit), a command's (`Close`, `Drop`, a
+register commit whose every `; ` part is `File`, `Retire`, `Update` or `Triage`, `Release X.Y.Z`,
+`Retrospective YYYY-MM-DD`, or setup's and uninstall's own subjects), or outside the loop:
+`hand_record` when it touches a record (a change folder or the register, a retrospective's report,
+`.sdlc/setup.json` or `.sdlc/last-id`), `outside` when not, each listed by its short sha and
+subject over `n`, the window's commits. `restored` lists each register entry a commit in the
+window added back after an earlier commit removed it, over the entries the window added. A closed
+change whose start can't be found claims only its own commit, and the commits before it back to
+the last `Close` or `Drop` are `unknown`, never outside, with a problem naming the change.
+`overrides` is read from each closed change's own commit and each dropped change's tip, over the
+changes a factory run built (`n`): `ejections`, the landing train's ejections by `cause` (`gate`,
+`review` or `refusal`; a `gate` one is a fault the train found, not the person's call), `stops`,
+the trains stopped, each once by the `train` its rows name (a row from before rows named their
+train counts once per change), and `fixes`, the fixes the person asked for at landing
+(`build/land-<n>.ask.md`). A stop before any change was committed records nothing. Each count is
+null, never 0, when its `n` is 0. It is a reading, not a guard: a hand commit worded as a
+command's counts as the command's, and an edit to a change's own records on its branch is the
+change's, which `unmeasured` names.
+
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there

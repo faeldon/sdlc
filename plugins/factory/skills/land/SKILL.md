@@ -253,7 +253,8 @@ command that refuses or an agent session that fails, a cancel, or the same step 
 nothing changed.
 
 **When the harness says the loop has exited**, read its JSON: `landed`, `live`, `moves`, `gates`,
-`ejected` (each with its `reason` and `cause`), the `undos` of the ejections it made, and either
+`ejected` (each with its `reason` and `cause`), the `undos` of the ejections it made (one
+whose record couldn't be written with its `problems`: say each), and either
 `done: true` (go to Step 4) or `stopped`, with its `next`, `change`, `cause`, `reason` and
 `way_on`, each worded by the script. Report a stop as it words it: the change, why, and the way
 on, and that rerunning `/sdlc-factory:land` takes it. Never take the step yourself.
