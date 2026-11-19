@@ -1960,3 +1960,25 @@ def test_an_ejection_is_recorded_and_amended_in(tmp_path, capsys) -> None:
             continue
         rows = [json.loads(x) for x in found.splitlines()]
         assert [r["cause"] for r in rows] == ["stop"], (tree.name, rows)
+
+
+@pytest.mark.portable
+def test_the_cores_train_gate_copy_reads_every_gate_line() -> None:
+    """175 R10: `factory_records.TRAIN_GATE_RE` reads each `GATE:` line `train_record()` writes, a
+    red prefix of two and a green tip, and the record's path is `factory.LAND_TRAIN`."""
+    state = {"order": ["001-a", "002-b"], "base": "main", "changes": {"001-a": {}, "002-b": {}}}
+    gates = [
+        {"prefix": 2, "verdict": "FAIL", "commit": "ab" * 20, "file": "002-b/build/land-1.gate.md"},
+        {"prefix": 1, "verdict": "PASS", "commit": "cd" * 20, "file": "001-a/build/land-1.gate.md"},
+    ]
+    text = factory.landing.train_record(state, "002-b", gates)
+    lines = [ln for ln in text.splitlines() if ln.startswith("GATE: ")]
+    read = [sdlc.factory_records.TRAIN_GATE_RE.match(ln) for ln in lines]
+    assert len(lines) == 2 and all(read), lines
+    assert [m.groups() for m in read] == [
+        ("2", "FAIL", "ab" * 6, "002-b/build/land-1.gate.md"),
+        ("1", "PASS", "cd" * 6, "001-a/build/land-1.gate.md"),
+    ]
+    assert not sdlc.factory_records.TRAIN_GATE_RE.match(text.splitlines()[4]), "TIP GATE: isn't"
+    assert sdlc.factory_records.LAND_TRAIN == factory.LAND_TRAIN
+    assert not hasattr(factory.landing, "LAND_TRAIN"), "one name, factory.py's"

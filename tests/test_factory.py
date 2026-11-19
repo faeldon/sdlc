@@ -3592,6 +3592,23 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
     assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
 
 
+def test_every_gate_attempt_records_its_slot_wait(tmp_path, capsys, monkeypatch) -> None:
+    """175 R3: each attempt carries `Waited:` right after `Seconds:`, the wait `gate_slot()`
+    yielded (0.0 for none), read back by the core's copy; a landing gate's record too."""
+    root = _change(tmp_path)
+    _gate_config(root, "echo ok")
+    folder = root / ".sdlc" / "work" / NAME
+    _build_report(root, 1)
+    assert _gate(root, capsys)[0] == 0
+    assert _gate(root, capsys)[0] == 0
+    lines = (folder / "build" / "round-1.gate.md").read_text(encoding="utf-8").splitlines()
+    seconds = [i for i, line in enumerate(lines) if factory.SECONDS_RE.match(line)]
+    assert len(seconds) == 2, lines
+    assert all(factory.WAITED_RE.match(lines[i + 1]) for i in seconds), lines
+    assert sum(bool(factory.WAITED_RE.match(line)) for line in lines) == 2
+    assert lines[seconds[0] + 1] == "Waited: 0.0"
+
+
 def test_the_gate_records_no_path_of_this_machine(tmp_path, capsys, monkeypatch) -> None:
     """087: `claude plugin validate` prints its manifests' absolute paths and `pytest -n auto` a
     failing worker's venv, and the record is committed with the change, so the checkout reads
@@ -4279,6 +4296,21 @@ def test_record_writes_the_step_it_read(tmp_path, capsys) -> None:
         assert got["reviewers"] == out["reviewers"]
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", got["since"])
     assert got["step"] == "stop" and _stopped(root).is_file(), "stopped.md does as it did"
+
+
+@pytest.mark.portable
+def test_record_writes_the_runs_depth(tmp_path, capsys) -> None:
+    """175 R6: every reading names its depth in `runs/step.md` as `DEPTH:`, read back as `depth`;
+    a record without the line reads as None."""
+    root = _change(tmp_path)
+    _build_report(root, 1)
+    _, out = _record(root, capsys, _head(root))
+    assert out["depth"] in ("full", "light")
+    text = _step(root).read_text(encoding="utf-8")
+    assert f"DEPTH: {out['depth']}" in text.splitlines()
+    assert _fields(root)["depth"] == out["depth"]
+    assert factory.read_step("STEP: build\nROUND: 1\n")["depth"] is None
+    assert "DEPTH" not in factory.step_text({"next": "build", "round": 1}, "2026-11-19T10:00:00Z")
 
 
 @pytest.mark.portable

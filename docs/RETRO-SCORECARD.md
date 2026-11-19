@@ -149,8 +149,11 @@ The pillars measure how work is done. This band measures what it is spent on.
 - **WIP and capacity:** how many changes ran at once, and whether those running beside others took
   longer.
 - **Feedback-loop time:** gate seconds and review-round time, the time between making a change and
-  knowing whether it works (DevEx).
-- **Landing time:** the train's steps, from `land-times.jsonl`.
+  knowing whether it works (DevEx). Gate seconds and slot waits are captured (S10, 175):
+  `pipeline.gates`, by window, with `pipeline.red_gate`; review-round time isn't.
+- **Landing time:** the train's steps, from `land-times.jsonl`. Captured (S10, 175) as the
+  landing's events: `pipeline.landing`'s gates, ejections, bisections, base moves, accept stops
+  and conflicts.
 
 ## Pillar 2: Quality. Can I trust what's built, including its structure?
 
@@ -194,7 +197,9 @@ Two halves: defects (does it work) and design health (will it keep being easy to
 - **Why:** autonomy raises the stakes of a missed review. This shows whether the riskiest code
   gets the deepest look.
 - **Where:** the factory's `depth`, findings by pass, landing trailers, `[review]`.
-- **Status:** partly. Needs S10.
+- **Status:** partly (S10, 175): the share at full depth (`pipeline.depth`, from each run's
+  `DEPTH:` line) and the landings with paths no review read (`pipeline.unreviewed`) are captured;
+  security findings and irreversible paths aren't.
 
 ### Supporting: design health
 - **What:** hotspot concentration (the share of changes touching the top three files), co-change
@@ -567,7 +572,7 @@ touches its files.
 - **S8**.
 - **S17**, done: 178.
 - **S9**.
-- **S10**.
+- **S10**, done: 175.
 
 #### Wave 4
 

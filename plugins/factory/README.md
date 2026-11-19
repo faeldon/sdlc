@@ -178,7 +178,8 @@ spec.
 - **One gate at a time, by default.** Gates and `check` runs from every worktree share
   `gate_jobs` slots (1 unless the base branch's `factory.toml` says more), so parallel runs'
   checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1
-  of 1 in use)`, and its wait is not in its `Seconds:`. A gate run by hand (`sdlc.py gate`) shares
+  of 1 in use)`, and its wait is not in its `Seconds:`: each attempt records it apart, as
+  `Waited:`, for the retrospective's gate figures. A gate run by hand (`sdlc.py gate`) shares
   the same slots, waiting at most 30 minutes for one.
 - **Agents leave the whole suite to the gate.** The builder runs each slice's tests by name, and
   the reviewers read the gate's record rather than run the suite again. A full run an agent still
@@ -357,8 +358,8 @@ server, so a round's two start together.
                                 stopped early, its - STUCK: and - UNTESTABLE: lines; removed by
                                 the first reading that finds the cause gone
   runs/step.md                  the step the supervisor's last reading named, for the board's
-                                track, with - STUCK: and - UNTESTABLE: lines when the run
-                                stopped early
+                                track, the depth it reviews at (DEPTH: full or light), and
+                                - STUCK: and - UNTESTABLE: lines when the run stopped early
 ```
 
 **What a run cost, while it runs.** Every agent run's result reports its cost and tokens, and

@@ -442,7 +442,7 @@ RECORD_NAMES = {
     "KEPT_RE", "DROPPED_RE", "STOPPED_RE", "NEXT_RE", "PROBLEM_RE", "STEP_RE", "AFTER_RE",
     "ROUND_RE", "UPGRADED_FILE_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "STUCK_RE",
     "UNTESTABLE_RE", "MOVES_RE", "TRAIN_RE", "WAITS_RE", "GATE_FAIL_RE", "ATTEMPT_VERDICT_RE",
-    "BUILD_RE", "SECONDS_RE",
+    "BUILD_RE", "SECONDS_RE", "WAITED_RE", "DEPTH_RE", "TRAIN_GATE_RE",
     # constants and paths
     "REASON_KINDS", "DECIDED", "SETTLED", "STOPPED", "STEP", "LAND_STEP", "LAND_STOPS",
     "LAND_STEPS", "AGENT_TIMEOUT", "RECONSIDER", "VERIFIED", "COSTS", "LAND_TIMES", "PAUSES",
@@ -450,12 +450,14 @@ RECORD_NAMES = {
     "HOME_MARK", "TMP_MARK", "USER_MARK", "TERM_MARK", "DEFUSE", "TERMS_FILE", "DECISION_FILE",
     "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS", "ARCHIVE_RE", "MENDED", "KEPT_ANSWER",
     "CONFIRMED", "SUPERSEDED", "LOOK_SEEN", "PURPOSES", "WASTE", "EJECTIONS", "PARTS",
+    "LAND_TRAIN", "LAND_ACCEPT",
     # readers
     "opening", "no_verdict", "read_stop", "read_land_stop", "landing", "first_build",
     "upgraded_build", "newest_round", "reasons", "reading", "read_step", "read_land_step",
     "read_land_times", "cost", "card_reading", "reviewed", "builder_started", "run_counts",
     "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
     "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts", "spend_rows",
+    "read_gate_attempts", "resolved_files", "pipeline_counts",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -489,7 +491,8 @@ UNRELATED = {("sdlc.py", "MOVES_RE")}
 # R5: the factory's records by name. Kept here, so the module can't loosen it.
 RECORD_FILES = (
     "decision.md", "decisions.md", "stopped.md", "step.md", "verified.md", "costs.jsonl",
-    "land-times.jsonl", "gate.md", "round-", ".sessions", "ejections.jsonl",
+    "land-times.jsonl", "gate.md", "round-", ".sessions", "ejections.jsonl", "land-train.md",
+    "land-accept.md",
 )  # fmt: skip
 
 

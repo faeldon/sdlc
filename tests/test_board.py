@@ -951,8 +951,8 @@ def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
     gate = (ROOT / "plugins" / "factory" / "scripts" / "factory.py").read_text(encoding="utf-8")
     assert "Seconds: {seconds}" in gate and sdlc.factory_records.SECONDS_RE.match("Seconds: 12.5")
     for out in (
-        {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"]},
-        {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"]},
+        {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"], "depth": "full"},
+        {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"], "depth": "light"},
         {
             "next": "approve",
             "round": 2,
@@ -965,6 +965,7 @@ def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
         text = factory.step_text(out, "2026-11-17T10:00:00Z", "rework")
         assert sdlc.factory_records.read_step(text) == factory.read_step(text)
         assert sdlc.factory_records.read_step(text)["reviewers"] == out["reviewers"]
+        assert sdlc.factory_records.read_step(text)["depth"] == out.get("depth")
     assert sdlc.factory_records.read_step(text)["stuck"] == ["code: a"], (
         "the early stop's reason reads back"
     )

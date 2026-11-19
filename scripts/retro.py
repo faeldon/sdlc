@@ -669,7 +669,8 @@ def _none_reason(coverage: object) -> str | None:
     text = str(coverage or "")
     if not text.startswith("none:"):
         return None
-    return re.sub(r"(\s+\S+=\S*)+$", "", text.removeprefix("none:")).strip()
+    # A key holds no `=`, so each word splits one way: no backtracking on `a=b=c` words.
+    return re.sub(r"(\s+[^\s=]+=\S*)+$", "", text.removeprefix("none:")).strip()
 
 
 # Why a closed change has no lead time, by the word close left in `Sdlc-Coverage` (`_lead_why()`).
@@ -1047,6 +1048,156 @@ def _autonomy(home: Path, changes: list[dict]) -> tuple[dict, list[str]]:
     }, problems
 
 
+# The causes a train ejects for (`landing.py`'s `_record_ejection()`), each counted, 0 included.
+EJECT_CAUSES = ("gate", "review", "refusal", "stop")
+
+
+def _spread(values: list[float]) -> dict:
+    """`values`' count, median and nearest-rank 85th percentile, each null with none."""
+    ordered = sorted(values)
+    return {
+        "n": len(ordered),
+        "median": round(statistics.median(ordered), 2) if ordered else None,
+        "p85": _p85(ordered),
+    }
+
+
+def _gate_spreads(read: list[dict]) -> dict:
+    """The round and landing gates' attempts over `read` (each a factory change's counts), as
+    their seconds and slot waits; an attempt without a `Waited:` line counts in `seconds` alone."""
+    out = {}
+    for kind in ("round", "land"):
+        tried = [g for c in read for g in c["gates"] if g["kind"] == kind]
+        out[kind] = {
+            "seconds": _spread([g["seconds"] for g in tried if g["seconds"] is not None]),
+            "wait": _spread([g["waited"] for g in tried if g["waited"] is not None]),
+        }
+    return out
+
+
+def _pipeline(home: Path, changes: list[dict], previous: list[dict] | None) -> dict:
+    """Where the pipeline spends time and takes risks (175), from the records each factory run
+    left in its change's commit (`factory_records.pipeline_counts()`) and its `Sdlc-Landed`: the
+    gates' seconds and slot waits, this window and the one before (`previous`, None with no
+    retrospective before it); the red-gate rate per build; the landing's gates, ejections,
+    bisections, base moves, accept stops and conflicts, over the changes a factory landing made;
+    the share of runs at full depth; and the landings with paths no review read. A change built by
+    hand counts only in `by_hand`; every figure carries its `n` and is null, never 0, with nothing
+    to divide by. Mends are `autonomy.spurious_stops`', never counted twice. `changes`, each
+    change's own figures, is printed only with `--metrics`. Read-only."""
+    counts = sdlc.factory_records.pipeline_counts
+    window = [{"rec": rec, "counts": counts(*_records_at(home, rec))} for rec in changes]
+    found = [c["counts"] for c in window if c["counts"] is not None]
+    before = None
+    if previous is not None:
+        read = (counts(*_records_at(home, rec)) for rec in previous)
+        before = _gate_spreads([c for c in read if c is not None])
+
+    builds = [red for c in found for red in c["builds"]]
+
+    def landed(c: dict) -> bool:
+        return c["counts"] is not None and c["counts"]["landed"]
+
+    lands = [c["counts"] for c in window if landed(c)]
+    n = len(lands)
+    land_gates = sum(1 for c in lands for g in c["gates"] if g["kind"] == "land")
+    causes = {cause: 0 for cause in EJECT_CAUSES}
+    for c in lands:
+        for cause, k in c["ejections"].items():
+            causes[cause] = causes.get(cause, 0) + k
+    bisected = {
+        (commit, file) for c in lands for prefix, verdict, commit, file in c["train_gates"]
+        if verdict == "FAIL" and prefix > 1
+    }  # fmt: skip
+    moves = [c["moves"] for c in lands if c["moves"] is not None]
+    deep = [c["depth"] for c in found if c["depth"] is not None]
+
+    def by_landing(c: dict) -> bool:
+        return ((c["rec"].get("landed") or {}).get("by")) in ("auto", "person")
+
+    def recorded(c: dict) -> bool:
+        value = (c["rec"].get("landed") or {}).get("unreviewed")
+        return value == "unknown" or isinstance(value, int)
+
+    landings = [c for c in window if by_landing(c)]
+    said = [c["rec"]["landed"]["unreviewed"] for c in landings if recorded(c)]
+    paths = [v for v in said if isinstance(v, int) and v > 0]
+    return {
+        "factory": len(found),
+        "by_hand": len(changes) - len(found),
+        "gates": {"window": _gate_spreads(found), "previous": before},
+        "red_gate": {
+            "builds": len(builds),
+            "red": sum(builds),
+            "rate": _share(sum(builds), len(builds)),
+            "n": len(builds),
+        },  # fmt: skip
+        "landing": {
+            "n": n,
+            **_coverage(
+                window,
+                landed,
+                lambda c: "built by hand" if c["counts"] is None else "no landing record",
+            ),  # fmt: skip
+            "gates": {"total": land_gates, "per_change": _share(land_gates, n)},
+            "ejections": {
+                **causes,
+                "total": sum(causes.values()),
+                "changes": sum(1 for c in lands if c["ejections"]),
+            },  # fmt: skip
+            "bisections": {"total": len(bisected)},
+            "base_moves": {
+                "total": sum(moves),
+                "per_change": _share(sum(moves), len(moves)),
+                "changes": sum(1 for m in moves if m),
+            },  # fmt: skip
+            "accept_stops": {
+                "total": sum(c["accepts"] for c in lands),
+                "changes": sum(1 for c in lands if c["accepts"]),
+            },
+            "conflicts": {
+                "landing": sum(c["resolves"] for c in lands),
+                "ship": sum(c["conflicts"] for c in lands),
+            },
+        },
+        "depth": {
+            "full": deep.count("full"),
+            "light": deep.count("light"),
+            "share": _share(deep.count("full"), len(deep)),
+            "n": len(deep),
+            **_coverage(found, lambda c: c["depth"] is not None, lambda c: "depth not recorded"),
+        },  # fmt: skip
+        "unreviewed": {
+            "with_paths": len(paths),
+            "paths": sum(paths),
+            "unknown": sum(1 for v in said if v == "unknown"),
+            "none": sum(1 for v in said if v == 0),
+            "n": len(said),
+            **_coverage(landings, recorded, lambda c: "unreviewed not recorded"),
+        },  # fmt: skip
+        "changes": [
+            {
+                "name": c["rec"]["name"],
+                "gates": {
+                    kind: sum(1 for g in c["counts"]["gates"] if g["kind"] == kind)
+                    for kind in ("round", "land")
+                },
+                "red_builds": sum(c["counts"]["builds"]),
+                "landed": c["counts"]["landed"],
+                "moves": c["counts"]["moves"],
+                "ejections": c["counts"]["ejections"],
+                "accepts": c["counts"]["accepts"],
+                "resolves": c["counts"]["resolves"],
+                "conflicts": c["counts"]["conflicts"],
+                "depth": c["counts"]["depth"],
+                "unreviewed": (c["rec"].get("landed") or {}).get("unreviewed"),
+            }
+            for c in window
+            if c["counts"] is not None
+        ],
+    }
+
+
 def _no_findings() -> dict:
     """What a group's ship findings add up to before any change is counted."""
     return {
@@ -1152,6 +1303,11 @@ LEAD_NAMES = {
 }  # fmt: skip
 
 
+def _p85(ordered: list):
+    """The nearest-rank 85th percentile of `ordered`, already sorted; None when it is empty."""
+    return ordered[math.ceil(0.85 * len(ordered)) - 1] if ordered else None
+
+
 def lead_view(changes: list[dict]) -> dict:
     """Lead time from each change's `Sdlc-Lead`: per tier and way of building (`Sdlc-Mode`)
     the count, median and nearest-rank 85th percentile of `lead`; each part's share, its sum
@@ -1171,7 +1327,7 @@ def lead_view(changes: list[dict]) -> dict:
         leads.sort()
         rows.append({
             "tier": tier, "way": way, "n": len(leads), "median": statistics.median(leads),
-            "p85": leads[math.ceil(0.85 * len(leads)) - 1],
+            "p85": _p85(leads),
         })  # fmt: skip
     shares = {}
     for part in LEAD_NAMES:
@@ -2337,6 +2493,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         rec["files"] = len(files)
     autonomy, unread = _autonomy(home, changes)
     problems += unread
+    previous = _previous_window(home, trunk, since)
     diffs = _diffs(home, changes, bases)
     rework, questions, unnamed = _rework(home, trunk, changes, bases, diffs)
     problems += unnamed
@@ -2391,7 +2548,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             bugs,
             since,
             today,
-            _previous_window(home, trunk, since),
+            previous,
         ),  # fmt: skip
         "report": report_rel(today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
@@ -2399,6 +2556,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "releases": sdlc._release_tags(home, cfg, since),
         "unmeasured": UNMEASURED,
         "autonomy": autonomy,
+        "pipeline": _pipeline(home, changes, previous),
         "direction": direction,
         "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
         "product": product,
@@ -2939,6 +3097,7 @@ def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
         if isinstance(agents, dict):
             out["spend"]["agents"] = {k: v for k, v in agents.items() if k != "changes"}
         out["cost"] = {k: v for k, v in out["cost"].items() if k != "changes"}
+        out["pipeline"] = {k: v for k, v in out["pipeline"].items() if k != "changes"}
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 

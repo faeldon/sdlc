@@ -221,6 +221,7 @@ def _masked(text: str) -> list[str]:
     return [
         "Build: *" if sdlc.factory_records.BUILD_RE.match(line)
         else "Seconds: *" if sdlc.factory_records.SECONDS_RE.match(line)
+        else "Waited: *" if sdlc.factory_records.WAITED_RE.match(line)
         else line
         for line in text.splitlines()
     ]  # fmt: skip

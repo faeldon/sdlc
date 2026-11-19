@@ -1379,9 +1379,10 @@ def findings_fresh(text: str) -> dict | None:
 def conflicts_resolved(path: Path) -> list[str]:
     """Every file the change's `conflicts.md` says a resolution merged, each once, in order: what
     `sdlc.py resolve` wrote as each one finished, and ship's question names."""
-    record = path / "conflicts.md"
-    lines = record.read_text(encoding="utf-8").splitlines() if record.is_file() else []
-    return list(dict.fromkeys(ln[2:].strip() for ln in lines if ln.startswith("- ")))
+    record = path / CONFLICTS
+    return factory_records.resolved_files(
+        record.read_text(encoding="utf-8") if record.is_file() else ""
+    )
 
 
 def _note_says(text: str, line_re: re.Pattern) -> dict | None:
@@ -3326,7 +3327,8 @@ def cmd_gate(root: Path, ident: str) -> int:
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
     section = (
         f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
-        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
+        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nWaited: {waited}\n"
+        f"Tree: {tree}\n\n"
         f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
     )
     # The first line is the latest verdict; the attempts before it stay as they were.

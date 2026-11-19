@@ -1192,6 +1192,35 @@ recorded`, `no cost reported`, and, for `waste`, `runs recorded before purposes`
 change's own figures, is printed only with `--metrics`. The report's *Coverage* lines say how far
 `cost per landed change` and `waste share` rest; the figures themselves aren't in its body yet.
 
+Its `pipeline` is where the factory's pipeline spends time and takes risks, read from the records
+each factory run left in its change's own commit (the gate records `build/round-<N>.gate.md` and
+`build/land-<n>.gate.md`, `runs/step.md`, `runs/land-step.md`, `runs/land-train.md`,
+`runs/land-times.jsonl`, `runs/ejections.jsonl`, `build/land-accept.md` and `conflicts.md`) and
+from its `Sdlc-Landed`. `factory` and `by_hand` are as in `autonomy`; a change built by hand is in
+no other figure. Every figure carries `n`, and a rate, share, median or percentile is null when
+`n` is 0. `gates.window` and `gates.previous` (the window before this one; null with no
+retrospective before it) give the `round` and `land` gates' attempts, each its `seconds` and
+`wait` (the slot wait, each attempt's `Waited:` line) as `n`, `median` and nearest-rank `p85`; an
+attempt from before `Waited:` counts in `seconds` alone, and the hand gate's `build/gate.md` is in
+neither. `red_gate`: the round gate files (`builds`), those with any failed attempt (`red`), and
+`rate`. `landing` is over the factory changes a factory landing made (with a `runs/land-step.md`),
+its `coverage` and `missing_because` under `built by hand` or `no landing record`: the landing
+gates' attempts (`gates`, `total` and `per_change`); `ejections` by cause (`gate`, `review`,
+`refusal`, `stop`), with a `total` and the changes with any; `bisections`, the distinct red gates
+over a prefix of more than one change, which a train must bisect, counted once though every change
+in the prefix names it; `base_moves`, each change's last `MOVES:` (a train change's is its
+train's: the moves seen while landing, not a train total), with `per_change` and the changes with
+any; `accept_stops`, the attempts in `build/land-accept.md`, each a stop for the person; and
+`conflicts`, the landing's resolved conflicts (`landing`) and the files ship's `conflicts.md`
+names (`ship`). `depth`: the runs whose last `runs/step.md` says `DEPTH: full` or `light`, with
+`share`, full over both; a run never lightens, so its last reading is its deepest, and a run from
+before the line is in `missing_because` as `depth not recorded`, never light. `unreviewed`: over
+the landings `Sdlc-Landed` says were the factory's (`auto` or `person`), those whose
+`unreviewed=` is a count above 0 (`with_paths`, and `paths`, their sum), `unknown`, or 0
+(`none`); a landing from before the field is missing, `unreviewed not recorded`. Mends aren't
+counted here: `autonomy.spurious_stops` gives them, a build's apart from a landing's. `changes`,
+each change's own figures, is printed only with `--metrics`. The report doesn't show these yet.
+
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there

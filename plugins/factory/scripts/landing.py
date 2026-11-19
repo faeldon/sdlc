@@ -1454,9 +1454,6 @@ def _train_fix(root: Path, folder: Path, opened: int | None = None, done: bool =
 TRAIN_STATE = "sdlc-factory-train.json"
 
 
-LAND_TRAIN = Path("runs") / "land-train.md"
-
-
 def train_path(root: Path) -> Path | None:
     where = factory._slot_dir(root)
     return where / TRAIN_STATE if where else None
@@ -1566,8 +1563,8 @@ def train_record(state: dict, name: str, gates: list[dict]) -> str:
 
 def _write_train_record(root: Path, folder: Path, state: dict, name: str) -> None:
     text = train_record(state, name, _train_took_part(root, state, name))
-    (folder / LAND_TRAIN).parent.mkdir(parents=True, exist_ok=True)
-    (folder / LAND_TRAIN).write_text(text, encoding="utf-8", newline="\n")
+    (folder / factory.LAND_TRAIN).parent.mkdir(parents=True, exist_ok=True)
+    (folder / factory.LAND_TRAIN).write_text(text, encoding="utf-8", newline="\n")
 
 
 def _landing_commit(tree: Path, name: str) -> str | None:

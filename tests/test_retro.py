@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -483,6 +484,8 @@ def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, caps
     full["spend"]["agents"].pop("changes")  # 146 R15: each change's own agent counts
     assert "changes" not in lean["cost"] and "changes" in full["cost"]
     full["cost"].pop("changes")  # 174 R7: each change's own cost
+    assert "changes" not in lean["pipeline"] and "changes" in full["pipeline"]
+    full["pipeline"].pop("changes")  # 175 R11: each change's own pipeline figures
     assert full == lean, "the summaries, dropped_cost and bugs are the same either way"
 
 
@@ -3611,3 +3614,222 @@ def test_the_report_says_how_far_cost_and_waste_rest(tmp_path: Path) -> None:
     assert waste.startswith("- *Coverage, waste share: 3 of 7 changes"), waste
     assert "runs recorded before purposes 1" in waste and "2 runs untagged" in waste, waste
     assert waste.endswith("a hint: under half the changes*"), waste
+
+
+# ---------------------------------------------------------------- the pipeline's figures (175)
+
+
+@pytest.mark.portable
+def test_none_reason_strips_close_s_words_as_before() -> None:
+    """175 R13: the reason loses the `key=value` words close appends, and nothing else."""
+    said = "none: no transcripts lead=failed runtime=failed"
+    assert sdlc.retro._none_reason(said) == "no transcripts"
+    assert sdlc.retro._none_reason("none: no transcripts") == "no transcripts"
+    assert sdlc.retro._none_reason("full") is None
+
+
+@pytest.mark.portable
+def test_none_reason_returns_quickly_on_many_equals_tokens() -> None:
+    """175 R13 (nit 2026-11-19-21): a hand-written coverage of many `a=b=c=d` tokens and a last
+    token without `=` returns within a second. It runs in a child process with a timeout, so a
+    regression fails rather than hangs: `re` holds the GIL, so no thread's join could stop it."""
+    child = (
+        "import importlib.util, sys, time\n"
+        "spec = importlib.util.spec_from_file_location('sdlc_nit', sys.argv[1])\n"
+        "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "said = 'none: by hand' + ' a=b=c=d' * 40 + ' plain'\n"
+        "start = time.monotonic(); got = mod.retro._none_reason(said)\n"
+        "assert got == said.removeprefix('none:').strip(), got\n"
+        "print(time.monotonic() - start)\n"
+    )
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", child, str(ROOT / "scripts" / "sdlc.py")],
+            capture_output=True, encoding="utf-8", timeout=60,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        pytest.fail("_none_reason backtracked for a minute")
+    assert done.returncode == 0, done.stderr
+    assert float(done.stdout) < 1.0, done.stdout
+
+
+def _gate_file(*attempts: tuple) -> str:
+    """A gate record as `factory.py gate` writes it: each attempt `(verdict, seconds, waited)`,
+    `waited` None for one from before the `Waited:` line."""
+    sections = []
+    for i, (verdict, seconds, waited) in enumerate(attempts, 1):
+        wait = "" if waited is None else f"Waited: {waited}\n"
+        sections.append(
+            f"## Attempt {i}\n\nVerdict: {verdict}\nCommand: true\nBuild: abc123\nExit: 0\n"
+            f"Seconds: {seconds}\n{wait}Tree: unchanged\n\nLast 40 lines of its output:\n\n"
+            f"    Seconds: 999\n"
+        )
+    return f"GATE: {attempts[-1][0]}\n\n" + "\n".join(sections)
+
+
+def _land_step(moves: int = 0) -> str:
+    return f"STEP: close\nROUND: 1\nMOVES: {moves}\nLIMIT: 3\nSINCE: 2026-10-01T10:00:00Z\n"
+
+
+def _pipeline(root: Path) -> dict:
+    return _retro(root)["pipeline"]
+
+
+def _nulls_and_ns(value, path=()) -> list[tuple]:
+    """Every `(path, key, value)` under `value` whose key is `n` or a rate, share, median, p85 or
+    per-change figure."""
+    found = []
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if k in ("n", "rate", "share", "median", "p85", "per_change"):
+                found.append((path, k, v))
+            found += _nulls_and_ns(v, (*path, k))
+    return found
+
+
+def test_pipeline_is_null_with_no_factory_change(tmp_path: Path) -> None:
+    """175 R1, R12: a window of changes built by hand: every `n` 0 and every rate, share, median
+    or percentile null, never 0; no `mends`, which `autonomy.spurious_stops` counts."""
+    root = _repo(tmp_path)
+    _close(root, "001-keep-one-draft")
+    _close(root, "002-draft-titles", own=("Sdlc-Landed: by=person",))
+    out = _pipeline(root)
+    assert (out["factory"], out["by_hand"]) == (0, 2)
+    for key in ("gates", "red_gate", "landing", "depth", "unreviewed"):
+        assert key in out, key
+    assert "mends" not in out
+    assert out["gates"]["previous"] is None, "no retrospective before this window"
+    found = _nulls_and_ns(out)
+    assert any(k == "median" for _, k, _ in found) and any(k == "rate" for _, k, _ in found)
+    wrong = [(p, k, v) for p, k, v in found if (v != 0 if k == "n" else v is not None)]
+    assert not wrong, wrong
+
+
+def test_pipeline_gates_by_window(tmp_path: Path) -> None:
+    """175 R2: the round and landing gates' seconds and slot waits, median and nearest-rank 85th
+    percentile, this window and the one before; an attempt without `Waited:` counts in
+    `seconds.n` and not `wait.n`; the hand gate's record is in neither."""
+    root = _repo(tmp_path)
+    _factory(root, "001-old-run", {"decision.md": READY,
+             "build/round-1.gate.md": _gate_file(("PASS", 5.0, 0.0))})  # fmt: skip
+    _retrospective(root, "2026-10-05", "# Direction\n")
+    _factory(root, "002-reopen-drafts", {
+        "decision.md": READY,
+        "build/round-1.gate.md": _gate_file(("FAIL", 10.0, 1.0), ("PASS", 20.0, 2.0)),
+        "build/land-1.gate.md": _gate_file(("PASS", 50.0, 5.0)),
+        "build/gate.md": _gate_file(("PASS", 999.0, 999.0)),
+    }, closed="2026-10-06")  # fmt: skip
+    _factory(root, "003-draft-titles", {
+        "decision.md": READY,
+        "build/round-1.gate.md": _gate_file(("PASS", 30.0, 3.0)),
+        "build/round-2.gate.md": _gate_file(("PASS", 40.0, None)),
+    }, closed="2026-10-07")  # fmt: skip
+    gates = _pipeline(root)["gates"]
+    assert gates["window"]["round"]["seconds"] == {"n": 4, "median": 25.0, "p85": 40.0}
+    assert gates["window"]["round"]["wait"] == {"n": 3, "median": 2.0, "p85": 3.0}
+    assert gates["window"]["land"]["seconds"] == {"n": 1, "median": 50.0, "p85": 50.0}
+    assert gates["window"]["land"]["wait"] == {"n": 1, "median": 5.0, "p85": 5.0}
+    assert gates["previous"]["round"]["seconds"] == {"n": 1, "median": 5.0, "p85": 5.0}
+    assert gates["previous"]["land"]["seconds"] == {"n": 0, "median": None, "p85": None}
+
+
+def test_pipeline_red_gate_rate(tmp_path: Path) -> None:
+    """175 R4: a build is red when any attempt of its round gate failed: one red-then-green build
+    and one green build is a rate of 0.5."""
+    root = _repo(tmp_path)
+    _factory(root, "001-reopen-drafts", {"decision.md": READY,
+             "build/round-1.gate.md": _gate_file(("FAIL", 1, 0), ("PASS", 1, 0))})  # fmt: skip
+    _factory(root, "002-draft-titles", {"decision.md": READY,
+             "build/round-1.gate.md": _gate_file(("PASS", 1, 0))})  # fmt: skip
+    _close(root, "003-by-hand")
+    assert _pipeline(root)["red_gate"] == {"builds": 2, "red": 1, "rate": 0.5, "n": 2}
+
+
+def _train_record(name: str, k: int, *gates: str) -> str:
+    return f"# {name} — landing train\n\nTRAIN: {k} of 2\nSTACKED ON: main\n" + "".join(
+        f"{g}\n" for g in gates
+    )
+
+
+def test_pipeline_landing_train_figures(tmp_path: Path) -> None:
+    """175 R5: the landing's gates, ejections by cause, bisections (a red gate over a prefix
+    above 1, counted once though two changes' records name it), base moves, accept stops and
+    conflicts, over the factory changes with a landing record; one without is missing."""
+    root = _repo(tmp_path)
+    red = "GATE: 2 FAIL abcdef012345 002-draft-titles/build/land-1.gate.md"
+    one = "GATE: 1 PASS 0123456789ab 001-reopen-drafts/build/land-1.gate.md"
+    tip = "GATE: 2 PASS fedcba987654 002-draft-titles/build/land-2.gate.md"
+    ejected = json.dumps({"at": "2026-10-01T10:00:00Z", "land": 1, "cause": "gate"}) + "\n"
+    _factory(root, "001-reopen-drafts", {
+        "decision.md": READY, "runs/land-step.md": _land_step(2),
+        "runs/land-train.md": _train_record("001-reopen-drafts", 1, red, one),
+        "build/land-1.gate.md": _gate_file(("PASS", 1, 0)),
+        "build/land-accept.md": _gate_file(("FAIL", 1, 0), ("PASS", 1, 0)),
+        "runs/land-times.jsonl": json.dumps({"step": "resolve", "round": 1, "seconds": 4.0})
+        + "\n" + json.dumps({"step": "gate", "round": 1, "seconds": 9.0}) + "\n",
+        "conflicts.md": "# Conflicts\n\n## Resolved\n\n- a.py\n- b.py\n- a.py\n",
+    })  # fmt: skip
+    _factory(root, "002-draft-titles", {
+        "decision.md": READY, "runs/land-step.md": _land_step(2),
+        "runs/land-train.md": _train_record("002-draft-titles", 2, red, tip),
+        "build/land-1.gate.md": _gate_file(("FAIL", 1, 0)),
+        "build/land-2.gate.md": _gate_file(("PASS", 1, 0)),
+        "runs/ejections.jsonl": ejected,
+    })  # fmt: skip
+    _factory(root, "003-shipped-by-hand", {"decision.md": READY})
+    _close(root, "004-by-hand")
+    landing = _pipeline(root)["landing"]
+    assert landing["n"] == 2
+    assert landing["coverage"] == {"measured": 2, "of": 4, "greyed": False}
+    assert landing["missing_because"] == {"built by hand": 1, "no landing record": 1}
+    assert landing["gates"] == {"total": 3, "per_change": 1.5}
+    assert landing["ejections"]["gate"] == 1 and landing["ejections"]["review"] == 0
+    assert (landing["ejections"]["total"], landing["ejections"]["changes"]) == (1, 1)
+    assert landing["bisections"] == {"total": 1}
+    assert landing["base_moves"] == {"total": 4, "per_change": 2.0, "changes": 2}
+    assert landing["accept_stops"] == {"total": 2, "changes": 1}
+    assert landing["conflicts"] == {"landing": 1, "ship": 2}
+    assert sdlc.CONFLICTS == sdlc.factory_records.CONFLICTS, "one name for the record"
+
+
+def test_pipeline_depth_share(tmp_path: Path) -> None:
+    """175 R7: the share of factory runs whose last step record says `DEPTH: full`; a run from
+    before the line is missing, never light."""
+    root = _repo(tmp_path)
+    step = "STEP: approve\nROUND: 1\nLIMIT: 3\nREVIEWERS: code\nSINCE: 2026-10-01T10:00:00Z\n"
+    _factory(root, "001-full", {"decision.md": READY, "runs/step.md": step + "DEPTH: full\n"})
+    _factory(root, "002-light", {"decision.md": READY, "runs/step.md": step + "DEPTH: light\n"})
+    _factory(root, "003-older", {"decision.md": READY, "runs/step.md": step})
+    _close(root, "004-by-hand")
+    depth = _pipeline(root)["depth"]
+    assert (depth["full"], depth["light"], depth["share"], depth["n"]) == (1, 1, 0.5, 2)
+    assert depth["coverage"] == {"measured": 2, "of": 3, "greyed": False}
+    assert depth["missing_because"] == {"depth not recorded": 1}
+
+
+def test_pipeline_unreviewed_landings(tmp_path: Path) -> None:
+    """175 R8: the landings `Sdlc-Landed` says left paths no review read, by its `unreviewed=`:
+    a count above 0, `unknown`, or 0; a landing from before the field is missing."""
+    root = _repo(tmp_path)
+    for i, landed in enumerate(("by=auto unreviewed=3", "by=person unreviewed=unknown",
+                                "by=auto unreviewed=0", "by=person"), 1):  # fmt: skip
+        _factory(root, f"00{i}-landing", {"decision.md": READY}, own=(f"Sdlc-Landed: {landed}",))
+    _close(root, "005-by-hand")
+    out = _pipeline(root)["unreviewed"]
+    assert {k: out[k] for k in ("with_paths", "paths", "unknown", "none", "n")} == {
+        "with_paths": 1, "paths": 3, "unknown": 1, "none": 1, "n": 3,
+    }  # fmt: skip
+    assert out["missing_because"] == {"unreviewed not recorded": 1}
+
+
+def test_retro_prints_each_changes_pipeline_only_with_metrics(tmp_path: Path, capsys) -> None:
+    """175 R11: `pipeline.changes` is each change's own figures, printed only with `--metrics`."""
+    root = _repo(tmp_path)
+    _factory(root, "001-reopen-drafts", {"decision.md": READY,
+             "build/round-1.gate.md": _gate_file(("PASS", 1, 0))})  # fmt: skip
+    sdlc.retro.cmd_retro(root)
+    lean = json.loads(capsys.readouterr().out)["pipeline"]
+    assert "changes" not in lean and lean["red_gate"]["builds"] == 1
+    sdlc.retro.cmd_retro(root, metrics=True)
+    changes = json.loads(capsys.readouterr().out)["pipeline"]["changes"]
+    assert [c["name"] for c in changes] == ["001-reopen-drafts"]

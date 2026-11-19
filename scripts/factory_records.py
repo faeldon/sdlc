@@ -103,6 +103,9 @@ UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(?!\s*(?i:none|n/?a)\.?\s*$)(.+
 ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
 REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
+# The depth the reading reviews at (`depth()`), from 175 on: a run never lightens, so its last
+# record's is its deepest; a record without the line has none, never `light`.
+DEPTH_RE = re.compile(r"^DEPTH: (full|light)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 AGENT_TIMEOUT = 3 * 3600
@@ -131,6 +134,13 @@ COSTS = Path("runs") / "costs.jsonl"
 PURPOSES = ("spec", "build", "rework", "gate-fix", "mend", "rerun", "land")
 WASTE = ("rework", "gate-fix", "mend", "rerun", "ejected", "dropped")
 EJECTIONS = Path("runs") / "ejections.jsonl"
+# Core's own record of the files `sdlc.py resolve` merged, read by `resolved_files()`.
+CONFLICTS = "conflicts.md"
+# A train change's record of its train (each gate it took part in, `GATE: <prefix> <verdict>
+# <commit> <file>`) and the acceptance checks a landing ran, in the gate file's shape.
+LAND_TRAIN = Path("runs") / "land-train.md"
+TRAIN_GATE_RE = re.compile(r"^GATE: (\d+) (PASS|FAIL) ([0-9a-f]+) (\S+)\s*$")
+LAND_ACCEPT = Path("build") / "land-accept.md"
 # The parts a row's spend lands in (`spend_rows()`), core's own: each purpose, what became of the
 # change (`ejected`, `dropped`), and a row from before purposes (`untagged`), which is never waste.
 PARTS = (*PURPOSES, "ejected", "dropped", "untagged")
@@ -461,6 +471,7 @@ def read_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
         "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
+        "depth": field(DEPTH_RE),
     }  # fmt: skip
 
 
@@ -641,6 +652,8 @@ def autonomy_counts(show, listing) -> dict | None:
         kind, text = e.group(4), e.group(5)
         answer = text.split(DECIDED, 1)[1].strip() if DECIDED in text else ""
         if kind == "default":
+            # Only a default carries `SUPERSEDED` or `SETTLED`: `factory.py decisions` writes those
+            # marks on defaults alone, so a blocking or look line never needs the check.
             mark = (
                 "superseded" if SUPERSEDED in text
                 else "settled" if SETTLED in text
@@ -664,6 +677,62 @@ def autonomy_counts(show, listing) -> dict | None:
     return {
         "escalations": escalations, "unread": unread, "blocking": blocking,
         "defaults": defaults, "looks": looks, "mends": mends,
+    }  # fmt: skip
+
+
+def resolved_files(text: str) -> list[str]:
+    """Every file a change's `conflicts.md` (`CONFLICTS`, core's own record, which `sdlc.py
+    resolve` writes) says a resolution merged, each once, in order: its `- ` lines. The one rule
+    `sdlc.py`'s `conflicts_resolved()` and `pipeline_counts()` both read it by."""
+    return list(dict.fromkeys(ln[2:].strip() for ln in text.splitlines() if ln.startswith("- ")))
+
+
+def pipeline_counts(show, listing) -> dict | None:
+    """The pipeline's raw figures from what a run left in the change's commit, for the
+    retrospective's `pipeline` (175): `gates`, each gate attempt (`gate_kind()`: a round's or a
+    landing's, never the hand gate's) as its `kind`, `seconds`, `waited` and `verdict`; `builds`,
+    each round gate file with attempts, whether any failed; `landed`, whether `LAND_STEP` exists,
+    and `moves`, its last `MOVES:`; `ejections`, `EJECTIONS`' rows by cause; `train_gates`, each
+    `GATE:` line of `LAND_TRAIN` as `(prefix, verdict, commit, file)`; `accepts`, the attempts in
+    `LAND_ACCEPT`; `resolves`, the `resolve` rows of `LAND_TIMES`; `conflicts`, the files
+    `CONFLICTS` names; and `depth`, `STEP`'s `DEPTH:`. A figure no record holds is None or empty,
+    never a zero made up. None for a change built by hand (no `decision.md`). Never raises."""
+    if show(DECISION_FILE) is None:
+        return None
+    gates, builds = [], []
+    for path in sorted((listing("build") or "").splitlines()):
+        parts = path.split("/")
+        kind = gate_kind(parts[1]) if len(parts) == 2 else None
+        if kind is None:
+            continue
+        attempts = read_gate_attempts(show(path) or "")
+        gates += [
+            {"kind": kind, "seconds": a["seconds"], "waited": a["waited"], "verdict": a["verdict"]}
+            for a in attempts
+        ]
+        if kind == "round" and attempts:
+            builds.append(any(a["verdict"] == "FAIL" for a in attempts))
+    step_text = show(LAND_STEP.as_posix())
+    land = read_land_step(step_text or "")
+    ejections: dict[str, int] = {}
+    for row in _json_rows(show(EJECTIONS.as_posix()) or ""):
+        cause = str(row.get("cause") or "refusal")
+        ejections[cause] = ejections.get(cause, 0) + 1
+    train = [
+        (int(m.group(1)), m.group(2), m.group(3), m.group(4))
+        for m in map(TRAIN_GATE_RE.match, (show(LAND_TRAIN.as_posix()) or "").splitlines())
+        if m
+    ]
+    step = read_step(show(STEP.as_posix()) or "")
+    return {
+        "gates": gates, "builds": builds, "landed": step_text is not None,
+        "moves": land["moves"] if land else None, "ejections": ejections, "train_gates": train,
+        "accepts": len(read_gate_attempts(show(LAND_ACCEPT.as_posix()) or "")),
+        "resolves": sum(
+            1 for r in read_land_times(show(LAND_TIMES.as_posix()) or "") if r["step"] == "resolve"
+        ),
+        "conflicts": len(resolved_files(show(CONFLICTS) or "")),
+        "depth": step["depth"] if step else None,
     }  # fmt: skip
 
 
@@ -808,23 +877,33 @@ USER_MARK = "<user>"
 ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
+# The slot wait before the attempt, from 175 on: an attempt without it has no wait, never 0.
+WAITED_RE = re.compile(r"^Waited: (\d+(?:\.\d+)?)\s*$")
 # The record, in the change's folder: beside the factory's round files, and matched by none of
 # their readers (`round-*`, `*.gate.md`).
 HAND_GATE = Path("build") / "gate.md"
 
 
 def gate_attempts(path: Path) -> list[dict]:
-    """A gate record's attempts, oldest first, each its verdict, build, exit and seconds, read by
-    line as `factory.py`'s `read_gate_file()` reads one: the output is indented, so a line of it
-    never reads as the record's. [] without the file."""
+    """A gate record's attempts on disk (`read_gate_attempts()`), [] without the file."""
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        text = path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return []
+    return read_gate_attempts(text)
+
+
+def read_gate_attempts(text: str) -> list[dict]:
+    """A gate record's attempts, oldest first, each its verdict, build, exit, seconds and slot
+    wait (`waited`, None for an attempt from before the `Waited:` line), read by line as
+    `factory.py`'s `read_gate_file()` reads one: the output is indented, so a line of it never
+    reads as the record's."""
     attempts: list[dict] = []
-    for line in lines:
+    for line in text.splitlines():
         if line.startswith("## Attempt "):
-            attempts.append({"verdict": None, "build": None, "exit": None, "seconds": None})
+            attempts.append(
+                {"verdict": None, "build": None, "exit": None, "seconds": None, "waited": None}
+            )
         elif attempts and (m := ATTEMPT_VERDICT_RE.match(line)):
             attempts[-1]["verdict"] = m.group(1)
         elif attempts and (m := BUILD_RE.match(line)):
@@ -833,6 +912,8 @@ def gate_attempts(path: Path) -> list[dict]:
             attempts[-1]["exit"] = line[len("Exit: ") :].strip()
         elif attempts and (m := SECONDS_RE.match(line)):
             attempts[-1]["seconds"] = float(m.group(1))
+        elif attempts and (m := WAITED_RE.match(line)):
+            attempts[-1]["waited"] = float(m.group(1))
     return attempts
 
 

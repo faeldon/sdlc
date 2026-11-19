@@ -45,8 +45,9 @@ Every command prints JSON and writes only where its name says: `decisions` to `d
 `carry` to `notes.md`, `stage` to `intent.md`, `write-spec` the approved draft to `spec.md`,
 `upgrade` its record to `build/round-<P>.upgraded.md` (and, through `sdlc.py upgrade`, the tier and
 stage to `intent.md` and the scaffolds a Tier 2 owes),
-`gate` its attempt to `build/round-<N>.gate.md`, `verdicts --record` a stop to `runs/stopped.md`
-(or removes it once the run is clear) and the step it read, with since when, to `runs/step.md`,
+`gate` its attempt to `build/round-<N>.gate.md` (with its `Seconds:` and its slot wait, `Waited:`),
+`verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear) and the step
+it read, with since when and its depth (`DEPTH:`), to `runs/step.md`,
 `agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
 questions to `runs/spec-questions.md`, never to `spec.md`), and its id and figures under `runs/`.
 The landing's commands (`land`, `land --close`, `resolve`, `gate --land`, `agent` on a landing
@@ -356,6 +357,9 @@ ATTEMPT_VERDICT_RE = re.compile(r"^Verdict: (PASS|FAIL)\s*$")
 BUILD_RE = re.compile(r"^Build: ([0-9a-f]+)\s*$")
 # How long an attempt ran, which the board reads from a closed change's history for its estimates.
 SECONDS_RE = re.compile(r"^Seconds: (\d+(?:\.\d+)?)\s*$")
+# How long it waited for a gate slot first (`gate_slot()`'s `waited`, 0.0 for none), for the
+# retrospective's gate figures: an attempt from before the line has no wait, never 0.
+WAITED_RE = re.compile(r"^Waited: (\d+(?:\.\d+)?)\s*$")
 # A decision an agent can't make: a person's call. `blocking` stops the run until they answer;
 # `default` goes ahead on the agent's stated default, recorded as assumed until they confirm it.
 RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
@@ -2196,13 +2200,15 @@ def read_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
         "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
+        "depth": field(DEPTH_RE),
     }  # fmt: skip
 
 
 def step_text(out: dict, since: str, after: str | None = None) -> str:
     """`runs/step.md`'s text for one `verdicts` reading: the step, its round, the run's round
-    limit and expected reviewers, since when, on a pause (`PAUSES`) the step it paused at, and on
-    a run stopped early why (`early_lines()`, from the reading's `stuck` and `untestable`)."""
+    limit and expected reviewers, since when, on a pause (`PAUSES`) the step it paused at, the
+    depth it reviews at (`DEPTH:`, when the reading has one), and on a run stopped early why
+    (`early_lines()`, from the reading's `stuck` and `untestable`)."""
     rnd = "" if out.get("round") is None else str(out["round"])
     lines = [
         f"STEP: {out['next']}", f"ROUND: {rnd}", f"LIMIT: {out.get('limit') or ''}",
@@ -2210,6 +2216,8 @@ def step_text(out: dict, since: str, after: str | None = None) -> str:
     ]  # fmt: skip
     if after:
         lines.append(f"AFTER: {after}")
+    if out.get("depth") in ("full", "light"):
+        lines.append(f"DEPTH: {out['depth']}")
     lines += early_lines(out.get("stuck") or [], out.get("untestable") or [])
     return "\n".join(line.rstrip() for line in lines) + "\n"
 
@@ -3139,7 +3147,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
     section = (
         f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
-        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nTree: {tree}\n\n"
+        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nWaited: {waited}\n"
+        f"Tree: {tree}\n\n"
         f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
     )
     # The first line is the latest verdict; the attempts before it stay as they were.
@@ -3376,6 +3385,12 @@ RERUNNABLE = (
     "land-mend",
 )  # fmt: skip
 EJECTIONS = Path("runs") / "ejections.jsonl"
+# A train change's place in its train and every gate it took part in (`landing.train_record()`),
+# each `GATE: <prefix> <verdict> <commit> <file>`; and the acceptance checks a landing ran
+# (`cmd_accept()`), in the gate file's shape. `sdlc`'s `factory_records.py` keeps copies, pinned.
+LAND_TRAIN = Path("runs") / "land-train.md"
+TRAIN_GATE_RE = re.compile(r"^GATE: (\d+) (PASS|FAIL) ([0-9a-f]+) (\S+)\s*$")
+LAND_ACCEPT = Path("build") / "land-accept.md"
 # A stopped run's record, written and removed only by `verdicts --record`, read by the board and
 # `sdlc.py status` (each with its own copies of these, pinned by tests), never by the loop.
 STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
@@ -3392,6 +3407,9 @@ STUCK_RE = re.compile(r"^- STUCK: (.+?)\s*$")
 ROUND_RE = re.compile(r"^ROUND: ?(\d*)\s*$")
 LIMIT_RE = re.compile(r"^LIMIT: ?(\d*)\s*$")
 REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
+# The depth the reading reviews at (`depth()`), from 175 on: a run never lightens, so its last
+# record's is its deepest; a record without the line has none, never `light`.
+DEPTH_RE = re.compile(r"^DEPTH: (full|light)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 # The step a landing is at, and since when: written by each landing command as it starts the step
@@ -4831,7 +4849,7 @@ def frontmatter_ids(text: str, key: str) -> list[str]:
 
 def accept_path(folder: Path) -> Path:
     """The change's acceptance checks as the landing ran them: beside the landing's gate files."""
-    return folder / "build" / "land-accept.md"
+    return folder / LAND_ACCEPT
 
 
 def accept_build(root: Path, folder: Path) -> str:
