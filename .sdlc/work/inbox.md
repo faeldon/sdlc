@@ -540,3 +540,20 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 180-workarounds-tagged (correctness)
+
+## [2026-11-19-58] [idea] The landing runs acceptance checks as stacked without stopping, when the person's yes already covers them
+
+Today the train stops at `accept` every time a change has acceptance checks, because the loop never
+runs a host command and only a session can prompt; the person must rerun /sdlc-factory:land just to
+click through checks whose commands they approved word for word in the landing question.
+(1) At `train --begin`, record a hash of each change's `checks.md`; the loop runs `factory.py
+accept` itself as stacked while `checks.md` is unchanged since the yes, and stops as today when it
+changed. (2) When it changed (a landing fix or a conflict resolution), the approver judges the
+changed commands in a landing round (`CHECKS: HARMLESS` or `CHECKS: ESCALATE`, with why), and the
+script independently requires every changed command to use only an allow-list of read-only
+programs (grep, awk, test, cat, head, wc, git log/show/diff; no redirection); it runs unattended
+only when both agree, and otherwise stops with the approver's reasoning shown. Rejected: a sandbox,
+for its friction and footprint; a permission rule, which doesn't let the background loop run
+anything.
+Theme: landing
+Raised 2026-11-19.
