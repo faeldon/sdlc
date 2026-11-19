@@ -222,28 +222,6 @@ Cost: S
 Value: low
 Raised by: 163-factory-records-reader (correctness)
 
-## [2026-11-19-13] [idea] Break retro throughput down by work class
-
-Left undone by 168-work-mix-and-follow-through, carried forward when it landed: `docs/RETRO-SCORECARD.md` *Supporting: throughput* still says "by impact S2": the work classes now exist, but throughput isn't broken down by them. A later change (S14's report, or its own) can add `process.throughput` by `work` class.
-See .sdlc/work/168-work-mix-and-follow-through/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-14] [idea] Teach _milestone_verdicts() that a seed retired by inbox-commit is dropped, not vanished
-
-Left undone by 168-work-mix-and-follow-through, carried forward when it landed: Follow-through's milestone `done` by grouped rows reads `_milestone_verdicts()` against the current register, so a grouped seed retired with `inbox-commit` reads `vanished` there (and the milestone `carried`), while the same seed scored as a seed reads `dropped`. Teaching `_milestone_verdicts()` about `Retire` subjects would change what `direction.milestones` reports, which the spec's boundaries say asks first.
-See .sdlc/work/168-work-mix-and-follow-through/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-15] [nit] `_is_process` also skips `.sdlc/setup.json` (`sdlc.MANIFEST`), which R3 doesn't list.
-
-Raised by the code review of 168-work-mix-and-follow-through, round 1: scripts/retro.py:377: `_is_process` also skips `.sdlc/setup.json` (`sdlc.MANIFEST`), which R3 doesn't list. The path is under `.sdlc/` anyway. The skip only stops a change that touched just `setup.json` from counting as process work. REFERENCE.md says so, but the spec doesn't. Drop the skip or add it to the spec.
-
-Theme: docs
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 168-work-mix-and-follow-through (correctness)
-
 ## [2026-11-19-17] [nit] `test_retro_and_its_report_show_the_same_figures` compares only work mix and time to users with the report, and has no assertion on the follow-through sentence.
 
 Raised by the test review of 168-work-mix-and-follow-through, round 1: tests/test_retro.py:2126: `test_retro_and_its_report_show_the_same_figures` compares only work mix and time to users with the report, and has no assertion on the follow-through sentence. The spec asks that the report and the JSON not disagree. The other test checks the report text, but follow-through is checked only in the JSON tests.
@@ -329,13 +307,6 @@ Paths: .sdlc/work/173-style-paydown/checks.md
 Cost: S
 Value: low
 Raised by: 173-style-paydown (correctness)
-
-## [2026-11-19-33] [idea] Figures by way of building
-
-Scorecard S9: lead time, throughput, cost and escape rate, factory against by hand. Pillars:
-Speed, Autonomy.
-Theme: retro
-Raised 2026-11-19.
 
 ## [2026-11-19-35] [nit] `_cost()` runs once in `retro()` and again in `retro_report()`, and each run re-reads every change's commit.
 
@@ -557,3 +528,19 @@ for its friction and footprint; a permission rule, which doesn't let the backgro
 anything.
 Theme: landing
 Raised 2026-11-19.
+
+## [2026-11-19-59] [idea] Floor by_way throughput at a week, or leave per_week null under a week
+
+Left undone by 176-by-way-of-building, carried forward when it landed: `by_way.throughput` floors the window at one day, as R5 says, so a retro run the day after the last retrospective gives `weeks: 0.1` and per-week figures many times the real rate (this repo, today: 196 factory changes a week over 1 day). A floor of one week, or `per_week` null under a week, would read better; it changes R5, so it is the person's call.
+See .sdlc/work/176-by-way-of-building/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-60] [nit] `introducer_way()` rescans `history` for every attributed bug and every way.
+
+Raised by the code review of 176-by-way-of-building, round 1: scripts/retro.py:3222: `introducer_way()` rescans `history` for every attributed bug and every way. This is fine at today's sizes, but a name-to-way dict built once would be simpler
+
+Theme: refactor
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 176-by-way-of-building (correctness)
