@@ -464,3 +464,11 @@ Scorecard S9: lead time, throughput, cost and escape rate, factory against by ha
 Speed, Autonomy.
 Theme: retro
 Raised 2026-11-19.
+
+## [2026-11-19-34] [idea] Pipeline and risk figures
+
+Scorecard S10: gate seconds and slot-wait trend, red-gate rate, train figures (gates, ejections,
+bisections, base moves, accept stops, conflicts), mends, full-depth share, unreviewed landings.
+Pillars: Speed, Quality.
+Theme: retro
+Raised 2026-11-19.
