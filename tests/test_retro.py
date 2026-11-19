@@ -2082,7 +2082,7 @@ def test_the_report_renders_indicator_rows_as_a_table(tmp_path: Path) -> None:
     assert "| a \\| b | x | 0.5 | — | — |" in section
     assert "output isn't indicator rows (line 1 isn't a JSON object), so it is in" in section
     assert "failed: exited 3" in section
-    assert "secret-output" not in text and "secret-stderr" not in text and "band" not in text
+    assert "secret-output" not in text and "secret-stderr" not in text and "band" not in section
     ran = sdlc.retro._evidence(root, ["sleep 5"], timeout=0.1)
     host = sdlc.retro._indicator_rows(root, None, ran)
     assert "timed out" in sdlc.retro._indicators_text(host)
@@ -2343,8 +2343,9 @@ def test_no_figure_folds_speed_and_stability_into_one() -> None:
     """R3: no velocity, no score, in the template or what it renders."""
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
     text = sdlc.retro.render_report(template, _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)]))
-    for word in ("velocity", "score"):
-        assert word not in template.lower() and word not in text.lower()
+    # 184: the `Scorecard` heading holds the letters, never the word.
+    for word in (r"\bvelocity\b", r"\bscores?\b"):
+        assert not re.search(word, template.lower()) and not re.search(word, text.lower())
     assert "{{" not in text
 
 
@@ -2451,18 +2452,19 @@ def test_the_report_renders_spend(tmp_path: Path) -> None:
     assert "metrics.transcripts is off: 1" in text
     assert "| Read | 5 | 0 | 0 | 1 |" in text
     assert "No change is over twice its tier's median" in text
-    # A host's override from before is reported as breaking, the section and its placeholder.
+    # A host's override without it is reported as breaking, the section and its placeholder
+    # (184 R11: `## Spend` now follows `## Indicators`).
     old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Spend")[0]
+    assert sdlc._template_misses("retro.md", old) == [
+        "the `## Spend` heading",
+        "the `{{spend}}` placeholder",
+    ]
+    # 177 R9: one cut before the indicators misses their section, and what follows it.
+    old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Indicators")[0]
     assert sdlc._template_misses("retro.md", old) == [
         "the `## Spend` heading",
         "the `## Indicators` heading",
         "the `{{spend}}` placeholder",
-        "the `{{indicators}}` placeholder",
-    ]
-    # 177 R9: one from before the indicators misses their section alone.
-    old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Indicators")[0]
-    assert sdlc._template_misses("retro.md", old) == [
-        "the `## Indicators` heading",
         "the `{{indicators}}` placeholder",
     ]
 
@@ -3116,8 +3118,8 @@ def test_without_an_earlier_retrospective_follow_through_is_unmeasured_not_zero(
 
 
 def test_the_report_shows_the_value_figures_in_its_window(tmp_path: Path) -> None:
-    """168 R10: one sentence each for work mix, time to users and follow-through, after the
-    window paragraph, each with its `n` and what it left out."""
+    """168 R10: one sentence each for work mix, time to users and follow-through, each with its
+    `n` and what it left out; since 184 R2, opening the scorecard after the window's sentence."""
     root = _repo(tmp_path)
     _retrospective(root, "2026-10-01", "# Direction\n\n## Milestones\n\n### M1. Drafts\n",
                    "# Inbox\n\n" + _seed("2026-09-30-1", "Reopen drafts"))  # fmt: skip
@@ -3126,8 +3128,9 @@ def test_the_report_shows_the_value_figures_in_its_window(tmp_path: Path) -> Non
     _released(root, "v1.0.0", "2026-10-04T12:00:00")
     _close(root, "003-draft-titles", impact="sometime", closed="2026-10-05")
     text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
-    window = text.split("## Window\n", 1)[1].split("\n## ", 1)[0]
-    assert window.index("From 2026-10-01 to 2026-10-24") < window.index("Work mix:")
+    assert "From 2026-10-01 to 2026-10-24" in _part(text, "Window")
+    window = _part(text, "Scorecard")
+    assert window.startswith("\nWork mix:")
     assert (
         "Work mix: capability 1 (50%), debt 1 (50%), of 2 classed changes; 1 not classed." in window
     )
@@ -3390,7 +3393,8 @@ def test_a_headline_under_half_its_changes_is_greyed(measured: int, of: int, gre
 
 
 def _window_section(text: str) -> str:
-    return text.split("## Window", 1)[1].split("\n## ", 1)[0]
+    """The Trust band's place: `## Scorecard` since 184 R2, `## Window` before."""
+    return text.split("## Scorecard", 1)[1].split("\n## ", 1)[0]
 
 
 def test_the_report_greys_a_thin_headline(tmp_path: Path) -> None:
@@ -3803,8 +3807,12 @@ def test_by_way_gives_every_figure_for_each_way_with_its_n(tmp_path: Path) -> No
     for part in by_way.values():
         assert set(part) == set(WAYS), part
     assert sum(by_way["changes"].values()) == out["process"]["window"]["closed"] == 2
-    assert by_way["throughput"]["factory"] == {"closed": 1, "weeks": 3.0, "per_week": 0.33}
-    assert by_way["throughput"]["unknown"] == {"closed": 0, "weeks": 3.0, "per_week": 0.0}
+    assert by_way["throughput"]["factory"] == {
+        "closed": 1, "weeks": 3.0, "per_week": 0.33, "why": None,
+    }  # fmt: skip
+    assert by_way["throughput"]["unknown"] == {
+        "closed": 0, "weeks": 3.0, "per_week": 0.0, "why": None,
+    }  # fmt: skip
     assert by_way["lead"] == out["process"]["lead"]["ways"]
     assert by_way["escapes"] == out["bugs"]["rate"]["window"]["by_way"]
     assert "_landed" not in out["cost"]
@@ -3840,8 +3848,9 @@ def test_the_report_compares_the_ways_of_building(tmp_path: Path) -> None:
     _close(root, "001-reopen-drafts", closed="2026-10-03", trailers=FACTORY)
     _by_hand(root, "002-draft-titles", (1000, 500, 100), closed="2026-10-10")
     text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
-    window = text.split("## Window\n", 1)[1].split("\n## ", 1)[0]
-    assert window.index("Follow-through") < window.index("By way of building")
+    # 184 R2: the table is Speed's now, and the Window's sentence stands alone.
+    window = _part(text, "Speed")
+    assert "By way of building" not in _part(text, "Window")
     rows = {line.split(" | ")[0].strip("| "): line for line in window.splitlines()
             if line.startswith("| ")}  # fmt: skip
     assert rows["By way of building"] == "| By way of building | Factory | By hand | Unknown |"
@@ -4041,9 +4050,9 @@ def test_pipeline_landing_train_figures(tmp_path: Path) -> None:
     assert landing["gates"] == {"total": 3, "per_change": 1.5}
     assert landing["ejections"]["gate"] == 1 and landing["ejections"]["review"] == 0
     assert (landing["ejections"]["total"], landing["ejections"]["changes"]) == (1, 1)
-    assert landing["bisections"] == {"total": 1}
+    assert landing["bisections"] == {"total": 1, "per_change": 0.5}
     assert landing["base_moves"] == {"total": 4, "per_change": 2.0, "changes": 2}
-    assert landing["accept_stops"] == {"total": 2, "changes": 1}
+    assert landing["accept_stops"] == {"total": 2, "changes": 1, "per_change": 1.0}
     assert landing["conflicts"] == {"landing": 1, "ship": 2}
     assert sdlc.CONFLICTS == sdlc.factory_records.CONFLICTS, "one name for the record"
 
@@ -4259,3 +4268,411 @@ def test_overrides_are_read_from_each_factory_changes_commit(tmp_path: Path) -> 
     }  # fmt: skip
     assert over["stops"] == {"count": 3, "n": 5}, "train t2 once, and 003 and 004 each once"
     assert over["fixes"] == {"count": 2, "n": 5}
+
+
+# ---------------------------------------------------------------- the scorecard report (184)
+
+
+def test_by_way_throughput_is_null_under_a_week(tmp_path: Path) -> None:
+    """184 R13: a retrospective a day after the last gives no rate per week, with why, and still
+    its closed count and weeks; the report's cell reads `–`."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", closed="2026-10-03", trailers=FACTORY)
+    _record(root, "2026-10-23")
+    _close(root, "002-draft-titles", closed="2026-10-23", trailers=FACTORY)
+    tput = _retro(root)["by_way"]["throughput"]["factory"]
+    assert tput == {"closed": 1, "weeks": 0.1, "per_week": None, "why": "window under a week"}
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "| Closed per week | – (1) |" in text
+
+
+def test_bisections_and_accept_stops_carry_per_change_null_over_none(tmp_path: Path) -> None:
+    """184 R18: with no factory landing, `per_change` is null on both, never 0."""
+    root = _repo(tmp_path)
+    _close(root, "001-by-hand")
+    landing = _pipeline(root)["landing"]
+    assert landing["bisections"] == {"total": 0, "per_change": None}
+    assert landing["accept_stops"] == {"total": 0, "changes": 0, "per_change": None}
+
+
+def _bugs_from_one_change(root: Path, bugs: int) -> None:
+    _close(root, "001-reopen-drafts", trailers=("Sdlc-Mode: manual",))
+    _close(root, "002-draft-titles", trailers=("Sdlc-Mode: factory",))
+    _filed(root, "# Inbox\n\n" + "".join(
+        f"## [2026-10-0{i}-1] [bug] Drafts break {i}\n\nWhat happens.\n\nSeverity: low\n"
+        "Introduced by: 001\n\n"
+        for i in range(1, bugs + 1)
+    ))  # fmt: skip
+
+
+def test_introducers_are_resolved_once_whatever_the_bugs(tmp_path: Path, monkeypatch) -> None:
+    """184 R19: each distinct `Introduced by:` is resolved to its change once, so the calls don't
+    grow with the bugs or the ways; the rate keeps its numbers."""
+    counts = []
+    for bugs in (1, 3):
+        (tmp_path / str(bugs)).mkdir()
+        root = _repo(tmp_path / str(bugs))
+        _bugs_from_one_change(root, bugs)
+        cfg = sdlc.load_config(root)[0]
+        changes = sdlc.closed_changes(root, None, "main")
+        calls = []
+        real = sdlc.names_change
+        monkeypatch.setattr(
+            sdlc, "names_change", lambda *a, seen=calls, real=real: seen.append(a) or real(*a)
+        )
+        out = sdlc.retro.bugs_retro(root, cfg, None, changes, date(2026, 10, 24))
+        monkeypatch.setattr(sdlc, "names_change", real)
+        assert out["rate"]["window"]["by_way"]["manual"] == {
+            "escapes": bugs, "changes": 1, "rate": float(bugs),
+        }  # fmt: skip
+        counts.append(len(calls))
+    assert counts[0] == counts[1], counts
+
+
+def test_report_figures_runs_cost_once(tmp_path: Path, monkeypatch) -> None:
+    """184 R12: `retro()` and `retro_report()` get their figures from `report_figures()`, the one
+    place `_cost` runs, once each."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", trailers=FACTORY)
+    calls = []
+    real = sdlc.retro._cost
+    monkeypatch.setattr(sdlc.retro, "_cost", lambda *a: calls.append(a) or real(*a))
+    _retro(root)
+    assert len(calls) == 1
+    sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert len(calls) == 2
+    source = (ROOT / "scripts" / "retro.py").read_text(encoding="utf-8")
+    callers = [
+        f.split("(", 1)[0]
+        for f in re.split(r"\ndef ", source)[1:]
+        if re.search(r"(?<![\w.`])_cost\(", f.split("\n", 1)[1])
+    ]
+    assert callers == ["report_figures"]
+
+
+HOST_ROWS = [
+    ("Speed", "headline", "Median lead time, factory"),
+    ("Speed", "headline", "Median lead time, by hand"),
+    ("Speed", "guardrail", "Rework links per closed change"),
+    ("Quality", "headline", "Escape rate"),
+    ("Autonomy", "headline", "Median response, tier 1"),
+    ("Autonomy", "headline", "Median response, tier 2"),
+    ("Autonomy", "headline", "Questions answered per factory change"),
+    ("Autonomy", "guardrail", "Escape rate, factory"),
+    ("Autonomy", "guardrail", "Escape rate, by hand"),
+    ("Cost", "headline", "Median dollars per landed change, tier 1"),
+    ("Cost", "headline", "Median dollars per landed change, tier 2"),
+    ("Simplicity", "headline", "Commits outside the loop"),
+    ("Simplicity", "headline", "Records edited by hand"),
+    ("Simplicity", "headline", "Register entries restored"),
+]
+SURFACE_ROW = ("Simplicity", "headline", "Share of the surface used")
+
+
+def _card(out: dict, own: bool = False, last: dict | None = None) -> dict:
+    return sdlc.retro.scorecard(
+        out["process"], out["autonomy"], out["by_way"], out["cost"],
+        out["simplicity"]["workarounds"], out["surface"] if own else None, last or {},
+    )  # fmt: skip
+
+
+def _keys(card: dict) -> list[tuple]:
+    return [(r["pillar"], r["role"], r["figure"]) for r in card["rows"]]
+
+
+def test_scorecard_rows_for_a_host_and_for_the_plugin(tmp_path: Path) -> None:
+    """184 R3, R4: one row a way or tier present, the surface's share only in the plugin's own
+    repo, and `retro()`'s JSON holds the same rows; with no tier, one `—` row each."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", tier=1, trailers=FACTORY)
+    _close(root, "002-draft-titles", tier=2, trailers=("Sdlc-Mode: manual",))
+    out = _retro(root)
+    assert _keys(_card(out)) == HOST_ROWS
+    assert _keys(_card(out, own=True)) == [*HOST_ROWS[:11], SURFACE_ROW, *HOST_ROWS[11:]]
+    assert out["scorecard"]["rows"] == _card(out)["rows"], "a test repo is a host"
+    assert out["scorecard"]["since"] is None
+    row = out["scorecard"]["rows"][0]
+    assert set(row) == {"pillar", "role", "figure", "unit", "value", "n", "last", "trend", "note"}
+    (tmp_path / "empty").mkdir()
+    empty = _card(_retro(_repo(tmp_path / "empty")))
+    figures = [r["figure"] for r in empty["rows"]]
+    assert "Median response" in figures and "Median dollars per landed change" in figures
+    assert all(r["value"] is None for r in empty["rows"] if r["figure"].startswith("Median"))
+
+
+def _card_row(text: str, figure: str) -> list[str]:
+    line = next(line for line in text.splitlines() if f"| {figure} |" in line)
+    return sdlc.retro.indicators._cells(line)
+
+
+def test_a_figure_with_no_data_reads_a_dash_with_its_reason(tmp_path: Path) -> None:
+    """184 R5: with no factory change, the factory lead time reads `—` with a reason, never 0."""
+    root = _repo(tmp_path)
+    _close(
+        root, "001-reopen-drafts", trailers=("Sdlc-Mode: manual", "Sdlc-Lead: lead=30 source=git")
+    )
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    cells = _card_row(text, "Median lead time, factory")
+    assert cells[4] == "—" and cells[8], cells
+    assert cells[8] == "none in the window"
+    row = next(r for r in _retro(root)["scorecard"]["rows"] if r["figure"] == cells[2])
+    assert (row["value"], row["n"], row["note"]) == (None, 0, "none in the window")
+
+
+def test_a_greyed_lead_time_is_marked_a_hint(tmp_path: Path) -> None:
+    """184 R6: one of three changes with a lead time is under half: its Note says it's a hint."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", trailers=(*FACTORY, "Sdlc-Lead: lead=30 source=git"))
+    _close(root, "002-draft-titles", trailers=FACTORY)
+    _close(root, "003-keep-one-draft", trailers=FACTORY)
+    rows = {r["figure"]: r for r in _retro(root)["scorecard"]["rows"]}
+    assert rows["Median lead time, factory"]["value"] == 30
+    assert "a hint: under half the changes" in rows["Median lead time, factory"]["note"]
+
+
+def test_a_first_scorecard_has_no_last_and_no_trend(tmp_path: Path) -> None:
+    """184 R7: no retrospective before: every `last` null and every trend `unknown`."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", trailers=FACTORY)
+    rows = _retro(root)["scorecard"]["rows"]
+    assert {(r["last"], r["trend"]) for r in rows if r["figure"] != "Escape rate"} == {
+        (None, "unknown")
+    }
+
+
+def _by_hand_led(root: Path, k: int, lead: int, closed: str) -> None:
+    for i in range(k):
+        _close(root, f"0{lead}{i}-draft-{lead}-{i}", closed=closed,
+               trailers=("Sdlc-Mode: manual", f"Sdlc-Lead: lead={lead} source=git"))  # fmt: skip
+
+
+def test_a_second_retrospective_carries_the_first_s_values_as_last(tmp_path: Path) -> None:
+    """184 R4, R7: the first report's table reads back as the JSON's rows, value and `n`; the
+    second's rows carry those values as `last`, and a trend only where both sides' `n` is 5 or
+    more; the escape rate keeps its own previous and trend."""
+    root = _repo(tmp_path)
+    _by_hand_led(root, 5, 40, "2026-10-02")
+    _close(root, "001-reopen-drafts", trailers=FACTORY)
+    cfg = sdlc.load_config(root)[0]
+    first = sdlc.retro.retro_report(root, cfg, date(2026, 10, 10))
+    rows = sdlc.retro.retro(root, cfg, date(2026, 10, 10))["scorecard"]["rows"]
+    head = sdlc.retro.SCORECARD_HEAD
+    read = sdlc.retro.indicators.report_rows
+    for col, field in ((4, "value"), (5, "n")):
+        back = read(first, head, keys=(0, 2), value=col)
+        assert back == {(r["pillar"], r["figure"]): r[field] for r in rows}, field
+    _retro_report_at(root, "2026-10-10", first)
+    _by_hand_led(root, 5, 20, "2026-10-12")
+    _close(root, "002-draft-titles", closed="2026-10-12", trailers=FACTORY)
+    now = {r["figure"]: r for r in _retro(root)["scorecard"]["rows"]}
+    before = {r["figure"]: r for r in rows}
+    for figure, r in now.items():
+        if figure != "Escape rate":
+            assert r["last"] == before[figure]["value"], figure
+    hand = now["Median lead time, by hand"]
+    assert (hand["value"], hand["n"], hand["last"], hand["trend"]) == (20, 5, 40, "down")
+    # One factory change each side: n under five gets no trend.
+    assert now["Median lead time, factory"]["trend"] == "unknown"
+    assert now["Rework links per closed change"]["trend"] == "flat"
+    escape = now["Escape rate"]
+    process = _retro(root)["process"]["escapes"]
+    assert (escape["last"], escape["trend"]) == (process["previous"], process["trend"])
+
+
+def test_a_row_under_five_gets_no_trend(tmp_path: Path) -> None:
+    """184 R7: a `last` with `n` 4, against a value with `n` 5 or more, is still `unknown`."""
+    root = _repo(tmp_path)
+    _by_hand_led(root, 5, 20, "2026-10-12")
+    out = _retro(root)
+    key = ("Speed", "Median lead time, by hand")
+    assert _card(out, last={key: (40, 4)})["rows"][1]["trend"] == "unknown"
+    assert _card(out, last={key: (40, 5)})["rows"][1]["trend"] == "down"
+    assert _card(out, last={key: (20, 9)})["rows"][1]["trend"] == "flat"
+
+
+# `templates/retro.md` as it stood before 184, as a host's override of it may still read.
+OLD_TEMPLATE = """\
+# Retrospective report
+
+> How the process ran from {{since}} to {{today}}, from the numbers `/sdlc:close` recorded on each
+> `Close` commit, and the host's own figures from its `retro.indicators`. `sdlc.py retro-commit`
+> writes it and commits it with the retrospective; `sdlc.py retro` gives the same figures as its
+> `process` and `spend` blocks and its `architecture.host` rows.
+
+## Window
+
+{{window}}
+
+## Cycle time
+
+{{cycle}}
+
+## Throughput
+
+{{throughput}}
+
+## Time
+
+{{time}}
+
+## Work in progress and capacity
+
+{{capacity}}
+
+## Rework
+
+{{rework}}
+
+## Escapes
+
+{{escapes}}
+
+## Spend
+
+{{spend}}
+
+## Indicators
+
+{{indicators}}
+"""
+SECTIONS = [
+    "Window",
+    "Scorecard",
+    "Speed",
+    "Quality",
+    "Indicators",
+    "Autonomy",
+    "Cost",
+    "Spend",
+    "Simplicity",
+]
+
+
+def _part(text: str, heading: str) -> str:
+    return text.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
+
+
+def _factory_window(root: Path) -> None:
+    _factory(root, "001-reopen-drafts", {"decision.md": READY})
+    _close(root, "002-draft-titles", trailers=("Sdlc-Mode: manual",))
+
+
+def _report(root: Path) -> str:
+    return sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+
+
+def test_the_report_s_sections_come_in_order(tmp_path: Path) -> None:
+    """184 R1: the template's `##` sections, in order, each with its one placeholder, and none
+    left in the report."""
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    assert re.findall(r"^## (.+)$", template, re.M) == SECTIONS
+    for name in SECTIONS:
+        assert _part(template, name).strip() == "{{" + name.lower() + "}}", name
+    root = _repo(tmp_path)
+    _factory_window(root)
+    text = _report(root)
+    assert re.findall(r"^## (.+)$", text, re.M) == SECTIONS
+    assert "{{" not in text
+
+
+def test_the_scorecard_holds_the_value_band_table_and_trust_band_once(tmp_path: Path) -> None:
+    """184 R2: the Value band, then the pillar table, then the Trust band, in `## Scorecard`;
+    `## Window` is the window's sentence alone; the by-way table is Speed's."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    text = _report(root)
+    window, card = _part(text, "Window"), _part(text, "Scorecard")
+    assert window.strip().startswith("From the start of history to 2026-10-24: 2 changes closed")
+    assert "\n" not in window.strip()
+    head = "| " + " | ".join(sdlc.retro.SCORECARD_HEAD) + " |"
+    order = [
+        card.index(s)
+        for s in (
+            "Work mix:",
+            "Follow-through",
+            head,
+            "Coverage, lead time",
+            "What changed underneath",
+            "Unmeasured signals:",
+        )
+    ]
+    assert order == sorted(order), order
+    for said in ("Work mix:", "Coverage, lead time", "| By way of building |"):
+        assert text.count(said) == 1, said
+    assert "| By way of building |" in _part(text, "Speed")
+    for u in sdlc.retro.UNMEASURED:
+        assert u["signal"] in card
+
+
+def test_the_pillar_sections_show_autonomy_pipeline_and_cost(tmp_path: Path) -> None:
+    """184 R8: autonomy's escalations, the landing's figures and the waste share, each in its
+    pillar's section."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    text = _report(root)
+    assert "Escalations:" in _part(text, "Autonomy")
+    speed = _part(text, "Speed")
+    for said in ("gates", "ejections", "bisections", "base moves", "accept stops"):
+        assert said in speed.lower(), said
+    assert "Waste share:" in _part(text, "Cost")
+    assert "Red gates:" in _part(text, "Quality")
+
+
+def test_a_host_s_simplicity_shows_workarounds_alone(tmp_path: Path) -> None:
+    """184 R9: a host's Simplicity is its workarounds, never the plugin's surface."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    simplicity = _part(_report(root), "Simplicity")
+    for said in ("Commits outside the loop", "Records edited by hand",
+                 "Register entries restored", "Overrides"):  # fmt: skip
+        assert said in simplicity, said
+    for word in ("surface", "footprint", "growth"):
+        assert word not in simplicity.lower(), word
+
+
+def test_the_plugin_s_simplicity_shows_its_surface(tmp_path: Path, monkeypatch) -> None:
+    """184 R9: in the plugin's own repo, the surface's share, retire candidates, footprint and
+    growth follow the workarounds, and the table has the share's row."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    monkeypatch.setattr(sdlc, "_own_repo", lambda home: True)
+    text = _report(root)
+    simplicity = _part(text, "Simplicity").lower()
+    for word in ("surface", "retire", "footprint", "growth"):
+        assert word in simplicity, word
+    assert "| Share of the surface used |" in _part(text, "Scorecard")
+
+
+def test_an_override_from_before_still_renders_every_placeholder(tmp_path: Path) -> None:
+    """184 R10: the template as it stood before still renders, every placeholder filled, and its
+    `{{window}}` keeps the Value band, the coverage lines and the by-way table."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    (root / ".sdlc" / "templates").mkdir(parents=True)
+    (root / ".sdlc" / "templates" / "retro.md").write_text(OLD_TEMPLATE, encoding="utf-8")
+    text = _report(root)
+    assert "{{" not in text
+    window = _part(text, "Window")
+    for said in ("Work mix:", "Coverage, lead time", "| By way of building |"):
+        assert said in window, said
+    assert "## Scorecard" not in text
+
+
+def test_an_override_without_the_scorecard_is_breaking() -> None:
+    """184 R11: the next retrospective reads the scorecard back, so an override without it is
+    misread: its heading and placeholder, and nothing else."""
+    assert sdlc._template_misses("retro.md", OLD_TEMPLATE) == [
+        "the `## Scorecard` heading",
+        "the `{{scorecard}}` placeholder",
+    ]
+
+
+def test_the_retro_skill_s_process_pass_reads_workarounds() -> None:
+    """184 R14: Step 0 lists `scorecard`, and Step 2's process pass reads
+    `simplicity.workarounds`, turning a recurring `outside` or `restored` row into a seed."""
+    text = (ROOT / "skills" / "retro" / "SKILL.md").read_text(encoding="utf-8")
+    step0 = text.split("## Step 0", 1)[1].split("\n## ", 1)[0]
+    step2 = text.split("## Step 2", 1)[1].split("\n## ", 1)[0]
+    assert "- `scorecard`:" in step0
+    process = step2.split("3. **Process.**", 1)[1].split("4. **Product**", 1)[0]
+    assert "`simplicity.workarounds`" in process and "seed" in process

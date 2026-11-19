@@ -72,7 +72,9 @@ The pillars measure how work is done. This band measures what it is spent on.
   changes that served it and whether what their `Moves` lines said should change, did.
 - **Why:** it ties the work to what users need, rather than to what was easy to build.
 - **Where:** the product doc, each change's `serves:` and `Moves` lines, `retro.evidence`.
-- **Status:** captured (the product pass); moves onto the scorecard with S14.
+- **Status:** captured (the product pass). The scorecard's Value band says so in one line
+  (S14, 184): the product pass scores them in the direction doc, and the report holds nothing
+  the skill wrote.
 
 ### Time to users
 - **What:** median time from a change landing to the first release that holds it, and releases
@@ -504,7 +506,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 
 | Seed | What it adds | After |
 |---|---|---|
-| **S14** | The scorecard: the report opens with the Value band, the five pillars' headlines and guardrails against the last retrospective (trend and `n`), and the Trust band; each pillar's diagnostics follow in its own section. | S1–S13 |
+| **S14** | The scorecard: the report opens with the Value band, the five pillars' headlines and guardrails against the last retrospective (trend and `n`), and the Trust band; each pillar's diagnostics follow in its own section. **Done: 184.** | S1–S13 |
 | **S15** | The Insights section: the synthesis questions in a guide file a host can extend, each answered by a read-only sub-agent on its pillar's data, in the fixed answer shape. | S14 |
 | **S16** | The person's experience: one rating and line asked at the retrospective's approval, recorded in its report. A change to a WAIT, so Tier 2. | S14 |
 
@@ -583,7 +585,7 @@ touches its files.
 
 #### Wave 4
 
-- **S14**, with 2026-11-18-105.
+- **S14**, with 2026-11-18-105, done: 184.
 
 #### Wave 5
 

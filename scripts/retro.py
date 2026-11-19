@@ -1144,7 +1144,7 @@ def _pipeline(home: Path, changes: list[dict], previous: list[dict] | None) -> d
                 "total": sum(causes.values()),
                 "changes": sum(1 for c in lands if c["ejections"]),
             },  # fmt: skip
-            "bisections": {"total": len(bisected)},
+            "bisections": {"total": len(bisected), "per_change": _share(len(bisected), n)},
             "base_moves": {
                 "total": sum(moves),
                 "per_change": _share(sum(moves), len(moves)),
@@ -1153,6 +1153,7 @@ def _pipeline(home: Path, changes: list[dict], previous: list[dict] | None) -> d
             "accept_stops": {
                 "total": sum(c["accepts"] for c in lands),
                 "changes": sum(1 for c in lands if c["accepts"]),
+                "per_change": _share(sum(c["accepts"] for c in lands), n),
             },
             "conflicts": {
                 "landing": sum(c["resolves"] for c in lands),
@@ -1567,7 +1568,8 @@ def by_way(
     """The window's figures by way of building (`_way()`), each of WAYS in every part, with its
     `n`: the closed `changes`; `lead`, `lead_view()`'s `ways`; `throughput`, each way's closed
     changes per week over the window's span (from `since`, or with none the first close, to
-    `today`; at least a day); `cost`, tokens (`in + cache_read + out` over the changes whose
+    `today`; at least a day), null with `why` under a week, where a day's changes would read as a
+    week's; `cost`, tokens (`in + cache_read + out` over the changes whose
     totals came from transcripts) and dollars (over `landed`, `_cost()`'s, with dollars), each
     with its `missing_because`; and `escapes`, `bugs_retro()`'s rate by way. A median with `n` 0
     is null. Pure: no git."""
@@ -1607,7 +1609,8 @@ def by_way(
             way: {
                 "closed": len(of[way]),
                 "weeks": round(weeks, 1),
-                "per_week": round(len(of[way]) / weeks, 2),
+                "per_week": round(len(of[way]) / weeks, 2) if days >= 7 else None,
+                "why": None if days >= 7 else "window under a week",
             }
             for way in WAYS
         },  # fmt: skip
@@ -1959,6 +1962,261 @@ def _indicators_text(host: list[dict] | None) -> str:
     return "\n\n".join(parts)
 
 
+# ---------------------------------------------------------------- the scorecard's sections (184)
+
+NOT_GIVEN = "Not given."
+GUARDED = (
+    "Quality and Simplicity are guarded by Speed's lead time, and Cost by Quality's escape rate."
+)
+OUTCOMES_MOVED = (
+    "Outcomes moved: scored by the retrospective's product pass, in the direction doc, not here."
+)
+
+
+def _num(value) -> str:
+    """A figure as the report writes it, `—` for none."""
+    return "—" if value is None else indicators.number(value)
+
+
+def _scorecard_text(
+    card: dict | None, value: dict | None, process: dict, spend: dict | None,
+    metrics: dict | None, cost: dict | None,
+) -> str:  # fmt: skip
+    """`## Scorecard`: the Value band (`_value_text()`) and how outcomes are scored, the pillar
+    table under `SCORECARD_HEAD`, which the next retrospective reads back, and what guards the
+    pillars that have no guardrail row; then the Trust band: the coverage lines, what changed
+    underneath, and the signals no record holds."""
+    parts = []
+    if value:
+        parts += [_value_text(value), OUTCOMES_MOVED]
+    if card:
+        parts.append(_table(list(SCORECARD_HEAD), [
+            [indicators.cell(r["pillar"]), r["role"], indicators.cell(r["figure"]), r["unit"],
+             _num(r["value"]), r["n"], _num(r["last"]), r["trend"], indicators.cell(r["note"])]
+            for r in card["rows"]
+        ]))  # fmt: skip
+        parts.append(GUARDED)
+    else:
+        parts.append("No pillar table given.")
+    trust = _coverage_lines(process, spend, metrics, cost).strip()
+    signals = "; ".join(u["signal"] for u in UNMEASURED)
+    parts.append((trust + "\n" if trust else "") + f"- Unmeasured signals: {signals}.")
+    return "\n\n".join(parts)
+
+
+def _spread_text(spread: dict, unit: str = "s") -> str:
+    if not spread["n"]:
+        return "none recorded"
+    return (
+        f"median {_num(spread['median'])}{unit}, 85th percentile {_num(spread['p85'])}{unit}, "
+        f"over {spread['n']}"
+    )
+
+
+def _pipeline_speed_text(pipeline: dict | None, window: dict) -> str:
+    """Speed's pipeline part: the gates' seconds and slot waits, this window's and the last's, and
+    the landing's gates, ejections, bisections, base moves, accept stops and conflicts, each with
+    its `n`; with no factory change, a sentence saying so (`_no_factory_text()`)."""
+    if pipeline is None:
+        return ""
+    if not pipeline["factory"]:
+        return _no_factory_text(window).strip()
+    lines = []
+    for side, gates in (("this window", pipeline["gates"]["window"]),
+                        ("the last", pipeline["gates"]["previous"])):  # fmt: skip
+        if gates is None:
+            lines.append(f"- Gates, {side}: no earlier window to compare.")
+            continue
+        for kind, said in (("round", "round"), ("land", "landing")):
+            g = gates[kind]
+            lines.append(
+                f"- {said.capitalize()} gates, {side}: {_spread_text(g['seconds'])}; slot wait "
+                f"{_spread_text(g['wait'])}."
+            )
+    land = pipeline["landing"]
+    e, n = land["ejections"], land["n"]
+    causes = ", ".join(f"{c} {e.get(c, 0)}" for c in EJECT_CAUSES)
+    lines += [
+        f"- Landing gates: {land['gates']['total']} over {n} factory landings "
+        f"({_num(land['gates']['per_change'])} per change).",
+        f"- Ejections: {e['total']} ({causes}), in {e['changes']} of {n} landings.",
+        f"- Bisections: {land['bisections']['total']} "
+        f"({_num(land['bisections']['per_change'])} per change), over {n}.",
+        f"- Base moves: {land['base_moves']['total']} "
+        f"({_num(land['base_moves']['per_change'])} per change), in "
+        f"{land['base_moves']['changes']} of {n}.",
+        f"- Accept stops: {land['accept_stops']['total']} "
+        f"({_num(land['accept_stops']['per_change'])} per change), in "
+        f"{land['accept_stops']['changes']} of {n}.",
+        f"- Conflicts: {land['conflicts']['landing']} at landing, {land['conflicts']['ship']} at "
+        "ship.",
+        _coverage_line("landing", land),
+    ]
+    return "Pipeline:\n\n" + "\n".join(lines)
+
+
+def _pipeline_quality_text(pipeline: dict | None) -> str:
+    """Quality's pipeline part: the red-gate rate per build, the share of runs at full depth, and
+    the landings with paths no review read, each with its `n`; nothing with no factory change,
+    which the escapes' part already says."""
+    if pipeline is None or not pipeline["factory"]:
+        return ""
+    red, depth, unread = pipeline["red_gate"], pipeline["depth"], pipeline["unreviewed"]
+    return "\n".join([
+        f"- Red gates: {red['red']} of {red['builds']} builds (rate {_num(red['rate'])}).",
+        f"- Full-depth runs: {depth['full']} of {depth['n']} (share {_num(depth['share'])}); "
+        f"light {depth['light']}.",
+        f"- Landings with paths no review read: {unread['with_paths']} of {unread['n']} "
+        f"({unread['paths']} paths); unknown {unread['unknown']}, none {unread['none']}.",
+    ])  # fmt: skip
+
+
+def _autonomy_text(autonomy: dict | None, metrics: dict | None) -> str:
+    """`## Autonomy`: how often the factory changes needed the person, each figure with its `n`
+    and `—` where null; then the extra stops by kind (`metrics.extra`)."""
+    if autonomy is None:
+        return NOT_GIVEN
+    a = autonomy
+    esc, asked, kept = a["escalations"], a["asked"], a["kept_default"]
+    auto, stops, looks = a["auto_landed"], a["spurious_stops"], a["looks"]
+    head = (
+        f"{a['factory']} factory changes, {a['by_hand']} built by hand; every figure is over the "
+        "factory changes."
+    )
+    lines = [
+        f"- Escalations: {esc['total']} in {esc['changes']} of {esc['n']} changes "
+        f"({_num(esc['per_change'])} per change).",
+        f"- Questions answered: blocking {asked['blocking']}, defaults {asked['default']}, looks "
+        f"{asked['look']} ({_num(asked['per_change'])} per change, over {asked['n']}).",
+        f"- Defaults kept: {kept['kept']} of {kept['n']} (rate {_num(kept['rate'])}); changed "
+        f"{kept['changed']}, confirmed {kept['confirmed']}, settled {kept['settled']}.",
+        f"- Auto-landed: {auto['auto']} of {auto['n']} (share {_num(auto['share'])}); by the "
+        f"person {auto['person']}, shipped {auto['shipped']}.",
+        f"- Spurious stops: build {stops['build']}, landing {stops['landing']}, in "
+        f"{stops['changes']} of {stops['n']} changes ({_num(stops['per_change'])} per change).",
+        f"- Looks: seen {looks['seen']}, checked {looks['checked']}, open {looks['open']} (seen "
+        f"share {_num(looks['seen_share'])}, over {looks['n']}).",
+    ]
+    extra = (metrics or {}).get("extra")
+    if extra:
+        kinds = ", ".join(
+            f"{k.replace('_', ' ')} {r['count']} ({r['changes']} changes)"
+            for k, r in extra["kinds"].items()
+        )
+        lines.append(f"- Extra stops by kind, over {extra['recorded']} recorded changes: {kinds}.")
+    return head + "\n\n" + "\n".join(lines)
+
+
+def _cost_text(cost: dict | None) -> str:
+    """`## Cost`: dollars and agent-minutes per landed change by tier, the waste share with its
+    parts, and spend by role and by model, each with its `n`."""
+    if cost is None:
+        return NOT_GIVEN
+    tiers = (
+        _table(
+            [
+                "Tier",
+                "Changes",
+                "Median dollars",
+                "Total dollars",
+                "Median agent minutes",
+                "Total agent minutes",
+            ],
+            [
+                [
+                    t,
+                    r["n"],
+                    r["usd"]["median"],
+                    r["usd"]["total"],
+                    r["minutes"]["median"],
+                    r["minutes"]["total"],
+                ]
+                for t, r in sorted(cost["per_change"].items())
+            ],
+        )  # fmt: skip
+        if cost["per_change"]
+        else "No landed change reported dollars."
+    )
+    w = cost["waste"]
+    parts = ", ".join(f"{p} ${r['usd']} ({r['runs']} runs)" for p, r in w["parts"].items()
+                      if r["runs"])  # fmt: skip
+    waste = (
+        f"Waste share: {_num(w['share'])} of the dollars (${w['usd']} of ${w['of_usd']}), "
+        f"{_num(w['minutes_share'])} of the minutes, over {w['n']} changes"
+        + (f"; by part: {parts}." if parts else ".")
+    )
+
+    def split(name: str, rows: dict) -> str:
+        if not rows:
+            return f"By {name}: no runs recorded."
+        return f"By {name}:\n\n" + _table(
+            [name.capitalize(), "Runs", "Dollars", "Minutes", "Changes"],
+            [[k, r["runs"], r["usd"], r["minutes"], r["changes"]] for k, r in rows.items()],
+        )
+
+    return "\n\n".join([tiers, waste, split("role", cost["by_role"]),
+                         split("model", cost["by_model"])])  # fmt: skip
+
+
+WORKAROUND_NAMES = {
+    "outside": "Commits outside the loop",
+    "hand_record": "Records edited by hand",
+    "restored": "Register entries restored",
+}
+
+
+def _simplicity_text(workarounds: dict | None, shown: dict | None) -> str:
+    """`## Simplicity`: the workarounds, each count with its `n` and its rows, and the factory's
+    overrides; then, in the plugin's own repo alone (`shown`), its share used, retire candidates,
+    footprint and growth. A host's is never the plugin's."""
+    if workarounds is None:
+        return NOT_GIVEN
+    parts = []
+    for kind, said in WORKAROUND_NAMES.items():
+        block = workarounds[kind]
+        rows = "".join(
+            f"\n- {r['id'] + ' at ' if 'id' in r else ''}{_code(r['sha'])} {r['subject']}"
+            for r in block["rows"]
+        )
+        parts.append(f"{said}: {_num(block['count'])} of {block['n']}.{rows}")
+    o = workarounds["overrides"]
+    causes = ", ".join(f"{c} {k}" for c, k in o["ejections"]["by_cause"].items())
+    parts.append(
+        f"Overrides, over {o['ejections']['n']} factory changes: ejections "
+        f"{_num(o['ejections']['count'])}{f' ({causes})' if causes else ''}, stops "
+        f"{_num(o['stops']['count'])}, fixes asked at landing {_num(o['fixes']['count'])}."
+    )
+    if shown:
+        share = shown["share"]
+        parts.append(
+            f"The plugin's surface used: {_num(share['overall'])} (skills {_num(share['skills'])}, "
+            f"commands {_num(share['commands'])}, keys {_num(share['keys'])})."
+        )
+        retire = shown["retire"]
+        named = ", ".join(f"{i['kind']} {i['name']}" for i in retire["items"]) or "none"
+        parts.append(
+            f"Retire candidates, unused in {retire['after']} measured windows ({retire['windows']} "
+            f"read): {named}."
+        )
+        foot = shown["footprint"]
+        parts.append(
+            f"Setup's footprint: {foot['created']} paths created, {foot['keys']} keys set, "
+            f"{foot['lines']} lines."
+            if foot
+            else f"Setup's footprint: not read ({shown['why'].get('footprint')})."
+        )
+        growth = shown["growth"]
+        if growth:
+            parts.append("The surface's growth by release:\n\n" + _table(
+                ["Tag", *(k.replace("_", " ").capitalize() for k in GROWTH_COUNTS)],
+                [[g["tag"], *(g[k] for k in GROWTH_COUNTS)] for g in growth],
+            ))  # fmt: skip
+        else:
+            why = shown["why"].get("growth") or "no release in the window"
+            parts.append(f"The surface's growth by release: {why}.")
+    return "\n\n".join(parts)
+
+
 def render_report(
     template: str,
     process: dict,
@@ -1968,6 +2226,12 @@ def render_report(
     cost: dict | None = None,
     indicators: list[dict] | None = None,
     ways: dict | None = None,
+    *,
+    autonomy: dict | None = None,
+    pipeline: dict | None = None,
+    workarounds: dict | None = None,
+    surface: dict | None = None,
+    card: dict | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
@@ -1976,7 +2240,15 @@ def render_report(
     coverage line says "not given" without it, as `cost`'s (`_cost()`) two do. The coverage lines
     follow the window's sentence, in `{{window}}`. `indicators` is `_indicator_rows()`'s, and with
     none `{{indicators}}` says no indicators are set. `ways` is `by_way()`'s, its table ending
-    `{{window}}`; nothing is added without it."""
+    `{{window}}`; nothing is added without it.
+
+    A template with `{{scorecard}}` (184) gets the scorecard there instead (`_scorecard_text()`,
+    `card` being `scorecard()`'s), `{{window}}` is the window's sentence alone, and each pillar's
+    section is built from the same parts the old placeholders get: `{{speed}}` (cycle, throughput,
+    time, capacity, the by-way table and the pipeline's landing), `{{quality}}` (escapes, rework,
+    the pipeline's red gates), `{{autonomy}}`, `{{cost}}` and `{{simplicity}}` (`surface` only in
+    the plugin's own repo). One without it renders as before, so each figure appears once either
+    way."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -1987,7 +2259,7 @@ def render_report(
             f"From {w['since'] or 'the start of history'} to {w['today']}: {w['closed']} changes "
             f"closed ({tiers}), {w['dropped']} dropped. {w['measured']} of them were measured, and "
             f"the timed views rest on those alone; {w['unmeasured']} weren't."
-        ) + _coverage_lines(process, spend, metrics, cost),
+        ),
         "throughput": _table(
             ["Week of", "Tiers", "Ways", "Classes", "Closed"],
             [[r["week"], *(", ".join(f"{k}: {n}" for k, n in (r.get(part) or {}).items() if n)
@@ -2008,10 +2280,13 @@ def render_report(
         "spend": _spend_text(spend, w["closed"]),
         "indicators": _indicators_text(indicators),
     }  # fmt: skip
-    if value:
-        values["window"] += "\n\n" + _value_text(value)
-    if ways:
-        values["window"] += "\n\n" + _by_way_text(ways)
+    scored = "{{scorecard}}" in template
+    if not scored:
+        values["window"] += _coverage_lines(process, spend, metrics, cost)
+        if value:
+            values["window"] += "\n\n" + _value_text(value)
+        if ways:
+            values["window"] += "\n\n" + _by_way_text(ways)
     if process["cycle"]:
         values["cycle"] = _table(
             ["Tier", "Changes", "Median elapsed", "Longest", "Median agent", "Median days open"],
@@ -2044,39 +2319,202 @@ def render_report(
         )
     if not process["cycle"] and process["lead"]["measured"]:
         values["cycle"] = _lead_text(process["lead"])
+    if scored:
+        speed = [
+            values["cycle"], "Throughput by week:\n\n" + values["throughput"],
+            "Where the time went:\n\n" + values["time"],
+            "Work in progress and capacity:\n\n" + values["capacity"],
+            _by_way_text(ways) if ways else "",
+            _pipeline_speed_text(pipeline, w),
+        ]  # fmt: skip
+        quality = [
+            "Escapes:\n\n" + values["escapes"], "Rework:\n\n" + values["rework"],
+            _pipeline_quality_text(pipeline),
+        ]  # fmt: skip
+        values.update(
+            scorecard=_scorecard_text(card, value, process, spend, metrics, cost),
+            speed="\n\n".join(p for p in speed if p),
+            quality="\n\n".join(p for p in quality if p),
+            autonomy=_autonomy_text(autonomy, metrics),
+            cost=_cost_text(cost),
+            simplicity=_simplicity_text(workarounds, surface),
+        )
     for key, value in values.items():
         template = template.replace("{{" + key + "}}", value)
     return template
 
 
-def retro_report(home: Path, cfg: dict, today: date) -> str:
-    """The report for the window since the last retrospective: the records `retro()` reads for
-    its process views and its spend, from history, without the product pass, the rest of the
-    architecture or the prose; and the host's `retro.indicators`, run through `_evidence()` as the
-    architecture pass runs them, the only host command it runs."""
+# ---------------------------------------------------------------- the scorecard (184)
+
+# The pillar table's header line, which the next retrospective reads back (`_last_rows()`).
+SCORECARD_HEAD = (
+    "Pillar", "Role", "Figure", "Unit", "Value", "n", "Last retrospective", "Trend", "Note",
+)  # fmt: skip
+# The table's key columns, Pillar and Figure, and its Value and n columns.
+SCORECARD_KEYS = (0, 2)
+SCORECARD_VALUE, SCORECARD_N = 4, 5
+# The ways a by-way row names, as the figure says them; `unknown` has no row.
+CARD_WAYS = {"factory": "factory", "manual": "by hand"}
+GREYED_NOTE = "a hint: under half the changes"
+NONE_NOTE = "none in the window"
+
+
+def _row_note(value, block: dict | None) -> str:
+    """A row's Note: with no value, the source `block`'s most counted `missing_because` reason
+    (`none in the window` without one); and the hint mark when the block is greyed."""
+    notes = []
+    if value is None:
+        why = sorted(((block or {}).get("missing_because") or {}).items(),
+                     key=lambda kv: (-kv[1], kv[0]))  # fmt: skip
+        notes.append(sdlc.metrics._word_text(str(why[0][0])) if why and why[0][0] else NONE_NOTE)
+    if ((block or {}).get("coverage") or {}).get("greyed"):
+        notes.append(GREYED_NOTE)
+    return "; ".join(notes)
+
+
+def _trend(value, n: int, last: tuple | None) -> str:
+    """`up`, `down` or `flat` from `value` against the last retrospective's, `unknown` without
+    both, or when either side rests on fewer than `RATE_MIN_CHANGES`."""
+    if value is None or not last or last[0] is None or last[1] is None:
+        return "unknown"
+    if min(n, last[1]) < RATE_MIN_CHANGES:
+        return "unknown"
+    return "up" if value > last[0] else "down" if value < last[0] else "flat"
+
+
+def _minutes(value) -> int | None:
+    """A median in minutes as the table writes it: a whole number, so it reads back the same."""
+    return None if value is None else round(value)
+
+
+def scorecard(
+    process: dict, autonomy: dict, ways: dict, cost: dict, workarounds: dict,
+    surface: dict | None, last: dict[tuple, tuple],
+) -> dict:  # fmt: skip
+    """The scorecard's pillar table (184 R3): each pillar's headline and guardrail figures, every
+    one from a block `retro` already computes, one row a way or tier present where the block
+    gives it only that way, with its unit, value, `n`, the last retrospective's value (`last`, by
+    `(pillar, figure)`: `(value, n)` from its report), the trend and a note. The surface's share
+    only with `surface`, which only the plugin's own repo passes. The escape rate's last and trend
+    are `process.escapes`' own. Pure."""
+    rows: list[dict] = []
+
+    def add(pillar, role, figure, unit, value, n, block=None, own_last=None) -> None:
+        mine = last.get((pillar, figure))
+        rows.append({
+            "pillar": pillar, "role": role, "figure": figure, "unit": unit, "value": value,
+            "n": n, "last": mine[0] if mine else None, "trend": _trend(value, n, mine),
+            "note": _row_note(value, block),
+            **(own_last or {}),
+        })  # fmt: skip
+
+    w = process["window"]
+    lead = process["lead"]
+    for way, said in CARD_WAYS.items():
+        got = (lead.get("ways") or {}).get(way) or {"n": 0, "median": None}
+        add("Speed", "headline", f"Median lead time, {said}", "minutes",
+            _minutes(got["median"]), got["n"], lead)  # fmt: skip
+    add("Speed", "guardrail", "Rework links per closed change", "per change",
+        process["rework"]["per_change"], w["closed"])  # fmt: skip
+    esc = process["escapes"]
+    add("Quality", "headline", "Escape rate", "per change", esc["rate"], w["closed"], esc,
+        {"last": esc["previous"], "trend": esc["trend"]})  # fmt: skip
+    tiers = list(w["tiers"])
+    for tier in tiers or [None]:
+        said = f"Median response, tier {tier}" if tier else "Median response"
+        timed = ((process.get("time") or {}).get("tiers") or {}).get(tier) or {}
+        n = ((process.get("cycle") or {}).get(tier) or {}).get("n", 0)
+        add("Autonomy", "headline", said, "minutes", _minutes(timed.get("response")), n)
+    asked = autonomy["asked"]
+    add("Autonomy", "headline", "Questions answered per factory change", "per change",
+        asked["per_change"], asked["n"])  # fmt: skip
+    for way, said in CARD_WAYS.items():
+        got = ways["escapes"][way]
+        add("Autonomy", "guardrail", f"Escape rate, {said}", "per change", got["rate"],
+            got["changes"])  # fmt: skip
+    for tier in tiers or [None]:
+        said = "Median dollars per landed change" + (f", tier {tier}" if tier else "")
+        got = cost["per_change"].get(tier) or {"n": 0, "usd": {"median": None}}
+        add("Cost", "headline", said, "USD", got["usd"]["median"], got["n"], cost)
+    if surface is not None:
+        measured = sum(1 for r in surface["items"] if r["state"] in ("used", "unused"))
+        add("Simplicity", "headline", "Share of the surface used", "share",
+            surface["share"]["overall"], measured, surface)  # fmt: skip
+    for kind, said, unit in (
+        ("outside", "Commits outside the loop", "commits"),
+        ("hand_record", "Records edited by hand", "commits"),
+        ("restored", "Register entries restored", "entries"),
+    ):
+        got = workarounds[kind]
+        add("Simplicity", "headline", said, unit, got["count"], got["n"])
+    return {"rows": rows, "since": w["since"]}
+
+
+def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict:
+    """The figures the report shows, and `retro()` gives, worked out once for the window since the
+    last retrospective, so the two never disagree: each closed change's start (`bases`), its rows
+    and paths, `days_open` and `release`; the dropped changes; the rework, the bugs, the Value band
+    (before the process views, so each change's `work` is set when the weeks are counted by it),
+    the process views, the metrics, the cost (`_cost()`'s one call, `_landed` popped into
+    `by_way()`), the figures by way, autonomy, the pipeline, the workarounds and the spend; with
+    `surface`, the plugin's surface (a host's report leaves it out); and the `scorecard()`, its
+    surface row only in the plugin's own repo. Each closed change keeps
+    its `problems`, which `retro()` pops; `problems` here are what the passes found. Read-only."""
     trunk = cfg["git"]["base"]
     since = sdlc.last_retrospective(home, trunk)
     changes = sdlc.closed_changes(home, since["sha"] if since else None, trunk)
-    bases, paths = {}, {}
+    bases: dict[str, str | None] = {}
+    rows: dict[str, list] = {}
+    paths: dict[str, list[str]] = {}
     for rec in changes:
-        bases[rec["name"]], rows = _change_rows(home, rec)
-        paths[rec["name"]] = [path for path, _, _ in rows]
+        # A change ships as one commit or several, and its size is all of them: its branch from
+        # where it started. Without that start, the last commit still says what it touched.
+        bases[rec["name"]], rows[rec["name"]] = _change_rows(home, rec)
+        paths[rec["name"]] = [path for path, _, _ in rows[rec["name"]]]
         rec["days_open"] = sdlc._days_between(rec["created"], rec["close_date"])
+        rec["release"] = _release_of(home, cfg, rec["sha"])
     dropped = sdlc.dropped_changes(home, since["sha"] if since else None, trunk)
-    diffs = _diffs(home, changes, bases)
-    rework, questions, _ = _rework(home, trunk, changes, bases, diffs)
-    bugs = bugs_retro(home, cfg, since, changes, today)
+    autonomy, unread = _autonomy(home, changes)
     previous = _previous_window(home, trunk, since)
-    # Each change's `work` is set before the weeks are counted by it.
+    diffs = _diffs(home, changes, bases)
+    rework, questions, unnamed = _rework(home, trunk, changes, bases, diffs)
+    bugs = bugs_retro(home, cfg, since, changes, today)
     value = value_band(home, cfg, since, changes, bases, paths)
+    workarounds, unknown = _workarounds(home, cfg, since, changes, dropped, bases)
     process = process_views(changes, dropped, rework, questions, bugs, since, today, previous)
-    template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
-    metrics = metrics_summary(changes, cfg["metrics"]["stop_allowance"])
     cost = _cost(home, changes, dropped)
     ways = by_way(changes, process["lead"], cost.pop("_landed"), bugs, since, today)
-    host = _indicator_rows(home, since, _evidence(home, cfg["retro"]["indicators"]))
-    spend = _spend(home, cfg, changes, diffs)
-    return render_report(template, process, spend, value, metrics, cost, host, ways)
+    pipeline = _pipeline(home, changes, previous)
+    shown = _surface(home, cfg, changes, since) if surface else None
+    card = scorecard(
+        process, autonomy, ways, cost, workarounds, shown if sdlc._own_repo(home) else None,
+        _last_rows(home, since)["scorecard"],
+    )  # fmt: skip
+    return {
+        "since": since, "changes": changes, "dropped": dropped, "bases": bases, "rows": rows,
+        "paths": paths, "diffs": diffs, "rework": rework, "questions": questions, "bugs": bugs,
+        "previous": previous, "value": value, "process": process,
+        "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
+        "cost": cost, "by_way": ways, "autonomy": autonomy,
+        "pipeline": pipeline, "workarounds": workarounds,
+        "spend": _spend(home, cfg, changes, diffs), "surface": shown, "scorecard": card,
+        "problems": [*unread, *unnamed, *unknown],
+    }  # fmt: skip
+
+
+def retro_report(home: Path, cfg: dict, today: date) -> str:
+    """The report for the window since the last retrospective: `report_figures()`, without the
+    product pass, the rest of the architecture or the prose, and the plugin's surface only in its
+    own repo; and the host's `retro.indicators`, run through `_evidence()` as the architecture pass
+    runs them, the only host command it runs."""
+    f = report_figures(home, cfg, today, surface=sdlc._own_repo(home))
+    template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
+    host = _indicator_rows(home, f["since"], _evidence(home, cfg["retro"]["indicators"]))
+    return render_report(
+        template, f["process"], f["spend"], f["value"], f["metrics"], f["cost"], host,
+        f["by_way"], autonomy=f["autonomy"], pipeline=f["pipeline"],
+        workarounds=f["workarounds"], surface=f["surface"], card=f["scorecard"],
+    )  # fmt: skip
 
 
 # ---------------------------------------------------------------- the surface: what is used
@@ -2312,6 +2750,10 @@ def surface(home: Path, cfg: dict, changes: list[dict], since: dict | None) -> d
     }
 
 
+# `report_figures()` takes a `surface` flag, which shadows the function there.
+_surface = surface
+
+
 def _window_trailers(home: Path, older: str | None, newer: str) -> list[dict]:
     """The changes closed between two retrospectives with their `Close` commits' trailers alone,
     as `metrics`: `closed_changes()`'s walk without the intents, and every body in one git call."""
@@ -2335,7 +2777,9 @@ def _retire(
     nor breaking its run; an item whose use is never recorded (`OUTSIDE_WHY`, `NO_CALLER_WHY`) is
     never a candidate. The walk back stops once every item is decided, and for a kind at a window
     closed before that kind was counted (`_counted_before()`), since no older one was either.
-    `windows` is how many windows the answer rests on."""
+    `windows` is how many windows the answer rests on: the windows actually read, which is below
+    `RETIRE_AFTER` when every item was decided early (each used, or never a candidate), and no
+    candidate is hidden then."""
     never = (OUTSIDE_WHY, NO_CALLER_WHY)
     runs: dict[tuple, list[str]] = {
         (r["kind"], r["name"]): [] for r in current if r.get("why") not in never
@@ -2435,6 +2879,8 @@ def _surface_at(home: Path, tag: str) -> dict:
     keys = manifest.get("config_keys") if isinstance(manifest, dict) else None
     return {
         "skills": skills if listed is not None else None,
+        # `core` is empty only at a tag from before the `@command` registry (or with no
+        # `sdlc.py`), where no command can be counted: None there, never the factory's alone.
         "commands": len(set(core)) + len(set(more)) if core else None,
         "keys": len(keys) if isinstance(keys, list) else None,
         "doc_lines": sum(_lines_under(home, tag, list(DOC_PATHS)).values()),
@@ -2763,37 +3209,27 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     """What the retrospective counts: everything since the last one, from history. Read-only."""
     today = today or date.today()
     trunk = cfg["git"]["base"]
-    since = sdlc.last_retrospective(home, trunk)
-    changes = sdlc.closed_changes(home, since["sha"] if since else None, trunk)
+    f = report_figures(home, cfg, today, surface=True)
+    since, changes, dropped, bases = f["since"], f["changes"], f["dropped"], f["bases"]
     problems: list[str] = [] if trunk else [sdlc.trunk_refusal(home, trunk)]
     kind = _kind(cfg)
-    bases: dict[str, str | None] = {}
-    paths: dict[str, list[str]] = {}
     for rec in changes:
         problems += rec.pop("problems")
-        # A change ships as one commit or several, and its size is all of them: its branch from
-        # where it started. Without that start, the last commit still says what it touched.
-        base, rows = _change_rows(home, rec)
-        bases[rec["name"]] = base
+        base, rows = bases[rec["name"]], f["rows"][rec["name"]]
         if not base:
             name, work = rec["name"], sdlc.work_rel(home)
             problems.append(
                 f"{name}: no commit holds {work}/{name}/intent.md, so its size is unknown"
             )
-        files = [path for path, _, _ in rows]
-        paths[rec["name"]] = files
         lines = sum((added or 0) + (deleted or 0) for _, added, deleted in rows)
         size = indicators.change_size(rows, kind)
         rec.update(
-            files=len(files) if base else None,
+            files=len(rows) if base else None,
             lines=lines if base else None,
             added=size["added"] if base else None,
             deleted=size["deleted"] if base else None,
             by_kind=size["by_kind"] if base else None,
-            days_open=sdlc._days_between(rec["created"], rec["close_date"]),
-            release=_release_of(home, cfg, rec["sha"]),
         )
-    dropped = sdlc.dropped_changes(home, since["sha"] if since else None, trunk)
     for rec in dropped:
         problems += rec.pop("problems")
         # What the dropped branch touched: its tip against where it left the base.
@@ -2802,13 +3238,8 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
             (sdlc._git(home, "diff", "--name-only", fork, rec["sha"]) or "").split() if fork else []
         )
         rec["files"] = len(files)
-    autonomy, unread = _autonomy(home, changes)
-    problems += unread
-    previous = _previous_window(home, trunk, since)
-    diffs = _diffs(home, changes, bases)
-    rework, questions, unnamed = _rework(home, trunk, changes, bases, diffs)
-    problems += unnamed
-    bugs = bugs_retro(home, cfg, since, changes, today)
+    problems += f["problems"]
+    rework, questions, bugs = f["rework"], f["questions"], f["bugs"]
     a = sdlc.analyze(home, today)
     ideas = [
         i
@@ -2823,12 +3254,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         None if doc is None else _product(home, cfg, doc, changes, a["open"], direction, bases)
     )
     lookback = _lookback(home, trunk) if trunk else None
-    value = value_band(home, cfg, since, changes, bases, paths)
-    workarounds, unknown = _workarounds(home, cfg, since, changes, dropped, bases)
-    problems += unknown
-    process = process_views(changes, dropped, rework, questions, bugs, since, today, previous)
-    cost = _cost(home, changes, dropped)
-    landed = cost.pop("_landed")
+    process = f["process"]
     return {
         "since": since,
         "today": today.isoformat(),
@@ -2857,25 +3283,26 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "nits": sdlc.nits_summary(sdlc.nit_entries(home)[0], today),
         "bugs": bugs,
         "process": process,
-        "by_way": by_way(changes, process["lead"], landed, bugs, since, today),
+        "by_way": f["by_way"],
         "report": report_rel(today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
         "releases": sdlc._release_tags(home, cfg, since),
         "unmeasured": UNMEASURED,
-        "autonomy": autonomy,
-        "pipeline": _pipeline(home, changes, previous),
+        "autonomy": f["autonomy"],
+        "pipeline": f["pipeline"],
         "direction": direction,
-        "metrics": metrics_summary(changes, cfg["metrics"]["stop_allowance"]),
+        "metrics": f["metrics"],
         "product": product,
         "prose": prose_metrics(home, cfg),
         "architecture": _architecture(home, cfg, since, changes, kind, lookback),
-        "spend": _spend(home, cfg, changes, diffs),
-        "cost": cost,
+        "spend": f["spend"],
+        "cost": f["cost"],
         "tests": _tests(home, cfg, lookback),
-        "surface": surface(home, cfg, changes, since),
-        "simplicity": {"workarounds": workarounds},
-        **value,
+        "surface": f["surface"],
+        "simplicity": {"workarounds": f["workarounds"]},
+        "scorecard": f["scorecard"],
+        **f["value"],
     }
 
 
@@ -3076,13 +3503,22 @@ def _architecture(
     }
 
 
-def _last_rows(home: Path, since: dict | None) -> dict[tuple[str, str], float | None]:
-    """The indicator rows the last retrospective's report shows, read from its own commit, by
-    `(name, unit)`; empty with no retrospective, or none committed at that commit."""
-    if not since:
-        return {}
-    rel = report_rel(date.fromisoformat(since["date"]))
-    return indicators.report_rows(sdlc._git(home, "show", f"{since['sha']}:{rel}") or "")
+def _last_rows(home: Path, since: dict | None) -> dict[str, dict]:
+    """The rows the last retrospective's report shows, read from its own commit by the one table
+    reader: `indicators`, each indicator row's value by `(name, unit)`; and `scorecard`, each
+    pillar row's `(value, n)` by `(pillar, figure)`. Each empty with no retrospective, none
+    committed at that commit, or a report without that table."""
+    text = ""
+    if since:
+        rel = report_rel(date.fromisoformat(since["date"]))
+        text = sdlc._git(home, "show", f"{since['sha']}:{rel}") or ""
+    read = indicators.report_rows
+    values = read(text, SCORECARD_HEAD, SCORECARD_KEYS, SCORECARD_VALUE)
+    ns = read(text, SCORECARD_HEAD, SCORECARD_KEYS, SCORECARD_N)
+    return {
+        "indicators": read(text),
+        "scorecard": {k: (v, ns.get(k)) for k, v in values.items()},
+    }
 
 
 def _indicator_rows(home: Path, since: dict | None, ran: list[dict]) -> list[dict]:
@@ -3109,7 +3545,7 @@ def _indicator_rows(home: Path, since: dict | None, ran: list[dict]) -> list[dic
         row["rows"], row["not_rows"] = indicators.host_rows(row["output"])
         if row["rows"] is None:
             continue
-        last = _last_rows(home, since) if last is None else last
+        last = _last_rows(home, since)["indicators"] if last is None else last
         for r in row["rows"]:
             r["last"] = last.get((r["name"], r["unit"]))
             r["change"] = None if r["last"] is None else round(r["value"] - r["last"], 3)
@@ -3161,6 +3597,13 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
     )
     history = {c["name"]: c for c in sdlc.closed_changes(home, None, trunk, read=True)}
     reviews: dict[str, dict] = {}
+    # Each `Introduced by:` value's change in history, worked out once however many bugs name it.
+    introducers: dict[str, str | None] = {}
+
+    def introducer(by: str) -> str | None:
+        if by not in introducers:
+            introducers[by] = next((n for n in history if sdlc.names_change(n, by)), None)
+        return introducers[by]
 
     def review(name: str) -> dict:
         """What the change's ship review left, read once."""
@@ -3188,7 +3631,7 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         if not by or by == "unknown":
             unattributed += 1
             continue
-        name = next((n for n in history if sdlc.names_change(n, by)), by)
+        name = introducer(by) or by
         row = escapes.setdefault(
             name,
             {"bugs": 0, "tier": (history.get(name) or {}).get("tier"),
@@ -3220,15 +3663,14 @@ def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], t
         and str(b.get("reported") or "unknown") != "unknown"
     ]
 
-    def introducer_way(by: str) -> str:
-        name = next((n for n in history if sdlc.names_change(n, by)), None)
-        return _way(history[name]) if name else "unknown"
+    # Each attributed bug's introducer's way, from the names worked out above, before any rate.
+    way_of = {by: _way(history[n]) if (n := introducer(by)) else "unknown" for _, by in attributed}
 
     def window_rate(first: str | None, last: str | None, closed: int, way: str | None = None):
         n = sum(
             (first is None or r >= first)
             and (last is None or r < last)
-            and (way is None or introducer_way(by) == way)
+            and (way is None or way_of[by] == way)
             for r, by in attributed
         )
         return {"escapes": n, "changes": closed, "rate": round(n / closed, 2) if closed else None}

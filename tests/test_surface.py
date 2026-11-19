@@ -399,3 +399,15 @@ def test_growth_reads_each_release_tag(tmp_path: Path, monkeypatch) -> None:
     assert [r["tag"] for r in rows] == ["v0.9.0", "v1.1.0"]
     assert rows[0]["commands"] is None and rows[0]["keys"] is None
     assert rows[1]["change"]["commands"] is None
+
+
+def test_a_tag_before_the_registry_has_no_commands(tmp_path: Path) -> None:
+    """184 R16: at a tag whose `sdlc.py` holds no `@command`, `commands` is None, never 0: no
+    command can be counted there, so none is subtracted in growth."""
+    root = _repo(tmp_path)
+    (root / "scripts").mkdir()
+    (root / "scripts" / "sdlc.py").write_text("sub.add_parser('status')\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Release 0.9.0")
+    _git(root, "tag", "-a", "v0.9.0", "-m", "v0.9.0")
+    assert sdlc.retro._surface_at(root, "v0.9.0")["commands"] is None

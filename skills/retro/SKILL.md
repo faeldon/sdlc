@@ -74,6 +74,11 @@ What `retro` gives:
   median dollars where `costs.jsonl` recorded them, each with `missing_because`; a hand-built
   change is missing dollars, never $0) and `escapes` (the escape rate over that way's changes).
   Every figure has its `n`; a small `n` is a hint, not a verdict.
+- `scorecard`: the report's pillar table, built from the blocks here. `rows`, each a pillar's
+  headline or guardrail figure with its `unit`, `value`, `n`, `last` (the same row in the last
+  retrospective's report, null with none), `trend` (`up`, `down`, `flat`, or `unknown` without a
+  `last` or under five changes either side) and `note` (why a null value is null, or that it is a
+  hint); and `since`. Read a trend the way `rate`'s is read: a small `n` is anecdote.
 - `work_mix`, `time_to_users` and `follow_through`: whether the work was aimed right. Each
   change's `work` class (fix, capability, process or debt) and the shares; the median days from
   landing to release, the unreleased apart; and how many of the last retrospective's seeds and
@@ -254,6 +259,13 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    changes that ran alongside others took longer), each with the `n` behind it, so a finding names
    a figure the committed report holds. Say how many changes the numbers rest on, and that
    `uncaptured` ones aren't in them.
+
+   Then `simplicity.workarounds`: where the process got in the way. An `outside` or `restored`
+   row that recurs across the window, or one that stands out on its own, is a finding whose
+   disposition is a seed naming what the process lacked (the command or skill the person went
+   round, or the register step that lost the entry), citing the commits. A `hand_record` row is a
+   question first: which record needed fixing by hand, and why no command fixed it. Read each
+   count beside its `n`, and `unknown` as not counted, never outside.
 
    Then the debt in `nits`: each theme's count and oldest age against the threshold the process
    doc's section on nits sets. A theme past it is a finding whose disposition is one seed to pay

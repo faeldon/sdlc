@@ -21,7 +21,7 @@ runs git and hands the text here.
     junit_times(text)                         -> {cases, error}             a JUnit XML report
     drifted_tests(lookback, kind, skip, present) -> [row]
     host_rows(output)                         -> (rows, None) | (None, reason)  `retro.indicators`
-    report_rows(text)                         -> {(name, unit): value | None}   a report's tables
+    report_rows(text, head, keys, value)      -> {key: value | None}   a report's tables
     cell(text), number(value), signed(change) -> str                            a table's cells
 
 A kind is told by path alone, so no language is assumed: a host whose layout the conventions
@@ -501,8 +501,9 @@ def _one_line(value: object, most: int) -> bool:
 def host_rows(output: str) -> tuple[list[dict] | None, str | None]:
     """An indicator command's stdout as rows, `(rows, None)`, when every non-blank line is a JSON
     object with a `name` (a non-empty string on one line, at most `NAME_MAX`), a `value` (a finite
-    number, never a boolean) and maybe a `unit` (a string on one line, at most `UNIT_MAX`, or null),
-    no `(name, unit)` twice; other keys are kept as `extra`. Anything else is `(None, reason)`."""
+    number, never a boolean) and maybe a `unit` (a string on one line, at most `UNIT_MAX`, or null,
+    never `—`), neither with leading or trailing spaces, no `(name, unit)` twice; other keys are
+    kept as `extra`. Anything else is `(None, reason)`."""
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
     lines = [(n, line) for n, line in enumerate(output.splitlines(), 1) if line.strip()]
@@ -523,6 +524,13 @@ def host_rows(output: str) -> tuple[list[dict] | None, str | None]:
             return None, f"line {n}'s value isn't a number"
         if unit is not None and not _one_line(unit, UNIT_MAX):
             return None, f"line {n}'s unit isn't a short string"
+        # A row the report would read back as another key (184 R15): a unit the table writes
+        # for none, or a name or unit the table's cells strip.
+        if unit == "—":
+            return None, f"line {n}'s unit is —, which the report reads as none"
+        for part, text in (("name", name), ("unit", unit or "")):
+            if text != text.strip():
+                return None, f"line {n}'s {part} has stray spaces"
         key = (name, unit or "")
         if key in seen:
             return None, f"line {n} repeats " + ", ".join(k for k in key if k)
@@ -581,18 +589,23 @@ def _parsed(text: str) -> float | None:
     return None
 
 
-def report_rows(text: str) -> dict[tuple[str, str], float | None]:
-    """Each `(name, unit)` a report's indicator tables show (those under `HEADER` exactly), with
-    its value; a key shown twice, or a value that doesn't read, is None. A unit of `—` is ""."""
-    found: dict[tuple[str, str], float | None] = {}
+def report_rows(
+    text: str, head: tuple[str, ...] = INDICATOR_HEAD, keys: tuple[int, ...] = (0, 1),
+    value: int = 2,
+) -> dict[tuple[str, ...], float | None]:  # fmt: skip
+    """Each row a report's tables under `head`'s header line exactly show, keyed by its `keys`
+    cells, with its `value` cell read as a number; a key shown twice, or a value that doesn't read,
+    is None. A key cell of `—` is "". By default the indicator tables, by `(name, unit)`."""
+    header = "| " + " | ".join(head) + " |"
+    found: dict[tuple[str, ...], float | None] = {}
     lines = text.splitlines()
     for i, line in enumerate(lines):
-        if line.strip() != HEADER:
+        if line.strip() != header:
             continue
         for row in itertools.takewhile(lambda r: r.lstrip().startswith("|"), lines[i + 2 :]):
             cells = _cells(row)
-            if len(cells) != len(INDICATOR_HEAD):
+            if len(cells) != len(head):
                 continue
-            key = (cells[0], "" if cells[1] == "—" else cells[1])
-            found[key] = None if key in found else _parsed(cells[2])
+            key = tuple("" if cells[k] == "—" else cells[k] for k in keys)
+            found[key] = None if key in found else _parsed(cells[value])
     return found

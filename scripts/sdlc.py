@@ -8742,11 +8742,12 @@ TEMPLATE_READS: dict[str, dict[str, tuple[str, ...]]] = {
     "changelog.md": {"placeholders": ("{{version}}", "{{notes}}")},
     # The board's plan hint counts the paths this section names.
     "plan.md": {"headings": ("Files to change",)},
-    # The report's spend and indicators views (`retro.render_report()`); the next retrospective
-    # reads the last one's indicator table back.
+    # The report's scorecard, spend and indicators views (`retro.render_report()`); the next
+    # retrospective reads the last one's scorecard and indicator tables back. The pillar sections
+    # are optional: an override without one just doesn't show it.
     "retro.md": {
-        "headings": ("Spend", "Indicators"),
-        "placeholders": ("{{spend}}", "{{indicators}}"),
+        "headings": ("Scorecard", "Spend", "Indicators"),
+        "placeholders": ("{{scorecard}}", "{{spend}}", "{{indicators}}"),
     },
 }
 # Classes a refresh proposes text for; the rest are reported or left alone.

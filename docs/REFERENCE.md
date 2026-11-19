@@ -332,8 +332,9 @@ now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py`
 replacement, until the release that drops the note; after it, the key is reported as one the
 plugin doesn't read), a template override lacking a heading, frontmatter key or placeholder the script
 reads (`TEMPLATE_READS`), or a project or product doc it can't parse: an override of
-`retro.md` needs its `## Indicators` section and `{{indicators}}`, or the next retrospective has no
-table to compare its indicators with. `report` also lists config
+`retro.md` needs its `## Scorecard` and `## Indicators` sections and `{{scorecard}}` and
+`{{indicators}}`, or the next retrospective has no table to compare its scorecard and indicators
+with. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
 
@@ -1008,17 +1009,20 @@ the report's throughput table shows the last two beside *Tiers*.
 `Sdlc-Mode` alone: `factory`, `manual`, or `unknown` when it records none, never guessed from its
 folder; so a change the factory built and the person shipped by hand is `factory`. Each of
 `changes`, `lead` (`process.lead.ways`), `throughput` (each way's `closed`, the window's `weeks`
-from `since`, or the first close, to today, and `per_week`), `cost` and `escapes`
+from `since`, or the first close, to today, and `per_week`, null with `why` `window under a week`
+when the window spans fewer than seven days, where a day's changes would read as a week's), `cost`
+and `escapes`
 (`bugs.rate.window.by_way`) gives all three ways. `cost` gives each way `tokens`, the median of
 `in + cache_read + out` over its changes whose totals came from transcripts, and `usd`, the median
 dollars over its landed changes with `costs.jsonl` dollars, each with its `n` and
 `missing_because`: a hand-built change has no dollars and is counted `built by hand`, never $0.
-Tokens are measured the same way on both sides; dollars are never priced from tokens. The report
-ends its *Window* text with a *By way of building* table of these, columns *Factory*, *By hand*
-and *Unknown*, each figure followed by its `n` in brackets and `–` where it is null.
+Tokens are measured the same way on both sides; dollars are never priced from tokens. The report's
+*Speed* section holds a *By way of building* table of these, columns *Factory*, *By hand* and
+*Unknown*, each figure followed by its `n` in brackets and `–` where it is null.
 
 Three figures say whether the work was aimed right, each with its `n` and what it left out,
-never a zero for missing data, and the report gives one sentence each under *Window*, from the
+never a zero for missing data, and the report gives one sentence each, opening its *Scorecard*
+(the Value band), from the
 same function as the JSON. `work_mix` classes each closed change once, as its record's `work`
 (`class`, the signal it was classed `by`, and `also`, the other classes whose rules applied):
 `fix` when its intent's `fixes:` names a bug, its `reworks:` names a change, or a seed its `idea:`
@@ -1057,8 +1061,8 @@ the window's closed changes) and `missing_because`, the rest by reason, whose co
 - **Spend:** its `why`.
 - **Escape rate:** none; it rests on every closed change.
 
-`greyed` is true when fewer than half the window's changes are measured. The report follows the
-*Window* sentence with one *Coverage* line per headline, giving the changes it rests on and why
+`greyed` is true when fewer than half the window's changes are measured. The report's Trust band,
+after the pillar table in *Scorecard*, gives one *Coverage* line per headline, giving the changes it rests on and why
 the rest are missing. A greyed line is in italics and ends `a hint: under half the changes`.
 
 `process.underneath` is what the changes ran on, from their `Sdlc-Runtime` (see *Metrics*), for
@@ -1096,8 +1100,9 @@ neither, beside `coverage` and `missing_because`: the window's changes whose `Cl
 `Sdlc-Skill` or `Sdlc-Tool` lines. `retire` names each item unused in each of the last
 `RETIRE_AFTER` (3) windows that measured it, the current one first: a window that couldn't
 measure it is passed over, and the walk back stops for a kind at a window closed before that kind
-was counted. Its `windows` says how many windows the answer rests on; with fewer than three
-measured, it names nothing. `footprint` is what setup left: the paths `.sdlc/setup.json`'s
+was counted. Its `windows` says how many windows the answer rests on, the windows actually read:
+below `RETIRE_AFTER` when every item was decided early (each used, or never a candidate), and no
+candidate is hidden then; with fewer than three measured, it names nothing. `footprint` is what setup left: the paths `.sdlc/setup.json`'s
 `created` names, the keys the config sets, and the lines of the tracked files under `.sdlc/` but
 the change folders, `retros/` and `reports/`, all on the base branch; with no `setup.json` it is
 null and `why.footprint` says so. `growth`, in the plugin's own repo only (null elsewhere, with
@@ -1124,7 +1129,8 @@ seconds, kept up to 20,000 characters), one row each in `host`, in config order.
 An indicator's output is read as rows when every non-blank line of its stdout is one JSON object
 (JSON Lines) with a `name` (a non-empty string on one line, at most 200 characters), a `value` (a
 finite number, never a boolean) and, if it likes, a `unit` (a string on one line, at most 40
-characters, or null); any other key is kept as `extra` and never rendered, and a row is known by
+characters, or null, never `—`, which the report writes for none); neither the name nor the unit
+may start or end with a space, or it would read back from the report as another row. Any other key is kept as `extra` and never rendered, and a row is known by
 its `name` and `unit` (a missing unit is `""`). For example
 `{"name": "src/drafts.py::save", "value": 3, "unit": "commits"}`. Its `host` row then holds
 `rows`, each with its `name`, `unit`, `value`, `extra`, `last` (the same row's value in the last
@@ -1191,7 +1197,7 @@ without the person, a build's (`build`) apart from a landing's (`landing`), the 
 and `per_change`. `looks`: `seen` (answered `seen`), `checked` (any other answer) and `open`, with
 `seen_share`. `overturned` has no count: no record holds an approver's settled call the person
 overturned, and it is in `unmeasured`, as a factory stop that cleared with nothing changed is. The
-report doesn't show these yet.
+report's *Autonomy* section shows each, with its `n`.
 
 Its `cost` is what the window's factory runs cost, read from each closed change's own commit and
 each dropped change's tip (`runs/costs.jsonl`, and `runs/ejections.jsonl`, which a landing train
@@ -1211,7 +1217,7 @@ dollars. `waste` gives the waste's `usd` and `minutes`, what they are of, their 
 and `waste` each carry `coverage` and `missing_because`, under `built by hand`, `no agent runs
 recorded`, `no cost reported`, and, for `waste`, `runs recorded before purposes`. `changes`, each
 change's own figures, is printed only with `--metrics`. The report's *Coverage* lines say how far
-`cost per landed change` and `waste share` rest; the figures themselves aren't in its body yet.
+`cost per landed change` and `waste share` rest, and its *Cost* section shows the figures.
 
 Its `pipeline` is where the factory's pipeline spends time and takes risks, read from the records
 each factory run left in its change's own commit (the gate records `build/round-<N>.gate.md` and
@@ -1229,9 +1235,10 @@ its `coverage` and `missing_because` under `built by hand` or `no landing record
 gates' attempts (`gates`, `total` and `per_change`); `ejections` by cause (`gate`, `review`,
 `refusal`, `stop`), with a `total` and the changes with any; `bisections`, the distinct red gates
 over a prefix of more than one change, which a train must bisect, counted once though every change
-in the prefix names it; `base_moves`, each change's last `MOVES:` (a train change's is its
+in the prefix names it, with `per_change`; `base_moves`, each change's last `MOVES:` (a train change's is its
 train's: the moves seen while landing, not a train total), with `per_change` and the changes with
-any; `accept_stops`, the attempts in `build/land-accept.md`, each a stop for the person; and
+any; `accept_stops`, the attempts in `build/land-accept.md`, each a stop for the person, with
+`per_change` and the changes with any; and
 `conflicts`, the landing's resolved conflicts (`landing`) and the files ship's `conflicts.md`
 names (`ship`). `depth`: the runs whose last `runs/step.md` says `DEPTH: full` or `light`, with
 `share`, full over both; a run never lightens, so its last reading is its deepest, and a run from
@@ -1240,7 +1247,9 @@ the landings `Sdlc-Landed` says were the factory's (`auto` or `person`), those w
 `unreviewed=` is a count above 0 (`with_paths`, and `paths`, their sum), `unknown`, or 0
 (`none`); a landing from before the field is missing, `unreviewed not recorded`. Mends aren't
 counted here: `autonomy.spurious_stops` gives them, a build's apart from a landing's. `changes`,
-each change's own figures, is printed only with `--metrics`. The report doesn't show these yet.
+each change's own figures, is printed only with `--metrics`. The report's *Speed* section shows the
+gates and the landing, and its *Quality* section the red gates, depth and unreviewed landings, with
+no factory change a sentence saying so.
 
 Its `simplicity.workarounds` counts what the process didn't plan for, from history alone, so
 nobody logs a workaround by hand. Every first-parent commit on the base branch in the window (from
@@ -1273,13 +1282,41 @@ unthemed entry a `Theme:`, on open ideas and bugs only (never a nit, or an entry
 names the seeds it judges no longer wanted for you to retire with `/sdlc:idea`. `sdlc.py
 retro-commit` commits those files and nothing else, as the next retrospective's boundary, and
 refuses a register entry removed or changed beyond those two lines. With them it commits a report
-it writes itself, `.sdlc/retros/<date>.md`, from history alone: the window's cycle time per tier,
-changes closed per week, where the time went (agent against the person's response and away), how
-many changes ran at once and what that did to them, rework, escapes and spend, and the host's
-indicators, rendered from `templates/retro.md` (override it in `.sdlc/templates/`; an override
-without its `## Spend` or `## Indicators` section and their `{{spend}}` and `{{indicators}}` is
-reported as breaking after an update). Its figures are `sdlc.py retro`'s `process` and `spend`
-blocks, which counts changes close couldn't measure but never reads them as zero. The report runs
+it writes itself, `.sdlc/retros/<date>.md`, from history alone, rendered from `templates/retro.md`.
+After the window's sentence it opens with the scorecard (`## Scorecard`): the Value band (work mix,
+time to users, follow-through), the pillar table, and the Trust band (the *Coverage* lines, *What
+changed underneath*, and the signals no record holds). Each pillar's figures then follow in a
+section of its own: *Speed* (cycle time per tier, changes closed per week, where the time went, how
+many changes ran at once and what that did to them, the *By way of building* table and the
+pipeline's gates and landing), *Quality* (escapes, who found what, rework, and the pipeline's red
+gates, depth and unreviewed landings), the host's *Indicators*, *Autonomy*, *Cost*, *Spend* and
+*Simplicity* (the workarounds; in the plugin's own repo, its surface's share, retire candidates,
+footprint and growth too, never in a host's).
+
+`sdlc.py retro`'s `scorecard` is that table: `rows`, each with its `pillar` (Speed, Quality,
+Autonomy, Cost, Simplicity), `role` (`headline` or `guardrail`), `figure`, `unit`, `value`, `n`,
+`last`, `trend` and `note`, and `since`. Each row's value is a figure another block already gives,
+one row a way or tier present where that block gives it only that way: lead time's median by way,
+rework links per closed change, the escape rate, the person's median response by tier, questions
+answered per factory change, the escape rate by way, the median dollars per landed change by tier,
+the surface's share used (the plugin's own repo alone), and the commits outside the loop, records
+edited by hand and register entries restored. A null value reads `—`, with its block's most
+counted `missing_because` reason (`none in the window` without one) as its note, never 0; a greyed
+block's note says `a hint: under half the changes`. `last` is the same row's value in the last
+retrospective's committed report, read back from its table as the indicators are (the escape rate
+keeps `process.escapes`' own `previous` and `trend`), and `trend` is `up`, `down` or `flat`
+against it, `unknown` with no `last` or when either side rests on fewer than five changes. The
+report and the JSON come from one function, so they never disagree.
+
+Override the template in `.sdlc/templates/`: an override without its `## Scorecard`, `## Spend` or
+`## Indicators` section and their `{{scorecard}}`, `{{spend}}` and `{{indicators}}` is reported as
+breaking after an update, since the next retrospective reads the scorecard and indicator tables
+back. The pillar sections (`{{speed}}`, `{{quality}}`, `{{autonomy}}`, `{{cost}}`,
+`{{simplicity}}`) are optional: an override without one just doesn't show it. An override without
+`{{scorecard}}` renders as before, its `{{window}}` holding the Value band, the coverage lines and
+the *By way of building* table, and every older placeholder (`{{cycle}}`, `{{throughput}}`,
+`{{time}}`, `{{capacity}}`, `{{rework}}`, `{{escapes}}`) still filled. Its figures are `sdlc.py
+retro`'s, which counts changes close couldn't measure but never reads them as zero. The report runs
 one host command, `retro.indicators`, as `retro` does, and never `retro.evidence` or
 `retro.test_times`: `## Indicators` names each command in a code span, then its rows as a table
 headed `| Indicator | Unit | Value | Last retrospective | Change |` (a `|` in a cell escaped as

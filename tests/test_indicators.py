@@ -465,6 +465,12 @@ def test_indicator_rows_are_read_from_json_lines() -> None:
          "line 2 repeats a, x"),
         ('{"name": "a", "value": 1}\n{"name": "a", "value": 2, "unit": null}\n',
          "line 2 repeats a"),
+        # 184 R15: a row that would read back from the report as another key.
+        ('{"name": "a", "value": 1, "unit": "—"}\n',
+         "line 1's unit is —, which the report reads as none"),
+        ('{"name": " a", "value": 1}\n', "line 1's name has stray spaces"),
+        ('{"name": "a ", "value": 1}\n', "line 1's name has stray spaces"),
+        ('{"name": "a", "value": 1, "unit": "x "}\n', "line 1's unit has stray spaces"),
     ],
 )  # fmt: skip
 def test_output_that_isnt_rows_passes_through_with_its_reason(text: str, why: str) -> None:
@@ -506,3 +512,19 @@ def test_a_cell_escapes_what_a_table_would_split_on() -> None:
     assert indicators.cell("a|b\\c") == "a\\|b\\\\c"
     assert [indicators.number(v) for v in (3, 3.0, 0.25, -2)] == ["3", "3", "0.25", "-2"]
     assert [indicators.signed(v) for v in (3, -2, 0, 0.5, None)] == ["+3", "−2", "0", "+0.5", "—"]
+
+
+def test_report_rows_reads_any_table_by_its_header_and_key_columns() -> None:
+    """184 R7: one parser reads the indicator table and the scorecard's, each by its own header,
+    keyed by the columns named and reading the column asked for."""
+    head = ("Pillar", "Role", "Figure", "Unit", "Value", "n", "Trend")
+    text = (
+        "| Pillar | Role | Figure | Unit | Value | n | Trend |\n|---|---|---|---|---|---|---|\n"
+        "| Speed | headline | Median lead time, factory | minutes | 76 | 6 | unknown |\n"
+        "| Cost | headline | Median dollars | USD | — | 0 | unknown |\n\n" + TABLE
+    )
+    assert indicators.report_rows(text, head, keys=(0, 2), value=4) == {
+        ("Speed", "Median lead time, factory"): 76, ("Cost", "Median dollars"): None,
+    }  # fmt: skip
+    assert indicators.report_rows(text, head, keys=(0, 2), value=5)[("Cost", "Median dollars")] == 0
+    assert indicators.report_rows(text) == indicators.report_rows(TABLE)

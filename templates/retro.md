@@ -1,42 +1,44 @@
 # Retrospective report
 
 > How the process ran from {{since}} to {{today}}, from the numbers `/sdlc:close` recorded on each
-> `Close` commit, and the host's own figures from its `retro.indicators`. `sdlc.py retro-commit`
-> writes it and commits it with the retrospective; `sdlc.py retro` gives the same figures as its
-> `process` and `spend` blocks and its `architecture.host` rows.
+> `Close` commit, and the host's own figures from its `retro.indicators`. It opens with the
+> scorecard: the Value band, each pillar's headline and guardrail against the last retrospective,
+> and the Trust band; each pillar's figures follow in a section of its own. `sdlc.py retro-commit`
+> writes it and commits it with the retrospective; `sdlc.py retro` gives the same figures, and the
+> next retrospective reads back the scorecard's table and the indicators'.
 
 ## Window
 
 {{window}}
 
-## Cycle time
+## Scorecard
 
-{{cycle}}
+{{scorecard}}
 
-## Throughput
+## Speed
 
-{{throughput}}
+{{speed}}
 
-## Time
+## Quality
 
-{{time}}
+{{quality}}
 
-## Work in progress and capacity
+## Indicators
 
-{{capacity}}
+{{indicators}}
 
-## Rework
+## Autonomy
 
-{{rework}}
+{{autonomy}}
 
-## Escapes
+## Cost
 
-{{escapes}}
+{{cost}}
 
 ## Spend
 
 {{spend}}
 
-## Indicators
+## Simplicity
 
-{{indicators}}
+{{simplicity}}
