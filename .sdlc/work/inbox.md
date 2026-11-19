@@ -512,3 +512,18 @@ Paths: scripts/closing.py
 Cost: S
 Value: low
 Raised by: 172-close-in-steps (contract)
+
+## [2026-11-19-30] [bug] A landing fix the stack already satisfied stops the train
+
+With "yes, with a fix", the train's fix step (land-fix, plugins/factory/scripts/landing.py: "the
+builder changed nothing outside the change's folder: nothing to commit") stops when the builder
+finds nothing to change, and a rerun repeats the same stop: the only way on is train --stop and a
+fresh landing without the fix. Seen landing 173 with fix R1 (rewrap AGENTS.md:74): the stack
+conflicted on AGENTS.md, the resolver's resolution rewrapped the line, and the builder rightly made
+no edit. Expected: a fix the builder reports as already satisfied, with its evidence, is recorded
+as such and the train goes on to the gate and the landing review.
+
+Severity: low
+Paths: plugins/factory/scripts/landing.py
+Introduced by: 104-landing-follows-main
+Theme: landing
