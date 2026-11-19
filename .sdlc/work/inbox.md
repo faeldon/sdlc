@@ -443,3 +443,10 @@ Paths: .sdlc/work/173-style-paydown/checks.md
 Cost: S
 Value: low
 Raised by: 173-style-paydown (correctness)
+
+## [2026-11-19-31] [idea] Waste tagged in costs.jsonl
+
+Scorecard S4: each agent run marked by what it was for (build, rework, red-gate fix, ejected,
+rerun, mend), and retro reports the waste share and cost per landed change. Pillar: Cost.
+Theme: retro
+Raised 2026-11-19.
