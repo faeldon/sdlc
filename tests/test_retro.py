@@ -91,6 +91,7 @@ def _close(
     before: tuple[str, ...] = (),
     based: bool = False,
     reworks: str = "",
+    fixes: str = "",
     rewrite: tuple[str, ...] = (),
     trailers: tuple[str, ...] = (),
     texts: dict[str, str] | None = None,
@@ -100,7 +101,7 @@ def _close(
     one, without its folder. `based` writes where the change started on the `Close`, as close
     does. Each file gets the change's name appended, but those in `rewrite`, which it replaces
     whole. `reworks` is the intent's line; `trailers` go on the `Close`; `texts` are files the
-    change's own commit writes whole, beside the rest."""
+    change's own commit writes whole, beside the rest. `fixes` is the intent's `fixes:` line."""
     start = _git(root, "rev-parse", "HEAD")
     when = f"{closed}T12:00:00"
     for rel in before:
@@ -120,6 +121,8 @@ def _close(
         text = text.replace("idea:\n", f'idea: "{idea}"\n', 1)
     if reworks:
         text = text.replace("idea:", f"reworks: {reworks}\nidea:", 1)
+    if fixes:
+        text = text.replace("idea:", f"fixes: {fixes}\nidea:", 1)
     (folder / "intent.md").write_text(text, encoding="utf-8")
     for rel in (*(files or (f"{slug}.txt",)), *rewrite):
         path = root / rel
@@ -541,6 +544,14 @@ def test_a_fixed_bug_s_introducer_is_rework_merged_with_a_declared_link(tmp_path
         "001-reopen-drafts": ["reworks", "bug 2026-10-05-1"],
         "002-draft-titles": ["bug 2026-10-06-1"],
     }
+
+
+def test_a_closed_change_carries_its_fixes_line(tmp_path: Path) -> None:
+    """168 R4: read as text, as `reworks:` is; [] with no line."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", fixes="[2026-10-01-1, 2026-10-02-1]")
+    _close(root, "002-draft-sync")
+    assert [c["fixes"] for c in _retro(root)["changes"]] == [["2026-10-01-1", "2026-10-02-1"], []]
 
 
 def test_counts_tiers_impacts_and_what_history_cannot_measure(tmp_path: Path) -> None:
@@ -2111,6 +2122,11 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     assert not (root / "ran").exists(), "the report runs none of the host's commands"
     assert "| 2 | 1 | 1h 16m | 1h 16m | 40m | 1 |" in text
     assert "1 of them were measured" in text and "1 weren't" in text
+    # 168 R10: the Value band's figures, from the same function as the JSON's.
+    mix, ttu = out["work_mix"], out["time_to_users"]
+    assert f"debt {mix['classes']['debt']} (100%), of {mix['n']} classed changes" in text
+    assert f"{ttu['why']['unreleased']} not yet released" in text
+    assert f"{ttu['releases']} releases in the window" in text
     assert sdlc.retro.cmd_retro(root, report=True) == 0
     assert capsys.readouterr().out.startswith("# Retrospective report\n")
     assert not (root / "ran").exists()
@@ -2432,3 +2448,297 @@ def test_the_report_shows_lead_time_under_cycle_time() -> None:
     assert "ready and waiting 40% (of 1)" in text and "1 change has no lead time" in text
     alone = sdlc.retro.render_report(template, _views([_led("001-a", 1, "manual", {"lead": 30})]))
     assert "| 1 | manual | 1 | 30m | 30m |" in alone and "Median elapsed" not in alone
+
+
+# ---------------------------------------------------------------- the Value band (168)
+
+
+def _filed(root: Path, text: str) -> None:
+    """The register on the base branch, committed as `inbox-commit` would."""
+    register = root / ".sdlc" / "work" / "inbox.md"
+    register.parent.mkdir(parents=True, exist_ok=True)
+    register.write_text(text, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File seeds")
+
+
+SEEDS = (
+    "# Inbox\n\n"
+    "## [2026-10-01-1] [bug] Drafts vanish\n\nWhat happens.\n\nSeverity: high\n\n"
+    "## [2026-10-01-2] [nit] A small thing\n\nTheme: style\nCost: S\nValue: low\n\n"
+    "## [2026-10-01-3] [idea] Tidy the drafts code\n\nWhy.\n\nTheme: refactor\n\n"
+)
+
+
+def test_work_mix_classes_each_change_by_its_first_signal(tmp_path: Path) -> None:
+    """168 R1: fix, capability, process, debt, the first rule that applies; the rest in `also`."""
+    root = _repo(tmp_path)
+    _filed(root, SEEDS)
+    _close(root, "001-fix-by-fixes", fixes="2026-10-01-1")
+    _close(root, "002-new-thing", impact="minor")
+    _close(root, "003-rework-it", reworks="002")
+    _close(root, "004-bug-seed", idea="2026-10-01-1")
+    _close(root, "005-process", files=(".sdlc/SDLC.md",))
+    _close(root, "006-nit-seed", idea="2026-10-01-2")
+    _close(root, "007-theme-seed", idea="2026-10-01-3", impact="none")
+    _close(root, "008-small", impact="patch")
+    _close(root, "009-mixed", fixes="2026-10-01-1", impact="minor")
+    work = {c["name"]: c["work"] for c in _retro(root)["changes"]}
+    assert {n: w["class"] for n, w in work.items()} == {
+        "001-fix-by-fixes": "fix", "002-new-thing": "capability", "003-rework-it": "fix",
+        "004-bug-seed": "fix", "005-process": "process", "006-nit-seed": "debt",
+        "007-theme-seed": "debt", "008-small": "debt", "009-mixed": "fix",
+    }  # fmt: skip
+    assert {n: w["by"] for n, w in work.items()} == {
+        "001-fix-by-fixes": "fixes", "002-new-thing": "impact: minor", "003-rework-it": "reworks",
+        "004-bug-seed": "bug seed", "005-process": "process paths", "006-nit-seed": "nit seed",
+        "007-theme-seed": "theme: refactor", "008-small": "impact: patch", "009-mixed": "fixes",
+    }  # fmt: skip
+    assert work["009-mixed"]["also"] == ["capability"]
+    assert work["005-process"]["also"] == ["debt"]
+    assert work["002-new-thing"]["also"] == []
+
+
+def test_work_mix_counts_an_unreadable_impact_as_unmeasured_never_a_class(tmp_path) -> None:
+    """168 R2: classed changes in `n` and the shares; an unreadable impact with nothing else
+    is `unmeasured`, in no class and no share."""
+    root = _repo(tmp_path)
+    _close(root, "001-new-thing", impact="minor")
+    _close(root, "002-small", impact="patch")
+    _close(root, "003-mixed", impact="minor", fixes="2026-10-01-1")
+    _close(root, "004-unknown", impact="sometime")
+    out = _retro(root)
+    assert out["changes"][3]["work"] == {"class": None, "by": None, "also": []}
+    assert out["work_mix"] == {
+        "n": 3, "unmeasured": 1, "mixed": 1,
+        "classes": {"fix": 1, "capability": 1, "process": 0, "debt": 1},
+        "shares": {"fix": 0.33, "capability": 0.33, "process": 0.0, "debt": 0.33},
+    }  # fmt: skip
+
+
+def test_work_mix_shares_are_null_with_nothing_classed(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-unknown", impact="sometime")
+    mix = _retro(root)["work_mix"]
+    assert (mix["n"], mix["unmeasured"], mix["shares"]) == (0, 1, None)
+
+
+def test_a_change_touching_only_the_process_is_process_work(tmp_path: Path) -> None:
+    """168 R3: git's quoted path for a non-ASCII process doc is unquoted before it is compared,
+    and a change touching only its own folder is not process work."""
+    root = _repo(tmp_path)
+    _config(root, '[docs]\nprocess = "docs/Prozeß.md"\n')
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "config")
+    _close(root, "001-host-dir", files=(".sdlc/SDLC.md",))
+    _close(root, "002-named-doc", files=("docs/Prozeß.md",))
+    _close(root, "003-own-folder", files=(".sdlc/work/003-own-folder/notes.md",))
+    work = {c["name"]: c["work"]["class"] for c in _retro(root)["changes"]}
+    assert work == {"001-host-dir": "process", "002-named-doc": "process",
+                    "003-own-folder": "debt"}  # fmt: skip
+
+
+def _released(root: Path, tag: str, when: str) -> None:
+    _git(root, "tag", "-a", tag, "-m", tag, when=when)
+
+
+def test_time_to_users_is_the_median_from_close_to_the_first_release(tmp_path: Path) -> None:
+    """168 R5: from each `Close` to the first release tag holding it, in days to one place."""
+    root = _repo(tmp_path)
+    _released(root, "v0.9.0", "2026-09-01T12:00:00")
+    _record(root, "2026-09-30")
+    _close(root, "001-reopen-drafts", closed="2026-10-02")
+    _close(root, "002-draft-sync", closed="2026-10-03")
+    _released(root, "v1.0.0", "2026-10-04T12:00:00")
+    _close(root, "003-draft-titles", closed="2026-10-05")
+    _released(root, "v1.1.0", "2026-10-06T00:00:00")
+    assert _retro(root)["time_to_users"] == {
+        "n": 3, "median_days": 1.0, "unmeasured": 0, "why": {}, "releases": 2,
+    }  # fmt: skip
+
+
+def test_an_unreleased_change_is_counted_apart_from_time_to_users(tmp_path: Path) -> None:
+    """168 R6: in `unmeasured` under `why`, never read as zero days."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", closed="2026-10-02")
+    released = _retro(root)["time_to_users"]
+    assert (released["n"], released["median_days"]) == (0, None)
+    assert released["why"] == {"unreleased": 1} and released["unmeasured"] == 1
+    _released(root, "v1.0.0", "2026-10-05T12:00:00")
+    _close(root, "002-draft-sync", closed="2026-10-06")
+    ttu = _retro(root)["time_to_users"]
+    assert (ttu["n"], ttu["median_days"], ttu["unmeasured"]) == (1, 3.0, 1)
+    assert ttu["why"] == {"unreleased": 1} and ttu["releases"] == 1
+
+
+def _retrospective(root: Path, day: str, direction: str, register: str | None = None) -> None:
+    """A `Retrospective` commit holding the direction doc and, when given, the register, as
+    `retro-commit` writes them."""
+    (root / ".sdlc").mkdir(exist_ok=True)
+    (root / ".sdlc" / "DIRECTION.md").write_text(direction, encoding="utf-8")
+    if register is not None:
+        (root / ".sdlc" / "work").mkdir(parents=True, exist_ok=True)
+        (root / ".sdlc" / "work" / "inbox.md").write_text(register, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"Retrospective {day}")
+
+
+def _seed(sid: str, title: str) -> str:
+    return f"## [{sid}] [idea] {title}\n\nWhy.\n\n"
+
+
+def test_follow_through_scores_the_last_retrospective_s_seeds(tmp_path: Path) -> None:
+    """168 R7: the seeds the last retrospective added, each done, dropped, carried or vanished;
+    never one already in the register before it."""
+    root = _repo(tmp_path)
+    _filed(root, "# Inbox\n\n" + _seed("2026-09-01-1", "Already here"))
+    titles = ("Built", "Retired", "Still open", "Deleted by hand")
+    added = "".join(_seed(f"2026-10-10-{n}", t) for n, t in enumerate(titles, 1))
+    _retrospective(root, "2026-10-10", "# Direction\n",
+                   "# Inbox\n\n" + _seed("2026-09-01-1", "Already here") + added)  # fmt: skip
+    _close(root, "001-reopen-drafts", idea="2026-10-10-1", closed="2026-10-12")
+    register = root / ".sdlc" / "work" / "inbox.md"
+    text = register.read_text(encoding="utf-8")
+    register.write_text(text.replace(_seed("2026-10-10-2", "Retired"), ""), encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "File 2026-10-13-1; Retire 2026-10-10-2",
+         "-m", "Reason 2026-10-10-2: duplicate")  # fmt: skip
+    text = register.read_text(encoding="utf-8")
+    register.write_text(text.replace(_seed("2026-10-10-4", "Deleted by hand"), ""), "utf-8")
+    _git(root, "commit", "-q", "-am", "tidy the register")
+    ft = _retro(root)["follow_through"]
+    assert ft["since"] == "2026-10-10"
+    seeds = ft["seeds"]
+    assert seeds["rows"] == [
+        {"id": "2026-10-10-1", "verdict": "done", "change": "001-reopen-drafts"},
+        {"id": "2026-10-10-2", "verdict": "dropped"},
+        {"id": "2026-10-10-3", "verdict": "carried"},
+        {"id": "2026-10-10-4", "verdict": "vanished"},
+    ]
+    assert {k: seeds[k] for k in ("n", "done", "dropped", "carried", "vanished")} == {
+        "n": 4, "done": 1, "dropped": 1, "carried": 1, "vanished": 1,
+    }  # fmt: skip
+    assert ft["milestones"]["n"] == 0
+    assert (ft["n"], ft["share"], ft["unmeasured"]) == (4, 0.5, 0)
+    assert any("intent titles" in m for m in ft["missing"])
+
+
+DIRECTION_THEN = """\
+# Direction
+
+## Milestones
+
+### ~~M0. Long done~~ Done: before
+
+### M1. Finished
+
+### M2. Given up
+
+### M3. Rethought
+
+### M4. Forgotten
+
+### M5. Built
+
+Groups: 001, "Reopen drafts"
+
+### M6. Lost track
+
+Groups: 099
+
+### M7. Under way
+
+Groups: 001, "Still waiting"
+"""
+
+DIRECTION_NOW = """\
+# Direction
+
+## Milestones
+
+### ~~M0. Long done~~ Done: before
+
+### ~~M1. Finished~~ Done: shipped
+
+### ~~M2. Given up~~ Dropped: not worth it
+
+### ~~M3. Rethought~~ Revised → M8: smaller
+
+### M5. Built
+
+Groups: 001, "Reopen drafts"
+
+### M6. Lost track
+
+Groups: 099
+
+### M7. Under way
+
+Groups: 001, "Still waiting"
+
+### M8. Smaller
+"""
+
+
+def test_follow_through_scores_the_milestones_open_at_the_last_retrospective(tmp_path) -> None:
+    """168 R8: struck Done is done, Dropped or Revised dropped, missing vanished; every grouped
+    row closed or shipped is done; an unknown change is unmeasured; the rest carried."""
+    root = _repo(tmp_path)
+    _retrospective(root, "2026-10-10", DIRECTION_THEN,
+                   "# Inbox\n\n" + _seed("2026-10-09-1", "Still waiting"))  # fmt: skip
+    _close(root, "001-reopen-drafts", idea="Reopen drafts", closed="2026-10-12")
+    (root / ".sdlc" / "DIRECTION.md").write_text(DIRECTION_NOW, encoding="utf-8")
+    _git(root, "commit", "-q", "-am", "Strike the milestones")
+    ft = _retro(root)["follow_through"]
+    milestones = ft["milestones"]
+    assert [(r["id"], r["verdict"]) for r in milestones["rows"]] == [
+        ("M1", "done"), ("M2", "dropped"), ("M3", "dropped"), ("M4", "vanished"),
+        ("M5", "done"), ("M6", "unmeasured"), ("M7", "carried"),
+    ]  # fmt: skip
+    assert {k: milestones[k] for k in ("n", "done", "dropped", "carried", "vanished")} == {
+        "n": 6, "done": 2, "dropped": 2, "carried": 1, "vanished": 1,
+    }  # fmt: skip
+    assert ft["unmeasured"] == 1
+    assert ft["seeds"]["rows"] == [{"id": "2026-10-09-1", "verdict": "carried"}]
+    assert (ft["n"], ft["share"]) == (7, 0.57), "six milestones and one seed; 4 kept"
+
+
+def test_without_an_earlier_retrospective_follow_through_is_unmeasured_not_zero(tmp_path) -> None:
+    """168 R9: nothing to follow through on is null, never a zero share."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    ft = _retro(root)["follow_through"]
+    assert ft["since"] is None and ft["n"] == 0
+    assert ft["share"] is None and ft["seeds"] is None and ft["milestones"] is None
+    assert any("no earlier retrospective" in m for m in ft["missing"])
+
+
+def test_the_report_shows_the_value_figures_in_its_window(tmp_path: Path) -> None:
+    """168 R10: one sentence each for work mix, time to users and follow-through, after the
+    window paragraph, each with its `n` and what it left out."""
+    root = _repo(tmp_path)
+    _retrospective(root, "2026-10-01", "# Direction\n\n## Milestones\n\n### M1. Drafts\n",
+                   "# Inbox\n\n" + _seed("2026-09-30-1", "Reopen drafts"))  # fmt: skip
+    _close(root, "001-reopen-drafts", impact="minor", idea="2026-09-30-1", closed="2026-10-02")
+    _close(root, "002-draft-sync", closed="2026-10-03")
+    _released(root, "v1.0.0", "2026-10-04T12:00:00")
+    _close(root, "003-draft-titles", impact="sometime", closed="2026-10-05")
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    window = text.split("## Window\n", 1)[1].split("\n## ", 1)[0]
+    assert window.index("From 2026-10-01 to 2026-10-24") < window.index("Work mix:")
+    assert (
+        "Work mix: capability 1 (50%), debt 1 (50%), of 2 classed changes; 1 not classed." in window
+    )
+    assert (
+        "Time to users: a median 1.5 days from landing to release, over 2 changes; 1 not yet "
+        "released. 1 releases in the window." in window
+    )
+    assert (
+        "Follow-through on the retrospective of 2026-10-01: 1 of 2 done or dropped (50%), seeds 1 "
+        "of 1 and milestones 0 of 1; intent titles aren't recorded." in window
+    )
+
+
+def test_without_a_value_band_the_window_is_as_before() -> None:
+    process = _views([])
+    text = sdlc.retro.render_report("{{window}}", process)
+    assert "Work mix" not in text and "Time to users" not in text

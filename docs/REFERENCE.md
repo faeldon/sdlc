@@ -995,6 +995,31 @@ is; and `measured` and `unmeasured`, the changes with and without the line, whic
 It sits beside `process.cycle`'s `elapsed`, which is unchanged, and the report shows it under the
 *Cycle time* table.
 
+Three figures say whether the work was aimed right, each with its `n` and what it left out,
+never a zero for missing data, and the report gives one sentence each under *Window*, from the
+same function as the JSON. `work_mix` classes each closed change once, as its record's `work`
+(`class`, the signal it was classed `by`, and `also`, the other classes whose rules applied):
+`fix` when its intent's `fixes:` names a bug, its `reworks:` names a change, or a seed its `idea:`
+names was a `[bug]` in the register at its base; else `capability` for `impact: major|minor`;
+else `process` when every path it touched, past the change folders, the register and
+`.sdlc/setup.json`, is under `.sdlc/` or is the configured process, review or policy doc; else
+`debt` for a seed that was a `[nit]` or has a theme among the guide's nit themes (`docs`,
+`refactor`, `robustness`, `tests`, `style`), or `impact: patch|none`. It counts each class and its
+share of `n`, the changes classed; `unmeasured` are those no rule classes (an unreadable impact
+and nothing else), in no share, and `mixed` those with an `also`. `time_to_users` is the median
+days, to one place, from each change's `Close` commit to the creation of the first release tag
+holding it, over the `n` released; a change no release holds yet is counted under `why` as
+`unreleased`, one whose tag has no readable date as `no date`, and `releases` is the window's
+release tags. `follow_through` scores the last retrospective's plans: the seeds its commit added
+to the register, each `done` (a change in the window names it on `idea:` or `fixes:`), `dropped`
+(an `inbox-commit` subject since says `Retire` with its id), `carried` (still in the register) or
+`vanished` (gone with neither); and the milestones open in its direction doc, `done` when struck
+Done or when every change and seed they group has closed or shipped, `dropped` when struck
+Dropped or Revised, `vanished` when gone from the doc, unmeasured when a grouped change is
+unknown, and `carried` otherwise. `share` is done and dropped over the `n` scored. `missing` names
+each source that couldn't be read, and always the intent titles a retrospective proposes, which
+nothing records; with no earlier retrospective `since`, `share`, `seeds` and `milestones` are null.
+
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
 A path is tests when a directory in it is `test`, `tests`, `spec` or `__tests__`, or its name

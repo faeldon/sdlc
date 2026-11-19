@@ -67,6 +67,11 @@ What `retro` gives:
   `rework` and `escapes`. The four timed views rest on `measured` alone, null with none: never
   read as zero. `report`: the path `retro-commit` writes them to, rendered from
   `templates["retro.md"]`; `sdlc.py retro --report` prints it.
+- `work_mix`, `time_to_users` and `follow_through`: whether the work was aimed right. Each
+  change's `work` class (fix, capability, process or debt) and the shares; the median days from
+  landing to release, the unreleased apart; and how many of the last retrospective's seeds and
+  milestones were done or dropped, against carried or vanished. Each has its `n` and what it left
+  out (`unmeasured`, `why`, `missing`), null where nothing could be read: never read as zero.
 - `entries`: the register's open ideas and bugs this retrospective may re-rank, each with its
   `priority` and `theme` as they stand. Nits (their `Cost:` and `Value:` rank them) and entries
   being built (their change's) are left out.

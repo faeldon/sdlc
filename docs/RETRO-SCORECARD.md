@@ -64,7 +64,8 @@ The pillars measure how work is done. This band measures what it is spent on.
   machinery itself, or mostly on fixes, is worth knowing about, whichever is intended.
 - **Where:** each change's `impact:` (`minor` and above is capability), its seed's tag (`[bug]`,
   `[nit]`, `[idea]`), its `fixes:` and `reworks:` lines, and its theme.
-- **Status:** needs S2.
+- **Status:** captured (S2, 168): each change's `work` class and `work_mix`'s counts and shares,
+  with the unclassed apart.
 
 ### Outcomes moved
 - **What:** each product outcome (O1–O6) scored done, carried, revised or dropped, with the
@@ -79,14 +80,16 @@ The pillars measure how work is done. This band measures what it is spent on.
 - **Why:** a landed change helps nobody until it is released. Work that lands fast and waits weeks
   for a release isn't fast.
 - **Where:** each change's `release` (the first tag holding it) and its `Close` commit's time.
-- **Status:** partly (`release` is captured; the time between isn't computed). Needs S13.
+- **Status:** captured (S13, 168): `time_to_users`'s median days and `releases`, the unreleased
+  counted apart.
 
 ### Last retro's follow-through
 - **What:** of the seeds, milestones and intents the last retrospective proposed, the share now
   done or dropped, against carried or vanished.
 - **Why:** a retrospective whose recommendations don't happen is cost without value.
 - **Where:** `direction.milestones`, the register, the last report.
-- **Status:** partly (milestones are scored). Needs S12.
+- **Status:** captured (S12, 168) for seeds and milestones: `follow_through`'s verdicts and
+  share. Intents aren't: nothing records the titles a retrospective proposes.
 
 ## Pillar 1: Speed. Are we shipping new capability quickly?
 

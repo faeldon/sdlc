@@ -321,6 +321,17 @@ def _uncited(items: list[dict], outcomes: list[dict]) -> list[dict]:
     return rows
 
 
+def _register_at(home: Path, base: str | None, cache: dict[str, list[dict]]) -> list[dict]:
+    """The register's entries as `base` held them, read once a base into `cache`; [] with no
+    base."""
+    if not base:
+        return []
+    if base not in cache:
+        rel = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
+        cache[base] = sdlc.parse_entries(sdlc._git(home, "show", f"{base}:{rel}") or "")
+    return cache[base]
+
+
 def _none_themes(home: Path, changes: list[dict], bases: dict[str, str | None]) -> list[dict]:
     """The closed changes serving no outcome, by the `Theme:` of the seeds their `idea:` names, as
     the register held them at each change's base: ship deletes a change's seeds on its branch, so
@@ -332,11 +343,7 @@ def _none_themes(home: Path, changes: list[dict], bases: dict[str, str | None]) 
     for rec in changes:
         if rec["serves"] != ["none"]:
             continue
-        base = bases.get(rec["name"])
-        if base and base not in registers:
-            rel = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
-            registers[base] = sdlc.parse_entries(sdlc._git(home, "show", f"{base}:{rel}") or "")
-        entries = registers.get(base or "", [])
+        entries = _register_at(home, bases.get(rec["name"]), registers)
         themes: list[str] = []
         for ref in sdlc.ideas_of(rec):
             for e in entries:
@@ -350,6 +357,266 @@ def _none_themes(home: Path, changes: list[dict], bases: dict[str, str | None]) 
          "recurring": theme != sdlc.NO_THEME and len(names) >= NONE_THEME_RECURS}
         for theme, names in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     ]  # fmt: skip
+
+
+# A landed change's work class, the first of these whose rule applies (`_work_class()`).
+WORK_CLASSES = ("fix", "capability", "process", "debt")
+
+
+# The guide's nit themes (`guide/process.md`, *Nits*): the plugin's own words for small debt.
+DEBT_THEMES = ("docs", "refactor", "robustness", "tests", "style")
+
+
+def _is_process(home: Path, cfg: dict, paths: list[str]) -> bool:
+    """Whether every path a change touched, past the change folders, the register and setup's
+    record, is under `.sdlc/` or is the configured process, review or policy doc; at least one.
+    git's quoted paths are unquoted and the docs compared `as_posix()`, so a non-ASCII name
+    matches."""
+    skip = {f"{sdlc.work_rel(home)}/{sdlc.INBOX}", sdlc.MANIFEST}
+    docs = {
+        Path(rel).as_posix()
+        for rel in (cfg["docs"][k] for k in ("process", "review", "policy"))
+        if rel and not Path(rel).is_absolute()
+    }
+    own = [indicators._unquote(p) for p in paths]
+    own = [p for p in own if not p.startswith(sdlc.CHANGE_FOLDERS) and p not in skip]
+    return bool(own) and all(p.startswith(f"{sdlc.HOST_DIR}/") or p in docs for p in own)
+
+
+def _work_class(rec: dict, seeds: list[dict], process: bool) -> dict:
+    """A change's `{class, by, also}`: the first class in WORK_CLASSES whose rule applies, the
+    signal that decided it, and the other classes whose rules applied too. All None (`also` [])
+    when none does. `seeds` are the register's entries its `idea:` and `fixes:` name, as its base
+    held them."""
+    impact = rec.get("impact") or ""
+    signals: list[tuple[str, str]] = []
+    if rec.get("fixes"):
+        signals.append(("fix", "fixes"))
+    if rec.get("reworks"):
+        signals.append(("fix", "reworks"))
+    if any(sdlc.is_bug(e) for e in seeds):
+        signals.append(("fix", "bug seed"))
+    if impact in ("major", "minor"):
+        signals.append(("capability", f"impact: {impact}"))
+    if process:
+        signals.append(("process", "process paths"))
+    if any(sdlc.is_nit(e) for e in seeds):
+        signals.append(("debt", "nit seed"))
+    theme = next((t for e in seeds if (t := sdlc.entry_theme(e)) in DEBT_THEMES), None)
+    if theme:
+        signals.append(("debt", f"theme: {theme}"))
+    if impact in ("patch", "none"):
+        signals.append(("debt", f"impact: {impact}"))
+    if not signals:
+        return {"class": None, "by": None, "also": []}
+    first, by = signals[0]
+    return {"class": first, "by": by,
+            "also": list(dict.fromkeys(c for c, _ in signals if c != first))}  # fmt: skip
+
+
+def _work_mix(
+    home: Path,
+    cfg: dict,
+    changes: list[dict],
+    bases: dict[str, str | None],
+    paths: dict[str, list[str]],
+) -> dict:
+    """Each change's `work`, set on its record, and the window's mix: `n` classed, `unmeasured`
+    no rule classes, the count and share of each class against `n` (shares None at 0), and
+    `mixed`, the changes more than one rule applied to."""
+    registers: dict[str, list[dict]] = {}
+    for rec in changes:
+        refs = [*sdlc.ideas_of(rec), *(rec.get("fixes") or [])]
+        entries = _register_at(home, bases.get(rec["name"]), registers) if refs else []
+        seeds = [e for e in entries if any(sdlc.ref_matches(r, e) for r in refs)]
+        process = _is_process(home, cfg, paths.get(rec["name"]) or [])
+        rec["work"] = _work_class(rec, seeds, process)
+    counts = Counter(rec["work"]["class"] for rec in changes if rec["work"]["class"])
+    n = sum(counts.values())
+    return {
+        "n": n,
+        "unmeasured": len(changes) - n,
+        "classes": {c: counts[c] for c in WORK_CLASSES},
+        "shares": {c: round(counts[c] / n, 2) for c in WORK_CLASSES} if n else None,
+        "mixed": sum(bool(rec["work"]["also"]) for rec in changes),
+    }
+
+
+def _tag_times(home: Path, cfg: dict) -> dict[str, str]:
+    """Each release tag's creation time, ISO 8601, from one `for-each-ref`."""
+    pattern = cfg["release"]["tag"].replace("{version}", "*")
+    fmt = "--format=%(refname:short)%00%(creatordate:iso-strict)"
+    listed = sdlc._git(home, "for-each-ref", f"refs/tags/{pattern}", fmt) or ""
+    return dict(line.split("\x00", 1) for line in listed.splitlines() if "\x00" in line)
+
+
+def _time_to_users(home: Path, cfg: dict, since: dict | None, changes: list[dict]) -> dict:
+    """How long users waited: the median days, to one place, from each change's `Close` to the
+    first release tag holding it (0 for a tag made before it), over the `n` released. A change no
+    release holds, or whose tag's time can't be read, is `unmeasured`, by reason under `why`,
+    never zero days. `releases` is the release tags in the window."""
+    times = _tag_times(home, cfg)
+    gaps: list[float] = []
+    why: Counter = Counter()
+    for rec in changes:
+        tag = rec["release"] if "release" in rec else _release_of(home, cfg, rec["sha"])
+        if not tag:
+            why["unreleased"] += 1
+            continue
+        try:
+            gap = datetime.fromisoformat(times[tag]) - datetime.fromisoformat(rec["close_at"])
+        except (KeyError, TypeError, ValueError):
+            why["no date"] += 1
+            continue
+        gaps.append(round(max(gap.total_seconds(), 0) / 86400, 1))
+    return {
+        "n": len(gaps),
+        "median_days": round(statistics.median(gaps), 1) if gaps else None,
+        "unmeasured": sum(why.values()),
+        "why": dict(why),
+        "releases": len(sdlc._release_tags(home, cfg, since)),
+    }
+
+
+# What follow-through can never score: Step 7 of the retro skill only reports its intent titles.
+NO_INTENTS = "the intent titles a retrospective proposes: nothing records them"
+
+
+# A follow-through verdict, in the order its counts are given.
+FOLLOWED = ("done", "dropped", "carried", "vanished")
+
+
+def _followed(rows: list[dict]) -> dict:
+    """A kind's follow-through: `n` the rows scored, each verdict's count, and the rows."""
+    counts = Counter(r["verdict"] for r in rows)
+    return {"n": sum(counts[v] for v in FOLLOWED), **{v: counts[v] for v in FOLLOWED},
+            "rows": rows}  # fmt: skip
+
+
+def _retired_ids(home: Path, since: str, trunk: str) -> set[str]:
+    """Every id a `Retire` part of a first-parent subject since `since` names: `inbox-commit`'s
+    `File a; Retire b, c`."""
+    log = sdlc._git(home, "log", "--first-parent", "--format=%s", f"{since}..{trunk}") or ""
+    return {
+        ident.strip()
+        for subject in log.splitlines()
+        for part in subject.split("; ")
+        if part.startswith("Retire ")
+        for ident in part[len("Retire ") :].split(",")
+    }
+
+
+def _seed_follow(
+    home: Path, since: dict, trunk: str, changes: list[dict], missing: list[str]
+) -> dict | None:
+    """The seeds the retrospective at `since` added to the register, each `done` (a change in the
+    window names it), `dropped` (a `Retire` subject since names it), `carried` (still in the
+    register) or `vanished`. None, and a line in `missing`, when its register can't be read."""
+    rel = f"{sdlc.work_rel(home)}/{sdlc.INBOX}"
+    at = sdlc._git(home, "show", f"{since['sha']}:{rel}")
+    if at is None:
+        missing.append(f"the register at the retrospective ({rel})")
+        return None
+    before = sdlc._git(home, "show", f"{since['sha']}^:{rel}") or ""
+    known = {e["id"] for e in sdlc.parse_entries(before)}
+    retired = _retired_ids(home, since["sha"], trunk)
+    current = {e["id"] for e in sdlc.inbox_entries(home)}
+    rows = []
+    for e in sdlc.parse_entries(at):
+        if e["id"] in known:
+            continue
+        by = next(
+            (c["name"] for c in changes
+             if any(sdlc.ref_matches(r, e) for r in [*sdlc.ideas_of(c), *(c.get("fixes") or [])])),
+            None,
+        )  # fmt: skip
+        if by:
+            rows.append({"id": e["id"], "verdict": "done", "change": by})
+        else:
+            verdict = (
+                "dropped" if e["id"] in retired else "carried" if e["id"] in current else "vanished"
+            )
+            rows.append({"id": e["id"], "verdict": verdict})
+    return _followed(rows)
+
+
+def _milestone_follow(
+    home: Path, cfg: dict, since: dict, trunk: str, missing: list[str]
+) -> dict | None:
+    """The milestones open in the direction doc at `since`, each by the first that holds: struck
+    now (`done` for Done, `dropped` for Dropped or Revised), gone from the doc (`vanished`), every
+    grouped row closed or shipped (`done`), an unknown change among them (`unmeasured`, in no
+    count), else `carried`. None, and a line in `missing`, when that doc can't be read."""
+    rel = cfg["docs"]["direction"]
+    text = sdlc._git(home, "show", f"{since['sha']}:{rel}") if rel else None
+    if text is None:
+        missing.append(f"the direction doc at the retrospective ({rel or 'not configured'})")
+        return None
+    then = [
+        i for i in sdlc.direction_items(text)["items"]
+        if i["kind"] == "milestone" and i["status"] == "open"
+    ]  # fmt: skip
+    now = {i["id"]: i for i in sdlc.direction_items(sdlc._direction_text(home, cfg))["items"]}
+    still = [now[i["id"]] for i in then if now.get(i["id"], {}).get("status") == "open"]
+    open_names = [p.name for p in sdlc.change_dirs(home)]
+    grouped = sdlc._milestone_verdicts(home, still, open_names, trunk) if still else {}
+    rows = []
+    for item in then:
+        cur = now.get(item["id"])
+        found = grouped.get(item["id"]) or []
+        if cur is None:
+            verdict = "vanished"
+        elif cur["status"] == "done":
+            verdict = "done"
+        elif cur["status"] in ("dropped", "revised"):
+            verdict = "dropped"
+        elif found and all(r["verdict"] in ("closed", "shipped") for r in found):
+            verdict = "done"
+        elif any(r["kind"] == "change" and r["verdict"] == "unknown" for r in found):
+            verdict = "unmeasured"
+        else:
+            verdict = "carried"
+        rows.append({"id": item["id"], "verdict": verdict})
+    return _followed(rows)
+
+
+def _follow_through(home: Path, cfg: dict, since: dict | None, changes: list[dict]) -> dict:
+    """Whether the last retrospective's plans were kept: its seeds and the milestones open at it,
+    `share` (done + dropped) over the `n` scored, `unmeasured` the milestones that couldn't be,
+    and under `missing` each source that couldn't be read, its intent titles always. With no
+    earlier retrospective, every figure is null and `n` 0."""
+    missing = [NO_INTENTS]
+    if not since:
+        return {"since": None, "n": 0, "share": None, "unmeasured": 0, "seeds": None,
+                "milestones": None,
+                "missing": ["no earlier retrospective to follow through on", *missing]}  # fmt: skip
+    trunk = cfg["git"]["base"]
+    seeds = _seed_follow(home, since, trunk, changes, missing)
+    milestones = _milestone_follow(home, cfg, since, trunk, missing)
+    kinds = [k for k in (seeds, milestones) if k]
+    n = sum(k["n"] for k in kinds)
+    kept = sum(k["done"] + k["dropped"] for k in kinds)
+    unmeasured = sum(r["verdict"] == "unmeasured" for r in (milestones or {}).get("rows", []))
+    return {"since": since["date"], "n": n, "share": round(kept / n, 2) if n else None,
+            "unmeasured": unmeasured, "missing": missing, "seeds": seeds,
+            "milestones": milestones}  # fmt: skip
+
+
+def value_band(
+    home: Path,
+    cfg: dict,
+    since: dict | None,
+    changes: list[dict],
+    bases: dict[str, str | None],
+    paths: dict[str, list[str]],
+) -> dict:
+    """The Value band's figures, the one function `retro()` and `retro_report()` both call: work
+    mix (setting each change's `work`), time to users and follow-through."""
+    return {
+        "work_mix": _work_mix(home, cfg, changes, bases, paths),
+        "time_to_users": _time_to_users(home, cfg, since, changes),
+        "follow_through": _follow_through(home, cfg, since, changes),
+    }
 
 
 # The totals a retrospective compares, as medians per tier and way of running.
@@ -863,10 +1130,58 @@ def _sources_text(sources: dict[str, dict], catches: dict | None = None) -> str:
     return text
 
 
-def render_report(template: str, process: dict, spend: dict | None = None) -> str:
+def _pct(share: float) -> str:
+    return f"{round(share * 100)}%"
+
+
+def _value_text(value: dict) -> str:
+    """`value_band()`'s figures as three sentences, each with its `n` and what it left out."""
+    mix, ttu, ft = value["work_mix"], value["time_to_users"], value["follow_through"]
+    classed = sorted(
+        (c for c in WORK_CLASSES if mix["classes"][c]),
+        key=lambda c: (-mix["classes"][c], WORK_CLASSES.index(c)),
+    )
+    shown = ", ".join(f"{c} {mix['classes'][c]} ({_pct(mix['shares'][c])})" for c in classed)
+    mix_text = (
+        f"Work mix: {shown}, of {mix['n']} classed changes; {mix['unmeasured']} not classed."
+        if mix["n"]
+        else f"Work mix: no change was classed; {mix['unmeasured']} not classed."
+    )
+    left = [f"{ttu['why'].get('unreleased', 0)} not yet released"]
+    if ttu["why"].get("no date"):
+        left.append(f"{ttu['why']['no date']} with no tag date")
+    ttu_text = (
+        f"Time to users: a median {ttu['median_days']} days from landing to release, over "
+        f"{ttu['n']} changes; {', '.join(left)}."
+        if ttu["n"]
+        else f"Time to users: no change in the window was released; {', '.join(left)}."
+    ) + f" {ttu['releases']} releases in the window."
+    if ft["since"] is None:
+        ft_text = "Follow-through: no earlier retrospective to follow through on."
+    else:
+        kinds = {kind: ft[kind] for kind in ("seeds", "milestones")}
+        done = {kind: k["done"] + k["dropped"] for kind, k in kinds.items() if k}
+        parts = [
+            f"{kind} {done[kind]} of {k['n']}" if k else f"{kind} unread"
+            for kind, k in kinds.items()
+        ]
+        share = f" ({_pct(ft['share'])})" if ft["share"] is not None else ""
+        kept = f"{sum(done.values())} of {ft['n']} done or dropped{share}"
+        unmeasured = f"; {ft['unmeasured']} milestones not scored" if ft["unmeasured"] else ""
+        ft_text = (
+            f"Follow-through on the retrospective of {ft['since']}: {kept}, "
+            f"{' and '.join(parts)}{unmeasured}; intent titles aren't recorded."
+        )
+    return f"{mix_text}\n\n{ttu_text}\n\n{ft_text}"
+
+
+def render_report(
+    template: str, process: dict, spend: dict | None = None, value: dict | None = None
+) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
-    block, "not counted" without it."""
+    block, "not counted" without it. `value` is `value_band()`'s, its sentences after the
+    window's paragraph; nothing is added without it."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -896,6 +1211,8 @@ def render_report(template: str, process: dict, spend: dict | None = None) -> st
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
     }  # fmt: skip
+    if value:
+        values["window"] += "\n\n" + _value_text(value)
     if process["cycle"]:
         values["cycle"] = _table(
             ["Tier", "Changes", "Median elapsed", "Longest", "Median agent", "Median days open"],
@@ -940,9 +1257,10 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     trunk = cfg["git"]["base"]
     since = sdlc.last_retrospective(home, trunk)
     changes = sdlc.closed_changes(home, since["sha"] if since else None, trunk)
-    bases = {}
+    bases, paths = {}, {}
     for rec in changes:
-        bases[rec["name"]] = _change_rows(home, rec)[0]
+        bases[rec["name"]], rows = _change_rows(home, rec)
+        paths[rec["name"]] = [path for path, _, _ in rows]
         rec["days_open"] = sdlc._days_between(rec["created"], rec["close_date"])
     dropped = sdlc.dropped_changes(home, since["sha"] if since else None, trunk)
     diffs = _diffs(home, changes, bases)
@@ -950,7 +1268,8 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     bugs = bugs_retro(home, cfg, since, changes, today)
     process = process_views(changes, dropped, rework, questions, bugs, since, today)
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
-    return render_report(template, process, _spend(home, cfg, changes, diffs))
+    value = value_band(home, cfg, since, changes, bases, paths)
+    return render_report(template, process, _spend(home, cfg, changes, diffs), value)
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -1062,6 +1381,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
     problems: list[str] = [] if trunk else [sdlc.trunk_refusal(home, trunk)]
     kind = _kind(cfg)
     bases: dict[str, str | None] = {}
+    paths: dict[str, list[str]] = {}
     for rec in changes:
         problems += rec.pop("problems")
         # A change ships as one commit or several, and its size is all of them: its branch from
@@ -1074,6 +1394,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
                 f"{name}: no commit holds {work}/{name}/intent.md, so its size is unknown"
             )
         files = [path for path, _, _ in rows]
+        paths[rec["name"]] = files
         lines = sum((added or 0) + (deleted or 0) for _, added, deleted in rows)
         size = indicators.change_size(rows, kind)
         rec.update(
@@ -1112,6 +1433,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         None if doc is None else _product(home, cfg, doc, changes, a["open"], direction, bases)
     )
     lookback = _lookback(home, trunk) if trunk else None
+    value = value_band(home, cfg, since, changes, bases, paths)
     return {
         "since": since,
         "today": today.isoformat(),
@@ -1152,6 +1474,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "architecture": _architecture(home, cfg, since, changes, kind, lookback),
         "spend": _spend(home, cfg, changes, diffs),
         "tests": _tests(home, cfg, lookback),
+        **value,
     }
 
 

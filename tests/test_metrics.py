@@ -668,6 +668,7 @@ def test_a_hand_gate_is_counted_as_a_check(tmp_path: Path, check) -> None:
     command itself, failed on an error; with no `commands.check` set too. Nothing else is."""
     gate = "uv run --quiet --script /x/scripts/sdlc.py gate 012"
     status = gate.replace("gate 012", "status")
+    quoted = "uv run --quiet --script '/a b/scripts/sdlc.py' gate 012"  # 168 R13
     events = _events(tmp_path, [
         cmd(0, "sdlc:ship"),
         asst(1, "m1", [tool("Bash", "g1", command=gate)]),
@@ -676,9 +677,11 @@ def test_a_hand_gate_is_counted_as_a_check(tmp_path: Path, check) -> None:
         result(4, "g2"),
         asst(5, "m3", [tool("Bash", "g3", command=status)]),
         result(6, "g3"),
+        asst(7, "m4", [tool("Bash", "g4", command=quoted)]),
+        result(8, "g4"),
     ], check=check)  # fmt: skip
     ship = _summary(events)["stages"]["ship"]
-    assert (ship["checks"], ship["checks_failed"]) == (2, 1)
+    assert (ship["checks"], ship["checks_failed"]) == (3, 1)
 
 
 def _decided(source: str, decision: str = "accept", **extra) -> dict:
@@ -1509,6 +1512,9 @@ def test_a_shell_edit_is_known_by_its_command(command: str, writes: bool) -> Non
         ('uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py gate 012', None, True),
         ("uv run --quiet --script /x/plugins/factory/scripts/factory.py check 155", None, True),
         ("uv run --quiet --script '/a b/scripts/factory.py' check 155", None, True),
+        ("uv run --quiet --script '/a b/scripts/sdlc.py' gate 012", None, True),
+        ("npx --yes pnpm test", None, True),
+        ("uvx --quiet tox", None, True),
         ("uv run --quiet --script /x/scripts/factory.py land-check", None, False),
         ("uv run --quiet --script /x/scripts/factory.py gate 155", None, False),
         ("grep pytest x", None, False),
@@ -1525,7 +1531,9 @@ def test_a_test_run_is_known_by_its_program(command: str, check, test: bool) -> 
 
 @pytest.mark.parametrize(
     "command, bg", [("pytest -q &", True), ("sleep 5 & ", True), ("a && b", False),
-                    ("make 2>&1", False)],
+                    ("make 2>&1", False), ("a &\nb", True), ("sleep 5 & echo hi", True),
+                    ("make &> log", False), ("cat <&3", False), ("a |& b", False),
+                    ("echo 'a & b'", False), ("echo a \\& b", False)],
 )  # fmt: skip
 def test_a_command_ending_in_a_lone_ampersand_goes_to_the_background(command, bg) -> None:
     """R4: the `&` half; the result's half is read from the transcript below."""

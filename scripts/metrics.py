@@ -45,7 +45,8 @@ How an agent worked is counted in the same pass over its run's entries (`_run()`
 never a second: a `subagent` event's `behaviour` holds `BEHAVIOURS` as counts and `calls` its tool
 calls by `_prompt_name()`, both None when counting raised. `edits=` is its `EDIT_TOOLS` calls,
 `shell_edits=` its `Bash` commands that write a file by a named shape (`_shell()`), `bg=` those that
-went to the background (a result's `toolUseResult.backgroundTaskId`, or a trailing `&`),
+went to the background (a result's `toolUseResult.backgroundTaskId`, or a lone `&` anywhere
+outside quotes and heredoc bodies; before 168, only one ending the whole command),
 `tool_errors=` its results with `is_error`, `test_runs=` its runs of the host's check, the hand
 gate, the factory's `check` or a `TEST_RUNNERS` program, and `broke=` the test runs whose output
 matches `BROKE_RE` with an edit since the run before. `read_events(models=)` maps a factory
@@ -140,10 +141,12 @@ SKILL_RE = re.compile(rf"<command-name>/({PLUGIN_SKILL})</command-name>")
 SKILL_NAME_RE = re.compile(rf"^{PLUGIN_SKILL}$")
 ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 STAGE_LINE_RE = re.compile(r"^stage:\s*([a-z]+)\s*$", re.M)
-# A run of the gate by hand, `sdlc.py gate NNN`, wherever the plugin is installed: a `check`.
-HAND_GATE_RE = re.compile(r"scripts/sdlc\.py\s+gate(?:\s|$)")
+# A run of the gate by hand, `sdlc.py gate NNN`, wherever the plugin is installed: a `check`. A
+# quoted path ends in a quote, as `FACTORY_CHECK_RE` allows.
+HAND_GATE_RE = re.compile(r"scripts/sdlc\.py['\"]?\s+gate(?:\s|$)")
 # An agent's full run through the factory's `check NNN`, the same command in a gate slot: a
-# `check` too. Never its `land-check` or `gate`, which the script runs itself.
+# `check` too. Never its `land-check` or `gate`, which the script runs itself. A quoted path ends
+# in a quote, as `HAND_GATE_RE` allows.
 FACTORY_CHECK_RE = re.compile(r"scripts/factory\.py['\"]?\s+check(?:\s|$)")
 # A change's branch: its number and slug (`sdlc.py`'s `DIR_RE`).
 DIR_RE = re.compile(r"^\d{3,}-[a-z0-9][a-z0-9-]*$")
@@ -689,7 +692,9 @@ def _program(words: list[str]) -> list[str]:
             skip = not skip and words[0] in UV_VALUED
             words = words[1:]
     elif words and words[0] in ("uvx", "npx"):
-        words = [w for w in words[1:] if not w.startswith("-")][:1] + words[2:]
+        # From the first word that isn't a flag: the program, and every word after it.
+        at = next((i for i, w in enumerate(words) if i and not w.startswith("-")), len(words))
+        words = words[at:]
     if words and INTERPRETERS.match(Path(words[0]).name) and words[1:2] == ["-m"]:
         words = words[2:]
     return [Path(words[0]).name, *words[1:]] if words else []
@@ -698,9 +703,9 @@ def _program(words: list[str]) -> list[str]:
 def _shell(command: str, check: str | None) -> tuple[bool, bool, bool]:
     """What a `Bash` command did, by its shape alone: whether it wrote a file (a redirect outside
     `SCRATCH`, `tee`, `sed -i`, `perl -i`, `patch`, `git apply`, or an inline interpreter script
-    that writes), whether it went to the background (`… &`), and whether it ran tests (the host's
-    check, the hand gate, the factory's `check`, or `TEST_RUNNERS`). Each is a lower bound: a shape
-    not named is missed."""
+    that writes), whether it went to the background (a lone `&`), and whether it ran tests (the
+    host's check, the hand gate, the factory's `check`, or `TEST_RUNNERS`). Each is a lower bound:
+    a shape not named is missed."""
     line = command.strip()
     test = bool(check and line.startswith(check)) or bool(HAND_GATE_RE.search(line))
     test = test or bool(FACTORY_CHECK_RE.search(line))
@@ -736,7 +741,8 @@ def _shell(command: str, check: str | None) -> tuple[bool, bool, bool]:
     for target in REDIRECT_RE.findall(bare):
         if target and not target.startswith(SCRATCH):
             writes = True
-    bg = bool(re.search(r"(?<![&>|])&\s*$", bare))
+    # A lone `&` anywhere: never `&&`, `>&`, `<&`, `&>`, `|&` or an escaped `\&`.
+    bg = bool(re.search(r"(?<![&>|<\\])&(?![&>])", bare))
     return writes, bg, test
 
 

@@ -5748,7 +5748,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec: dict = {"id": m.group(1), "slug": m.group(2), "name": name, "title": "", "tier": None}
     rec.update(impact="", created="", idea="", problem="", sha=sha, closed=closed, problems=[])
     rec["ideas"] = []
-    rec.update(serves=None, moves=[], reworks=[])
+    rec.update(serves=None, moves=[], reworks=[], fixes=[])
     if not read:
         return rec
     try:
@@ -5764,6 +5764,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec["ideas"] = intent_ideas(text or "")
     rec["idea"] = (rec["ideas"] or [""])[0]
     rec["reworks"] = reworks(text or "")
+    rec["fixes"] = frontmatter_list(text or "", "fixes") or []
     for line in (post.content or "").splitlines():
         if line.startswith("# "):
             rec["title"] = TITLE_ID_RE.sub("", line[2:].strip())
