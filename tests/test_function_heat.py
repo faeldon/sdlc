@@ -6,6 +6,7 @@ scratch repo's base branch.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,12 @@ SCRIPT = ROOT / ".sdlc" / "function-heat.py"
 _spec = importlib.util.spec_from_file_location("sdlc_function_heat_test", SCRIPT)
 heat = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(heat)
+
+_retro_spec = importlib.util.spec_from_file_location(
+    "sdlc_retro_heat_test", ROOT / "scripts" / "retro.py"
+)
+retro = importlib.util.module_from_spec(_retro_spec)
+_retro_spec.loader.exec_module(retro)
 
 pytestmark = pytest.mark.portable
 
@@ -92,13 +99,38 @@ def test_ranked_by_commits_then_size_and_cut_to_the_top():
     assert [r["name"] for r in heat.rank(rows, top=3)] == ["b", "c", "a"]
 
 
-def test_the_table_names_each_file_and_function_with_its_numbers():
-    text = heat.render(
-        {"mod.py": [{"name": "big", "commits": 2, "lines": 4}]}, {"sha": "abc1234", "date": "x"}
-    )
-    assert "mod.py" in text
-    assert "big" in text and "2" in text and "4" in text
-    assert "abc1234" in text
+def test_each_function_is_two_indicator_rows():
+    """177 R10: the retrospective's row shape, commits and lines, ranked as before; a file with no
+    functions read prints nothing."""
+    text = heat.rows({
+        "mod.py": [{"name": "small", "commits": 1, "lines": 2},
+                   {"name": "big", "commits": 2, "lines": 4}],
+        "gone.py": [],
+    })  # fmt: skip
+    assert [json.loads(line) for line in text.splitlines()] == [
+        {"name": "mod.py::big", "value": 2, "unit": "commits"},
+        {"name": "mod.py::big", "value": 4, "unit": "lines"},
+        {"name": "mod.py::small", "value": 1, "unit": "commits"},
+        {"name": "mod.py::small", "value": 2, "unit": "lines"},
+    ]
+
+
+def test_this_repos_rows_stay_under_the_evidence_limit():
+    """177 R10: output cut at the limit would be read as text, not rows. Every function of the
+    four files at its widest numbers, cut to the top, is still under it."""
+    by_file = {
+        path: [
+            {"name": name, "commits": 10**6, "lines": 10**6}
+            for name, _, _ in heat.functions((ROOT / path).read_text(encoding="utf-8"))
+        ]
+        for path in heat.FILES
+    }
+    # The longest names, so whichever `rank()` keeps, the output is no longer than this.
+    by_file = {path: sorted(rows, key=lambda r: -len(r["name"]))[: heat.TOP]
+               for path, rows in by_file.items()}  # fmt: skip
+    text = heat.rows(by_file)
+    assert len(text.splitlines()) == 2 * heat.TOP * len(heat.FILES)
+    assert len(text) + 1 < retro.EVIDENCE_LIMIT
 
 
 def test_it_reads_the_base_branch_and_writes_nothing(repo: Path):
@@ -111,8 +143,8 @@ def test_it_reads_the_base_branch_and_writes_nothing(repo: Path):
         cwd=repo, capture_output=True, encoding="utf-8",
     )  # fmt: skip
     assert ran.returncode == 0, ran.stderr
-    assert "small" in ran.stdout and "big" in ran.stdout
-    assert "other" not in ran.stdout
+    names = {json.loads(line)["name"] for line in ran.stdout.splitlines()}
+    assert names == {"mod.py::small", "mod.py::big"}
     assert _git(repo, "status", "--porcelain") == before
 
 

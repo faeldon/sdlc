@@ -160,6 +160,7 @@ READS_CONFIG = {
         "review.irreversible",
     ],
     "sdlc:setup": [
+        "retro.indicators",
         "git.attribution",
         "review.sensitive",
         "review.irreversible",

@@ -67,7 +67,7 @@ due_after_days = 14                         # the default: days since the oldest
 [retro]
 after_releases = 2                          # the default: releases before status says Retro due; 0 = only a major one
 evidence = ["./scripts/usage-summary.sh"]   # optional: what users did, printed for the product pass; only with a product doc
-indicators = ["./scripts/complexity.sh"]    # optional: measures only a language can tell, printed for the architecture pass
+indicators = ["./scripts/complexity.sh"]    # optional: measures only a language can tell, as JSON rows; a table in the report
 test_times = ["cat build/junit.xml"]        # optional: each prints a JUnit XML report on stdout, read for the pruning pass
 test_paths = ["checks/"]                    # optional: the paths that are tests, replacing the conventions; `dir/` prefixes or globs
 doc_paths = ["handbook/"]                   # optional: the paths that are docs, replacing the conventions
@@ -331,7 +331,9 @@ Whitespace alone is never drift. `breaking` is kept apart from all of that: what
 now misread. That is a config key a release retired (`RETIRED_KEYS` in `sdlc.py` names its
 replacement, until the release that drops the note; after it, the key is reported as one the
 plugin doesn't read), a template override lacking a heading, frontmatter key or placeholder the script
-reads (`TEMPLATE_READS`), or a project or product doc it can't parse. `report` also lists config
+reads (`TEMPLATE_READS`), or a project or product doc it can't parse: an override of
+`retro.md` needs its `## Indicators` section and `{{indicators}}`, or the next retrospective has no
+table to compare its indicators with. `report` also lists config
 keys the plugin doesn't read, keys new since the record (with their default; this page says what
 each does), and plugin templates that changed under one of your overrides.
 
@@ -1066,8 +1068,23 @@ more than 50 files) read the last 30 closed changes, past the retrospective (`lo
 one window is too few to show structure. `largest` is the ten largest text files and `totals` each
 kind's files and lines, each now and at the last retrospective, with the growth between. Nothing
 times the gate: a host that wants it, or complexity or dependency cycles, names a command in
-`retro.indicators`, run as `retro.evidence` is (with or without a product doc) and passed through
-as `host`.
+`retro.indicators`, run as `retro.evidence` is (with or without a product doc, stopped after 60
+seconds, kept up to 20,000 characters), one row each in `host`, in config order.
+
+An indicator's output is read as rows when every non-blank line of its stdout is one JSON object
+(JSON Lines) with a `name` (a non-empty string on one line, at most 200 characters), a `value` (a
+finite number, never a boolean) and, if it likes, a `unit` (a string on one line, at most 40
+characters, or null); any other key is kept as `extra` and never rendered, and a row is known by
+its `name` and `unit` (a missing unit is `""`). For example
+`{"name": "src/drafts.py::save", "value": 3, "unit": "commits"}`. Its `host` row then holds
+`rows`, each with its `name`, `unit`, `value`, `extra`, `last` (the same row's value in the last
+retrospective's committed report, read back from its `## Indicators` table, null with no
+retrospective, no report, no such row or the row twice) and `change` (`value − last`, to three
+decimal places, null with no `last`), with `output` null and `not_rows` null. Anything else
+passes through as before, `output`, `exit`, `error` and `truncated` kept, with `rows` null and
+`not_rows` saying why: a line that isn't such an object, no line at all, a row twice, an output
+cut at the limit, a non-zero exit (`failed: exited N`) or a timeout (`timed out`). Plain text
+never breaks: it just stays out of the report.
 
 Its `tests` is what the pruning pass reads. `times` comes from `retro.test_times`: commands each
 printing a JUnit XML report of the suite on stdout, the format nearly every runner can write
@@ -1157,11 +1174,18 @@ retro-commit` commits those files and nothing else, as the next retrospective's 
 refuses a register entry removed or changed beyond those two lines. With them it commits a report
 it writes itself, `.sdlc/retros/<date>.md`, from history alone: the window's cycle time per tier,
 changes closed per week, where the time went (agent against the person's response and away), how
-many changes ran at once and what that did to them, rework, escapes and spend, rendered from
-`templates/retro.md` (override it in `.sdlc/templates/`; an override without its `## Spend`
-section and `{{spend}}` is reported as breaking after an update). Its figures are `sdlc.py retro`'s
-`process` and `spend` blocks, which counts changes close couldn't measure but never reads them as zero, and
-`sdlc.py retro --report` prints it without writing anything. It never edits code, skills, the process doc, the review doc or
+many changes ran at once and what that did to them, rework, escapes and spend, and the host's
+indicators, rendered from `templates/retro.md` (override it in `.sdlc/templates/`; an override
+without its `## Spend` or `## Indicators` section and their `{{spend}}` and `{{indicators}}` is
+reported as breaking after an update). Its figures are `sdlc.py retro`'s `process` and `spend`
+blocks, which counts changes close couldn't measure but never reads them as zero. The report runs
+one host command, `retro.indicators`, as `retro` does, and never `retro.evidence` or
+`retro.test_times`: `## Indicators` names each command in a code span, then its rows as a table
+headed `| Indicator | Unit | Value | Last retrospective | Change |` (a `|` in a cell escaped as
+`\|`, a missing figure `—`, a change signed `+3` or `−2`), or one sentence saying it failed,
+timed out, or printed output that isn't rows, which is in `retro`'s output only; a command's raw
+output or stderr is never written there. With `retro.indicators` empty it says no indicators are
+set. `sdlc.py retro --report` prints it without writing anything. It never edits code, skills, the process doc, the review doc or
 `.sdlc/config.toml`: a lesson an escape holds for the review (a failure class for the review doc,
 a path for `[review]`) is a seed with the exact text, made by a change that ship reviews.
 

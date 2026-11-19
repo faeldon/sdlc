@@ -1,8 +1,9 @@
 # Retrospective report
 
 > How the process ran from {{since}} to {{today}}, from the numbers `/sdlc:close` recorded on each
-> `Close` commit. `sdlc.py retro-commit` writes it from history and commits it with the
-> retrospective; `sdlc.py retro` gives the same figures as its `process` and `spend` blocks.
+> `Close` commit, and the host's own figures from its `retro.indicators`. `sdlc.py retro-commit`
+> writes it and commits it with the retrospective; `sdlc.py retro` gives the same figures as its
+> `process` and `spend` blocks and its `architecture.host` rows.
 
 ## Window
 
@@ -35,3 +36,7 @@
 ## Spend
 
 {{spend}}
+
+## Indicators
+
+{{indicators}}

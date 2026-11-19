@@ -114,6 +114,12 @@ Then one short round, only for what Step 1 couldn't settle:
   what users did with the product, as counts and summaries, for the retrospective's product pass.
   Ask; never guess them from task files. None is a fine answer, and the pass then has only the
   history.
+- **Indicators** (`retro.indicators`), only when `config` gives it empty: commands that print
+  figures only a language can tell (function hotspots, complexity, dependency cycles) for the
+  retrospective's architecture pass, each line a JSON row, `{"name": "src/drafts.py::save",
+  "value": 3, "unit": "commits"}`, which its report shows as a table against the last
+  retrospective's. Propose what Step 1 found a tool for. None is a fine answer, and the report
+  then says no indicators are set.
 
 Propose an answer for each from what Step 1 found; the human corrects rather than composes.
 
@@ -130,7 +136,8 @@ title: it says what the plugin reads from the doc, which whoever edits it later 
   isn't `main`: the branch Step 2 was given, or the one `config` detected (`git.base_source` is
   `detected` and `git.base` isn't `main`), so a later change to `origin/HEAD` never moves it.
   Include `[git] attribution` when Step 2 asked: `true` for on, `false` for off. Include
-  `[review] sensitive` and `[review] irreversible` when Step 2's answer named any.
+  `[review] sensitive` and `[review] irreversible` when Step 2's answer named any, and
+  `[retro] indicators` when Step 2's answer gave a command.
 - **The process doc** (`docs.process`, `.sdlc/SDLC.md` by default): start from `defaults.process`,
   this repo's answers to the plugin's guide (`docs.process.guide`), which the skills read with it.
   Fill in every line that starts with `<`. Those are where this repo differs: the failure it most

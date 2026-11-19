@@ -20,6 +20,9 @@ runs git and hands the text here.
     spend(rows)                               -> {tiers, outliers, tools, recorded, unrecorded}
     junit_times(text)                         -> {cases, error}             a JUnit XML report
     drifted_tests(lookback, kind, skip, present) -> [row]
+    host_rows(output)                         -> (rows, None) | (None, reason)  `retro.indicators`
+    report_rows(text)                         -> {(name, unit): value | None}   a report's tables
+    cell(text), number(value), signed(change) -> str                            a table's cells
 
 A kind is told by path alone, so no language is assumed: a host whose layout the conventions
 misread names its own (`retro.test_paths`, `retro.doc_paths`).
@@ -34,6 +37,7 @@ never guessed at.
 from __future__ import annotations
 
 import itertools
+import json
 import math
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -470,3 +474,125 @@ def drifted_tests(
             rows.append({"file": test, "last_change": changes[i][0], "code": moved, "later": later})
     rows.sort(key=lambda r: (-r["later"], r["file"]))
     return rows[:top]
+
+
+# ---------------------------------------------------------------- the host's indicator rows
+
+# The table a report shows a host's indicator rows under, and reads back by: its header line.
+INDICATOR_HEAD = ("Indicator", "Unit", "Value", "Last retrospective", "Change")
+HEADER = "| " + " | ".join(INDICATOR_HEAD) + " |"
+# The longest `name` and `unit` a row may carry.
+NAME_MAX = 200
+UNIT_MAX = 40
+
+
+def _finite(value: float) -> bool:
+    """A finite number, as a float can hold it: an integer too large for one is not."""
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _one_line(value: object, most: int) -> bool:
+    return isinstance(value, str) and "\n" not in value and "\r" not in value and len(value) <= most
+
+
+def host_rows(output: str) -> tuple[list[dict] | None, str | None]:
+    """An indicator command's stdout as rows, `(rows, None)`, when every non-blank line is a JSON
+    object with a `name` (a non-empty string on one line, at most `NAME_MAX`), a `value` (a finite
+    number, never a boolean) and maybe a `unit` (a string on one line, at most `UNIT_MAX`, or null),
+    no `(name, unit)` twice; other keys are kept as `extra`. Anything else is `(None, reason)`."""
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    lines = [(n, line) for n, line in enumerate(output.splitlines(), 1) if line.strip()]
+    if not lines:
+        return None, "no rows"
+    for n, line in lines:
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            return None, f"line {n} isn't a JSON object"
+        name, value, unit = obj.get("name"), obj.get("value"), obj.get("unit")
+        if not _one_line(name, NAME_MAX) or not name:
+            return None, f"line {n} has no name"
+        is_number = isinstance(value, int | float) and type(value) is not bool
+        if not is_number or not _finite(value):
+            return None, f"line {n}'s value isn't a number"
+        if unit is not None and not _one_line(unit, UNIT_MAX):
+            return None, f"line {n}'s unit isn't a short string"
+        key = (name, unit or "")
+        if key in seen:
+            return None, f"line {n} repeats " + ", ".join(k for k in key if k)
+        seen.add(key)
+        extra = {k: v for k, v in obj.items() if k not in ("name", "value", "unit")}
+        rows.append({"name": name, "unit": key[1], "value": value, "extra": extra})
+    return rows, None
+
+
+def cell(text: str) -> str:
+    """Text as a table cell: `\\` and `|` escaped, so the row splits where the table does."""
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def number(value: float) -> str:
+    """A value as the report writes it: an integral float without its `.0`."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def signed(change: float | None) -> str:
+    """A change as `+3`, `−2` (a minus sign) or `0`; `—` for none."""
+    if change is None:
+        return "—"
+    if change > 0:
+        return "+" + number(change)
+    if change < 0:
+        return "−" + number(-change)
+    return "0"
+
+
+def _cells(line: str) -> list[str]:
+    """A table row's cells, split on the `|` no backslash escapes, each unescaped and stripped."""
+    out, cur, chars = [], [], iter(line.strip().removeprefix("|"))
+    for ch in chars:
+        if ch == "\\":
+            cur.append(next(chars, ""))
+        elif ch == "|":
+            out.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    if "".join(cur).strip():
+        out.append("".join(cur).strip())
+    return out
+
+
+def _parsed(text: str) -> float | None:
+    for kind in (int, float):
+        try:
+            value = kind(text)
+        except ValueError:
+            continue
+        return value if _finite(value) else None
+    return None
+
+
+def report_rows(text: str) -> dict[tuple[str, str], float | None]:
+    """Each `(name, unit)` a report's indicator tables show (those under `HEADER` exactly), with
+    its value; a key shown twice, or a value that doesn't read, is None. A unit of `—` is ""."""
+    found: dict[tuple[str, str], float | None] = {}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() != HEADER:
+            continue
+        for row in itertools.takewhile(lambda r: r.lstrip().startswith("|"), lines[i + 2 :]):
+            cells = _cells(row)
+            if len(cells) != len(INDICATOR_HEAD):
+                continue
+            key = (cells[0], "" if cells[1] == "—" else cells[1])
+            found[key] = None if key in found else _parsed(cells[2])
+    return found

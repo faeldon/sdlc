@@ -107,7 +107,10 @@ What `retro` gives:
   more changes touched together) read the last 30 closed changes, past `since` (`lookback`).
   `largest` gives the biggest files and `totals` each kind's files and lines, both now and at the
   last retrospective (`then`, `growth`; null on a first one). `host` is a row per
-  `retro.indicators` command, as `evidence` is: what it means is the host's.
+  `retro.indicators` command, as `evidence` is: what it means is the host's. Output printed as
+  JSON rows is read into `rows`, each with its `name`, `unit`, `value`, `last` (the same row in
+  the last retrospective's report, null where it had none) and `change`, and `output` is then
+  null; any other output stays in `output`, with `rows` null and `not_rows` saying why.
 - `spend`: what each change spent beside its size. `tiers` gives per tier the median comment
   share, agent `out` tokens per added code line and tool calls per added code line (null under
   three changes); `outliers` names each change over twice its tier's median, with the `measure`

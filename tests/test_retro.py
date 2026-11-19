@@ -1922,6 +1922,164 @@ def test_the_hosts_indicators_run_without_a_product_doc(tmp_path: Path) -> None:
     assert _retro(root)["product"] is None
 
 
+ROWS = (
+    '{"name": "src/drafts.py::save", "value": 5, "unit": "commits", "band": "high"}\n'
+    '{"name": "src/drafts.py::save", "value": 40, "unit": "lines"}\n'
+    '{"name": "cycles", "value": 2}\n'
+    '{"name": "new one", "value": 1}\n'
+)
+
+
+def _rows_indicator(root: Path, text: str = ROWS) -> None:
+    """An indicator that prints `text`, from a file the tree leaves untracked."""
+    (root / "rows.jsonl").write_text(text, encoding="utf-8", newline="\n")
+    _config(root, '[retro]\nindicators = ["cat rows.jsonl"]\n')
+
+
+def test_indicator_rows_reach_the_architecture_block(tmp_path: Path) -> None:
+    """177 R3: rows read, in the command's order, `output` null so the blob holds one copy."""
+    root = _repo(tmp_path)
+    _rows_indicator(root)
+    (row,) = _retro(root)["architecture"]["host"]
+    assert (row["output"], row["not_rows"], row["error"], row["exit"]) == (None, None, None, 0)
+    assert [(r["name"], r["unit"], r["value"]) for r in row["rows"]] == [
+        ("src/drafts.py::save", "commits", 5),
+        ("src/drafts.py::save", "lines", 40),
+        ("cycles", "", 2),
+        ("new one", "", 1),
+    ]
+    assert row["rows"][0]["extra"] == {"band": "high"}
+    assert all(r["last"] is None and r["change"] is None for r in row["rows"])
+
+
+def test_a_failed_or_cut_indicator_passes_through_with_its_reason(tmp_path: Path) -> None:
+    """177 R2: plain text, a non-zero exit, a timeout and a cut output keep `output`, `exit`,
+    `error` and `truncated` as before, with `rows: null` and why."""
+    root = _repo(tmp_path)
+    _config(root, '[retro]\nindicators = ["echo 7 cycles", "echo oops >&2; exit 3"]\n')
+    plain, failed = _retro(root)["architecture"]["host"]
+    assert (plain["rows"], plain["not_rows"], plain["output"]) == (
+        None, "line 1 isn't a JSON object", "7 cycles\n"
+    )  # fmt: skip
+    assert (failed["rows"], failed["not_rows"], failed["exit"]) == (None, "failed: exited 3", 3)
+    assert failed["error"] == "exited 3: oops"
+    ran = sdlc.retro._evidence(root, ['echo \'{"name": "a", "value": 1}\''], limit=5)
+    (cut,) = sdlc.retro._indicator_rows(root, None, ran)
+    assert (cut["rows"], cut["truncated"], cut["output"]) == (None, True, '{"nam')
+    assert cut["not_rows"] == "truncated at 5 characters"
+    ran = sdlc.retro._evidence(root, ["sleep 5"], timeout=0.1)
+    (slow,) = sdlc.retro._indicator_rows(root, None, ran)
+    assert (slow["rows"], slow["not_rows"]) == (None, "timed out")
+
+
+def _retro_report_at(root: Path, day: str, report: str) -> None:
+    """A `Retrospective` commit holding `report` as that day's report."""
+    path = root / ".sdlc" / "retros" / f"{day}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report, encoding="utf-8", newline="\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"Retrospective {day}")
+
+
+LAST = """\
+## Indicators
+
+`cat rows.jsonl`
+
+| Indicator | Unit | Value | Last retrospective | Change |
+|---|---|---|---|---|
+| src/drafts.py::save | commits | 7 | — | — |
+| src/drafts.py::save | lines | 40 | — | — |
+| cycles | — | 1 | — | — |
+| cycles | — | 4 | — | — |
+"""
+
+
+def test_an_indicator_is_compared_with_the_last_retrospectives_report(tmp_path: Path) -> None:
+    """177 R4: `last` from the newest `Retrospective` commit's report alone, null (never 0) where
+    there is none, no such row, or the row twice; `change` is `value − last`."""
+    root = _repo(tmp_path)
+    # An older retrospective, and a report in the tree, are neither of them the last report.
+    _retro_report_at(root, "2026-10-01", LAST.replace("| 7 |", "| 1 |").replace("| 40 |", "| 9 |"))
+    _retro_report_at(root, "2026-10-10", LAST)
+    in_tree = root / ".sdlc" / "retros" / "2026-10-10.md"
+    in_tree.write_text(LAST.replace("| 7 |", "| 99 |"), encoding="utf-8", newline="\n")
+    _rows_indicator(root)
+    (row,) = _retro(root)["architecture"]["host"]
+    got = {(r["name"], r["unit"]): (r["last"], r["change"]) for r in row["rows"]}
+    assert got == {
+        ("src/drafts.py::save", "commits"): (7, -2),
+        ("src/drafts.py::save", "lines"): (40, 0),
+        ("cycles", ""): (None, None),
+        ("new one", ""): (None, None),
+    }
+    # A retrospective whose commit holds no report gives no comparison.
+    _record(root, "2026-10-20")
+    (row,) = _retro(root)["architecture"]["host"]
+    assert all(r["last"] is None and r["change"] is None for r in row["rows"])
+
+
+def _indicators_section(text: str) -> str:
+    return text.split("## Indicators\n", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_report_renders_indicator_rows_as_a_table(tmp_path: Path) -> None:
+    """177 R5: each command in config order, by name; rows as a table against the last report,
+    anything else as one sentence. No raw output or stderr reaches the report."""
+    root = _repo(tmp_path)
+    _retro_report_at(root, "2026-10-10", LAST)
+    (root / "rows.jsonl").write_text(
+        ROWS + '{"name": "a | b", "value": 0.5, "unit": "x"}\n', encoding="utf-8", newline="\n"
+    )
+    (root / "plain.txt").write_text("secret-output\n", encoding="utf-8", newline="\n")
+    (root / "fail.sh").write_text(
+        "cat plain.txt; echo secret-stderr >&2; exit 3\n", encoding="utf-8", newline="\n"
+    )
+    _config(root, '[retro]\nindicators = ["cat rows.jsonl", "cat plain.txt", "sh fail.sh"]\n')
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    section = _indicators_section(text)
+    assert "{{indicators}}" not in text
+    assert section.index("`cat rows.jsonl`") < section.index("`cat plain.txt`")
+    assert "| Indicator | Unit | Value | Last retrospective | Change |" in section
+    assert "| src/drafts.py::save | commits | 5 | 7 | −2 |" in section
+    assert "| src/drafts.py::save | lines | 40 | 40 | 0 |" in section
+    assert "| cycles | — | 2 | — | — |" in section
+    assert "| a \\| b | x | 0.5 | — | — |" in section
+    assert "output isn't indicator rows (line 1 isn't a JSON object), so it is in" in section
+    assert "failed: exited 3" in section
+    assert "secret-output" not in text and "secret-stderr" not in text and "band" not in text
+    ran = sdlc.retro._evidence(root, ["sleep 5"], timeout=0.1)
+    host = sdlc.retro._indicator_rows(root, None, ran)
+    assert "timed out" in sdlc.retro._indicators_text(host)
+
+
+def test_the_report_says_no_indicators_set(tmp_path: Path) -> None:
+    """177 R6."""
+    root = _repo(tmp_path)
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert _indicators_section(text).strip() == (
+        "No indicators set: name commands in retro.indicators (.sdlc/config.toml) to see them here."
+    )
+
+
+def test_indicator_rows_round_trip_through_the_report() -> None:
+    """177 R8: what the table shows is what the next retrospective reads back."""
+    rows = [
+        {"name": "a | b", "unit": "", "value": 2.0},
+        {"name": "back\\slash|", "unit": "u|v", "value": 0.1},
+        {"name": "neg", "unit": "lines", "value": -3},
+        {"name": "big", "unit": "", "value": 12345.678},
+    ]
+    host = [{"command": "x", "error": None, "exit": 0, "not_rows": None,
+             "rows": [{**r, "last": 1, "change": round(r["value"] - 1, 3), "extra": {}}
+                      for r in rows]}]  # fmt: skip
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    text = sdlc.retro.render_report(template, _views([]), indicators=host)
+    assert sdlc.retro.indicators.report_rows(text) == {
+        (r["name"], r["unit"]): r["value"] for r in rows
+    }
+
+
 def test_the_architecture_block_stays_small_however_large_the_repo(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     for n in range(200):
@@ -2169,12 +2327,19 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     assert out["process"]["window"]["unmeasured"] == 1
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text(
-        '[retro]\nevidence = ["touch ran"]\nindicators = ["touch ran"]\n', "utf-8"
-    )
+        '[retro]\nevidence = ["touch ran-evidence"]\nindicators = ["touch ran-indicator"]\n'
+        'test_times = ["touch ran-times"]\n', "utf-8"
+    )  # fmt: skip
     assert sdlc.retro.retro(root, sdlc.load_config(root)[0])["architecture"]["host"], "it would run"
-    (root / "ran").unlink()
+    # `retro` runs the evidence only with a product doc; the other two run either way.
+    assert (root / "ran-indicator").exists() and (root / "ran-times").exists()
+    for name in ("ran-evidence", "ran-indicator", "ran-times"):
+        (root / name).unlink(missing_ok=True)
     text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
-    assert not (root / "ran").exists(), "the report runs none of the host's commands"
+    # 177 R7: the report runs `retro.indicators`, and none of the host's other commands.
+    assert not (root / "ran-evidence").exists() and not (root / "ran-times").exists()
+    assert (root / "ran-indicator").exists(), "the report runs the indicators"
+    (root / "ran-indicator").unlink()
     assert "| 2 | 1 | 1h 16m | 1h 16m | 40m | 1 |" in text
     assert "1 of them were measured" in text and "1 weren't" in text
     # 168 R10: the Value band's figures, from the same function as the JSON's.
@@ -2184,7 +2349,7 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     assert f"{ttu['releases']} releases in the window" in text
     assert sdlc.retro.cmd_retro(root, report=True) == 0
     assert capsys.readouterr().out.startswith("# Retrospective report\n")
-    assert not (root / "ran").exists()
+    assert not (root / "ran-evidence").exists() and not (root / "ran-times").exists()
 
 
 # ---------------------------------------------------------------- spend (118)
@@ -2255,7 +2420,15 @@ def test_the_report_renders_spend(tmp_path: Path) -> None:
     old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Spend")[0]
     assert sdlc._template_misses("retro.md", old) == [
         "the `## Spend` heading",
+        "the `## Indicators` heading",
         "the `{{spend}}` placeholder",
+        "the `{{indicators}}` placeholder",
+    ]
+    # 177 R9: one from before the indicators misses their section alone.
+    old = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8").split("## Indicators")[0]
+    assert sdlc._template_misses("retro.md", old) == [
+        "the `## Indicators` heading",
+        "the `{{indicators}}` placeholder",
     ]
 
 

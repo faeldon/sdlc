@@ -1646,6 +1646,45 @@ def _coverage_lines(
     return "\n\n" + "\n".join(lines)
 
 
+NO_INDICATORS = (
+    "No indicators set: name commands in retro.indicators (.sdlc/config.toml) to see them here."
+)
+
+
+def _code(text: str) -> str:
+    """`text` as a Markdown code span, its fence longer than any backtick run inside it."""
+    fence = "`" * (max((len(r) for r in re.findall(r"`+", text)), default=0) + 1)
+    pad = " " if "`" in text else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+def _indicators_text(host: list[dict] | None) -> str:
+    """`## Indicators`: each `retro.indicators` command by name, in config order, with its rows as
+    a table under `indicators.HEADER`, which the next retrospective reads back, or one sentence
+    saying why there are none. A command's raw output or stderr is never written here."""
+    if not host:
+        return NO_INDICATORS
+    parts = []
+    for row in host:
+        if row["rows"] is not None:
+            body = _table(list(indicators.INDICATOR_HEAD), [
+                [indicators.cell(r["name"]), indicators.cell(r["unit"]) if r["unit"] else "—",
+                 indicators.number(r["value"]),
+                 "—" if r["last"] is None else indicators.number(r["last"]),
+                 indicators.signed(r["change"])]
+                for r in row["rows"]
+            ])  # fmt: skip
+        elif row["not_rows"].startswith(("failed", "timed out")):
+            body = f"It {row['not_rows']}."
+        else:
+            body = (
+                f"Its output isn't indicator rows ({row['not_rows']}), so it is in "
+                "`sdlc.py retro`'s output only."
+            )
+        parts.append(f"{_code(row['command'])}\n\n{body}")
+    return "\n\n".join(parts)
+
+
 def render_report(
     template: str,
     process: dict,
@@ -1653,13 +1692,15 @@ def render_report(
     value: dict | None = None,
     metrics: dict | None = None,
     cost: dict | None = None,
+    indicators: list[dict] | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
     block, "not counted" without it. `value` is `value_band()`'s, its sentences after the
     window's paragraph; nothing is added without it. `metrics` is `metrics_summary()`'s, whose
     coverage line says "not given" without it, as `cost`'s (`_cost()`) two do. The coverage lines
-    follow the window's sentence, in `{{window}}`."""
+    follow the window's sentence, in `{{window}}`. `indicators` is `_indicator_rows()`'s, and with
+    none `{{indicators}}` says no indicators are set."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -1688,6 +1729,7 @@ def render_report(
                           process.get("landing_catches"), w),  # fmt: skip
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
+        "indicators": _indicators_text(indicators),
     }  # fmt: skip
     if value:
         values["window"] += "\n\n" + _value_text(value)
@@ -1729,9 +1771,10 @@ def render_report(
 
 
 def retro_report(home: Path, cfg: dict, today: date) -> str:
-    """The report for the window since the last retrospective, from history alone: the records
-    `retro()` reads for its process views and its spend, without the product pass, the
-    architecture, the prose or any host command."""
+    """The report for the window since the last retrospective: the records `retro()` reads for
+    its process views and its spend, from history, without the product pass, the rest of the
+    architecture or the prose; and the host's `retro.indicators`, run through `_evidence()` as the
+    architecture pass runs them, the only host command it runs."""
     trunk = cfg["git"]["base"]
     since = sdlc.last_retrospective(home, trunk)
     changes = sdlc.closed_changes(home, since["sha"] if since else None, trunk)
@@ -1750,7 +1793,9 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     value = value_band(home, cfg, since, changes, bases, paths)
     metrics = metrics_summary(changes, cfg["metrics"]["stop_allowance"])
     cost = _cost(home, changes, dropped)
-    return render_report(template, process, _spend(home, cfg, changes, diffs), value, metrics, cost)
+    host = _indicator_rows(home, since, _evidence(home, cfg["retro"]["indicators"]))
+    spend = _spend(home, cfg, changes, diffs)
+    return render_report(template, process, spend, value, metrics, cost, host)
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -2165,8 +2210,49 @@ def _architecture(
             "now": indicators.totals(now, kind, skip),
             "then": None if then is None else indicators.totals(then, kind, skip),
         },
-        "host": _evidence(home, cfg["retro"]["indicators"]),
+        "host": _indicator_rows(home, since, _evidence(home, cfg["retro"]["indicators"])),
     }
+
+
+def _last_rows(home: Path, since: dict | None) -> dict[tuple[str, str], float | None]:
+    """The indicator rows the last retrospective's report shows, read from its own commit, by
+    `(name, unit)`; empty with no retrospective, or none committed at that commit."""
+    if not since:
+        return {}
+    rel = report_rel(date.fromisoformat(since["date"]))
+    return indicators.report_rows(sdlc._git(home, "show", f"{since['sha']}:{rel}") or "")
+
+
+def _indicator_rows(home: Path, since: dict | None, ran: list[dict]) -> list[dict]:
+    """`_evidence()`'s rows for `retro.indicators`, each read as `indicators.host_rows()`: with
+    `rows` (each against the last retrospective's report, `last` and `change`, null where it has
+    no such row) and `output` null; or with `rows` null and `not_rows` saying why, its `output`,
+    `exit`, `error` and `truncated` as they were. A failure, a timeout or a cut output is never
+    read as rows."""
+    last = None
+    for row in ran:
+        if row["error"]:
+            timed_out = row["exit"] is None and row["error"].startswith("timed out")
+            if timed_out:
+                why = "timed out"
+            elif row["exit"] is None:
+                why = "failed: could not start"
+            else:
+                why = f"failed: exited {row['exit']}"
+            row["rows"], row["not_rows"] = None, why
+            continue
+        if row["truncated"]:
+            row["rows"], row["not_rows"] = None, f"truncated at {len(row['output'])} characters"
+            continue
+        row["rows"], row["not_rows"] = indicators.host_rows(row["output"])
+        if row["rows"] is None:
+            continue
+        last = _last_rows(home, since) if last is None else last
+        for r in row["rows"]:
+            r["last"] = last.get((r["name"], r["unit"]))
+            r["change"] = None if r["last"] is None else round(r["value"] - r["last"], 3)
+        row["output"] = None
+    return ran
 
 
 def bugs_retro(home: Path, cfg: dict, since: dict | None, changes: list[dict], today: date) -> dict:

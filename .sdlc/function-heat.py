@@ -8,7 +8,9 @@ Named in `.sdlc/config.toml` under `retro.indicators`, so only `sdlc.py retro` i
 it: a host's cached copy of the plugin carries the file, but no host's config names it. For each
 top-level function in the four scripts below, it counts the commits since the last retrospective
 that rewrote some of its lines and gives its size, ranked by commits then size, and prints the top
-of each file as a plain-text table.
+of each file as the retrospective's indicator rows, JSON Lines: two rows per function, its
+`commits` and its `lines`, each named `<path>::<function>`, which the report sets against the last
+retrospective's.
 
 "Since the last retrospective" is the newest `Retrospective YYYY-MM-DD` commit on the base
 branch's first-parent line, the boundary `sdlc.py retro` reads (`retrospectives()`); with none,
@@ -21,6 +23,7 @@ same answer, and nothing is written. It prints function names and numbers only.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import subprocess
 import sys
@@ -144,16 +147,16 @@ def rank(rows: list[dict], top: int = TOP) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["commits"], -r["lines"], r["name"]))[:top]
 
 
-def render(by_file: dict[str, list[dict]], since: dict | None) -> str:
-    when = f"since the retrospective at {since['sha']} ({since['date']})" if since else "ever"
-    out = [f"Function hotspots: commits that rewrote some of each top-level function {when}."]
-    for path, rows in by_file.items():
-        out += ["", path]
-        if not rows:
-            out.append("  (no functions read)")
-            continue
-        out.append(f"  {'commits':>7}  {'lines':>5}  function")
-        out += [f"  {r['commits']:>7}  {r['lines']:>5}  {r['name']}" for r in rank(rows)]
+def rows(by_file: dict[str, list[dict]]) -> str:
+    """The top of each file as `retro.indicators` rows, JSON Lines: per function, its commits and
+    its lines, under the name `<path>::<function>`. A file with no functions read prints none."""
+    out = []
+    for path, found in by_file.items():
+        for r in rank(found):
+            name = f"{path}::{r['name']}"
+            for unit in ("commits", "lines"):
+                row = {"name": name, "value": r[unit], "unit": unit}
+                out.append(json.dumps(row, ensure_ascii=False))
     return "\n".join(out)
 
 
@@ -164,7 +167,7 @@ def main(argv: list[str]) -> int:
         print("function-heat: no base branch found", file=sys.stderr)
         return 1
     files = argv or FILES
-    print(render(heat(root, base, files), last_retrospective(root, base)))
+    print(rows(heat(root, base, files)))
     return 0
 
 

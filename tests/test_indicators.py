@@ -418,3 +418,91 @@ def test_drift_skips_what_skip_says_and_reads_only_tests() -> None:
     skip = lambda p: p.startswith(".sdlc/")  # noqa: E731
     present = TESTED | {"README.md", ".sdlc/x.py"}
     assert indicators.drifted_tests(lookback, indicators.classify, skip, present) == []
+
+
+# ---------------------------------------------------------------- the host's indicator rows (177)
+
+
+def test_indicator_rows_are_read_from_json_lines() -> None:
+    """R1: JSON Lines, each with a `name`, a numeric `value` and an optional `unit`; other keys
+    kept as `extra`, a missing or null unit read as ""."""
+    text = (
+        '{"name": "src/drafts.py::save", "value": 3, "unit": "commits", "band": "high"}\n'
+        "\n"
+        '{"name": "cycles", "value": 1.5}\n'
+        '{"name": "cycles2", "value": -2, "unit": null}\n'
+    )
+    rows, why = indicators.host_rows(text)
+    assert why is None
+    assert rows == [
+        {"name": "src/drafts.py::save", "unit": "commits", "value": 3, "extra": {"band": "high"}},
+        {"name": "cycles", "unit": "", "value": 1.5, "extra": {}},
+        {"name": "cycles2", "unit": "", "value": -2, "extra": {}},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "why"),
+    [
+        ("", "no rows"),
+        ("  \n\n", "no rows"),
+        ("7 cycles\n", "line 1 isn't a JSON object"),
+        ('{"name": "a", "value": 1}\n[1]\n', "line 2 isn't a JSON object"),
+        ('{"value": 1}\n', "line 1 has no name"),
+        ('{"name": "", "value": 1}\n', "line 1 has no name"),
+        ('{"name": "a\\nb", "value": 1}\n', "line 1 has no name"),
+        ('{"name": "' + "n" * 201 + '", "value": 1}\n', "line 1 has no name"),
+        ('{"name": "a"}\n', "line 1's value isn't a number"),
+        ('{"name": "a", "value": "3"}\n', "line 1's value isn't a number"),
+        ('{"name": "a", "value": true}\n', "line 1's value isn't a number"),
+        ('{"name": "a", "value": NaN}\n', "line 1's value isn't a number"),
+        ('{"name": "a", "value": Infinity}\n', "line 1's value isn't a number"),
+        ('{"name": "a", "value": ' + "9" * 400 + "}\n", "line 1's value isn't a number"),
+        ('{"name": "a", "value": 1, "unit": 3}\n', "line 1's unit isn't a short string"),
+        ('{"name": "a", "value": 1, "unit": "' + "u" * 41 + '"}\n',
+         "line 1's unit isn't a short string"),
+        ('{"name": "a", "value": 1, "unit": "x"}\n{"name": "a", "value": 2, "unit": "x"}\n',
+         "line 2 repeats a, x"),
+        ('{"name": "a", "value": 1}\n{"name": "a", "value": 2, "unit": null}\n',
+         "line 2 repeats a"),
+    ],
+)  # fmt: skip
+def test_output_that_isnt_rows_passes_through_with_its_reason(text: str, why: str) -> None:
+    """R2: anything else is no rows, with a short reason."""
+    assert indicators.host_rows(text) == (None, why)
+
+
+TABLE = """\
+## Indicators
+
+`./heat`
+
+| Indicator | Unit | Value | Last retrospective | Change |
+|---|---|---|---|---|
+| src/drafts.py::save | commits | 3 | — | — |
+| a \\| b | — | -1.5 | 2 | −3.5 |
+
+Some prose | with a bar.
+
+| Name | Value |
+|---|---|
+| other | 9 |
+"""
+
+
+def test_the_last_report_s_rows_are_read_back_by_their_header() -> None:
+    """R4: only tables under R5's exact header are read, each cell unescaped; a key twice is
+    ambiguous, so None."""
+    assert indicators.report_rows(TABLE) == {
+        ("src/drafts.py::save", "commits"): 3,
+        ("a | b", ""): -1.5,
+    }
+    twice = TABLE + "\n" + "\n".join(TABLE.splitlines()[4:7]) + "\n"
+    assert indicators.report_rows(twice)[("src/drafts.py::save", "commits")] is None
+    assert indicators.report_rows("no tables here") == {}
+
+
+def test_a_cell_escapes_what_a_table_would_split_on() -> None:
+    assert indicators.cell("a|b\\c") == "a\\|b\\\\c"
+    assert [indicators.number(v) for v in (3, 3.0, 0.25, -2)] == ["3", "3", "0.25", "-2"]
+    assert [indicators.signed(v) for v in (3, -2, 0, 0.5, None)] == ["+3", "−2", "0", "+0.5", "—"]
