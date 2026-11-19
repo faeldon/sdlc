@@ -623,13 +623,18 @@ started in the background by `/sdlc-factory:land`, takes each step itself, eject
 found at fault and lands the rest, and stops at any other ejection, a train stop, checks to run
 again as stacked or a refused push, recording the stop and the way on in the change's
 `runs/land-step.md`. One loop runs at a time, under a run lock in the git common dir
-(`sdlc-factory-train-run.lock`), and `train --cancel` stops it after the step in flight. A
+(`sdlc-factory-train-run.lock`), and `train --cancel` stops it after the step in flight. While
+a loop holds that lock, each train card not stopped says `running unattended: train --run takes
+each step`; the board reads the lock only while a train card is under way, opening it read-only
+and never creating it, and `runs/land-step.md` alone never claims a live loop. A
 click opens
 any file in the change's folder, a markdown file rendered (its text never parsed as HTML; a link
 followed only to the web, in a new tab, or to another file of the change) with a `Raw` toggle for
 its exact text. It writes nothing, answers only `GET` for the page, `/state.json`
 and `/file` (one file inside the folder of a change it shows), refuses a request naming another host,
-and a second `board` on a port a board holds says so rather than starting again. `--port 0` takes
+and a second `board` on a port this repo's board holds says so rather than starting again (each
+board's `/state.json` names its repo by a hash of the main checkout's path, never the path);
+another repo's board on the port, or anything else, is a refusal naming the port. `--port 0` takes
 a port the OS picks, and prints it. A running board serves `board.py` as it is on disk, loading it
 afresh when it changes, so a change to the board that lands needs no restart; a file that won't
 load leaves it serving the code it had, and the page says it is stale. The page polls every two

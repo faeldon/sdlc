@@ -168,7 +168,11 @@ reasons (`needs_of()`). Its columns name the state of the work, the same for eit
 sections by the same rule without loading the board. It
 reads a factory run's files through `scripts/factory_records.py`, as `status`, the hand gate and
 close do, its copies of `factory.py`'s parsing pinned by `tests/test_modules.py`, and the page builds every node with `textContent`, never from a string of
-HTML. Its docstring; REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).
+HTML. Its `/state.json` names its repo by `repo_id`, a hash of the main checkout's path, so a
+second `board` calls a port's board its own only when the ids match (`cmd_board()`); a train card
+says it runs unattended only while another process holds the train's run lock, which the board
+opens read-only, never creating it, and tries only while a train is under way. Its docstring;
+REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).
 
 **The register: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests.
 Every entry is a seed, and its tag is its kind (`[idea]`, `[bug]` or `[nit]`), so say "seed" for any
@@ -240,7 +244,8 @@ loads it (`test_sdlc_loads_nothing_from_plugins`), and knows only whether it is 
 Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing run), for intent's
 `yes, for the factory` and the hand gate. `factory.py` never imports `sdlc.py`, and
 `sdlc` only reads the files a run leaves in a change's folder, the base branch's `gate_jobs`
-and the gate slots' lock files, for the hand gate (`_hand_slot()`), and the base branch's `[ui]`
+and the gate slots' lock files, for the hand gate (`_hand_slot()`), the train's run lock, for the
+board (`train_run_held()`), and the base branch's `[ui]`
 and the screenshot sets under `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`,
 `_current_shots()`), never running `factory.py`: each reads the other's files with
 copies of its parsing (`risk_paths()` and the regexes included), pinned by tests; core's copies

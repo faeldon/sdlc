@@ -624,13 +624,19 @@ def test_the_board_writes_nothing(served) -> None:
     root, url, _ = served
     _closed(root, "019-draft-closed", 2)
     _run_at(root, "review", 1)
+    # 167 R13: a train card under way, so the board tries the run lock, which it must not create.
+    _in_train(root, "stack", 1, "030-draft-land")
     _git(root, "add", "-A")
+    common = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     before = _git(root, "status", "--porcelain", "--ignored")
+    listed = sorted(p.name for p in common.iterdir())
     for path in ("/", "/state.json", "/file?change=003-draft-export&path=decision.md"):
         _get(url + path)
-    assert json.loads(_get(url + "/state.json")[1])["changes"][-1]["progress"]["step"] == "review"
+    st = json.loads(_get(url + "/state.json")[1])
+    assert {c["change"]: c for c in st["changes"]}["016-draft-tags"]["progress"]["step"] == "review"
     _get(url + "/state.json", "POST")
     assert _git(root, "status", "--porcelain", "--ignored") == before
+    assert sorted(p.name for p in common.iterdir()) == listed, "nothing new in the git common dir"
 
 
 @pytest.mark.portable
@@ -649,6 +655,82 @@ def test_a_second_board_reports_the_first_and_anything_else_is_refused(
     finally:
         other.shutdown()
         other.server_close()
+
+
+def _bare_repo(path: Path) -> Path:
+    """A second repo, unrelated to `repo`, with one open change."""
+    path.mkdir()
+    _write(path / "README.md", "another repo\n")
+    _git(path, "init", "-q", "-b", "main")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-q", "-m", "init")
+    _change(path, "001-other-thing", 1, "plan", "Other thing")
+    return path
+
+
+@pytest.mark.portable
+def test_the_board_names_its_repo_by_id_not_by_path(repo, tmp_path) -> None:
+    """167 R1: `repo_id` is the same from the main checkout and a worktree, differs between two
+    repos, and the payload carries no absolute path."""
+    other = _bare_repo(tmp_path / "other")
+    tree = _worktree(repo, "040-draft-tree", 1, "plan").parents[2]
+    main_st, tree_st, other_st = board.state(repo), board.state(tree), board.state(other)
+    assert re.fullmatch(r"[0-9a-f]{16}", main_st["repo_id"]), main_st["repo_id"]
+    assert tree_st["repo_id"] == main_st["repo_id"], "a worktree shows its main checkout's repo"
+    assert other_st["repo_id"] != main_st["repo_id"], "two repos, two ids"
+    home = sdlc.main_root(repo)
+    for st in (main_st, tree_st):
+        body = json.dumps(st, ensure_ascii=False)
+        for path in {str(home), home.as_posix(), str(home.resolve()), str(repo)}:
+            assert path not in body, path
+
+
+@pytest.mark.portable
+def test_another_repos_board_is_a_refusal(served, capsys, tmp_path) -> None:
+    """167 R3: a board on the port that shows another repo is refused, naming the port, and never
+    reported as `already`."""
+    root, url, port = served
+    other = _bare_repo(tmp_path / "other")
+    assert board.cmd_board(other, port) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert "serving" not in out, out
+    refusal = out["refusals"][0]
+    assert f"port {port}" in refusal and "another repo's board" in refusal, refusal
+    assert "--port" in refusal, refusal
+    # The first board's own repo still reads it as its own.
+    assert board.cmd_board(root, port) == 0
+    assert json.loads(capsys.readouterr().out)["serving"] == "already"
+
+
+@pytest.mark.portable
+def test_a_board_that_names_no_repo_is_a_refusal(repo, capsys) -> None:
+    """167 R4: a board from an older plugin copy answers `"board": "sdlc"` with no `repo_id`: it
+    is refused as another repo's would be, never `already`."""
+
+    class Old(SimpleHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = json.dumps({"board": "sdlc", "repo": "repo", "changes": []}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    old = ThreadingHTTPServer(("127.0.0.1", 0), Old)
+    threading.Thread(target=old.serve_forever, daemon=True).start()
+    try:
+        taken = old.server_address[1]
+        assert board.cmd_board(repo, taken) == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "serving" not in out, out
+        assert f"port {taken}" in out["refusals"][0], out
+        assert "another repo's board" in out["refusals"][0], out
+    finally:
+        old.shutdown()
+        old.server_close()
 
 
 # ---------------------------------------------------------------- the page
@@ -2282,6 +2364,120 @@ def test_a_train_member_shows_its_place_and_an_ejection(repo) -> None:
     assert _cards(repo)["031-draft-plain"]["progress"]["train"] is None
 
 
+# ---------------------------------------------------------------- the train's run lock (167)
+
+
+def _run_lock_path(root: Path) -> Path:
+    return Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")) / (
+        factory.landing.TRAIN_RUN_LOCK
+    )
+
+
+def _hold_run_lock(root: Path) -> int:
+    """The run lock taken on a descriptor of the test's own, as a `train --run` holds it."""
+    fd = os.open(_run_lock_path(root), os.O_RDWR | os.O_CREAT, 0o644)
+    assert factory._try_lock(fd), "the lock was free"
+    return fd
+
+
+def _let_go(fd: int) -> None:
+    factory._unlock(fd)
+    os.close(fd)
+
+
+def _in_train(root: Path, step: str, k: int, name: str, after: str | None = None) -> Path:
+    folder = _landing_at(root, step, name=name)
+    out = {"step": step, "round": 1, "moves": 0, "limit": 3, "train": {"k": k, "n": 3}}
+    why = ["ejected from the train: the gate failed"] if after else []
+    _write(folder / factory.LAND_STEP,
+           factory.land_step_text(out, "2000-01-01T00:00:00Z", after, why))  # fmt: skip
+    return folder
+
+
+@pytest.mark.portable
+def test_the_run_lock_name_is_a_pinned_copy() -> None:
+    """167 R12: the board's copy of the run lock's name is `landing.py`'s."""
+    assert board.TRAIN_RUN_LOCK == factory.landing.TRAIN_RUN_LOCK
+
+
+@pytest.mark.portable
+def test_a_held_run_lock_marks_a_train_card_unattended(repo) -> None:
+    """167 R7: with the run lock held by another descriptor, a train card that isn't stopped reads
+    `unattended`; an ejected train card and a landing outside a train never do."""
+    _in_train(repo, "stack", 1, "030-draft-land")
+    _in_train(repo, "eject", 2, "031-draft-eject", after="gate")
+    _landing_at(repo, "gate", name="032-draft-plain")
+    fd = _hold_run_lock(repo)
+    try:
+        cards = _cards(repo)
+    finally:
+        _let_go(fd)
+    assert cards["030-draft-land"]["progress"]["unattended"] is True
+    assert cards["031-draft-eject"]["progress"]["stopped"] is True
+    assert cards["031-draft-eject"]["progress"]["unattended"] is False
+    assert cards["032-draft-plain"]["progress"]["unattended"] is False
+    # Once the loop lets go, the card says so on the next read.
+    assert _cards(repo)["030-draft-land"]["progress"]["unattended"] is False
+
+
+@pytest.mark.portable
+def test_land_step_alone_never_claims_a_live_loop(repo) -> None:
+    """167 R8: a train card whose record names a step in flight, with the run lock missing or
+    free, is not unattended: a loop that died mid-step, or steps run by hand."""
+    _in_train(repo, "gate", 1, "030-draft-land")
+    assert not _run_lock_path(repo).exists()
+    assert _cards(repo)["030-draft-land"]["progress"]["unattended"] is False
+    _let_go(_hold_run_lock(repo))  # the file a loop leaves behind, free
+    assert _run_lock_path(repo).exists()
+    assert _cards(repo)["030-draft-land"]["progress"]["unattended"] is False
+
+
+@pytest.mark.portable
+def test_reading_the_run_lock_creates_nothing_and_holds_nothing(repo) -> None:
+    """167 R9: the board's reading of the lock never creates the file, and leaves a free lock
+    free when `state()` returns."""
+    _in_train(repo, "stack", 1, "030-draft-land")
+    lock = _run_lock_path(repo)
+    board.state(repo)
+    assert not lock.exists(), "the board created the run lock"
+    _let_go(_hold_run_lock(repo))
+    board.state(repo)
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        assert factory._try_lock(fd), "the board kept the run lock"
+        factory._unlock(fd)
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.portable
+def test_no_train_no_lock_probe(repo, monkeypatch) -> None:
+    """167 R10: with no train card under way, the board never tries the run lock."""
+    calls = []
+    monkeypatch.setattr(board, "train_run_held", lambda home: calls.append(home) or True)
+    _landing_at(repo, "gate", name="032-draft-plain")
+    _in_train(repo, "eject", 2, "031-draft-eject", after="gate")
+    cards = _cards(repo)
+    assert calls == [], "the lock was tried with no train under way"
+    assert cards["032-draft-plain"]["progress"]["unattended"] is False
+    _in_train(repo, "stack", 1, "030-draft-land")
+    assert _cards(repo)["030-draft-land"]["progress"]["unattended"] is True
+    assert len(calls) == 1, "tried once a read, however many cards"
+
+
+@pytest.mark.portable
+def test_the_page_says_unattended_only_from_the_lock() -> None:
+    """167 R11: the page says a train runs unattended only on `p.unattended`, as text."""
+    html = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    row = html[html.index("function progressRow") :]
+    row = row[: row.index("\n}\n")]
+    text = "running unattended: train --run takes each step"
+    lines = [line for line in row.splitlines() if text in line]
+    assert len(lines) == 1 and html.count(text) == 1, "said once, in progressRow"
+    assert re.search(r"if \(land && p\.unattended\) parts\.push\(h\(", lines[0]), lines[0]
+    assert "unattended" not in row.replace(lines[0], ""), "no other condition shows it"
+
+
 @pytest.mark.portable
 def test_landing_typical_times_come_from_closed_factory_runs(repo) -> None:
     """133: the rows after the approver are the landing's: its reviews and verifications, and its
@@ -2967,3 +3163,17 @@ def test_nothing_names_a_retired_status_section() -> None:
             text = path.read_text(encoding="utf-8", errors="replace")
             for old in retired:
                 assert old not in text, (path.relative_to(ROOT).as_posix(), old)
+
+
+@pytest.mark.portable
+def test_the_dashboard_skill_offers_another_port_on_a_refusal() -> None:
+    """167 R6: the dashboard skill's first step reads `already` as this repo's board, the one to
+    open, and a refusal as another repo's board or something else, rerun on another `--port`."""
+    text = (ROOT / "skills" / "dashboard" / "SKILL.md").read_text(encoding="utf-8")
+    step = text[text.index("## Step 1") : text.index("## Step 2")]
+    flat = " ".join(step.split())
+    assert '"already"' in flat and "this repo's board" in flat, flat
+    assert "the one to open" in flat, flat
+    assert "another repo's board" in flat and "something else" in flat, flat
+    assert re.search(r"another `--port`", flat) and "5171" in flat, flat
+    assert "sdlc.py board --port 5170\n" in step, "the command is unchanged"

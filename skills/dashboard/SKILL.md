@@ -27,8 +27,9 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py board --port 517
 ```
 
 Its first output line is JSON: `{"url": …, "serving": true}` once it listens, or `"serving":
-"already"` when a board already holds the port, which is then the one to open. A `refusals` line
-means something else holds the port: say so, and start it again with another `--port`.
+"already"` when this repo's board already holds the port, which is then the one to open. A
+`refusals` line means another repo's board, or something else, holds the port: say which, as the
+refusal does, and run the same command again with another `--port` (5171, say).
 
 ## Step 2 — Say where it is, and stop
 

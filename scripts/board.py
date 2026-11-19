@@ -15,9 +15,14 @@ it. Its card's step track is the step the
 supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
 factory runs, read from history once per base-branch tip and kept in memory. A change landing (at
 `test` or `shipped` with a `runs/land-step.md`) shows the landing's track instead, from the step
-its last landing command recorded, a stop with its problems. Nothing here
-writes: three GET routes, every other method refused, and `/file` serves only a file inside an
-open change's own folder.
+its last landing command recorded, a stop with its problems; a train card that isn't stopped says
+it runs unattended only while another process holds the train's run lock (`TRAIN_RUN_LOCK`, in
+the git common dir, `landing.py`'s name pinned by a test), opened read-only and never created,
+and tried only while such a card exists, so `land-step.md` alone never claims a live loop. Nothing
+here writes: three GET routes, every other method refused, and `/file` serves only a file inside an
+open change's own folder. `/state.json` names its repo by `repo_id`, a hash of the main
+checkout's path, never the path, so a second `board` on a taken port calls the board there its
+own only when the ids match; another repo's, or one too old to say, is a refusal.
 
 A running board serves this file as it is on disk: each request compares its mtime, and a change
 loads it afresh by path (`_Live`) and routes with the new `route()`. A file that won't load (half
@@ -28,6 +33,7 @@ is the contract between a running server and a reloaded module.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -91,6 +97,9 @@ LAND_OPEN = ("resolve", "fix", "mend", "cases", "wait")
 # only from `MIN_CHANGES` of them or more. Read once per base-branch tip, kept in memory only.
 WINDOW = 20
 MIN_CHANGES = 3
+# The lock a `train --run` holds in the git common dir for its whole life (`landing.py`'s, pinned
+# by a test): held by another process, a train card is being landed unattended.
+TRAIN_RUN_LOCK = "sdlc-factory-train-run.lock"
 _HISTORY: dict[tuple[str, str], tuple[str, dict]] = {}
 _HISTORY_LOCK = threading.Lock()
 
@@ -108,13 +117,68 @@ def state(root: Path) -> dict:
     now = datetime.now(UTC).timestamp()
     history = typical_times(home, trunk)
     rebasing = sdlc.rebasing_branches(home)
+    changes = [
+        _entry(root, home, f, trunk, issues, now, history, rebasing=f.name in rebasing)
+        for f in _on_board(root, rebasing)
+    ]
+    _mark_unattended(home, changes)
     return {
-        "board": MARKER, "repo": home.name, "trunk": trunk, "at": now,
-        "changes": [
-            _entry(root, home, f, trunk, issues, now, history, rebasing=f.name in rebasing)
-            for f in _on_board(root, rebasing)
-        ],
+        "board": MARKER, "repo": home.name, "repo_id": _repo_id(home), "trunk": trunk, "at": now,
+        "changes": changes,
     }  # fmt: skip
+
+
+def _mark_unattended(home: Path, changes: list[dict]) -> None:
+    """Set `unattended` on each train card that isn't stopped while a `train --run` holds the run
+    lock. The lock is tried only when such a card exists, once a read; `land-step.md` alone
+    never says a loop is live, since a loop that died mid-step leaves it as it was."""
+    train = [
+        p for c in changes if (p := c.get("progress")) and p.get("kind") == "land"
+        and p.get("train") and not p.get("stopped")
+    ]  # fmt: skip
+    if train and train_run_held(home):
+        for p in train:
+            p["unattended"] = True
+
+
+def train_run_held(home: Path) -> bool:
+    """Whether another process holds the train's run lock now. The file is opened read-only,
+    never created; a free lock is taken and let go at once, as `landing.py`'s
+    `train_running()` tries it. Anything that stops the reading reads as not held: the board
+    never claims a loop it can't see."""
+    common = sdlc._git(home, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        return False
+    try:
+        fd = os.open(Path(common) / TRAIN_RUN_LOCK, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        if not sdlc._try_lock(fd):
+            return True
+        _release(fd)
+        return False
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def _release(fd: int) -> None:
+    """The factory's `_unlock()`: Windows unlocks the byte; elsewhere closing the descriptor
+    drops the flock."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+
+def _repo_id(home: Path) -> str:
+    """Which repo a board shows, without its path: the first 16 hex digits of the SHA-256 of the
+    main checkout's resolved POSIX path, the same from every worktree, which a second `board`
+    compares before it calls a port's board its own."""
+    return hashlib.sha256(home.resolve().as_posix().encode("utf-8")).hexdigest()[:16]
 
 
 def _on_board(root: Path, rebasing: set[str] | None = None) -> list[Path]:
@@ -423,7 +487,7 @@ def _land_progress(
         "problems": rec["problems"], "elapsed": elapsed,
         "typical": typical if fraction is not None else None, "fraction": fraction,
         "samples": found["samples"] if fraction is not None else None, "plan": None,
-        "running": not stopped and fraction is None,
+        "running": not stopped and fraction is None, "unattended": False,
     }  # fmt: skip
 
 
@@ -782,26 +846,34 @@ def serve(root: Path, port: int) -> ThreadingHTTPServer:
     return server
 
 
-def _is_board(port: int) -> bool:
+def _board_on(port: int) -> dict | None:
+    """The `state.json` whatever holds `port` answers with, or None when it answers nothing a
+    board would."""
     try:
         with urllib.request.urlopen(f"http://{HOST}:{port}/state.json", timeout=10) as r:
-            return json.loads(r.read().decode("utf-8")).get("board") == MARKER
+            found = json.loads(r.read().decode("utf-8"))
     except (OSError, ValueError, AttributeError):
-        return False
+        return None
+    return found if isinstance(found, dict) else None
 
 
 def cmd_board(root: Path, port: int) -> int:
-    """Serve the board until stopped. A board already on `port` is reported, not doubled; anything
-    else on it is a refusal, naming the port."""
+    """Serve the board until stopped. This repo's board already on `port` is reported, not
+    doubled; another repo's board (or one too old to name its repo) is a refusal naming the port,
+    as is anything else on it."""
     url = f"http://{HOST}:{port}/"
     try:
         server = serve(root, port)
         url = f"http://{HOST}:{server.server_address[1]}/"  # port 0's is the one the OS picked
     except OSError:
-        if _is_board(port):
-            print(json.dumps({"url": url, "serving": "already"}, indent=2))
-            return 0
-        refusal = f"port {port} is in use by something other than a board: pass --port <N>"
+        found = _board_on(port)
+        if found is not None and found.get("board") == MARKER:
+            if found.get("repo_id") == _repo_id(sdlc.main_root(root)):
+                print(json.dumps({"url": url, "serving": "already"}, indent=2))
+                return 0
+            refusal = f"port {port} holds another repo's board: pass --port <N>"
+        else:
+            refusal = f"port {port} is in use by something other than a board: pass --port <N>"
         print(json.dumps({"refusals": [refusal]}, indent=2))
         return 1
     print(json.dumps({"url": url, "serving": True}, indent=2), flush=True)
