@@ -352,18 +352,6 @@ Cost: S
 Value: low
 Raised by: 179-feature-inventory (correctness)
 
-## [2026-11-19-45] [idea] Board drawer focus test is flaky under a loaded gate
-
-Left undone by 181-landing-nits-and-fixes, carried forward when it landed: `tests/test_board_browser.py::test_the_drawer_holds_focus_and_returns_it_to_its_card` failed in 181's round-1 gate with no error in the record's tail, and passed when rerun alone: likely flaky under a loaded gate. Not this change's code.
-See .sdlc/work/181-landing-nits-and-fixes/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-46] [idea] Adoption tests fail the gate when offline; skip or cache uv's deps
-
-Left undone by 181-landing-nits-and-fixes, carried forward when it landed: `tests/test_adoption.py` needs network (uv fetches PyPI deps for `uv run --script`); a gate with no DNS fails two of its tests. A skip or cache when offline would keep the gate about the code.
-See .sdlc/work/181-landing-nits-and-fixes/notes.md in its commit.
-Raised 2026-11-19.
-
 ## [2026-11-19-49] [nit] the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
 
 Raised by the test review of 181-landing-nits-and-fixes, round 1: tests/test_land.py: the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
@@ -541,3 +529,39 @@ Paths: plugins/factory/scripts/landing.py
 Cost: S
 Value: med
 Raised by: 185-landing-gates (contract)
+
+## [2026-11-19-75] [idea] test_train's by() should share _uv()'s offline fallback
+
+Left undone by 186-gate-reliability, carried forward when it landed: `tests/test_train.py`'s `by()` runs `uv run --script` on a copy of the plugin at a new path, as the adoption tests did, so a gate with no network can fail it the same way. It could share the adoption tests' `_uv()` (offline from uv's cache, else a skip naming the network).
+See .sdlc/work/186-gate-reliability/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-76] [nit] `"network was disabled" in cached.stderr` depends on uv's exact wording.
+
+Raised by the code review of 186-gate-reliability, round 1: tests/test_adoption.py:65: `"network was disabled" in cached.stderr` depends on uv's exact wording. If a later uv words it differently, an offline run with an empty cache returns the failing result instead of skipping, so the gate goes red on the network again. Matching "offline" or "disabled" as well, or checking `--offline`'s non-zero exit more loosely, would be sturdier.
+
+Theme: robustness
+Paths: tests/test_adoption.py
+Cost: S
+Value: med
+Raised by: 186-gate-reliability (correctness)
+
+## [2026-11-19-77] [nit] `test_with_the_index_unreachable_a_copy_of_the_script_runs_from_uvs_cache` passes on the old code too.
+
+Raised by the code review of 186-gate-reliability, round 1: tests/test_adoption.py:529: `test_with_the_index_unreachable_a_copy_of_the_script_runs_from_uvs_cache` passes on the old code too. It only fails once uv's cached index answers are stale, as the builder says. It shows the fallback works but isn't a regression guard.
+
+Theme: tests
+Paths: tests/test_adoption.py
+Cost: M
+Value: low
+Raised by: 186-gate-reliability (correctness)
+
+## [2026-11-19-78] [nit] the builder's note is right that it also runs `uv run --script` and could share `_uv()`.
+
+Raised by the code review of 186-gate-reliability, round 1: tests/test_train.py: the builder's note is right that it also runs `uv run --script` and could share `_uv()`. Filed as a follow-up.
+
+Theme: refactor
+Paths: tests/test_train.py
+Cost: M
+Value: med
+Raised by: 186-gate-reliability (correctness)
