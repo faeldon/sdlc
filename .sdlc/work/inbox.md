@@ -565,3 +565,18 @@ Paths: tests/test_train.py
 Cost: M
 Value: med
 Raised by: 186-gate-reliability (correctness)
+
+## [2026-11-19-79] [bug] A DECISION question that continues in sub-bullets is cut off and loses its options
+
+When an agent's `- DECISION:` line continues its question in its own indented sub-bullets, with the
+`- OPTION:` and `- WHY:` lines after them, `sub_lines()` stops at the first sub-bullet that is
+neither. So `decisions.md` keeps only the question's first line, and the options are never read:
+`ask` gives `options: []` and `why: null`, and `/sdlc-factory:decide` offers keep/change with a
+truncated question. Expected: the whole question, with its options and why. To see it: 187's
+builder raised D3 as "I reworded more than R7 and R9 list:" followed by three sub-bullets, and
+the ledger and `ask 187` show only that line, with no options.
+
+Severity: low
+Paths: plugins/factory/scripts/factory.py
+Introduced by: 137-approver-weighs-defaults
+Theme: factory
