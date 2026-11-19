@@ -32,6 +32,7 @@ SCRIPTS = [
     REPO / "plugins" / "factory" / "scripts" / "landing.py",
     # This repo's own retro indicator, which the retrospective runs on Windows as anywhere.
     REPO / ".sdlc" / "function-heat.py",
+    REPO / ".sdlc" / "comment-health.py",
 ]
 GIT_ID = {
     "GIT_AUTHOR_NAME": "t",

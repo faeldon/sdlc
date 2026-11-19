@@ -213,6 +213,19 @@ Two halves: defects (does it work) and design health (will it keep being easy to
 - **Status:** partly: suite times and drifted tests are in `retro`'s output; the cases' scores
   are kept per run and read by ship and release, not by `retro`.
 
+### Supporting: comment health
+- **What:** each script's comment density (comment and docstring lines over non-blank lines) and
+  the files outside 0.10–0.40; docstring coverage of long (30+ lines) and hot functions; the share
+  of comments that narrate the line they sit on; and comments' share of the scripts' bytes, with
+  its estimate in tokens.
+- **Why:** agent-written code narrates when unsure, and code with too few comments can't be
+  audited; no one ratio is right, so the four together, and their trend, show which way it drifts.
+  Comments are also a share of every file an agent reads.
+- **Where:** this repo's `.sdlc/comment-health.py`, under `retro.indicators`, beside function heat.
+- **Status:** captured (S17, 178), as indicator rows; their trend is the report's `Change`.
+  **Guardrail:** Cost, its `comment est. tokens` row: trimming comments to cut what agents read
+  must not cost the coverage rows.
+
 ### Guardrail: lead time
 Quality bought with slowness shows up as lead time rising. See Speed.
 
@@ -473,7 +486,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 | **S11** | Trust band: each headline's coverage and why the rest is missing, greyed under half; the Claude Code version, models and plugin version against the last window. | Trust | – |
 | **S12** | Follow-through: the share of the last retrospective's seeds, milestones and intents done or dropped against carried or vanished. | Value | – |
 | **S13** | Time to users: median time from landing to release, and releases per window. | Value | – |
-| **S17** | Comment health, an indicator beside function heat: comment density per file as a band and its trend, docstring coverage of long and hot functions, the share of comments that restate their line, and comments' share of what agents read. **Exists as 2026-11-19-9.** | Quality, Cost | S8 |
+| **S17** | Comment health, an indicator beside function heat: comment density per file as a band and its trend, docstring coverage of long and hot functions, the share of comments that restate their line, and comments' share of what agents read. **Done: 178.** | Quality, Cost | S8 |
 
 ### Presentation (the report)
 
@@ -552,7 +565,7 @@ touches its files.
 - **S5**, with the feature map 2026-10-25-3 and the process map 2026-10-25-1.
 - **S6**, with 2026-11-18-93.
 - **S8**.
-- **S17**, 2026-11-19-9, after S8.
+- **S17**, done: 178.
 - **S9**.
 - **S10**.
 
