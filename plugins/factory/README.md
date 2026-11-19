@@ -96,9 +96,12 @@ reviewing, and deciding whether to escalate.
   your yes the skill runs each change's acceptance checks and cases behind their own prompts, then
   starts `factory.py train --run` in the background and ends its turn: the loop takes every
   step itself and starts the landing's agents, ejects a change the gate found at fault as your
-  yes approved, and stops only where you're needed (any other ejection, a train stop, checks to
-  run again as stacked, a refused push, a command or agent that fails), naming why and the way
-  on; rerun `/sdlc-factory:land` to go on past it. `train --cancel` stops the loop after the step
+  yes approved, runs each change's acceptance checks again as stacked while its `checks.md` is the
+  one your yes covered, runs the base branch's `[commands] build` once at the tip when a change
+  calls for it (a path its `build_when` matches, or a `[review] sensitive` one, as `/sdlc:ship`
+  does by hand), and stops only where you're needed (any other ejection, a train stop, a red
+  build, checks changed since your yes that the script's read-only list and the approver haven't
+  both cleared, a refused push, a command or agent that fails), naming why and the way on; rerun `/sdlc-factory:land` to go on past it. `train --cancel` stops the loop after the step
   in flight, and one loop runs at a time, under a run lock in the git common dir. Answer
   `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
   reviewer at its depth reads it before it lands; a builder that finds it already made edits
@@ -114,7 +117,10 @@ reviewing, and deciding whether to escalate.
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
   its one question shows what your yes approves, for each change: each acceptance check's name
   and command, run then through `factory.py accept` behind the harness's own prompt (a failure
-  stops that change and those after it, and a rebased change runs its checks again), and the
+  stops that change and those after it, and a rebased change runs its checks again, by the loop
+  itself: unattended only for the commands your yes showed, or, for one changed since, when every
+  added or edited command passes the read-only list and the approver judges it harmless, its
+  judgement filed in `build/land-<n>.checks.md`; the approver's word alone never runs one), and the
   skills' cases with their cost cap, run before the question through `factory.py cases`, behind
   the same prompt, so it shows each case that failed (with its failing graders and its traces),
   hit the sandbox, or was skipped (`cases --skip` when you decline the run), which your yes
@@ -487,8 +493,9 @@ answers, the ledger, the depth the diff calls for, and which step the loop takes
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
 `stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
 `upgrade`); the gate itself, the base branch's check run on each build and recorded attempt by
-attempt (`gate`), and an agent's full run of it that records nothing (`check`), through one function
-(`_run_check()`), the only places it runs a host's command, each holding one of `gate_jobs` slots,
+attempt (`gate`), its `[commands] build` once at a landing train's tip (`gate --land --build`, into
+`build/land-<n>.build.md`), and an agent's full run of the check that records nothing (`check`),
+through one function (`_run_check()`), the only places it runs a host's command, each holding one of `gate_jobs` slots,
 an OS lock on `sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate
 ends, and that `sdlc.py gate`, the gate run by hand, takes too, through pinned copies; the change
 brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`); each agent
@@ -502,7 +509,8 @@ and `--cancel`), each change's landing (`land`, `resolve --onto`, `land-fix`, `l
 landing step recorded as it starts in `runs/land-step.md` for the board's landing track
 (`land-verdicts --record` adds a stop and why, a plain line over the tool's words), its acceptance
 checks and skills' cases (`accept`, `cases` and `cases --skip`, never pre-approved, each recording
-its step before the commit); for the eval and the review, which bugs escaped and through which diff
+its step before the commit; the loop runs `accept` itself only as stacked and cleared, and the
+approver's judgement of changed checks, `agent --task land-checks`); for the eval and the review, which bugs escaped and through which diff
 (`escapes`), the slice of code to look at (`slice`), a report folder (`report-dir`) and the eval's
 scores (`score`). It never imports `sdlc.py`: installed from the marketplace, each plugin is cached
 on its own, so it reads the register and the `Close` commits' trailers with copies of `sdlc.py`'s

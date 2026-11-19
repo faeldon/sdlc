@@ -18,8 +18,8 @@ from pathlib import Path
 
 # Every `next` a reading names that the driver takes, `done` and `stop` included.
 DRIVER_STEPS = frozenset(
-    {"commit", "stack", "resolve", "gate", "eject", "accept", "review", "verify", "mend", "fix",
-     "close", "stop", "done"}
+    {"commit", "stack", "resolve", "gate", "build", "eject", "accept", "checks", "review",
+     "verify", "mend", "fix", "close", "stop", "done"}
 )  # fmt: skip
 
 
@@ -68,6 +68,7 @@ def drive_train(
     verify=None,
     mend=None,
     fix=None,
+    checks=None,
     strict: bool = False,
     limit: int = 80,
     until=None,
@@ -78,7 +79,9 @@ def drive_train(
     default); `verify(folder, verdict)` the verifier's answer (every change dropped by default);
     `mend(folder, n, role)` the role's reply again (a passing one by default), recorded in
     `runs/mended` as `agent --task land-mend` records it; `fix(tree)` the builder's edit for a
-    stored fix, between `land-fix --ask` and `--commit`. A `commit` runs what the reading says
+    stored fix, between `land-fix --ask` and `--commit`; `checks(folder, n)` the approver's
+    judgement of a changed `checks.md` under the `Judged:` line the script writes (`CHECKS:
+    HARMLESS` by default). A `commit` runs what the reading says
     comes `before` it (`accept`, `cases`); an `eject` runs `--eject` whatever its cause. With
     `strict`, every gate must pass, no stack may conflict, a close must merge and a `stop` is a
     failure. Stops at `done`, at `stop` (after `--stop`), or once `until(reading)` holds. Returns
@@ -128,9 +131,22 @@ def drive_train(
             code, done = _run(capsys, factory.landing.cmd_train, root, eject=out["change"])
             assert code == 0, done
             out["did"] = done
+        elif nxt == "build":
+            code, done = _run(capsys, factory.cmd_gate, tree, num, True, build=True)
+            assert not strict or done["verdict"] == "PASS", done
         elif nxt == "accept":
             code, done = _run(capsys, factory.cmd_accept, tree, num)
             assert not strict or code == 0, done
+        elif nxt == "checks":
+            n = factory.land_round(folder) or 1
+            if checks is not None:
+                reply = checks(folder, n)
+            else:
+                reply = "CHECKS: HARMLESS\n\nEach changed command only reads.\n"
+            judged = factory.landing.checks_sha(folder)[:16]
+            path = factory.land_checks_path(folder, n)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"Judged: {judged}\n\n{reply}", encoding="utf-8")
         elif nxt == "review":
             n = out["verdict"]["round"]
             for role in out["verdict"]["missing"]:

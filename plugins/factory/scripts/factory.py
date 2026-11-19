@@ -250,6 +250,8 @@ VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 # `FIX_MADE` goes on, when the fix it was asked for already holds and it edited nothing.
 FIX_RE = re.compile(r"^FIX: (\S.*?)\s*$")
 FIX_MADE = "ALREADY MADE"
+# The approver's answer on a `checks.md` changed since the person's yes (`--task land-checks`).
+CHECKS_RE = re.compile(r"^CHECKS: (HARMLESS|ESCALATE)\s*$")
 DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 # A problem in code the change didn't touch: filed for later, never reworked.
@@ -886,16 +888,22 @@ def _irreversible(root: Path, base: str) -> list[str]:
     return _review_list(root, base, "irreversible")
 
 
-def _base_check(root: Path, base: str) -> str | None:
-    """`[commands] check` as the base branch holds it, never this checkout's: a change can't edit
-    the gate it is judged by. None when the base branch names none."""
+def _base_command(root: Path, base: str, key: str) -> str | None:
+    """`[commands] <key>` as the base branch holds it (`check`, `build`, `build_when`), never this
+    checkout's: a change can't edit the gate it is judged by. None when the base branch names
+    none, or only blanks."""
     try:
         data = tomllib.loads(_git(root, "show", f"{base}:{SDLC_CONFIG.as_posix()}") or "")
     except tomllib.TOMLDecodeError:
         return None
     commands = data.get("commands")
-    check = commands.get("check") if isinstance(commands, dict) else None
-    return check if isinstance(check, str) and check.strip() else None
+    value = commands.get(key) if isinstance(commands, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _base_check(root: Path, base: str) -> str | None:
+    """`[commands] check` as the base branch holds it (`_base_command()`)."""
+    return _base_command(root, base, "check")
 
 
 def _changed_paths(root: Path, base: str) -> list[str]:
@@ -2714,6 +2722,18 @@ def land_gate_path(folder: Path, n: int) -> Path:
     return folder / "build" / f"land-{n}.gate.md"
 
 
+def land_build_path(folder: Path, n: int) -> Path:
+    """The base branch's `[commands] build` on a landing train's tip, landing round `n`, in the gate
+    file's shape (`gate --land --build`): beside the gate's record."""
+    return folder / "build" / f"land-{n}.build.md"
+
+
+def land_checks_path(folder: Path, n: int) -> Path:
+    """The approver's judgement of a `checks.md` changed since the person's yes, landing round
+    `n` (`agent --task land-checks`): never under `reviews/land-<n>/`, read there as a review."""
+    return folder / "build" / f"land-{n}.checks.md"
+
+
 def read_gate_file(path: Path) -> dict | None:
     """A gate file's attempts, oldest first, or None when there is none."""
     if not path.is_file():
@@ -3043,7 +3063,8 @@ def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, 
 def _run_check(root: Path, command: str, capture: bool) -> subprocess.CompletedProcess:
     """Run the base branch's `[commands] check` in `root`, within `GATE_TIMEOUT`: the one place
     this script runs a host's command, for `gate` (`capture`, its output into the record) and
-    `check` (its output straight through to the caller). Raises what `subprocess.run` raises."""
+    `check` (its output straight through to the caller); and `[commands] build` the same way for
+    `gate --land --build`, once at a landing train's tip. Raises what `subprocess.run` raises."""
     if capture:
         return subprocess.run(
             _sh(command), cwd=root, capture_output=True, encoding="utf-8", errors="replace",
@@ -3088,21 +3109,27 @@ def cli_check(root: Path, args) -> int:
     return cmd_check(root, args.id)
 
 
-def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
+def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) -> int:
     """Run the base branch's `[commands] check` in the change's worktree on its newest build, and
     add the attempt to `build/round-<N>.gate.md`; with `land`, on the change as a landing rebased
-    it, into `build/land-<n>.gate.md`. PASS only on exit 0, within `GATE_TIMEOUT`, with the tree as
-    it found it. Writes only that file, its copy of the output holding no path of this machine's
-    (`_placeholders()`): the record is committed with the change."""
+    it, into `build/land-<n>.gate.md`. With `land` and `build`, its `[commands] build` instead,
+    once at a landing train's tip (`landing._train_build()`), into `build/land-<n>.build.md`,
+    first line `BUILD:`; never in a build round. PASS only on exit 0, within `GATE_TIMEOUT`, with
+    the tree as it found it. Writes only that file, its copy of the output holding no path of
+    this machine's (`_placeholders()`): the record is committed with the change."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
+    if build and not land:
+        why = "--build runs only with --land: the build runs once at a landing train's tip"
+        return emit({"refusals": [why]}, 1)
     base = _base(root)
     if base is None:
         return emit({"refusals": ["no base branch: set [git] base in .sdlc/config.toml"]}, 1)
-    command = _base_check(root, base)
+    key = "build" if build else "check"
+    command = _base_command(root, base, key)
     if command is None:
-        why = "the base branch's .sdlc/config.toml has no [commands] check"
+        why = f"the base branch's .sdlc/config.toml has no [commands] {key}"
         return emit({"refusals": [why]}, 1)
     if land:
         n = land_round(folder)
@@ -3112,14 +3139,15 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
             n = 1
         if n == 0:
             return emit({"refusals": ["no landing round is under way: run land first"]}, 1)
-        path, build = land_gate_path(folder, n), landed_build(root)
+        path = (land_build_path if build else land_gate_path)(folder, n)
+        built = landed_build(root)
         # Before the tree is hashed, so the gate finds it as the record leaves it.
         _record_land(root, folder, "gate")
     else:
         n = build_round(folder)
         if n == 0:
             return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
-        path, build = gate_path(folder, n), build_hash(folder, n)
+        path, built = gate_path(folder, n), build_hash(folder, n)
     jobs = load_config(root)[0]["gate_jobs"]
     with gate_slot(root, jobs, folder.name) as (slot, waited):
         before = _tree_hashes(root, base)
@@ -3147,7 +3175,7 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     tree = f"changed: {', '.join(changed)}" if changed else "unchanged"
     section = (
         f"## Attempt {attempt}\n\nVerdict: {verdict}\nCommand: {command}\n"
-        f"Build: {build}\nExit: {exit_text}\nSeconds: {seconds}\nWaited: {waited}\n"
+        f"Build: {built}\nExit: {exit_text}\nSeconds: {seconds}\nWaited: {waited}\n"
         f"Tree: {tree}\n\n"
         f"Last {GATE_TAIL} lines of its output:\n\n{tail}"
     )
@@ -3155,7 +3183,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
     earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    head = "BUILD" if build else "GATE"
+    path.write_text(f"{head}: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
     out = {"change": folder.name, "round": n, "attempt": attempt, "verdict": verdict}
     out.update(exit=exit_text, seconds=seconds, waited=waited, slot=slot, tree=tree)
     out["to"] = path.relative_to(root).as_posix()
@@ -3167,9 +3196,10 @@ def cmd_gate(root: Path, ident: str, land: bool = False) -> int:
     "run the base branch's gate on the newest build",
     arg("id"),
     arg("--land", action="store_true", help="on the change as a landing rebased it"),
+    arg("--build", action="store_true", help="with --land: [commands] build, at a train's tip"),
 )
 def cli_gate(root: Path, args) -> int:
-    return cmd_gate(root, args.id, args.land)
+    return cmd_gate(root, args.id, args.land, args.build)
 
 
 def set_stage(text: str, stage: str, today: str) -> tuple[str, list[str]]:
@@ -3437,10 +3467,11 @@ LAND_STEPS = (
     "checks", "cases", "ship", "rebase", "stack", "wait", "resolve", "fix", "gate", "recheck",
     "review", "mend", "verify", "close", "eject",
 )  # fmt: skip
-# The landing tasks `agent` runs, and the step each records as it starts.
+# The landing tasks `agent` runs, and the step each records as it starts: the approver judging a
+# changed `checks.md` is the checks' own step after the commit, `recheck`.
 LAND_TASK_STEP = {
     "resolve": "resolve", "train-resolve": "resolve", "land-fix": "fix", "land-review": "review",
-    "land-verify": "verify", "land-mend": "mend",
+    "land-verify": "verify", "land-mend": "mend", "land-checks": "recheck",
 }  # fmt: skip
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at: a
 # decision to answer, and an upgrade with the spec it owes. The board keeps a copy, pinned.
@@ -3474,19 +3505,20 @@ USAGE_FIELDS = {
 }  # fmt: skip
 TASKS = (
     "spec", "build", "fix", "review", "verify", "rework", "decided", "mend", "approve", "resolve",
-    "train-resolve", "land-fix", "land-review", "land-verify", "land-mend",
+    "train-resolve", "land-fix", "land-review", "land-verify", "land-mend", "land-checks",
 )  # fmt: skip
 # The role each task runs as; `review`, `mend` and `land-review` are told theirs.
 TASK_ROLE = {
     "spec": "spec-writer", "build": "builder", "fix": "builder", "verify": "verifier",
     "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
     "train-resolve": "resolver", "land-fix": "builder", "land-verify": "verifier",
+    "land-checks": "approver",
 }  # fmt: skip
 # Each task's purpose, but those `purpose_of()` reads from the round (`ROUND_PURPOSE`).
 TASK_PURPOSE = {
     "spec": "spec", "approve": "build", "rework": "rework", "fix": "gate-fix", "mend": "mend",
     "land-mend": "mend", "resolve": "land", "train-resolve": "land", "land-fix": "land",
-    "land-review": "land", "land-verify": "land",
+    "land-review": "land", "land-verify": "land", "land-checks": "land",
 }  # fmt: skip
 # The tasks that are the build in the run's first round and rework after it.
 ROUND_PURPOSE = ("build", "review", "verify", "decided")
@@ -3494,7 +3526,10 @@ ROUND_PURPOSE = ("build", "review", "verify", "decided")
 # for, the resolver resolving a train's, the review of the change as it now stands on the base
 # branch, and the mend of a landing reply `land-verdicts` names. Never steps of the build's loop,
 # so `verdicts` names none.
-LAND_TASKS = ("resolve", "train-resolve", "land-fix", "land-review", "land-verify", "land-mend")
+LAND_TASKS = (
+    "resolve", "train-resolve", "land-fix", "land-review", "land-verify", "land-mend",
+    "land-checks",
+)  # fmt: skip
 # The step `verdicts` must name for a task to run, so no step is taken out of turn.
 TASK_STEP = {"build": "build", "fix": "fix", "review": "review", "verify": "verify",
              "rework": "rework", "approve": "approve"}  # fmt: skip
@@ -3535,6 +3570,7 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
         "land-review": {"main": "round what diff", "rebased": "base why", "resolved": "round",
                         "clean": "", "asked": "round ask"},
         "land-verify": {"main": "round diff"},
+        "land-checks": {"main": "approved current changed removed"},
     }.items()
 }  # fmt: skip
 # The files each task's prompt reads beyond `common`: a mend reads a review's opening, a landing's
@@ -3543,7 +3579,7 @@ TASK_PROMPTS = {
     "land-mend": ("mend", "land-review"), "mend": ("mend", "review"),
     **{t: (t,) for t in ("spec", "build", "fix", "review", "verify", "rework", "approve",
                          "decided", "resolve", "train-resolve", "land-fix", "land-review",
-                         "land-verify")},
+                         "land-verify", "land-checks")},
 }  # fmt: skip
 PART_RE = re.compile(r"^## ([a-z][a-z0-9-]*)$")
 
@@ -3792,17 +3828,18 @@ def _claude(argv: list[str], cwd: Path) -> tuple[int, list[str], str | None, dic
     return 0, replies, None, figures
 
 
-def holds(role: str, reply: str) -> bool:
+def holds(role: str, reply: str, task: str | None = None) -> bool:
     """Whether a reply holds what `role` is asked to give: a reviewer's `VERDICT:` line, the
-    approver's `DECISION:` line, the verifier's `- KEPT:` or `- DROPPED:` line, the builder's
-    `## Evidence`, or the spec-writer's draft (a bare `---`, its frontmatter's opening, as
-    `split_draft()` finds it). It only picks which of a session's replies `agent` files, never
-    what the reply says: `verdicts` and `land-verdicts` still read the file."""
+    approver's `DECISION:` line (its `CHECKS:` line for `land-checks`), the verifier's `- KEPT:`
+    or `- DROPPED:` line, the builder's `## Evidence`, or the spec-writer's draft (a bare `---`,
+    its frontmatter's opening, as `split_draft()` finds it). It only picks which of a session's
+    replies `agent` files, never what the reply says: `verdicts` and `land-verdicts` still read
+    the file."""
     lines = reply.splitlines()
     if role in REVIEWERS:
         return any(map(VERDICT_RE.match, lines))
     if role == "approver":
-        return any(map(DECISION_RE.match, lines))
+        return any(map(CHECKS_RE.match if task == "land-checks" else DECISION_RE.match, lines))
     if role == "verifier":
         return any(KEPT_RE.match(line) or DROPPED_RE.match(line) for line in lines)
     if role == "spec-writer":
@@ -3817,7 +3854,9 @@ def purpose_of(
     in the change's `costs.jsonl` ran the same `RERUNNABLE` task for the same role in the same
     round (`rnd`) or landing round (`land`); else the task's own (`TASK_PURPOSE`), or, for
     `ROUND_PURPOSE`'s tasks, `build` in the run's `first` round (a restart's or an upgrade's) and
-    `rework` after it. A row with no `task`, from before purposes, never matches."""
+    `rework` after it. A row with no `task`, from before purposes, never matches. A run whose
+    `claude` reported no figures writes no row (`cmd_agent()`), so the next try of the same task
+    in the same round is never a `rerun` of it (nit -36)."""
     if task in RERUNNABLE:
         key, value = ("land", land) if task in LAND_TASKS else ("round", rnd)
         if any(
@@ -4218,6 +4257,25 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             folder / "build" / f"land-{n}.md",
             False,
         )
+    if task == "land-checks":
+        # Only the step the train names (185 R6): a live train's change whose `checks.md` changed
+        # since the yes, every changed command on the read-only list, and no current judgement.
+        named = landing.train_names(root, folder)
+        if named is None:
+            return f"no train under way names {folder.name}: land-checks judges a train's change"
+        cleared = landing.checks_clearance(root, folder, named[1])
+        if cleared["step"] != "checks":
+            return f"the train names no judgement of {folder.name}'s checks: {cleared['why']}"
+
+        def listed(checks: list[dict]) -> str:
+            return "; ".join(f"{c['name']}: {json.dumps(c['command'])}" for c in checks) or "none"
+
+        main = prompt_part(
+            "land-checks", "main", approved=listed(cleared["approved"]),
+            current=listed(cleared["current"]), changed=listed(cleared["changed"]),
+            removed=listed(cleared["removed"]),
+        )  # fmt: skip
+        return head + main, land_checks_path(folder, n), False
     ask = land_ask(folder, n)
     if task == "land-fix":
         if ask is None:
@@ -4340,6 +4398,9 @@ def cmd_agent(
     if task == "train-resolve" and role not in (None, "resolver"):
         why = f"train-resolve runs the resolver, never the {role}: drop --role, or pass resolver"
         return emit({"refusals": [why]}, 1)
+    if task == "land-checks" and role not in (None, "approver"):
+        why = f"land-checks runs the approver, never the {role}: drop --role, or pass approver"
+        return emit({"refusals": [why]}, 1)
     role = role or TASK_ROLE.get(task)
     if task == "review" and role not in REVIEWERS:
         return emit({"refusals": [f"review needs --role, one of {', '.join(REVIEWERS)}"]}, 1)
@@ -4366,6 +4427,8 @@ def cmd_agent(
     if isinstance(planned, str):
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
+    # The file the approver judges, hashed before it reads it: the record's first line.
+    judged = landing.checks_sha(folder)[:16] if task == "land-checks" else None
     if role in UI_REVIEWERS and task in ("review", "land-review"):
         if not ui_complete(cfg["ui"]):
             return emit({"refusals": ["the base branch's [ui] needs serve, shoot and paths"]}, 1)
@@ -4436,7 +4499,7 @@ def cmd_agent(
     # The last reply that holds the role's answer, else the last: a background task's notice
     # answered after the verdict never replaces it (`holds()`). `replies[-1]` is safe: `_claude()`
     # returns a non-empty list whenever it returns no problem.
-    reply = next((r for r in reversed(replies) if holds(role, r)), replies[-1])
+    reply = next((r for r in reversed(replies) if holds(role, r, task)), replies[-1])
     # The reply is committed with the change: an agent quoting a command's output never files
     # this machine's paths, only the marks (`_placeholders()`), cites its own change's folder by
     # its full name (`_own_folder()`), and holds no shape the repo's scan refuses (`_defused()`).
@@ -4444,6 +4507,8 @@ def cmd_agent(
     if task == "spec":
         return emit({**out, **_file_draft(root, folder, reply)})
     text = reply if reply.endswith("\n") else reply + "\n"
+    if judged:
+        text = f"Judged: {judged}\n\n{text}"
     if append:
         before = target.read_text(encoding="utf-8")
         text = before + ("" if before.endswith("\n") else "\n") + "\n" + text
@@ -4783,15 +4848,20 @@ NIT_SECTIONS = (("intent.md", "## Approach"), ("spec.md", "## Requirements"))
 TAKEN_RE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?nits taken in:(?:\*\*)?(.*)$", re.IGNORECASE)
 
 
+# An indented line that starts a list item of its own: never a `Nits taken in:` line's wrap.
+LIST_ITEM_RE = re.compile(r"^\s+(?:[-*+]|\d+\.)\s")
+
+
 def taken_lines(text: str) -> str:
     """The text of `text`'s `Nits taken in:` lines after the colon, each with the lines that
-    continue it (indented, up to the next blank or unindented line)."""
+    continue it (indented, up to the next blank or unindented line, or an indented one that
+    starts a list item, `LIST_ITEM_RE`: a sub-bullet naming a nit to say it's left out)."""
     found, inside = [], False
     for line in text.splitlines():
         if m := TAKEN_RE.match(line):
             found.append(m.group(1))
             inside = True
-        elif inside and line[:1].isspace() and line.strip():
+        elif inside and line[:1].isspace() and line.strip() and not LIST_ITEM_RE.match(line):
             found.append(line)
         else:
             inside = False
@@ -4871,7 +4941,10 @@ def accept_build(root: Path, folder: Path) -> str:
 def cmd_accept(root: Path, ident: str) -> int:
     """Run change `ident`'s acceptance checks through `sdlc.py accept`, in its worktree, and add
     the attempt to `build/land-accept.md`, in the gate file's shape: never reading or running
-    `checks.md` itself. No skill's rule grants it, so the harness asks before every run. Before
+    `checks.md` itself. No skill's rule grants it, so the harness asks before a person's run; a
+    landing train's loop runs it unasked only on a change as stacked whose checks
+    `landing.checks_clearance()` clears: the commands the person's yes covered word for word, or
+    changed ones both the read-only list and the approver cleared. Before
     the landing's commit it records the landing step `checks` (`_record_land()`), for the board;
     after, `recheck`, its own step after the gate."""
     folder, refusal = find_change(root, ident)

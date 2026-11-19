@@ -130,7 +130,7 @@ Only when the batch isn't clear. Ask `land-check`'s `question` literally, as pri
 your own. Its fullest form, each clause there only when some change in the batch has what it
 names:
 
-> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks and skills' cases run as shown (at most $<total>), its undone notes carried or dropped and its assumed decisions confirmed as shown, its agents' nits filed as shown, with how to recover shown, committed, stacked in this order on <base>, gated once at the tip (a red tip bisected, the change at fault left out with why and the rest landed; a conflict resolved by one landing agent and reviewed again), brought up to date as often as <base> moves while landing, up to <moves> times, and closed in order, pushed as git.push says? (yes / yes, with a fix / leave one out / no)`
+> `Land <n> changes in this order, <NNN-slug, NNN-slug>, each shipped with its approver's impact, its acceptance checks run as shown, and again as stacked, its skills' cases run as shown (at most $<total>), its build check run once at the tip, its undone notes carried or dropped and its assumed decisions confirmed as shown, its agents' nits filed as shown, with how to recover shown, committed, stacked in this order on <base>, gated once at the tip (a red tip bisected, the change at fault left out with why and the rest landed; a conflict resolved by one landing agent and reviewed again), brought up to date as often as <base> moves while landing, up to <moves> times, and closed in order, pushed as git.push says? (yes / yes, with a fix / leave one out / no)`
 
 `<moves>` is `config`'s `land.moves`.
 
@@ -162,7 +162,11 @@ holds, so the harness asks before each run, for each change in the batch in orde
   `Skill evals:` line ship reads (a skipped run says why, and is no stop):
   `uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py cases <NNN>`
 
-The loop runs neither.
+The loop runs neither before a commit. After it, as stacked, the loop runs a change's acceptance
+checks itself while its `checks.md` is the file this yes covered (`train --begin` records its
+hash and each check); a `checks.md` changed since runs unattended only when every added or edited
+command passes the script's read-only list and the approver judges it harmless, and otherwise
+stops at `accept` for you.
 
 **A fix the person asked for** (`yes, with a fix`), only for the change it named: write their
 words at the end of the change's `decisions.md`, in its folder in its worktree (`Write` it with a
@@ -219,6 +223,11 @@ commands, and only one loop runs at a time (the run lock). The steps:
   before any reviewer reads any change, recorded in `.sdlc/work/NNN-slug/build/land-<n>.gate.md`.
   A red tip is bisected by prefix, at most ⌈log₂ n⌉ more gates, until the change at fault is
   found.
+- **`build`**: `gate <NNN> --land --build`, the base branch's `[commands] build`, once at the
+  stack's tip after its gate is green, when the base branch sets it and a change calls for it (a
+  path matching its `build_when`, `build_when` unset or not a valid regex, or a `[review]
+  sensitive` path), as `/sdlc:ship` runs it for a change built by hand; recorded in
+  `.sdlc/work/NNN-slug/build/land-<n>.build.md`. Never bisected: a red build stops the train.
 - **`eject`** with `cause` `gate`: the change at fault leaves the train, as the yes approved
   (`train --eject <NNN>`): its branch goes back to its pre-train commit (`git reset --keep`; the
   `undo` is kept in the loop's output), with the reason and the gate file amended into its
@@ -228,6 +237,13 @@ commands, and only one loop runs at a time (the run lock). The steps:
   each missing reviewer, started together (`agent <NNN> --task land-review --role <role>`), the
   verifier when one asks for changes (`--task land-verify`), or each role a mend names, once a
   round (`--task land-mend --role <role>`).
+- **`accept`**: the change's acceptance checks again on its commit as stacked (`accept <NNN>`),
+  only while the reading clears them, read again from `checks.md` just before the run; a check
+  that fails is the landing round's to read, an ejection with `cause` `review`.
+- **`checks`**: a `checks.md` changed since the yes whose every added or edited command passes the
+  read-only list: the approver, in a fresh session, judges the changes (`agent <NNN> --task
+  land-checks`), its reply filed in `.sdlc/work/NNN-slug/build/land-<n>.checks.md` under the hash
+  of the file it judged; `CHECKS: HARMLESS` clears them, anything else stops at `accept`.
 - **`fix`**: the stored fix, once, as soon as that change sits in the stack (after its conflict's
   resolution, if it had one), before any gate: `land-fix <NNN> --ask R<n>`, the change's own
   builder (`agent <NNN> --task land-fix`), `land-fix <NNN> --commit`; the train then stacks what
@@ -247,8 +263,9 @@ commands, and only one loop runs at a time (the run lock). The steps:
 `cause` (`review`: a landing review that kept a change, a reply still unreadable after its one
 mend, acceptance checks failing as stacked; `refusal`: a landing command's own), a train `stop`
 (the base branch moved past `land.moves`, the first change at fault twice in a row, a worktree
-gone), `accept` (the checks run again as stacked, behind your prompt), a `commit` whose `before`
-names what hasn't run, a refused push (the change has landed; `/sdlc:publish` pushes it), a
+gone, a red build at the tip), `accept` when its checks aren't cleared (`checks.md` changed since
+the yes, and the read-only list or the approver didn't clear it: the reason says which), a
+`commit` whose `before` names what hasn't run, a refused push (the change has landed; `/sdlc:publish` pushes it), a
 command that refuses or an agent session that fails, a cancel, or the same step named twice with
 nothing changed.
 
@@ -280,9 +297,10 @@ for, and this skill runs that one command, then the loop again in the background
   uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py train --stop
   ```
 
-- `accept`, or a `commit` whose `before` names `accept` or `cases`: run `factory.py accept <NNN>`
-  (or `cases <NNN>`) as above, behind the harness's prompt; the cases never run again once run,
-  since each run is paid.
+- `accept` (checks not cleared: show the person the stop's reason, which names each command), or
+  a `commit` whose `before` names `accept` or `cases`: run `factory.py accept <NNN>` (or `cases
+  <NNN>`) as above, behind the harness's prompt; the cases never run again once run, since each
+  run is paid.
 - anything else: the loop takes it.
 
 Then `train --run` with `run_in_background`, as above.
@@ -303,7 +321,8 @@ what was pushed, or that nothing was, and that nothing was tagged.
 
 - A change built by hand: `/sdlc:ship` and `/sdlc:close`.
 - Running a check or a case from this skill's own rules, or by `sdlc.py` directly: only through
-  `factory.py accept` and `cases`, behind the harness's prompt.
+  `factory.py accept` and `cases`, behind the harness's prompt, or the loop's own `accept` of
+  checks the yes covered or both the list and the approver cleared.
 - Wording a disposition, a confirmation or `How to recover:` the approver didn't propose: a change
   that needs another goes to `/sdlc:ship`.
 - `--force`, a merge that isn't a fast-forward, a stash, or resolving a conflict any way but by

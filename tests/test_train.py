@@ -420,7 +420,8 @@ def test_the_question_says_the_batch_is_stacked_and_gated_once() -> None:
         [_entry("001-a", checks=[{"name": "x", "command": "true"}])], "t"
     )
     assert one.startswith("Land 1 change in this order, 001-a, each shipped with its approver's "
-                          "impact, its acceptance checks run as shown, committed, stacked in this "
+                          "impact, its acceptance checks run as shown, and again as stacked, "
+                          "committed, stacked in this "
                           "order on t, gated once at the tip")  # fmt: skip
 
 
@@ -1278,17 +1279,20 @@ def test_the_train_driver_takes_every_step_a_reading_names() -> None:
     emitted = set(
         re.findall(r'done\(\s*"(\w+)"', inspect.getsource(factory.landing._train_reading))
     )
-    emitted |= set(re.findall(r'"next": "(\w+)"', inspect.getsource(factory.landing._train_gate)))
+    for steps in (factory.landing._train_gate, factory.landing._train_build):
+        emitted |= set(re.findall(r'"next": "(\w+)"', inspect.getsource(steps)))
+    emitted |= {"checks"}  # `checks_clearance()`'s `step`, named through `done()`
     verdicts = inspect.getsource(factory.landing.land_verdict)
     emitted |= set(re.findall(r'out\["next"\](?:, out\["\w+"\])? = \(?\s*"(\w+)"', verdicts))
     emitted |= {"eject", "stop"}  # `ejecting()` and `stopping()`
     emitted.discard("pass")  # a passing round goes on to the next change, never a step
-    assert {"commit", "stack", "gate", "review", "close", "fix", "done"} <= emitted, emitted
+    assert {"commit", "stack", "gate", "build", "review", "close", "fix", "done"} <= emitted
     assert emitted <= set(factory.landing.TRAIN_STEPS), emitted - set(factory.landing.TRAIN_STEPS)
     assert set(factory.landing.TRAIN_STEPS) <= DRIVER_STEPS
     covered = set(factory.landing.RUN_STEPS) | set(factory.landing.RUN_STOPS) | {"done"}
     assert covered == set(factory.landing.TRAIN_STEPS), covered ^ set(factory.landing.TRAIN_STEPS)
-    assert not set(factory.landing.RUN_STEPS) & set(factory.landing.RUN_STOPS)
+    # 185: `accept` is both, the loop's own step while cleared and the person's while not.
+    assert set(factory.landing.RUN_STEPS) & set(factory.landing.RUN_STOPS) == {"accept"}
     own = [f"def _{name}(" for name in ("drive", "land_train")]  # never this test's own text
     for path in (ROOT / "tests").glob("test_*.py"):
         text = path.read_text(encoding="utf-8")
@@ -1375,8 +1379,9 @@ def test_train_run_records_each_step(tmp_path, capsys, monkeypatch) -> None:
 
 @pytest.mark.portable
 def test_the_loop_runs_only_its_named_commands() -> None:
-    """147 R3: `RUN_STEPS` names exactly the commands the loop may run; never `accept`, `cases`,
-    `--stop`, and `--eject` only as the gate's step."""
+    """147 R3: `RUN_STEPS` names exactly the commands the loop may run; never `cases` or
+    `--stop`, `--eject` only as the gate's step, and since 185 `accept` only as stacked and
+    cleared (`_run_plan()`), the approver's `land-checks`, and `gate --land --build`."""
     commands = {" ".join(argv) for argvs in factory.landing.RUN_STEPS.values() for argv in argvs}
     assert commands == {
         "land {change} --by {by}", "resolve {change} --onto {onto}",
@@ -1385,6 +1390,7 @@ def test_the_loop_runs_only_its_named_commands() -> None:
         "agent {change} --task land-review --role {role}", "agent {change} --task land-verify",
         "agent {change} --task land-mend --role {role}", "land-fix {change} --ask {ask}",
         "agent {change} --task land-fix", "land-fix {change} --commit", "land {change} --close",
+        "accept {change}", "agent {change} --task land-checks", "gate {change} --land --build",
     }, commands  # fmt: skip
     assert factory.landing.RUN_EJECTS == ("gate",)
     assert set(factory.landing.RUN_STOPS) == {"accept", "stop"}
@@ -2020,3 +2026,501 @@ def test_an_ejection_that_cant_be_recorded_still_ejects(tmp_path, capsys) -> Non
     [did] = [r["did"] for r in readings if r.get("next") == "eject"]
     assert did["state"] == "ejected" and did["undo"], did
     assert [p for p in did["problems"] if "runs/ejections.jsonl" in p], did
+
+
+# ------------------------------------------------- acceptance checks as stacked (185 R1–R10)
+
+
+READ_ONLY_PASSES = [
+    "grep -q keep README.md",
+    "test -f README.md && test ! -f gone.txt",
+    "[ -f README.md ]",
+    "cat README.md | wc -l",
+    "head -n 2 README.md; tail -n 1 README.md",
+    "true || false",
+    "grep -rn 'a > b $x `y` (z)' src",
+    "grep -rn -e keep src",
+    'grep -c "keep" README.md',
+    "git log --oneline -3",
+    "git show HEAD:README.md",
+    "git diff --stat HEAD~1 -- src",
+    "git log --format=%H -1",
+    "test -f README.md\ngrep -q one README.md",
+]
+
+READ_ONLY_REFUSALS = [
+    ("cat README.md > out.txt", ">"),
+    ("grep x < README.md", "<"),
+    ("cat `ls`", "`"),
+    ("cat $HOME/x", "$"),
+    ('grep "$(id)" README.md', "$"),
+    ("cat README\\.md", "\\"),
+    ("true & false", "&"),
+    ("(cat README.md)", "("),
+    ("{ cat README.md; }", "{"),
+    ("cat *.md", "*"),
+    ("cat README.m?", "?"),
+    ("cat [R]EADME.md", "["),
+    ("rm -rf x", "rm"),
+    ("sed -n 1p README.md", "sed"),
+    ("awk '{print}' README.md", "awk"),
+    ("/bin/cat README.md", "/bin/cat"),
+    ("FOO=1 cat README.md", "FOO=1"),
+    ("git status", "git status"),
+    ("git -C . log", "git -C"),
+    ("git push", "git push"),
+    ("git diff --output=x.txt", "--output"),
+    ("git diff --ext-diff", "--ext-diff"),
+    ("git log -p --textconv", "--textconv"),
+    ("cat /etc/passwd", "/etc/passwd"),
+    ("cat ~/.ssh/id_rsa", "~/.ssh/id_rsa"),
+    ("cat src/../../x", ".."),
+    ("grep --file=/etc/passwd x", "/etc/passwd"),
+    ("grep -f/etc/passwd x", "/etc/passwd"),
+    ("cat out-link/secret", "out-link/secret"),
+    ("grep -R keep .", "-R"),
+    ("grep -rnS keep .", "-rnS"),
+    ("grep -O -r keep .", "-O"),
+    ("grep --dereference-recursive keep .", "--dereference-recursive"),
+    ("cat 'unclosed", "quote"),
+    ("cat README.md &&", "empty"),
+]
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("command", READ_ONLY_PASSES)
+def test_read_only_command_passes(tmp_path, command) -> None:
+    """185 R5: each command only reads inside the checkout, with the listed programs alone."""
+    (tmp_path / "README.md").write_text("one\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    assert factory.landing.read_only_command(command, tmp_path) is None, command
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("command, named", READ_ONLY_REFUSALS)
+def test_read_only_command(tmp_path, command, named) -> None:
+    """185 R5: each rule refuses its case, saying why, the offending text named."""
+    (tmp_path / "checkout").mkdir()
+    checkout = tmp_path / "checkout"
+    (checkout / "README.md").write_text("one\n", encoding="utf-8")
+    (checkout / "src").mkdir()
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_text("s\n", encoding="utf-8")
+    if command.startswith("cat out-link"):
+        if not hasattr(os, "symlink"):
+            pytest.skip("no symlinks here")
+        try:
+            (checkout / "out-link").symlink_to(tmp_path / "outside", target_is_directory=True)
+        except OSError:
+            pytest.skip("this account can't make a symlink")
+    why = factory.landing.read_only_command(command, checkout)
+    assert why is not None and named in why, (command, why)
+
+
+CHECKS_HEAD = "# Checks\n\n> Acceptance checks.\n"
+
+
+def _checks(tree: Path, *checks: tuple[str, str]) -> Path:
+    """Write the change's `checks.md`, one `## ` check per (name, command)."""
+    body = "".join(f"\n## {name}\n\n```sh\n{command}\n```\n" for name, command in checks)
+    path = _folder(tree) / "checks.md"
+    path.write_text(CHECKS_HEAD + body, encoding="utf-8", newline="\n")
+    return path
+
+
+def _sha(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _to_the_stack(root: Path, capsys, trees: list[Path], by: str = "person") -> None:
+    """Begin a train over `trees` and drive it, in process, through each change's commit (its
+    checks run first, as the land skill's Step 3 does): up to its first `stack`."""
+    drive_train(factory, root, capsys, trees, by, until=lambda o: o.get("next") == "stack")
+
+
+@needs_uv
+def test_begin_records_each_changes_approved_checks(tmp_path, capsys) -> None:
+    """185 R1: `--begin` records each change's `checks_sha` (its `checks.md`'s sha256, or null
+    with none) and its `checks`, each name and command as `sdlc.py preflight` gives them."""
+    root = _repo(tmp_path, check="true")
+    checked = _ready(root, "checked", {"checked.txt": "checked\n"})
+    plain = _ready(root, "plain", {"plain.txt": "plain\n"})
+    path = _checks(
+        checked, ("Its file", "test -f checked.txt"), ("Says it", "grep -q c checked.txt")
+    )
+    _begin(root, capsys, "person")
+    state = json.loads(_state_file(root).read_text(encoding="utf-8"))
+    mine, other = state["changes"][checked.name], state["changes"][plain.name]
+    assert mine["checks_sha"] == _sha(path), mine
+    assert mine["checks"] == [{"name": "Its file", "command": "test -f checked.txt"},
+                              {"name": "Says it", "command": "grep -q c checked.txt"}]  # fmt: skip
+    assert other["checks_sha"] is None and other["checks"] == [], other
+
+
+@needs_uv
+def test_unchanged_checks_run_as_stacked_without_a_stop(tmp_path, capsys, monkeypatch) -> None:
+    """185 R2: two changes with checks, stacked over a base that moved: each reading names
+    `accept` cleared `as approved`, and the loop runs it itself, to `done`; each landed commit's
+    `build/land-accept.md` holds a second attempt, on its stacked commit."""
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    for tree in trees:
+        _checks(tree, ("Its file", f"test -f {tree.name.split('-', 1)[1]}.txt"))
+    _move(root, 1)
+    fake_claude(tmp_path, monkeypatch)
+    _to_the_stack(root, capsys, trees)
+    readings: list[dict] = []
+    real = factory.landing._run_plan
+
+    def plan(main: Path, reading: dict):
+        readings.append(reading)
+        return real(main, reading)
+
+    monkeypatch.setattr(factory.landing, "_run_plan", plan)
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert out["landed"] == [t.name for t in trees], out
+    accepts = [r for r in readings if r["next"] == "accept"]
+    assert [r["change"] for r in accepts] == [t.name for t in trees], readings
+    assert all(r["checks"] == {"clear": True, "why": "as approved"} for r in accepts), accepts
+    for tree in trees:
+        own = _closes(root)[tree.name]
+        record = _git(root, "show", f"{own}:.sdlc/work/{tree.name}/build/land-accept.md")
+        builds = re.findall(r"^Build: (\w+)$", record, re.M)
+        assert record.startswith("ACCEPT: PASS") and len(builds) == 2, record
+        assert builds[0] != builds[1], "run again on the stacked commit"
+
+
+@needs_uv
+def test_checks_failing_as_stacked_pause_as_a_review_ejection(tmp_path, capsys, monkeypatch):
+    """185 R3: a check that passes alone and fails once stacked: the loop runs it, reads the train
+    again, and stops at the reading's ejection with cause `review`, which pauses; never a failed
+    command's stop, and the loop ejects nothing itself."""
+    root, trees = _three(tmp_path, check="true")
+    _checks(trees[1], ("No aa.txt", "test ! -f aa.txt"))
+    fake_claude(tmp_path, monkeypatch)
+    _to_the_stack(root, capsys, trees)
+    code, out, _ = _loop(root, capsys)
+    assert code == 1, out
+    stopped = out["stopped"]
+    assert (stopped["next"], stopped["change"], stopped["cause"]) == (
+        "eject", trees[1].name, "review"), stopped  # fmt: skip
+    assert "acceptance checks failed" in stopped["reason"], stopped
+    assert not stopped["way_on"].startswith("fix what it says"), stopped
+    assert out["ejected"] == [] and out["undos"] == [], "the loop ejected nothing"
+    record = (_folder(trees[1]) / "build" / "land-accept.md").read_text(encoding="utf-8")
+    assert record.startswith("ACCEPT: FAIL") and record.count("## Attempt") == 2, record
+
+
+@needs_uv
+def test_a_changed_check_off_the_list_stops_before_the_approver(tmp_path, capsys, monkeypatch):
+    """185 R4: a check edited after the yes to run what the read-only list refuses stops the loop
+    at `accept`, saying `checks.md` changed and naming the command and why; no approver runs,
+    and no check runs."""
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    _checks(trees[1], ("Its file", "test -f bb.txt"))
+    calls = fake_claude(tmp_path, monkeypatch)
+    _to_the_stack(root, capsys, trees)
+    _checks(trees[1], ("Its file", "test -f bb.txt"), ("Tidy", "rm -f bb.txt"))
+    code, out, _ = _loop(root, capsys)
+    assert code == 1 and out["stopped"]["next"] == "accept", out
+    reason = out["stopped"]["reason"]
+    assert "checks.md changed since the yes" in reason and "rm -f bb.txt" in reason, reason
+    assert "`rm` isn't a read-only program" in reason, reason
+    assert "approver" not in {c["agent"] for c in calls()}, calls()
+    record = (_folder(trees[1]) / "build" / "land-accept.md").read_text(encoding="utf-8")
+    assert record.count("## Attempt") == 1, "only the run before the commit"
+
+
+APPROVED = [{"name": "Its file", "command": "test -f bb.txt"}]
+
+
+def _judging(tmp_path: Path, monkeypatch, current: list[dict]) -> tuple[Path, Path, dict]:
+    """A change in a landing round whose `checks.md` changed since the yes to hold `current`,
+    which `sdlc.py preflight` is stood in for to give; its train entry approved `APPROVED`."""
+    tree = tmp_path / "002-bb"
+    folder = tree / ".sdlc" / "work" / "002-bb"
+    (folder / "reviews" / "land-1").mkdir(parents=True)
+    (tree / "bb.txt").write_text("bb\n", encoding="utf-8")
+    _checks(tree, *((c["name"], c["command"]) for c in current))
+    monkeypatch.setattr(factory.landing, "_preflight",
+                        lambda folder, tree: ({"checks": {"checks": current}}, ""))  # fmt: skip
+    return tree, folder, {"checks_sha": "0" * 64, "checks": APPROVED}
+
+
+def _judged(folder: Path, reply: str, sha: str | None = None) -> None:
+    sha = sha or factory.landing.checks_sha(folder)
+    path = factory.land_checks_path(folder, 1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"Judged: {sha[:16]}\n\n{reply}", encoding="utf-8")
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "reply, clear, step, said",
+    [
+        ("CHECKS: HARMLESS\n\nIt only greps.\n", True, "accept", "judged harmless"),
+        ("CHECKS: ESCALATE\n\nIt reads .env, a secret.\n", False, "accept", "reads .env"),
+        ("It looks fine to me.\n", False, "accept", "holds no CHECKS: HARMLESS"),
+        ("CHECKS: HARMLESS\nCHECKS: ESCALATE\n", False, "accept", "holds no CHECKS: HARMLESS"),
+        ("Hm.\nCHECKS: HARMLESS\nCHECKS: ESCALATE\n", False, "accept", "holds no CHECKS"),
+        (None, False, "checks", "the approver judges what changed"),
+        ("stale", False, "checks", "the approver judges what changed"),
+    ],
+    ids=["harmless", "escalate", "unreadable", "disagreeing", "preamble", "missing", "stale"],
+)
+def test_the_approvers_answer_decides_a_changed_check(
+    tmp_path, monkeypatch, reply, clear, step, said
+) -> None:
+    """185 R6, R7: a changed check the read-only list passes goes to the approver (`checks`)
+    while no record judges the file as it stands, missing or stale; a current record clears it
+    only when it opens `CHECKS: HARMLESS` with no `CHECKS:` line that disagrees; anything else
+    stops at `accept`, saying why."""
+    current = [*APPROVED, {"name": "Says it", "command": "grep -q bb bb.txt"}]
+    tree, folder, mine = _judging(tmp_path, monkeypatch, current)
+    if reply == "stale":
+        _judged(folder, "CHECKS: HARMLESS\n", sha="f" * 64)
+    elif reply is not None:
+        _judged(folder, reply)
+    found = factory.landing.checks_clearance(tree, folder, mine)
+    assert (found["clear"], found["step"]) == (clear, step), found
+    assert said in found["why"] and "checks.md changed since the yes" in found["why"], found
+    assert found["changed"] == [current[1]] and found["off_list"] == [], found
+
+
+@pytest.mark.portable
+def test_harmless_never_clears_a_command_off_the_list(tmp_path, monkeypatch) -> None:
+    """185 R8: a current `CHECKS: HARMLESS` record, written by hand, for a file holding a command
+    the read-only list refuses: not clear, named, and the loop plans no `accept` for it."""
+    current = [*APPROVED, {"name": "Tidy", "command": "rm -rf x"}]
+    tree, folder, mine = _judging(tmp_path, monkeypatch, current)
+    _judged(folder, "CHECKS: HARMLESS\n\nFine.\n")
+    found = factory.landing.checks_clearance(tree, folder, mine)
+    assert (found["clear"], found["step"]) == (False, "accept"), found
+    assert "rm -rf x" in found["why"] and "isn't read-only" in found["why"], found
+    state = {"order": ["002-bb"], "changes": {"002-bb": mine}}
+    monkeypatch.setattr(factory, "read_train", lambda root: state)
+    reading = _step("accept", worktree=str(tree), checks={"clear": True, "why": "as approved"})
+    groups, stopped = factory.landing._run_plan(tmp_path, reading)
+    assert groups is None and "rm -rf x" in stopped["reason"], stopped
+
+
+@needs_uv
+def test_the_loop_rechecks_before_it_runs_accept(tmp_path, capsys) -> None:
+    """185 R9: a reading names `accept` cleared as approved; `checks.md` is edited before the loop
+    plans the step: `_run_plan()` reads it again and stops, planning no `accept`. Unedited, it
+    plans `accept`."""
+    root = _repo(tmp_path, check="true")
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    _checks(tree, ("Its file", "test -f bb.txt"))
+    _move(root, 1)
+    readings = drive_train(factory, root, capsys, [tree], "person",
+                           until=lambda o: o.get("next") == "accept")  # fmt: skip
+    reading = readings[-1]
+    assert reading["checks"] == {"clear": True, "why": "as approved"}, reading
+    groups, stopped = factory.landing._run_plan(root, reading)
+    assert stopped is None and groups == [[(["accept", tree.name], tree)]], groups
+    _checks(tree, ("Its file", "test -f bb.txt"), ("Tidy", "rm -f bb.txt"))
+    groups, stopped = factory.landing._run_plan(root, reading)
+    assert groups is None and stopped["next"] == "accept", stopped
+    assert "checks.md changed since the yes" in stopped["reason"], stopped
+    assert "rm -f bb.txt" in stopped["reason"], stopped
+
+
+@needs_uv
+def test_changed_read_only_checks_go_to_the_approver(tmp_path, capsys, monkeypatch) -> None:
+    """185 R6: a check added after the yes that the read-only list passes: the loop runs the
+    approver (`agent --task land-checks`), told the approved, current and changed checks; its
+    reply is filed in `build/land-1.checks.md` under `Judged: <sha16>`; HARMLESS, the loop runs
+    the checks itself and lands it."""
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    _checks(trees[1], ("Its file", "test -f bb.txt"))
+    calls = fake_claude(tmp_path, monkeypatch, {
+        "approver": {"reply": "CHECKS: HARMLESS\n\nThe new check only greps bb.txt.\n"},
+    })  # fmt: skip
+    _to_the_stack(root, capsys, trees)
+    path = _checks(trees[1], ("Its file", "test -f bb.txt"), ("Says it", "grep -q bb bb.txt"))
+    judged = _sha(path)[:16]
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    [asked_] = [c for c in calls() if c["agent"] == "approver"]
+    assert asked_["change"] == trees[1].name, asked_
+    assert 'Says it: "grep -q bb bb.txt"' in asked_["prompt"], asked_["prompt"]
+    assert 'Its file: "test -f bb.txt"' in asked_["prompt"], asked_["prompt"]
+    own = _closes(root)[trees[1].name]
+    rel = f".sdlc/work/{trees[1].name}/build"
+    record = _git(root, "show", f"{own}:{rel}/land-1.checks.md")
+    assert record.startswith(f"Judged: {judged}\n\nCHECKS: HARMLESS"), record
+    accept = _git(root, "show", f"{own}:{rel}/land-accept.md")
+    assert accept.startswith("ACCEPT: PASS") and accept.count("## Attempt") == 2, accept
+    assert "Says it: exit 0, passed" in accept, accept
+
+
+@needs_uv
+def test_land_checks_refuses_outside_a_changed_train_change(tmp_path, capsys, monkeypatch):
+    """185 R6: `agent --task land-checks` refuses a change no live train names, and one whose
+    `checks.md` still hashes to what the yes covered; no session starts."""
+    root = _repo(tmp_path, check="true")
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    _checks(tree, ("Its file", "test -f bb.txt"))
+    calls = fake_claude(tmp_path, monkeypatch)
+    (_folder(tree) / "reviews" / "land-1").mkdir(parents=True)
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-checks", None, None)
+    assert code == 1 and "no train under way names" in out["refusals"][0], out
+    (_folder(tree) / "reviews" / "land-1").rmdir()
+    _move(root, 1)
+    drive_train(factory, root, capsys, [tree], "person", until=lambda o: o.get("next") == "accept")
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-checks", None, None)
+    assert code == 1 and "as approved" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-checks", "code", None)
+    assert code == 1 and "runs the approver" in out["refusals"][0], out
+    (_folder(tree) / "checks.md").unlink()  # removed after the yes: nothing left to judge
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-checks", None, None)
+    assert code == 1 and "checks.md is gone" in out["refusals"][0], out
+    assert calls() == [], "no session started"
+    assert not factory.land_checks_path(_folder(tree), 1).exists()
+
+
+# ------------------------------------------------------------- commands.build (185 R10–R16)
+
+
+def _build_repo(tmp_path: Path, build: str | None = "true", when: str | None = None,
+                sensitive: list[str] | None = None, check: str = "true") -> Path:  # fmt: skip
+    """A scratch host whose base branch names `check`, and `build` and `build_when` when given,
+    and `[review] sensitive` when given."""
+    root = _repo(tmp_path, check=check)
+    lines = [f"[commands]\ncheck = {json.dumps(check)}\n"]
+    if build is not None:
+        lines.append(f"build = {json.dumps(build)}\n")
+    if when is not None:
+        lines.append(f"build_when = {json.dumps(when)}\n")
+    if sensitive is not None:
+        lines.append(f"\n[review]\nsensitive = {json.dumps(sensitive)}\n")
+    (root / ".sdlc" / "config.toml").write_text("".join(lines), encoding="utf-8")
+    _git(root, "commit", "-q", "--allow-empty", "-am", "the base's commands")
+    return root
+
+
+@needs_uv
+def test_gate_build_runs_the_bases_build_and_records_it(tmp_path, capsys) -> None:
+    """185 R11: `gate --land --build` runs the base branch's `[commands] build`, never the
+    checkout's, in a gate slot, and adds the attempt to `build/land-<n>.build.md`, first line
+    `BUILD: <verdict>`, in the gate file's shape."""
+    root = _build_repo(tmp_path, build="echo base-built")
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    config = tree / ".sdlc" / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        "echo base-built", "touch checkout-ran"), encoding="utf-8")  # fmt: skip
+    (_folder(tree) / "reviews" / "land-1").mkdir(parents=True)
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True, build=True)
+    assert (code, out["verdict"]) == (0, "PASS"), out
+    assert out["to"] == f".sdlc/work/{tree.name}/build/land-1.build.md", out
+    assert not (tree / "checkout-ran").exists(), "the checkout's build never runs"
+    path = factory.land_build_path(_folder(tree), 1)
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("BUILD: PASS\n") and "Command: echo base-built" in text, text
+    assert "base-built" in text.split("output:", 1)[1], text
+    record = factory.read_gate_file(path)
+    assert [a["verdict"] for a in record["attempts"]] == ["PASS"], record
+    assert not factory.land_gate_path(_folder(tree), 1).exists(), "the gate's record is its own"
+
+
+@needs_uv
+def test_gate_build_refuses_without_a_build(tmp_path, capsys) -> None:
+    """185 R11: with no `[commands] build` on the base branch, `gate --land --build` refuses and
+    writes no record; `--build` without `--land` refuses too."""
+    root = _build_repo(tmp_path, build=None)
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    (_folder(tree) / "reviews" / "land-1").mkdir(parents=True)
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True, build=True)
+    assert code == 1 and "[commands] build" in out["refusals"][0], out
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", False, build=True)
+    assert code == 1 and "--land" in out["refusals"][0], out
+    assert not list((_folder(tree) / "build").glob("land-*")), "no record on a refusal"
+
+
+@needs_uv
+@pytest.mark.parametrize(
+    "build, when, sensitive, edited, due",
+    [
+        (None, None, None, "src/a.py", False),
+        ("true", None, None, "docs/a.md", True),
+        ("true", "^src/", None, "src/a.py", True),
+        ("true", "^src/", None, "docs/a.md", False),
+        ("true", "^src/", ["docs/"], "docs/a.md", True),
+        ("true", "([", None, "docs/a.md", True),
+    ],
+    ids=["no-build", "when-unset", "when-matches", "when-misses", "sensitive", "bad-regex"],
+)
+def test_which_changes_call_for_the_build(tmp_path, build, when, sensitive, edited, due) -> None:
+    """185 R12: a change calls for the build when the base branch sets it and `build_when` is
+    unset, matches a path in its diff, or isn't a valid regex, or a path in its diff is on the
+    base branch's `[review] sensitive`; never when the base sets no build."""
+    root = _build_repo(tmp_path, build=build, when=when, sensitive=sensitive)
+    tree = _ready(root, "bb", {edited: "bb\n"})
+    assert factory.landing.build_due(tree, "main") is due
+
+
+@needs_uv
+def test_a_train_of_one_runs_the_build_before_it_lands(tmp_path, capsys, monkeypatch) -> None:
+    """185 R13: a train of one that never moved, whose change calls for the build: the train
+    names `build` at its tip, the loop runs it, and its commit holds `build/land-1.build.md`."""
+    root = _build_repo(tmp_path, build="true", when=".")
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert f"train: build {tree.name}" in err, err
+    own = _closes(root)[tree.name]
+    record = _git(root, "show", f"{own}:.sdlc/work/{tree.name}/build/land-1.build.md")
+    assert record.startswith("BUILD: PASS"), record
+
+
+@needs_uv
+def test_a_red_build_stops_the_train(tmp_path, capsys, monkeypatch) -> None:
+    """185 R14: a red build at the tip stops the train, naming the exit and the record's file;
+    never bisected, and the loop ejects nothing."""
+    root = _build_repo(tmp_path, build="false", when=".")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert code == 1 and out["stopped"]["next"] == "stop", out
+    reason = out["stopped"]["reason"]
+    assert "exit 1" in reason and f"{trees[1].name}/build/land-1.build.md" in reason, reason
+    assert out["ejected"] == [] and out["undos"] == [] and "eject" not in err, out
+    assert err.count("train: build") == 1, "run once, at the tip, never bisected"
+    assert not (_folder(trees[0]) / "build" / "land-1.build.md").exists()
+
+
+@needs_uv
+@pytest.mark.parametrize("build, when", [(None, None), ("true", "^nothing/")],
+                         ids=["no-build", "none-calls"])  # fmt: skip
+def test_no_build_runs_unless_a_change_calls_for_it(tmp_path, capsys, monkeypatch, build, when):
+    """185 R15: with no `commands.build`, or none of the train's changes calling for it, no build
+    is planned and no `.build.md` is written."""
+    root = _build_repo(tmp_path, build=build, when=when)
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), out
+    assert "train: build" not in err, err
+    for tree in trees:
+        listed = _git(root, "ls-tree", "-r", "--name-only", _closes(root)[tree.name])
+        assert ".build.md" not in listed, listed
+
+
+@needs_uv
+def test_a_build_rounds_gate_never_runs_the_build(tmp_path, capsys) -> None:
+    """185 R16: a build round's gate runs `[commands] check` alone; a red build changes nothing."""
+    root = _build_repo(tmp_path, build="false", when=".")
+    tree = _ready(root, "bb", {"bb.txt": "bb\n"})
+    code, out = _run(capsys, factory.cmd_gate, tree, "001")
+    assert (code, out["verdict"]) == (0, "PASS"), out
+    assert out["to"].endswith("build/round-1.gate.md"), out

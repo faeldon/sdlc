@@ -233,6 +233,15 @@ def _land_verify(c: Case) -> str:
     return c.land("land-verify", "verifier")
 
 
+def _land_checks(c: Case) -> str:
+    approved = [{"name": "Its file", "command": "test -f src/a.py"}]
+    edited = {"name": "Says it", "command": "grep -q 'keep' src/a.py"}
+    cleared = {"step": "checks", "why": "", "approved": approved, "current": [*approved, edited],
+               "changed": [edited], "removed": []}  # fmt: skip
+    c.mp.setattr(factory.landing, "checks_clearance", lambda root, folder, mine: cleared)
+    return c.land("land-checks", "approver")
+
+
 def _land_mend(c: Case, role: str) -> str:
     c.preamble = role == "code"
     problems = ["reviews/land-1/verified.md: C1 answered twice", "reviews/round-1/verified.md: x"]
@@ -293,6 +302,7 @@ CASES: dict[str, Callable[[Case], str]] = {
     "land-review-resolved": lambda c: _land_review(c, "resolved"),
     "land-review-asked": lambda c: _land_review(c, "asked"),
     "land-verify": _land_verify,
+    "land-checks": _land_checks,
     "land-mend-verifier": lambda c: _land_mend(c, "verifier"),
     "land-mend-verdict": lambda c: _land_mend(c, "code"),
     "land-mend-evidence": lambda c: _land_mend(c, "behaviour"),

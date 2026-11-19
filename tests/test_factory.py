@@ -6102,3 +6102,26 @@ def test_a_row_names_its_purpose_task_and_round(tmp_path, capsys, claude, monkey
     ], said  # fmt: skip
     assert all("land" not in r for r in rows), "a loop task's row names no landing"
     assert all(isinstance(v, int | float | str) for r in rows for v in r.values()), rows
+
+
+def test_a_run_with_no_figures_leaves_the_next_try_its_own_purpose(
+    tmp_path, capsys, claude, monkeypatch
+) -> None:
+    """185 R19 (nit 2026-11-19-36): a run whose `claude` reports no figures writes no row to
+    `runs/costs.jsonl`, so the next try of the same task in the same round is not a `rerun`."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.5))
+    assert _run(capsys, factory.cmd_agent, root, "008", "build", None, None)[0] == 0
+    monkeypatch.setenv("FAKE_CLAUDE_REPLIES", json.dumps(["VERDICT: PASS"]))
+    monkeypatch.delenv("FAKE_CLAUDE_FIGURES")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
+    assert [r["task"] for r in rows] == ["build"], "no figures, no row"
+    (folder / "reviews" / "round-1" / "code.md").unlink()
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.5))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+    assert code == 0, out
+    rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
+    assert [(r["task"], r["purpose"]) for r in rows] == [("build", "build"), ("review", "build")]

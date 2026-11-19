@@ -260,7 +260,8 @@ edit (the builder's sub-agents only `Agent(Explore, Plan)`; the resolver, a trai
 agent, only the files the conflict names, which `resolve --continue` checks), and no agent commits.
 `factory.py agent` is the one place the factory runs `claude`, and `factory.py gate` and `check`,
 through one function (`_run_check()`), the only places it runs a host's command, the base branch's
-`[commands] check`. Landing, in `scripts/landing.py`, is the one place it commits, through `sdlc`'s
+`[commands] check`, and `[commands] build` for `gate --land --build`, once at a train's tip when a
+change calls for it (`build_due()`). Landing, in `scripts/landing.py`, is the one place it commits, through `sdlc`'s
 own `ship` and `close` of its own version (`sdlc_path()`): a batch lands as a train (`cmd_train()`,
 its state `TRAIN_STATE` in the git common dir, never in a tree), each change committed by `land`
 (which no longer runs `base`), stacked on the one before it by the factory's own rebase (`resolve
@@ -268,8 +269,9 @@ its state `TRAIN_STATE` in the git common dir, never in a tree), each change com
 back to its pre-train commit (`--eject`, `reset --keep`), and each closed in order by `land
 --close`, which rebases it onto the base past the `Close` commits before it; after the yes, `train
 --run` takes those steps itself (`_run_loop()`, each a subprocess of the script, `RUN_STEPS` and no
-other command), ejecting only a gate's fault and stopping at every other ejection, `accept` and a
-refused push, under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
+other command), ejecting only a gate's fault and stopping at every other ejection, a red build,
+`accept` only for checks not cleared (`checks.md` changed since the yes and not cleared by the
+approver and the read-only list together, `checks_clearance()`) and a refused push, under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
 `TRAIN_RUN_ENV`) that a second `--run`, `--begin`, `--eject` and `--stop` refuse while held, and
 `--cancel` stops it between steps; `fresh` moves a change's branch onto the base before a build or a
 spec, through `sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run,

@@ -114,6 +114,10 @@ LANDING_NAMES = {
     "cmd_resolve",
     "cmd_land_verdicts",
     "land_verdict",
+    # 185: the train's clearance of a change's acceptance checks, which `agent --task
+    # land-checks` asks before it runs and hashes the file it files a judgement of.
+    "checks_clearance",
+    "checks_sha",
 }
 
 # 171 R1: the build loop's one reading, and every function only it calls.

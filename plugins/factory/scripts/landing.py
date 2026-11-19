@@ -28,14 +28,19 @@ may read it, and this file has no path of its own: the train runs each step thro
 What it keeps: it commits only through `sdlc.py`'s own `ship` and `close` of the factory's own
 version (`factory.sdlc_path()`); a branch moves only by `resolve --onto`, `land --close`,
 `train --eject` and `--stop`, each printing its undo; the loop runs `RUN_STEPS` and no other
-command.
+command. Of those, two run a host's command: `accept` (a change's own checks, as stacked, only
+while `checks_clearance()` clears them: the file the person's yes covered, or changed commands
+`read_only_command()` passes and the approver judged harmless, never the approver alone) and
+`gate --land --build` (the base branch's `[commands] build`, once at the tip, `build_due()`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -606,10 +611,11 @@ def _cases_signals(cases: dict) -> list[str]:
 
 def land_question(batch: list[dict], base: str, moves: int | None = None) -> str:
     """The batch's question, worded here so the skill never words its own: a clause for the checks
-    and cases, for failed or skipped cases accepted as shown, for the dispositions and
-    confirmations, for the agents' nits to file, and for `How to recover:`, each only when some
-    change in the batch has one, and the cases' total ceiling,
-    the cap per change with any; what the train does (stacked in this order, gated once at the
+    (run as shown, and again as stacked), the cases, the base branch's build at the tip (a change
+    whose `build` is true, `build_due()`), for failed or skipped cases accepted as shown, for the
+    dispositions and confirmations, for the agents' nits to file, and for `How to recover:`, each
+    only when some change in the batch has one, and the cases' total ceiling, the cap per change
+    with any; what the train does (stacked in this order, gated once at the
     tip, a red tip bisected and the change at fault left out, a conflict resolved by one landing
     agent and reviewed again, closed in order); the most times it follows `base` moving
     (`land.moves`, the default's when none is given); and its four answers, `yes, with a fix`
@@ -619,12 +625,16 @@ def land_question(batch: list[dict], base: str, moves: int | None = None) -> str
     n = len(batch)
     names = ", ".join(c["change"] for c in batch)
     parts = ["each shipped with its approver's impact"]
-    checks = any(c["checks"] for c in batch)
     with_cases = sum(1 for c in batch if c["cases"])
-    runs = [w for w, has in (("acceptance checks", checks), ("skills' cases", with_cases)) if has]
-    if runs:
-        ceiling = f" (at most ${factory.CASE_CAP_USD * with_cases})" if with_cases else ""
-        parts.append(f"its {' and '.join(runs)} run as shown{ceiling}")
+    if any(c["checks"] for c in batch):
+        # Again as stacked, by the loop itself while `checks.md` is the file this yes covers.
+        parts.append("its acceptance checks run as shown, and again as stacked")
+    if with_cases:
+        parts.append(
+            f"its skills' cases run as shown (at most ${factory.CASE_CAP_USD * with_cases})"
+        )
+    if any(c.get("build") for c in batch):
+        parts.append("its build check run once at the tip")
     if any((c["cases"] or {}).get("failed") or (c["cases"] or {}).get("skipped") for c in batch):
         parts.append("its failed or skipped skills' cases accepted as shown")
     undone = any(c["undone"] for c in batch)
@@ -654,9 +664,10 @@ def land_question(batch: list[dict], base: str, moves: int | None = None) -> str
 
 def cmd_land_check(root: Path, idents: list[str]) -> int:
     """The batch: the ready changes in `ready`'s order (or those named), at most `land.batch`, each
-    with its signals, what it is (`intent_parts()`), what the yes approves for it (`land_parts()`)
-    and why any is left out, the question to ask (`land_question()`), the text the dialog shows
-    beside it (`land_shown()`), and `clear`: true when no change in it has a signal, so
+    with its signals, what it is (`intent_parts()`), what the yes approves for it (`land_parts()`),
+    whether it calls for the base branch's build (`build`, `build_due()`) and why any is left
+    out, the question to ask (`land_question()`), the text the dialog shows beside it
+    (`land_shown()`), and `clear`: true when no change in it has a signal, so
     the gate passes itself. Read-only."""
     cfg, warnings = factory.load_config(root)
     picked = [
@@ -670,6 +681,7 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         folder = worktree / factory.work_rel(worktree) / r["change"]
         pre, said = _preflight(folder, worktree)
         unreviewed = _unreviewed_at_test(worktree, folder, cfg)
+        base = factory._base(worktree)
         signals, excluded = land_signals(
             folder, worktree, r["decision"], cfg, pre or {}, unreviewed=unreviewed
         )
@@ -679,6 +691,7 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
             "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
             "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
             "intent": intent_parts(folder), **land_parts(folder, pre or {}, worktree, cfg),
+            "build": bool(base) and build_due(worktree, base),
         }  # fmt: skip
         if excluded:
             left_out.append({**entry, "excluded": excluded})
@@ -765,6 +778,208 @@ def drop_entries(root: Path, ids: list[str]) -> list[str]:
     if gone:
         register.write_text("".join(kept), encoding="utf-8", newline="\n")
     return gone
+
+
+# The programs a changed acceptance check may run unattended (185 R5), each read-only as called:
+# `git` only with `READ_ONLY_GIT`'s subcommands as its very next word, never with an option that
+# writes a file or runs a program (`READ_ONLY_GIT_REFUSED`). Everything else stops the train.
+READ_ONLY_PROGRAMS = frozenset({"grep", "cat", "head", "tail", "wc", "test", "[", "true", "false",
+                                "git"})  # fmt: skip
+READ_ONLY_GIT = frozenset({"log", "show", "diff"})
+READ_ONLY_GIT_REFUSED = ("--output", "--ext-diff", "--textconv")
+# grep's flags that follow a symlink while recursing (GNU `-R`, BSD `-S` and `-O`), which the path
+# rule can't see: a link inside the checkout read through to a file outside it.
+GREP_FOLLOWS = frozenset("RSO")
+GREP_FOLLOWS_LONG = "--dereference-recursive"
+# Outside single quotes: a redirect, a substitution, an escape, a subshell or group.
+READ_ONLY_REFUSED = frozenset(">`$\\(){}<")
+GLOBS = frozenset("*?[")
+
+
+def _simple_commands(text: str) -> tuple[list[str], str | None]:
+    """`text` split into its simple commands on `&&`, `||`, `|`, `;` and newlines outside quotes,
+    or why it can't be: a character `READ_ONLY_REFUSED` names outside single quotes, a lone `&`,
+    an unquoted glob past a command's first character, or a quote left open."""
+    parts, quote, i = [""], None, 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            quote = None if ch == "'" else quote
+        elif ch in READ_ONLY_REFUSED or (ch == "&" and text[i : i + 2] != "&&"):
+            return [], f"`{ch}` outside single quotes"
+        elif quote == '"':
+            quote = None if ch == '"' else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "|;\n" or text[i : i + 2] == "&&":
+            step = 2 if text[i : i + 2] in ("&&", "||") else 1
+            parts.append("")
+            i += step
+            continue
+        elif ch in GLOBS and parts[-1].strip():
+            # Past a command's first character: `[ -f x ]` is the one first word that is one.
+            return [], f"an unquoted `{ch}`, which the shell expands"
+        parts[-1] += ch
+        i += 1
+    if quote:
+        return [], "a quote left open"
+    return parts, None
+
+
+def _path_refusal(word: str, checkout: Path) -> str | None:
+    """Why `word`, a command's argument, reaches outside `checkout`: absolute, `~`, a `..`
+    component, or an existing path that resolves outside it (a symlink out). None when it
+    doesn't."""
+    if word.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[/\\]", word):
+        return f"`{word}` names a path outside the checkout"
+    if ".." in re.split(r"[/\\]", word):
+        return f"`{word}` has a `..` component"
+    path = checkout / word
+    if os.path.lexists(path):
+        try:
+            path.resolve().relative_to(checkout.resolve())
+        except (ValueError, OSError):
+            return f"`{word}` resolves outside the checkout"
+    return None
+
+
+def read_only_command(text: str, checkout: Path) -> str | None:
+    """Why the shell command `text`, a changed acceptance check, isn't on the read-only list
+    (185 R5), or None when it is: every simple command in it (`_simple_commands()`) starts with
+    one of `READ_ONLY_PROGRAMS`, named bare, with no `VAR=value` before it; `git` takes one of
+    `READ_ONLY_GIT` as its very next word and none of `READ_ONLY_GIT_REFUSED`; `grep` none of the
+    flags that follow symlinks as it recurses (`GREP_FOLLOWS`); and no word, nor an
+    option's value (after `=`, or glued to a short option), is absolute, starts `~`, has a `..`
+    component, or names an existing path that resolves outside `checkout`. It never runs
+    anything, and never judges intent: `cat .env` passes, which is why the approver reads it too."""
+    parts, why = _simple_commands(text)
+    if why:
+        return why
+    for part in parts:
+        try:
+            words = shlex.split(part, posix=True)
+        except ValueError as e:
+            return f"`{part.strip()}` can't be read: {e}"
+        if not words:
+            return "an empty command between separators"
+        program = words[0]
+        if program not in READ_ONLY_PROGRAMS:
+            return f"`{program}` isn't a read-only program the list names"
+        if program == "git" and (len(words) < 2 or words[1] not in READ_ONLY_GIT):
+            said = " ".join(words[:2])
+            return f"`{said}`: git runs unattended only as git log, git show or git diff"
+        for word in words[1:]:
+            if program == "git" and word.startswith(READ_ONLY_GIT_REFUSED):
+                return f"`{word}` makes git write a file or run a program"
+            short = word.startswith("-") and not word.startswith("--")
+            if program == "grep" and (
+                word == GREP_FOLLOWS_LONG or (short and GREP_FOLLOWS & set(word[1:]))
+            ):
+                return f"`{word}` makes grep follow symlinks, which can lead out of the checkout"
+            values = [word]
+            if word.startswith("-"):
+                values = [word.partition("=")[2]] if "=" in word else []
+                if not values and not word.startswith("--") and len(word) > 2:
+                    values = [word[2:]]
+            for value in values:
+                if value and (why := _path_refusal(value, checkout)):
+                    return why
+    return None
+
+
+def checks_sha(folder: Path) -> str | None:
+    """The sha256 of change `folder`'s `checks.md` bytes, or None when it has none: what the
+    person's yes covered, as `train --begin` records it, and what the approver judged."""
+    path = folder / "checks.md"
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _checks_now(folder: Path, tree: Path) -> tuple[list[dict], str | None]:
+    """Each acceptance check as `sdlc.py preflight` gives it (`acceptance()`, the parser `sdlc.py
+    accept` runs them with), `name` and `command`; or why they can't be read."""
+    pre, said = _preflight(folder, tree)
+    if pre is None:
+        return [], f"preflight couldn't be read: {said.strip()[-300:]}"
+    part = pre.get("checks") or {}
+    if part.get("problems"):
+        return [], "; ".join(part["problems"])
+    return [{"name": c["name"], "command": c["command"]} for c in part.get("checks") or []], None
+
+
+# The approver's judgement of a changed `checks.md`, `build/land-<n>.checks.md`: the first line,
+# which the script writes, is the hash of the file it judged; the reply under it opens with its
+# answer (`factory.CHECKS_RE`).
+JUDGED_RE = re.compile(r"^Judged: ([0-9a-f]{16})\s*$")
+
+
+def read_checks_record(path: Path) -> dict | None:
+    """The approver's judgement in `path`: `judged`, the hash it judged (None when the first line
+    isn't one), `answer`, `HARMLESS` or `ESCALATE` when `opening()` reads it and every `CHECKS:`
+    line agrees, else None, and `said`, the reply's words after its answer; None with no file."""
+    if not path.is_file():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    m = JUDGED_RE.match(lines[0]) if lines else None
+    reply = lines[1:] if m else lines
+    while reply and not reply[0].strip():
+        reply = reply[1:]
+    found = factory.opening(reply, factory.CHECKS_RE)
+    answers = {a.group(1) for a in map(factory.CHECKS_RE.match, reply) if a}
+    answer = found[1].group(1) if found and len(answers) == 1 else None
+    rest = reply[found[0] + 1 :] if answer else reply
+    said = " ".join(" ".join(rest).split())
+    return {"judged": m.group(1) if m else None, "answer": answer, "said": said}
+
+
+CHANGED = "checks.md changed since the yes"
+
+
+def checks_clearance(tree: Path, folder: Path, mine: dict) -> dict:
+    """Whether a train may run change `folder`'s acceptance checks as stacked without the person
+    (185 R2–R8), from its entry `mine` in the train: `clear`, the `step` to name (`accept`, or
+    `checks` for the approver's judgement), `why`, and what changed. Clear `as approved` when
+    `checks.md` hashes to the `checks_sha` the yes covered (`train --begin`); otherwise the checks
+    added or edited (`changed`: a name and command not among the approved) must each pass
+    `read_only_command()` (`off_list` names those that don't, which stops it before any agent),
+    and the approver's judgement of the file as it stands (`read_checks_record()`, current when
+    its `Judged:` hash is the file's) must open `CHECKS: HARMLESS`: missing or stale, `checks`;
+    anything else, not clear, with its words. A state from before `checks_sha` approved
+    nothing, so every check counts as changed. Removed checks run nothing; the approver is told."""
+    sha = checks_sha(folder)
+    approved = mine.get("checks") or []
+    out = {"clear": False, "step": "accept", "why": "", "sha": sha, "approved": approved,
+           "current": [], "changed": [], "removed": [], "off_list": []}  # fmt: skip
+    if "checks_sha" in mine and sha == mine["checks_sha"]:
+        return {**out, "clear": True, "why": "as approved"}
+    if sha is None:
+        # Removed since the yes: nothing runs (`land_verdict()` reads no file as a PASS), and
+        # nothing is left for the approver to judge.
+        return {**out, "why": f"{CHANGED}: checks.md is gone, so there is nothing to judge"}
+    current, problem = _checks_now(folder, tree)
+    if problem:
+        return {**out, "why": f"{CHANGED}, and its checks can't be read: {problem}"}
+    pairs = {(c["name"], c["command"]) for c in approved}
+    now = {(c["name"], c["command"]) for c in current}
+    out["current"] = current
+    out["changed"] = [c for c in current if (c["name"], c["command"]) not in pairs]
+    out["removed"] = [c for c in approved if (c["name"], c["command"]) not in now]
+    for c in out["changed"]:
+        if why := read_only_command(c["command"], tree):
+            out["off_list"].append({**c, "why": why})
+    if out["off_list"]:
+        listed = "; ".join(f"{c['name']}: `{c['command']}` ({c['why']})" for c in out["off_list"])
+        return {**out, "why": f"{CHANGED}, and a changed check isn't read-only: {listed}"}
+    record = read_checks_record(factory.land_checks_path(folder, factory.land_round(folder) or 1))
+    if record is None or record["judged"] != sha[:16]:
+        return {**out, "step": "checks", "why": f"{CHANGED}: the approver judges what changed"}
+    if record["answer"] == "HARMLESS":
+        why = f"{CHANGED}: read-only by the list, and judged harmless by the approver"
+        return {**out, "clear": True, "why": why}
+    said = record["said"][:300] or "no reasons given"
+    if record["answer"] is None:
+        said = ("its reply holds no CHECKS: HARMLESS or CHECKS: ESCALATE the script reads "
+                "(first, or the only answer it gives)")  # fmt: skip
+    return {**out, "why": f"{CHANGED}, and the approver didn't clear it: {said}"}
 
 
 def _accept_state(root: Path, folder: Path, settled: bool = False) -> str | None:
@@ -1404,21 +1619,19 @@ def _not_already_made(root: Path, folder: Path, n: int) -> list[str]:
     """Why an empty fix in landing round `n` can't go on: no builder's report, no
     `FIX: ALREADY MADE` answer `opening()` reads in it, or its `## Evidence` failing
     `read_evidence()`; empty when the builder says, with its evidence, that the fix was already
-    made."""
+    made. Each case is worded once, short, the answer named only where it is missing (nit -47)."""
     path = folder / "build" / f"land-{n}.md"
-    rel = path.relative_to(root).as_posix()
-    nothing = "the builder changed nothing outside the change's folder: nothing to commit"
+    rel = path.relative_to(folder).as_posix()
+    nothing = "the builder changed nothing outside the change's folder"
     if not path.is_file():
         return [f"{nothing}, and wrote no report ({rel})"]
     text = path.read_text(encoding="utf-8")
     found = factory.opening(text.splitlines(), factory.FIX_RE)
     if found is None or found[1].group(1) != factory.FIX_MADE:
-        return [
-            f"{nothing}, and its report {rel} doesn't say `FIX: ALREADY MADE` first, or as the "
-            f"only answer it gives, with the commands that prove it under `{factory.EVIDENCE}`"
-        ]
+        return [f"{nothing}, and {rel} doesn't say `FIX: {factory.FIX_MADE}` first, or as its "
+                "only answer"]  # fmt: skip
     if problems := factory.read_evidence(text, rel):
-        return [f"{nothing}, and its report says `FIX: ALREADY MADE` but:", *problems]
+        return [f"{nothing}, and its report's evidence doesn't hold:", *problems]
     return []
 
 
@@ -1701,16 +1914,23 @@ def _train_begin(
     tip = factory._git(main, "rev-parse", f"refs/heads/{base}") or ""
     # The landing round each change already has, from an earlier train: this train never judges
     # a change by that round's replies (`_fresh_round()` opens a new one).
-    before = {}
+    before, approved = {}, {}
     for r in picked:
         tree = Path(r["worktree"])
-        before[r["change"]] = factory.land_round(tree / factory.work_rel(tree) / r["change"])
+        folder = tree / factory.work_rel(tree) / r["change"]
+        before[r["change"]] = factory.land_round(folder)
+        # What the person's yes covered of its acceptance checks (185 R1): the file's hash, and
+        # each check as the parser that runs them reads it. Unreadable, none: all count changed.
+        sha = checks_sha(folder)
+        approved[r["change"]] = {"checks_sha": sha,
+                                 "checks": _checks_now(folder, tree)[0] if sha else []}  # fmt: skip
     state = {
         "base": base, "by": by, "order": [r["change"] for r in picked],
         "changes": {
             r["change"]: {"worktree": r["worktree"], "pre": None, "on": None, "stacked": None,
                           "stacking": None, "landed": None, "ejected": None, "failed": None,
-                          "fault": None, "rounds_before": before[r["change"]]}
+                          "fault": None, "rounds_before": before[r["change"]],
+                          **approved[r["change"]]}
             for r in picked
         },
         "base_tip": tip, "expected": tip, "moves": 0, "gates": [], "ejections": [],
@@ -1816,8 +2036,9 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
             mine["stacked"] = head  # a fix amended in: what is above re-stacks on it
         if fix and fix["change"] == name and not fix.get("done"):
             return done("fix", name, ask=fix["ask"], asked=fix.get("round") is not None)
-    # 3. The gate, once at the tip; a red tip bisected.
-    gate = _train_gate(main, cfg, state, trees)
+    # 3. The gate, once at the tip; a red tip bisected. Then the build, once at the tip, when a
+    # change calls for it (185 R13).
+    gate = _train_gate(main, cfg, state, trees) or _train_build(main, state, trees)
     write_train(main, state)  # the gates read, for `_land_gate_state()` under `land_verdict()`
     if gate is not None:
         if gate["next"] == "stop":
@@ -1839,6 +2060,11 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
             continue
         if verdict["next"] == "stop":
             return ejecting(name, "; ".join(verdict["problems"]), "review")
+        if verdict["next"] == "accept":
+            # Run again as stacked: by the loop itself only while cleared (185 R2–R8).
+            cleared = checks_clearance(tree, folder, state["changes"][name])
+            shown = {"clear": cleared["clear"], "why": cleared["why"]}
+            return done(cleared["step"], name, verdict=verdict, checks=shown)
         return done(verdict["next"], name, verdict=verdict)
     # 5. Closed in order.
     return done("close", train_live(state)[0])
@@ -1913,6 +2139,79 @@ def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> d
         return {"next": "eject", "change": fault, "reason": reason, "prefix": red}
     p = (green + red) // 2
     return {"next": "gate", "change": live[p - 1], "prefix": p, "of": m, "green": green, "red": red}
+
+
+def build_due(tree: Path, base: str) -> bool:
+    """Whether the change in `tree` calls for the base branch's `[commands] build` (185 R12), as
+    `/sdlc:ship` would run it on the same change built by hand: the base branch sets it, and its
+    `build_when` is unset, matches a path the change touches (`_changed_paths()`, by `re.search`),
+    or isn't a valid regex, which errs towards running; or a path it touches is on the base
+    branch's `[review] sensitive`. All of it read from the base branch, never the checkout."""
+    if factory._base_command(tree, base, "build") is None:
+        return False
+    when = factory._base_command(tree, base, "build_when")
+    if when is None:
+        return True
+    paths = factory._changed_paths(tree, base)
+    try:
+        pattern = re.compile(when)
+    except re.error:
+        return True
+    return any(pattern.search(p) for p in paths) or bool(
+        factory.risk_paths(paths, factory._sensitive(tree, base))
+    )
+
+
+def _train_build(main: Path, state: dict, trees: dict[str, Path]) -> dict | None:
+    """The build's step, after the tip's gate is green or none is due (185 R13, R14): None when
+    the base branch names no `[commands] build`, no live change calls for it (`build_due()`), or a
+    PASS sits on a commit that has the tip's stacked commit as an ancestor, which covers every
+    change stacked under it, as a gate's PASS does; `build` at the tip when no attempt sits on its
+    stacked commit; `stop` when the last one there is red. Never bisected: a slow build that
+    needs what no change caused is the person's to read."""
+    base = state["base"]
+    live = train_live(state)
+    if factory._base_command(main, base, "build") is None:
+        return None
+    if not any(build_due(trees[name], base) for name in live):
+        return None
+    _read_builds(main, state, trees)
+    tip = live[-1]
+    stacked = state["changes"][tip].get("stacked")
+    builds = state["builds"]
+    if any(b["verdict"] == "PASS" and _is_ancestor(main, stacked, b["commit"]) for b in builds):
+        return None
+    mine = [b for b in builds if b["commit"] == stacked]
+    if not mine:
+        return {"next": "build", "change": tip}
+    last = mine[-1]
+    return {"next": "stop", "reason": (
+        f"the build failed on the train's tip, {tip} (exit {last['exit']}), in {last['file']}: "
+        "it isn't bisected; read it, then rerun /sdlc-factory:land"
+    )}  # fmt: skip
+
+
+def _read_builds(main: Path, state: dict, trees: dict[str, Path]) -> None:
+    """Every attempt in the live changes' current build files that ran on a stacked commit of the
+    train, recorded once each in the state (`builds`), oldest first, as `_read_gates()` does."""
+    builds = state.setdefault("builds", [])
+    seen = {(b["change"], b["commit"], b["attempt"]) for b in builds}
+    for name in train_live(state):
+        tree = trees[name]
+        folder = tree / factory.work_rel(tree) / name
+        path = factory.land_build_path(folder, factory.land_round(folder) or 1)
+        stacked = state["changes"][name].get("stacked") or ""
+        for i, attempt in enumerate((factory.read_gate_file(path) or {"attempts": []})["attempts"],
+                                    1):  # fmt: skip
+            if not attempt["build"] or not stacked.startswith(attempt["build"]):
+                continue
+            if (name, stacked, i) in seen:
+                continue
+            seen.add((name, stacked, i))
+            builds.append({
+                "change": name, "commit": stacked, "attempt": i, "verdict": attempt["verdict"],
+                "exit": attempt["exit"], "file": f"{name}/{path.relative_to(folder).as_posix()}",
+            })  # fmt: skip
 
 
 def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
@@ -2048,8 +2347,8 @@ RUN_UNDER_WAY = "a train --run is under way: wait for it to end, or train --canc
 
 # Every `next` a train's reading can name.
 TRAIN_STEPS = (
-    "commit", "stack", "resolve", "gate", "eject", "accept", "review", "verify", "mend", "fix",
-    "close", "stop", "done",
+    "commit", "stack", "resolve", "gate", "build", "eject", "accept", "checks", "review",
+    "verify", "mend", "fix", "close", "stop", "done",
 )  # fmt: skip
 
 
@@ -2062,7 +2361,10 @@ RUN_STEPS = {
         ("agent", "{change}", "--task", "train-resolve"), ("resolve", "{change}", "--continue"),
     ),
     "gate": (("gate", "{change}", "--land"),),
+    "build": (("gate", "{change}", "--land", "--build"),),
     "eject": (("train", "--eject", "{change}"),),
+    "accept": (("accept", "{change}"),),
+    "checks": (("agent", "{change}", "--task", "land-checks"),),
     "review": (("agent", "{change}", "--task", "land-review", "--role", "{role}"),),
     "verify": (("agent", "{change}", "--task", "land-verify"),),
     "mend": (("agent", "{change}", "--task", "land-mend", "--role", "{role}"),),
@@ -2079,8 +2381,9 @@ RUN_STEPS = {
 RUN_EJECTS = ("gate",)
 
 
-# The steps that are always the person's: checks run again as stacked, behind their prompt, and a
-# train that stops.
+# The steps that are the person's: a train that stops, and `accept` when the reading doesn't clear
+# its checks (`checks_clearance()`): a `checks.md` changed since the yes that the read-only list and
+# the approver haven't both cleared. A cleared `accept` the loop runs itself, from `RUN_STEPS`.
 RUN_STOPS = ("accept", "stop")
 
 
@@ -2195,10 +2498,15 @@ def _run_plan(main: Path, reading: dict) -> tuple[list | None, dict | None]:
     if nxt == "stop":
         return stop(reading.get("reason") or "the train stopped", f"{PUT_BACK}, then {RERUN}")
     if nxt == "accept":
-        return stop(
-            f"{name}'s acceptance checks run again on it as stacked, behind your prompt",
-            f"factory.py accept {num}, then {RERUN}",
-        )
+        # Read again from `checks.md` as it is now, just before the run (R9): a file edited since
+        # the reading is never run on the reading's word.
+        said, now = reading.get("checks") or {}, _clearance_now(main, reading)
+        if not (said.get("clear") and now["clear"]):
+            why = now["why"] if said.get("clear") else said.get("why") or now["why"]
+            return stop(
+                f"{why}: {name}'s acceptance checks run again on it as stacked, behind your prompt",
+                f"factory.py accept {num}, then {RERUN}",
+            )
     if nxt == "commit" and reading.get("before"):
         firsts = reading["before"]
         return stop(
@@ -2232,6 +2540,16 @@ def _run_plan(main: Path, reading: dict) -> tuple[list | None, dict | None]:
             ([part.format(**fill, role=role) for part in template], cwd) for role in each
         ])  # fmt: skip
     return groups, None
+
+
+def _clearance_now(main: Path, reading: dict) -> dict:
+    """`checks_clearance()` for the change a reading names, from the train's state and its
+    `checks.md` as they are now; not clear when no live train names it."""
+    state, name = factory.read_train(main), reading.get("change")
+    if state is None or name not in train_live(state) or not reading.get("worktree"):
+        return {"clear": False, "why": f"no train under way names {name}"}
+    tree = Path(reading["worktree"])
+    return checks_clearance(tree, tree / factory.work_rel(tree) / name, state["changes"][name])
 
 
 def _run_end(main: Path, reading: dict, undos: list[dict], stopped: dict | None = None) -> int:
@@ -2319,7 +2637,9 @@ def _run_loop(main: Path) -> int:
                         "reason": f"{name} landed, but its push was refused",
                         "way_on": out["push_failed"],
                     })  # fmt: skip
-                failed = result["code"] and result["argv"][0] != "gate"
+                # A red gate or a failed check is the next reading's to read (R3); a refusal
+                # still stops the loop.
+                failed = result["code"] and result["argv"][0] not in ("gate", "accept")
                 if failed or out.get("problem") or out.get("refusals"):
                     why = out.get("problem") or "; ".join(out.get("refusals") or [])
                     why = why or result["said"].strip()[-300:] or f"exit {result['code']}"
@@ -2563,7 +2883,8 @@ def cmd_land_verdicts(root: Path, ident: str, record: bool = False) -> int:
     """The landing review of round `land-<n>`, and the step it takes next: `gate` (the script's
     gate on the change as rebased, before any reviewer, while the base branch names one),
     `accept` (a change with acceptance checks runs them again on its commit as rebased, through
-    `factory.py accept`, after the gate),
+    `factory.py accept`, after the gate; a train's reading adds whether they're cleared to run
+    unattended, `checks_clearance()`),
     `review` for the `missing` reviewers (behaviour alone after a clean rebase, every reviewer at
     the run's depth after a resolved conflict or a fix the person asked for, `fixed`), `verify`
     when one asks for changes, `pass` when none is kept, `mend` when every problem is one the

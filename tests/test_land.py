@@ -547,7 +547,8 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     )
     assert full == (
         "Land 2 changes in this order, 001-a, 002-b, each shipped with its approver's impact, its "
-        "acceptance checks and skills' cases run as shown (at most $10), its undone notes carried "
+        "acceptance checks run as shown, and again as stacked, its skills' cases run as shown (at "
+        "most $10), its undone notes carried "
         "or dropped and its assumed decisions confirmed as shown, with how to recover shown, "
         "committed, stacked in this order on trunk, gated once at the tip (a red tip bisected, "
         "the change at fault left out with why and the rest landed; a conflict resolved by one "
@@ -556,7 +557,11 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
         "(yes / yes, with a fix / leave one out / no)"
     )
     only = factory.landing.land_question([_entry("001-a", checks=[check])], "main")
-    assert "its acceptance checks run as shown, committed" in only and "$" not in only
+    assert "its acceptance checks run as shown, and again as stacked, committed" in only
+    assert "$" not in only and "build" not in only, "185 R10: no build clause unless called for"
+    built = factory.landing.land_question([_entry("001-a", build=True), _entry("002-b")], "main")
+    assert "impact, its build check run once at the tip, committed" in built, built
+    assert "acceptance" not in built, "no checks clause without checks"
     assert only.startswith("Land 1 change in this order, 001-a,")
     cases_only = factory.landing.land_question([_entry("001-a", cases=cases)], "main")
     assert "its skills' cases run as shown (at most $5)," in cases_only
@@ -943,6 +948,15 @@ def test_the_nits_taken_in_line_is_read_in_its_forms(tmp_path) -> None:
     assert named(wrapped) == ["2026-11-17-11", "2026-11-17-2"], "up to an unindented line"
     assert named("Nits taken in: 2026-11-17-11\n\n  2026-11-17-1") == ["2026-11-17-11"], "blank"
     assert named("Nits taken in: 2026-11-17-11") == ["2026-11-17-11"], "never -1 by -11"
+    # 185 R18: an indented list item ends the line's continuation; a plain wrap is still read.
+    left_out = "Nits taken in: 2026-11-17-11\n  - 2026-11-17-1 is left out"
+    assert named(left_out) == ["2026-11-17-11"], "a sub-bullet naming an id retires nothing"
+    for item in ("  * 2026-11-17-1 later", "  + 2026-11-17-1 later", "  1. 2026-11-17-1 later"):
+        assert named(f"Nits taken in: 2026-11-17-11\n{item}") == ["2026-11-17-11"], item
+    assert named("Nits taken in: 2026-11-17-11,\n  2026-11-17-1") == [
+        "2026-11-17-1",
+        "2026-11-17-11",
+    ], "a plain wrap still continues it"
     assert named("2026-11-17-11 and 2026-11-17-2, in prose") == []
     assert named("", problem="Nits taken in: 2026-11-17-11") == [], "the Problem retires nothing"
     (folder / "spec.md").write_text("## Requirements\n\nR1. Nits taken in: 2026-11-17-1\n")
@@ -1828,6 +1842,7 @@ def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_facto
     code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
     assert [c["change"] for c in batch["batch"]] == [checked.name, noted.name, deployed.name]
     assert batch["excluded"] == [] and batch["clear"] is False
+    assert [c["build"] for c in batch["batch"]] == [False] * 3, "185 R10: no build on the base"
     question = batch["question"]
     for clause in ("its acceptance checks run as shown", "undone notes carried or dropped",
                    "with how to recover shown"):  # fmt: skip
@@ -2568,6 +2583,9 @@ def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
         code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
         assert code == 1 and "changed nothing" in out["refusals"][0], out
         assert said in " ".join(out["refusals"]), (text, out)
+        # 185 R17: `FIX: ALREADY MADE` named once across the refusals, each line short.
+        assert " ".join(out["refusals"]).count(ALREADY) <= 1, out["refusals"]
+        assert all(len(line) < 160 for line in out["refusals"]), out["refusals"]
         assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"
 
 
