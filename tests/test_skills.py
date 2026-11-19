@@ -1641,9 +1641,34 @@ def test_the_approver_gives_every_reason_a_line_with_its_kind() -> None:
     """145 R1: every reason the approver escalates for is a line of its own with a kind: an open
     ledger line by its id or its `- ESCALATED: D<n>:` line, else `gate:` or `look:`."""
     flat = " ".join((FACTORY / "agents" / "approver.md").read_text(encoding="utf-8").split())
-    assert "`- ESCALATED: gate: <why>`" in flat and "`- ESCALATED: look: <why>`" in flat
+    assert (
+        "`- ESCALATED: gate: <why>`" in flat
+        and "`- ESCALATED: look: <what to look at> — <why>`" in flat
+    )
     assert "Every reason you escalate for is a line of its own" in flat
     assert "a green `[commands] check` on the change would show is fixed" in flat
+
+
+def test_the_approver_raises_a_look_only_for_what_no_one_approved() -> None:
+    """182: a published interface the approved spec's Contracts touched or the person's answers
+    already cover is named for ship, not filed as a look; the kinds that stay looks stay; each
+    look's reason starts with what to look at."""
+    flat = " ".join((FACTORY / "agents" / "approver.md").read_text(encoding="utf-8").split())
+    assert "*Contracts touched*" in flat and "under *For the person at ship*" in flat
+    assert "no ledger line and no ESCALATE on that ground alone" in flat
+    assert (
+        "A Critical or High finding still open, a disagreement, a departure from the spec, a "
+        "requirement with no test, a destructive operation and a secret stay looks" in flat
+    )
+    assert "`- ESCALATED: look: <what to look at> — <why>`" in flat
+
+
+def test_decide_names_what_a_look_asks_to_see() -> None:
+    """182: decide's look question names the look's target and says what each answer records."""
+    flat = " ".join((FACTORY / "skills" / "decide" / "SKILL.md").read_text("utf-8").split())
+    assert "names what to look at" in flat and "the reason's text before ` — `" in flat
+    assert "`seen` records it as acknowledged and accepted as built" in flat
+    assert "`checked something` records what they verified" in flat
 
 
 def test_decide_asks_each_look_and_runs_nothing_for_a_gate() -> None:

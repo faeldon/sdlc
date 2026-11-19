@@ -75,9 +75,12 @@ the default and why it was chosen (`why`), and each alternative with its notes. 
   For `change it`, ask what they want instead, as text.
 
 - A `look` item (`kind: look`, the approver's reason in `question`, its `reply` `decision.md`): read
-  the decision around it, and ask whether they have looked. Its answers are `seen` and `checked
-  something`; for `checked something`, ask what they checked, as text. A look is never answered for
-  them, and never by an agent.
+  the decision around it, and ask whether they have looked. The question names what to look at:
+  the reason's text before ` — `, the file, function or contract the approver put first (the whole
+  reason, when it has no ` — `), then why. Its answers are `seen` and `checked something`, and the
+  question says what each means: `seen` records it as acknowledged and accepted as built, without
+  claiming they verified anything; `checked something` records what they verified, so for it, ask
+  what they checked, as text. A look is never answered for them, and never by an agent.
 
 For a blocking item, the first option is the agent's recommendation, marked as such in its
 description. Hold each answer: the option the person chose, or their words when they typed one.

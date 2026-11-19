@@ -72,7 +72,9 @@ reviewing, and deciding whether to escalate.
 - **`/sdlc-factory:decide NNN`**, on one change at `stage: test`: its open decisions and assumed
   defaults, one at a time, each with its background, the default, the alternatives the agent
   weighed and why it chose the default, asked in a dialog with the default first, and each `look`
-  the approver escalated for (`seen`, or what you checked). After one approval it writes your
+  the approver escalated for, naming what to look at (`seen`, acknowledged and accepted as built,
+  or what you checked). The approver files no look for a published interface you already approved
+  in the spec or an answer; it names it for ship instead. After one approval it writes your
   answers into `decisions.md` (`→ decided:`), as the supervisor does, and says what's next: decide
   again, rebuild (an answer the build doesn't follow), the hand gate (a `gate` reason not yet
   green on the change as it stands), or ship. It reads

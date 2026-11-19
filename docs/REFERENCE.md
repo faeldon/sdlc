@@ -543,7 +543,8 @@ rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's comm
 read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
 decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
 approach` (its `decision.md` holds that section), `acknowledge D<n>` for each `look` the approver
-escalated for (`- ESCALATED: look: <why>`, filed in the ledger as `(approver round <R>, look)`),
+escalated for (`- ESCALATED: look: <what to look at> — <why>`, filed in the ledger as
+`(approver round <R>, look)`, its decide question quoting the target before ` — `),
 `gate it green` while a `gate` reason (`- ESCALATED: gate: <why>`) has no green hand gate on the
 change as it stands (below), and, with no such reason and no decision line at all in its ledger,
 `read the escalation` (a default the approver settled, `→ settled by the approver:`, is no decision

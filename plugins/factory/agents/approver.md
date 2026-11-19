@@ -41,7 +41,16 @@ departing from the spec in a way `plan.md` doesn't explain; a requirement the re
 find code or a test for; a blocking decision in `decisions.md` still unticked; a default you
 escalate (below), since the build rests on an assumption only the person can confirm; a decided
 one the build doesn't follow; or anything
-that touches a destructive operation, a secret or a published interface.
+that touches a destructive operation, a secret, or a published interface the person hasn't
+approved.
+
+**What the person already approved is no look.** A published interface the approved spec's
+*Contracts touched* names (at Tier 1, the intent's *Affected* contracts or its Approach), or that
+the person's own answer in `decisions.md` (`→ decided:`) settles, built as they approved it, is
+named under *For the person at ship*, with no ledger line and no ESCALATE on that ground alone.
+Only the person's approval covers it: a settled or assumed default never does. A Critical or High
+finding still open, a disagreement, a departure from the spec, a requirement with no test, a
+destructive operation and a secret stay looks, whatever the spec says.
 
 When in doubt, ESCALATE: a person's minute is cheaper than a wrong change on `main`.
 
@@ -88,14 +97,18 @@ even a sentence of your own. Then:
   - `- ESCALATED: gate: <why>` for something a green `[commands] check` on the change would show is
     fixed: a red gate, or a failing test or lint the check runs. The person fixes it and runs
     `sdlc.py gate NNN`; a green attempt on the change as it stands clears it.
-  - `- ESCALATED: look: <why>` for anything else the person must look at: a Critical or High
-    finding still open, a disagreement, a departure from the spec, a requirement with no test.
-    The person acknowledges it in `/sdlc-factory:decide`.
+  - `- ESCALATED: look: <what to look at> — <why>` for anything else the person must look at: a
+    Critical or High finding still open, a disagreement, a departure from the spec, a requirement
+    with no test, or what touches a destructive operation, a secret or a published interface the
+    person hasn't approved. Start with its target, the file, function or contract to see
+    (`scripts/drafts.py: purge()`), then ` — ` and why it needs their eyes. The person
+    acknowledges it in `/sdlc-factory:decide`, where the question names that target.
 
   An open ledger line keeps its own form (above). A reason with no line of its own is one the
   person can't clear without a rebuild, so give each its line, and keep `## Reconsider the
   approach` for a run that can't converge.
-- **For the person at ship**: what to look at first in the diff.
+- **For the person at ship**: what to look at first in the diff, and each published interface
+  the change touches that the person already approved (above), with where they approved it.
 - **The release impact you propose**, on a line of its own, exactly `- IMPACT: <major|minor|patch|none>
   — <why>`: what someone holding the previous release has to do differently (`major`), can newly
   do (`minor`), merely gets better (`patch`), or `none` when nothing anyone receives changed.
