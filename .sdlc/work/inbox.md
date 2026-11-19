@@ -457,3 +457,10 @@ Scorecard S8: retro.indicators emit JSON rows, rendered as a table in the report
 set" said when empty; setup offers the key. Pillar: Quality.
 Theme: retro
 Raised 2026-11-19.
+
+## [2026-11-19-33] [idea] Figures by way of building
+
+Scorecard S9: lead time, throughput, cost and escape rate, factory against by hand. Pillars:
+Speed, Autonomy.
+Theme: retro
+Raised 2026-11-19.
