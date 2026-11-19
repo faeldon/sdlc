@@ -29,6 +29,7 @@ An event is a dict with `ts` (an aware datetime) and `kind`:
     edit{artifact, added, removed, role?}  stage{to}  plan{action}  question  answer{reply, waited}
     check{ok}  permission{name, rejected}  mode{modes}  tool{name, error, role?}
     subagent{role, ms, in, cache_create, cache_read, out, behaviour, calls, model?}
+    runtime{claude?, model?}
 
 A `human` event's `words` is how many whitespace-separated words the person typed (`_words()`): a
 slash command's name and arguments, a reply's text, never what the harness wraps around it. It is
@@ -110,6 +111,20 @@ the landing to the close. A part that can't be known is left out, never 0; `sour
 (the factory's run files), `transcripts` or `git`. A change with no `opened:` has no line, and
 `Sdlc-Coverage` says so (` lead=none`, ` lead=bad-opened`, ` lead=failed`): a `Close` commit
 without it is unmeasured, never a lead of 0.
+
+What a change ran on, on a line of its own:
+
+    runtime_trailer(events, role_models, plugin)  -> line | None   `Sdlc-Runtime`
+
+A `runtime` event is one Claude Code version (an entry's `version`) or one model (an assistant
+entry's `message.model`, never the harness's `<synthetic>`) a run of the change carried: the main
+session, a factory agent's session or a sub-agent's, one event a distinct value a run. It moves no
+clock. `Sdlc-Runtime: claude=<v>[,<v>…] models=<m>[,<m>…] plugin=<v>` joins them with the factory
+roles' models from `runs/costs.jsonl` and the plugin's version close passes in, each part sorted,
+deduplicated and `_model_word()`, and a part not known left out, never empty; read back as
+`runtime`, a dict of text. Close writes it on every `Close` and `Drop` commit, `plugin=` alone
+from history; a failure leaves it out and `Sdlc-Coverage` gains ` runtime=failed`. A `Close`
+commit without it was closed before it was recorded: unrecorded, never unchanged.
 
 A change `/sdlc-factory:land` landed may say on its `Sdlc-Landed` how many paths changed after its
 last review (`unreviewed=<n>`, or `unknown` with no snapshot to compare). `landed_unreviewed()`
@@ -447,6 +462,31 @@ def _supervised(entries: list[dict], branch: str, ident: str, keep: list[bool]) 
                     dialogs.add(str(block.get("id")))
 
 
+# A model the harness names when it, not a model, wrote an assistant entry: never a model run.
+SYNTHETIC_MODEL = "<synthetic>"
+
+
+def _runtime(entries: list[dict]) -> list[dict]:
+    """What a run's entries ran on, as `runtime` events: one for each distinct Claude Code version
+    (an entry's `version`) and each distinct model (an assistant entry's `message.model`), at the
+    first entry carrying it. Never an empty value or the harness's `<synthetic>`."""
+    found: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for e in entries:
+        ts = _ts(e)
+        if ts is None:
+            continue
+        msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+        model = msg.get("model") if e.get("type") == "assistant" else None
+        for key, value in (("claude", e.get("version")), ("model", model)):
+            if not isinstance(value, str) or not value.strip() or value == SYNTHETIC_MODEL:
+                continue
+            if (key, value) not in seen:
+                seen.add((key, value))
+                found.append({"ts": ts, "kind": "runtime", key: value})
+    return found
+
+
 def _usage(msg: dict) -> dict:
     usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
     return {
@@ -584,7 +624,7 @@ def _run(
     }
     if model:
         run["model"] = model
-    return {"events": [run, *edits], "agents": agents}
+    return {"events": [run, *edits, *_runtime(entries)], "agents": agents}
 
 
 # The person's questions and plan gates: answered by the person, but counted as `question` and
@@ -976,6 +1016,7 @@ def read_events(
                             agents.add(str(block.get("id")))
             if last is not None:
                 events.append({"ts": last, "kind": "mode", "modes": sorted(modes)})
+            events.extend(_runtime([e for e, k in zip(entries, keep, strict=True) if k]))
             for sub in sorted((folder / path.stem / "subagents").glob("agent-*.jsonl")):
                 found = _subagent(sub, branch, check or None)
                 if found and found["parent"] in agents:
@@ -1118,6 +1159,8 @@ def summarize(
     for event in events:
         if event["kind"] == "mode":  # a session's modes, not a moment: it moves no clock
             prompt_modes.update(event["modes"])
+            continue
+        if event["kind"] == "runtime":  # what ran, not a moment: it moves no clock either
             continue
         opens = _stage_of(event)
         if opens and opens != current:
@@ -1661,6 +1704,27 @@ def lead_trailer(lead: dict, source: str) -> str:
     """`lead_time()`'s parts as the `Sdlc-Lead` line: whole minutes and a source word only."""
     fields = {k: _minutes(lead[k]) for k in ("lead", *LEAD_PARTS) if k in lead}
     return f"Sdlc-Lead: {_pairs(fields)} source={_word(source)}"
+
+
+def runtime_trailer(events: list[dict], role_models, plugin: str | None) -> str | None:
+    """What the change ran on as the `Sdlc-Runtime` line: the Claude Code versions and models of
+    its `runtime` events, the factory roles' models (`role_models`, from `runs/costs.jsonl`) and
+    the plugin's version, each part sorted, deduplicated and a word; a part not known is left out,
+    and None when none is. Every value is `_model_word()`: a `,` would split it, a `:` make it a
+    pair."""
+
+    def words(values) -> str:
+        return ",".join(sorted({_model_word(v.strip()) for v in values if str(v).strip()}))
+
+    ran = [e for e in events if e.get("kind") == "runtime"]
+    parts = {
+        "claude": words(str(e["claude"]) for e in ran if "claude" in e),
+        "models": words([*(str(e["model"]) for e in ran if "model" in e),
+                         *(str(m) for m in role_models or () if m)]),
+        "plugin": words([str(plugin)] if plugin else []),
+    }  # fmt: skip
+    fields = {k: v for k, v in parts.items() if v}
+    return f"Sdlc-Runtime: {_pairs(fields)}" if fields else None
 
 
 def landed_unreviewed(summary: dict, tip: dict | None) -> None:

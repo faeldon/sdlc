@@ -91,6 +91,11 @@ What `retro` gives:
   the changes with no `findings.md` to read, or one that no longer parses: its review's
   `problems` say which sections.
 - `unmeasured`: signals history doesn't record.
+- Trust: `process.lead`, `process.escapes`, `metrics` and `spend` each carry `coverage`
+  (`measured` of `of` changes) and `missing_because`. Read a `greyed` one, under half its
+  changes, as a hint, never a finding. Before reading any trend, rule out
+  `process.underneath.changed`: a Claude Code, model or plugin version that moved can shift every
+  figure at once.
 - `prose`: each skill's size and estimated tokens (its `SKILL.md`, which every run reads; the files
   read only when a branch applies are its `branches`) and commands, plus the host docs the skills
   read.

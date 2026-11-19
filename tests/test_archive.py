@@ -2342,10 +2342,12 @@ def test_close_times_a_factory_change_from_its_run_files(tmp_path, gh, capsys, m
     summary, lines = _measure(root, name)
     assert _lead(lines) == {"lead": 240, "queued": 60, "agents": 85, "idle": 15,
                             "ready_wait": 20, "landing": 60, "source": "runs"}  # fmt: skip
-    assert lines[-1].startswith("Sdlc-Lead:") and "lead=" not in summary["coverage"]
+    # 170: `Sdlc-Runtime` follows it, the one line written after it.
+    assert lines[-2].startswith("Sdlc-Lead:") and "lead=" not in summary["coverage"]
+    assert lines[-1].startswith("Sdlc-Runtime:")
     real = sdlc.closing._lead_line
     monkeypatch.setattr(sdlc.closing, "_lead_line", lambda *_: (None, None))
-    assert _measure(root, name)[1] == lines[:-1], "every other line as it was"
+    assert _measure(root, name)[1] == lines[:-2] + lines[-1:], "every other line as it was"
     monkeypatch.setattr(sdlc.closing, "_lead_line", real)
 
     code, out = _close(root, capsys, "001")
@@ -2454,6 +2456,64 @@ def test_a_dropped_change_records_no_lead(tmp_path, gh, capsys) -> None:
     assert code == 0 and out["kind"] == "dropped", out
     body = _git(root, "log", "-1", "--format=%B", "main")
     assert body.startswith("Drop ") and "Sdlc-Coverage:" in body and "Sdlc-Lead" not in body
+
+
+# ---------------------------------------------------------------- what ran underneath (170)
+
+RAN = [
+    {**SESSION[0], "version": "9.1.10"},
+    {"type": "assistant", "timestamp": "2026-10-01T09:01:00Z", "version": "9.1.11",
+     "message": {"id": "m1", "model": "model-a", "content": []}},
+    *SESSION[1:],
+]  # fmt: skip
+
+
+def test_close_writes_the_runtime_line(tmp_path, gh, capsys, monkeypatch) -> None:
+    """170 R3: after every other line, from the transcripts and the plugin's version; on a drop
+    too, `plugin=` alone with no transcripts."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "9.0.1")
+    root = _repo(tmp_path)
+    name = _shipped(root)
+    _transcript(home, root, name, RAN)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and not _on_main(root, name), out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    lines = [ln for ln in body.splitlines() if ln.startswith("Sdlc-")]
+    at = lines.index("Sdlc-Runtime: claude=9.1.10,9.1.11 models=model-a plugin=9.0.1")
+    assert lines[at - 1].startswith("Sdlc-Lead: "), "after the lines close already writes"
+    assert "runtime=failed" not in body
+
+
+def test_a_drop_records_the_plugin_alone(tmp_path, gh, capsys, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "9.0.1")
+    root = _repo(tmp_path)
+    _dropped(root)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and out["kind"] == "dropped", out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert "\nSdlc-Runtime: plugin=9.0.1\n" in body + "\n", body
+
+
+def test_a_failed_runtime_read_never_stops_a_close(tmp_path, gh, capsys, monkeypatch) -> None:
+    """170 R3: a raise costs the line alone, and the coverage says so."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    root = _repo(tmp_path)
+    name = _shipped(root)
+    _transcript(home, root, name, RAN)
+
+    def broken(*_):
+        raise RuntimeError("a runtime shape nobody planned for")
+
+    monkeypatch.setattr(sdlc.metrics, "runtime_trailer", broken)
+    code, out = _close(root, capsys, "001")
+    assert code == 0 and not _on_main(root, name), out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert "Sdlc-Runtime" not in body and "Sdlc-Totals:" in body and "Sdlc-Happy:" in body
+    assert sdlc.metrics.parse_trailers(body)["coverage"].endswith(" runtime=failed")
 
 
 def test_close_reads_the_run_rows_the_factory_writes(tmp_path, monkeypatch) -> None:

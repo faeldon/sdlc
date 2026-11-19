@@ -1,0 +1,14 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Leave ship's `cases.md` branch out of a host's `prose` block. The spec assumed retro never mentions the skills' cases, but `prose` listed that file in every host's JSON, so R11 couldn't pass without it. Going ahead unless told otherwise. → settled by the approver: R11 says a host's retro JSON must hold no `cases` key outside `tests.times`. `test_a_hosts_retrospective_never_mentions_the_cases` fails while `prose` lists ship's `cases.md`, so the default is what the spec already demands. The other option, narrowing R11, would rewrite the spec. Plan.md explains the change and the code reviewer agreed with it in round 1.
+  - OPTION: leave it out in a host (`OWN_REPO_BRANCHES`) — meets R11, and a host never reads that branch; one more rule in `prose`
+  - OPTION: keep listing it and narrow R11 — no code change; a host's JSON keeps naming this repo's cases
+  - WHY: R11's own test fails on that key, and `SHIP_BRANCHES` names the file only where the cases suite exists
+- [x] D2 (builder round 1, default): Strip the trailing words close adds (` lead=failed`, ` runtime=failed`) from a `none:` coverage reason, for spend's `why` as well as the new `missing_because`. Going ahead unless told otherwise. → settled by the approver: R5 writes the `none:` reasons out bare (`no transcripts for this repo`) and makes spend's reason "its existing `why`". `_none_reason()` keeps the two the same, and the test reviewer confirms the R4 test checks spend's `missing_because` equals its `why`. The code reviewer agreed with this default in round 1.
+  - OPTION: strip them everywhere (`_none_reason()`) — R5's reason words come out as written, and `missing_because` matches spend's `why`; spend's `why` text changes for such changes
+  - OPTION: strip them only for coverage — spend's `why` stays as it was; the same change shows two different reasons
+  - WHY: R5 names the reasons as `no transcripts for this repo`, without the suffix
+- [x] D3 (builder round 1, default): Clean each version in `Sdlc-Runtime` with `_model_word()`, not `_word()`. Going ahead unless told otherwise. → settled by the approver: R2's own test needs a version to come back as text with no `/`, `~` or space. `_model_word()` is `_word()` with `,` and `:` also replaced, so it is stricter and the line's format is still the one R2 specifies. Plan.md explains the departure. The security review shows it stops a value forging a second trailer, splitting in two, or reading back as a key:value pair.
+  - OPTION: `_model_word()` — a `,` can't split one value and a `:` can't turn it into a pair; it is stricter than `_word()`
+  - OPTION: `_word()`, as the spec wrote — follows the spec exactly; a value holding `a:1` reads back as a dict
+  - WHY: R2 asks for a version to come back as text

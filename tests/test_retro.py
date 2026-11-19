@@ -608,8 +608,9 @@ def test_open_changes_and_seeds_are_counted(tmp_path: Path, tag: str) -> None:
     assert out["ideas"] == {"open": 2, "oldest": "2026-09-01"}
 
 
-def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path) -> None:
-    prose = _retro(_repo(tmp_path))["prose"]
+def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    prose = _retro(root)["prose"]
     assert set(prose["skills"]) == {p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")}
     retro = prose["skills"]["retro"]
     assert retro["est_tokens"] == retro["bytes"] // 4 and retro["script_calls"] >= 3
@@ -618,7 +619,10 @@ def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path) -> None:
     skill = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
     assert ship["lines"] == len(skill.splitlines())
     beside = {p.name for p in (ROOT / "skills" / "ship").glob("*.md")} - {"SKILL.md"}
-    assert set(ship["branches"]) == beside and "branches" not in retro
+    # 170: a host never reads the skills' cases' branch, which only this repo's ship names.
+    assert set(ship["branches"]) == beside - {"cases.md"} and "branches" not in retro
+    monkeypatch.setattr(sdlc, "_own_repo", lambda home: True)
+    assert set(_retro(root)["prose"]["skills"]["ship"]["branches"]) == beside
     setup = prose["skills"]["setup"]
     skill = (ROOT / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
     assert setup["lines"] == len(skill.splitlines()) and set(setup["branches"]) == {"drafts.md"}
@@ -2103,7 +2107,7 @@ def test_the_process_views_count_cycle_throughput_time_and_load() -> None:
     ])  # fmt: skip
     assert out["window"] == {
         "since": "2026-10-01", "today": "2026-10-24", "closed": 4, "tiers": {"1": 2, "2": 2},
-        "dropped": 0, "measured": 3, "unmeasured": 1,
+        "dropped": 0, "measured": 3, "unmeasured": 1, "factory": 0, "mode_unknown": 4,
     }  # fmt: skip
     assert out["throughput"] == [
         {"week": "2026-10-05", "tiers": {"1": 1, "2": 2}, "total": 3},
@@ -2118,7 +2122,9 @@ def test_the_process_views_count_cycle_throughput_time_and_load() -> None:
     assert out["capacity"]["2"]["elapsed"] == 90
     assert out["rework"] == {"links": 1, "reworked": 1, "per_change": 0.25, "questions": 2}
     assert out["escapes"] == {"reported": 1, "fixed": 1, "days_to_fix": 2, "rate": 0.25,
-                              "previous": 0.0, "trend": "up"}  # fmt: skip
+                              "previous": 0.0, "trend": "up",
+                              "coverage": {"measured": 4, "of": 4, "greyed": False},
+                              "missing_because": {}}  # fmt: skip
 
 
 def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
@@ -2278,7 +2284,9 @@ def test_retro_counts_a_landing_catch_once_per_change(tmp_path: Path) -> None:
         "004-wrong": head + _caught(1, "important", "landing round 1", "wrong", "ui"),
     }  # fmt: skip
     for name, text in texts.items():
-        _close(root, name, texts={f".sdlc/work/{name}/findings.md": text})
+        # 170 R10: the catches are counted only in a window holding a factory change.
+        mode = ("Sdlc-Mode: manual",) if name == "001-hand" else ("Sdlc-Mode: factory",)
+        _close(root, name, texts={f".sdlc/work/{name}/findings.md": text}, trailers=mode)
     out = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))
     assert out["bugs"]["landing_catches"] == {"caught": 1, "reviewed": 3}
     report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 25))
@@ -2474,7 +2482,11 @@ def test_without_a_lead_line_every_other_figure_is_as_it_was() -> None:
     a, b = _views(plain), _views(led)
     for key in ("window", "cycle", "time", "wip", "capacity"):
         assert a[key] == b[key], key
-    assert a["lead"] == {"measured": 0, "unmeasured": 2, "groups": [], "shares": {}}
+    assert a["lead"] == {
+        "measured": 0, "unmeasured": 2, "groups": [], "shares": {},
+        "coverage": {"measured": 0, "of": 2, "greyed": True},
+        "missing_because": {"closed before lead time was recorded": 2},
+    }  # fmt: skip
 
 
 def test_the_report_shows_lead_time_under_cycle_time() -> None:
@@ -2949,3 +2961,265 @@ def test_retro_says_what_autonomy_cannot_count(tmp_path: Path) -> None:
         assert signal in signals and signals[signal]["needs"], signals
     over = out["autonomy"]["overturned"]
     assert over["count"] is None and over["n"] == 0 and over["unmeasured"]
+
+
+# ---------------------------------------------------------------- the trust band (170)
+
+FULL_TOTALS = "Sdlc-Totals: elapsed=10 agent=5 response=2 away=0 blocked=0 stops=1 tools=3 words=4"
+OLD_TOTALS = "Sdlc-Totals: elapsed=10 agent=5 response=2 away=0 blocked=0 stops=1"
+
+
+def _trust_window(root: Path) -> None:
+    """Six changes, each missing something else: fully measured; history-only with failed
+    timing; `lead=none`; closed before `Sdlc-Lead` (and before tool calls); no trailers at all;
+    history-only with an unreadable `opened:`."""
+    _close(root, "001-full", trailers=(
+        "Sdlc-Mode: manual", "Sdlc-Coverage: transcripts=1 stages=ship", FULL_TOTALS,
+        "Sdlc-Lead: lead=30 source=git",
+    ))  # fmt: skip
+    _close(root, "002-history", closed="2026-10-03", trailers=(
+        "Sdlc-Mode: manual", "Sdlc-Coverage: none: metrics.transcripts is off lead=failed",
+        "Sdlc-Totals: elapsed=10",
+    ))  # fmt: skip
+    _close(root, "003-no-opened", closed="2026-10-04", trailers=(
+        "Sdlc-Mode: manual", "Sdlc-Coverage: transcripts=1 stages=ship lead=none", FULL_TOTALS,
+    ))  # fmt: skip
+    _close(root, "004-before-lead", closed="2026-10-05", trailers=(
+        "Sdlc-Mode: manual", "Sdlc-Coverage: transcripts=1 stages=ship", OLD_TOTALS,
+    ))  # fmt: skip
+    _close(root, "005-bare", closed="2026-10-06")
+    _close(root, "006-bad-opened", closed="2026-10-07", trailers=(
+        "Sdlc-Coverage: none: no transcripts for this repo lead=bad-opened runtime=failed",
+        "Sdlc-Totals: elapsed=10",
+    ))  # fmt: skip
+
+
+def test_every_headline_says_its_coverage_and_why_the_rest_is_missing(tmp_path: Path) -> None:
+    """170 R4, R5: each of the four headlines carries `coverage` and `missing_because`, read from
+    what each commit carries, and the reasons add up to what isn't measured."""
+    root = _repo(tmp_path)
+    _trust_window(root)
+    out = _retro(root)
+    blocks = {
+        "lead": out["process"]["lead"], "escapes": out["process"]["escapes"],
+        "metrics": out["metrics"], "spend": out["spend"],
+    }  # fmt: skip
+    for name, block in blocks.items():
+        cov, why = block["coverage"], block["missing_because"]
+        assert cov["of"] == 6, name
+        assert sum(why.values()) == cov["of"] - cov["measured"], name
+    assert blocks["lead"]["coverage"] == {"measured": 1, "of": 6, "greyed": True}
+    assert blocks["lead"]["missing_because"] == {
+        "timing failed": 1, "no opened: line": 1, "closed before lead time was recorded": 1,
+        "not measured at close": 1, "opened: unreadable": 1,
+    }  # fmt: skip
+    assert blocks["metrics"]["coverage"] == {"measured": 3, "of": 6, "greyed": False}
+    assert blocks["metrics"]["missing_because"] == {
+        "metrics.transcripts is off": 1, "not measured at close": 1,
+        "no transcripts for this repo": 1,
+    }  # fmt: skip
+    assert blocks["spend"]["coverage"] == {"measured": 2, "of": 6, "greyed": True}
+    assert blocks["spend"]["missing_because"] == {
+        "metrics.transcripts is off": 1, "closed before tool calls and words were counted": 1,
+        "not measured at close": 1, "no transcripts for this repo": 1,
+    }  # fmt: skip
+    assert blocks["spend"]["missing_because"] == blocks["spend"]["why"], "one reading, not two"
+    assert blocks["escapes"]["coverage"] == {"measured": 6, "of": 6, "greyed": False}
+    assert blocks["escapes"]["missing_because"] == {}
+
+
+@pytest.mark.parametrize(
+    ("measured", "of", "greyed"), [(4, 10, True), (5, 10, False), (0, 0, False)]
+)
+def test_a_headline_under_half_its_changes_is_greyed(measured: int, of: int, greyed: bool) -> None:
+    """170 R6: greyed exactly when fewer than half the window's changes are measured."""
+    changes = [{"n": n} for n in range(of)]
+    got = sdlc.retro._coverage(changes, lambda c: c["n"] < measured, lambda c: "a reason")
+    assert got["coverage"] == {"measured": measured, "of": of, "greyed": greyed}
+    assert got["missing_because"] == ({"a reason": of - measured} if of > measured else {})
+
+
+def _window_section(text: str) -> str:
+    return text.split("## Window", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_report_greys_a_thin_headline(tmp_path: Path) -> None:
+    """170 R7: a *Coverage* line per headline after the window's sentence, in italics and
+    marked a hint under half its changes; the template is left as it is."""
+    root = _repo(tmp_path)
+    _trust_window(root)
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    lines = {ln.split(":", 1)[0].strip("-* "): ln for ln in _window_section(text).splitlines()
+             if "Coverage, " in ln}  # fmt: skip
+    assert set(lines) == {"Coverage, lead time", "Coverage, escape rate",
+                          "Coverage, the person's minutes", "Coverage, spend"}  # fmt: skip
+    lead, spend = lines["Coverage, lead time"], lines["Coverage, spend"]
+    for thin in (lead, spend):
+        assert thin.startswith("- *") and thin.endswith("a hint: under half the changes*"), thin
+    assert "1 of 6 changes" in lead and "timing failed 1" in lead and "opened: unreadable 1" in lead
+    for full in (lines["Coverage, escape rate"], lines["Coverage, the person's minutes"]):
+        assert not full.startswith("- *") and "a hint" not in full, full
+    assert "6 of 6 changes" in lines["Coverage, escape rate"]
+    minutes = lines["Coverage, the person's minutes"]
+    assert "3 of 6 changes" in minutes and "metrics.transcripts is off 1" in minutes
+    assert "{{" not in text
+    # Without the metrics block, its line says so; with no change closed there is no line.
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    views = _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)])
+    alone = sdlc.retro.render_report(template, views)
+    assert "- Coverage, the person's minutes: not given." in alone
+    empty = sdlc.retro.render_report(template, _views([]))
+    assert "Coverage, " not in empty
+
+
+def _ran(runtime: str) -> tuple[str, ...]:
+    return ("Sdlc-Mode: manual", f"Sdlc-Runtime: {runtime}")
+
+
+def _underneath_repo(tmp_path: Path) -> Path:
+    """Two retrospectives: 002 and 003 in the last window (003 from before `Sdlc-Runtime`, with a
+    role's model), 004 and 005 in this one (005 with nothing)."""
+    root = _repo(tmp_path)
+    _close(root, "001-oldest", trailers=_ran("claude=1.0.0 models=model-z plugin=0.0.9"))
+    _record(root, "2026-10-01")
+    _close(root, "002-a", closed="2026-10-03",
+           trailers=_ran("claude=1.0.0 models=model-a plugin=0.1.0"))  # fmt: skip
+    _close(root, "003-b", closed="2026-10-04", trailers=(
+        "Sdlc-Mode: factory", "Sdlc-Role: builder runs=1 agent=3 model=model-a",
+    ))  # fmt: skip
+    _record(root, "2026-10-10")
+    _close(root, "004-c", closed="2026-10-12",
+           trailers=_ran("claude=1.0.1 models=model-a plugin=0.1.0"))  # fmt: skip
+    _close(root, "005-d", closed="2026-10-13")
+    return root
+
+
+def test_what_changed_underneath_compares_with_the_last_window(tmp_path: Path) -> None:
+    """170 R8: each dimension's values in this window and the last, how many changes recorded
+    them, and what changed: null, never false, when a side recorded none."""
+    under = _retro(_underneath_repo(tmp_path))["process"]["underneath"]
+    assert under["window"] == {
+        "claude": {"1.0.1": 1}, "models": {"model-a": 1}, "plugin": {"0.1.0": 1},
+        "recorded": 1, "unrecorded": 1,
+    }  # fmt: skip
+    assert under["previous"] == {
+        "claude": {"1.0.0": 1}, "models": {"model-a": 2}, "plugin": {"0.1.0": 1},
+        "recorded": 1, "unrecorded": 1,
+    }  # fmt: skip
+    assert under["changed"] == {"claude": True, "models": False, "plugin": False}
+
+    old = sdlc.retro._underneath_side
+    rec = lambda m: {"metrics": m}  # noqa: E731
+    now = [rec({"runtime": {"claude": "1.0.1,1.0.2", "models": "m", "plugin": "0.2.0"}})]
+    before = [rec({"roles": {"builder": {"model": "m"}}}), rec(None)]
+    got = sdlc.retro.underneath(now, before)
+    assert got["window"]["claude"] == {"1.0.1": 1, "1.0.2": 1}
+    assert got["changed"] == {"claude": None, "models": False, "plugin": None}
+    assert got["previous"] == old(before) and got["previous"]["unrecorded"] == 2
+    first = sdlc.retro.underneath(now, None)
+    assert first["previous"] is None
+    assert first["changed"] == {"claude": None, "models": None, "plugin": None}
+
+
+def test_the_last_window_runs_from_the_start_with_one_retrospective(tmp_path: Path) -> None:
+    """170 R8: with one retrospective the last window is all history before it; with none there
+    is no last window."""
+    root = _repo(tmp_path)
+    _close(root, "001-a", trailers=_ran("claude=1.0.0 plugin=0.1.0"))
+    assert _retro(root)["process"]["underneath"]["previous"] is None
+    _record(root, "2026-10-01")
+    _close(root, "002-b", closed="2026-10-03", trailers=_ran("claude=1.0.0 plugin=0.1.1"))
+    under = _retro(root)["process"]["underneath"]
+    assert under["previous"]["plugin"] == {"0.1.0": 1}
+    assert under["changed"] == {"claude": False, "models": None, "plugin": True}
+
+
+def test_the_report_says_what_changed_underneath(tmp_path: Path) -> None:
+    """170 R9: one line after the coverage lines, each dimension against the last window, what
+    changed and how many recorded none; never a path, whatever a trailer says."""
+    root = _underneath_repo(tmp_path)
+    _close(root, "006-e", closed="2026-10-14",
+           trailers=_ran("claude=made/up/1.0.2 plugin=~/0.1.0"))  # fmt: skip
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    window = _window_section(text)
+    [line] = [ln for ln in window.splitlines() if "What changed underneath" in ln]
+    assert window.index("Coverage, spend") < window.index(line)
+    assert "/" not in line and "~" not in line, line
+    assert "Claude Code" in line and "changed" in line and "1.0.0" in line
+    assert "1 of 3 changes in this window recorded none" in line, line
+    (tmp_path / "first").mkdir()
+    root2 = _repo(tmp_path / "first")
+    _close(root2, "001-a", trailers=_ran("claude=1.0.0 plugin=0.1.0"))
+    first = sdlc.retro.retro_report(root2, sdlc.load_config(root2)[0], date(2026, 10, 24))
+    [line] = [ln for ln in first.splitlines() if "What changed underneath" in ln]
+    assert "no earlier window to compare" in line
+
+
+def test_underneath_reads_history_alone(tmp_path: Path, monkeypatch) -> None:
+    """170 R12: no transcript, no `claude`, no plugin manifest: only git runs."""
+    root = _underneath_repo(tmp_path)
+    real = subprocess.run
+
+    def only_git(args, *a, **kw):
+        if not args or Path(str(args[0])).name != "git":
+            raise AssertionError(f"retro ran {args[0] if args else args}")
+        return real(args, *a, **kw)
+
+    def refuse(*_a, **_kw):
+        raise AssertionError("retro reached outside history")
+
+    monkeypatch.setattr(subprocess, "run", only_git)
+    monkeypatch.setattr(sdlc.shutil, "which", lambda name, *a, **kw: refuse() if "claude" in
+                        str(name) else None)  # fmt: skip
+    for name in ("plugin_version", "_project_dirs"):
+        monkeypatch.setattr(sdlc, name, refuse)
+    monkeypatch.setattr(sdlc.metrics, "read_events", refuse)
+    out = _retro(root)
+    assert out["process"]["underneath"]["changed"]["claude"] is True
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "What changed underneath" in text
+
+
+def test_a_window_with_no_factory_changes_says_so(tmp_path: Path) -> None:
+    """170 R10: with no `Sdlc-Mode: factory` in the window, no landing-catches figure, a sentence
+    in its place, and the changes with no way recorded named."""
+    root = _repo(tmp_path)
+    _close(root, "001-a", trailers=("Sdlc-Mode: manual",))
+    _close(root, "002-b", closed="2026-10-03")
+    process = _retro(root)["process"]
+    assert (process["window"]["factory"], process["window"]["mode_unknown"]) == (0, 1)
+    assert process["landing_catches"] is None
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "No factory changes in this window." in text
+    assert "1 change records no way of building" in text
+    assert "Landing catches: 0 of 0" not in text
+    _close(root, "003-c", closed="2026-10-04", trailers=("Sdlc-Mode: factory",))
+    process = _retro(root)["process"]
+    assert process["window"]["factory"] == 1 and process["landing_catches"] is not None
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "No factory changes" not in text
+
+
+def test_a_hosts_retrospective_never_mentions_the_cases(tmp_path: Path, capsys) -> None:
+    """170 R11: the skills' cases are this plugin's own; a host's retro and report say nothing of
+    them. `tests.times` counts JUnit test cases, which are the host's."""
+    root = _underneath_repo(tmp_path)
+    _trust_window(root)
+    assert not sdlc._own_repo(root)
+    assert sdlc.retro.cmd_retro(root, metrics=True) == 0
+    out = capsys.readouterr().out
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
+    report = capsys.readouterr().out
+
+    def keys(value: object, path: tuple = ()) -> list[tuple]:
+        if isinstance(value, dict):
+            return [p for k, v in value.items() for p in [(*path, k), *keys(v, (*path, k))]]
+        if isinstance(value, list):
+            return [p for v in value for p in keys(v, path)]
+        return []
+
+    named = [p for p in keys(json.loads(out)) if "cases" in str(p[-1]).lower()]
+    assert all(p[:2] == ("tests", "times") for p in named), named
+    for text in (out, report):
+        for said in ("skills' cases", "Skill evals", "run-cases"):
+            assert said.lower() not in text.lower(), said

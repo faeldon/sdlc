@@ -388,8 +388,9 @@ Simplifying must not remove what's used or slow a change down.
   rest are missing.
 - **Why:** a tidy number built on half the data is worse than an obviously incomplete one.
   *Baseline:* spend covered 41 of 86 changes.
-- **Where:** each figure's `n`, `uncaptured`, `unrecorded`.
-- **Status:** partly. Needs S11.
+- **Where:** each headline's `coverage` and `missing_because` (`process.lead`, `process.escapes`,
+  `metrics`, `spend`), greyed in the report under half.
+- **Status:** captured (170).
 
 ### Unmeasured signals
 - **What:** what the process can't yet measure: findings caught later, tests a newer one repeats,
@@ -403,8 +404,8 @@ Simplifying must not remove what's used or slow a change down.
   window.
 - **Why:** a change of model can move every pillar at once, and should be ruled out before reading
   any trend.
-- **Where:** the cases' `claude` field, `costs.jsonl`'s models, release tags.
-- **Status:** partly. Needs S11.
+- **Where:** the `Sdlc-Runtime` trailer close writes, read as `process.underneath`.
+- **Status:** captured (170).
 
 ## Insights: the synthesis questions
 

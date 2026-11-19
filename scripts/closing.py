@@ -360,7 +360,8 @@ def _lead_marks(
         for e in events
         if e["kind"] in ("turn", "subagent")
     ]
-    return events[0]["ts"], ready, None, intervals, "transcripts"
+    first = next((e["ts"] for e in events if e["kind"] != "runtime"), events[0]["ts"])
+    return first, ready, None, intervals, "transcripts"
 
 
 def _lead_line(
@@ -435,7 +436,16 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
             lead, missing = _lead_line(main, branch, folder, text, way == "factory", events)
             if missing:
                 summary["coverage"] += f" {missing}"
-        return summary, sdlc.metrics.trailers(summary) + extra + ([lead] if lead else [])
+        # What ran underneath: Claude Code's versions and the models, from the events and the
+        # factory roles' rows, and this plugin's version. A failure drops only this line.
+        try:
+            models = _agent_models(main, branch, folder).values()
+            ran = sdlc.metrics.runtime_trailer(events, list(models), sdlc.plugin_version())
+        except Exception:
+            summary["coverage"] += " runtime=failed"
+            ran = None
+        tail = [line for line in (lead, ran) if line]
+        return summary, sdlc.metrics.trailers(summary) + extra + tail
 
     def from_history(reason: str) -> tuple[dict, list[str]]:
         now = datetime.now(UTC)

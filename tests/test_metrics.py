@@ -1875,3 +1875,77 @@ def test_the_lead_line_round_trips_with_minutes_and_a_source_word() -> None:
     short = metrics.lead_trailer({"lead": 600, "ready_wait": 120}, "git")
     assert short == "Sdlc-Lead: lead=10 ready_wait=2 source=git"
     assert "Sdlc-Lead" in metrics.__doc__ and "lead_time(" in metrics.__doc__
+
+
+# ---------------------------------------------------------------- what ran underneath (170)
+
+
+def _ran(entry: dict, version: str | None, model: str | None = None) -> dict:
+    """An entry as Claude Code writes it: `version` on every entry, `message.model` on an
+    assistant's. The values are made up; the shape is a real transcript's."""
+    if version is not None:
+        entry["version"] = version
+    if model is not None:
+        entry["message"]["model"] = model
+    return entry
+
+
+def test_runtime_is_read_from_each_entrys_version_and_model(tmp_path: Path) -> None:
+    """170 R1: each distinct version and model the change's entries carry, from the main session,
+    a factory agent's session and a sub-agent's transcript; never an empty value, the harness's
+    `<synthetic>`, or another branch's session."""
+    folder = tmp_path / "projects" / WORKTREE
+    _write(folder, "main", [
+        _ran(cmd(0, "sdlc-factory:build", "12"), "9.1.10"),
+        _ran(asst(1, "m1", [tool("Agent", "a1")]), "9.1.10", "model-main"),
+        _ran(asst(2, "m2"), "9.1.11", "<synthetic>"),
+        _ran(asst(3, "m3"), "", ""),
+        _ran(asst(4, "m4", branch=OTHER), "9.9.9", "model-other"),
+    ])  # fmt: skip
+    sub = folder / "main" / "subagents"
+    _write(sub, "agent-a1", [_ran(asst(5, "s1"), "9.1.11", "model-sub")])
+    (sub / "agent-a1.meta.json").write_text(json.dumps({"agentType": "Explore", "toolUseId": "a1"}))
+    _write(folder, "sess-b", [_ran(user(6, "Build it."), "9.1.12"),
+                              _ran(asst(7, "b1"), "9.1.12", "model-builder")])  # fmt: skip
+    _write(folder, "other", [_ran(asst(8, "o1", branch=OTHER), "9.9.8", "model-leak")])
+    events = metrics.read_events([folder], BRANCH, "012", None, {"sess-b": "builder"})
+    ran = [e for e in events if e["kind"] == "runtime"]
+    claude = sorted({e["claude"] for e in ran if "claude" in e})
+    models = sorted({e["model"] for e in ran if "model" in e})
+    assert claude == ["9.1.10", "9.1.11", "9.1.12"]
+    assert models == ["model-builder", "model-main", "model-sub"]
+    assert all(set(e) <= {"ts", "kind", "claude", "model"} for e in ran)
+    # One event a value a run: the main session's 9.1.10 is on two entries.
+    assert sum(e.get("claude") == "9.1.10" for e in ran) == 1
+    # The kind moves no clock: the summary is the same with and without it.
+    plain = [e for e in events if e["kind"] != "runtime"]
+    assert metrics.trailers(_summary(events, way="factory")) == metrics.trailers(
+        _summary(plain, way="factory")
+    )
+
+
+def test_runtime_trailer_round_trips() -> None:
+    """170 R2: one line, every value sorted, deduplicated and a word; read back as text."""
+    at = T0
+    events = [
+        {"ts": at, "kind": "runtime", "claude": "2.1.10"},
+        {"ts": at, "kind": "runtime", "claude": "2.1.9 made/x"},
+        {"ts": at, "kind": "runtime", "claude": "2.1.10"},
+        {"ts": at, "kind": "runtime", "model": "model~b"},
+        {"ts": at, "kind": "tokens", "in": 1},
+    ]
+    line = metrics.runtime_trailer(events, ["model-a", "model-a", "provider:model/x"], "1.9.0")
+    assert line == (
+        "Sdlc-Runtime: claude=2.1.10,2.1.9-made-x models=model-a,model-b,provider-model-x "
+        "plugin=1.9.0"
+    )
+    back = metrics.parse_trailers(line)["runtime"]
+    assert back == {"claude": "2.1.10,2.1.9-made-x", "models": "model-a,model-b,provider-model-x",
+                    "plugin": "1.9.0"}  # fmt: skip
+    one = metrics.parse_trailers(metrics.runtime_trailer([], [], "2.1.10"))["runtime"]
+    assert one == {"plugin": "2.1.10"} and isinstance(one["plugin"], str)
+    rest = line.removeprefix("Sdlc-Runtime: ")
+    assert not any(c in rest for c in "/~") and rest.count(" ") == 2
+    assert metrics.runtime_trailer([], [], None) is None
+    assert metrics.runtime_trailer([], ["", "  "], "") is None
+    assert "runtime_trailer(" in metrics.__doc__ and "runtime{" in metrics.__doc__

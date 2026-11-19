@@ -1020,6 +1020,40 @@ unknown, and `carried` otherwise. `share` is done and dropped over the `n` score
 each source that couldn't be read, and always the intent titles a retrospective proposes, which
 nothing records; with no earlier retrospective `since`, `share`, `seeds` and `milestones` are null.
 
+Each headline says how far it can be trusted. `process.lead`, `process.escapes`, `metrics` (the
+person's response and stops) and `spend` each carry `coverage: {measured, of, greyed}` (`of` being
+the window's closed changes) and `missing_because`, the rest by reason, whose counts sum to
+`of - measured`. The reasons are fixed words, read from what each `Close` commit carries:
+
+- **Lead time:** `not measured at close` (no `Sdlc-*` at all), `no opened: line`, `opened:
+  unreadable`, `timing failed` (` lead=none`, ` lead=bad-opened`, ` lead=failed`), or `closed
+  before lead time was recorded`.
+- **The person's minutes:** `not measured at close`, or the reason a `Sdlc-Coverage: none:` gives
+  (`no transcripts for this repo`, `metrics.transcripts is off`).
+- **Spend:** its `why`.
+- **Escape rate:** none; it rests on every closed change.
+
+`greyed` is true when fewer than half the window's changes are measured. The report follows the
+*Window* sentence with one *Coverage* line per headline, giving the changes it rests on and why
+the rest are missing. A greyed line is in italics and ends `a hint: under half the changes`.
+
+`process.underneath` is what the changes ran on, from their `Sdlc-Runtime` (see *Metrics*), for
+this window (`window`) and the last one (`previous`): each of `claude`, `models` and `plugin` as
+`{value: changes}`, and how many changes `recorded` the line and how many didn't (`unrecorded`). A
+change closed before the line gives its models from its `Sdlc-Role` `model=`, and counts as
+unrecorded. `changed` says, per dimension, whether the values differ, and is null when either side
+recorded none. The last window runs from the retrospective before this window's boundary (the
+start of history with only one) to it; with no retrospective `previous` is null. The report's
+*What changed underneath* line, after the coverage lines, gives each dimension against the last
+window and says which changed. It is read from history alone: retro reads no transcript and runs
+no `claude`.
+
+`process.window.factory` counts the window's changes with `Sdlc-Mode: factory`, and
+`mode_unknown` those with no `Sdlc-Mode`. With no factory change, `process.landing_catches` is
+null and the report says `No factory changes in this window.` in place of the catches line,
+naming the changes with no way recorded. In a host, neither `retro` nor its report mentions the
+skills' cases, which belong to this plugin's own repo; `prose` leaves out ship's branch for them.
+
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
 A path is tests when a directory in it is `test`, `tests`, `spec` or `__tests__`, or its name
@@ -1257,6 +1291,17 @@ and `ready_wait` (with `landing` for a factory change) alone (`source=git`). A p
 known is left out, never 0. A change with no `opened:` (one opened before it was written) gets
 no line, and `Sdlc-Coverage` says ` lead=none` (` lead=bad-opened` for a value that doesn't fit,
 ` lead=failed` when timing it failed); a dropped change has none.
+
+What the change ran on goes on the line after it, on every `Close` and `Drop` commit:
+`Sdlc-Runtime: claude=<v>[,<v>…] models=<m>[,<m>…] plugin=<v>`. `claude` is each Claude Code
+version the change's transcript entries carry (the main session's, each factory agent's session's
+and each sub-agent's), and `models` each model they ran (never the harness's `<synthetic>`), with
+the factory roles' models from `runs/costs.jsonl`. `plugin` is this plugin's version at close.
+Each part is sorted and deduplicated, every value a word (no space, `/`, `~`, `,` or `:`), and a
+part that isn't known is left out, never empty: without transcripts the line is `plugin=` alone.
+When building it fails, the line is left out and `Sdlc-Coverage` gains ` runtime=failed`; the
+close still lands. A `Close` commit without it was closed before it was recorded: unrecorded,
+never unchanged.
 
 Where a change started is recorded as `Sdlc-Base: <sha>`: the base branch's tip just before close
 merged it, which close keeps in `refs/sdlc/base/<branch>` between its runs and removes with the

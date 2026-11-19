@@ -253,6 +253,8 @@ def test_a_bare_repo_runs_a_change_from_new_to_close(tmp_path: Path, trunk: str)
     assert "Sdlc-Totals: elapsed=" in body and "Sdlc-Mode: manual" in body
     # 162: `new` wrote `opened:`, so close times the lead from git alone.
     assert re.search(r"^Sdlc-Lead: lead=\d+ ready_wait=\d+ source=git$", body, re.M), body
+    # 170: no transcripts, so what ran underneath is the plugin's version alone.
+    assert re.search(r"^Sdlc-Runtime: plugin=\d+\.\d+\.\d+$", body, re.M), body
     assert not tree.exists()
     assert "001-first-change" not in _git(root, "branch", "--list")
     assert not (root / ".sdlc" / "work" / "001-first-change").exists()

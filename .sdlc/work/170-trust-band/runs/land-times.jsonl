@@ -1,0 +1,13 @@
+{"step": "ship", "round": null, "seconds": 14.0, "since": "2026-11-19T04:28:46Z"}
+{"step": "wait", "round": null, "seconds": 165.0, "since": "2026-11-19T04:29:00Z"}
+{"step": "stack", "round": 1, "seconds": 1.0, "since": "2026-11-19T04:31:45Z"}
+{"step": "resolve", "round": 1, "seconds": 499.0, "since": "2026-11-19T04:31:46Z"}
+{"step": "wait", "round": 1, "seconds": 315.0, "since": "2026-11-19T04:40:05Z"}
+{"step": "gate", "round": 1, "seconds": 576.0, "since": "2026-11-19T04:45:20Z"}
+{"step": "wait", "round": 1, "seconds": 182.0, "since": "2026-11-19T04:54:56Z"}
+{"step": "wait", "round": 1, "seconds": 182.0, "since": "2026-11-19T04:54:56Z"}
+{"step": "wait", "round": 1, "seconds": 182.0, "since": "2026-11-19T04:54:56Z"}
+{"step": "wait", "round": 1, "seconds": 182.0, "since": "2026-11-19T04:54:56Z"}
+{"step": "review", "round": 1, "seconds": 404.0, "since": "2026-11-19T04:57:58Z"}
+{"step": "mend", "round": 1, "seconds": 459.0, "since": "2026-11-19T05:04:42Z"}
+{"step": "wait", "round": 1, "seconds": 41.0, "since": "2026-11-19T05:12:21Z"}

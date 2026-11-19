@@ -109,11 +109,18 @@ def _load_indicators():
 indicators = _load_indicators()
 
 
+# Side files a host's session never reads: ship's branch for the skills' cases, which
+# `SHIP_BRANCHES` names only where the suite is (`_cases_report()`), this plugin's own repo.
+OWN_REPO_BRANCHES = {"ship": ("cases.md",)}
+
+
 def prose_metrics(home: Path, cfg: dict) -> dict:
     """How much each skill is, the plugin's: what every session in a host reads and follows. A
     skill's size is its `SKILL.md`'s, which every run reads; the files beside it, read only when
     their branch applies, are its `branches`, and its commands are counted across them all. And
-    the host docs the skills read on top. Tokens are an estimate, bytes / 4."""
+    the host docs the skills read on top. Tokens are an estimate, bytes / 4. In a host, the
+    branches only this plugin's own repo reads (`OWN_REPO_BRANCHES`) are left out."""
+    own = sdlc._own_repo(home)
 
     def size(text: str) -> dict:
         n = len(text.encode("utf-8"))
@@ -126,6 +133,7 @@ def prose_metrics(home: Path, cfg: dict) -> dict:
             p.name: p.read_text(encoding="utf-8")
             for p in sorted(path.parent.glob("*.md"))
             if p.name != "SKILL.md"
+            and (own or p.name not in OWN_REPO_BRANCHES.get(path.parent.name, ()))
         }
         commands = [c for t in (text, *side.values()) for c in sdlc.bash_commands(t)]
         skills[path.parent.name] = {
@@ -641,6 +649,59 @@ COMPARED = (
 )  # fmt: skip
 
 
+def _coverage(changes: list[dict], measured, why) -> dict:
+    """A headline's reach over the window's `changes`: how many `measured(c)` holds for, of how
+    many, `greyed` when that is under half; and `missing_because`, each other change counted under
+    `why(c)`, so its counts sum to the changes not measured."""
+    missing = Counter(why(c) for c in changes if not measured(c))
+    n = len(changes) - sum(missing.values())
+    return {
+        "coverage": {"measured": n, "of": len(changes), "greyed": 2 * n < len(changes)},
+        "missing_because": dict(missing),
+    }
+
+
+def _none_reason(coverage: object) -> str | None:
+    """Why close measured a change from history alone: `Sdlc-Coverage: none: <reason>`'s reason,
+    without the `key=value` words close appends after it (` lead=failed`, ` runtime=failed`);
+    None when the coverage isn't `none:`."""
+    text = str(coverage or "")
+    if not text.startswith("none:"):
+        return None
+    return re.sub(r"(\s+\S+=\S*)+$", "", text.removeprefix("none:")).strip()
+
+
+# Why a closed change has no lead time, by the word close left in `Sdlc-Coverage` (`_lead_why()`).
+LEAD_MISSING = {
+    "lead=none": "no opened: line",
+    "lead=bad-opened": "opened: unreadable",
+    "lead=failed": "timing failed",
+}
+
+
+def _lead_why(c: dict) -> str:
+    """Why a closed change has no `Sdlc-Lead`, from what its `Close` commit carries alone."""
+    m = c.get("metrics")
+    if not m:
+        return "not measured at close"
+    words = str(m.get("coverage") or "").split()
+    return next((why for w, why in LEAD_MISSING.items() if w in words),
+                "closed before lead time was recorded")  # fmt: skip
+
+
+def _minutes_measured(c: dict) -> bool:
+    """Whether close measured the person's time on a change from its transcripts: its totals,
+    and no `none:` coverage, which is elapsed from history alone."""
+    m = c.get("metrics") or {}
+    return bool(m.get("totals")) and _none_reason(m.get("coverage")) is None
+
+
+def _minutes_why(c: dict) -> str:
+    """Why the person's minutes on a change weren't measured: the `none:` reason, or nothing at
+    close."""
+    return _none_reason((c.get("metrics") or {}).get("coverage")) or "not measured at close"
+
+
 def _stop_target(totals: dict, allowance: int) -> int | None:
     """The stops a change was measured against: its own gates plus the allowance. A `Close`
     commit from before `allowance=` was recorded carries one flat `target=` for every change, so
@@ -678,6 +739,7 @@ def metrics_summary(changes: list[dict], allowance: int | None = None) -> dict:
     out: dict = {
         "captured": len(captured),
         "uncaptured": len(changes) - len(captured),
+        **_coverage(changes, _minutes_measured, _minutes_why),
         "prompts": _prompt_report(captured),
         "extra": _extra_report(captured),
         "groups": {},
@@ -1003,9 +1065,10 @@ def lead_view(changes: list[dict]) -> dict:
         if had and total:
             share = round(sum(lead[part] for lead in had) / total, 2)
             shares[part] = {"share": share, "changes": len(had)}
+    measured = {id(c) for c, _ in led}
     return {
         "measured": len(led), "unmeasured": len(changes) - len(led), "groups": rows,
-        "shares": shares,
+        "shares": shares, **_coverage(changes, lambda c: id(c) in measured, _lead_why),
     }  # fmt: skip
 
 
@@ -1026,12 +1089,66 @@ def _lead_text(lead: dict) -> str:
     return table + text
 
 
+# What ran underneath a change, as its `Sdlc-Runtime` names each (`underneath()`).
+UNDERNEATH = ("claude", "models", "plugin")
+
+
+def _underneath_side(changes: list[dict]) -> dict:
+    """One window's `Sdlc-Runtime` values, each with the changes that ran on it, and how many
+    changes recorded the line. A change closed before it gives its models from its `Sdlc-Role`
+    `model=`, and counts as unrecorded for the rest."""
+    found = {k: Counter() for k in UNDERNEATH}
+    recorded = 0
+    for c in changes:
+        m = c.get("metrics") or {}
+        ran = m.get("runtime") if isinstance(m.get("runtime"), dict) else None
+        recorded += ran is not None
+        values = {k: {v for v in str((ran or {}).get(k) or "").split(",") if v} for k in UNDERNEATH}
+        if not values["models"]:
+            roles = m.get("roles") if isinstance(m.get("roles"), dict) else {}
+            values["models"] = {
+                v for r in roles.values() if isinstance(r, dict)
+                for v in str(r.get("model") or "").split(",") if v
+            }  # fmt: skip
+        for k, vs in values.items():
+            found[k].update(vs)
+    return {
+        **{k: dict(sorted(found[k].items())) for k in UNDERNEATH},
+        "recorded": recorded, "unrecorded": len(changes) - recorded,
+    }  # fmt: skip
+
+
+def underneath(changes: list[dict], previous: list[dict] | None) -> dict:
+    """What the window's changes ran on against the last window's (`_previous_window()`, None
+    with no earlier window): each side's values, and per dimension whether they changed, null
+    when either side recorded none. Read from the `Close` trailers alone."""
+    now = _underneath_side(changes)
+    before = _underneath_side(previous) if previous is not None else None
+    changed = {
+        k: None if before is None or not now[k] or not before[k] else set(now[k]) != set(before[k])
+        for k in UNDERNEATH
+    }
+    return {"window": now, "previous": before, "changed": changed}
+
+
+def _previous_window(home: Path, trunk: str | None, since: dict | None) -> list[dict] | None:
+    """The changes closed in the window before this one: from the retrospective before `since`
+    (the start of history with none) to `since`; None when there is no `since`."""
+    if not since:
+        return None
+    bounds = sdlc.retrospectives(home, trunk)
+    at = next((i for i, b in enumerate(bounds) if b["sha"] == since["sha"]), 0)
+    older = bounds[at + 1]["sha"] if at + 1 < len(bounds) else None
+    return sdlc.closed_changes(home, older, since["sha"])
+
+
 def process_views(
     changes: list[dict], dropped: list[dict], rework: list[dict], questions: list[dict],
-    bugs: dict, since: dict | None, today: date,
+    bugs: dict, since: dict | None, today: date, previous: list[dict] | None = None,
 ) -> dict:  # fmt: skip
     """The retrospective's process views, the report's figures: cycle time, throughput, where the
-    time went, how many changes ran at once and what that did to them, rework and escapes. Only
+    time went, how many changes ran at once and what that did to them, rework and escapes, and
+    what ran underneath against `previous`, the last window's changes (`underneath()`). Only
     changes close measured (`Sdlc-Totals` with `elapsed`) are in the four timed views, which are
     None with none; the rest count every change. No figure combines them into one."""
 
@@ -1042,7 +1159,11 @@ def process_views(
     def totals(c: dict) -> dict:
         return (c.get("metrics") or {}).get("totals") or {}
 
+    def mode(c: dict) -> str | None:
+        return (c.get("metrics") or {}).get("mode") or None
+
     measured = [c for c in changes if isinstance(totals(c).get("elapsed"), int)]
+    factory = [c for c in changes if mode(c) == "factory"]
     by_tier = lambda rows: {str(t): [c for c in rows if c["tier"] == t]  # noqa: E731
                             for t in sorted({c["tier"] for c in rows}, key=str)}  # fmt: skip
     weeks: dict[str, Counter] = {}
@@ -1059,6 +1180,8 @@ def process_views(
             "dropped": len(dropped),
             "measured": len(measured),
             "unmeasured": len(changes) - len(measured),
+            "factory": len(factory),
+            "mode_unknown": sum(1 for c in changes if not mode(c)),
         },
         "throughput": [
             {"week": w, "tiers": dict(sorted(n.items())), "total": sum(n.values())}
@@ -1077,11 +1200,15 @@ def process_views(
             "rate": ((bugs.get("rate") or {}).get("window") or {}).get("rate"),
             "previous": ((bugs.get("rate") or {}).get("previous") or {}).get("rate"),
             "trend": (bugs.get("rate") or {}).get("trend"),
+            # The rate rests on every closed change: none is left out of it.
+            **_coverage(changes, lambda c: True, lambda c: ""),
         },
         "review_sources": bugs.get("review_sources") or {},
-        "landing_catches": bugs.get("landing_catches"),
+        # A window the factory built nothing in has no landing to catch anything: no figure.
+        "landing_catches": bugs.get("landing_catches") if factory else None,
         "cycle": None, "time": None, "wip": None, "capacity": None,
         "lead": lead_view(changes),
+        "underneath": underneath(changes, previous),
     }  # fmt: skip
     if not measured:
         return out
@@ -1239,15 +1366,38 @@ def _agents_text(agents: dict | None) -> str:
     return "Agents by role and model:\n\n" + table + note
 
 
-def _sources_text(sources: dict[str, dict], catches: dict | None = None) -> str:
+def _no_factory_text(window: dict) -> str:
+    """Where the landing catches would be when the window holds no factory change: a sentence,
+    never `0 of 0`, naming the changes that record no way of building."""
+    if window.get("factory", 1):
+        return ""
+    n = window.get("mode_unknown") or 0
+    unknown = (
+        f" {n} change{' records' if n == 1 else 's record'} no way of building, so "
+        f"{'it' if n == 1 else 'they'} may have been."
+        if n
+        else ""
+    )
+    return f"\n\nNo factory changes in this window.{unknown}"
+
+
+def _sources_text(
+    sources: dict[str, dict], catches: dict | None = None, window: dict | None = None
+) -> str:
     """Who found what in the window's reviews, one line per source (`_review_sources()`), after
     the escapes: ship's own beside the fresh reviewer's and each factory role's; then how many of
-    the factory-reviewed changes their landing caught out (`_landing_catches()`)."""
+    the factory-reviewed changes their landing caught out (`_landing_catches()`), or, with no
+    factory change in the `window`, a sentence saying so (`_no_factory_text()`)."""
+    none = _no_factory_text(window or {})
     if not sources:
-        return ""
-    text = "\n\nFindings by who raised them:\n\n" + _table(
-        ["Source", "Changes", "Important", "Nit", "Pre-existing", "Wrong"],
-        [[s, *(r[k] for k in ("changes", *REVIEW_KINDS))] for s, r in sources.items()],
+        return none
+    text = (
+        "\n\nFindings by who raised them:\n\n"
+        + _table(
+            ["Source", "Changes", "Important", "Nit", "Pre-existing", "Wrong"],
+            [[s, *(r[k] for k in ("changes", *REVIEW_KINDS))] for s, r in sources.items()],
+        )
+        + none
     )
     if catches:
         text += (
@@ -1302,13 +1452,85 @@ def _value_text(value: dict) -> str:
     return f"{mix_text}\n\n{ttu_text}\n\n{ft_text}"
 
 
+def _coverage_line(name: str, block: dict | None) -> str:
+    """One headline's *Coverage* line: the changes it rests on and why the rest are missing, in
+    italics and marked a hint under half; `not given` without its block. Every reason is a phrase
+    with no path (`metrics._word_text()`), whatever a hand-written trailer said."""
+    if block is None or "coverage" not in block:
+        return f"- Coverage, {name}: not given."
+    cov = block["coverage"]
+    why = sorted(block["missing_because"].items(), key=lambda kv: (-kv[1], kv[0]))
+    said = ", ".join(f"{sdlc.metrics._word_text(str(k))} {n}" for k, n in why)
+    line = f"Coverage, {name}: {cov['measured']} of {cov['of']} changes"
+    line += f"; missing: {said}" if said else ""
+    if cov["greyed"]:
+        return f"- *{line}; a hint: under half the changes*"
+    return f"- {line}."
+
+
+# Each `underneath()` dimension as the report names it.
+UNDERNEATH_NAMES = {"claude": "Claude Code", "models": "models", "plugin": "the plugin"}
+
+
+def _underneath_text(under: dict) -> str:
+    """The *What changed underneath* line: each dimension's values against the last window's,
+    whether they changed, and how many changes recorded none. Every value is a word again
+    (`metrics._word()`), so no trailer puts a path in the report."""
+    now, before = under["window"], under["previous"]
+
+    def values(side: dict, k: str) -> str:
+        return ", ".join(sdlc.metrics._word(v) for v in side[k]) or "none recorded"
+
+    def none(side: dict, where: str) -> str:
+        total = side["recorded"] + side["unrecorded"]
+        return f"{side['unrecorded']} of {total} changes {where} recorded none"
+
+    if before is None:
+        ran = "; ".join(f"{UNDERNEATH_NAMES[k]} {values(now, k)}" for k in UNDERNEATH)
+        return (
+            f"- What changed underneath: no earlier window to compare. This window ran {ran}; "
+            f"{none(now, 'in this window')}."
+        )
+    state = {True: "changed", False: "unchanged", None: "not known"}
+    said = "; ".join(
+        f"{UNDERNEATH_NAMES[k]} {values(now, k)} against {values(before, k)} "
+        f"({state[under['changed'][k]]})"
+        for k in UNDERNEATH
+    )
+    return (
+        f"- What changed underneath, against the last window: {said}. "
+        f"{none(now, 'in this window')}, {none(before, 'in the last')}."
+    )
+
+
+def _coverage_lines(process: dict, spend: dict | None, metrics: dict | None) -> str:
+    """The *Coverage* lines for the report's window, one a headline, then what changed underneath;
+    none with no change closed."""
+    if not process["window"]["closed"]:
+        return ""
+    heads = [
+        ("lead time", process["lead"]), ("escape rate", process["escapes"]),
+        ("the person's minutes", metrics), ("spend", spend),
+    ]  # fmt: skip
+    lines = [_coverage_line(name, block) for name, block in heads]
+    if process.get("underneath"):
+        lines.append(_underneath_text(process["underneath"]))
+    return "\n\n" + "\n".join(lines)
+
+
 def render_report(
-    template: str, process: dict, spend: dict | None = None, value: dict | None = None
+    template: str,
+    process: dict,
+    spend: dict | None = None,
+    value: dict | None = None,
+    metrics: dict | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
     block, "not counted" without it. `value` is `value_band()`'s, its sentences after the
-    window's paragraph; nothing is added without it."""
+    window's paragraph; nothing is added without it. `metrics` is `metrics_summary()`'s, whose
+    coverage line says "not given" without it. The coverage lines follow the window's sentence,
+    in `{{window}}`."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -1319,7 +1541,7 @@ def render_report(
             f"From {w['since'] or 'the start of history'} to {w['today']}: {w['closed']} changes "
             f"closed ({tiers}), {w['dropped']} dropped. {w['measured']} of them were measured, and "
             f"the timed views rest on those alone; {w['unmeasured']} weren't."
-        ),
+        ) + _coverage_lines(process, spend, metrics),
         "throughput": _table(
             ["Week of", "Tiers", "Closed"],
             [[r["week"], ", ".join(f"{t}: {n}" for t, n in r["tiers"].items()), r["total"]]
@@ -1334,7 +1556,7 @@ def render_report(
             [[process["escapes"][k]
               for k in ("reported", "fixed", "days_to_fix", "rate", "previous", "trend")]],
         ) + _sources_text(process.get("review_sources") or {},
-                          process.get("landing_catches")),  # fmt: skip
+                          process.get("landing_catches"), w),  # fmt: skip
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
     }  # fmt: skip
@@ -1393,10 +1615,12 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     diffs = _diffs(home, changes, bases)
     rework, questions, _ = _rework(home, trunk, changes, bases, diffs)
     bugs = bugs_retro(home, cfg, since, changes, today)
-    process = process_views(changes, dropped, rework, questions, bugs, since, today)
+    previous = _previous_window(home, trunk, since)
+    process = process_views(changes, dropped, rework, questions, bugs, since, today, previous)
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
     value = value_band(home, cfg, since, changes, bases, paths)
-    return render_report(template, process, _spend(home, cfg, changes, diffs), value)
+    metrics = metrics_summary(changes, cfg["metrics"]["stop_allowance"])
+    return render_report(template, process, _spend(home, cfg, changes, diffs), value, metrics)
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -1590,7 +1814,16 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "entries": rankable_entries(home, today),
         "nits": sdlc.nits_summary(sdlc.nit_entries(home)[0], today),
         "bugs": bugs,
-        "process": process_views(changes, dropped, rework, questions, bugs, since, today),
+        "process": process_views(
+            changes,
+            dropped,
+            rework,
+            questions,
+            bugs,
+            since,
+            today,
+            _previous_window(home, trunk, since),
+        ),  # fmt: skip
         "report": report_rel(today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
@@ -1642,10 +1875,8 @@ def _unrecorded(m: dict | None) -> str | None:
         return None
     if not totals:
         return "not measured at close"
-    coverage = str((m or {}).get("coverage") or "")
-    if coverage.startswith("none:"):
-        return coverage.removeprefix("none:").strip()
-    return "closed before tool calls and words were counted"
+    reason = _none_reason((m or {}).get("coverage"))
+    return reason if reason is not None else "closed before tool calls and words were counted"
 
 
 def _spend(home: Path, cfg: dict, changes: list[dict], diffs: dict[str, str]) -> dict:
@@ -1690,6 +1921,7 @@ def _spend(home: Path, cfg: dict, changes: list[dict], diffs: dict[str, str]) ->
         })  # fmt: skip
     out = indicators.spend(rows)
     out["why"] = dict(Counter(r["why"] for r in rows if r["why"]))
+    out.update(_coverage(rows, lambda r: r["recorded"], lambda r: r["why"]))
     out["changes"] = rows
     out["agents"] = _agents(changes)
     return out
