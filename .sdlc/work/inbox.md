@@ -166,12 +166,6 @@ Cost: S
 Value: low
 Raised by: 153-risky-code-in-its-own-modules (correctness)
 
-## [2026-11-18-105] [idea] Hosts: the scorecard reaches hosts when S14 and S15 build it into the plugin: the numbers in `sdlc.py retro` (core, language-neutral), the page in `templates/retro.md` (a host overrides it in `.sdlc/templates/`), the synthesis questions in a `guide/` file a host extends, and the metrics' meanings in `docs/REFERENCE.md`'s *Retrospectives*.
-
-Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: the scorecard reaches hosts when S14 and S15 build it into the plugin: the numbers in `sdlc.py retro` (core, language-neutral), the page in `templates/retro.md` (a host overrides it in `.sdlc/templates/`), the synthesis questions in a `guide/` file a host extends, and the metrics' meanings in `docs/REFERENCE.md`'s *Retrospectives*. This doc stays this repo's design reference. In a host, the Simplicity pillar means the process's overhead and workarounds there; the plugin's own surface (skills used, footprint, growth) is this repo's measure alone. The structural debt index comes from the host's own `retro.indicators`, in its language.
-See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-109] [nit] `test_main_runs_a_stand_in_handler` already passed before the move (the plan says so).
 
 Raised by the test review of 160-command-registry, round 1: tests/test_registry.py:104: `test_main_runs_a_stand_in_handler` already passed before the move (the plan says so). It guards R7 and would catch a later regression, but it never failed on the old code. Only the `config` command is stubbed, so an adapter that bound its handler at import time would be caught for that one command and no other. Stubbing one more, such as `status` with the default no-command path, would cover R5's `--all` default through `main()`.
@@ -308,16 +302,6 @@ Cost: S
 Value: low
 Raised by: 173-style-paydown (correctness)
 
-## [2026-11-19-35] [nit] `_cost()` runs once in `retro()` and again in `retro_report()`, and each run re-reads every change's commit.
-
-Raised by the code review of 174-waste-tagged, round 1: scripts/retro.py:1752: `_cost()` runs once in `retro()` and again in `retro_report()`, and each run re-reads every change's commit. Computing it once per `retro` call would halve the git reads.
-
-Theme: refactor
-Paths: scripts/retro.py
-Cost: M
-Value: low
-Raised by: 174-waste-tagged (correctness)
-
 ## [2026-11-19-36] [nit] if `claude` returns no figures, no row is written, so a run that failed that way doesn't make the next try a `rerun`.
 
 Raised by the code review of 174-waste-tagged, round 1: plugins/factory/scripts/factory.py:4392: if `claude` returns no figures, no row is written, so a run that failed that way doesn't make the next try a `rerun`. This matches R3 as worded. A line in the `purpose_of()` docstring would say so.
@@ -348,12 +332,6 @@ Cost: S
 Value: low
 Raised by: 174-waste-tagged (correctness)
 
-## [2026-11-19-39] [idea] Reject indicator names and units that don't read back from the report
-
-Left undone by 177-indicators-structured, carried forward when it landed: A `unit` that is literally `—`, or a `name` or `unit` with leading or trailing spaces, is accepted by `host_rows()` but reads back from the report as a different key (`""`, or stripped), so it gets no `last`. R1 doesn't forbid either; rejecting them would be a one-line rule in `host_rows()` if it ever matters.
-See .sdlc/work/177-indicators-structured/notes.md in its commit.
-Raised 2026-11-19.
-
 ## [2026-11-19-40] [nit] R2's OSError case has no test; `_indicator_rows` treats it like the timeout path
 
 Raised by the test review of 177-indicators-structured, round 1: tests/test_retro.py:1957: R2's OSError case has no test; `_indicator_rows` treats it like the timeout path
@@ -370,26 +348,6 @@ Raised by the code review of 179-feature-inventory, round 1: AGENTS.md:253: the 
 
 Theme: style
 Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 179-feature-inventory (correctness)
-
-## [2026-11-19-42] [nit] `_surface_at` calls `COMMAND_RE.findall` on `sdlc.py` at a tag that predates the `@command` registry.
-
-Raised by the code review of 179-feature-inventory, round 1: scripts/retro.py:1768: `_surface_at` calls `COMMAND_RE.findall` on `sdlc.py` at a tag that predates the `@command` registry. It returns `commands: None` only because `core` is empty, which is the intended behaviour, but it's implicit. A short comment would say so
-
-Theme: docs
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 179-feature-inventory (correctness)
-
-## [2026-11-19-43] [nit] `_retire` stops walking back once every item is decided, so `retire.windows` can be below `RETIRE_AFTER` while no candidate is hidden.
-
-Raised by the code review of 179-feature-inventory, round 1: scripts/retro.py:1715: `_retire` stops walking back once every item is decided, so `retire.windows` can be below `RETIRE_AFTER` while no candidate is hidden. REFERENCE.md could say `windows` is the windows actually read
-
-Theme: docs
-Paths: scripts/retro.py
 Cost: S
 Value: low
 Raised by: 179-feature-inventory (correctness)
@@ -466,22 +424,6 @@ Cost: S
 Value: low
 Raised by: 183-spec-writer-nits-marker (correctness)
 
-## [2026-11-19-53] [nit] `bisections` and `accept_stops` have no `per_change`.
-
-Raised by the code review of 175-pipeline-figures, round 1: scripts/retro.py:1098: `bisections` and `accept_stops` have no `per_change`. `gates` and `base_moves` do. This is optional and the spec doesn't ask for it.
-
-Theme: docs
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 175-pipeline-figures (correctness)
-
-## [2026-11-19-54] [idea] retro's process pass seeds from workaround rows
-
-Left undone by 180-workarounds-tagged, carried forward when it landed: `/sdlc:retro`'s passes don't read `simplicity.workarounds` yet: its process pass could turn an `outside` or `restored` row into a seed. The report renders it with S14.
-See .sdlc/work/180-workarounds-tagged/notes.md in its commit.
-Raised 2026-11-19.
-
 ## [2026-11-19-55] [nit] R5's test covers the eject path only.
 
 Raised by the code review of 180-workarounds-tagged, round 1: tests/test_train.py: R5's test covers the eject path only. The same `problems.append(f"{name}: {problem}")` branch in `_train_stop` has no failing-append test.
@@ -529,22 +471,6 @@ anything.
 Theme: landing
 Raised 2026-11-19.
 
-## [2026-11-19-59] [idea] Floor by_way throughput at a week, or leave per_week null under a week
-
-Left undone by 176-by-way-of-building, carried forward when it landed: `by_way.throughput` floors the window at one day, as R5 says, so a retro run the day after the last retrospective gives `weeks: 0.1` and per-week figures many times the real rate (this repo, today: 196 factory changes a week over 1 day). A floor of one week, or `per_week` null under a week, would read better; it changes R5, so it is the person's call.
-See .sdlc/work/176-by-way-of-building/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-60] [nit] `introducer_way()` rescans `history` for every attributed bug and every way.
-
-Raised by the code review of 176-by-way-of-building, round 1: scripts/retro.py:3222: `introducer_way()` rescans `history` for every attributed bug and every way. This is fine at today's sizes, but a name-to-way dict built once would be simpler
-
-Theme: refactor
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 176-by-way-of-building (correctness)
-
 ## [2026-11-19-61] [bug] The factory never runs commands.build
 
 A host can set `[commands] build` with `build_when`, a slower gate (integration tests, a full
@@ -575,3 +501,45 @@ key or file is renamed (each would need a shim hosts must follow); only wording 
 docs/FEATURES.md's term test fails on a doc that uses a word in a meaning it no longer has.
 Theme: docs
 Raised 2026-11-19.
+
+## [2026-11-19-63] [idea] Pass report_figures() to render_report() as one dict
+
+Left undone by 184-scorecard-report, carried forward when it landed: `render_report()` now takes eight positional blocks and five keyword ones. One figures dict (`report_figures()`'s) passed whole would read better, but the tests' many `render_report(template, process)` calls would all change with it, so it stays out of 184.
+See .sdlc/work/184-scorecard-report/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-64] [idea] Give response, autonomy and workarounds blocks a missing_because so scorecard rows name their real reason
+
+Left undone by 184-scorecard-report, carried forward when it landed: A scorecard row whose block has no `missing_because` (response by tier, autonomy, the workarounds) says `none in the window` when null, even when the window held changes that just weren't measured: R5's rule as written. A per-row reason would need those blocks to carry one.
+See .sdlc/work/184-scorecard-report/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-65] [nit] `_trend` compares the unrounded `value` with the `last` read back from the report's cell, which was written through `indicators.number`.
+
+Raised by the code review of 184-scorecard-report, round 1: scripts/retro.py:423: `_trend` compares the unrounded `value` with the `last` read back from the report's cell, which was written through `indicators.number`. A figure that rounds to the same cell (for example 0.174 against a written 0.17) could read `up` when the person saw two equal numbers. Compare after rounding `value` the way the table writes it, or confirm `number()` writes full precision.
+
+Theme: robustness
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 184-scorecard-report (correctness)
+
+## [2026-11-19-66] [nit] `_minutes` rounds a median response to a whole number.
+
+Raised by the code review of 184-scorecard-report, round 1: scripts/retro.py:433: `_minutes` rounds a median response to a whole number. The report above shows a median response of "1" minute in both tiers, so small values lose their trend resolution. This follows the spec's "integers" rule, so it is only worth a Note in REFERENCE.md.
+
+Theme: docs
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 184-scorecard-report (correctness)
+
+## [2026-11-19-67] [nit] `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections").
+
+Raised by the test review of 184-scorecard-report, round 1: tests/test_retro.py: `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections"). It would still pass if they appeared anywhere in the Speed section, such as in prose rather than the landing line. Match the landing line's label instead.
+
+Theme: tests
+Paths: tests/test_retro.py
+Cost: S
+Value: low
+Raised by: 184-scorecard-report (correctness)
