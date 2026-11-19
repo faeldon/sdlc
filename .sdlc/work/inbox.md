@@ -566,3 +566,11 @@ Paths: tests/test_archive.py
 Cost: S
 Value: low
 Raised by: 188-local-day-elapsed (correctness)
+
+## [2026-11-20-5] [idea] The retrospective's Insights section (S15)
+
+S15: The retrospective's Insights section — the synthesis questions in a guide file a host can
+extend, each answered by a read-only sub-agent on its pillar's data, in the fixed answer shape.
+After S14 (184, landed). From docs/RETRO-SCORECARD.md's seeds.
+Theme: retro
+Raised 2026-11-20.
