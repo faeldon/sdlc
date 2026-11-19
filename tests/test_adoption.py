@@ -38,13 +38,34 @@ def _run(cwd: Path, *args: str, path: str | None = None) -> subprocess.Completed
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"} | GIT_ID
     if path is not None:
         env["PATH"] = path
-    return subprocess.run(
-        ["uv", "run", "--quiet", "--script", str(SCRIPT), *args],
-        cwd=cwd,
-        capture_output=True,
-        encoding="utf-8",
-        env=env,
-    )
+    return _uv(SCRIPT, cwd, args, env)
+
+
+# uv's own error when it couldn't reach the package index, printed before the script runs.
+UNREACHED = re.compile(r"error: (request failed after|failed to fetch|failed to download)", re.I)
+
+
+def _uv(script: Path, cwd: Path, args, env: dict) -> subprocess.CompletedProcess:
+    """`uv run --script`, as the skills run it. When uv can't reach the package index (no network,
+    as on a gate whose machine lost its DNS), the script never ran, so it runs once more from the
+    packages uv's cache holds; with none there, the test skips naming the network. With the
+    network up nothing changes: a dependency the script doesn't declare still fails it."""
+
+    def run(*flags: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["uv", "run", "--quiet", *flags, "--script", str(script), *args],
+            cwd=cwd, capture_output=True, encoding="utf-8", env=env,
+        )  # fmt: skip
+
+    ran = run()
+    if ran.returncode == 0 or not UNREACHED.match(ran.stderr):
+        return ran
+    cached = run("--offline")
+    if "network was disabled" in cached.stderr:
+        first = ran.stderr.splitlines()[0]
+        pytest.skip(f"no network: the package index can't be reached ({first}), and uv's cache "
+                    "lacks the script's dependencies")  # fmt: skip
+    return cached
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -481,15 +502,46 @@ def _probe(tree: Path, word: str) -> None:
     metrics.write_text(text.replace(BLOCKED, BLOCKED + probe), encoding="utf-8")
 
 
-def _by(script: Path, cwd: Path, *args: str, ran: str | None = None):
+def _by(script: Path, cwd: Path, *args: str, ran: str | None = None, env: dict | None = None):
     """`_run` with a given copy of the script, and the handoff marker set or cleared."""
     dropped = ("VIRTUAL_ENV", "SDLC_CLOSE_RAN", "SDLC_OWN_SCRIPT")
+    extra = env or {}
     env = {k: v for k, v in os.environ.items() if k not in dropped}
-    env |= GIT_ID | ({"SDLC_CLOSE_RAN": ran} if ran else {})
-    return subprocess.run(
-        ["uv", "run", "--quiet", "--script", str(script), *args],
-        cwd=cwd, capture_output=True, encoding="utf-8", env=env,
-    )  # fmt: skip
+    env |= GIT_ID | ({"SDLC_CLOSE_RAN": ran} if ran else {}) | extra
+    return _uv(script, cwd, args, env)
+
+
+# No network, as a gate has when the machine's DNS is down: every request uv makes is refused at
+# once, by a proxy on a port nothing listens on.
+UNREACHABLE = {
+    name: "http://127.0.0.1:9"
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy")
+} | {"NO_PROXY": "", "no_proxy": "", "UV_HTTP_RETRIES": "0"}
+
+
+def test_with_the_index_unreachable_a_copy_of_the_script_runs_from_uvs_cache(
+    tmp_path: Path,
+) -> None:
+    """Seed 2026-11-19-46: a copy of the script at a new path has no environment of its own yet,
+    so uv resolves its dependencies, asking the package index once its cached answers are some
+    minutes old. With no network it builds one from the packages its cache already holds, and the
+    test goes on to judge the code."""
+    assert _run(tmp_path, "next").returncode == 0, "the cache holds the script's dependencies"
+    script = _plugin_copy(tmp_path / "plugin") / "scripts" / "sdlc.py"
+    ran = _by(script, tmp_path, "next", env=UNREACHABLE)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.strip() == "001"
+
+
+def test_with_the_index_unreachable_and_nothing_cached_the_test_skips_naming_the_network(
+    tmp_path: Path,
+) -> None:
+    """With no network and a cache that lacks the dependencies, nothing about the code can be
+    learnt: the test skips, and `pytest -rs` says the package index couldn't be reached."""
+    script = _plugin_copy(tmp_path / "plugin") / "scripts" / "sdlc.py"
+    empty = UNREACHABLE | {"UV_CACHE_DIR": str(tmp_path / "empty-cache")}
+    with pytest.raises(pytest.skip.Exception, match="no network: the package index"):
+        _by(script, tmp_path, "next", env=empty)
 
 
 def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Path) -> None:
@@ -560,13 +612,7 @@ def test_a_host_hears_what_an_update_changed_and_can_take_setup_out(tmp_path: Pa
 
     def run(*args: str) -> subprocess.CompletedProcess:
         env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"} | GIT_ID
-        return subprocess.run(
-            ["uv", "run", "--quiet", "--script", str(script), *args],
-            cwd=root,
-            capture_output=True,
-            encoding="utf-8",
-            env=env,
-        )
+        return _uv(script, root, args, env)
 
     (root / ".sdlc").mkdir(exist_ok=True)
     (root / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")

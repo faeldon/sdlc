@@ -78,12 +78,18 @@ IN_DRAWER = "() => document.getElementById('drawer').contains(document.activeEle
 FOCUSABLE = """() => [...document.getElementById('drawer').querySelectorAll(
   'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')]
   .filter((n) => !n.closest('[hidden]')).length"""
+# How long the page may take to load, show a card or poll again, in ms: a bound on a hang, never
+# on speed. A gate beside others, or a machine that stalls, can hold a poll past any tight bound
+# (seed 2026-11-19-45); the focus each step asserts is set in the event's own handler, so it is
+# read at once.
+PATIENT = 120_000
 
 
 @pytest.mark.browser
 def test_the_drawer_holds_focus_and_returns_it_to_its_card(board_url, chromium) -> None:
     root, url = board_url
     page = chromium.new_page()
+    page.set_default_timeout(PATIENT)
     page.goto(url)
     card = page.locator(".card").first
     card.wait_for()
@@ -104,7 +110,7 @@ def test_the_drawer_holds_focus_and_returns_it_to_its_card(board_url, chromium) 
     old = card.element_handle()
     folder = next(root.glob(f".claude/worktrees/{name}/.sdlc/work/{name}"))
     (folder / "notes.md").write_text("# Notes\n", encoding="utf-8", newline="\n")
-    page.wait_for_function("(el) => !el.isConnected", arg=old, timeout=10_000)
+    page.wait_for_function("(el) => !el.isConnected", arg=old)
 
     page.keyboard.press("Escape")
     assert page.evaluate("() => document.getElementById('drawer').hidden")
