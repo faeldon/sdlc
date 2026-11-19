@@ -537,21 +537,6 @@ Paths: plugins/factory/scripts/factory.py
 Introduced by: 137-approver-weighs-defaults
 Theme: factory
 
-## [2026-11-20-3] [bug] Close's elapsed goes negative when the local date is ahead of UTC
-
-When close measures a change from history, it takes the change's `created:` date, which is the
-local day, as midnight UTC (`datetime.combine(created, dtime(), UTC)` in `from_history`). On a
-machine east of UTC, between local midnight and UTC midnight, a change created that local day
-starts in the future, and `Sdlc-Totals: elapsed=` on its `Close` commit is negative. It should
-measure from the local day's midnight in the machine's own timezone, never negative. To see it:
-at UTC+8 between 00:00 and 08:00 local, run `pytest tests/test_archive.py -k
-test_close_output_is_unchanged`. Four cases fail with `elapsed=-N`, so the gate is red for those
-hours every day and ejects whatever lands then (it ejected 187 on 2026-11-20).
-
-Severity: med
-Paths: scripts/closing.py, tests/test_archive.py
-Theme: metrics
-
 ## [2026-11-20-1] [nit] The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card).
 
 Raised by the code review of 187-one-word-one-meaning, round 1: .sdlc/work/187-one-word-one-meaning/decisions.md:34: The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card). D3 also has its reworded-docs list missing from the ledger line itself. Collapse the duplicates and keep D3's list under its line.
@@ -571,3 +556,13 @@ Paths: tests/test_feature_map.py
 Cost: S
 Value: low
 Raised by: 187-one-word-one-meaning (correctness)
+
+## [2026-11-20-4] [nit] the `east` fixture uses `time.tzset()`, which doesn't exist on Windows.
+
+Raised by the code review of 188-local-day-elapsed, round 1: tests/test_archive.py:2500: the `east` fixture uses `time.tzset()`, which doesn't exist on Windows. That is fine as long as these tests stay unmarked `portable`, but a comment saying so would stop someone adding the marker later.
+
+Theme: tests
+Paths: tests/test_archive.py
+Cost: S
+Value: low
+Raised by: 188-local-day-elapsed (correctness)
