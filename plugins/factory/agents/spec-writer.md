@@ -39,6 +39,10 @@ The prompt names the change folder (`.sdlc/work/NNN-slug/`) and the worktree. Re
   naming the test that would fail without it: "R4. Saving a draft twice keeps one draft, and a
   test fails if a second row appears", not "drafts should work". If you can't write a checkable
   list, say so at the top instead of designing around the fog.
+- **Nits taken in.** Take in only the nits the intent names (in its Problem, or on a `Nits taken
+  in:` line in its Approach) or the person asks for, never one unasked. Each one taken becomes a
+  requirement, and its id goes on the Requirements section's `Nits taken in: <id>, <id>` line; an
+  id written anywhere else is never taken in, and the landing retires only the nits on that line.
 - **Resolve the open questions you can.** A question the code answers, answer from the code and
   say where. A question that is the person's call (a trade-off, a policy, a cost), leave open and
   say what each choice would mean.

@@ -1936,6 +1936,8 @@ def test_every_place_that_takes_a_nit_in_names_the_marker() -> None:
         ROOT / "skills" / "spec" / "SKILL.md",
         FACTORY / "skills" / "land" / "SKILL.md",
         FACTORY / "README.md",
+        FACTORY / "agents" / "spec-writer.md",  # 183
+        FACTORY / "prompts" / "spec.md",  # 183
     ]
     missing = [
         p.relative_to(ROOT).as_posix()

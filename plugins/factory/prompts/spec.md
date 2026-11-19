@@ -7,7 +7,7 @@
 
 ## draft
 
-Draft spec.md for this change.
+Draft spec.md for this change. Every nit it takes in becomes a requirement, and its id goes on the Requirements section's `Nits taken in: <id>, <id>` line; an id written anywhere else is never taken in.
 
 ## upgraded
 
