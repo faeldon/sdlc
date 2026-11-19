@@ -260,16 +260,6 @@ Left undone by 156-cases-that-tell, carried forward when it landed: 26 `e-*` wor
 See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-100] [nit] `ceiling = int((5 - spent) * 100) / 100` can lose a cent to float error (for example 4.35 becomes 4.34).
-
-Raised by the code review of 156-cases-that-tell, round 1: scripts/sdlc.py:3877: `ceiling = int((5 - spent) * 100) / 100` can lose a cent to float error (for example 4.35 becomes 4.34). That is harmless, because it only errs low. Using `Decimal`, or `math.floor(x * 100 + 1e-9)`, would be more exact.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 156-cases-that-tell (correctness)
-
 ## [2026-11-18-101] [nit] the workspace test chmods to 0 and then restores in `finally`.
 
 Raised by the test review of 156-cases-that-tell, round 1: tests/test_evals.py:523: the workspace test chmods to 0 and then restores in `finally`. A failure partway through could leave `outside` unreadable for pytest's tmp cleanup.
@@ -315,36 +305,6 @@ Paths: tests/test_registry.py
 Cost: S
 Value: low
 Raised by: 160-command-registry (correctness)
-
-## [2026-11-19-2] [nit] a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`).
-
-Raised by the code review of 162-lead-time, round 1: scripts/closing.py:431: a factory change with no timed rows and no transcript events gets `ready=None`, so `ready_wait` is dropped (`source=git`). R10's "no transcripts" case says `lead`, `ready_wait` and `landing` are kept. The code is reasonable, because there is no approver row to read `ready` from. The spec could say so, or `ready` could fall back to the tip's author date for a factory change too.
-
-Theme: robustness
-Paths: scripts/closing.py
-Cost: S
-Value: low
-Raised by: 162-lead-time (correctness)
-
-## [2026-11-19-3] [nit] the broad `except Exception` also hides programming errors as `lead=failed`.
-
-Raised by the security review of 162-lead-time, round 1: scripts/closing.py:475: the broad `except Exception` also hides programming errors as `lead=failed`. That fits "never refuses", but it could log the exception's type name to stderr so a regression is visible
-
-Theme: robustness
-Paths: scripts/closing.py
-Cost: S
-Value: low
-Raised by: 162-lead-time (contract)
-
-## [2026-11-19-4] [nit] the `lead=bad-opened` path for `opened` after `closed` (decision D3) has no test of its own; only a malformed value is parametrized
-
-Raised by the test review of 162-lead-time, round 1: tests/test_archive.py: the `lead=bad-opened` path for `opened` after `closed` (decision D3) has no test of its own; only a malformed value is parametrized
-
-Theme: tests
-Paths: tests/test_archive.py
-Cost: S
-Value: low
-Raised by: 162-lead-time (correctness)
 
 ## [2026-11-19-8] [nit] the R5 test only builds the `build` task, so the refusal for a broken `mend.md` or `land-review.md` under `land-mend` is untested.
 
@@ -542,3 +502,13 @@ Paths: .sdlc/work/171-factory-run-state/spec.md
 Cost: S
 Value: med
 Raised by: 171-factory-run-state (correctness)
+
+## [2026-11-19-26] [nit] `measure.errors` holds the raw exception text.
+
+Raised by the security review of 172-close-in-steps, round 1: scripts/closing.py:396: `measure.errors` holds the raw exception text. In the plugin's own repo, a child after a handoff passes it up unchanged. It's local stdout only, but if a future reader of the run files puts a path or a line of content in a message, that text lands in close's report, so say in the docstring that the message is meant for the person running close and must never become a trailer
+
+Theme: docs
+Paths: scripts/closing.py
+Cost: S
+Value: low
+Raised by: 172-close-in-steps (contract)
