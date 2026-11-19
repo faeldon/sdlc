@@ -530,3 +530,33 @@ Paths: tests/test_board.py
 Cost: S
 Value: low
 Raised by: 167-board-knows-its-repo (correctness)
+
+## [2026-11-19-5] [nit] the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
+
+Raised by the code review of 163-factory-records-reader, round 1: AGENTS.md:68: the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
+
+Theme: docs
+Paths: AGENTS.md
+Cost: S
+Value: low
+Raised by: 163-factory-records-reader (correctness)
+
+## [2026-11-19-6] [nit] the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable.
+
+Raised by the code review of 163-factory-records-reader, round 1: tests/test_board.py: the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable. It was a comparison of two copies, and with one copy it would compare the module with itself. `LAND_STOPS` still has no factory twin, so nothing checks it against the factory. It is only pinned against `LAND_STEPS` through the board's `LAND_AT` test.
+
+Theme: tests
+Paths: tests/test_board.py
+Cost: S
+Value: low
+Raised by: 163-factory-records-reader (correctness)
+
+## [2026-11-18-68] [nit] `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it.
+
+Raised by the code review of 147-landing-runs-unattended, round 1: plugins/factory/scripts/factory.py:6291: `RUN_STEPS["eject"]` is looked up, but `RUN_EJECTS` and the cause check already guard it. The `RUN_STOPS` tuple (line 6163) looks unused; remove it or use it for the `accept` and `stop` branches.
+
+Theme: refactor
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 147-landing-runs-unattended (correctness)
