@@ -200,12 +200,6 @@ Cost: S
 Value: low
 Raised by: 164-prompts-in-files (correctness)
 
-## [2026-11-19-9] [idea] Comment health as a retro indicator
-
-Agent-written code tends to over-comment (RealHumanEval: about 2x the comments; it narrates when unsure), while too few comments make complex code unauditable, and comment text is roughly 30% of what agents read in this repo's scripts. No research gives one right ratio (open-source norm about 19% of lines, Arafat & Riehle 2009), so measure four signals rather than one: per-file density as a band (flag <0.10 or >0.40) and its trend across the window; docstring coverage of long (>=30 lines) and hot functions; the share of narration comments that restate their line; and the comment share of agent input tokens. Ship it as an indicator script beside .sdlc/function-heat.py (this repo's, Python), reported through retro.indicators in the Quality pillar with Cost as its guardrail. Follows S8 (structured indicators) in docs/RETRO-SCORECARD.md.
-Theme: retro
-Raised 2026-11-19.
-
 ## [2026-11-19-7] [nit] a few helper names such as `_reached` and `_named` have no docstring
 
 Raised by the test review of 163-factory-records-reader, round 1: tests/test_modules.py: a few helper names such as `_reached` and `_named` have no docstring
@@ -541,3 +535,13 @@ Severity: low
 Paths: plugins/factory/agents/spec-writer.md, plugins/factory/prompts/spec.md
 Introduced by: 181-landing-nits-and-fixes
 Theme: landing
+
+## [2026-11-19-51] [nit] no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
+
+Raised by the test review of 178-comment-health, round 1: tests/test_comment_health.py: no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
+
+Theme: tests
+Paths: tests/test_comment_health.py
+Cost: S
+Value: low
+Raised by: 178-comment-health (correctness)
