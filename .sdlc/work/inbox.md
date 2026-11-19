@@ -152,13 +152,6 @@ Cost: S
 Value: low
 Raised by: 146-measure-how-agents-work (correctness)
 
-## [2026-11-18-66] [idea] The board shows an unattended landing from the run lock
-
-Left undone by 147-landing-runs-unattended, carried forward when it landed: The board could read the run lock (`sdlc-factory-train-run.lock`) to say a landing is running unattended, rather than inferring it from `runs/land-step.md` alone; the spec left the board unchanged.
-See .sdlc/work/147-landing-runs-unattended/notes.md in its commit.
-Theme: landing
-Raised 2026-11-18.
-
 ## [2026-11-18-67] [idea] A Windows test for a killed train run
 
 Left undone by 147-landing-runs-unattended, carried forward when it landed: `test_a_killed_train_run_resumes` kills a process group, so it doesn't run on Windows; a Windows kill test would need `CREATE_NEW_PROCESS_GROUP` and `taskkill /T`.
@@ -420,15 +413,6 @@ Cost: S
 Value: low
 Raised by: 156-cases-that-tell (correctness)
 
-## [2026-11-18-103] [bug] A second repo's dashboard reports another repo's board as its own
-
-A second repo's /sdlc:dashboard reports "serving: already" on 5170 when another repo's board holds it: _is_board() (scripts/board.py:1015) checks only state.json's "board": "sdlc" marker, never which repo the board shows, so a host's dashboard points at another repo's board. Expected: "already" only for the same repo root; another repo's board is a refusal naming the port, and the skill starts on another --port. To see it: start a board in one repo with `sdlc.py board --port 5170`, then run /sdlc:dashboard in another.
-
-Severity: low
-Paths: scripts/board.py, skills/dashboard/SKILL.md
-Introduced by: 075-factory-dashboard
-Theme: board
-
 ## [2026-11-18-104] [nit] the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push).
 
 Raised by the test review of 153-risky-code-in-its-own-modules, round 1: tests/test_sdlc.py:1921: the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push). It plants only two, and the other two live in `test_work_folder.py` and presumably `test_skills.py`.
@@ -536,3 +520,13 @@ Paths: plugins/factory/README.md
 Cost: S
 Value: med
 Raised by: 166-untestable-none-and-waits (correctness)
+
+## [2026-11-19-11] [nit] `_bare_repo` creates a repo with no `user.name` or `user.email`.
+
+Raised by the test review of 167-board-knows-its-repo, round 1: tests/test_board.py:660: `_bare_repo` creates a repo with no `user.name` or `user.email`. It passes on this machine, but may fail on a clean CI box. Reuse the `repo` fixture's git config if it sets one.
+
+Theme: tests
+Paths: tests/test_board.py
+Cost: S
+Value: low
+Raised by: 167-board-knows-its-repo (correctness)
