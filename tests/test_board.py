@@ -787,6 +787,17 @@ def test_an_early_stop_shows_on_the_card(repo) -> None:
 
 
 @pytest.mark.portable
+def test_the_step_record_drops_an_empty_untestable_answer() -> None:
+    """166: core's `read_step()` reads `- UNTESTABLE: none.` as no untestable requirement, as
+    `factory.py`'s does, and a real one as one."""
+    head = "STEP: approve\nROUND: 1\nLIMIT: 3\nREVIEWERS: code\nSINCE: 2026-11-17T10:00:00Z\n"
+    for read in (sdlc.factory_records.read_step, factory.read_step):
+        assert read(head + "- UNTESTABLE: none.\n- UNTESTABLE: N/A\n")["untestable"] == []
+        real = read(head + "- UNTESTABLE: R3 needs a live GitHub\n")["untestable"]
+        assert real == ["R3 needs a live GitHub"]
+
+
+@pytest.mark.portable
 def test_a_decision_or_a_stop_overrides_the_record(repo) -> None:
     """R4: a valid decision is every step done, at the stage it belongs to (098); a stop shown
     has no track at all."""

@@ -199,8 +199,8 @@ spec.
 - **Stop early when a round can't help.** A run goes to the approver with rounds still left when
   the verifier keeps the same change, word for word, two rounds running (`stuck`; reviewers raise
   an undone kept change again in its own words so the script can tell), or when the builder's
-  report says a requirement can't be tested (`- UNTESTABLE: R<n>: <why>`, `untestable`), once its
-  round is reviewed. The approver is told which, and must ESCALATE, naming under `## Reconsider
+  report says a requirement can't be tested (`- UNTESTABLE: R<n>: <why>`, `untestable`; `none` or
+  `n/a` there is no requirement), once its round is reviewed. The approver is told which, and must ESCALATE, naming under `## Reconsider
   the approach` the next step it would take: a requirement to rewrite, a model to try, or an
   approach to change. A restart or an upgrade starts the count afresh.
 - **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`

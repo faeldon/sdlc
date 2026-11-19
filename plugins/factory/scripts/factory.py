@@ -271,8 +271,9 @@ ROLE_PASS = {"security": "contract"}
 VERIFIED = "verified.md"
 KEPT_RE = re.compile(r"^\s*- KEPT:\s*([a-z]+):\s*(.+?)\s*$")
 # A builder report's requirement no test the repo can run could show, `<requirement>: <why>`: once
-# its round is reviewed and verified, the run goes to the approver, never to another rework.
-UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(.+?)\s*$")
+# its round is reviewed and verified, the run goes to the approver, never to another rework. An
+# empty answer (`none`, `n/a`, any case, a period or not) is no requirement, so it never matches.
+UNTESTABLE_RE = re.compile(r"^\s*- UNTESTABLE:\s*(?!\s*(?i:none|n/?a)\.?\s*$)(.+?)\s*$")
 DROPPED_RE = re.compile(r"^\s*- DROPPED:\s*([a-z]+):\s*(.+?)\s*$")
 DROP_WHY = " — "
 # An answer may open with its change's id, `C<n>`, as the verify prompt numbers them

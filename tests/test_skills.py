@@ -1382,6 +1382,18 @@ def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None
     )
 
 
+def test_the_agents_that_wait_never_sleep() -> None:
+    """166: the builder and the behaviour check, the agents that wait on a command, are told never
+    to `sleep`, which the harness refuses in the foreground, and how to wait instead: the command's
+    own timeout, or a bounded poll in one command."""
+    for name in ("builder", "reviewer-behaviour"):
+        text = (FACTORY / "agents" / f"{name}.md").read_text(encoding="utf-8")
+        flat = " ".join(text.split())
+        assert "Never run `sleep` to wait" in flat, name
+        assert "give the command its own timeout" in flat, name
+        assert "poll in one command, a loop with a bound" in flat, name
+
+
 # What each agent that reads checks.md says instead of running it.
 NEVER_RUNS_CHECKS = {
     "reviewer-behaviour": "**Never run them yourself**",

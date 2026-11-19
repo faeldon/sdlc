@@ -1706,6 +1706,28 @@ def test_an_untestable_requirement_escalates_after_its_round(tmp_path, capsys) -
     assert (out["next"], out["exhausted"], out["untestable"]) == ("approve", True, [line])
 
 
+EMPTY_UNTESTABLE = ("none", "none.", "None", "NONE.", "n/a", "N/A.", "na")
+
+
+def test_an_empty_untestable_answer_is_no_requirement(tmp_path, capsys) -> None:
+    """166: a builder writing `- UNTESTABLE: none` (any case, `n/a`, with or without a period)
+    names no untestable requirement, so `verdicts` doesn't stop on it; a real one still stops."""
+    for n, empty in enumerate(EMPTY_UNTESTABLE):
+        root = _change(tmp_path / str(n))
+        _build_report(root, 1, f"- UNTESTABLE: {empty}\n")
+        _round(root, 1)
+        out = _verdicts(root, capsys)
+        assert (out["untestable"], out["exhausted"]) == ([], False), (empty, out)
+    root = _change(tmp_path / "real")
+    _build_report(root, 1, "- UNTESTABLE: R3 needs a live GitHub\n")
+    _round(root, 1)
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["exhausted"]) == ("approve", True), out
+    assert out["untestable"] == ["R3 needs a live GitHub"]
+    for word in ("nonetheless", "none of R3 can run here", "n/a: R2 needs a live service"):
+        assert factory.UNTESTABLE_RE.match(f"- UNTESTABLE: {word}"), "only an empty answer"
+
+
 NEXT_STEP = (
     "Under `## Reconsider the approach`, name the next step you'd take: a requirement to "
     "rewrite, a model to try, or an approach to change."

@@ -62,6 +62,12 @@ lint the slice's tests don't cover), use the `check` command your prompt names: 
 gate in one of the gate slots, waiting its turn. Run it in the foreground with the Bash tool's
 longest timeout; never a bare `[commands] check` or the test runner with no test named.
 
+Never run `sleep` to wait: the harness refuses a `sleep` on its own, so each one is a spent turn.
+To wait for something, give the command its own timeout (the Bash tool's `timeout`, or the
+command's own flag), or poll in one command, a loop with a bound that checks and pauses inside it:
+`for i in $(seq 30); do test -f out.log && break; sleep 2; done`. A loop with no bound is a session
+that never ends.
+
 Keep the tree working after every slice. Touch only what the slice needs; a refactor or cleanup
 you notice on the way goes into `notes.md` as an unticked `- [ ]` line, not into this change.
 Test behaviour, not implementation; prefer real code over mocks except at real boundaries.
@@ -178,6 +184,7 @@ A requirement no test the repo can run could show (one judged by eye, or one tha
 service the repo can't start) gets one line, `- UNTESTABLE: R<n>: <why>`. Once its round is
 reviewed, the run goes to the approver and then the person rather than to another rework, so the
 only cost of a wrong claim is an escalation. It never stands in for a test you chose not to write.
+When every requirement has its test, write no such line; `- UNTESTABLE: none` is read as none.
 
 **End it with `## Evidence`:** every command a claim above rests on (the tests you ran, anything
 you say passed or failed), each as the command on a `$ ` line, the tail of what it printed, and

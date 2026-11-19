@@ -33,6 +33,12 @@ and the lines it printed, which a read owes no `exit:`.
 Run nothing in the background. A background task's notice wakes your session after your
 reply, to answer it again. Everything you run, you run in the foreground.
 
+Never run `sleep` to wait: the harness refuses a `sleep` on its own, so each one is a spent turn.
+To wait for something, give the command its own timeout (the Bash tool's `timeout`, or the
+command's own flag), or poll in one command, a loop with a bound that checks and pauses inside it:
+`for i in $(seq 30); do test -f out.log && break; sleep 2; done`. A loop with no bound is a session
+that never ends.
+
 ## What to run
 
 - **The end-to-end path** the spec or Approach describes: the command a person would run, the
