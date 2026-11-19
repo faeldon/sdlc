@@ -544,3 +544,20 @@ Paths: scripts/retro.py
 Cost: S
 Value: low
 Raised by: 176-by-way-of-building (correctness)
+
+## [2026-11-19-61] [bug] The factory never runs commands.build
+
+A host can set `[commands] build` with `build_when`, a slower gate (integration tests, a full
+compile) that /sdlc:ship runs when a changed path matches, and always for a diff touching a
+`[review] sensitive` path. The factory runs only `commands.check`, through `_run_check()` in
+plugins/factory/scripts/factory.py: neither a build round's gate nor a landing train's gate at the
+tip runs `commands.build`, so a factory-built change that touches those paths lands without the
+slow gate the same change built by hand would get at ship. To see it: set `build = "false"` and
+`build_when = "."` in a host's config, build and land any change with the factory; it lands green
+(read from the code; not yet run). Expected: when the diff matches `build_when` or a sensitive
+path, the factory runs `commands.build` too, at least once before landing (the train's tip gate),
+recorded like the gate.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
+Theme: landing
