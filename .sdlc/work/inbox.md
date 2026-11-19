@@ -139,46 +139,6 @@ See .sdlc/work/152-board-drawer-browser-test/notes.md in its commit.
 Theme: ci
 Raised 2026-11-18.
 
-## [2026-11-18-75] [nit] the header comment line now runs to 166 characters; the rest of the file wraps near 100.
-
-Raised by the code review of 152-board-drawer-browser-test, round 1: .github/workflows/check.yml:3: the header comment line now runs to 166 characters; the rest of the file wraps near 100. Re-wrap it
-
-Theme: style
-Paths: .github/workflows/check.yml
-Cost: S
-Value: low
-Raised by: 152-board-drawer-browser-test (correctness)
-
-## [2026-11-18-76] [nit] the intent's open question on a skip note in `./check.sh`'s summary is not addressed.
-
-Raised by the code review of 152-board-drawer-browser-test, round 1: tests/test_board_browser.py:75: the intent's open question on a skip note in `./check.sh`'s summary is not addressed. Recorded here as a possible follow-up; the gate record shows 28 skipped without saying why
-
-Theme: docs
-Paths: tests/test_board_browser.py
-Cost: S
-Value: low
-Raised by: 152-board-drawer-browser-test (correctness)
-
-## [2026-11-18-77] [nit] the rewrapped header comment runs past the file's line width
-
-Raised by the security review of 152-board-drawer-browser-test, round 1: .github/workflows/check.yml:3: the rewrapped header comment runs past the file's line width
-
-Theme: style
-Paths: .github/workflows/check.yml
-Cost: S
-Value: low
-Raised by: 152-board-drawer-browser-test (contract)
-
-## [2026-11-18-78] [nit] the reflowed header comment leaves one line far over the file's roughly 100-column wrapping
-
-Raised by the test review of 152-board-drawer-browser-test, round 1: .github/workflows/check.yml:3: the reflowed header comment leaves one line far over the file's roughly 100-column wrapping
-
-Theme: style
-Paths: .github/workflows/check.yml
-Cost: S
-Value: low
-Raised by: 152-board-drawer-browser-test (correctness)
-
 ## [2026-11-18-79] [nit] the test takes about 49s here, mostly waiting on the poll interval.
 
 Raised by the test review of 152-board-drawer-browser-test, round 1: tests/test_board_browser.py:98: the test takes about 49s here, mostly waiting on the poll interval. A shorter bounded wait or a faster poll in the fixture would speed up `./check.sh`
@@ -189,40 +149,10 @@ Cost: M
 Value: low
 Raised by: 152-board-drawer-browser-test (correctness)
 
-## [2026-11-18-81] [idea] Wrap the reviewer agents' other lines past 100 columns
-
-Left undone by 150-pay-down-batch-nits, carried forward when it shipped: `plugins/factory/agents/reviewer-code.md` and `reviewer-ux.md` keep other lines past 100 columns (each frontmatter `description`, and the "Under a decision's line" paragraph after the `supersedes` sentence -55 wrapped), outside -55's scope.
-See .sdlc/work/150-pay-down-batch-nits/notes.md in its commit.
-Theme: docs
-Raised 2026-11-18.
-
-## [2026-11-18-82] [idea] Rewrap the factory README's lines past 100 columns
-
-Left undone by 150-pay-down-batch-nits, carried forward when it shipped: `plugins/factory/README.md` keeps about twenty other lines past 100 columns, outside -63's scope (the one paragraph it named).
-See .sdlc/work/150-pay-down-batch-nits/notes.md in its commit.
-Theme: docs
-Raised 2026-11-18.
-
-## [2026-11-18-83] [nit] the edited *The factory* paragraph now has a very long line, 4 lines down from the reflow.
-
-Raised by the code review of 149-landing-resolver-agent, round 1: AGENTS.md:237: the edited *The factory* paragraph now has a very long line, 4 lines down from the reflow. Re-wrap it near the 100-column width the rest of the file keeps.
-
-Theme: style
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 149-landing-resolver-agent (correctness)
-
 ## [2026-11-18-88] [idea] Pay down the tests nits in one change
 
 Five `[nit]` entries are open under `tests` (2026-11-18-64, -70, -71, -79 and -85), which is the threshold the process guide sets for paying a theme down. Two of them are slow polls in the train's kill test (-71 and -79, about 49 seconds here). One change takes all five, and its review decides each.
 Theme: tests
-Raised by the retrospective of 2026-11-18.
-
-## [2026-11-18-89] [idea] Pay down the style nits in one change
-
-Five `[nit]` entries are open under `style` (2026-11-18-65, -75, -77, -78 and -83), which is the threshold. Four are lines past the 100-column wrap, the same work as ideas 2026-11-18-81 and -82. One change takes the five nits, and the two ideas with them if they are still open.
-Theme: style
 Raised by the retrospective of 2026-11-18.
 
 ## [2026-11-18-90] [idea] A pruning pass over the tests that drifted
@@ -243,16 +173,6 @@ Five changes' Important findings share one class: a context or reference doc sti
 - **A doc's claim the change made false.** A sentence in `AGENTS.md`, `docs/REFERENCE.md`, `docs/CONTRIBUTING.md` or a README that names the function, the command or the rule this diff changed, and still says what it did before. Grep the docs for each name the diff touches.
 Theme: review
 Raised by the retrospective of 2026-11-18.
-
-## [2026-11-18-96] [nit] the rewrapped "One gate at a time" bullet leaves one line over the wrap width
-
-Raised by the code review of 155-agent-test-runs-share-the-slot, round 1: plugins/factory/README.md:170: the rewrapped "One gate at a time" bullet leaves one line over the wrap width
-
-Theme: style
-Paths: plugins/factory/README.md
-Cost: S
-Value: low
-Raised by: 155-agent-test-runs-share-the-slot (correctness)
 
 ## [2026-11-18-99] [idea] Clear the eval workspaces left in /tmp by earlier case runs
 
@@ -285,16 +205,6 @@ Raised by: 153-risky-code-in-its-own-modules (correctness)
 Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: the scorecard reaches hosts when S14 and S15 build it into the plugin: the numbers in `sdlc.py retro` (core, language-neutral), the page in `templates/retro.md` (a host overrides it in `.sdlc/templates/`), the synthesis questions in a `guide/` file a host extends, and the metrics' meanings in `docs/REFERENCE.md`'s *Retrospectives*. This doc stays this repo's design reference. In a host, the Simplicity pillar means the process's overhead and workarounds there; the plugin's own surface (skills used, footprint, growth) is this repo's measure alone. The structural debt index comes from the host's own `retro.indicators`, in its language.
 See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
 Raised 2026-11-18.
-
-## [2026-11-18-108] [nit] `heat()` ignores the `--root` blame edge when a file was created after the boundary.
-
-Raised by the code review of 161-function-heat, round 1: `.sdlc/function-heat.py:123`: `heat()` ignores the `--root` blame edge when a file was created after the boundary. A commit that only added the whole file counts as 1, which is correct, but a one-line comment would say so
-
-Theme: docs
-Paths: .sdlc/function-heat.py
-Cost: S
-Value: low
-Raised by: 161-function-heat (correctness)
 
 ## [2026-11-18-109] [nit] `test_main_runs_a_stand_in_handler` already passed before the move (the plan says so).
 
@@ -332,16 +242,6 @@ Cost: S
 Value: low
 Raised by: 163-factory-records-reader (correctness)
 
-## [2026-11-19-10] [nit] the edited line runs to 136 characters, while the rest of the paragraph wraps at about 97; re-wrap it.
-
-Raised by the code review of 166-untestable-none-and-waits, round 1: plugins/factory/README.md:203: the edited line runs to 136 characters, while the rest of the paragraph wraps at about 97; re-wrap it.
-
-Theme: docs
-Paths: plugins/factory/README.md
-Cost: S
-Value: med
-Raised by: 166-untestable-none-and-waits (correctness)
-
 ## [2026-11-19-11] [nit] `_bare_repo` creates a repo with no `user.name` or `user.email`.
 
 Raised by the test review of 167-board-knows-its-repo, round 1: tests/test_board.py:660: `_bare_repo` creates a repo with no `user.name` or `user.email`. It passes on this machine, but may fail on a clean CI box. Reuse the `repo` fixture's git config if it sets one.
@@ -351,16 +251,6 @@ Paths: tests/test_board.py
 Cost: S
 Value: low
 Raised by: 167-board-knows-its-repo (correctness)
-
-## [2026-11-19-5] [nit] the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
-
-Raised by the code review of 163-factory-records-reader, round 1: AGENTS.md:68: the "Modules loaded by path" and "The board" edits leave lines far over the file's wrap width (about 100 columns)
-
-Theme: docs
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 163-factory-records-reader (correctness)
 
 ## [2026-11-19-6] [nit] the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable.
 
@@ -527,3 +417,29 @@ Severity: low
 Paths: plugins/factory/scripts/landing.py
 Introduced by: 104-landing-follows-main
 Theme: landing
+
+## [2026-11-19-27] [idea] Rewrap the remaining factory agents' prose lines past 100 columns
+
+Left undone by 173-style-paydown, carried forward when it landed: The other factory agents (`approver.md`, `builder.md`, `resolver.md`, `reviewer-behaviour.md`, `reviewer-security.md`, `reviewer-test.md`, `reviewer-ui.md`, `spec-writer.md`, `verifier.md`) keep prose lines past 100 columns; no entry named them, so they stayed out of this change.
+See .sdlc/work/173-style-paydown/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-28] [nit] the round-file sentence ("and `factory.py` writes it to `.sdlc/work/NNN-slug/reviews/round-N/test.md`…") is 105 columns, the same shape -81 fixed in `reviewer-code.md` and `reviewer-ux.md`; its "Under a decision's line" paragraph is probably the same; the change names only the first two files, so this is out of scope here
+
+Raised by the test review of 173-style-paydown, round 1: plugins/factory/agents/reviewer-test.md:13: the round-file sentence ("and `factory.py` writes it to `.sdlc/work/NNN-slug/reviews/round-N/test.md`…") is 105 columns, the same shape -81 fixed in `reviewer-code.md` and `reviewer-ux.md`; its "Under a decision's line" paragraph is probably the same; the change names only the first two files, so this is out of scope here
+
+Theme: docs
+Paths: plugins/factory/agents/reviewer-test.md
+Cost: S
+Value: low
+Raised by: 173-style-paydown (correctness)
+
+## [2026-11-19-29] [nit] the first check covers only the seven named files, so a rewrap that regressed another agent file would not be caught; fine for this scope
+
+Raised by the test review of 173-style-paydown, round 1: .sdlc/work/173-style-paydown/checks.md: the first check covers only the seven named files, so a rewrap that regressed another agent file would not be caught; fine for this scope
+
+Theme: tests
+Paths: .sdlc/work/173-style-paydown/checks.md
+Cost: S
+Value: low
+Raised by: 173-style-paydown (correctness)
