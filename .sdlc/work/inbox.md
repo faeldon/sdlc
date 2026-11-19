@@ -450,3 +450,10 @@ Scorecard S4: each agent run marked by what it was for (build, rework, red-gate 
 rerun, mend), and retro reports the waste share and cost per landed change. Pillar: Cost.
 Theme: retro
 Raised 2026-11-19.
+
+## [2026-11-19-32] [idea] Indicators in a structured format
+
+Scorecard S8: retro.indicators emit JSON rows, rendered as a table in the report; "no indicators
+set" said when empty; setup offers the key. Pillar: Quality.
+Theme: retro
+Raised 2026-11-19.
