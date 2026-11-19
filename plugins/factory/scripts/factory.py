@@ -3360,6 +3360,18 @@ def cli_restart(root: Path, args) -> int:
 AGENT_TIMEOUT = 3 * 3600
 # Each agent run's figures, one JSON object a line, beside the `.sessions` files measuring reads.
 COSTS = Path("runs") / "costs.jsonl"
+# What each row of `COSTS` was for (`purpose_of()`), fixed when it is written; the parts of a run's
+# spend that bought nothing (`WASTE`), which `ejected` and `dropped` join when the retrospective
+# reads what later became of the change; the steps whose second run in a round is a `rerun`; and
+# the record an ejection or a train's stop leaves in each change it put back, a JSON object a line.
+# `sdlc`'s `factory_records.py` keeps copies, pinned by a test.
+PURPOSES = ("spec", "build", "rework", "gate-fix", "mend", "rerun", "land")
+WASTE = ("rework", "gate-fix", "mend", "rerun", "ejected", "dropped")
+RERUNNABLE = (
+    "build", "rework", "review", "verify", "approve", "mend", "land-review", "land-verify",
+    "land-mend",
+)  # fmt: skip
+EJECTIONS = Path("runs") / "ejections.jsonl"
 # A stopped run's record, written and removed only by `verdicts --record`, read by the board and
 # `sdlc.py status` (each with its own copies of these, pinned by tests), never by the loop.
 STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
@@ -3448,6 +3460,14 @@ TASK_ROLE = {
     "rework": "builder", "decided": "builder", "approve": "approver", "resolve": "builder",
     "train-resolve": "resolver", "land-fix": "builder", "land-verify": "verifier",
 }  # fmt: skip
+# Each task's purpose, but those `purpose_of()` reads from the round (`ROUND_PURPOSE`).
+TASK_PURPOSE = {
+    "spec": "spec", "approve": "build", "rework": "rework", "fix": "gate-fix", "mend": "mend",
+    "land-mend": "mend", "resolve": "land", "train-resolve": "land", "land-fix": "land",
+    "land-review": "land", "land-verify": "land",
+}  # fmt: skip
+# The tasks that are the build in the run's first round and rework after it.
+ROUND_PURPOSE = ("build", "review", "verify", "decided")
 # The landing's tasks: the builder resolving a rebase's conflicts or making a fix the person asked
 # for, the resolver resolving a train's, the review of the change as it now stands on the base
 # branch, and the mend of a landing reply `land-verdicts` names. Never steps of the build's loop,
@@ -3768,18 +3788,54 @@ def holds(role: str, reply: str) -> bool:
     return EVIDENCE in [line.strip() for line in lines]
 
 
+def purpose_of(
+    task: str, role: str, rnd: int | None, first: int, land: int | None, earlier: list[dict]
+) -> str:
+    """What a run of `task` for `role` is for, one of `PURPOSES`: a `rerun` when a row `earlier`
+    in the change's `costs.jsonl` ran the same `RERUNNABLE` task for the same role in the same
+    round (`rnd`) or landing round (`land`); else the task's own (`TASK_PURPOSE`), or, for
+    `ROUND_PURPOSE`'s tasks, `build` in the run's `first` round (a restart's or an upgrade's) and
+    `rework` after it. A row with no `task`, from before purposes, never matches."""
+    if task in RERUNNABLE:
+        key, value = ("land", land) if task in LAND_TASKS else ("round", rnd)
+        if any(
+            r.get("task") == task and r.get("role") == role and r.get(key) == value for r in earlier
+        ):
+            return "rerun"
+    if task in ROUND_PURPOSE:
+        return "rework" if rnd is not None and rnd > first else "build"
+    return TASK_PURPOSE[task]
+
+
+def cost_rows(folder: Path) -> list[dict]:
+    """The rows of the change's `runs/costs.jsonl` so far, each a dict; a line that isn't one is
+    skipped, as `run_cost()` skips it."""
+    path = folder / COSTS
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
 def record_cost(
     folder: Path, session: str, role: str, model: str, figures: dict,
-    started: str | None = None, ended: str | None = None,
+    started: str | None = None, ended: str | None = None, tagged: dict | None = None,
 ) -> None:  # fmt: skip
     """Add one run's figures to the change's `runs/costs.jsonl`, with its session, role and
-    model, and when it `started` and `ended` (`_utc_now()`'s form, taken around the `claude`
-    call: what `sdlc`'s close times the change's lead from): numbers and names only, never a
+    model, when it `started` and `ended` (`_utc_now()`'s form, taken around the `claude` call:
+    what `sdlc`'s close times the change's lead from), and what `tagged` says it was for: its
+    `purpose`, `task`, and `round` or `land` (`cmd_agent()`). Numbers and names only, never a
     prompt or a reply."""
     path = folder / COSTS
     path.parent.mkdir(parents=True, exist_ok=True)
     times = {k: v for k, v in (("started", started), ("ended", ended)) if v}
-    line = json.dumps({"session": session, "role": role, "model": model, **figures, **times})
+    row = {"session": session, "role": role, "model": model, **figures, **times, **(tagged or {})}
+    line = json.dumps(row)
     with path.open("a", encoding="utf-8", newline="\n") as f:
         f.write(line + "\n")
 
@@ -4333,10 +4389,23 @@ def cmd_agent(
     argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{agent_name(role)}"]
     argv += ["--model", model, "--permission-mode", cfg["mode"]]
     argv += ["--output-format", "stream-json", "--verbose", how, session]
+    # What the run is for, fixed now, from the task, its round and the rows before it (174).
+    if task in LAND_TASKS:
+        where = {"land": land_round(folder)}
+    elif task == "mend":
+        where = {"round": mend_round(state, role)}
+    elif task == "decided":
+        where = {"round": state["round"] or state["built"]}
+    else:
+        where = {"round": state["round"]}
+    first = state.get("first") or 1
+    rnd, land = where.get("round"), where.get("land")
+    purpose = purpose_of(task, role, rnd, first, land, cost_rows(folder))
+    tagged = {"purpose": purpose, "task": task, **where}
     started = _utc_now()
     code, replies, problem, figures = _claude(argv, root)
     if figures:
-        record_cost(folder, session, role, model, figures, started, _utc_now())
+        record_cost(folder, session, role, model, figures, started, _utc_now(), tagged)
     out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
     out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
     if problem:

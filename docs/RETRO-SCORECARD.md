@@ -284,9 +284,9 @@ Quality bought with slowness shows up as lead time rising. See Speed.
   are what the machine's time costs. *Baseline:* a one-line config change cost $1.04; a large
   Tier 2 move, $8.94.
 - **Where:** `runs/costs.jsonl` (each agent run's reported cost, tokens and duration).
-- **Status:** partly: each factory change's dollars are in its `runs/costs.jsonl`, summed per
-  change by `factory.py ready`, but `retro` reports none across changes; hand-built changes
-  record tokens, not dollars. Needs S4.
+- **Status:** captured (S4, 174): `retro`'s `cost.per_change`, dollars and agent-minutes per
+  landed factory change by tier, each with its `n`; hand-built changes record tokens, not dollars,
+  so they are counted missing, never $0.
 
 ### Supporting: waste share
 - **What:** the share of spend on work that didn't land or was redone: ejected changes, red gates,
@@ -294,16 +294,15 @@ Quality bought with slowness shows up as lead time rising. See Speed.
 - **Why:** the cheapest change is the one not built twice. Waste is where cost can fall without
   slowing anything.
 - **Where:** `costs.jsonl`, tagged by what each run was for.
-- **Status:** needs S4.
+- **Status:** captured (S4, 174): `retro`'s `cost.waste`, its share and parts, with the runs
+  recorded before purposes counted apart, never as waste.
 
 ### Supporting: spend by role and model
 - **What:** dollars per change split by agent role (builder, each reviewer, approver) and model.
 - **Why:** it shows where the money goes, and what a model choice costs. *Baseline:* the builder
   is most of every change's cost.
 - **Where:** `costs.jsonl`.
-- **Status:** partly: one change's dollars by role and model are in `factory.py ready`;
-  `retro`'s `spend.agents` groups runs by role and model, but counts how they worked, not what
-  they cost. Needs S4.
+- **Status:** captured (S4, 174): `retro`'s `cost.by_role` and `cost.by_model`.
 
 ### Supporting: cost per unit of output
 - **What:** dollars, and agent output tokens, per 100 added code lines.
@@ -548,7 +547,7 @@ touches its files.
 
 #### Wave 3
 
-- **S4**.
+- **S4**, done: 174.
 - **S5**, with the feature map 2026-10-25-3 and the process map 2026-10-25-1.
 - **S6**, with 2026-11-18-93.
 - **S8**.

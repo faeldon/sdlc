@@ -1560,10 +1560,12 @@ def test_a_test_run_is_known_by_its_program(command: str, check, test: bool) -> 
     "command, bg", [("pytest -q &", True), ("sleep 5 & ", True), ("a && b", False),
                     ("make 2>&1", False), ("a &\nb", True), ("sleep 5 & echo hi", True),
                     ("make &> log", False), ("cat <&3", False), ("a |& b", False),
-                    ("echo 'a & b'", False), ("echo a \\& b", False)],
+                    ("echo 'a & b'", False), ("echo a \\& b", False),
+                    ("curl x?a=1&b=2", True), ("curl 'x?a=1&b=2'", False)],
 )  # fmt: skip
 def test_a_command_ending_in_a_lone_ampersand_goes_to_the_background(command, bg) -> None:
-    """R4: the `&` half; the result's half is read from the transcript below."""
+    """R4: the `&` half; the result's half is read from the transcript below. An unquoted `&`
+    inside a URL backgrounds the command before it, as the shell runs it (174 R10)."""
     assert metrics._shell(command, None)[1] is bg
 
 
@@ -1922,6 +1924,17 @@ def test_runtime_is_read_from_each_entrys_version_and_model(tmp_path: Path) -> N
     assert metrics.trailers(_summary(events, way="factory")) == metrics.trailers(
         _summary(plain, way="factory")
     )
+
+
+@pytest.mark.portable
+def test_runtime_values_are_capped() -> None:
+    """174 R11: an odd transcript value makes no very long trailer line: each value is at most 64
+    characters, and the line still reads back."""
+    long = "v" * 200
+    line = metrics.runtime_trailer([{"ts": T0, "kind": "runtime", "claude": long}], [long], "1.0")
+    back = metrics.parse_trailers(line)["runtime"]
+    assert back["claude"] == "v" * 64 and back["models"] == "v" * 64, back
+    assert back["plugin"] == "1.0"
 
 
 def test_runtime_trailer_round_trips() -> None:

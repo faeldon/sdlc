@@ -1918,6 +1918,18 @@ def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
             })  # fmt: skip
 
 
+def _record_ejection(folder: Path, cause: str) -> None:
+    """One row appended to the change's `runs/ejections.jsonl` (`factory.EJECTIONS`) as a train
+    puts it back: when, its landing round, and why (`gate`, `review`, `refusal` or `stop`). The
+    retrospective reads it to count the landing's runs before it as `ejected` (174 R4); the
+    caller amends it into the change's commit with the rest of the landing's record."""
+    path = folder / factory.EJECTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {"at": factory._utc_now(), "land": factory.land_round(folder), "cause": cause}
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 def _train_eject(main: Path, state: dict, ident: str) -> int:
     name = next((n for n in state["order"] if factory.names_change(n, ident)), None)
     if name is None or name not in train_live(state):
@@ -1940,6 +1952,7 @@ def _train_eject(main: Path, state: dict, ident: str) -> int:
         )
     if mine.get("pre"):
         factory._record_land(tree, folder, "eject", [f"ejected from the train: {reason}"])
+        _record_ejection(folder, cause)
         _write_train_record(tree, folder, state, name)
         _amend_record(tree, folder)
     first = train_live(state)[0] == name
@@ -1967,6 +1980,7 @@ def _train_stop(main: Path, state: dict) -> int:
             continue
         if mine.get("pre"):
             factory._record_land(tree, folder, "stop", [f"the train stopped: {reason}"])
+            _record_ejection(folder, "stop")
             _amend_record(tree, folder)
         put_back.append({"change": name, "undo": undo,
                          "head": (factory._git(tree, "rev-parse", "HEAD") or "")[:12]})  # fmt: skip

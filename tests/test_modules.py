@@ -449,13 +449,13 @@ RECORD_NAMES = {
     "REVIEWERS", "OPEN_BOX", "NO_DECISION", "GARBLED_LEDGER", "HAND_GATE", "CLONE_MARK",
     "HOME_MARK", "TMP_MARK", "USER_MARK", "TERM_MARK", "DEFUSE", "TERMS_FILE", "DECISION_FILE",
     "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS", "ARCHIVE_RE", "MENDED", "KEPT_ANSWER",
-    "CONFIRMED", "SUPERSEDED", "LOOK_SEEN",
+    "CONFIRMED", "SUPERSEDED", "LOOK_SEEN", "PURPOSES", "WASTE", "EJECTIONS", "PARTS",
     # readers
     "opening", "no_verdict", "read_stop", "read_land_stop", "landing", "first_build",
     "upgraded_build", "newest_round", "reasons", "reading", "read_step", "read_land_step",
     "read_land_times", "cost", "card_reading", "reviewed", "builder_started", "run_counts",
     "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
-    "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts",
+    "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts", "spend_rows",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -489,7 +489,7 @@ UNRELATED = {("sdlc.py", "MOVES_RE")}
 # R5: the factory's records by name. Kept here, so the module can't loosen it.
 RECORD_FILES = (
     "decision.md", "decisions.md", "stopped.md", "step.md", "verified.md", "costs.jsonl",
-    "land-times.jsonl", "gate.md", "round-", ".sessions",
+    "land-times.jsonl", "gate.md", "round-", ".sessions", "ejections.jsonl",
 )  # fmt: skip
 
 

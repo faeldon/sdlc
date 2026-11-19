@@ -1706,15 +1706,21 @@ def lead_trailer(lead: dict, source: str) -> str:
     return f"Sdlc-Lead: {_pairs(fields)} source={_word(source)}"
 
 
+# The longest a value of `Sdlc-Runtime` may be: a version or a model's name, never a sentence.
+RUNTIME_CAP = 64
+
+
 def runtime_trailer(events: list[dict], role_models, plugin: str | None) -> str | None:
     """What the change ran on as the `Sdlc-Runtime` line: the Claude Code versions and models of
     its `runtime` events, the factory roles' models (`role_models`, from `runs/costs.jsonl`) and
     the plugin's version, each part sorted, deduplicated and a word; a part not known is left out,
     and None when none is. Every value is `_model_word()`: a `,` would split it, a `:` make it a
-    pair."""
+    pair; and each is cut at `RUNTIME_CAP` characters, so an odd transcript value makes no very
+    long line."""
 
     def words(values) -> str:
-        return ",".join(sorted({_model_word(v.strip()) for v in values if str(v).strip()}))
+        found = {_model_word(v.strip())[:RUNTIME_CAP] for v in values if str(v).strip()}
+        return ",".join(sorted(found))
 
     ran = [e for e in events if e.get("kind") == "runtime"]
     parts = {

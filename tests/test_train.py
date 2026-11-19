@@ -1861,3 +1861,48 @@ def test_a_killed_train_run_resumes_on_windows(tmp_path, capsys) -> None:
     _killed_at_its_gate(
         tmp_path, capsys, {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}, kill
     )
+
+
+# ------------------------------------------------------- an ejection leaves a durable record (174)
+
+
+@needs_uv
+def test_an_ejection_is_recorded_and_amended_in(tmp_path, capsys) -> None:
+    """174 R4: `--eject` and `--stop` each append one row to `runs/ejections.jsonl` in each change
+    they put back, its landing round and cause, amended into the change's commit; no row of
+    `costs.jsonl` is rewritten."""
+    (tmp_path / "eject").mkdir()
+    root, trees = _three(tmp_path / "eject", check="test ! -f bb.txt")
+    tree = trees[1]
+    rel = f".sdlc/work/{tree.name}"
+    costs = '{"session": "s-1", "role": "builder", "cost_usd": 0.5, "purpose": "build"}\n'
+    (_folder(tree) / "runs").mkdir(exist_ok=True)
+    (_folder(tree) / "runs" / "costs.jsonl").write_text(costs, encoding="utf-8")  # land commits it
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys)
+    assert [e["change"] for e in readings[-1]["ejected"]] == [tree.name]
+    assert _git(tree, "status", "--porcelain") == "", "the record is in its commit"
+    shown = _git(tree, "show", f"HEAD:{rel}/runs/ejections.jsonl")
+    rows = [json.loads(x) for x in shown.splitlines()]
+    assert [(r["land"], r["cause"]) for r in rows] == [(1, "gate")], rows
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", rows[0]["at"]), rows
+    assert _git(tree, "show", f"HEAD:{rel}/runs/costs.jsonl") + "\n" == costs, "never rewritten"
+
+    (tmp_path / "stop").mkdir()
+    root, trees = _three(tmp_path / "stop")
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
+    moved = [n for n, c in readings[-1]["changes"].items() if c.get("pre")]
+    code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
+    assert code == 0 and out["state"] == "stopped", out
+    for tree in trees:
+        rel = f".sdlc/work/{tree.name}"
+        found = subprocess.run(
+            ["git", "-C", str(tree), "show", f"HEAD:{rel}/runs/ejections.jsonl"],
+            capture_output=True, encoding="utf-8",
+        ).stdout  # fmt: skip
+        if tree.name not in moved:
+            assert not found, "a change the train never moved has nothing to record"
+            continue
+        rows = [json.loads(x) for x in found.splitlines()]
+        assert [r["cause"] for r in rows] == ["stop"], (tree.name, rows)

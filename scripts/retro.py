@@ -854,6 +854,120 @@ def _share(part: int, n: int) -> float | None:
     return round(part / n, 2) if n else None
 
 
+def _cost_why(c: dict, waste: bool = False) -> str:
+    """Why a change's cost (174 R8), or with `waste` its waste (R9), isn't measured: no rows (by
+    hand, or a factory run that recorded none), rows from before purposes, or rows with no
+    dollars, which are never read as $0."""
+    if not c["rows"]:
+        factory = (c["rec"].get("metrics") or {}).get("mode") == "factory"
+        return "no agent runs recorded" if factory else "built by hand"
+    if waste and c["untagged"]:
+        return "runs recorded before purposes"
+    return "no cost reported"
+
+
+def _sums(rows: list[dict]) -> dict:
+    """Rows' dollars (a row with none adds nothing), minutes and count."""
+    return {
+        "usd": round(sum(r["usd"] or 0 for r in rows), 4),
+        "minutes": round(sum(r["minutes"] for r in rows), 4),
+        "runs": len(rows),
+    }
+
+
+def _cost(home: Path, changes: list[dict], dropped: list[dict]) -> dict:
+    """The Cost pillar's figures (174 R7–R9), from each closed change's own commit and each
+    dropped change's tip, through `factory_records.spend_rows()` alone: dollars and agent-minutes
+    per landed change by tier, over the landed changes with dollars; the waste share and its parts,
+    over the changes (landed and dropped) with dollars and no row from before purposes; spend by
+    role and model, every run; the rows with no dollars (`unknown`) and with no purpose
+    (`untagged`); and `changes`, each change's own, which `cmd_retro()` prints only with
+    `--metrics`. Each figure carries its `n` and coverage, and is null, never 0, with nothing to
+    divide by. Read-only."""
+    fr = sdlc.factory_records
+    read = []
+    for rec, gone in [*((c, False) for c in changes), *((d, True) for d in dropped)]:
+        spent = fr.spend_rows(_records_at(home, rec)[0], dropped=gone)
+        rows = spent["rows"]
+        known = [r["usd"] for r in rows if r["usd"] is not None]
+        read.append({
+            "rec": rec, "dropped": gone, "rows": rows, "untagged": spent["untagged"],
+            "unknown": spent["unknown"], "usd": round(sum(known), 4) if known else None,
+            "minutes": round(sum(r["minutes"] for r in rows), 4),
+        })  # fmt: skip
+    landed = [c for c in read if not c["dropped"]]
+    per_change: dict[str, dict] = {}
+    for c in landed:
+        if c["usd"] is not None:
+            per_change.setdefault(str(c["rec"]["tier"]), []).append(c)
+    for tier, group in per_change.items():
+        usd, minutes = [c["usd"] for c in group], [c["minutes"] for c in group]
+        per_change[tier] = {
+            "n": len(group),
+            "usd": {"median": round(statistics.median(usd), 4), "total": round(sum(usd), 4)},
+            "minutes": {
+                "median": round(statistics.median(minutes), 4), "total": round(sum(minutes), 4),
+            },
+        }  # fmt: skip
+
+    def weighed(c: dict) -> bool:
+        return c["usd"] is not None and not c["untagged"]
+
+    measured = [r for c in read if weighed(c) for r in c["rows"]]
+    parts = {p: _sums([r for r in measured if r["part"] == p]) for p in fr.PARTS}
+    lost = [r for r in measured if r["part"] in fr.WASTE]
+    usd, of_usd = _sums(lost)["usd"], _sums(measured)["usd"]
+    minutes, of_minutes = _sums(lost)["minutes"], _sums(measured)["minutes"]
+    waste = {
+        "usd": usd, "of_usd": of_usd, "share": _share(usd, of_usd),
+        "minutes": minutes, "of_minutes": of_minutes, "minutes_share": _share(minutes, of_minutes),
+        "n": sum(1 for c in read if weighed(c)), "parts": parts,
+        **_coverage(read, weighed, lambda c: _cost_why(c, waste=True)),
+    }  # fmt: skip
+
+    def split(key: str) -> dict:
+        names = sorted({r[key] for c in read for r in c["rows"]})
+        return {
+            name: {
+                **_sums([r for c in read for r in c["rows"] if r[key] == name]),
+                "changes": sum(1 for c in read if any(r[key] == name for r in c["rows"])),
+            }
+            for name in names
+        }
+
+    untagged = [r for c in read for r in c["rows"] if r["part"] == "untagged"]
+    return {
+        "per_change": per_change,
+        **_coverage(landed, lambda c: c["usd"] is not None, _cost_why),
+        "waste": waste,
+        "by_role": split("role"),
+        "by_model": split("model"),
+        "unknown": sum(c["unknown"] for c in read),
+        "untagged": {
+            "runs": len(untagged),
+            "usd": _sums(untagged)["usd"],
+            "changes": sum(1 for c in read if c["untagged"]),
+        },  # fmt: skip
+        "changes": [
+            {
+                "name": c["rec"]["name"],
+                "tier": c["rec"]["tier"],
+                "state": "dropped" if c["dropped"] else "landed",
+                "usd": c["usd"],
+                "minutes": c["minutes"],
+                "runs": len(c["rows"]),
+                "parts": {
+                    p: _sums([r for r in c["rows"] if r["part"] == p])["usd"]
+                    for p in fr.PARTS
+                    if any(r["part"] == p for r in c["rows"])
+                },
+            }
+            for c in read
+            if c["rows"]
+        ],  # fmt: skip
+    }
+
+
 def _autonomy(home: Path, changes: list[dict]) -> tuple[dict, list[str]]:
     """How often the window's factory changes needed the person, from the records each run left
     in its change's commit (`factory_records.autonomy_counts()`), and a problem for each decision
@@ -1452,10 +1566,11 @@ def _value_text(value: dict) -> str:
     return f"{mix_text}\n\n{ttu_text}\n\n{ft_text}"
 
 
-def _coverage_line(name: str, block: dict | None) -> str:
-    """One headline's *Coverage* line: the changes it rests on and why the rest are missing, in
-    italics and marked a hint under half; `not given` without its block. Every reason is a phrase
-    with no path (`metrics._word_text()`), whatever a hand-written trailer said."""
+def _coverage_line(name: str, block: dict | None, note: str = "") -> str:
+    """One headline's *Coverage* line: the changes it rests on and why the rest are missing, and
+    `note` after them, in italics and marked a hint under half; `not given` without its block.
+    Every reason is a phrase with no path (`metrics._word_text()`), whatever a hand-written
+    trailer said."""
     if block is None or "coverage" not in block:
         return f"- Coverage, {name}: not given."
     cov = block["coverage"]
@@ -1463,6 +1578,7 @@ def _coverage_line(name: str, block: dict | None) -> str:
     said = ", ".join(f"{sdlc.metrics._word_text(str(k))} {n}" for k, n in why)
     line = f"Coverage, {name}: {cov['measured']} of {cov['of']} changes"
     line += f"; missing: {said}" if said else ""
+    line += f"; {note}" if note else ""
     if cov["greyed"]:
         return f"- *{line}; a hint: under half the changes*"
     return f"- {line}."
@@ -1503,9 +1619,12 @@ def _underneath_text(under: dict) -> str:
     )
 
 
-def _coverage_lines(process: dict, spend: dict | None, metrics: dict | None) -> str:
+def _coverage_lines(
+    process: dict, spend: dict | None, metrics: dict | None, cost: dict | None = None
+) -> str:
     """The *Coverage* lines for the report's window, one a headline, then what changed underneath;
-    none with no change closed."""
+    none with no change closed. `cost` is `_cost()`'s: its waste line names the runs recorded
+    before purposes, which count in no share."""
     if not process["window"]["closed"]:
         return ""
     heads = [
@@ -1513,6 +1632,15 @@ def _coverage_lines(process: dict, spend: dict | None, metrics: dict | None) -> 
         ("the person's minutes", metrics), ("spend", spend),
     ]  # fmt: skip
     lines = [_coverage_line(name, block) for name, block in heads]
+    untagged = (cost or {}).get("untagged", {}).get("runs", 0)
+    lines += [
+        _coverage_line("cost per landed change", cost),
+        _coverage_line(
+            "waste share",
+            (cost or {}).get("waste"),
+            f"{untagged} runs untagged" if untagged else "",
+        ),
+    ]
     if process.get("underneath"):
         lines.append(_underneath_text(process["underneath"]))
     return "\n\n" + "\n".join(lines)
@@ -1524,13 +1652,14 @@ def render_report(
     spend: dict | None = None,
     value: dict | None = None,
     metrics: dict | None = None,
+    cost: dict | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
     block, "not counted" without it. `value` is `value_band()`'s, its sentences after the
     window's paragraph; nothing is added without it. `metrics` is `metrics_summary()`'s, whose
-    coverage line says "not given" without it. The coverage lines follow the window's sentence,
-    in `{{window}}`."""
+    coverage line says "not given" without it, as `cost`'s (`_cost()`) two do. The coverage lines
+    follow the window's sentence, in `{{window}}`."""
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -1541,7 +1670,7 @@ def render_report(
             f"From {w['since'] or 'the start of history'} to {w['today']}: {w['closed']} changes "
             f"closed ({tiers}), {w['dropped']} dropped. {w['measured']} of them were measured, and "
             f"the timed views rest on those alone; {w['unmeasured']} weren't."
-        ) + _coverage_lines(process, spend, metrics),
+        ) + _coverage_lines(process, spend, metrics, cost),
         "throughput": _table(
             ["Week of", "Tiers", "Closed"],
             [[r["week"], ", ".join(f"{t}: {n}" for t, n in r["tiers"].items()), r["total"]]
@@ -1620,7 +1749,8 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
     value = value_band(home, cfg, since, changes, bases, paths)
     metrics = metrics_summary(changes, cfg["metrics"]["stop_allowance"])
-    return render_report(template, process, _spend(home, cfg, changes, diffs), value, metrics)
+    cost = _cost(home, changes, dropped)
+    return render_report(template, process, _spend(home, cfg, changes, diffs), value, metrics, cost)
 
 
 def rankable_entries(home: Path, today: date) -> list[dict]:
@@ -1836,6 +1966,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "prose": prose_metrics(home, cfg),
         "architecture": _architecture(home, cfg, since, changes, kind, lookback),
         "spend": _spend(home, cfg, changes, diffs),
+        "cost": _cost(home, changes, dropped),
         "tests": _tests(home, cfg, lookback),
         **value,
     }
@@ -2326,6 +2457,7 @@ def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
         agents = out["spend"].get("agents")
         if isinstance(agents, dict):
             out["spend"]["agents"] = {k: v for k, v in agents.items() if k != "changes"}
+        out["cost"] = {k: v for k, v in out["cost"].items() if k != "changes"}
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 

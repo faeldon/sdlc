@@ -2009,13 +2009,14 @@ def _landing(tmp_path: Path, capsys, config: str | None = None) -> tuple[Path, P
     return root, tree
 
 
-def _replies(monkeypatch, reply: str) -> list[list[str]]:
-    """A stand-in for `claude -p` that replies `reply`; the argv of each call, in order."""
+def _replies(monkeypatch, reply: str, figures: dict | None = None) -> list[list[str]]:
+    """A stand-in for `claude -p` that replies `reply`, reporting `figures`; the argv of each
+    call, in order."""
     calls: list[list[str]] = []
 
     def fake(argv: list[str], cwd: Path):
         calls.append(argv)
-        return 0, [reply], None, None
+        return 0, [reply], None, figures
 
     monkeypatch.setattr(factory, "_claude", fake)
     return calls
@@ -2669,10 +2670,14 @@ def test_a_landing_records_each_step_it_takes(tmp_path, capsys, monkeypatch) -> 
     assert out["verdict"] == "PASS", out
     gate = _land_step(folder)
     assert (gate["step"], gate["round"], gate["moves"], gate["limit"]) == ("gate", 1, 0, 3)
-    _replies(monkeypatch, _verdict("behaviour"))
+    _replies(monkeypatch, _verdict("behaviour"), {"cost_usd": 0.1, "duration_ms": 60000})
     code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-review", "behaviour", None)
     assert code == 0, out
     assert _land_step(folder)["step"] == "review"
+    # 174 R1: a landing task's row names its landing round, not a build round.
+    row = json.loads((folder / "runs" / "costs.jsonl").read_text().splitlines()[-1])
+    assert (row["task"], row["purpose"], row["land"]) == ("land-review", "land", 1), row
+    assert "round" not in row
     code, out = _run(capsys, factory.landing.cmd_land_verdicts, tree, "001", True)
     assert out["next"] == "pass" and _land_step(folder)["step"] == "review", "pass writes nothing"
 

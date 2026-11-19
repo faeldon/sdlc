@@ -1126,6 +1126,26 @@ and `per_change`. `looks`: `seen` (answered `seen`), `checked` (any other answer
 overturned, and it is in `unmeasured`, as a factory stop that cleared with nothing changed is. The
 report doesn't show these yet.
 
+Its `cost` is what the window's factory runs cost, read from each closed change's own commit and
+each dropped change's tip (`runs/costs.jsonl`, and `runs/ejections.jsonl`, which a landing train
+writes in each change it puts back). Every row a factory run writes names what it was for, its
+`purpose`: `spec`, `build`, `rework` (a round after the run's first), `gate-fix`, `mend`,
+`rerun` (the same step for the same agent in the same round, again) or `land`. A row's dollars are
+the change in its session's running total, so a resumed builder counts once. Each row lands in one
+part: `untagged` (a row from before purposes, never waste), `dropped` (any row of a dropped
+change), `ejected` (a landing's run that ended by an ejection), or its purpose; `rework`,
+`gate-fix`, `mend`, `rerun`, `ejected` and `dropped` are waste. `per_change` gives each tier's
+`n`, and the median and total of `usd` and `minutes`, over the landed changes that report
+dollars. `waste` gives the waste's `usd` and `minutes`, what they are of, their `share` and
+`minutes_share` (null with nothing to divide by), `n`, and every part's `usd`, `minutes` and
+`runs`, over the changes, landed and dropped, with dollars and no untagged row. `by_role` and
+`by_model` split every run's dollars and minutes; `unknown` counts the rows with no dollars and
+`untagged` the rows with no purpose. A change with no dollars is in no figure, never a $0: `cost`
+and `waste` each carry `coverage` and `missing_because`, under `built by hand`, `no agent runs
+recorded`, `no cost reported`, and, for `waste`, `runs recorded before purposes`. `changes`, each
+change's own figures, is printed only with `--metrics`. The report's *Coverage* lines say how far
+`cost per landed change` and `waste share` rest; the figures themselves aren't in its body yet.
+
 `/sdlc:retro` makes five passes over that (cost, architecture, process, product, direction),
 turns every finding into a seed, an intent title or a reason for dropping it, and after one
 approval rewrites the direction doc (`docs.direction`), the product doc's outcome lines when there

@@ -2867,7 +2867,7 @@ def test_each_agent_run_records_its_figures_and_a_resume_is_not_counted_twice(
     assert rows == [{
         "session": session, "role": "builder", "model": "opus", "cost_usd": 0.5,
         "duration_ms": 1200, "turns": 3, "in": 10, "out": 5, "cache_create": 100,
-        "cache_read": 1000,
+        "cache_read": 1000, "purpose": "build", "task": "build", "round": 1,
     }]  # fmt: skip
     sessions = (folder / "runs" / "builder.sessions").read_text()
     assert sessions == session + "\n", "one id a line, as measuring reads it"
@@ -5990,3 +5990,83 @@ def test_a_restart_makes_a_look_line_history(tmp_path, capsys) -> None:
     cfg = factory.load_config(root)[0]
     signals, _ = factory.landing.land_signals(folder, root, "ESCALATE", cfg, pre={})
     assert "decisions still open or assumed in decisions.md" not in signals, signals
+
+
+# ---------------------------------------------------------------- what each run was for (174)
+
+
+@pytest.mark.portable
+def test_every_task_has_a_purpose() -> None:
+    """174 R1: every task `agent` runs has a purpose, one of `PURPOSES`, in either round."""
+    for task in factory.TASKS:
+        for rnd, first in ((1, 1), (2, 1), (None, 1)):
+            purpose = factory.purpose_of(task, "builder", rnd, first, None, [])
+            assert purpose in factory.PURPOSES, (task, rnd, purpose)
+    assert set(factory.WASTE) < set(factory.PURPOSES) | {"ejected", "dropped"}
+    assert set(factory.RERUNNABLE) <= set(factory.TASKS)
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize(
+    "task, role, rnd, first, purpose",
+    [
+        ("spec", "spec-writer", None, 1, "spec"), ("spec", "spec-writer", 3, 1, "spec"),
+        ("build", "builder", 1, 1, "build"), ("build", "builder", 2, 1, "rework"),
+        ("build", "builder", 3, 3, "build"), ("build", "builder", 4, 3, "rework"),
+        ("review", "code", 1, 1, "build"), ("review", "code", 2, 1, "rework"),
+        ("verify", "verifier", 1, 1, "build"), ("verify", "verifier", 2, 1, "rework"),
+        ("decided", "builder", 1, 1, "build"), ("decided", "builder", 2, 1, "rework"),
+        ("approve", "approver", 1, 1, "build"), ("approve", "approver", 3, 1, "build"),
+        ("rework", "builder", 1, 1, "rework"), ("fix", "builder", 1, 1, "gate-fix"),
+        ("mend", "code", 1, 1, "mend"), ("land-mend", "verifier", None, 1, "mend"),
+        ("resolve", "builder", None, 1, "land"), ("train-resolve", "resolver", None, 1, "land"),
+        ("land-fix", "builder", None, 1, "land"), ("land-review", "code", None, 1, "land"),
+        ("land-verify", "verifier", None, 1, "land"),
+    ],
+)  # fmt: skip
+def test_purpose_by_task_and_round(task, role, rnd, first, purpose) -> None:
+    """174 R2: the purpose from the task and the round, against the run's first round."""
+    land = 1 if task in factory.LAND_TASKS else None
+    assert factory.purpose_of(task, role, rnd, first, land, []) == purpose
+
+
+@pytest.mark.portable
+def test_a_second_run_of_a_step_is_a_rerun() -> None:
+    """174 R3: the same step for the same role in the same round (or landing) again is a rerun,
+    but a second gate fix, answer or conflict is work of its own; rows with no task never match."""
+    review = {"task": "review", "role": "code", "round": 2, "purpose": "rework"}
+    assert factory.purpose_of("review", "code", 2, 1, None, [review]) == "rerun"
+    assert factory.purpose_of("review", "test", 2, 1, None, [review]) == "rework", "another role"
+    assert factory.purpose_of("review", "code", 3, 1, None, [review]) == "rework", "another round"
+    fix = {"task": "fix", "role": "builder", "round": 2}
+    assert factory.purpose_of("fix", "builder", 2, 1, None, [fix]) == "gate-fix"
+    land = {"task": "land-review", "role": "code", "land": 1}
+    assert factory.purpose_of("land-review", "code", None, 1, 1, [land]) == "rerun"
+    assert factory.purpose_of("land-review", "code", None, 1, 2, [land]) == "land"
+    resolve = {"task": "resolve", "role": "builder", "land": 1}
+    assert factory.purpose_of("resolve", "builder", None, 1, 1, [resolve]) == "land"
+    old = {"role": "code", "session": "s"}
+    assert factory.purpose_of("review", "code", 1, 1, None, [old]) == "build"
+
+
+def test_a_row_names_its_purpose_task_and_round(tmp_path, capsys, claude, monkeypatch) -> None:
+    """174 R1: every row `agent` writes names its purpose, its task and its round; a review run
+    twice in a round is a rerun the second time. Still numbers and names only."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    monkeypatch.setenv("FAKE_CLAUDE_FIGURES", _figures(0.5))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    monkeypatch.setenv("FAKE_CLAUDE_REPLIES", json.dumps(["VERDICT: PASS"]))
+    for _ in range(2):
+        (folder / "reviews" / "round-1" / "code.md").unlink(missing_ok=True)
+        code, out = _run(capsys, factory.cmd_agent, root, "008", "review", "code", None)
+        assert code == 0, out
+    rows = [json.loads(x) for x in (folder / "runs" / "costs.jsonl").read_text().splitlines()]
+    said = [(r["task"], r["role"], r["round"], r["purpose"]) for r in rows]
+    assert said == [
+        ("build", "builder", 1, "build"), ("review", "code", 1, "build"),
+        ("review", "code", 1, "rerun"),
+    ], said  # fmt: skip
+    assert all("land" not in r for r in rows), "a loop task's row names no landing"
+    assert all(isinstance(v, int | float | str) for r in rows for v in r.values()), rows

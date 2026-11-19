@@ -415,9 +415,11 @@ def _drop(
     dropped: str = "2026-10-03",
     files: tuple[str, ...] = (),
     trailers: tuple[str, ...] = (),
+    texts: dict[str, str] | None = None,
 ) -> None:
     """What drop and close leave: the branch's commit, then `Drop NNN-slug`, a merge that keeps
-    main's tree and ends with what close measured, and the branch gone."""
+    main's tree and ends with what close measured, and the branch gone. `texts` are files the
+    branch's commit writes whole, `{rel: text}`."""
     nid, slug = name.split("-", 1)
     _git(root, "checkout", "-q", "-b", name)
     folder = root / ".sdlc" / "work" / name
@@ -430,6 +432,10 @@ def _drop(
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{name}\n", encoding="utf-8")
+    for rel, body in (texts or {}).items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
     when = f"{dropped}T12:00:00"
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", f"Record why {name} was dropped", when=when)
@@ -475,6 +481,8 @@ def test_retro_prints_each_change_s_numbers_only_when_asked(tmp_path: Path, caps
     assert "changes" not in lean["spend"] and full["spend"].pop("changes")
     assert "changes" not in lean["spend"]["agents"]
     full["spend"]["agents"].pop("changes")  # 146 R15: each change's own agent counts
+    assert "changes" not in lean["cost"] and "changes" in full["cost"]
+    full["cost"].pop("changes")  # 174 R7: each change's own cost
     assert full == lean, "the summaries, dropped_cost and bugs are the same either way"
 
 
@@ -3052,7 +3060,8 @@ def test_the_report_greys_a_thin_headline(tmp_path: Path) -> None:
     lines = {ln.split(":", 1)[0].strip("-* "): ln for ln in _window_section(text).splitlines()
              if "Coverage, " in ln}  # fmt: skip
     assert set(lines) == {"Coverage, lead time", "Coverage, escape rate",
-                          "Coverage, the person's minutes", "Coverage, spend"}  # fmt: skip
+                          "Coverage, the person's minutes", "Coverage, spend",
+                          "Coverage, cost per landed change", "Coverage, waste share"}  # fmt: skip
     lead, spend = lines["Coverage, lead time"], lines["Coverage, spend"]
     for thin in (lead, spend):
         assert thin.startswith("- *") and thin.endswith("a hint: under half the changes*"), thin
@@ -3223,3 +3232,209 @@ def test_a_hosts_retrospective_never_mentions_the_cases(tmp_path: Path, capsys) 
     for text in (out, report):
         for said in ("skills' cases", "Skill evals", "run-cases"):
             assert said.lower() not in text.lower(), said
+
+
+# ---------------------------------------------------------------- what a change cost (174)
+
+
+def _row(session: str, cost: float | None, purpose: str | None = "build", **kw) -> str:
+    """One `costs.jsonl` row as `factory.py agent` writes it: `cost` the session's running total."""
+    row = {
+        "session": session,
+        "role": kw.pop("role", "builder"),
+        "model": kw.pop("model", "opus"),
+        "duration_ms": kw.pop("ms", 60000),
+        **({"purpose": purpose} if purpose else {}),
+        **kw,
+    }
+    return json.dumps(row if cost is None else {**row, "cost_usd": cost})  # fmt: skip
+
+
+RESUMED = "\n".join([
+    _row("b", 0.5, task="build", round=1),
+    _row("b", 0.75, "rework", task="rework", round=1),
+    _row("b", None, "mend", task="mend", round=2),
+    _row("b", 1.25, "rework", task="rework", round=2),
+    _row("r1", 0.2, role="code", model="sonnet", task="review", round=1),
+    _row("r2", 0.3, "rework", role="code", model="sonnet", task="review", round=2),
+]) + "\n"  # fmt: skip
+
+
+@pytest.mark.portable
+def test_row_dollars_sum_to_the_changes_cost(tmp_path: Path) -> None:
+    """174 R5: each row's dollars are the change in its session's running total, so a builder
+    resumed three times is counted once; a row with no cost is unknown, and the next carries it."""
+    fr = sdlc.factory_records
+    folder = tmp_path / "008-reopen-drafts"
+    (folder / "runs").mkdir(parents=True)
+    (folder / "runs" / "costs.jsonl").write_text(RESUMED, encoding="utf-8")
+    spent = fr.spend_rows(_run({"runs/costs.jsonl": RESUMED})[0])
+    assert [r["usd"] for r in spent["rows"]] == [0.5, 0.25, None, 0.5, 0.2, 0.3]
+    assert spent["unknown"] == 1 and spent["untagged"] == 0
+    total = sum(r["usd"] or 0 for r in spent["rows"])
+    assert round(total, 4) == fr.cost(folder)["usd"] == 1.75
+    assert [r["minutes"] for r in spent["rows"]] == [1.0] * 6
+    assert {(r["role"], r["model"]) for r in spent["rows"]} == {
+        ("builder", "opus"), ("code", "sonnet"),
+    }  # fmt: skip
+    # A total that falls floors at 0, and never takes back what was counted.
+    fell = _row("b", 0.5) + "\n" + _row("b", 0.25) + "\n"
+    assert [r["usd"] for r in fr.spend_rows(_run({"runs/costs.jsonl": fell})[0])["rows"]] == [
+        0.5, 0.0,
+    ]  # fmt: skip
+    assert fr.spend_rows(_run({})[0]) == {"rows": [], "unknown": 0, "untagged": 0}
+
+
+@pytest.mark.portable
+def test_each_row_counts_in_one_part() -> None:
+    """174 R6: untagged first, then a dropped change's every row, then a landing's runs that ended
+    by an ejection, then the row's own purpose; the parts sum to the total, and an untagged row of
+    a dropped change is never waste."""
+    fr = sdlc.factory_records
+    costs = "\n".join([
+        _row("b", 1.0, task="build", round=1),
+        _row("g", 0.5, "gate-fix", task="fix", round=1),
+        _row("c", 0.25, "rerun", role="code", task="review", round=1),
+        _row("l1", 0.4, "land", role="code", task="land-review", land=1,
+             ended="2026-11-01T10:00:00Z"),
+        _row("l2", 0.6, "land", role="code", task="land-review", land=2,
+             ended="2026-11-02T10:00:00Z"),
+        _row("old", 0.1, None),
+    ]) + "\n"  # fmt: skip
+    ejected = json.dumps({"at": "2026-11-01T10:00:00Z", "land": 1, "cause": "gate"}) + "\n"
+    files = {"runs/costs.jsonl": costs, "runs/ejections.jsonl": ejected}
+    spent = fr.spend_rows(_run(files)[0])
+    parts = [r["part"] for r in spent["rows"]]
+    assert parts == ["build", "gate-fix", "rerun", "ejected", "land", "untagged"], parts
+    assert set(parts) <= set(fr.PARTS) and spent["untagged"] == 1
+    by_part = Counter()
+    for r in spent["rows"]:
+        by_part[r["part"]] += r["usd"]
+    assert round(sum(by_part.values()), 4) == 2.85
+    assert "untagged" not in fr.WASTE and {"ejected", "dropped"} <= set(fr.WASTE)
+    gone = fr.spend_rows(_run(files)[0], dropped=True)
+    assert [r["part"] for r in gone["rows"]] == ["dropped"] * 5 + ["untagged"]
+
+
+FACTORY = ("Sdlc-Mode: factory",)
+
+
+def _cost_window(root: Path) -> None:
+    """The window R7's test reads, each change's rows a minute each:
+
+    - 001 (tier 2, landed): build 1.00, review 0.50, rework 0.50 (its builder resumed to 1.50),
+      mend 0.25: 2.25 and 4 minutes, 0.75 and 2 minutes of it waste.
+    - 002 (tier 2, ejected once, then landed): build 1.00, the ejected landing's review 0.40, the
+      next landing's 0.60: 2.00 and 3 minutes, 0.40 and 1 minute waste.
+    - 003 (dropped): build 0.30, 1 minute, all of it waste.
+    - 004 (tier 1, by hand): no rows. 005 (tier 1, factory, before purposes): 0.80 untagged, and
+      an untagged row with no cost. 006 (tier 1, factory): no rows. 007 (tier 1, factory): one
+      row with no cost.
+    """
+    ejected = "2026-10-01T10:00:00Z"
+    _factory(root, "001-reopen-drafts", {"runs/costs.jsonl": "\n".join([
+        _row("b", 1.0, task="build", round=1),
+        _row("r", 0.5, role="code", model="sonnet", task="review", round=1),
+        _row("b", 1.5, "rework", task="rework", round=1),
+        _row("m", 0.25, "mend", role="code", model="sonnet", task="mend", round=2),
+    ]) + "\n"}, trailers=FACTORY)  # fmt: skip
+    _factory(root, "002-draft-titles", {"runs/costs.jsonl": "\n".join([
+        _row("b2", 1.0, task="build", round=1),
+        _row("l1", 0.4, "land", role="code", model="sonnet", task="land-review", land=1,
+             ended=ejected),
+        _row("l2", 0.6, "land", role="code", model="sonnet", task="land-review", land=2,
+             ended="2026-10-01T12:00:00Z"),
+    ]) + "\n", "runs/ejections.jsonl": json.dumps({"at": ejected, "land": 1, "cause": "gate"})
+        + "\n"}, trailers=FACTORY)  # fmt: skip
+    _drop(root, "003-draft-sync", trailers=FACTORY, texts={
+        ".sdlc/work/003-draft-sync/runs/costs.jsonl": _row("b3", 0.3, task="build", round=1) + "\n",
+    })  # fmt: skip
+    _close(root, "004-by-hand")
+    _close(root, "005-draft-dates", trailers=FACTORY, texts={
+        ".sdlc/work/005-draft-dates/runs/costs.jsonl": _row("e", 0.8, None) + "\n"
+        + _row("e2", None, None) + "\n",
+    })  # fmt: skip
+    _close(root, "006-draft-export", trailers=FACTORY)
+    _close(root, "007-draft-colours", trailers=FACTORY, texts={
+        ".sdlc/work/007-draft-colours/runs/costs.jsonl": _row("g", None, task="build", round=1)
+        + "\n",
+    })  # fmt: skip
+
+
+def test_retro_reports_cost_per_landed_change_and_waste(tmp_path: Path) -> None:
+    """174 R7, R8: dollars and minutes per landed change by tier, the waste share and its parts,
+    spend by role and model, each with its `n`; a change with no dollars is missing, never $0;
+    each change's own rows only with `--metrics`; and retro writes nothing."""
+    root = _repo(tmp_path)
+    _cost_window(root)
+    before = _state(root)
+    cost = _retro(root)["cost"]
+    assert _state(root) == before
+    assert cost["per_change"] == {
+        "2": {"n": 2, "usd": {"median": 2.125, "total": 4.25},
+              "minutes": {"median": 3.5, "total": 7.0}},
+        "1": {"n": 1, "usd": {"median": 0.8, "total": 0.8},
+              "minutes": {"median": 2.0, "total": 2.0}},
+    }  # fmt: skip
+    assert cost["coverage"] == {"measured": 3, "of": 6, "greyed": False}
+    assert cost["missing_because"] == {
+        "built by hand": 1, "no agent runs recorded": 1, "no cost reported": 1,
+    }  # fmt: skip
+    waste = cost["waste"]
+    assert (waste["usd"], waste["of_usd"], waste["share"]) == (1.45, 4.55, 0.32), waste
+    assert (waste["minutes"], waste["of_minutes"], waste["minutes_share"]) == (4.0, 8.0, 0.5)
+    assert waste["n"] == 3
+    assert waste["parts"]["rework"] == {"usd": 0.5, "minutes": 1.0, "runs": 1}
+    assert waste["parts"]["mend"] == {"usd": 0.25, "minutes": 1.0, "runs": 1}
+    assert waste["parts"]["ejected"] == {"usd": 0.4, "minutes": 1.0, "runs": 1}
+    assert waste["parts"]["dropped"] == {"usd": 0.3, "minutes": 1.0, "runs": 1}
+    assert waste["parts"]["build"] == {"usd": 2.5, "minutes": 3.0, "runs": 3}
+    assert waste["parts"]["land"] == {"usd": 0.6, "minutes": 1.0, "runs": 1}
+    assert waste["parts"]["untagged"] == {"usd": 0.0, "minutes": 0.0, "runs": 0}
+    assert waste["coverage"] == {"measured": 3, "of": 7, "greyed": True}, "under half"
+    assert waste["missing_because"] == {
+        "built by hand": 1, "runs recorded before purposes": 1, "no agent runs recorded": 1,
+        "no cost reported": 1,
+    }  # fmt: skip
+    assert cost["by_role"] == {
+        "builder": {"usd": 3.6, "minutes": 7.0, "runs": 7, "changes": 5},
+        "code": {"usd": 1.75, "minutes": 4.0, "runs": 4, "changes": 2},
+    }  # fmt: skip
+    assert cost["by_model"] == {
+        "opus": {"usd": 3.6, "minutes": 7.0, "runs": 7, "changes": 5},
+        "sonnet": {"usd": 1.75, "minutes": 4.0, "runs": 4, "changes": 2},
+    }  # fmt: skip
+    assert cost["unknown"] == 2
+    assert cost["untagged"] == {"runs": 2, "usd": 0.8, "changes": 1}
+    named = {c["name"]: c for c in cost["changes"]}
+    assert set(named) == {"001-reopen-drafts", "002-draft-titles", "003-draft-sync",
+                          "005-draft-dates", "007-draft-colours"}  # fmt: skip
+    assert named["001-reopen-drafts"]["usd"] == 2.25 and named["007-draft-colours"]["usd"] is None
+    assert named["003-draft-sync"]["state"] == "dropped"
+
+
+def test_retro_prints_each_changes_cost_only_with_metrics(tmp_path: Path, capsys) -> None:
+    """174 R7: `cost.changes` is each change's own figures, printed only with `--metrics`."""
+    root = _repo(tmp_path)
+    _cost_window(root)
+    sdlc.retro.cmd_retro(root)
+    lean = json.loads(capsys.readouterr().out)["cost"]
+    assert "changes" not in lean and lean["waste"]["n"] == 3
+    sdlc.retro.cmd_retro(root, metrics=True)
+    assert len(json.loads(capsys.readouterr().out)["cost"]["changes"]) == 5
+
+
+def test_the_report_says_how_far_cost_and_waste_rest(tmp_path: Path) -> None:
+    """174 R9: the report's *Coverage* lines say how far the cost per landed change and the waste
+    share rest, the waste line naming the runs recorded before purposes, greyed under half."""
+    root = _repo(tmp_path)
+    _cost_window(root)
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    lines = {line.split(":")[0].strip("-* "): line for line in text.splitlines()}
+    cost = lines["Coverage, cost per landed change"]
+    assert cost.startswith("- Coverage, cost per landed change: 3 of 6 changes; missing: "), cost
+    assert "built by hand 1" in cost and "no cost reported 1" in cost
+    waste = lines["Coverage, waste share"]
+    assert waste.startswith("- *Coverage, waste share: 3 of 7 changes"), waste
+    assert "runs recorded before purposes 1" in waste and "2 runs untagged" in waste, waste
+    assert waste.endswith("a hint: under half the changes*"), waste

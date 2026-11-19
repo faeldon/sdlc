@@ -126,6 +126,14 @@ TRAIN_RE = re.compile(r"^TRAIN: (\d+) of (\d+)\s*$")
 WAITS_RE = re.compile(r"^WAITS: (.+?)\s*$")
 LAND_TIMES = Path("runs") / "land-times.jsonl"
 COSTS = Path("runs") / "costs.jsonl"
+# What each row of `COSTS` was for, the parts that bought nothing, and the record of a train's
+# ejection or stop: `factory.py`'s, read by `spend_rows()`.
+PURPOSES = ("spec", "build", "rework", "gate-fix", "mend", "rerun", "land")
+WASTE = ("rework", "gate-fix", "mend", "rerun", "ejected", "dropped")
+EJECTIONS = Path("runs") / "ejections.jsonl"
+# The parts a row's spend lands in (`spend_rows()`), core's own: each purpose, what became of the
+# change (`ejected`, `dropped`), and a row from before purposes (`untagged`), which is never waste.
+PARTS = (*PURPOSES, "ejected", "dropped", "untagged")
 
 
 def opening(lines: list[str], regex: re.Pattern) -> tuple[int, re.Match] | None:
@@ -736,6 +744,52 @@ def timed_rows(text: str) -> list[tuple[datetime, datetime, str]]:
         if start and end and start <= end:
             out.append((start, end, str(row.get("role") or "")))
     return out
+
+
+def spend_rows(show, dropped: bool = False) -> dict:
+    """Each agent run's spend in a change's `runs/costs.jsonl`, read through `show`, in order:
+    `{"rows": [...], "unknown": n, "untagged": n}`, each row its `usd`, `minutes`, `role`,
+    `model`, `session` and `part` (one of `PARTS`).
+
+    A row's `cost_usd` is its session's running total across `--resume`, so its `usd` is that
+    total less the highest an earlier row of the session reported, floored at 0; a row with no
+    cost has `usd` None and counts in `unknown`, and the next that reports one carries its spend.
+    Its part, in this order: `untagged` with no purpose (never waste); `dropped` for every row of a
+    `dropped` change; `ejected` for a landing's run (`land`) that ended at or before an ejection
+    in `runs/ejections.jsonl`; else its purpose. A row naming no session is skipped, as `cost()`
+    skips it."""
+    ejections = [
+        t for t in (_run_time(r.get("at")) for r in _json_rows(show(EJECTIONS.as_posix()) or ""))
+        if t
+    ]  # fmt: skip
+    highest: dict[str, float] = {}
+    rows, unknown, untagged = [], 0, 0
+    for row in _json_rows(show(COSTS.as_posix()) or ""):
+        session = row.get("session")
+        if not isinstance(session, str):
+            continue
+        total = row.get("cost_usd")
+        if isinstance(total, int | float) and not isinstance(total, bool):
+            usd = round(max(0.0, total - highest.get(session, 0.0)), 6)
+            highest[session] = max(highest.get(session, 0.0), total)
+        else:
+            usd, unknown = None, unknown + 1
+        ended = _run_time(row.get("ended"))
+        if row.get("purpose") not in PURPOSES:
+            part, untagged = "untagged", untagged + 1
+        elif dropped:
+            part = "dropped"
+        elif row.get("land") is not None and ended and any(ended <= at for at in ejections):
+            part = "ejected"
+        else:
+            part = row["purpose"]
+        ms = row.get("duration_ms")
+        minutes = ms / 60000 if isinstance(ms, int | float) and not isinstance(ms, bool) else 0.0
+        rows.append({
+            "usd": usd, "minutes": round(minutes, 4), "role": str(row.get("role") or "unknown"),
+            "model": str(row.get("model") or "unknown"), "session": session, "part": part,
+        })  # fmt: skip
+    return {"rows": rows, "unknown": unknown, "untagged": untagged}
 
 
 def land_sinces(text: str) -> list[datetime]:

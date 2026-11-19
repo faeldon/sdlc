@@ -104,6 +104,7 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     out.update(exhausted=False, stuck=stuck, untestable=untestable)
     out.update({k: run[k] for k in ("depth", "sensitive", "why", "reviewers")})
     out["limit"] = first - 1 + run["rounds"]
+    out["first"] = first
     out["restart"] = restart
     out.update(upgraded=upgrade, upgrading=None, written=None)
     meta = factory.frontmatter((folder / "intent.md").read_text(encoding="utf-8"))

@@ -342,7 +342,11 @@ server, so a round's two start together.
   runs/spec-questions.md        the open questions it resolved and left, after the draft's ---
   runs/<agent>.sessions         each agent session's id, one a line, which close's measuring reads
   runs/costs.jsonl              each agent run's reported cost, duration and tokens, with its role
-                                and model
+                                and model, its task, its round (or landing round, land), and its
+                                purpose: spec, build, rework, gate-fix, mend, rerun or land
+  runs/ejections.jsonl          each time a landing train put the change back: when (at), its
+                                landing round (land) and why (cause: gate, review, refusal or
+                                stop), so the retrospective counts that landing's runs as waste
   runs/stopped.md               while the run is stopped: STOPPED: ship, mend or rerun, the NEXT:
                                 step in a few words, a longer sentence saying why, each
                                 - PROBLEM: as verdicts worded it, and, for a run that had
