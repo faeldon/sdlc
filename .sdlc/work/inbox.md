@@ -373,12 +373,6 @@ Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: t
 See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
 Raised 2026-11-18.
 
-## [2026-11-18-107] [idea] Hosts: the skills' cases are this repo's only, so nothing about them is in a host's scorecard, and a host with no factory gets the by-hand view: mode comparison and pipeline health say "no factory changes" rather than show zeros.
-
-Left undone by 159-retro-scorecard-doc, carried forward when it landed: Hosts: the skills' cases are this repo's only, so nothing about them is in a host's scorecard, and a host with no factory gets the by-hand view: mode comparison and pipeline health say "no factory changes" rather than show zeros.
-See .sdlc/work/159-retro-scorecard-doc/notes.md in its commit.
-Raised 2026-11-18.
-
 ## [2026-11-18-108] [nit] `heat()` ignores the `--root` blame edge when a file was created after the boundary.
 
 Raised by the code review of 161-function-heat, round 1: `.sdlc/function-heat.py:123`: `heat()` ignores the `--root` blame edge when a file was created after the boundary. A commit that only added the whole file counts as 1, which is correct, but a one-line comment would say so
@@ -585,3 +579,23 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 169-decisions-and-stops-counted (correctness)
+
+## [2026-11-19-21] [nit] `_none_reason()`'s `(\s+\S+=\S*)+$` backtracks badly on a hand-written `Sdlc-Coverage` with many `a=b=c` tokens; use `(\s+[^\s=]+=\S*)+$`
+
+Raised by the security review of 170-trust-band, round 1: scripts/retro.py:384: `_none_reason()`'s `(\s+\S+=\S*)+$` backtracks badly on a hand-written `Sdlc-Coverage` with many `a=b=c` tokens; use `(\s+[^\s=]+=\S*)+$`
+
+Theme: robustness
+Paths: scripts/retro.py
+Cost: S
+Value: med
+Raised by: 170-trust-band (contract)
+
+## [2026-11-19-22] [nit] `runtime_trailer()` puts no limit on how long a version or model value can be, so an odd transcript value makes a very long trailer line; capping each value (e.g.
+
+Raised by the security review of 170-trust-band, round 1: scripts/metrics.py:1700: `runtime_trailer()` puts no limit on how long a version or model value can be, so an odd transcript value makes a very long trailer line; capping each value (e.g. 64 chars) would bound it
+
+Theme: robustness
+Paths: scripts/metrics.py
+Cost: S
+Value: low
+Raised by: 170-trust-band (contract)
