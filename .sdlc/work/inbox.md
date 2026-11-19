@@ -332,26 +332,6 @@ Cost: S
 Value: low
 Raised by: 177-indicators-structured (correctness)
 
-## [2026-11-19-41] [nit] the factory paragraph's reflowed line runs past 100 columns (`` `surface` (`COMMAND_RE`), never running … ``); rewrap it like its neighbours
-
-Raised by the code review of 179-feature-inventory, round 1: AGENTS.md:253: the factory paragraph's reflowed line runs past 100 columns (`` `surface` (`COMMAND_RE`), never running … ``); rewrap it like its neighbours
-
-Theme: style
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 179-feature-inventory (correctness)
-
-## [2026-11-19-44] [nit] the docstring starts "179 R1", which cites the change by number; the rest of the repo's test docstrings name only the behaviour
-
-Raised by the test review of 179-feature-inventory, round 1: tests/test_metrics.py:495: the docstring starts "179 R1", which cites the change by number; the rest of the repo's test docstrings name only the behaviour
-
-Theme: style
-Paths: tests/test_metrics.py
-Cost: S
-Value: low
-Raised by: 179-feature-inventory (correctness)
-
 ## [2026-11-19-49] [nit] the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
 
 Raised by the test review of 181-landing-nits-and-fixes, round 1: tests/test_land.py: the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
@@ -371,16 +351,6 @@ Paths: tests/test_comment_health.py
 Cost: S
 Value: low
 Raised by: 178-comment-health (correctness)
-
-## [2026-11-19-52] [nit] the `# 183` comments on the two new `places` entries add nothing, since git blame already says where they came from.
-
-Raised by the code review of 183-spec-writer-nits-marker, round 1: tests/test_skills.py:1939: the `# 183` comments on the two new `places` entries add nothing, since git blame already says where they came from.
-
-Theme: style
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 183-spec-writer-nits-marker (correctness)
 
 ## [2026-11-19-55] [nit] R5's test covers the eject path only.
 
@@ -411,20 +381,6 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 180-workarounds-tagged (correctness)
-
-## [2026-11-19-62] [idea] One meaning per word across the docs, skills and messages
-
-Contributors meet the same words with several meanings: "gate" is both the host's check command and
-a person's approval at a WAIT (docs/FEATURES.md defines it as both); "check" is `[commands] check`
-and check.sh, the acceptance checks in checks.md, and `sdlc.py check`, the artifact audit; "build"
-is `stage: build`, the builder and its rounds, and `commands.build`, the slower gate. Proposed:
-"gate" means only the host's commands (the code already says so: factory.py gate, gate.md); a
-person's yes is an "approval" (the step, a WAIT); "acceptance checks" always keeps "acceptance";
-`sdlc.py check` is "the audit" in prose; `commands.build` is "the slow gate" in prose. No command,
-key or file is renamed (each would need a shim hosts must follow); only wording changes, and
-docs/FEATURES.md's term test fails on a doc that uses a word in a meaning it no longer has.
-Theme: docs
-Raised 2026-11-19.
 
 ## [2026-11-19-63] [idea] Pass report_figures() to render_report() as one dict
 
@@ -595,3 +551,23 @@ hours every day and ejects whatever lands then (it ejected 187 on 2026-11-20).
 Severity: med
 Paths: scripts/closing.py, tests/test_archive.py
 Theme: metrics
+
+## [2026-11-20-1] [nit] The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card).
+
+Raised by the code review of 187-one-word-one-meaning, round 1: .sdlc/work/187-one-word-one-meaning/decisions.md:34: The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card). D3 also has its reworded-docs list missing from the ledger line itself. Collapse the duplicates and keep D3's list under its line.
+
+Theme: docs
+Paths: .sdlc/work/187-one-word-one-meaning/decisions.md
+Cost: S
+Value: low
+Raised by: 187-one-word-one-meaning (correctness)
+
+## [2026-11-20-2] [nit] the phrasing fixture's `# fmt: skip` list packs several phrasings per line, which makes a future edit harder to read
+
+Raised by the test review of 187-one-word-one-meaning, round 1: tests/test_feature_map.py:273: the phrasing fixture's `# fmt: skip` list packs several phrasings per line, which makes a future edit harder to read
+
+Theme: tests
+Paths: tests/test_feature_map.py
+Cost: S
+Value: low
+Raised by: 187-one-word-one-meaning (correctness)
