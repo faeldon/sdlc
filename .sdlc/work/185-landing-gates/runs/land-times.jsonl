@@ -1,6 +1,0 @@
-{"step": "checks", "round": null, "seconds": 13.0, "since": "2026-11-19T14:09:12Z"}
-{"step": "ship", "round": null, "seconds": 2.0, "since": "2026-11-19T14:09:25Z"}
-{"step": "stack", "round": 1, "seconds": 164.0, "since": "2026-11-19T14:09:27Z"}
-{"step": "recheck", "round": 1, "seconds": 6.0, "since": "2026-11-19T14:12:21Z"}
-{"step": "review", "round": 1, "seconds": 77.0, "since": "2026-11-19T14:12:27Z"}
-{"step": "wait", "round": 1, "seconds": 22.0, "since": "2026-11-19T14:13:44Z"}

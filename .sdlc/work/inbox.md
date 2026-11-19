@@ -302,16 +302,6 @@ Cost: S
 Value: low
 Raised by: 173-style-paydown (correctness)
 
-## [2026-11-19-36] [nit] if `claude` returns no figures, no row is written, so a run that failed that way doesn't make the next try a `rerun`.
-
-Raised by the code review of 174-waste-tagged, round 1: plugins/factory/scripts/factory.py:4392: if `claude` returns no figures, no row is written, so a run that failed that way doesn't make the next try a `rerun`. This matches R3 as worded. A line in the `purpose_of()` docstring would say so.
-
-Theme: docs
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 174-waste-tagged (correctness)
-
 ## [2026-11-19-37] [nit] R1's `land` field is never asserted on a row written by `cmd_agent` for a landing task.
 
 Raised by the test review of 174-waste-tagged, round 1: tests/test_factory.py: R1's `land` field is never asserted on a row written by `cmd_agent` for a landing task. `purpose_of` is tested for it, but no test runs a `land-review` through `cmd_agent` and checks the row carries `land`.
@@ -374,26 +364,6 @@ Left undone by 181-landing-nits-and-fixes, carried forward when it landed: `test
 See .sdlc/work/181-landing-nits-and-fixes/notes.md in its commit.
 Raised 2026-11-19.
 
-## [2026-11-19-47] [nit] the refusal message is long and repeats `FIX: ALREADY MADE`
-
-Raised by the code review of 181-landing-nits-and-fixes, round 1: plugins/factory/scripts/landing.py:1420: the refusal message is long and repeats `FIX: ALREADY MADE`
-
-Theme: style
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: low
-Raised by: 181-landing-nits-and-fixes (correctness)
-
-## [2026-11-19-48] [nit] `taken_lines()` counts every indented line after a `Nits taken in:` line as part of it, so an indented sub-bullet that names an id to say it's left out would retire that nit.
-
-Raised by the security review of 181-landing-nits-and-fixes, round 1: plugins/factory/scripts/factory.py:4699: `taken_lines()` counts every indented line after a `Nits taken in:` line as part of it, so an indented sub-bullet that names an id to say it's left out would retire that nit. Only the change's own author can write this, and the intent asked for an explicit marker, so the risk is low. Stopping continuation at a line that starts a new `-` bullet would tighten it
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 181-landing-nits-and-fixes (contract)
-
 ## [2026-11-19-49] [nit] the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
 
 Raised by the test review of 181-landing-nits-and-fixes, round 1: tests/test_land.py: the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
@@ -454,40 +424,6 @@ Cost: S
 Value: low
 Raised by: 180-workarounds-tagged (correctness)
 
-## [2026-11-19-58] [idea] The landing runs acceptance checks as stacked without stopping, when the person's yes already covers them
-
-Today the train stops at `accept` every time a change has acceptance checks, because the loop never
-runs a host command and only a session can prompt; the person must rerun /sdlc-factory:land just to
-click through checks whose commands they approved word for word in the landing question.
-(1) At `train --begin`, record a hash of each change's `checks.md`; the loop runs `factory.py
-accept` itself as stacked while `checks.md` is unchanged since the yes, and stops as today when it
-changed. (2) When it changed (a landing fix or a conflict resolution), the approver judges the
-changed commands in a landing round (`CHECKS: HARMLESS` or `CHECKS: ESCALATE`, with why), and the
-script independently requires every changed command to use only an allow-list of read-only
-programs (grep, awk, test, cat, head, wc, git log/show/diff; no redirection); it runs unattended
-only when both agree, and otherwise stops with the approver's reasoning shown. Rejected: a sandbox,
-for its friction and footprint; a permission rule, which doesn't let the background loop run
-anything.
-Theme: landing
-Raised 2026-11-19.
-
-## [2026-11-19-61] [bug] The factory never runs commands.build
-
-A host can set `[commands] build` with `build_when`, a slower gate (integration tests, a full
-compile) that /sdlc:ship runs when a changed path matches, and always for a diff touching a
-`[review] sensitive` path. The factory runs only `commands.check`, through `_run_check()` in
-plugins/factory/scripts/factory.py: neither a build round's gate nor a landing train's gate at the
-tip runs `commands.build`, so a factory-built change that touches those paths lands without the
-slow gate the same change built by hand would get at ship. To see it: set `build = "false"` and
-`build_when = "."` in a host's config, build and land any change with the factory; it lands green
-(read from the code; not yet run). Expected: when the diff matches `build_when` or a sensitive
-path, the factory runs `commands.build` too, at least once before landing (the train's tip gate),
-recorded like the gate.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
-Theme: landing
-
 ## [2026-11-19-62] [idea] One meaning per word across the docs, skills and messages
 
 Contributors meet the same words with several meanings: "gate" is both the host's check command and
@@ -543,3 +479,65 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 184-scorecard-report (correctness)
+
+## [2026-11-19-68] [idea] Land skill description names the build at the tip and the approver's check judgement
+
+Left undone by 185-landing-gates, carried forward when it landed: The land skill's frontmatter `description` still lists what a landing runs without the build at the tip or the approver's judgement of changed checks; Step 3 and the steps list say both. A wording pass on the description alone, kept out of this change.
+See .sdlc/work/185-landing-gates/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-69] [idea] Landing records that an agent in the change's folder can't forge
+
+Left undone by 185-landing-gates, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:2180: gate/build/accept records are trusted by the hash they state, which any agent that can write in the change's folder can write; a script-side signature or a record kept outside the tree would close it
+See .sdlc/work/185-landing-gates/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-70] [nit] the edited factory paragraph has two lines over the file's ~100-column wrap (`change calls for it (build_due()).
+
+Raised by the code review of 185-landing-gates, round 1: AGENTS.md:263: the edited factory paragraph has two lines over the file's ~100-column wrap (`change calls for it (build_due()). Landing, in …`, and `approver and the read-only list together, …`). Re-wrap them.
+
+Theme: docs
+Paths: AGENTS.md
+Cost: S
+Value: low
+Raised by: 185-landing-gates (correctness)
+
+## [2026-11-19-71] [nit] `_train_begin` calls `_preflight` once per change at begin, as the spec says.
+
+Raised by the code review of 185-landing-gates, round 1: plugins/factory/scripts/landing.py:1900: `_train_begin` calls `_preflight` once per change at begin, as the spec says. Where preflight can't be read, it records `checks: []` with a hash. This is safe, since every check then counts as changed, but a one-line comment saying so would help.
+
+Theme: docs
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 185-landing-gates (correctness)
+
+## [2026-11-19-72] [nit] the docstring says a symlink out is refused "for a word naming an existing path"; say that a program walking the tree itself is not covered
+
+Raised by the security review of 185-landing-gates, round 1: plugins/factory/scripts/landing.py:842: the docstring says a symlink out is refused "for a word naming an existing path"; say that a program walking the tree itself is not covered
+
+Theme: docs
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 185-landing-gates (contract)
+
+## [2026-11-19-73] [nit] the R9 test drives a real train to `accept` and then edits `checks.md`.
+
+Raised by the test review of 185-landing-gates, round 1: tests/test_train.py:2307: the R9 test drives a real train to `accept` and then edits `checks.md`. The edited command is `rm -f bb.txt`, which is off the list, so it never exercises the case where an edit passes R5 but loses the approver's clearance.
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 185-landing-gates (correctness)
+
+## [2026-11-19-74] [nit] GNU grep accepts unambiguous long-option prefixes, so `--der`/`--dereference` passes the exact `GREP_FOLLOWS_LONG` match and still follows symlinks while recursing; refuse any `--` word that is a prefix of `--dereference-recursive` (length ≥ 3), or refuse every grep long option not on a short allow-list
+
+Raised by the security review of 185-landing-gates, round 2: plugins/factory/scripts/landing.py:876: GNU grep accepts unambiguous long-option prefixes, so `--der`/`--dereference` passes the exact `GREP_FOLLOWS_LONG` match and still follows symlinks while recursing; refuse any `--` word that is a prefix of `--dereference-recursive` (length ≥ 3), or refuse every grep long option not on a short allow-list
+
+Theme: robustness
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: med
+Raised by: 185-landing-gates (contract)
