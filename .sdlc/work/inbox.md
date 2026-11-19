@@ -13,32 +13,6 @@ reaches the remote. Raised 2026-10-24.
 Theme: landing
 Priority: low
 
-## [2026-10-25-1] [idea] A process map of the three loops, kept true by the gate
-
-A map of the change loop (intent → spec → plan → build → ship → close), the release loop (release
-→ publish) and the retro loop: each stage's gates, the `sdlc.py` calls, the checks (gate,
-acceptance checks, review passes) and what it writes. Mermaid in the repo (`docs/PROCESS.md`,
-rendered by GitHub), with a test that fails when a stage, skill or WAIT is missing from it; HTML
-or a diagramming tool can be generated from it later. Decide whether hosts get a copy from setup.
-Raised 2026-10-25.
-Theme: docs
-Priority: low
-
-## [2026-10-25-3] [idea] A feature map of what hosts get, with its vocabulary
-
-One docs/FEATURES.md that maps every user-facing feature a host gets — skills and commands, the
-stages and gates, the board and its components (columns, cards, step track, drawer), the tracking
-documents (intent, spec, plan, decisions, findings, notes, the register, the direction and product
-docs), the trailers and the retro's metrics — each with a one-line definition in the plugin's
-standard vocabulary (the glossary this entry first proposed: change, tier, stage, gate, WAIT, stop,
-seed, nit, finding, impact, landed, retro, direction, outcome, drift…), where it's specified, and
-which features it depends on, drawn as a Mermaid graph GitHub renders. A test fails when a term the
-code fixes (STAGES, tiers, impacts, nit costs and values, review passes, skills) has no entry. It
-gives the scorecard's S5 (feature inventory) its list, and the process map's (2026-10-25-1) labels
-its words. Raised 2026-10-25.
-Theme: docs
-Priority: low
-
 ## [2026-10-25-23] [idea] Setup refreshes template overrides the way it refreshes docs
 
 A host's override in `.sdlc/templates/` drifts from the plugin's template just as a host doc drifts
@@ -494,3 +468,43 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 177-indicators-structured (correctness)
+
+## [2026-11-19-41] [nit] the factory paragraph's reflowed line runs past 100 columns (`` `surface` (`COMMAND_RE`), never running … ``); rewrap it like its neighbours
+
+Raised by the code review of 179-feature-inventory, round 1: AGENTS.md:253: the factory paragraph's reflowed line runs past 100 columns (`` `surface` (`COMMAND_RE`), never running … ``); rewrap it like its neighbours
+
+Theme: style
+Paths: AGENTS.md
+Cost: S
+Value: low
+Raised by: 179-feature-inventory (correctness)
+
+## [2026-11-19-42] [nit] `_surface_at` calls `COMMAND_RE.findall` on `sdlc.py` at a tag that predates the `@command` registry.
+
+Raised by the code review of 179-feature-inventory, round 1: scripts/retro.py:1768: `_surface_at` calls `COMMAND_RE.findall` on `sdlc.py` at a tag that predates the `@command` registry. It returns `commands: None` only because `core` is empty, which is the intended behaviour, but it's implicit. A short comment would say so
+
+Theme: docs
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 179-feature-inventory (correctness)
+
+## [2026-11-19-43] [nit] `_retire` stops walking back once every item is decided, so `retire.windows` can be below `RETIRE_AFTER` while no candidate is hidden.
+
+Raised by the code review of 179-feature-inventory, round 1: scripts/retro.py:1715: `_retire` stops walking back once every item is decided, so `retire.windows` can be below `RETIRE_AFTER` while no candidate is hidden. REFERENCE.md could say `windows` is the windows actually read
+
+Theme: docs
+Paths: scripts/retro.py
+Cost: S
+Value: low
+Raised by: 179-feature-inventory (correctness)
+
+## [2026-11-19-44] [nit] the docstring starts "179 R1", which cites the change by number; the rest of the repo's test docstrings name only the behaviour
+
+Raised by the test review of 179-feature-inventory, round 1: tests/test_metrics.py:495: the docstring starts "179 R1", which cites the change by number; the rest of the repo's test docstrings name only the behaviour
+
+Theme: style
+Paths: tests/test_metrics.py
+Cost: S
+Value: low
+Raised by: 179-feature-inventory (correctness)
