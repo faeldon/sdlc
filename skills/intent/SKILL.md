@@ -158,9 +158,11 @@ earlier ships left open on the paths this change will touch:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py nits --touching <path> <path>
 ```
 
-Offer the ones of cost `S`, and any whose theme is the change's own, to take in. Each one taken is
-named by id in the **Approach** section; `/sdlc:ship` retires it once the diff fixes it. Nothing
-listed is the usual answer, and then there is nothing to say. Never take one in unasked.
+Offer the ones of cost `S`, and any whose theme is the change's own, to take in. Each one taken
+goes on a `Nits taken in: <id>, <id>` line in the **Approach**; an id written anywhere else is
+never taken in, so name a nit elsewhere only to say it isn't. `/sdlc:ship` retires each one taken
+once the diff fixes it. Nothing listed is the usual answer, and then there is nothing to say.
+Never take one in unasked.
 
 ## Step 3 — Draft and show it
 

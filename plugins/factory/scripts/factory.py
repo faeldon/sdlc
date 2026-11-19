@@ -245,6 +245,10 @@ STARTS = {
 }
 # First lines the loop reads, and each required change a reviewer lists below its verdict.
 VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
+# The land-fix builder's answer, any `FIX:` line, so two that disagree are no answer; only
+# `FIX_MADE` goes on, when the fix it was asked for already holds and it edited nothing.
+FIX_RE = re.compile(r"^FIX: (\S.*?)\s*$")
+FIX_MADE = "ALREADY MADE"
 DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
 CHANGE_RE = re.compile(r"^\s*- CHANGE:\s*(.+?)\s*$")
 # A problem in code the change didn't touch: filed for later, never reworked.
@@ -4754,9 +4758,26 @@ def first_sentence(text: str) -> str:
     return re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0] if text else ""
 
 
-# Where a change names the nits it takes in, as `/sdlc:intent` and `/sdlc:spec` write them: an id
-# anywhere else (a Problem citing what an earlier change took in) is never taken in.
+# Where a change names the nits it takes in, as `/sdlc:intent` and `/sdlc:spec` write them: a
+# `Nits taken in:` line (`TAKEN_RE`) in one of these sections. An id anywhere else, in these
+# sections' prose too (a nit named to say it is left to a later change), is never taken in.
 NIT_SECTIONS = (("intent.md", "## Approach"), ("spec.md", "## Requirements"))
+TAKEN_RE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?nits taken in:(?:\*\*)?(.*)$", re.IGNORECASE)
+
+
+def taken_lines(text: str) -> str:
+    """The text of `text`'s `Nits taken in:` lines after the colon, each with the lines that
+    continue it (indented, up to the next blank or unindented line)."""
+    found, inside = [], False
+    for line in text.splitlines():
+        if m := TAKEN_RE.match(line):
+            found.append(m.group(1))
+            inside = True
+        elif inside and line[:1].isspace() and line.strip():
+            found.append(line)
+        else:
+            inside = False
+    return "\n".join(found)
 
 
 def _section(text: str, heading: str) -> str:
@@ -4772,11 +4793,11 @@ def _section(text: str, heading: str) -> str:
 
 def named_nits(root: Path, folder: Path, text: str | None = None) -> list[str]:
     """The open `[nit]` entries of the checkout's register (or of the register `text`, as another
-    commit holds it) that the change names by id in `NIT_SECTIONS`, in the register's order: each
-    id matched whole, so `2026-11-17-1` is never named by `2026-11-17-11`. Never inferred from
-    the diff."""
+    commit holds it) that the change takes in, by id on a `Nits taken in:` line (`taken_lines()`)
+    in `NIT_SECTIONS`, in the register's order: each id matched whole, so `2026-11-17-1` is never
+    named by `2026-11-17-11`. Never inferred from the diff, nor from an id in prose."""
     named = "\n".join(
-        _section((folder / f).read_text(encoding="utf-8"), heading)
+        taken_lines(_section((folder / f).read_text(encoding="utf-8"), heading))
         for f, heading in NIT_SECTIONS if (folder / f).is_file()
     )  # fmt: skip
     register = root / INBOX

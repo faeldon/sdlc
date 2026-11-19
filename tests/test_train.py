@@ -1692,6 +1692,60 @@ def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> N
     assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 1
 
 
+MADE = "FIX: ALREADY MADE\n\naa.txt says it.\n\n## Evidence\n$ grep -c aa aa.txt\n1\nexit: 0\n"
+
+
+def _fix_stored(tmp_path: Path, capsys) -> tuple[Path, list[Path]]:
+    """Two changes, a train begun by the person with a fix stored for the first."""
+    tmp_path.mkdir()
+    root = _repo(tmp_path, check="true")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    (_folder(trees[0]) / "decisions.md").write_text(
+        "# Decisions\n\n- [x] R1 (person, fix): say aa\n", encoding="utf-8"
+    )
+    (_folder(trees[0]) / "runs").mkdir()
+    (_folder(trees[0]) / "runs" / "builder.sessions").write_text("s-1\n", encoding="utf-8")
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=["1", "2"], by="person", fix="1=R1"
+    )
+    assert code == 0, out
+    return root, trees
+
+
+@needs_uv
+def test_a_train_fix_already_made_goes_on_to_the_gate(tmp_path, capsys, monkeypatch) -> None:
+    """181 R8: a stored fix the builder reports already made, with its evidence and no edit,
+    goes on to the tip's gate and then the landing review at the run's full depth, with no stop:
+    through the driver's steps, and through `train --run`."""
+
+    def already(tree: Path) -> None:
+        folder = _folder(tree)
+        (folder / "build" / f"land-{factory.land_round(folder)}.md").write_text(MADE)
+
+    root, trees = _fix_stored(tmp_path / "driven", capsys)
+    readings = drive_train(factory, root, capsys, fix=already)
+    steps = [(r.get("next"), r.get("change")) for r in readings]
+    one = trees[0].name
+    after = steps[steps.index(("fix", one)) + 1 :]
+    nexts = [s[0] for s in after]
+    assert "gate" in nexts and nexts.index("gate") < after.index(("review", one)), "tip's gate"
+    review = next(r for r in readings if (r.get("next"), r.get("change")) == ("review", one))
+    assert set(review["verdict"]["missing"]) == set(factory.DEFAULTS["reviewers"]), review
+    assert readings[-1]["next"] == "done" and "stop" not in [s[0] for s in steps], steps
+    assert _git(root, "show", f"{_closes(root)[one]}:aa.txt") == "aa", "nothing edited"
+
+    root, trees = _fix_stored(tmp_path / "run", capsys)
+    calls = fake_claude(tmp_path / "run", monkeypatch, {
+        f"{trees[0].name}:builder": {"reply": MADE},
+    })  # fmt: skip
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done")) == (0, True), (out, err)
+    assert len(out["landed"]) == 2 and out["ejected"] == [], out
+    reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
+    assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
+    assert _git(root, "show", f"{_closes(root)[trees[0].name]}:aa.txt") == "aa"
+
+
 @needs_uv
 def test_a_fix_the_gate_needs_is_made_before_the_gate(tmp_path, capsys, monkeypatch) -> None:
     """154: a check that fails until change one's file says `AA`, and the person's fix that

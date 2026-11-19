@@ -1348,7 +1348,9 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     `build/land-<round>.ask.md`, for the builder (`agent --task
     land-fix`) and then every reviewer at the run's depth. `commit`: amend what the builder
     changed outside the folder (`fixed`) into the change's commit through `_amend_record()`, so
-    the new `HEAD` is gated again before its review."""
+    the new `HEAD` is gated again before its review. With nothing changed, it goes on only when the
+    builder's report answers `FIX: ALREADY MADE` with its evidence (`_not_already_made()`), and
+    amends nothing (`already_made`): the ask file stays, so the fix is still a signal (181)."""
     folder, refusal = factory.find_change(root, ident)
     if refusal:
         return factory.emit({"refusals": [refusal]}, 1)
@@ -1365,13 +1367,14 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
         rel = folder.relative_to(root).as_posix() + "/"
         fixed = [p for p in dirty if not p.startswith(rel)]
         if not fixed:
-            why = "the builder changed nothing outside the change's folder: nothing to commit"
-            return factory.emit({**out, "refusals": [why]}, 1)
-        if why := _amend_record(root, folder, also=fixed):
+            if refusals := _not_already_made(root, folder, n):
+                return factory.emit({**out, "refusals": refusals}, 1)
+        elif why := _amend_record(root, folder, also=fixed):
             return factory.emit({**out, "refusals": [why]}, 1)
         _train_fix(root, folder, done=True)
         head = factory._git(root, "rev-parse", "--short", "HEAD")
-        return factory.emit({**out, "round": n, "fixed": fixed, "head": head})
+        made = {"fixed": fixed, "already_made": not fixed, "head": head}
+        return factory.emit({**out, "round": n, **made})
     meta = factory.frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     if meta.get("stage") != "shipped":
         return factory.emit({**out, "refusals": [f"{folder.name} isn't shipped: land it first"]}, 1)
@@ -1395,6 +1398,28 @@ def cmd_land_fix(root: Path, ident: str, ask: str | None, commit: bool) -> int:
     path.write_text(words + "\n", encoding="utf-8", newline="\n")
     _train_fix(root, folder, opened=k)
     return factory.emit({**out, "round": k, "ask": path.relative_to(root).as_posix()})
+
+
+def _not_already_made(root: Path, folder: Path, n: int) -> list[str]:
+    """Why an empty fix in landing round `n` can't go on: no builder's report, no
+    `FIX: ALREADY MADE` answer `opening()` reads in it, or its `## Evidence` failing
+    `read_evidence()`; empty when the builder says, with its evidence, that the fix was already
+    made."""
+    path = folder / "build" / f"land-{n}.md"
+    rel = path.relative_to(root).as_posix()
+    nothing = "the builder changed nothing outside the change's folder: nothing to commit"
+    if not path.is_file():
+        return [f"{nothing}, and wrote no report ({rel})"]
+    text = path.read_text(encoding="utf-8")
+    found = factory.opening(text.splitlines(), factory.FIX_RE)
+    if found is None or found[1].group(1) != factory.FIX_MADE:
+        return [
+            f"{nothing}, and its report {rel} doesn't say `FIX: ALREADY MADE` first, or as the "
+            f"only answer it gives, with the commands that prove it under `{factory.EVIDENCE}`"
+        ]
+    if problems := factory.read_evidence(text, rel):
+        return [f"{nothing}, and its report says `FIX: ALREADY MADE` but:", *problems]
+    return []
 
 
 def _train_fix(root: Path, folder: Path, opened: int | None = None, done: bool = False) -> None:

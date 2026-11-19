@@ -482,6 +482,17 @@ def test_filled_text_is_never_read_as_a_placeholder(tmp_path, monkeypatch) -> No
 
 
 @needs_files
+def test_the_land_fix_prompt_tells_a_fix_already_made(tmp_path, monkeypatch) -> None:
+    """181 R10: the builder asked for a fix at landing is told what to do when it already holds:
+    edit nothing, answer `FIX: ALREADY MADE`, and prove it under `## Evidence`."""
+    case = Case(tmp_path, monkeypatch)
+    case.write("build/land-1.ask.md", "say it louder")
+    told = case.land("land-fix", "builder")
+    assert "already holds" in told and "edit nothing" in told, told
+    assert "FIX: ALREADY MADE" in told and "## Evidence" in told, told
+
+
+@needs_files
 @pytest.mark.portable
 def test_a_crlf_prompt_file_gives_the_same_prompt(tmp_path, monkeypatch) -> None:
     """164 R7: a prompt file checked out with CRLF line ends gives the prompt an LF one does."""

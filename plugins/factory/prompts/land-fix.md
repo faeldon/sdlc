@@ -7,4 +7,4 @@
 
 ## main
 
-The person asked for a fix while landing this change: ${ask} Make it, editing only what the fix needs; run no git command, then report what you changed, ending with ## Evidence.
+The person asked for a fix while landing this change: ${ask} Make it, editing only what the fix needs; run no git command, then report what you changed, ending with ## Evidence. If what it asks for already holds, edit nothing: give FIX: ALREADY MADE as your report's first line, and show the commands that prove it holds under ## Evidence.

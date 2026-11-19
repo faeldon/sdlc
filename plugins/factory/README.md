@@ -79,7 +79,7 @@ reviewing, and deciding whether to escalate.
   through `factory.py ask`, which writes nothing, and starts no agent.
 - **`/sdlc-factory:land [NNN…]`**, from the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and
-  the nits its intent or spec names by id retired, committed, and landed as a **train**, through
+  the nits on its intent's or spec's `Nits taken in:` line retired, committed, and landed as a **train**, through
   `sdlc`'s own `ship` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it,
   never a copy). The train stacks each change on the one before it, in order, on the base
   branch; a stack that conflicts goes to the `resolver`, an agent of its own given every change's
@@ -99,7 +99,9 @@ reviewing, and deciding whether to escalate.
   on; rerun `/sdlc-factory:land` to go on past it. `train --cancel` stops the loop after the step
   in flight, and one loop runs at a time, under a run lock in the git common dir. Answer
   `yes, with a fix` and name the change, and the fix goes to its own builder, is gated, and every
-  reviewer at its depth reads it before it lands. Your words for it go into the change's
+  reviewer at its depth reads it before it lands; a builder that finds it already made edits
+  nothing, answers `FIX: ALREADY MADE` with its evidence, and the train goes on to the gate and
+  that review all the same. Your words for it go into the change's
   `decisions.md` as a ticked `(person, fix)` line, never on a command line. A path changed after
   the last review round any other way is a signal, and the commit says so (`unreviewed=<n>`).
   One approval covers the batch, and it **passes itself when no change in it carries a risk

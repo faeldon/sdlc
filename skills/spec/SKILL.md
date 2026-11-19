@@ -73,9 +73,10 @@ spec worth writing. `config` says where each one is:
   ```
 
   Offer the ones of cost `S`, and any whose theme is the change's own, to take in, weighed by the
-  rubric in the process (`docs.process.guide`, then `docs.process`). Each one taken becomes a requirement naming its id;
-  `/sdlc:ship` retires it once the diff fixes it. Nothing listed is the usual answer. Never take
-  one in unasked.
+  rubric in the process (`docs.process.guide`, then `docs.process`). Each one taken becomes a
+  requirement, and its id goes on the section's `Nits taken in: <id>, <id>` line; an id written
+  anywhere else is never taken in. `/sdlc:ship` retires it once the diff fixes it. Nothing listed
+  is the usual answer. Never take one in unasked.
 
 ## Step 2 — Resolve the intent's open questions
 

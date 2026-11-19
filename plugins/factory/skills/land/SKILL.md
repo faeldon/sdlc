@@ -200,8 +200,9 @@ commands, and only one loop runs at a time (the run lock). The steps:
   `Theme:`, `Paths:`, `Cost:`, `Value:` and `Raised by:` lines (its `filed_nits`, ids from the
   same `next-entry` call; one already filed for the change is never filed twice), and ticks each
   assumed decision confirmed. Then it sets the approver's impact, runs `sdlc.py ship` (stamped
-  shipped, every path staged), adds a `Retire` line to `entries.md` for each open nit its intent
-  or spec names by id (its `retired_nits`), and commits with the change's composed message
+  shipped, every path staged), adds a `Retire` line to `entries.md` for each open nit on a
+  `Nits taken in:` line in its intent's Approach or spec's Requirements (its `retired_nits`; an
+  id anywhere else retires nothing), and commits with the change's composed message
   (`Retired nits:`, `Carried forward:`, `Dropped:` and `How to recover:` in it, as ship's). The
   change's branch never edits the register: close files what `entries.md` holds, and retires the
   seed, the bugs and the nits, in its `Close` commit.
@@ -231,6 +232,9 @@ commands, and only one loop runs at a time (the run lock). The steps:
   resolution, if it had one), before any gate: `land-fix <NNN> --ask R<n>`, the change's own
   builder (`agent <NNN> --task land-fix`), `land-fix <NNN> --commit`; the train then stacks what
   is above it on the fixed commit, so the tip's gate and every reviewer at the run's depth read it.
+  A builder that finds the fix already made edits nothing and answers `FIX: ALREADY MADE` with its
+  `## Evidence`: `--commit` then amends nothing (`already_made`) and the train goes on to the gate
+  and the review as for any fix; with no such answer, an empty fix still stops.
   A fix made while landing stays a signal for the change, so a later landing never passes it by
   itself.
 - **`close`**: `land <NNN> --close`, from the main checkout: its own commits rebased onto the base

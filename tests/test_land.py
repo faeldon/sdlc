@@ -306,7 +306,7 @@ def test_a_refused_step_lands_nothing_of_that_change(tmp_path, capsys) -> None:
     (folder / "decision.md").write_text("DECISION: READY\n\n- IMPACT: minor\n", encoding="utf-8")
     intent = folder / "intent.md"
     intent.write_text(
-        intent.read_text(encoding="utf-8") + "\nTakes in nit 2026-11-17-11.\n", encoding="utf-8"
+        intent.read_text(encoding="utf-8") + "\nNits taken in: 2026-11-17-11.\n", encoding="utf-8"
     )
     (folder / "findings.md").write_text(
         "# Findings\n\n> The review.\n\n## F1. [important] [correctness] Still open\n\n"
@@ -786,7 +786,7 @@ def test_a_landing_whose_commit_failed_commits_on_rerun(tmp_path, capsys) -> Non
     tree = _ready(root, "retried", "retried's one")
     intent = _folder(tree) / "intent.md"
     intent.write_text(
-        intent.read_text(encoding="utf-8") + "\nTakes in nit 2026-11-17-11.\n", encoding="utf-8"
+        intent.read_text(encoding="utf-8") + "\nNits taken in: 2026-11-17-11.\n", encoding="utf-8"
     )
     before = _git(tree, "rev-parse", "HEAD")
     _hook(root, "hook says no")
@@ -847,7 +847,7 @@ def test_a_landing_retires_the_nits_its_intent_names(tmp_path, capsys) -> None:
     )
     headings = [ln for ln in text.splitlines() if ln.startswith("## ")]
     assert headings[-1] == "## Approach", "what's appended below is in the Approach"
-    intent.write_text(text + "\nTakes in nit 2026-11-17-11.\n", encoding="utf-8")
+    intent.write_text(text + "\nNits taken in: 2026-11-17-11.\n", encoding="utf-8")
     code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
     assert (code, out["state"], out["retired_nits"]) == (0, "committed", ["2026-11-17-11"]), out
     message = _git(tree, "log", "-1", "--format=%B")
@@ -870,7 +870,7 @@ def test_a_landing_retires_the_nits_its_intent_names(tmp_path, capsys) -> None:
 
 def test_the_landings_nits_are_the_ones_sdlc_reads(tmp_path) -> None:
     """`named_nits()` reads the register with a copy of `sdlc.py`'s parsing: the same `[nit]`
-    entries, a fenced example never one."""
+    entries, a fenced example never one, every id on the `Nits taken in:` line (181 R3)."""
     sdlc = _load("sdlc_for_landing", ROOT / "scripts" / "sdlc.py")
     text = (
         REGISTER
@@ -881,7 +881,7 @@ def test_the_landings_nits_are_the_ones_sdlc_reads(tmp_path) -> None:
     folder = tmp_path / ".sdlc" / "work" / "001-tidy"
     folder.mkdir()
     ids = [e["id"] for e in sdlc.parse_entries(text)]
-    approach = "## Approach\n\n" + " ".join([*ids, "2026-11-17-13"]) + "\n"
+    approach = "## Approach\n\nNits taken in: " + " ".join([*ids, "2026-11-17-13"]) + "\n"
     (folder / "intent.md").write_text(approach, encoding="utf-8")
     theirs = [e["id"] for e in sdlc.parse_entries(text) if e["status"] == "nit"]
     assert (
@@ -889,6 +889,66 @@ def test_the_landings_nits_are_the_ones_sdlc_reads(tmp_path) -> None:
         == theirs
         == ["2026-11-17-1", "2026-11-17-11", "2026-11-17-2", "2026-11-17-14"]
     )
+
+
+@needs_uv
+def test_a_nit_named_but_not_taken_in_stays(tmp_path, capsys) -> None:
+    """181 R1: an Approach that names one open nit in prose, as left to a later change, and
+    another on a `Nits taken in:` line retires only the second; the first is still in the
+    register after close."""
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "a register")
+    tree = _ready(root, "picky", "picky's one")
+    intent = _folder(tree) / "intent.md"
+    intent.write_text(
+        intent.read_text(encoding="utf-8")
+        + "\n2026-11-17-1 is left to a later change; none of it is taken in here.\n"
+        + "\nNits taken in: 2026-11-17-11\n",
+        encoding="utf-8",
+    )
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
+    assert (code, out["state"], out["retired_nits"]) == (0, "committed", ["2026-11-17-11"]), out
+    held = _git(tree, "show", f"HEAD:.sdlc/work/{tree.name}/entries.md").splitlines()
+    assert [ln for ln in held if ln.startswith("Retire ")] == [
+        f"Retire 2026-11-17-11: taken in by {tree.name}"
+    ], held
+    code, out = _run(capsys, factory.landing.cmd_land_close, tree, "001")
+    assert code == 0 and "merge" in out["done"], out
+    register = (root / ".sdlc" / "work" / "inbox.md").read_text(encoding="utf-8")
+    assert "## [2026-11-17-1] [nit] A nit no change names" in register, "named, not taken in"
+    assert "2026-11-17-11" not in register
+
+
+def test_the_nits_taken_in_line_is_read_in_its_forms(tmp_path) -> None:
+    """181 R2: the marker as a plain line, a list item, a bold lead, in any case, and a wrapped
+    continuation; ids matched whole; a marker under `## Problem` retires nothing."""
+    (tmp_path / ".sdlc" / "work").mkdir(parents=True)
+    (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
+    folder = tmp_path / ".sdlc" / "work" / "001-tidy"
+    folder.mkdir()
+    intent = folder / "intent.md"
+
+    def named(approach: str, problem: str = "") -> list[str]:
+        intent.write_text(f"## Problem\n\n{problem}\n\n## Approach\n\n{approach}\n")
+        return factory.named_nits(tmp_path, folder)
+
+    assert named("Nits taken in: 2026-11-17-11") == ["2026-11-17-11"]
+    assert named("- Nits taken in: 2026-11-17-2") == ["2026-11-17-2"]
+    assert named("* **Nits taken in:** 2026-11-17-2") == ["2026-11-17-2"]
+    assert named("**nits TAKEN in:** 2026-11-17-2") == ["2026-11-17-2"]
+    wrapped = "- Nits taken in: 2026-11-17-11,\n  2026-11-17-2\n2026-11-17-1 is not\n"
+    assert named(wrapped) == ["2026-11-17-11", "2026-11-17-2"], "up to an unindented line"
+    assert named("Nits taken in: 2026-11-17-11\n\n  2026-11-17-1") == ["2026-11-17-11"], "blank"
+    assert named("Nits taken in: 2026-11-17-11") == ["2026-11-17-11"], "never -1 by -11"
+    assert named("2026-11-17-11 and 2026-11-17-2, in prose") == []
+    assert named("", problem="Nits taken in: 2026-11-17-11") == [], "the Problem retires nothing"
+    (folder / "spec.md").write_text("## Requirements\n\nR1. Nits taken in: 2026-11-17-1\n")
+    assert named("") == [], "a marker mid-line is no marker"
+    (folder / "spec.md").write_text("## Requirements\n\nNits taken in: 2026-11-17-1\n")
+    assert named("") == ["2026-11-17-1"], "the spec's Requirements"
 
 
 @needs_uv
@@ -1830,7 +1890,7 @@ def _resolving(tmp_path: Path, capsys, edit: tuple[str, str]) -> tuple[Path, Pat
     intent = _folder(tree) / "intent.md"
     text = intent.read_text(encoding="utf-8").replace("idea:", "idea: 2026-11-17-6", 1)
     text = text.replace("---\n", "---\nfixes: [2026-11-17-7]\n", 1)
-    intent.write_text(text + "\nTakes in nit 2026-11-17-5.\n", encoding="utf-8")
+    intent.write_text(text + "\nNits taken in: 2026-11-17-5.\n", encoding="utf-8")
     assert factory.frontmatter(text).get("idea") == "2026-11-17-6", text
     code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
     assert (code, out["state"]) == (0, "committed"), out
@@ -2439,7 +2499,7 @@ def test_a_fix_asked_at_landing_is_built_gated_and_reviewed_at_depth(
 
     before = _git(tree, "rev-parse", "HEAD")
     code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
-    assert (code, out["fixed"]) == (0, ["README.md"]), out
+    assert (code, out["fixed"], out["already_made"]) == (0, ["README.md"], False), out
     assert _git(tree, "rev-parse", "HEAD") != before and _git(tree, "status", "--porcelain") == ""
     assert _git(tree, "show", "HEAD:README.md").startswith("fixed's one\nTWO")
     assert "Sdlc-Landed: by=person" in _git(tree, "log", "-1", "--format=%B"), "one commit"
@@ -2494,7 +2554,78 @@ def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
     assert (code, out["round"]) == (0, 1), "a round no reviewer has answered takes the fix (154)"
     code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
     assert code == 1 and "changed nothing" in out["refusals"][0], out
+    assert "wrote no report" in out["refusals"][0], "181 R6: no report"
     assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"
+    # 181 R6: a report that claims nothing, claims with lines that disagree, or shows no evidence.
+    report = folder / "build" / "land-1.md"
+    for text, said in (
+        ("Done.\n\n## Evidence\n$ true\nexit: 0\n", "doesn't say `FIX: ALREADY MADE`"),
+        (f"Hm.\n{ALREADY}\nFIX: NOT MADE\n\n## Evidence\n$ true\nexit: 0\n", "first"),
+        (f"{ALREADY}\n\nIt holds.\n", "## Evidence"),
+        (f"{ALREADY}\n\n## Evidence\n$ grep -c TWO README.md\n", "has no `exit:` line"),
+    ):
+        report.write_text(text, encoding="utf-8")
+        code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
+        assert code == 1 and "changed nothing" in out["refusals"][0], out
+        assert said in " ".join(out["refusals"]), (text, out)
+        assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"
+
+
+ALREADY = "FIX: ALREADY MADE"
+MADE = (
+    f"{ALREADY}\n\nREADME.md already says it.\n\n## Evidence\n$ grep -c one README.md\n1\nexit: 0\n"
+)
+
+
+def _already_made(root: Path, capsys, slug: str, by: str = "person") -> tuple[Path, Path, dict]:
+    """A change landed in a train of one `by`, a fix stored and asked (`land-1`), and the
+    builder's report that the fix is already made, with its evidence and no edit."""
+    tree = _ready(root, slug, f"{slug}'s one")
+    folder = _folder(tree)
+    _asked(folder)
+    code, out = _run(
+        capsys, factory.landing.cmd_train, root, begin=[tree.name], by="person", fix="1=R1"
+    )
+    assert code == 0 and out["state"] == "begun", out
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", by)
+    assert (code, out["state"]) == (0, "committed"), out
+    code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", "R1", False)
+    assert (code, out["round"]) == (0, 1), out
+    (folder / "build" / "land-1.md").write_text(MADE, encoding="utf-8")
+    return tree, folder, out
+
+
+@needs_uv
+def test_a_fix_already_made_goes_on_without_a_commit(tmp_path, capsys) -> None:
+    """181 R5: nothing edited, and the builder's report answers `FIX: ALREADY MADE` with its
+    evidence: `--commit` exits 0 with nothing fixed, leaves `HEAD` as it was, and marks the
+    train's stored fix done."""
+    root = _repo(tmp_path)
+    tree, folder, _ = _already_made(root, capsys, "made")
+    head = _git(tree, "rev-parse", "HEAD")
+    assert not factory.read_train(root)["fix"].get("done")
+    code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
+    assert code == 0, out
+    assert (out["fixed"], out["already_made"], out["round"]) == ([], True, 1), out
+    assert out["head"] == _git(tree, "rev-parse", "--short", "HEAD")
+    assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"
+    assert factory.read_train(root)["fix"]["done"] is True
+
+
+@needs_uv
+def test_a_fix_already_made_is_still_a_signal(tmp_path, capsys) -> None:
+    """181 R9: a fix already made is a fix made while landing: a signal, `fixed` in the landing
+    verdict, and `land --close` refuses a commit that landed by=auto."""
+    root = _repo(tmp_path)
+    tree, folder, _ = _already_made(root, capsys, "still", by="auto")
+    code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
+    assert (code, out["already_made"]) == (0, True), out
+    cfg = factory.load_config(tree)[0]
+    said = "a fix was made while landing"
+    assert said in factory.landing.land_signals(folder, tree, "READY", cfg)[0]
+    assert factory.landing.land_verdict(tree, folder, cfg, 1)["fixed"] is True
+    code, out = _run(capsys, factory.landing.cmd_land_close, tree, "001")
+    assert code == 1 and said in " ".join(out["refusals"]), out
 
 
 @needs_uv
@@ -2806,7 +2937,7 @@ def _landed_holding(tmp_path: Path, capsys) -> tuple[Path, Path]:
     )
     _nit(folder, "code", TERSE)
     intent = folder / "intent.md"
-    intent.write_text(intent.read_text(encoding="utf-8") + "\nTakes in nit 2026-11-17-11.\n")
+    intent.write_text(intent.read_text(encoding="utf-8") + "\nNits taken in: 2026-11-17-11.\n")
     code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "person")
     assert (code, out["state"]) == (0, "committed"), out
     return root, tree

@@ -36,8 +36,8 @@ a single run does, from its entries first.
 
 ## Step 2
 
-A nit in a group is taken in: a Tier 1 names it in its Approach, a Tier 2 leaves it for its spec
-to weigh. List no other nits; the batch took what it names.
+A nit in a group is taken in: a Tier 1 puts its id on a `Nits taken in:` line in its Approach, a
+Tier 2 leaves it for its spec to weigh. List no other nits; the batch took what it names.
 
 ## Step 3
 

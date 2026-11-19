@@ -1900,3 +1900,21 @@ def test_the_build_skill_handles_every_step_verdicts_names() -> None:
     skill = (FACTORY / "skills" / "build" / "SKILL.md").read_text(encoding="utf-8")
     missing = sorted(s for s in steps if f"- **`{s}`**" not in skill)
     assert missing == [], f"steps verdicts names with no bullet in the build skill: {missing}"
+
+
+def test_every_place_that_takes_a_nit_in_names_the_marker() -> None:
+    """181 R4: a landing retires only the nits on a `Nits taken in:` line, so every word that
+    tells a person or an agent how to take a nit in names that line."""
+    places = [
+        ROOT / "skills" / "intent" / "SKILL.md",
+        ROOT / "skills" / "intent" / "batch.md",
+        ROOT / "skills" / "spec" / "SKILL.md",
+        FACTORY / "skills" / "land" / "SKILL.md",
+        FACTORY / "README.md",
+    ]
+    missing = [
+        p.relative_to(ROOT).as_posix()
+        for p in places
+        if "Nits taken in:" not in p.read_text(encoding="utf-8")
+    ]
+    assert not missing, missing
