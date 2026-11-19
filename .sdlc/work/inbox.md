@@ -561,3 +561,17 @@ recorded like the gate.
 Severity: med
 Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
 Theme: landing
+
+## [2026-11-19-62] [idea] One meaning per word across the docs, skills and messages
+
+Contributors meet the same words with several meanings: "gate" is both the host's check command and
+a person's approval at a WAIT (docs/FEATURES.md defines it as both); "check" is `[commands] check`
+and check.sh, the acceptance checks in checks.md, and `sdlc.py check`, the artifact audit; "build"
+is `stage: build`, the builder and its rounds, and `commands.build`, the slower gate. Proposed:
+"gate" means only the host's commands (the code already says so: factory.py gate, gate.md); a
+person's yes is an "approval" (the step, a WAIT); "acceptance checks" always keeps "acceptance";
+`sdlc.py check` is "the audit" in prose; `commands.build` is "the slow gate" in prose. No command,
+key or file is renamed (each would need a shim hosts must follow); only wording changes, and
+docs/FEATURES.md's term test fails on a doc that uses a word in a meaning it no longer has.
+Theme: docs
+Raised 2026-11-19.
