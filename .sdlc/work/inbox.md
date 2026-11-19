@@ -236,15 +236,6 @@ Cost: S
 Value: low
 Raised by: 163-factory-records-reader (correctness)
 
-## [2026-11-19-12] [bug] A landing retires every nit its Approach or Requirements names, taken in or not
-
-A landing retires every nit its intent's Approach or spec's Requirements names by id, even one named to say it isn't taken: named_nits() (plugins/factory/scripts/factory.py, NIT_SECTIONS) matches any whole id in those sections. 165's Approach listed its wave plan and retired 2026-11-19-1, -5 and -6; 166's said "-68 … left to R3, none is taken in here" and retired 2026-11-18-68, all as "taken in". Expected: only nits the change says it takes in are retired, e.g. a "Nits taken in:" line, or ids the diff's review confirms. To see it: name an open nit's id in a Tier 1 intent's Approach as not taken, land the change, and the Close commit retires it.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
-Introduced by: 097-landing-fixes
-Theme: landing
-
 ## [2026-11-19-13] [idea] Break retro throughput down by work class
 
 Left undone by 168-work-mix-and-follow-through, carried forward when it landed: `docs/RETRO-SCORECARD.md` *Supporting: throughput* still says "by impact S2": the work classes now exist, but throughput isn't broken down by them. A later change (S14's report, or its own) can add `process.throughput` by `work` class.
@@ -356,21 +347,6 @@ Paths: scripts/closing.py
 Cost: S
 Value: low
 Raised by: 172-close-in-steps (contract)
-
-## [2026-11-19-30] [bug] A landing fix the stack already satisfied stops the train
-
-With "yes, with a fix", the train's fix step (land-fix, plugins/factory/scripts/landing.py: "the
-builder changed nothing outside the change's folder: nothing to commit") stops when the builder
-finds nothing to change, and a rerun repeats the same stop: the only way on is train --stop and a
-fresh landing without the fix. Seen landing 173 with fix R1 (rewrap AGENTS.md:74): the stack
-conflicted on AGENTS.md, the resolver's resolution rewrapped the line, and the builder rightly made
-no edit. Expected: a fix the builder reports as already satisfied, with its evidence, is recorded
-as such and the train goes on to the gate and the landing review.
-
-Severity: low
-Paths: plugins/factory/scripts/landing.py
-Introduced by: 104-landing-follows-main
-Theme: landing
 
 ## [2026-11-19-27] [idea] Rewrap the remaining factory agents' prose lines past 100 columns
 
@@ -508,3 +484,45 @@ Paths: tests/test_metrics.py
 Cost: S
 Value: low
 Raised by: 179-feature-inventory (correctness)
+
+## [2026-11-19-45] [idea] Board drawer focus test is flaky under a loaded gate
+
+Left undone by 181-landing-nits-and-fixes, carried forward when it landed: `tests/test_board_browser.py::test_the_drawer_holds_focus_and_returns_it_to_its_card` failed in 181's round-1 gate with no error in the record's tail, and passed when rerun alone: likely flaky under a loaded gate. Not this change's code.
+See .sdlc/work/181-landing-nits-and-fixes/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-46] [idea] Adoption tests fail the gate when offline; skip or cache uv's deps
+
+Left undone by 181-landing-nits-and-fixes, carried forward when it landed: `tests/test_adoption.py` needs network (uv fetches PyPI deps for `uv run --script`); a gate with no DNS fails two of its tests. A skip or cache when offline would keep the gate about the code.
+See .sdlc/work/181-landing-nits-and-fixes/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-47] [nit] the refusal message is long and repeats `FIX: ALREADY MADE`
+
+Raised by the code review of 181-landing-nits-and-fixes, round 1: plugins/factory/scripts/landing.py:1420: the refusal message is long and repeats `FIX: ALREADY MADE`
+
+Theme: style
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 181-landing-nits-and-fixes (correctness)
+
+## [2026-11-19-48] [nit] `taken_lines()` counts every indented line after a `Nits taken in:` line as part of it, so an indented sub-bullet that names an id to say it's left out would retire that nit.
+
+Raised by the security review of 181-landing-nits-and-fixes, round 1: plugins/factory/scripts/factory.py:4699: `taken_lines()` counts every indented line after a `Nits taken in:` line as part of it, so an indented sub-bullet that names an id to say it's left out would retire that nit. Only the change's own author can write this, and the intent asked for an explicit marker, so the risk is low. Stopping continuation at a line that starts a new `-` bullet would tighten it
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 181-landing-nits-and-fixes (contract)
+
+## [2026-11-19-49] [nit] the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
+
+Raised by the test review of 181-landing-nits-and-fixes, round 1: tests/test_land.py: the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
+
+Theme: tests
+Paths: tests/test_land.py
+Cost: S
+Value: low
+Raised by: 181-landing-nits-and-fixes (correctness)
