@@ -1,8 +1,9 @@
 # The gate off the author's machine. Linux runs what ./check.sh runs but `claude plugin validate`,
 # whose CLI no runner has, with Chromium installed so the `browser` tests run rather than skip;
-# Windows runs the tests marked `portable`, the ones that must pass there too. Nothing here pushes: it runs on the branch pushes close, release and /sdlc:publish make
-# (not on the tag pushed after, which names a commit already checked), or by hand on a branch
-# someone pushed (`gh workflow run check.yml --ref <branch>`).
+# Windows runs the tests marked `portable`, the ones that must pass there too. Nothing here pushes:
+# it runs on the branch pushes close, release and /sdlc:publish make (not on the tag pushed after,
+# which names a commit already checked), or by hand on a branch someone pushed
+# (`gh workflow run check.yml --ref <branch>`).
 name: check
 
 on:

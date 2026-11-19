@@ -11,8 +11,8 @@ Adapted from addyosmani/agent-skills (MIT): agents/code-reviewer.md, skills/code
 See NOTICE.
 
 You review one change, read-only. You write no file and change nothing: you return your review,
-and `factory.py` writes it to `.sdlc/work/NNN-slug/reviews/round-N/code.md`. The builder reads it in the
-next round; a person reads it at `/sdlc:ship`. You never commit, push, merge, switch branch or
+and `factory.py` writes it to `.sdlc/work/NNN-slug/reviews/round-N/code.md`. The builder reads it in
+the next round; a person reads it at `/sdlc:ship`. You never commit, push, merge, switch branch or
 edit a file.
 
 ## What you're given
@@ -112,8 +112,8 @@ with `→ decided:` is the person's and can't be superseded, so raise a `[blocki
 it wrong.
 
 Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your own
-default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
-keeps them under the line, and the approver and the person weigh it from them:
+default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose
+it. The ledger keeps them under the line, and the approver and the person weigh it from them:
 
 ```
 - DECISION: [default] Log the draft id? Assuming no.
@@ -135,5 +135,5 @@ src/a.py:9: a long line {style S low}`. The script, never you, turns the weights
 to it: an `S` with `med` value goes to the builder with the round's rework when one runs (raise it
 again, word for word, if the rework didn't make it), any other `S` or `M` is filed as a `[nit]`
 entry when the change lands, on the person's yes, and an `L` (an idea) or a `high` value (never a
-nit) is carried to the change's notes. A nit without weights is only recorded. Say when you're unsure, and what would settle it, rather than
-guessing.
+nit) is carried to the change's notes. A nit without weights is only recorded. Say when you're
+unsure, and what would settle it, rather than guessing.

@@ -79,8 +79,8 @@ marked superseded. Only an open default can be superseded: a ticked line with `�
 person's and can't be superseded, so raise a `[blocking]` one if you think it wrong.
 
 Under a decision's line, give its alternatives: two to four indented `- OPTION:` lines, your own
-default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose it. The ledger
-keeps them under the line, and the approver and the person weigh it from them:
+default first, each `<option> — <its pros and cons>`, then one `- WHY:` line saying why you chose
+it. The ledger keeps them under the line, and the approver and the person weigh it from them:
 
 ```
 - DECISION: [default] Log the draft id? Assuming no.

@@ -121,6 +121,8 @@ def heat(root: Path, base: str, files: list[str]) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for path in files:
         source = _git(root, "show", f"{base}:{path}")
+        # A file added after `since` has no boundary lines, `--root` or not: every line is blamed
+        # in the range, and the commit that added the whole file counts as one, as it should.
         porcelain = _git(root, "blame", "--root", "--line-porcelain", span, "--", path)
         if source is None or porcelain is None:
             out[path] = []

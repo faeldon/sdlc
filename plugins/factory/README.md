@@ -83,15 +83,15 @@ reviewing, and deciding whether to escalate.
   `sdlc`'s own `ship` and `close` (`factory.py` runs the `sdlc.py` of its own version, beside it,
   never a copy). The train stacks each change on the one before it, in order, on the base
   branch; a stack that conflicts goes to the `resolver`, an agent of its own given every change's
-  spec and diff, which may edit only the conflicted files, and every reviewer at that change's depth checks the resolution before it
-  lands. The base branch's gate runs once, at the stack's tip; a red tip is bisected by prefix
-  and the change at fault is ejected, back to its commit as it was before the train with the
-  reason and the gate file in its commit, while the rest land; nothing of it reaches the base
-  branch. Then the changes close in order, each by close's fast-forward, so the base branch's
-  history reads as a one-at-a-time landing. When the base branch moves under the train, every
-  change not landed re-stacks onto it and the tip is gated again, up to `[land] moves` times. A
-  rerun resumes a train under way, and the board shows each change's place in it. After your
-  yes the skill runs each change's acceptance checks and cases behind their own prompts, then
+  spec and diff, which may edit only the conflicted files, and every reviewer at that change's depth
+  checks the resolution before it lands. The base branch's gate runs once, at the stack's tip; a red
+  tip is bisected by prefix and the change at fault is ejected, back to its commit as it was before
+  the train with the reason and the gate file in its commit, while the rest land; nothing of it
+  reaches the base branch. Then the changes close in order, each by close's fast-forward, so the
+  base branch's history reads as a one-at-a-time landing. When the base branch moves under the
+  train, every change not landed re-stacks onto it and the tip is gated again, up to `[land] moves`
+  times. A rerun resumes a train under way, and the board shows each change's place in it. After
+  your yes the skill runs each change's acceptance checks and cases behind their own prompts, then
   starts `factory.py train --run` in the background and ends its turn: the loop takes every
   step itself and starts the landing's agents, ejects a change the gate found at fault as your
   yes approved, and stops only where you're needed (any other ejection, a train stop, checks to
@@ -104,9 +104,9 @@ reviewing, and deciding whether to escalate.
   the last review round any other way is a signal, and the commit says so (`unreviewed=<n>`).
   One approval covers the batch, and it **passes itself when no change in it carries a risk
   signal** (a sensitive or irreversible path, `impact: major`, an ESCALATE, an open or assumed
-  decision, a default the approver settled, an issue someone filed, a resolved conflict no reviewer has seen, a path no review
-  read, a fix made while landing, acceptance checks, skills' cases in scope (and any that
-  failed, hit the sandbox or were skipped), undone notes, nits to file),
+  decision, a default the approver settled, an issue someone filed, a resolved conflict no reviewer
+  has seen, a path no review read, a fix made while landing, acceptance checks, skills' cases in
+  scope (and any that failed, hit the sandbox or were skipped), undone notes, nits to file),
   recorded as `Sdlc-Landed: by=auto` on the change's commit and never as your review. Otherwise
   its one question shows what your yes approves, for each change: each acceptance check's name
   and command, run then through `factory.py accept` behind the harness's own prompt (a failure
@@ -119,10 +119,10 @@ reviewing, and deciding whether to escalate.
   as a bug filed as a `[bug]` with its severity and paths (`filed as a bug, <severity>: <title>
   (<paths>)`); each nit its agents weighed to file, as a `[nit]` entry with its theme, paths,
   cost and value (`[nit] <title> (<theme>, <cost>, <value>; <paths>)`); each assumed decision
-  confirmed; and the `How to recover:` its commit carries for an irreversible path. A change touching an irreversible path its approver proposed no way back
-  for, or with a bug proposed on a severity that isn't one of the process doc's words (`sdlc.py
-  bugs`), with no paths or on any other item, is left for `/sdlc:ship`, which also stays the way
-  to land a change by hand.
+  confirmed; and the `How to recover:` its commit carries for an irreversible path. A change
+  touching an irreversible path its approver proposed no way back for, or with a bug proposed on a
+  severity that isn't one of the process doc's words (`sdlc.py bugs`), with no paths or on any other
+  item, is left for `/sdlc:ship`, which also stays the way to land a change by hand.
 - **`/sdlc-factory:spec NNN`** (Tier 2, `stage: plan`): the `spec-writer` alone, for a spec you
   want approved on its own before building by hand or with the factory. Then `stage: design`.
 
@@ -157,12 +157,13 @@ spec.
 ## Rounds that converge
 
 - **Built on current code.** Before its spec-writer or its question, `/sdlc-factory:build NNN`
-  (and `/sdlc-factory:spec NNN`, before its spec-writer) runs `factory.py fresh`, which brings the change's branch up to the base branch through
-  `sdlc`'s own `base` (and its `resolve` when the base changed what the change's uncommitted work
-  changes), and shows how far behind it was, what moved and the undo. Only the change's own branch
-  moves; never a stash, a merge of the base or a force. A real conflict is aborted and left for
-  you (`/sdlc:ship` resolves it), and a run that stopped part way at `stage: build` is held where
-  it was: its rounds were reviewed on that base, and landing rebases and gates it again.
+  (and `/sdlc-factory:spec NNN`, before its spec-writer) runs `factory.py fresh`, which brings the
+  change's branch up to the base branch through `sdlc`'s own `base` (and its `resolve` when the base
+  changed what the change's uncommitted work changes), and shows how far behind it was, what moved
+  and the undo. Only the change's own branch moves; never a stash, a merge of the base or a force. A
+  real conflict is aborted and left for you (`/sdlc:ship` resolves it), and a run that stopped part
+  way at `stage: build` is held where it was: its rounds were reviewed on that base, and landing
+  rebases and gates it again.
 - **Gated by the script, before any reviewer.** After each builder report, `factory.py gate` runs
   the base branch's `[commands] check` in the change's worktree, never the change's own config, and
   records each attempt in `build/round-<N>.gate.md`. A red gate, or one that changes the tree,
@@ -172,9 +173,9 @@ spec.
   `[review] sensitive` to have an edit to it reviewed at the full depth and named at ship.
 - **One gate at a time, by default.** Gates and `check` runs from every worktree share
   `gate_jobs` slots (1 unless the base branch's `factory.toml` says more), so parallel runs'
-  checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1 of 1 in
-  use)`, and its wait is not in its `Seconds:`. A gate run by hand (`sdlc.py gate`) shares the
-  same slots, waiting at most 30 minutes for one.
+  checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1
+  of 1 in use)`, and its wait is not in its `Seconds:`. A gate run by hand (`sdlc.py gate`) shares
+  the same slots, waiting at most 30 minutes for one.
 - **Agents leave the whole suite to the gate.** The builder runs each slice's tests by name, and
   the reviewers read the gate's record rather than run the suite again. A full run an agent still
   wants goes through `factory.py check NNN`, which its prompt names: the base branch's `[commands]
@@ -200,9 +201,10 @@ spec.
   the verifier keeps the same change, word for word, two rounds running (`stuck`; reviewers raise
   an undone kept change again in its own words so the script can tell), or when the builder's
   report says a requirement can't be tested (`- UNTESTABLE: R<n>: <why>`, `untestable`; `none` or
-  `n/a` there is no requirement), once its round is reviewed. The approver is told which, and must ESCALATE, naming under `## Reconsider
-  the approach` the next step it would take: a requirement to rewrite, a model to try, or an
-  approach to change. A restart or an upgrade starts the count afresh.
+  `n/a` there is no requirement), once its round is reviewed. The approver is told which, and must
+  ESCALATE, naming under `## Reconsider the approach` the next step it would take: a requirement to
+  rewrite, a model to try, or an approach to change. A restart or an upgrade starts the count
+  afresh.
 - **An ESCALATE can go back.** `/sdlc-factory:build NNN` on an escalated change at `stage: test`
   asks once more, and on your yes (`yes, <words>` adds your own direction) `factory.py restart`
   keeps the old `decision.md` as `decision-<n>.md`, writes `build/round-<R>.restart.md` and sets
@@ -267,9 +269,10 @@ They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, e
   landing (a signal of its own, so a batch holding one never passes itself) and at ship; one it
   can't, it escalates to you, and the change is escalated while any is. `/sdlc-factory:decide
   NNN` then asks you each open one, one at a time, with the alternatives; `/sdlc:ship` shows every
-  one, so your approval there confirms it or sends the change back. A later default that replaces one names it,
-  `- DECISION: [default] (supersedes D2) ...`, and the ledger ticks D2 `→ superseded by D4`: no
-  longer assumed, shown beside the default that replaced it. A decided line can't be superseded.
+  one, so your approval there confirms it or sends the change back. A later default that replaces
+  one names it, `- DECISION: [default] (supersedes D2) ...`, and the ledger ticks D2 `→ superseded
+  by D4`: no longer assumed, shown beside the default that replaced it. A decided line can't be
+  superseded.
 
 ## The agents
 
@@ -306,11 +309,12 @@ never make a run's depth full. Neither has a shell: before each runs, `factory.p
 the dev server `[ui]` names on a free port (on a new one, up to three tries, when another process
 takes it first, each lost try in `shots.json`'s `retries`; only a port that already answers, or
 won't bind once the server has exited, is lost, and a server that fails on its own is started
-once), takes each page at each width with its screenshot command, stops the process group it started, and gives the reviewer the images and the changed
-paths. A shot that fails refuses that review, with what the commands printed, so neither judges a
-page it couldn't see. The images go under `.sdlc/reports/shots/<change>/round-<N>/<role>/` with
-a `shots.json` of what ran, a folder that ignores itself, so none is committed. Each reviewer has
-its own folder, fixture copy and server, so a round's two start together.
+once), takes each page at each width with its screenshot command, stops the process group it
+started, and gives the reviewer the images and the changed paths. A shot that fails refuses that
+review, with what the commands printed, so neither judges a page it couldn't see. The images go
+under `.sdlc/reports/shots/<change>/round-<N>/<role>/` with a `shots.json` of what ran, a folder
+that ignores itself, so none is committed. Each reviewer has its own folder, fixture copy and
+server, so a round's two start together.
 
 ## What it leaves in the change's folder
 
@@ -366,9 +370,9 @@ record without counting the agents' review as yours.
 Since it is public, every record is filed in a form the repo's own scan accepts: this machine's
 paths as marks (`<path-to-clone>`, `<home>`), the change's own folder by its full name, and any
 other shape the scan refuses, such as a test fixture's change cited by its bare number in
-quoted output, as a placeholder (the number in `<` and `>`). The approver's step stops the change when its folder still holds such
-a line (one written by hand, or filed before this rule), naming the file and line;
-`factory.py defuse NNN` rewrites it the same way.
+quoted output, as a placeholder (the number in `<` and `>`). The approver's step stops the change
+when its folder still holds such a line (one written by hand, or filed before this rule), naming the
+file and line; `factory.py defuse NNN` rewrites it the same way.
 `/sdlc:close` counts from it what the run cost in rework (rounds after the first, red gates,
 `CHANGES` verdicts, the changes the verifier dropped, an `ESCALATE`, a default you overturned at
 ship), so a factory change and one built by hand are measured the same way.
@@ -470,31 +474,29 @@ stage allows the step, where `HEAD` was, what verdict each review holds, the ver
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
 `gate`, `fix`, `review`, `verify`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
 `stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
-`upgrade`); the gate
-itself, the base branch's check run on each build and recorded attempt by attempt (`gate`), and an
-agent's full run of it that records nothing (`check`), through one function (`_run_check()`), the
-only places it runs a host's command, each holding one of `gate_jobs` slots, an OS lock on
-`sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate ends, and
-that `sdlc.py gate`, the gate run by hand, takes too, through pinned copies; the
-change brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`);
-each agent session, its
-prompt, model and reply's file, and the session ids under `runs/` that measuring reads (`agent`,
-the one place it runs `claude`); an approved spec draft copied into `spec.md` byte for byte
-(`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands
-(`shots`, which `agent` runs first); the changes ready to ship and their order (`ready`); the landing's
-batch, its signals and its question (`land-check`), the train and its next step (`train`, with
-`--begin`, its `--fix`, `--eject` and `--stop`; `train --run`, the loop that takes each step,
-under the run lock, and `--cancel`), each change's landing (`land`, `resolve --onto`, `land-fix`,
-`land-verdicts`), each landing step recorded as it starts in `runs/land-step.md` for
-the board's landing track (`land-verdicts --record` adds a stop and why, a plain line over the
-tool's words), its acceptance checks and skills' cases (`accept`, `cases` and `cases --skip`,
-never pre-approved, each recording its step before the commit);
-for the eval and the review, which bugs escaped and through which diff (`escapes`), the slice of
-code to look at (`slice`), a report folder (`report-dir`) and the eval's scores (`score`). It never
-imports `sdlc.py`: installed from the marketplace, each plugin is cached on its own, so it reads
-the register and the `Close` commits' trailers with copies of `sdlc.py`'s parsing, pinned by tests.
-For `fresh`, `upgrade` and landing alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's,
-or the cache's), so ship, base, upgrade and close have one implementation; another version is refused.
+`upgrade`); the gate itself, the base branch's check run on each build and recorded attempt by
+attempt (`gate`), and an agent's full run of it that records nothing (`check`), through one function
+(`_run_check()`), the only places it runs a host's command, each holding one of `gate_jobs` slots,
+an OS lock on `sdlc-factory-gate-<k>.lock` in the git common dir that the OS frees however the gate
+ends, and that `sdlc.py gate`, the gate run by hand, takes too, through pinned copies; the change
+brought up to the base before a run (`fresh`, through `sdlc`'s own `base` and `resolve`); each agent
+session, its prompt, model and reply's file, and the session ids under `runs/` that measuring reads
+(`agent`, the one place it runs `claude`); an approved spec draft copied into `spec.md` byte for
+byte (`write-spec`); the screenshots a UI review reads, from `[ui]`'s own commands (`shots`, which
+`agent` runs first); the changes ready to ship and their order (`ready`); the landing's batch, its
+signals and its question (`land-check`), the train and its next step (`train`, with `--begin`, its
+`--fix`, `--eject` and `--stop`; `train --run`, the loop that takes each step, under the run lock,
+and `--cancel`), each change's landing (`land`, `resolve --onto`, `land-fix`, `land-verdicts`), each
+landing step recorded as it starts in `runs/land-step.md` for the board's landing track
+(`land-verdicts --record` adds a stop and why, a plain line over the tool's words), its acceptance
+checks and skills' cases (`accept`, `cases` and `cases --skip`, never pre-approved, each recording
+its step before the commit); for the eval and the review, which bugs escaped and through which diff
+(`escapes`), the slice of code to look at (`slice`), a report folder (`report-dir`) and the eval's
+scores (`score`). It never imports `sdlc.py`: installed from the marketplace, each plugin is cached
+on its own, so it reads the register and the `Close` commits' trailers with copies of `sdlc.py`'s
+parsing, pinned by tests. For `fresh`, `upgrade` and landing alone it runs the `sdlc.py` of its own
+version, beside it (`sdlc-path`: the clone's, or the cache's), so ship, base, upgrade and close have
+one implementation; another version is refused.
 
 The landing's own code (`land`, `land-check`, `train`, `resolve` and `land-verdicts`, the one place
 the factory commits) lives in `scripts/landing.py` beside it, which `factory.py` loads by path and

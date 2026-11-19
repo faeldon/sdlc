@@ -65,15 +65,16 @@ answers to the guides, read block by block (`doc_units()`). REFERENCE.md, *The d
 *Templates*.
 
 **Modules loaded by path.** `retro.py`, `board.py`, `closing.py`, `metrics.py`, `indicators.py`,
-`factory_records.py` and the trackers are loaded by path, never imported: `uv run --script` and the tests put different
-directories on `sys.path`. `retro.py`, `board.py` and `closing.py` are bound to a live view of
-`sdlc.py`'s globals and call what they share as `sdlc.<name>`, so a test's stand-in reaches them;
-`board.py` loads only when `board` runs. The factory's `landing.py` is bound the same way to
-`factory.py`'s, as `factory.<name>`. `metrics.py`, `indicators.py` and `factory_records.py` are
-pure: no subprocess and no import of `sdlc.py`; the board, close and retro reach
-`factory_records.py` through their binding, as `sdlc.factory_records`. `closing.py` and `landing.py` are apart so `[review] sensitive` can name
-them: a function lives there when it is close's, the push's, the lock's or the landing's, or only
-code there calls it (`tests/test_modules.py`). Each module's docstring is its contract.
+`factory_records.py` and the trackers are loaded by path, never imported: `uv run --script` and the
+tests put different directories on `sys.path`. `retro.py`, `board.py` and `closing.py` are bound to
+a live view of `sdlc.py`'s globals and call what they share as `sdlc.<name>`, so a test's stand-in
+reaches them; `board.py` loads only when `board` runs. The factory's `landing.py` is bound the same
+way to `factory.py`'s, as `factory.<name>`. `metrics.py`, `indicators.py` and `factory_records.py`
+are pure: no subprocess and no import of `sdlc.py`; the board, close and retro reach
+`factory_records.py` through their binding, as `sdlc.factory_records`. `closing.py` and `landing.py`
+are apart so `[review] sensitive` can name them: a function lives there when it is close's, the
+push's, the lock's or the landing's, or only code there calls it (`tests/test_modules.py`). Each
+module's docstring is its contract.
 
 **The base branch: `git.base`.** `main` in this file means the base branch a host names in
 `[git] base`, or that `_resolve_trunk()` detects (`main`, else `origin/HEAD`'s branch). The code
@@ -165,13 +166,13 @@ built by hand moves across its columns by what it touched, whether ship's review
 run at `stage: test`, and only there, where its green record clears the approver's `gate`
 reasons (`needs_of()`). Its columns name the state of the work, the same for either tool, by
 `column()`, which lives in `sdlc.py` beside `needs_of()` and `seen_stage()`, so `status` prints its
-sections by the same rule without loading the board. It
-reads a factory run's files through `scripts/factory_records.py`, as `status`, the hand gate and
-close do, its copies of `factory.py`'s parsing pinned by `tests/test_modules.py`, and the page builds every node with `textContent`, never from a string of
-HTML. Its `/state.json` names its repo by `repo_id`, a hash of the main checkout's path, so a
-second `board` calls a port's board its own only when the ids match (`cmd_board()`); a train card
-says it runs unattended only while another process holds the train's run lock, which the board
-opens read-only, never creating it, and tries only while a train is under way. Its docstring;
+sections by the same rule without loading the board. It reads a factory run's files through
+`scripts/factory_records.py`, as `status`, the hand gate and close do, its copies of `factory.py`'s
+parsing pinned by `tests/test_modules.py`, and the page builds every node with `textContent`, never
+from a string of HTML. Its `/state.json` names its repo by `repo_id`, a hash of the main checkout's
+path, so a second `board` calls a port's board its own only when the ids match (`cmd_board()`); a
+train card says it runs unattended only while another process holds the train's run lock, which the
+board opens read-only, never creating it, and tries only while a train is under way. Its docstring;
 REFERENCE.md, *`.sdlc/work/` and worktrees* (The board).
 
 **The register: `inbox_entries()`.** `.sdlc/work/inbox.md` is the one register of change requests.
@@ -245,27 +246,26 @@ Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing
 `yes, for the factory` and the hand gate. `factory.py` never imports `sdlc.py`, and
 `sdlc` only reads the files a run leaves in a change's folder, the base branch's `gate_jobs`
 and the gate slots' lock files, for the hand gate (`_hand_slot()`), the train's run lock, for the
-board (`train_run_held()`), and the base branch's `[ui]`
-and the screenshot sets under `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`,
-`_current_shots()`), never running `factory.py`: each reads the other's files with
-copies of its parsing (`risk_paths()` and the regexes included), pinned by tests; core's copies
-of a run's records live in `scripts/factory_records.py` alone, under `factory.py`'s names, and
-no other core file names a record (`tests/test_modules.py`). Agents that
-judge have no Write; only the builder and the resolver edit (the builder's sub-agents only
-`Agent(Explore, Plan)`; the resolver, a train conflict's own agent, only the files the conflict
-names, which `resolve --continue` checks), and no agent commits. `factory.py agent` is the one place the factory runs `claude`, and `factory.py
-gate` and `check`, through one function (`_run_check()`), the only places it runs a host's command,
-the base branch's `[commands] check`. Landing, in
-`scripts/landing.py`, is the one place it commits, through `sdlc`'s own `ship` and `close` of its own version
-(`sdlc_path()`): a batch lands as a train (`cmd_train()`, its state `TRAIN_STATE` in the git
-common dir, never in a tree), each change committed by `land` (which no longer runs `base`),
-stacked on the one before it by the factory's own rebase (`resolve --onto`), the gate run once
-at the tip and a red tip bisected by prefix, the change at fault ejected back to its pre-train
-commit (`--eject`, `reset --keep`), and each closed in order by `land --close`, which rebases
-it onto the base past the `Close` commits before it; after the yes, `train --run` takes those
-steps itself (`_run_loop()`, each a subprocess of the script, `RUN_STEPS` and no other command),
-ejecting only a gate's fault and stopping at every other ejection, `accept` and a refused push,
-under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
+board (`train_run_held()`), and the base branch's `[ui]` and the screenshot sets under
+`.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`, `_current_shots()`), never
+running `factory.py`: each reads the other's files with copies of its parsing (`risk_paths()` and
+the regexes included), pinned by tests; core's copies of a run's records live in
+`scripts/factory_records.py` alone, under `factory.py`'s names, and no other core file names a
+record (`tests/test_modules.py`). Agents that judge have no Write; only the builder and the resolver
+edit (the builder's sub-agents only `Agent(Explore, Plan)`; the resolver, a train conflict's own
+agent, only the files the conflict names, which `resolve --continue` checks), and no agent commits.
+`factory.py agent` is the one place the factory runs `claude`, and `factory.py gate` and `check`,
+through one function (`_run_check()`), the only places it runs a host's command, the base branch's
+`[commands] check`. Landing, in `scripts/landing.py`, is the one place it commits, through `sdlc`'s
+own `ship` and `close` of its own version (`sdlc_path()`): a batch lands as a train (`cmd_train()`,
+its state `TRAIN_STATE` in the git common dir, never in a tree), each change committed by `land`
+(which no longer runs `base`), stacked on the one before it by the factory's own rebase (`resolve
+--onto`), the gate run once at the tip and a red tip bisected by prefix, the change at fault ejected
+back to its pre-train commit (`--eject`, `reset --keep`), and each closed in order by `land
+--close`, which rebases it onto the base past the `Close` commits before it; after the yes, `train
+--run` takes those steps itself (`_run_loop()`, each a subprocess of the script, `RUN_STEPS` and no
+other command), ejecting only a gate's fault and stopping at every other ejection, `accept` and a
+refused push, under a run lock (`TRAIN_RUN_LOCK` in the git common dir, passed to its children by
 `TRAIN_RUN_ENV`) that a second `--run`, `--begin`, `--eject` and `--stop` refuse while held, and
 `--cancel` stops it between steps; `fresh` moves a change's branch onto the base before a build or a
 spec, through `sdlc`'s own `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run,
@@ -278,13 +278,13 @@ never as the person's. `verdicts` decides from the rounds alone and reads no sta
 every command with its `exit:` but a read that shows its output, which only the script judges
 (`is_read()`); a reply missing it, holding verdict or decision lines that disagree, none of them
 first (`opening()`, `preamble()`, `decision_preamble()`), or a `verified.md` the script can't read,
-is the one stop a run mends, once a round for each role, a landing round counting as its own
-(`agent --task mend` or `--task land-mend`, recorded in `runs/mended`). No agent but the builder
-runs `checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is
-ever a run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`)
-is kept as `decision-<n>.md`, never written over, and its new run counts its rounds from the round
-its `build/round-<R>.restart.md` names. The eval and the review write only under
-`.sdlc/reports/`, and never the register.
+is the one stop a run mends, once a round for each role, a landing round counting as its own (`agent
+--task mend` or `--task land-mend`, recorded in `runs/mended`). No agent but the builder runs
+`checks.md` (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever a
+run's decision: an ESCALATE sent back for another build (`restart_state()`, `cmd_restart()`) is kept
+as `decision-<n>.md`, never written over, and its new run counts its rounds from the round its
+`build/round-<R>.restart.md` names. The eval and the review write only under `.sdlc/reports/`, and
+never the register.
 
 ## Invariants the tests enforce
 
@@ -306,9 +306,9 @@ Changing a skill or the script usually means satisfying these, so know them befo
   must run its script's `config` and name the config keys listed in `READS_CONFIG`.
 - **Only the named steps push** (`tests/test_skills.py::test_only_the_named_steps_push`): no
   skill has a `push` rule or runs `git push`; the core's one git push is in `closing.py`'s
-  `_push()`, never forced, called only by `cmd_publish`, and by `cmd_close` and `cmd_release` through
-  `_push_plan()`, so each pushes only when `git.push` names it, behind the question it already
-  asks. Ship never pushes.
+  `_push()`, never forced, called only by `cmd_publish`, and by `cmd_close` and `cmd_release`
+  through `_push_plan()`, so each pushes only when `git.push` names it, behind the question it
+  already asks. Ship never pushes.
 - **Narrow `allowed-tools`** (`tests/test_skills.py`): a skill's `allowed-tools` *grants* each tool
   without a prompt for the turn that runs it; it restricts nothing. So no skill lists plain `Bash`:
   each lists a `Bash(...)` rule per command it runs, written exactly as the skill runs it (quotes

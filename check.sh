@@ -6,8 +6,10 @@ cd "$(dirname "$0")"
 
 uv run --quiet --group dev ruff check .
 uv run --quiet --group dev ruff format --check .
-# No tolerance for pytest's exit 5 ("no tests collected"): discovery breaking is a red gate. The tests
-# run across the cores (pytest-xdist), which keeps pytest's exit codes.
+# No tolerance for pytest's exit 5 ("no tests collected"): discovery breaking is a red gate. The
+# tests run across the cores (pytest-xdist), which keeps pytest's exit codes. The summary's
+# `skipped` count is expected: the pairs of board states that can't overlap, and the `browser` tests
+# on a machine without Chromium (docs/CONTRIBUTING.md, *The gate*). `pytest -rs` names each reason.
 uv run --quiet --group dev pytest -q -n auto
 # The sdlc plugin and the marketplace live in one folder here, so one validate covers both. The
 # optional factory is a plugin of its own.
