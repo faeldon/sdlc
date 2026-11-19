@@ -560,3 +560,12 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 147-landing-runs-unattended (correctness)
+
+## [2026-11-19-12] [bug] A landing retires every nit its Approach or Requirements names, taken in or not
+
+A landing retires every nit its intent's Approach or spec's Requirements names by id, even one named to say it isn't taken: named_nits() (plugins/factory/scripts/factory.py, NIT_SECTIONS) matches any whole id in those sections. 165's Approach listed its wave plan and retired 2026-11-19-1, -5 and -6; 166's said "-68 … left to R3, none is taken in here" and retired 2026-11-18-68, all as "taken in". Expected: only nits the change says it takes in are retired, e.g. a "Nits taken in:" line, or ids the diff's review confirms. To see it: name an open nit's id in a Tier 1 intent's Approach as not taken, land the change, and the Close commit retires it.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
+Introduced by: 097-landing-fixes
+Theme: landing
