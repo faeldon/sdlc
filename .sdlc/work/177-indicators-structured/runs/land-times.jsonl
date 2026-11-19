@@ -1,9 +1,0 @@
-{"step": "cases", "round": null, "seconds": 40.0, "since": "2026-11-19T10:30:50Z"}
-{"step": "ship", "round": null, "seconds": 3.0, "since": "2026-11-19T10:31:30Z"}
-{"step": "stack", "round": 1, "seconds": 1.0, "since": "2026-11-19T10:31:33Z"}
-{"step": "resolve", "round": 1, "seconds": 352.0, "since": "2026-11-19T10:31:34Z"}
-{"step": "resolve", "round": 1, "seconds": 352.0, "since": "2026-11-19T10:31:34Z"}
-{"step": "resolve", "round": 1, "seconds": 352.0, "since": "2026-11-19T10:31:34Z"}
-{"step": "resolve", "round": 1, "seconds": 352.0, "since": "2026-11-19T10:31:34Z"}
-{"step": "review", "round": 1, "seconds": 322.0, "since": "2026-11-19T10:37:26Z"}
-{"step": "wait", "round": 1, "seconds": 21.0, "since": "2026-11-19T10:42:48Z"}
