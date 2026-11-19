@@ -140,14 +140,6 @@ A later change looks at each one again (merge, rewrite, move or delete it), and 
 Theme: tests
 Raised by the retrospective of 2026-11-18.
 
-## [2026-11-18-93] [idea] The review doc names a doc's claim left false by the change
-
-Five changes' Important findings share one class: a context or reference doc still states a rule the change altered, or one place restates a rule changed in another. These are 072 F1, 077 F1, 127 F1, 128 F1 and F2, and 130 F1, and all were fixed before landing. The proposed bullet for `.sdlc/REVIEW.md`, *The ways this repo's code fails*:
-
-- **A doc's claim the change made false.** A sentence in `AGENTS.md`, `docs/REFERENCE.md`, `docs/CONTRIBUTING.md` or a README that names the function, the command or the rule this diff changed, and still says what it did before. Grep the docs for each name the diff touches.
-Theme: review
-Raised by the retrospective of 2026-11-18.
-
 ## [2026-11-18-99] [idea] Clear the eval workspaces left in /tmp by earlier case runs
 
 Left undone by 156-cases-that-tell, carried forward when it landed: 26 `e-*` workspaces from earlier case runs sit in `/private/tmp` (made before runs removed their own); a one-off `run-cases --prune` or a line in CONTRIBUTING could clear them, behind the same `_workspace_of()` guard
@@ -311,16 +303,6 @@ Paths: .sdlc/work/171-factory-run-state/spec.md
 Cost: S
 Value: med
 Raised by: 171-factory-run-state (correctness)
-
-## [2026-11-19-26] [nit] `measure.errors` holds the raw exception text.
-
-Raised by the security review of 172-close-in-steps, round 1: scripts/closing.py:396: `measure.errors` holds the raw exception text. In the plugin's own repo, a child after a handoff passes it up unchanged. It's local stdout only, but if a future reader of the run files puts a path or a line of content in a message, that text lands in close's report, so say in the docstring that the message is meant for the person running close and must never become a trailer
-
-Theme: docs
-Paths: scripts/closing.py
-Cost: S
-Value: low
-Raised by: 172-close-in-steps (contract)
 
 ## [2026-11-19-27] [idea] Rewrap the remaining factory agents' prose lines past 100 columns
 
@@ -522,3 +504,39 @@ Paths: scripts/retro.py
 Cost: S
 Value: low
 Raised by: 175-pipeline-figures (correctness)
+
+## [2026-11-19-54] [idea] retro's process pass seeds from workaround rows
+
+Left undone by 180-workarounds-tagged, carried forward when it landed: `/sdlc:retro`'s passes don't read `simplicity.workarounds` yet: its process pass could turn an `outside` or `restored` row into a seed. The report renders it with S14.
+See .sdlc/work/180-workarounds-tagged/notes.md in its commit.
+Raised 2026-11-19.
+
+## [2026-11-19-55] [nit] R5's test covers the eject path only.
+
+Raised by the code review of 180-workarounds-tagged, round 1: tests/test_train.py: R5's test covers the eject path only. The same `problems.append(f"{name}: {problem}")` branch in `_train_stop` has no failing-append test.
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 180-workarounds-tagged (correctness)
+
+## [2026-11-19-56] [nit] the `unknown` rows carry a `change` key that no test asserts, and `unknown` has no `n`
+
+Raised by the test review of 180-workarounds-tagged, round 1: tests/test_retro.py:3704: the `unknown` rows carry a `change` key that no test asserts, and `unknown` has no `n`
+
+Theme: tests
+Paths: tests/test_retro.py
+Cost: S
+Value: low
+Raised by: 180-workarounds-tagged (correctness)
+
+## [2026-11-19-57] [nit] add one assertion that a stop before any commit leaves no row, since the spec's edge-case section names it
+
+Raised by the test review of 180-workarounds-tagged, round 1: tests/test_retro.py:3677: add one assertion that a stop before any commit leaves no row, since the spec's edge-case section names it
+
+Theme: tests
+Paths: tests/test_retro.py
+Cost: S
+Value: low
+Raised by: 180-workarounds-tagged (correctness)
