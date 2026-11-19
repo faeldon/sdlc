@@ -492,6 +492,25 @@ def test_an_after_gate_stop_names_the_skill_whose_gate_it_followed(tmp_path: Pat
     assert not any(x.startswith("Sdlc-AfterGate") for x in plain), "none written for none"
 
 
+def test_close_names_each_skill_it_ran(tmp_path: Path) -> None:
+    """179 R1: one `Sdlc-Skill` line a plugin skill the change's events started, typed or by the
+    Skill tool, each run counted; read back as `skills`. A commit without one is unrecorded."""
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:spec"), turn(1, 1), user(2, "yes"),
+        cmd(10, "sdlc:ship"), turn(11, 1), user(12, "fix all 2 first"),
+        user(20, " /sdlc:ship"), *_skill_call(21, "sdlc:ship"), turn(22, 1), user(23, "yes"),
+    ])  # fmt: skip
+    s = _summary(events)
+    assert s["skills"] == {"sdlc:ship": 2, "sdlc:spec": 1}
+    lines = metrics.trailers(s)
+    assert [x for x in lines if x.startswith("Sdlc-Skill:")] == [
+        "Sdlc-Skill: sdlc:ship runs=2", "Sdlc-Skill: sdlc:spec runs=1",
+    ]  # fmt: skip
+    back = metrics.parse_trailers("\n".join(lines))
+    assert back["skills"] == {"sdlc:ship": {"runs": 2}, "sdlc:spec": {"runs": 1}}
+    assert "skills" not in metrics.parse_trailers("Sdlc-Mode: manual"), "unrecorded, never zero"
+
+
 def test_the_factorys_build_gate_comes_first_and_its_decisions_are_questions(tmp_path) -> None:
     events = _events(tmp_path, [
         cmd(0, "sdlc-factory:build", "12"),

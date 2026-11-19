@@ -1,0 +1,195 @@
+# Features
+
+Every feature a host gets from the `sdlc` plugin and its optional factory (`sdlc-factory`), each
+with a one-line definition in the plugin's own words, the file that specifies it, and the features
+it depends on. `docs/PROCESS.md` draws the loops these run in. This map is kept by hand and
+checked against the code by `tests/test_feature_map.py`: a stage, tier, impact, nit cost or value,
+review pass, skill, board column or trailer the code fixes with no entry here fails it. Every
+script command and config key is listed with its use by `sdlc.py retro`'s `surface`, not here
+(`docs/REFERENCE.md`, *Retrospectives*).
+
+Each entry reads `term`: definition. Specified: the file that says it. Depends on: other entries.
+
+```mermaid
+graph LR
+  vocab["Vocabulary"]
+  skills["Skills"]
+  stages["Stages"]
+  tiers["Tiers"]
+  impacts["Impacts"]
+  nits["Nits"]
+  passes["Review passes"]
+  board["The board"]
+  docs["Tracking documents"]
+  trailers["Trailers"]
+  figures["The retro's figures"]
+  skills --> stages
+  skills --> docs
+  stages --> tiers
+  stages --> docs
+  tiers --> docs
+  passes --> nits
+  passes --> docs
+  impacts --> stages
+  nits --> docs
+  board --> stages
+  board --> docs
+  trailers --> skills
+  trailers --> stages
+  figures --> trailers
+  figures --> docs
+  skills --> vocab
+  stages --> vocab
+  docs --> vocab
+```
+
+## Vocabulary
+
+- **`change`**: one piece of work with a number and a slug (`NNN-slug`), its folder under `.sdlc/work/`, its branch and its worktree, from `/sdlc:intent` until close or drop. Specified: `guide/process.md`. Depends on: `intent.md`.
+- **`seed`**: an entry in the register, tagged `[idea]`, `[bug]` or `[nit]`: a change request no change has taken up yet. Specified: `docs/REFERENCE.md`. Depends on: `inbox.md`.
+- **`gate`**: a check a change must pass before it moves on: the host's `[commands] check` run at ship, or a person's approval at a WAIT. Specified: `guide/process.md`. Depends on: `WAIT`.
+- **`WAIT`**: the one step in a writing skill where it stops and asks the person a literal question in a dialog; only a chosen yes lets it write. Specified: `guide/process.md`. Depends on: nothing.
+- **`stop`**: any time a change's session waited on the person: a gate, a question, or an extra reply; counted at close against the gates the change owed. Specified: `scripts/metrics.py`. Depends on: `gate`, `Sdlc-Stage`.
+- **`finding`**: one thing a review raised about a change, ranked important, nit or pre-existing, with its evidence and what was done about it. Specified: `templates/findings.md`. Depends on: `findings.md`.
+- **`nit`**: a finding approved unfixed, kept in the register with its cost and value, so later changes pay it down. Specified: `guide/process.md`. Depends on: `finding`, `seed`.
+- **`impact`**: what a change does to someone holding the previous release, settled at ship; a release takes the highest. Specified: `guide/process.md`. Depends on: `change`.
+- **`landed`**: committed on the base branch: a change's own commit, then its `Close` commit. Specified: `docs/REFERENCE.md`. Depends on: `change`, `Sdlc-Landed`.
+- **`retro`**: the outermost loop: a look across every change and release since the last retrospective, ending in one `Retrospective` commit. Specified: `guide/process.md`. Depends on: `change`, `direction`.
+- **`direction`**: the doc of goals, milestones and the next major release that the retro keeps. Specified: `templates/direction.md`. Depends on: `outcome`.
+- **`outcome`**: a line of the product doc saying what users get, which goals and changes cite and the retro scores. Specified: `defaults/PRODUCT.md`. Depends on: nothing.
+- **`drift`**: what a newer plugin changed in a doc setup copied, told apart from what the host changed, so setup can propose a refresh. Specified: `docs/REFERENCE.md`. Depends on: `/sdlc:setup`.
+- **`worktree`**: the checkout a change is worked in, at `.claude/worktrees/NNN-slug`, so the main checkout stays clean. Specified: `guide/process.md`. Depends on: `change`.
+- **`factory`**: the optional `sdlc-factory` plugin, which builds and reviews a change with agents in rounds and lands a batch as a train. Specified: `plugins/factory/README.md`. Depends on: `change`, `gate`.
+
+## Skills
+
+- **`/sdlc:intent`**: opens a change: interviews the person, drafts `intent.md`, and creates the change's number, branch and worktree after its WAIT. Specified: `skills/intent/SKILL.md`. Depends on: `intent.md`, `seed`.
+- **`/sdlc:spec`**: turns a Tier 2 intent into `spec.md`'s numbered requirements and design. Specified: `skills/spec/SKILL.md`. Depends on: `intent.md`, `spec.md`.
+- **`/sdlc:ship`**: runs the gate, reviews the diff in its passes, writes `findings.md`, and commits the change with its folder. Specified: `skills/ship/SKILL.md`. Depends on: `gate`, `findings.md`, `correctness`.
+- **`/sdlc:close`**: lands a shipped change on the base branch, mirrors it to the tracker, removes its folder in a `Close` commit with its measured trailers, and cleans up. Specified: `skills/close/SKILL.md`. Depends on: `stage: shipped`, `Sdlc-Totals`.
+- **`/sdlc:drop`**: records why a change won't ship and closes it as a `Drop` commit that keeps the base branch's files. Specified: `skills/drop/SKILL.md`. Depends on: `stage: dropped`.
+- **`/sdlc:status`**: reports the open changes, what each needs, and the one next action. Read-only. Specified: `skills/status/SKILL.md`. Depends on: `change`.
+- **`/sdlc:idea`**: files, edits or retires an idea in the register, committed alone on the base branch. Specified: `skills/idea/SKILL.md`. Depends on: `seed`, `inbox.md`.
+- **`/sdlc:bug`**: files, retags or retires a bug in the register, with its severity and the change that introduced it. Specified: `skills/bug/SKILL.md`. Depends on: `seed`, `inbox.md`.
+- **`/sdlc:triage`**: reads the issues people filed and proposes a verdict for each: an idea, a bug, an open change's `closes:`, or closed. Specified: `skills/triage/SKILL.md`. Depends on: `seed`, `Sdlc-Triaged`.
+- **`/sdlc:health`**: runs the repo's scans and tiers each finding: report, fix inline, or write an intent. Specified: `skills/health/SKILL.md`. Depends on: `/sdlc:intent`.
+- **`/sdlc:release`**: proposes a version from the closed changes' impacts, bumps, writes the notes and tags. Specified: `skills/release/SKILL.md`. Depends on: `impact`, `landed`.
+- **`/sdlc:publish`**: pushes the release and its tag, then runs the host's publish command. Specified: `skills/publish/SKILL.md`. Depends on: `/sdlc:release`.
+- **`/sdlc:retro`**: runs the retrospective's passes over history and commits the direction doc, the register and its report. Specified: `skills/retro/SKILL.md`. Depends on: `retro`, `surface`.
+- **`/sdlc:setup`**: sets a repo up for the plugin, or refreshes what an update changed under it. Specified: `skills/setup/SKILL.md`. Depends on: `drift`, `process doc`.
+- **`/sdlc:uninstall`**: takes setup's files and lines back out of a repo. Specified: `skills/uninstall/SKILL.md`. Depends on: `/sdlc:setup`.
+- **`/sdlc:dashboard`**: opens the board in a browser. Specified: `skills/dashboard/SKILL.md`. Depends on: `Planned`.
+- **`/sdlc-factory:spec`**: has the factory's spec-writer draft a Tier 2 spec, shown and written after one approval. Specified: `plugins/factory/skills/spec/SKILL.md`. Depends on: `spec.md`, `factory`.
+- **`/sdlc-factory:build`**: adds a change to the supervisor: the builder plans and builds it, reviewers check it in rounds, and an approver decides. Specified: `plugins/factory/skills/build/SKILL.md`. Depends on: `plan.md`, `decisions.md`, `factory`.
+- **`/sdlc-factory:decide`**: walks the person through a change's open decisions and records their answers. Specified: `plugins/factory/skills/decide/SKILL.md`. Depends on: `decisions.md`.
+- **`/sdlc-factory:land`**: lands a batch of ready changes as one train: each shipped and closed in order, the gate run at the tip. Specified: `plugins/factory/skills/land/SKILL.md`. Depends on: `/sdlc:ship`, `/sdlc:close`, `Sdlc-Landed`.
+- **`/sdlc-factory:eval`**: replays the factory's reviewers on the diffs that let real bugs through, and scores which would have caught each. Specified: `plugins/factory/skills/eval/SKILL.md`. Depends on: `seed`, `factory`.
+- **`/sdlc-factory:review`**: reviews code no change touches and proposes what it finds as bugs. Specified: `plugins/factory/skills/review/SKILL.md`. Depends on: `seed`, `factory`.
+
+## Stages
+
+- **`stage: plan`**: an intent is written; nothing designed or built yet. Specified: `guide/process.md`. Depends on: `intent.md`.
+- **`stage: spike`**: exploration meant to be thrown away, entered from any stage and left by setting the stage it left; owes nothing. Specified: `scripts/sdlc.py`. Depends on: `change`.
+- **`stage: design`**: a Tier 2's spec is being written. Specified: `guide/process.md`. Depends on: `spec.md`.
+- **`stage: build`**: the code is being written, to `plan.md` for a Tier 2. Specified: `guide/process.md`. Depends on: `plan.md`.
+- **`stage: test`**: built; the gate and checks are run, and a factory run waits here for its landing. Specified: `guide/process.md`. Depends on: `gate`.
+- **`stage: ship`**: reviewed and being committed by `/sdlc:ship`. Specified: `guide/process.md`. Depends on: `/sdlc:ship`.
+- **`stage: shipped`**: committed on its branch, ready for close. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:ship`.
+- **`stage: dropped`**: won't ship; the reason is in its intent. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:drop`.
+
+## Tiers
+
+- **`Tier 0`**: trivial: a typo or a one-line fix; no folder, committed directly. Specified: `guide/process.md`. Depends on: nothing.
+- **`Tier 1`**: small: `intent.md` alone, its Approach standing in for spec and plan. Specified: `guide/process.md`. Depends on: `intent.md`.
+- **`Tier 2`**: substantial: `intent.md`, `spec.md` and `plan.md`, for anything a live consumer or an invariant is near. Specified: `guide/process.md`. Depends on: `intent.md`, `spec.md`, `plan.md`.
+
+## Impacts
+
+- **`impact: major`**: someone holding the previous release has to change what they do. Specified: `guide/process.md`. Depends on: `impact`.
+- **`impact: minor`**: they can do something new. Specified: `guide/process.md`. Depends on: `impact`.
+- **`impact: patch`**: they do the same things, working or described better. Specified: `guide/process.md`. Depends on: `impact`.
+- **`impact: none`**: they receive nothing different. Specified: `guide/process.md`. Depends on: `impact`.
+
+## Nits
+
+- **`Cost: S`**: one sitting and a few lines. Specified: `guide/process.md`. Depends on: `nit`.
+- **`Cost: M`**: a test or several files. Specified: `guide/process.md`. Depends on: `nit`.
+- **`Value: med`**: a user or host could hit it on an edge case. Specified: `guide/process.md`. Depends on: `nit`.
+- **`Value: low`**: only a reader of the code notices. Specified: `guide/process.md`. Depends on: `nit`.
+
+## Review passes
+
+- **`correctness`**: does the change do what its intent or spec's requirements said. Specified: `guide/review.md`. Depends on: `finding`.
+- **`contract`**: does it stay inside the invariants the policy doc names. Specified: `guide/review.md`. Depends on: `finding`.
+- **`cost`**: could it be simpler, reuse more, or cost less to run. Specified: `guide/review.md`. Depends on: `finding`.
+- **`context`**: do the docs that give a session its context still say what the code does. Specified: `docs/REFERENCE.md`. Depends on: `finding`.
+- **`ship-security`**: ship's security agent, on a diff that reaches a risky path. Specified: `agents/security.md`. Depends on: `finding`.
+- **`ship-behaviour`**: ship's own run of the change's behaviour, each command behind the person's prompt. Specified: `skills/ship/SKILL.md`. Depends on: `finding`.
+- **`ship-ui`**: ship's UI agent, on a diff with screens. Specified: `agents/ui.md`. Depends on: `finding`.
+- **`ship-ux`**: ship's UX agent, on the same diffs. Specified: `agents/ux.md`. Depends on: `finding`.
+
+## The board
+
+- **`Planned`**: an intent, nothing built. Specified: `scripts/board.html`. Depends on: `stage: plan`.
+- **`Designing`**: a Tier 2's spec being written. Specified: `scripts/board.html`. Depends on: `stage: design`.
+- **`Building`**: code, by hand or in a factory's rounds. Specified: `scripts/board.html`. Depends on: `stage: build`.
+- **`Ready`**: built and checked, not yet committed. Specified: `scripts/board.html`. Depends on: `stage: test`.
+- **`Landing`**: committed, on its way to the base branch. Specified: `scripts/board.html`. Depends on: `stage: shipped`.
+- **`Needs you`**: a change waiting on the person, each card saying for what. Specified: `scripts/board.html`. Depends on: `WAIT`.
+- **`card`**: one change in its column: tier, stage, next command and what it needs. Specified: `scripts/board.py`. Depends on: `change`.
+- **`step track`**: a factory run's round as a row of its steps, the current one timed. Specified: `scripts/board.html`. Depends on: `factory`.
+- **`drawer`**: the panel a card opens, showing every file in the change's folder. Specified: `scripts/board.html`. Depends on: `card`.
+
+## Tracking documents
+
+- **`intent.md`**: why a change is worth making, in its originator's words; every tiered change has one. Specified: `templates/intent.md`. Depends on: nothing.
+- **`spec.md`**: a Tier 2's numbered testable requirements and design. Specified: `templates/spec.md`. Depends on: `intent.md`.
+- **`plan.md`**: a Tier 2's files, work order, tests and rollback, written after reading the code. Specified: `templates/plan.md`. Depends on: `spec.md`.
+- **`notes.md`**: free-form notes; an unticked line is left undone, and ship carries or drops each. Specified: `templates/notes.md`. Depends on: `change`.
+- **`findings.md`**: what ship's review found and what was done about each. Specified: `templates/findings.md`. Depends on: `finding`.
+- **`checks.md`**: a change's acceptance checks, each a block ship reruns before it commits. Specified: `templates/checks.md`. Depends on: `change`.
+- **`decisions.md`**: a factory change's ledger of decisions, blocking and assumed, and the person's answers. Specified: `plugins/factory/README.md`. Depends on: `factory`.
+- **`inbox.md`**: the register: every seed, ranked, committed alone on the base branch. Specified: `templates/inbox.md`. Depends on: `seed`.
+- **`process doc`**: the host's answers to the process guide: its tiers, stages and gates. Specified: `guide/process.md`. Depends on: nothing.
+- **`review doc`**: the host's answers to the review guide: its passes and what they look for. Specified: `guide/review.md`. Depends on: nothing.
+- **`direction doc`**: the goals, milestones and next major release the retro keeps. Specified: `templates/direction.md`. Depends on: `direction`.
+- **`product doc`**: the product's outcomes and the evidence the retro scores them by. Specified: `defaults/PRODUCT.md`. Depends on: `outcome`.
+
+## Trailers
+
+- **`Sdlc-Mode`**: how the change was run: by hand or by the factory. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Coverage`**: what close measured from, and why a part is missing. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Totals`**: the change's clocks, stops, tokens, prompts, words and tool calls. Specified: `scripts/metrics.py`. Depends on: `stop`.
+- **`Sdlc-Stage`**: the same per stage, with its gates and replies. Specified: `scripts/metrics.py`. Depends on: `stage: build`.
+- **`Sdlc-Role`**: each agent role's runs, time, tokens, model and behaviour counts. Specified: `scripts/metrics.py`. Depends on: `factory`.
+- **`Sdlc-Calls`**: each role's tool calls by name. Specified: `scripts/metrics.py`. Depends on: `Sdlc-Role`.
+- **`Sdlc-Prompt`**: each tool prompt the person answered. Specified: `scripts/metrics.py`. Depends on: `stop`.
+- **`Sdlc-Tool`**: each tool call by name, a plugin script's by its command, and its errors. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Skill`**: each plugin skill the change's sessions ran, and how many times. Specified: `scripts/metrics.py`. Depends on: `/sdlc:intent`.
+- **`Sdlc-Extra`**: the extra stops per stage, by why each happened. Specified: `scripts/metrics.py`. Depends on: `stop`.
+- **`Sdlc-AfterGate`**: the stops typed after a gated skill's WAIT was answered, by skill. Specified: `scripts/metrics.py`. Depends on: `WAIT`.
+- **`Sdlc-Blocked`**: the time spent waiting on a change this one depends on. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Lead`**: lead time from opened to close, and where it went. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Runtime`**: the Claude Code versions, models and plugin version the change ran on. Specified: `scripts/metrics.py`. Depends on: `change`.
+- **`Sdlc-Rework`**: rework within the change: stages re-entered, revises, failed checks, a factory run's rounds and decisions. Specified: `scripts/metrics.py`. Depends on: `Sdlc-Stage`.
+- **`Sdlc-Review`**: what each review round found and how it was dealt with. Specified: `scripts/metrics.py`. Depends on: `finding`.
+- **`Sdlc-Happy`**: which stages the change passed straight through. Specified: `scripts/metrics.py`. Depends on: `Sdlc-Stage`.
+- **`Sdlc-Spike`**: a spike's time, kept apart from rework. Specified: `scripts/metrics.py`. Depends on: `stage: spike`.
+- **`Sdlc-Base`**: where the change's branch started, so its size is all of its commits. Specified: `scripts/sdlc.py`. Depends on: `change`.
+- **`Sdlc-Findings`**: ship's findings by rank and disposition, on the change's own commit. Specified: `scripts/sdlc.py`. Depends on: `findings.md`.
+- **`Sdlc-Landed`**: who passed a factory landing's gate, the person or the gate itself. Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`.
+- **`Sdlc-Fixes`**: each bug a change's `fixes:` names, with its severity, when it was reported and the change that introduced it. Specified: `scripts/closing.py`. Depends on: `seed`.
+- **`Sdlc-Retired`**: a bug retired from the register without a fix, with its severity and the reason. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:bug`.
+- **`Sdlc-Triaged`**: an issue's triage verdict, on the register commit that recorded it. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:triage`.
+
+## The retro's figures
+
+- **`surface`**: every skill, script command and config key, built from the code, with its use in the window. Specified: `scripts/retro.py`. Depends on: `Sdlc-Skill`, `Sdlc-Tool`.
+- **`share used`**: the items used over those used or unused, per kind; an unmeasured item is in neither. Specified: `docs/REFERENCE.md`. Depends on: `surface`.
+- **`retire candidate`**: an item unused in each of the last windows that measured it. Specified: `docs/REFERENCE.md`. Depends on: `surface`, `retro`.
+- **`footprint`**: what setup left in a host: the files it created, the keys set, and the lines under `.sdlc/`. Specified: `docs/REFERENCE.md`. Depends on: `/sdlc:setup`.
+- **`growth`**: the surface's size at each release, in the plugin's own repo. Specified: `docs/REFERENCE.md`. Depends on: `surface`.
+- **`rework`**: what a later change declares it reworks of an earlier one. Specified: `docs/REFERENCE.md`. Depends on: `change`.
+- **`lead time`**: how long changes took from opened to close, by part. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Lead`.
+- **`stops`**: the window's stops against the gates its changes owed. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Totals`.
+- **`prose`**: each skill's size, what every session that runs it reads. Specified: `scripts/retro.py`. Depends on: `/sdlc:retro`.

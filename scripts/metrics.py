@@ -98,6 +98,11 @@ unclassified, never as none. Each gated skill with an `after_gate` stop gets its
 `Sdlc-AfterGate: <skill> stops=<n>`, read back as `after_gate: {skill: {"stops": n}}`: a `Close`
 commit without one names no skill for its `after_gate` stops, never 0 of them.
 
+Each plugin skill a change's events started, typed or through the Skill tool, is one `Sdlc-Skill:
+<skill> runs=<n>` line, after the `Sdlc-Tool` lines, read back as `skills: {skill: {"runs": n}}`:
+the retrospective's count of a skill's use. A `Close` commit without any was closed before skills
+were counted: unrecorded, never a skill unused.
+
 Lead time, from the change's `opened:` to its close, and where it went, on a line of its own:
 
     lead_time(opened, closed, first, ready, landing, intervals) -> dict   seconds by part
@@ -140,6 +145,7 @@ import json
 import re
 import shlex
 import statistics
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -1359,6 +1365,8 @@ def summarize(
         "stops": stops,
         # Each gated skill's stops typed after its WAIT was answered (`Sdlc-AfterGate`).
         "after_gate": after_gate,
+        # Each plugin skill's runs, typed or started by the Skill tool (`Sdlc-Skill`).
+        "skills": dict(Counter(e["name"] for e in events if e["kind"] == "skill")),
         "segments": segments,
         "required": required,
     }
@@ -1649,6 +1657,8 @@ def trailers(summary: dict) -> list[str]:
         fields = {**s["kinds"], "harness": s["harness"], "command": s["command"]}
         if any(fields.values()):
             lines.append(f"Sdlc-Extra: {name} {_pairs(fields)}")
+    for skill, n in sorted((summary.get("skills") or {}).items()):
+        lines.append(f"Sdlc-Skill: {_word(skill)} runs={n}")
     for skill, n in sorted((summary.get("after_gate") or {}).items()):
         lines.append(f"Sdlc-AfterGate: {_word(skill)} stops={n}")
     for dep, seconds in sorted(summary["blocked"].items()):
@@ -1806,6 +1816,8 @@ def parse_trailers(body: str | None) -> dict | None:
             out.setdefault("calls", {})[name] = fields
         elif key == "extra" and name:
             out.setdefault("extra", {})[name] = fields
+        elif key == "skill" and name:
+            out.setdefault("skills", {})[name] = fields
         elif key == "aftergate" and name:
             out.setdefault("after_gate", {})[name] = fields
         elif key == "blocked" and name:

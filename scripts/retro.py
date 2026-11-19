@@ -20,6 +20,7 @@ import math
 import re
 import statistics
 import subprocess
+import tomllib
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -1798,6 +1799,399 @@ def retro_report(home: Path, cfg: dict, today: date) -> str:
     return render_report(template, process, spend, value, metrics, cost, host)
 
 
+# ---------------------------------------------------------------- the surface: what is used
+
+# An item unused in this many measured windows running, the current one first, is a retire
+# candidate. A constant, not a key: a key to say how many windows would grow the surface it counts.
+RETIRE_AFTER = 3
+
+# Whether a skill's run reaches a `Close` commit's trailers, for each skill that `metrics.py`'s
+# `SKILL_STAGE` doesn't name or names wrongly: only a change's sessions are measured
+# (`metrics.read_events()`). `outside`: run from the main checkout outside any change, or recorded
+# on no `Close` commit (a drop's is a `Drop`), so neither it nor its calls are ever counted.
+# `supervised`: the factory's supervisor, in the main checkout, keeps for a change only the typed
+# command naming it (`metrics._supervised()`), so its run is counted and its calls never are.
+# Every other skill is `inside`: its run and its calls are the change's.
+SKILL_RUNS = {
+    "sdlc:bug": "outside",
+    "sdlc:dashboard": "outside",
+    "sdlc:drop": "outside",
+    "sdlc:health": "outside",
+    "sdlc:idea": "outside",
+    "sdlc:publish": "outside",
+    "sdlc:release": "outside",
+    "sdlc:retro": "outside",
+    "sdlc:setup": "outside",
+    "sdlc:status": "outside",
+    "sdlc:triage": "outside",
+    "sdlc:uninstall": "outside",
+    "sdlc-factory:build": "supervised",
+    "sdlc-factory:decide": "outside",
+    "sdlc-factory:eval": "outside",
+    "sdlc-factory:land": "supervised",
+    "sdlc-factory:review": "outside",
+}
+
+# A command's registration, read from a script's text: `@command("name"` or `@command(` with the
+# name on the next line. `factory.py` is never imported; the copy is pinned to both registries.
+COMMAND_RE = re.compile(r'@command\(\s*"([a-z][a-z0-9-]*)"')
+# A plugin script's command in a skill's bash, `…/scripts/sdlc.py" ship 179`.
+SCRIPT_CALL_RE = re.compile(r"scripts/(sdlc\.py|factory\.py)['\"]?\s+([a-z][a-z0-9-]*)")
+# A plugin script's call as `Sdlc-Tool` names it (`metrics._prompt_name()`).
+TOOL_CALL_RE = re.compile(r"^Bash:(sdlc\.py|factory\.py):([a-z][a-z0-9-]*)$")
+FACTORY_DIR = "plugins/factory"
+# The skills' cases' commands, this plugin's own like ship's branch for them (`OWN_REPO_BRANCHES`):
+# a host's surface never lists them.
+OWN_REPO_COMMANDS = ("cases", "run-cases")
+OUTSIDE_WHY = "runs outside a change's sessions"
+NO_CALLER_WHY = "no skill runs it"
+UNRECORDED_WHY = "no change recorded it"
+
+
+def _skill_where(name: str) -> str:
+    """`inside`, `supervised` or `outside`: whether a skill's run, and its calls, are counted."""
+    return SKILL_RUNS.get(name, "inside")
+
+
+def _skill_dirs(factory: bool) -> list[tuple[str, Path]]:
+    """Each skill's `plugin:name` and folder: the core's, then the factory's when in play."""
+    roots = [("sdlc", sdlc.PLUGIN_DIR / "skills")]
+    if factory:
+        roots.append(("sdlc-factory", sdlc.PLUGIN_DIR / FACTORY_DIR / "skills"))
+    return [
+        (f"{plugin}:{p.parent.name}", p.parent)
+        for plugin, root in roots
+        for p in sorted(root.glob("*/SKILL.md"))
+    ]
+
+
+def _factory_in_play(home: Path) -> bool:
+    """Whether the factory's surface is counted: enabled for the repo, or the plugin's own."""
+    return sdlc._own_repo(home) or sdlc.factory_enabled(home)[0]
+
+
+def _inventory(home: Path) -> list[dict]:
+    """Every skill, script command and config key, from the code as it is now: `{kind, name,
+    plugin}`, a command named as `Sdlc-Tool` names its call without the `Bash:`."""
+    factory = _factory_in_play(home)
+    own = sdlc._own_repo(home)
+    items = [
+        {"kind": "skill", "name": name, "plugin": name.split(":")[0]}
+        for name, _ in _skill_dirs(factory)
+    ]
+    items += [
+        {"kind": "command", "name": f"sdlc.py:{c}", "plugin": "sdlc"}
+        for c in sorted(sdlc.COMMANDS)
+        if own or c not in OWN_REPO_COMMANDS
+    ]
+    script = sdlc.PLUGIN_DIR / FACTORY_DIR / "scripts" / "factory.py"
+    if factory and script.is_file():
+        found = sorted(set(COMMAND_RE.findall(script.read_text(encoding="utf-8"))))
+        items += [{"kind": "command", "name": f"factory.py:{c}", "plugin": "sdlc-factory"}
+                  for c in found]  # fmt: skip
+    items += [
+        {"kind": "key", "name": f"{section}.{key}", "plugin": "sdlc"}
+        for section, keys in sdlc.CONFIG_KEYS.items()
+        for key in keys
+        if f"{section}.{key}" not in sdlc.RETIRED_KEYS
+    ]
+    return items
+
+
+def _callers(factory: bool) -> dict[str, set[str]]:
+    """Each script command's callers: the skills whose bash blocks, `SKILL.md` and side files,
+    run it (`sdlc.bash_commands()`, as `prose_metrics()` reads them)."""
+    found: dict[str, set[str]] = {}
+    for skill, folder in _skill_dirs(factory):
+        for path in sorted(folder.glob("*.md")):
+            for line in sdlc.bash_commands(path.read_text(encoding="utf-8")):
+                for script, cmd in SCRIPT_CALL_RE.findall(line):
+                    found.setdefault(f"{script}:{cmd}", set()).add(skill)
+    return found
+
+
+def _keys_set(home: Path, ref: str | None) -> set[str] | None:
+    """The `section.key`s the config at `ref` sets itself, read raw, never merged over the
+    defaults; None with no ref to read."""
+    if not ref:
+        return None
+    text = sdlc._git(home, "show", f"{ref}:{sdlc.HOST_DIR}/config.toml")
+    try:
+        data = tomllib.loads(text) if text else {}
+    except tomllib.TOMLDecodeError:
+        data = {}
+    return {f"{s}.{k}" for s, table in data.items() if isinstance(table, dict) for k in table}
+
+
+def _recorded(c: dict, kind: str) -> bool:
+    """Whether a closed change's `Close` commit carries the lines that would show `kind`'s use:
+    `Sdlc-Skill` for a skill, `Sdlc-Tool` for a command."""
+    return bool((c.get("metrics") or {}).get("skills" if kind == "skill" else "tools"))
+
+
+def _counted_before(changes: list[dict], kind: str) -> bool:
+    """Whether a window's changes closed before `kind`'s lines were written: none carries them,
+    and one was measured from its transcripts (`_minutes_measured()`), so a run would have."""
+    return not any(_recorded(c, kind) for c in changes) and any(
+        _minutes_measured(c) for c in changes
+    )
+
+
+def _uses(changes: list[dict]) -> Counter:
+    """Each skill's runs and each command's calls across `changes`: a command's from `Sdlc-Tool`
+    alone, never `Sdlc-Calls`, which splits the same calls by role."""
+    uses: Counter = Counter()
+    for c in changes:
+        m = c.get("metrics") or {}
+        for name, fields in (m.get("skills") or {}).items():
+            runs = fields.get("runs")
+            uses[("skill", name)] += runs if isinstance(runs, int) else 0
+        for name, fields in (m.get("tools") or {}).items():
+            hit = TOOL_CALL_RE.match(name)
+            n = fields.get("calls")
+            if hit and isinstance(n, int):
+                uses[("command", f"{hit[1]}:{hit[2]}")] += n
+    return uses
+
+
+def _states(
+    items: list[dict], changes: list[dict], keys: set[str] | None, callers: dict[str, set[str]]
+) -> list[dict]:
+    """Each item with its `uses` and `state` in one window: `used` when anything counted it;
+    `unmeasured`, with its `why`, when nothing could have (run outside a change, run by no skill,
+    or recorded by no change in the window); `unused` only where a record could have shown it."""
+    uses = _uses(changes)
+    recorded = {k: any(_recorded(c, k) for c in changes) for k in ("skill", "command")}
+    out = []
+    for item in items:
+        kind, name = item["kind"], item["name"]
+        why = None
+        if kind == "key":
+            n = int(name in keys) if keys is not None else 0
+            why = "no base branch" if keys is None else None
+        else:
+            n = uses[(kind, name)]
+            if kind == "skill" and _skill_where(name) == "outside":
+                why = OUTSIDE_WHY
+            elif kind == "command" and not callers.get(name):
+                why = NO_CALLER_WHY
+            elif kind == "command" and all(_skill_where(s) != "inside" for s in callers[name]):
+                why = OUTSIDE_WHY
+            elif not recorded[kind]:
+                why = UNRECORDED_WHY
+        state = "used" if n else ("unmeasured" if why else "unused")
+        out.append({**item, "uses": n, "state": state, **({"why": why} if state == "unmeasured"
+                                                              else {})})  # fmt: skip
+    return out
+
+
+def _surface_share(states: list[dict]) -> dict:
+    """`used / (used + unused)` per kind and overall: the unmeasured are in neither."""
+
+    def share(rows: list[dict]) -> float | None:
+        used = sum(r["state"] == "used" for r in rows)
+        return _share(used, used + sum(r["state"] == "unused" for r in rows))
+
+    kinds = {"skills": "skill", "commands": "command", "keys": "key"}
+    return {
+        **{k: share([r for r in states if r["kind"] == v]) for k, v in kinds.items()},
+        "overall": share(states),
+    }
+
+
+def _surface_why(c: dict) -> str:
+    """Why a closed change carries neither `Sdlc-Skill` nor `Sdlc-Tool` lines."""
+    if not c.get("metrics"):
+        return "not measured at close"
+    reason = _none_reason(c["metrics"].get("coverage"))
+    return reason or "closed before skills and calls were counted"
+
+
+def surface(home: Path, cfg: dict, changes: list[dict], since: dict | None) -> dict:
+    """The plugin's surface and how much of it the window used (the scorecard's Simplicity): every
+    skill, script command and config key, built from the code, with each one's use; the share
+    used, the unmeasured left out; the retire candidates; setup's footprint; and, in the plugin's
+    own repo, the surface's growth per release. Read-only."""
+    trunk = cfg["git"]["base"]
+    items = _inventory(home)
+    callers = _callers(_factory_in_play(home))
+    states = _states(items, changes, _keys_set(home, trunk), callers)
+    footprint, footprint_why = _footprint(home, trunk)
+    growth, growth_why = _growth(home, cfg, since)
+    why = {"footprint": footprint_why, "growth": growth_why}
+    return {
+        "items": states,
+        "share": _surface_share(states),
+        **_coverage(
+            changes, lambda c: _recorded(c, "skill") or _recorded(c, "command"), _surface_why
+        ),
+        "retire": _retire(home, trunk, items, states, callers),
+        "footprint": footprint,
+        "growth": growth,
+        "why": {k: v for k, v in why.items() if v},
+    }
+
+
+def _window_trailers(home: Path, older: str | None, newer: str) -> list[dict]:
+    """The changes closed between two retrospectives with their `Close` commits' trailers alone,
+    as `metrics`: `closed_changes()`'s walk without the intents, and every body in one git call."""
+    recs = sdlc.closed_changes(home, older, newer, read=False)
+    if not recs:
+        return []
+    shas = [r["close_sha"] for r in recs]
+    out = sdlc._git(home, "show", "-s", "--format=%x1e%B", *shas) or ""
+    # Every body holds its subject, so none is empty; `_git()`'s strip takes the first `\x1e`.
+    bodies = [b for b in out.split("\x1e") if b.strip()]
+    for rec, body in zip(recs, bodies + [""] * (len(recs) - len(bodies)), strict=False):
+        rec["metrics"] = sdlc.metrics.parse_trailers(body)
+    return recs
+
+
+def _retire(
+    home: Path, trunk: str | None, items: list[dict], current: list[dict], callers: dict
+) -> dict:
+    """The items unused in each of the last `RETIRE_AFTER` windows they were measured in, the
+    current one first. A window that couldn't measure an item is passed over, neither counting
+    nor breaking its run; an item whose use is never recorded (`OUTSIDE_WHY`, `NO_CALLER_WHY`) is
+    never a candidate. The walk back stops once every item is decided, and for a kind at a window
+    closed before that kind was counted (`_counted_before()`), since no older one was either.
+    `windows` is how many windows the answer rests on."""
+    never = (OUTSIDE_WHY, NO_CALLER_WHY)
+    runs: dict[tuple, list[str]] = {
+        (r["kind"], r["name"]): [] for r in current if r.get("why") not in never
+    }
+    bounds = sdlc.retrospectives(home, trunk)
+    starts = [b["sha"] for b in bounds] + [None]
+    ends = [trunk, *(b["sha"] for b in bounds)]
+    spent: set[str] = set()  # the kinds no older window can have recorded
+    read = 0
+
+    def open_items() -> list[tuple]:
+        return [
+            k
+            for k, seen in runs.items()
+            if k[0] not in spent and len(seen) < RETIRE_AFTER and "used" not in seen
+        ]
+
+    for at, (older, newer) in enumerate(zip(starts, ends, strict=True)):
+        if not trunk or not open_items():
+            break
+        if at == 0:
+            states = current
+        else:
+            changes = _window_trailers(home, older, newer)
+            for kind in ("skill", "command"):
+                if _counted_before(changes, kind):
+                    spent.add(kind)
+            wanted = [i for i in items if (i["kind"], i["name"]) in open_items()]
+            states = _states(wanted, changes, _keys_set(home, newer), callers)
+        read += 1
+        for r in states:
+            key = (r["kind"], r["name"])
+            if key in runs and r["state"] != "unmeasured" and len(runs[key]) < RETIRE_AFTER:
+                runs[key].append(r["state"])
+    named = {(i["kind"], i["name"]): i for i in items}
+    candidates = [
+        {**named[k], "windows": len(seen)}
+        for k, seen in runs.items()
+        if len(seen) == RETIRE_AFTER and set(seen) == {"unused"}
+    ]
+    return {"after": RETIRE_AFTER, "windows": read, "items": candidates}
+
+
+def _lines_under(home: Path, ref: str, paths: list[str]) -> dict[str, int]:
+    """Lines per text file under `paths` at `ref`, in one git call."""
+    out = sdlc._git(home, "grep", "-I", "-c", "", ref, "--", *paths) or ""
+    return indicators.grep_counts(out, ref)
+
+
+def _footprint(home: Path, trunk: str | None) -> tuple[dict | None, str | None]:
+    """What setup left in the host, on the base branch: the paths `setup.json` says it created,
+    the keys the config sets, and the lines of `.sdlc/`'s tracked files but the change folders,
+    the reports and the retrospectives. None, with why, without a `setup.json`."""
+    text = sdlc._git(home, "show", f"{trunk}:{sdlc.MANIFEST}") if trunk else None
+    try:
+        manifest = json.loads(text) if text else None
+    except ValueError:
+        manifest = None
+    if not isinstance(manifest, dict):
+        return None, f"no {sdlc.MANIFEST} on the base branch"
+    left_out = (
+        f"{sdlc.work_rel(home)}/",
+        f"{sdlc.HOST_DIR}/{RETROS}/",
+        f"{sdlc.REPORTS}/",
+    )
+    lines = _lines_under(home, trunk, [f"{sdlc.HOST_DIR}/"])
+    created = manifest.get("created")
+    return {
+        "created": len(created) if isinstance(created, list) else 0,
+        "keys": len(_keys_set(home, trunk) or ()),
+        "lines": sum(n for p, n in lines.items() if not p.startswith(left_out)),
+    }, None
+
+
+# The prose a person or a session reads, counted at each release for `doc_lines`.
+DOC_PATHS = (
+    "skills/", f"{FACTORY_DIR}/skills/", "agents/", f"{FACTORY_DIR}/agents/", "guide/",
+    "defaults/", "templates/", "docs/", "README.md",
+)  # fmt: skip
+SKILL_PATH_RE = re.compile(rf"^(?:{FACTORY_DIR}/)?skills/[^/]+/SKILL\.md$")
+GROWTH_COUNTS = ("skills", "commands", "keys", "doc_lines")
+
+
+def _surface_at(home: Path, tag: str) -> dict:
+    """The surface's size at `tag`, each count None when it can't be read there: commands before
+    the `@command` registry, keys without a `setup.json`."""
+    listed = sdlc._git(home, "ls-tree", "-r", "--name-only", tag, "--", "skills", FACTORY_DIR)
+    skills = sum(bool(SKILL_PATH_RE.match(p)) for p in (listed or "").splitlines())
+    core = COMMAND_RE.findall(sdlc._git(home, "show", f"{tag}:scripts/sdlc.py") or "")
+    more = COMMAND_RE.findall(
+        sdlc._git(home, "show", f"{tag}:{FACTORY_DIR}/scripts/factory.py") or ""
+    )
+    try:
+        manifest = json.loads(sdlc._git(home, "show", f"{tag}:{sdlc.MANIFEST}") or "null")
+    except ValueError:
+        manifest = None
+    keys = manifest.get("config_keys") if isinstance(manifest, dict) else None
+    return {
+        "skills": skills if listed is not None else None,
+        "commands": len(set(core)) + len(set(more)) if core else None,
+        "keys": len(keys) if isinstance(keys, list) else None,
+        "doc_lines": sum(_lines_under(home, tag, list(DOC_PATHS)).values()),
+    }
+
+
+def _growth(home: Path, cfg: dict, since: dict | None) -> tuple[list | None, str | None]:
+    """The surface at each release tag in the window and the tag before the first, oldest first,
+    each with its change since the one before and the `major` and `minor` changes between them.
+    Only in the plugin's own repo: a host's tags are its own releases, not the plugin's."""
+    if not sdlc._own_repo(home):
+        return None, "only in the plugin's own repo"
+    tags = [t["tag"] for t in sdlc._release_tags(home, cfg, since)]
+    if not tags:
+        return [], None
+    every = [t["tag"] for t in sdlc._release_tags(home, cfg, None)]
+    at = every.index(tags[0]) if tags[0] in every else 0
+    rows: list[dict] = []
+    prev: dict | None = None
+    for tag in every[max(at - 1, 0) : at] + tags:
+        counts = _surface_at(home, tag)
+        row: dict = {"tag": tag, **counts, "change": None, "capability": None}
+        if prev:
+            row["change"] = {
+                k: counts[k] - prev[k] if counts[k] is not None and prev[k] is not None else None
+                for k in GROWTH_COUNTS
+            }
+            row["capability"] = [
+                c["name"]
+                for c in sdlc.closed_changes(home, prev["tag"], tag)
+                if c["impact"] in ("major", "minor")
+            ]
+        rows.append(row)
+        prev = row
+    return rows, None
+
+
 def rankable_entries(home: Path, today: date) -> list[dict]:
     """The register's entries a retrospective may re-rank: open ideas and bugs, each with its
     `Priority:` and `Theme:` as they stand. Nits are ranked by their `Cost:` and `Value:`, and an
@@ -2013,6 +2407,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "spend": _spend(home, cfg, changes, diffs),
         "cost": _cost(home, changes, dropped),
         "tests": _tests(home, cfg, lookback),
+        "surface": surface(home, cfg, changes, since),
         **value,
     }
 

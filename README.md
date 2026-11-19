@@ -220,6 +220,10 @@ A repo set up before 1.5.0 has the whole process and review guides copied into `
 
 - [`docs/REFERENCE.md`](docs/REFERENCE.md): every config key, the templates, the docs, numbering,
   trackers, releases, retrospectives and metrics.
+- [`docs/FEATURES.md`](docs/FEATURES.md): every feature, each defined in the plugin's own words,
+  where it is specified and what it depends on.
+- [`docs/PROCESS.md`](docs/PROCESS.md): the change, release and retro loops as maps, with each
+  stage's skill, commands, checks, WAIT and what it writes.
 - [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md): working on the plugin itself, its design, and
   how a change to it is made.
 

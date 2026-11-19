@@ -1056,6 +1056,34 @@ null and the report says `No factory changes in this window.` in place of the ca
 naming the changes with no way recorded. In a host, neither `retro` nor its report mentions the
 skills' cases, which belong to this plugin's own repo; `prose` leaves out ship's branch for them.
 
+Its `surface` is how much of the plugin the window used, read-only like the rest. `items` lists
+every skill, every `sdlc.py` command and every config key, built from the code as it runs, never
+from a list kept by hand, with the factory's skills and `factory.py` commands (`plugin:
+"sdlc-factory"`) when the factory is enabled or the repo is the plugin's own. Each item has its
+`uses` and a `state`: `used`; `unused`, only where a record could have shown it; or `unmeasured`,
+with its `why`, where none could: a skill that runs outside a change's sessions (`/sdlc:idea`,
+`/sdlc:status`, `/sdlc:release` and the rest, whose sessions no `Close` commit measures), a
+command no skill's bash runs, or a skill or command when no change in the window recorded its
+kind of line. A skill's use is the runs on its `Sdlc-Skill` lines, a command's the calls on the
+`Sdlc-Tool` lines naming it (`Bash:sdlc.py:<command>`), never `Sdlc-Calls` on top, and a key is
+used when the base branch's `.sdlc/config.toml` sets it, a default being no setting. The
+factory's supervisor keeps a change's typed `/sdlc-factory:build` or `land` but none of its calls,
+so a command only those skills run is unmeasured; one an agent ran is still used. `share` is used
+over used and unused, per kind (`skills`, `commands`, `keys`) and `overall`, the unmeasured in
+neither, beside `coverage` and `missing_because`: the window's changes whose `Close` carries
+`Sdlc-Skill` or `Sdlc-Tool` lines. `retire` names each item unused in each of the last
+`RETIRE_AFTER` (3) windows that measured it, the current one first: a window that couldn't
+measure it is passed over, and the walk back stops for a kind at a window closed before that kind
+was counted. Its `windows` says how many windows the answer rests on; with fewer than three
+measured, it names nothing. `footprint` is what setup left: the paths `.sdlc/setup.json`'s
+`created` names, the keys the config sets, and the lines of the tracked files under `.sdlc/` but
+the change folders, `retros/` and `reports/`, all on the base branch; with no `setup.json` it is
+null and `why.footprint` says so. `growth`, in the plugin's own repo only (null elsewhere, with
+`why.growth`), is one row per release tag in the window and the tag before the first: `skills`,
+`commands`, `keys` (from that tag's `setup.json`) and `doc_lines`, each read at the tag and null
+where it can't be, their `change` since the row before, and `capability`, the `major` and `minor`
+changes between the two tags. `docs/FEATURES.md` maps the features these count.
+
 Its `architecture` is where the code is going, from git alone, for any language. Each closed
 change carries `added`, `deleted` and `by_kind`: its lines and files as `code`, `tests` or `docs`.
 A path is tests when a directory in it is `test`, `tests`, `spec` or `__tests__`, or its name

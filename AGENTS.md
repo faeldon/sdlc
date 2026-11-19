@@ -154,8 +154,11 @@ doc, the register, the product doc and the report, nothing else. It runs the hos
 `retro.evidence`, `retro.indicators` and `retro.test_times` (`_evidence()`, the only place they
 run), and its report runs `retro.indicators` alone, read back by the next one, so `retro` is
 not in `READ_ONLY`. Rework across changes is only what a change declares (`_rework()`); blame's
-matches are questions, never counted. `scripts/retro.py`'s docstring; REFERENCE.md,
-*Retrospectives* and *The product doc*.
+matches are questions, never counted. Its `surface` is built from the code (`COMMANDS`,
+`CONFIG_KEYS`, the skill folders), never a list kept by hand, and an item no record could show is
+`unmeasured`, never `unused`; `docs/FEATURES.md` and `docs/PROCESS.md` are the maps of it,
+checked against the code by `tests/test_feature_map.py`. `scripts/retro.py`'s docstring;
+REFERENCE.md, *Retrospectives* and *The product doc*.
 
 **The board: `scripts/board.py`.** It writes nothing, `stage:` included, serves `127.0.0.1`
 alone, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A change
@@ -247,8 +250,9 @@ Claude Code's settings files (`factory_enabled()`, `config`'s `factory`, nothing
 `sdlc` only reads the files a run leaves in a change's folder, the base branch's `gate_jobs`
 and the gate slots' lock files, for the hand gate (`_hand_slot()`), the train's run lock, for the
 board (`train_run_held()`), and the base branch's `[ui]` and the screenshot sets under
-`.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`, `_current_shots()`), never
-running `factory.py`: each reads the other's files with copies of its parsing (`risk_paths()` and
+`.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`, `_current_shots()`), and its
+skill folders' names and `factory.py`'s `@command` names, as text, for the retrospective's
+`surface` (`COMMAND_RE`), never running `factory.py`: each reads the other's files with copies of its parsing (`risk_paths()` and
 the regexes included), pinned by tests; core's copies of a run's records live in
 `scripts/factory_records.py` alone, under `factory.py`'s names, and no other core file names a
 record (`tests/test_modules.py`). Agents that judge have no Write; only the builder and the resolver

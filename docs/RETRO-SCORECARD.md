@@ -330,9 +330,10 @@ Cheap work that escapes isn't cheap. A falling cost with a rising escape rate is
   window.
 - **Why:** a feature nobody uses still costs every host its context, its docs and its upkeep.
   Features unused for several windows are candidates to retire.
-- **Where:** the `Sdlc-Tool` and `Sdlc-Calls` trailers (each command and skill per change), the
-  host's config, against an inventory of what exists.
-- **Status:** needs S5.
+- **Where:** the `Sdlc-Skill` and `Sdlc-Tool` trailers (each skill and command per change), the
+  host's config, against an inventory built from the code.
+- **Status:** fed by S5: `surface.share`, the unmeasured left out, and `surface.retire` for the
+  never-used.
 
 ### Headline: context per run
 - **What:** the median tokens a skill run reads (its `SKILL.md` and side files), per skill and in
@@ -347,14 +348,14 @@ Cheap work that escapes isn't cheap. A falling cost with a rising escape rate is
   `.sdlc/`.
 - **Why:** what a host has to carry and understand before it gets any value.
 - **Where:** `setup.json`, `defaults/`.
-- **Status:** partly. Needs S5.
+- **Status:** fed by S5: `surface.footprint`.
 
 ### Supporting: the plugin's surface and its growth
 - **What:** the count of skills, commands, config keys and doc lines, and their growth per release
   against the capability added.
 - **Why:** surface that grows faster than capability is complexity accumulating.
 - **Where:** the repo itself.
-- **Status:** needs S5.
+- **Status:** fed by S5: `surface.growth`, in the plugin's own repo.
 
 ### Supporting: process overhead and workarounds
 - **What:** time and stops spent on the process itself rather than the change, and workarounds:
