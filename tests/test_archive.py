@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -2494,6 +2494,55 @@ def test_a_dropped_change_records_no_lead(tmp_path, gh, capsys) -> None:
     assert body.startswith("Drop ") and "Sdlc-Coverage:" in body and "Sdlc-Lead" not in body
 
 
+# ---------------------------------------------------------------- elapsed from the local day (188)
+
+# UTC+8, as a POSIX TZ string (its sign is west-positive), so no tz database is needed.
+EAST = "UTC-8"
+
+
+@pytest.fixture
+def east():
+    """The process's local timezone set to UTC+8 for the test, and put back after it."""
+    import time
+
+    was = os.environ.get("TZ")
+    os.environ["TZ"] = EAST
+    time.tzset()
+    yield
+    if was is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = was
+    time.tzset()
+
+
+# 02:00 at UTC+8 on 2026-10-01, the day `_opened` gives the intent: still 2026-09-30 in UTC.
+EAST_SMALL_HOURS = datetime(2026, 9, 30, 18, 0, tzinfo=UTC)
+
+
+class _EastFrozen(datetime):
+    """`datetime` with `now()` fixed at `EAST_SMALL_HOURS`."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return EAST_SMALL_HOURS
+
+
+def test_elapsed_counts_from_the_local_day_never_negative(tmp_path, gh, monkeypatch, east):
+    """188: `created:` is the local day `new` stamped, so a change created that day and closed
+    at 02:00 at UTC+8, while UTC is still on the day before, measures two hours from local
+    midnight, never a negative elapsed."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    root = _repo(tmp_path)
+    name = _lead_shipped(root, monkeypatch, "2026-09-30T17:00Z")
+    monkeypatch.setattr(sdlc.closing, "datetime", _EastFrozen)
+    summary, lines = _measure(root, name)
+    assert summary["coverage"].startswith("none:"), summary["coverage"]
+    assert summary["totals"]["elapsed"] == 2 * 3600, summary["totals"]
+    totals = next(ln for ln in lines if ln.startswith("Sdlc-Totals:"))
+    assert "elapsed=120 " in totals, totals
+
+
 # ---------------------------------------------------------------- what ran underneath (170)
 
 RAN = [
@@ -2617,8 +2666,35 @@ def _pushed_repo(tmp_path: Path) -> Path:
     return root
 
 
+class _EastDay(date):
+    """`date` with `today()` fixed at 2026-10-01, the local day at `EAST_SMALL_HOURS`."""
+
+    @classmethod
+    def today(cls):
+        return cls(2026, 10, 1)
+
+
+class _Frozen17(datetime):
+    """`datetime` with `now()` fixed half an hour before `EAST_SMALL_HOURS`: when `new` opens."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 9, 30, 17, 30, tzinfo=UTC)
+
+
+def _pin_clock(monkeypatch) -> None:
+    """188: every clock a close reads fixed at 02:00 at UTC+8 (the `east` fixture's timezone),
+    while UTC is still on the day before: `new`'s day and `opened:`, git's dates, close's now."""
+    for var in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
+        monkeypatch.setenv(var, "2026-09-30T17:30:00Z")
+    monkeypatch.setattr(sdlc, "date", _EastDay)
+    monkeypatch.setattr(sdlc, "datetime", _Frozen17)
+    monkeypatch.setattr(sdlc.closing, "datetime", _EastFrozen)
+
+
 def _close_scenario(scenario: str, tmp_path: Path, capsys, monkeypatch) -> list[dict]:
     monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    _pin_clock(monkeypatch)
     root = _pushed_repo(tmp_path) if scenario == "pushed" else _repo(tmp_path)
     if scenario == "dropped":
         _dropped(root)
@@ -2634,9 +2710,10 @@ def _close_scenario(scenario: str, tmp_path: Path, capsys, monkeypatch) -> list[
 
 
 @pytest.mark.parametrize("scenario", ["shipped", "dropped", "check", "rerun", "pushed"])
-def test_close_output_is_unchanged(tmp_path, gh, capsys, monkeypatch, scenario) -> None:
+def test_close_output_is_unchanged(tmp_path, gh, capsys, monkeypatch, east, scenario) -> None:
     """172 R4: splitting close into named steps changed nothing a person sees: the report as
     printed (its keys in order), the exit, and the commit and tree it leaves, as recorded from
-    the close before the split."""
+    the close before the split. 188: its clock and timezone are pinned (`_pin_clock()`), at an
+    hour when the local day is ahead of UTC's, so it reads the same at any hour."""
     runs = _close_scenario(scenario, tmp_path, capsys, monkeypatch)
     assert runs == json.loads(CLOSE_OUTPUT.read_text(encoding="utf-8"))[scenario]

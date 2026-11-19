@@ -400,6 +400,20 @@ def _lead_line(
         return None, "lead=failed"
 
 
+def _day_start(created: date | None, now: datetime) -> datetime:
+    """When a change's `created:` day began, for its elapsed time: midnight in this machine's
+    timezone, since `created:` is the local day `new` stamped (`date.today()`), never after `now`
+    (east of UTC, UTC midnight of that day can still lie ahead), and `now` when there is no day.
+    A day the platform can't place falls back to UTC midnight."""
+    if not created:
+        return now
+    try:
+        start = datetime.combine(created, dtime()).astimezone()
+    except (OverflowError, OSError, ValueError):
+        start = datetime.combine(created, dtime(), UTC)
+    return min(start, now)
+
+
 def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]:
     """What a change cost, as a summary and its `Sdlc-*` trailer lines: from this repo's
     transcripts when `metrics.transcripts` allows and they hold the change, else what history
@@ -468,7 +482,7 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
 
     def from_history(reason: str) -> tuple[dict, list[str]]:
         now = datetime.now(UTC)
-        start = datetime.combine(created, dtime(), UTC) if created else now
+        start = _day_start(created, now)
         summary = sdlc.metrics.history_summary(
             (now - start).total_seconds(), way, tier, settings, reason
         )
