@@ -110,8 +110,9 @@ The pillars measure how work is done. This band measures what it is spent on.
   trades the first for the second. *Baseline:* by hand 1–5 a day, 41 minutes median lead time;
   factory 32–36 a day, 93 minutes.
 - **Where:** `Close` commits, `Sdlc-Mode`, `impact:`.
-- **Status:** partly: per week by tier is captured (`process.throughput`); by mode needs S9, and
-  by impact S2.
+- **Status:** captured: each week of `process.throughput` by tier, by way of building (`ways`,
+  S9, 176) and by work class (`classes`, 176, the S2 classes standing in for impact), and
+  `by_way.throughput`'s changes per week for each way.
 
 ### Supporting: flow efficiency and ready-wait share
 - **What:** flow efficiency is the time agents (or the person) were working on a change, divided by
@@ -285,7 +286,8 @@ Quality bought with slowness shows up as lead time rising. See Speed.
 - **What:** escapes per change for factory-built changes against hand-built ones (O6).
 - **Why:** autonomy must not cost trust. If the factory escapes more, less should be delegated.
 - **Where:** `bugs.escapes` with each introducing change's `Sdlc-Mode`.
-- **Status:** needs S9.
+- **Status:** captured (S9, 176): each escape's `way`, and `bugs.rate.window.by_way` (copied to
+  `by_way.escapes`), the window's rate for each way over its own changes.
 
 ### Diagnostics
 - **Extra stops by kind:** `after_gate`, `asked`, `revise`, `unprompted`. A kind that recurs is a
@@ -304,7 +306,8 @@ Quality bought with slowness shows up as lead time rising. See Speed.
 - **Where:** `runs/costs.jsonl` (each agent run's reported cost, tokens and duration).
 - **Status:** captured (S4, 174): `retro`'s `cost.per_change`, dollars and agent-minutes per
   landed factory change by tier, each with its `n`; hand-built changes record tokens, not dollars,
-  so they are counted missing, never $0.
+  so they are counted missing, never $0. `by_way.cost` (S9, 176) compares the ways in tokens,
+  measured the same on both sides, with dollars beside them where recorded.
 
 ### Supporting: waste share
 - **What:** the share of spend on work that didn't land or was redone: ejected changes, red gates,
@@ -490,7 +493,7 @@ its `After:` line, or open it with `/sdlc:intent` where marked.
 | **S6** | Workarounds tagged: a change landed outside the loop, a record fixed by hand, an override, each recorded so retro counts it. **Done: 180.** | Simplicity | – |
 | **S7** | This repo's function-heat indicator, `.sdlc/function-heat.py`, set in `retro.indicators`. **Open as a Tier 1 intent by hand.** | Quality | – |
 | **S8** | Indicators in a structured format (JSON rows), rendered as a table in the report; "no indicators set" said when empty; setup offers the key. | Quality | S7 |
-| **S9** | Figures by way of building: lead time, throughput, cost and escape rate, factory against by hand. | Speed, Autonomy | S1 |
+| **S9** | Figures by way of building: lead time, throughput, cost and escape rate, factory against by hand. **Done: 176.** | Speed, Autonomy | S1 |
 | **S10** | Pipeline and risk figures: gate seconds and slot-wait trend, red-gate rate, train figures (gates, ejections, bisections, base moves, accept stops, conflicts), mends, full-depth share, unreviewed landings. | Speed, Quality | S1 |
 | **S11** | Trust band: each headline's coverage and why the rest is missing, greyed under half; the Claude Code version, models and plugin version against the last window. | Trust | – |
 | **S12** | Follow-through: the share of the last retrospective's seeds, milestones and intents done or dropped against carried or vanished. | Value | – |
@@ -575,7 +578,7 @@ touches its files.
 - **S6**, done, with 2026-11-18-93: 180.
 - **S8**.
 - **S17**, done: 178.
-- **S9**.
+- **S9**, done: 176.
 - **S10**, done: 175.
 
 #### Wave 4

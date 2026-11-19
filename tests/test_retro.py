@@ -560,6 +560,35 @@ def test_a_fixed_bug_s_introducer_is_rework_merged_with_a_declared_link(tmp_path
     }
 
 
+def test_escape_rate_is_split_by_the_introducing_change_s_way(tmp_path: Path) -> None:
+    """176 R7: each escape carries its introducer's way, `unknown` when history doesn't hold it;
+    the window's rate is split by way over each way's closed changes, null with none, and the
+    split's escapes sum to the window's."""
+    root = _repo(tmp_path)
+    _filed(root, "# Inbox\n\n## [2026-10-07-1] [bug] Drafts lose titles\n\nWhat happens.\n\n"
+                 "Severity: low\nIntroduced by: 099\n\n")  # fmt: skip
+    _close(root, "001-reopen-drafts", trailers=("Sdlc-Mode: factory",))
+    _close(root, "002-draft-titles", trailers=("Sdlc-Mode: manual",))
+    fixes = (
+        "Sdlc-Mode: manual",
+        "Sdlc-Fixes: 2026-10-05-1 severity=high reported=2026-10-05 introduced_by=001",
+        "Sdlc-Fixes: 2026-10-06-1 severity=low reported=2026-10-06 introduced_by=002-draft-titles",
+    )
+    _close(root, "003-keep-one-draft", closed="2026-10-08", trailers=fixes)
+    out = _retro(root)
+    bugs = out["bugs"]
+    assert {r["change"]: r["way"] for r in bugs["escapes"]} == {
+        "001-reopen-drafts": "factory", "002-draft-titles": "manual", "099": "unknown",
+    }  # fmt: skip
+    window = bugs["rate"]["window"]
+    assert window["by_way"] == {
+        "factory": {"escapes": 1, "changes": 1, "rate": 1.0},
+        "manual": {"escapes": 1, "changes": 2, "rate": 0.5},
+        "unknown": {"escapes": 1, "changes": 0, "rate": None},
+    }
+    assert sum(w["escapes"] for w in window["by_way"].values()) == window["escapes"] == 3
+
+
 def test_a_closed_change_carries_its_fixes_line(tmp_path: Path) -> None:
     """168 R4: read as text, as `reworks:` is; [] with no line."""
     root = _repo(tmp_path)
@@ -2281,7 +2310,7 @@ def test_the_process_views_count_cycle_throughput_time_and_load() -> None:
         "since": "2026-10-01", "today": "2026-10-24", "closed": 4, "tiers": {"1": 2, "2": 2},
         "dropped": 0, "measured": 3, "unmeasured": 1, "factory": 0, "mode_unknown": 4,
     }  # fmt: skip
-    assert out["throughput"] == [
+    assert [{k: r[k] for k in ("week", "tiers", "total")} for r in out["throughput"]] == [
         {"week": "2026-10-05", "tiers": {"1": 1, "2": 2}, "total": 3},
         {"week": "2026-10-12", "tiers": {"1": 1}, "total": 1},
     ]
@@ -2659,6 +2688,60 @@ def test_lead_time_by_tier_and_way_with_unmeasured_counted_apart() -> None:
     assert out["cycle"] is None, "no elapsed: the timed views are unmeasured, as before"
 
 
+def test_lead_time_is_given_by_way_across_tiers() -> None:
+    """176 R2: per way, over every tier, the count, median and nearest-rank p85; a way with no
+    measured change is n 0 and null figures; the per-tier groups are as they were."""
+    changes = [
+        _led("001-a", 1, "factory", {"lead": 10}),
+        _led("002-b", 2, "factory", {"lead": 30}),
+        _led("003-c", 2, "factory", {"lead": 20}),
+        _led("004-d", 1, "manual", {"lead": 40}),
+        _led("005-e", 1, "manual", None),
+    ]
+    lead = _views(changes)["lead"]
+    assert lead["ways"] == {
+        "factory": {"n": 3, "median": 20, "p85": 30},
+        "manual": {"n": 1, "median": 40, "p85": 40},
+        "unknown": {"n": 0, "median": None, "p85": None},
+    }
+    assert [(g["tier"], g["way"], g["n"]) for g in lead["groups"]] == [
+        ("1", "factory", 1), ("1", "manual", 1), ("2", "factory", 2),
+    ]  # fmt: skip
+
+
+def test_throughput_counts_each_week_by_way_and_by_work_class() -> None:
+    """176 R3: each week's row counts its changes by way and by work class, every key there with
+    its 0, and each of the two sums to the row's total."""
+    a = _led("001-a", 1, "factory", None)
+    b = _led("002-b", 2, "manual", None)
+    c = _rec("003-c", 2, "2026-10-13", None, None)
+    a["work"], b["work"] = {"class": "fix"}, {"class": "process"}
+    rows = _views([a, b, c])["throughput"]
+    assert rows == [
+        {"week": "2026-10-05", "tiers": {"1": 1, "2": 1}, "total": 2,
+         "ways": {"factory": 1, "manual": 1, "unknown": 0},
+         "classes": {"fix": 1, "capability": 0, "process": 1, "debt": 0, "unclassed": 0}},
+        {"week": "2026-10-12", "tiers": {"2": 1}, "total": 1,
+         "ways": {"factory": 0, "manual": 0, "unknown": 1},
+         "classes": {"fix": 0, "capability": 0, "process": 0, "debt": 0, "unclassed": 1}},
+    ]  # fmt: skip
+    for row in rows:
+        assert sum(row["ways"].values()) == sum(row["classes"].values()) == row["total"]
+
+
+def test_the_report_s_throughput_shows_work_classes(tmp_path: Path) -> None:
+    """176 R4: the report classes each change before it counts the weeks, so a `fix` change reads
+    `fix` in the throughput table, as in `retro`'s JSON, never `unclassed`."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", reworks="000", closed="2026-10-05",
+           trailers=("Sdlc-Mode: manual",))  # fmt: skip
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    assert "| Week of | Tiers | Ways | Classes | Closed |" in text
+    assert "| 2026-10-05 | 1: 1 | manual: 1 | fix: 1 | 1 |" in text, text
+    week = _retro(root)["process"]["throughput"][0]
+    assert week["classes"]["fix"] == 1 and week["ways"]["manual"] == 1
+
+
 def test_without_a_lead_line_every_other_figure_is_as_it_was() -> None:
     """162 R14: the existing views don't see the new line."""
     plain = [
@@ -2671,6 +2754,7 @@ def test_without_a_lead_line_every_other_figure_is_as_it_was() -> None:
         assert a[key] == b[key], key
     assert a["lead"] == {
         "measured": 0, "unmeasured": 2, "groups": [], "shares": {},
+        "ways": {w: {"n": 0, "median": None, "p85": None} for w in WAYS},
         "coverage": {"measured": 0, "of": 2, "greyed": True},
         "missing_because": {"closed before lead time was recorded": 2},
     }  # fmt: skip
@@ -2776,6 +2860,15 @@ def test_a_change_touching_only_the_process_is_process_work(tmp_path: Path) -> N
     work = {c["name"]: c["work"]["class"] for c in _retro(root)["changes"]}
     assert work == {"001-host-dir": "process", "002-named-doc": "process",
                     "003-own-folder": "debt"}  # fmt: skip
+
+
+def test_a_change_touching_only_setup_s_record_is_process_work(tmp_path: Path) -> None:
+    """176 R12 (nit 2026-11-19-15): setup's record is a `.sdlc/` path like any other, so a
+    change whose only edit outside its folder is `.sdlc/setup.json` is process work."""
+    root = _repo(tmp_path)
+    _close(root, "001-setup-record", files=(".sdlc/setup.json",))
+    (change,) = _retro(root)["changes"]
+    assert change["work"]["class"] == "process", change["work"]
 
 
 def _released(root: Path, tag: str, when: str) -> None:
@@ -2940,6 +3033,76 @@ def test_follow_through_scores_the_milestones_open_at_the_last_retrospective(tmp
     assert ft["unmeasured"] == 1
     assert ft["seeds"]["rows"] == [{"id": "2026-10-09-1", "verdict": "carried"}]
     assert (ft["n"], ft["share"]) == (7, 0.57), "six milestones and one seed; 4 kept"
+
+
+def _retire(root: Path, subject: str, *gone: str) -> None:
+    """Remove `gone` (whole entries) from the register in one commit with `subject`, as
+    `inbox-commit` does."""
+    register = root / ".sdlc" / "work" / "inbox.md"
+    text = register.read_text(encoding="utf-8")
+    for entry in gone:
+        text = text.replace(entry, "")
+    register.write_text(text, encoding="utf-8")
+    _git(root, "commit", "-q", "-am", subject)
+
+
+RETIRED_DIRECTION = """\
+# Direction
+
+## Milestones
+
+### M1. Given up seed by seed
+
+Groups: 2026-10-09-1, "Second seed"
+
+### M2. Partly built
+
+Groups: 001, 2026-10-09-3
+
+### M3. Lost
+
+Groups: "Deleted by hand"
+"""
+
+
+def test_a_grouped_seed_retired_by_inbox_commit_reads_dropped(tmp_path: Path) -> None:
+    """176 R9, R10: a grouped seed gone from the register, which a `Retire` subject names, is
+    `dropped`, whether the milestone groups it by id or by its quoted title; one gone without a
+    `Retire` is still `vanished`. `retired_entries()` gives each retired entry's title from the
+    register before its commit."""
+    root = _repo(tmp_path)
+    seeds = [_seed("2026-10-09-1", "First seed"), _seed("2026-10-09-2", "Second seed"),
+             _seed("2026-10-09-4", "Deleted by hand")]  # fmt: skip
+    _filed(root, "# Inbox\n\n" + "".join(seeds))
+    _retire(root, "File 2026-10-10-1; Retire 2026-10-09-1, 2026-10-09-2", *seeds[:2])
+    _retire(root, "tidy the register", seeds[2])
+    assert sdlc.retired_entries(root, "main") == [
+        {"id": "2026-10-09-1", "title": "First seed"},
+        {"id": "2026-10-09-2", "title": "Second seed"},
+    ]
+    items = sdlc.direction_items(RETIRED_DIRECTION)["items"]
+    verdicts = sdlc._milestone_verdicts(root, items, [], "main")
+    assert [(r["entry"], r["verdict"]) for r in verdicts["M1"]] == [
+        ("2026-10-09-1", "dropped"), ("Second seed", "dropped"),
+    ]  # fmt: skip
+    assert [r["verdict"] for r in verdicts["M3"]] == ["vanished"]
+    assert not hasattr(sdlc.retro, "_retired_ids"), "one reader of Retire subjects"
+
+
+def test_a_milestone_whose_grouped_seeds_were_retired_follows_through_as_dropped(tmp_path) -> None:
+    """176 R11: every grouped row dropped is a `dropped` milestone; closed or shipped beside
+    dropped is `done`; never `carried`."""
+    root = _repo(tmp_path)
+    seeds = [_seed("2026-10-09-1", "First seed"), _seed("2026-10-09-2", "Second seed"),
+             _seed("2026-10-09-3", "Third seed")]  # fmt: skip
+    _retrospective(root, "2026-10-10", RETIRED_DIRECTION.split("### M3")[0],
+                   "# Inbox\n\n" + "".join(seeds))  # fmt: skip
+    _close(root, "001-reopen-drafts", closed="2026-10-12")
+    _retire(root, "Retire 2026-10-09-1, 2026-10-09-2, 2026-10-09-3", *seeds)
+    milestones = _retro(root)["follow_through"]["milestones"]
+    assert [(r["id"], r["verdict"]) for r in milestones["rows"]] == [
+        ("M1", "dropped"), ("M2", "done"),
+    ]  # fmt: skip
 
 
 def test_without_an_earlier_retrospective_follow_through_is_unmeasured_not_zero(tmp_path) -> None:
@@ -3601,6 +3764,96 @@ def test_retro_prints_each_changes_cost_only_with_metrics(tmp_path: Path, capsys
     assert "changes" not in lean and lean["waste"]["n"] == 3
     sdlc.retro.cmd_retro(root, metrics=True)
     assert len(json.loads(capsys.readouterr().out)["cost"]["changes"]) == 5
+
+
+# ---------------------------------------------------------------- by way of building (176)
+
+WAYS = ("factory", "manual", "unknown")
+
+
+def _by_hand(root: Path, name: str, tokens: tuple[int, int, int], **kw) -> None:
+    """A change built by hand whose close read its transcripts: `in`, `cache_read`, `out`."""
+    i, c, o = tokens
+    _close(root, name, trailers=("Sdlc-Mode: manual",
+                                 f"Sdlc-Totals: elapsed=10 in={i} cache_read={c} out={o}"),
+           **kw)  # fmt: skip
+
+
+def test_a_change_with_no_sdlc_mode_counts_as_unknown_way(tmp_path: Path) -> None:
+    """176 R1: the way is `Sdlc-Mode` alone; a `Close` with no `Sdlc-*` lines is `unknown`, even
+    when the change's folder held a `decision.md`."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts",
+           texts={".sdlc/work/001-reopen-drafts/decision.md": "DECISION: READY\n"})  # fmt: skip
+    out = _retro(root)
+    assert out["by_way"]["changes"] == {"factory": 0, "manual": 0, "unknown": 1}
+    assert out["process"]["throughput"][0]["ways"] == {"factory": 0, "manual": 0, "unknown": 1}
+
+
+def test_by_way_gives_every_figure_for_each_way_with_its_n(tmp_path: Path) -> None:
+    """176 R5: every part names every way, and `changes` sums to the window's closed count;
+    throughput is per week over the window's span, which runs from the first close with no
+    retrospective."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", closed="2026-10-03", trailers=FACTORY)
+    _by_hand(root, "002-draft-titles", (100, 50, 10), closed="2026-10-10")
+    out = _retro(root)
+    by_way = out["by_way"]
+    assert set(by_way) == {"changes", "lead", "throughput", "cost", "escapes"}
+    for part in by_way.values():
+        assert set(part) == set(WAYS), part
+    assert sum(by_way["changes"].values()) == out["process"]["window"]["closed"] == 2
+    assert by_way["throughput"]["factory"] == {"closed": 1, "weeks": 3.0, "per_week": 0.33}
+    assert by_way["throughput"]["unknown"] == {"closed": 0, "weeks": 3.0, "per_week": 0.0}
+    assert by_way["lead"] == out["process"]["lead"]["ways"]
+    assert by_way["escapes"] == out["bugs"]["rate"]["window"]["by_way"]
+    assert "_landed" not in out["cost"]
+
+
+def test_hand_built_cost_compares_in_tokens_and_is_missing_in_dollars(tmp_path: Path) -> None:
+    """176 R6: tokens on both sides from `Sdlc-Totals`, over the changes whose totals came from
+    transcripts; dollars only where recorded, a hand-built change missing as `built by hand`,
+    never $0; a median with n 0 is null."""
+    root = _repo(tmp_path)
+    _cost_window(root)
+    _by_hand(root, "008-hand-tokens", (100, 50, 10))
+    _by_hand(root, "009-hand-more", (200, 100, 20))
+    cost = _retro(root)["by_way"]["cost"]
+    manual = cost["manual"]
+    assert manual["tokens"] == {"n": 2, "median": 240, "missing_because": {}}
+    assert manual["usd"] == {"n": 0, "median": None, "missing_because": {"built by hand": 2}}
+    factory = cost["factory"]
+    assert (factory["usd"]["n"], factory["usd"]["median"]) == (3, 2.0)
+    assert factory["usd"]["missing_because"] == {
+        "no agent runs recorded": 1, "no cost reported": 1,
+    }  # fmt: skip
+    assert factory["tokens"] == {
+        "n": 0, "median": None, "missing_because": {"not measured at close": 5},
+    }  # fmt: skip
+    assert cost["unknown"]["usd"]["missing_because"] == {"built by hand": 1}
+
+
+def test_the_report_compares_the_ways_of_building(tmp_path: Path) -> None:
+    """176 R8: the window ends with the *By way of building* table, after the value sentences,
+    every figure with its `n` and `–` for a null, never 0; throughput gains its two columns."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", closed="2026-10-03", trailers=FACTORY)
+    _by_hand(root, "002-draft-titles", (1000, 500, 100), closed="2026-10-10")
+    text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
+    window = text.split("## Window\n", 1)[1].split("\n## ", 1)[0]
+    assert window.index("Follow-through") < window.index("By way of building")
+    rows = {line.split(" | ")[0].strip("| "): line for line in window.splitlines()
+            if line.startswith("| ")}  # fmt: skip
+    assert rows["By way of building"] == "| By way of building | Factory | By hand | Unknown |"
+    assert rows["Changes"] == "| Changes | 1 | 1 | 0 |"
+    assert rows["Median lead"] == "| Median lead | – (0) | – (0) | – (0) |"
+    assert rows["85th percentile lead"] == "| 85th percentile lead | – (0) | – (0) | – (0) |"
+    assert rows["Closed per week"] == "| Closed per week | 0.33 (1) | 0.33 (1) | 0 (0) |"
+    assert rows["Median tokens"] == "| Median tokens | – (0) | 1,600 (1) | – (0) |"
+    assert rows["Median dollars"] == "| Median dollars | – (0) | – (0) | – (0) |"
+    assert rows["Escape rate"] == "| Escape rate | 0 (1) | 0 (1) | – (0) |"
+    assert "| Week of | Tiers | Ways | Classes | Closed |" in text
+    assert "By way of building" not in sdlc.retro.render_report("{{window}}", _views([]))
 
 
 def test_the_report_says_how_far_cost_and_waste_rest(tmp_path: Path) -> None:

@@ -6913,6 +6913,34 @@ def doc_items(text: str, kinds: str) -> dict:
     }
 
 
+def retired_entries(home: Path, trunk: str | None, since: str | None = None) -> list[dict]:
+    """Every entry a `Retire` part of a first-parent subject on `trunk` names, since `since` when
+    given (`inbox-commit`'s `File a; Retire b, c`), oldest first: its `id`, and its `title` when
+    the register held it just before that commit. [] with no `trunk`."""
+    if not trunk:
+        return []
+    span = f"{since}..{trunk}" if since else trunk
+    log = _git(home, "log", "--first-parent", "--reverse", "--format=%H%x00%s", span) or ""
+    rel = f"{work_rel(home)}/{INBOX}"
+    out: list[dict] = []
+    for line in log.splitlines():
+        sha, _, subject = line.partition("\x00")
+        ids = [
+            ident.strip()
+            for part in subject.split("; ")
+            if part.startswith("Retire ")
+            for ident in part[len("Retire ") :].split(",")
+            if ident.strip()
+        ]
+        if not ids:
+            continue
+        before = {e["id"]: e for e in parse_entries(_git(home, "show", f"{sha}^:{rel}") or "")}
+        for ident in ids:
+            entry = before.get(ident)
+            out.append({"id": ident, **({"title": entry["title"]} if entry else {})})
+    return out
+
+
 def _milestone_verdicts(
     home: Path,
     items: list[dict],
@@ -6922,14 +6950,16 @@ def _milestone_verdicts(
 ) -> dict:
     """What each open milestone's grouped seeds and changes have become, from history: a change
     closed (with when), still open, or unknown; a seed still in the register, shipped by the change
-    whose `idea:` names it, or vanished with no change behind it. `history`, every closed change,
-    when the caller has walked it already."""
+    whose `idea:` names it, dropped when gone from the register and an `inbox-commit` `Retire`
+    named it (`retired_entries()`, walked only when a seed has gone), or vanished with none of
+    these. `history`, every closed change, when the caller has walked it already."""
     wanted = [i for i in items if i["kind"] == "milestone" and i["status"] == "open"]
     if not wanted:
         return {}
     if history is None:
         history = closed_changes(home, None, trunk)
     entries = inbox_entries(home)
+    retired: list[dict] | None = None
     out: dict[str, list[dict]] = {}
     for item in wanted:
         rows = []
@@ -6955,7 +6985,14 @@ def _milestone_verdicts(
             elif any(ref_matches(seed, e) for e in entries):
                 rows.append({"entry": seed, "kind": "seed", "verdict": "open"})
             else:
-                rows.append({"entry": seed, "kind": "seed", "verdict": "vanished"})
+                if retired is None:
+                    retired = [
+                        {"id": e["id"], "title": e.get("title") or ""}
+                        for e in retired_entries(home, trunk)
+                    ]
+                gone = any(ref_matches(seed, e) for e in retired)
+                rows.append({"entry": seed, "kind": "seed",
+                             "verdict": "dropped" if gone else "vanished"})  # fmt: skip
         out[item["id"]] = rows
     return out
 
@@ -7139,7 +7176,9 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
             home, doc["items"], open_names, cfg["git"]["base"], history()
         )
         for m_id, rows in verdicts.items():
-            if rows and all(r["verdict"] in ("closed", "shipped", "vanished") for r in rows):
+            if rows and all(
+                r["verdict"] in ("closed", "shipped", "dropped", "vanished") for r in rows
+            ):
                 done.append(m_id)
 
     warnings = [

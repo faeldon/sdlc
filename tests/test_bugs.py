@@ -682,6 +682,7 @@ def test_retro_counts_bugs_reported_fixed_retired_open_and_escaped(
             "change": "001-start",
             "bugs": 1,
             "tier": 1,
+            "way": "unknown",  # its Close records no Sdlc-Mode
             # Fixed: its title left with the entry, and a trailer from before `paths=`.
             "escaped": [{"id": "2026-10-01-1", "title": None, "severity": "high", "paths": None}],
             "review": {"state": "unknown", "counts": None, "findings": [], "problems": []},
@@ -703,7 +704,15 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
         "escapes": [],
         "unattributed": 0,
         "rate": {
-            "window": {"escapes": 0, "changes": 0, "rate": None},
+            "window": {
+                "escapes": 0,
+                "changes": 0,
+                "rate": None,
+                "by_way": {
+                    w: {"escapes": 0, "changes": 0, "rate": None}
+                    for w in ("factory", "manual", "unknown")
+                },
+            },  # fmt: skip
             "previous": None,
             "trend": "unknown",
         },
@@ -867,8 +876,8 @@ def test_the_escape_rate_moves_against_the_window_before(
     root = _repo(tmp_path)
     _windows(root, before, now, prev_bugs, now_bugs)
     rate = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 25))["bugs"]["rate"]
-    assert rate["window"] == {"escapes": now_bugs, "changes": now,
-                              "rate": round(now_bugs / now, 2)}  # fmt: skip
+    assert {k: v for k, v in rate["window"].items() if k != "by_way"} == {
+        "escapes": now_bugs, "changes": now, "rate": round(now_bugs / now, 2)}  # fmt: skip
     assert rate["previous"] == {"escapes": prev_bugs, "changes": before,
                                 "rate": round(prev_bugs / before, 2)}  # fmt: skip
     assert rate["trend"] == trend, "under five changes in either window says nothing"

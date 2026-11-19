@@ -60,13 +60,20 @@ What `retro` gives:
 - `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
 - `process`: the report's figures, aggregates only. `window` (closed by tier, dropped, and how
   many were `measured`), `cycle` (per tier, median and longest `elapsed`, median `agent` and days
-  open), `throughput` (closed per week by tier), `time` (per tier, the median clocks; over the
+  open), `throughput` (closed per week by tier, by way of building in `ways` and by work class in
+  `classes`), `lead` (per tier and way, and per way alone in `ways`), `time` (per tier, the median clocks; over the
   window, their sums and `agent_share`, agent against agent, response and away), `wip` (each
   change's span is its `Close` commit's time less its `elapsed`; how many ran at once, median and
   most), `capacity` (changes by how many ran at once, `1`, `2`, `3+`, each `n` and its medians),
   `rework` and `escapes`. The four timed views rest on `measured` alone, null with none: never
   read as zero. `report`: the path `retro-commit` writes them to, rendered from
   `templates["retro.md"]`; `sdlc.py retro --report` prints it.
+- `by_way`: the factory against the person's own changes, and those whose `Close` records no way
+  (`unknown`, never guessed), from `Sdlc-Mode` alone: each way's closed `changes`, `lead` (median
+  and 85th percentile), `throughput` (closed per week), `cost` (median tokens for both sides, and
+  median dollars where `costs.jsonl` recorded them, each with `missing_because`; a hand-built
+  change is missing dollars, never $0) and `escapes` (the escape rate over that way's changes).
+  Every figure has its `n`; a small `n` is a hint, not a verdict.
 - `work_mix`, `time_to_users` and `follow_through`: whether the work was aimed right. Each
   change's `work` class (fix, capability, process or debt) and the shares; the median days from
   landing to release, the unreleased apart; and how many of the last retrospective's seeds and
@@ -81,12 +88,12 @@ What `retro` gives:
   `Close` commit's `Sdlc-Fixes:`) and `retired` (from each `Retire` commit's `Sdlc-Retired:`,
   by reason), `triaged` (the issues triage closed without a change, from each `Sdlc-Triaged:`, by
   verdict), `days_to_fix` (median and max), `open` (oldest first), and `escapes`: each change a
-  bug was `Introduced by`, with its tier, the bugs (`escaped`, each with its paths, null when
+  bug was `Introduced by`, with its tier and `way`, the bugs (`escaped`, each with its paths, null when
   nobody recorded them) and `review`, what that change's ship review left: `state` `file` (its
   `findings.md`, each finding marked `on_paths` when it sits on a bug's paths), `trailer` (only
   the counts) or `unknown`, which is never a clean review. Then `unattributed`, the bugs no one
-  tied to a change; `rate`, the escapes per closed change in this window and the one before, and
-  its `trend` (`up`, `down`, `flat`, or `unknown` when either window is too small to say); and
+  tied to a change; `rate`, the escapes per closed change in this window (split by the
+  introducing change's way in `window.by_way`) and the one before, and its `trend` (`up`, `down`, `flat`, or `unknown` when either window is too small to say); and
   `important`, the window's Important findings with their class, beside `important_unknown`,
   the changes with no `findings.md` to read, or one that no longer parses: its review's
   `problems` say which sections.
@@ -135,8 +142,8 @@ What `retro` gives:
   `done`, `dropped` or `revised`, with `serves`: the outcomes a goal's line ends with, `(O1, O3)`,
   or the goals and outcomes a milestone's `Serves:` line names), its format `problems`, the `next_ids` to give new ones, and
   `milestones`: for each open milestone, what every seed and change on its `Groups:` line became
-  (a change `closed`, `open` or `unknown`; a seed `shipped` by a change, still `open`, or
-  `vanished` with no change behind it). Empty items with no doc, or a doc without ids, means a
+  (a change `closed`, `open` or `unknown`; a seed `shipped` by a change, still `open`, `dropped`
+  when an `inbox-commit` `Retire` took it out of the register, or `vanished` with none of these). Empty items with no doc, or a doc without ids, means a
   first retrospective.
 - `metrics`: what `/sdlc:close` measured on each change in range and wrote on its `Close` commit,
   as medians per tier and way of running (`manual` or `factory`):
@@ -304,12 +311,15 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
 5. **Direction.** First, close the loop: score every `open` item in `direction.items`, for *Since
    the last retrospective*, as one of:
    - **done**: struck `~~…~~ Done: <evidence>`, citing the change or release (a milestone whose
-     `milestones` rows are all `closed` or `shipped` is the usual case);
-   - **dropped**: struck `~~…~~ Dropped: <reason>`;
+     `milestones` rows are all `closed`, `shipped` or `dropped`, at least one built, is the usual
+     case);
+   - **dropped**: struck `~~…~~ Dropped: <reason>` (a milestone whose `milestones` rows were all
+     `dropped`, its seeds retired, is the usual case);
    - **revised**: struck `~~…~~ Revised → <new id>: <reason>`, with the new item written beside it;
    - **carried**: left open, saying what's left. Partial progress is carried, never "partly done".
 
-   A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it. Then,
+   A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it and
+   no `Retire` (a `dropped` one was retired on purpose). Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each goal ends with the outcomes it answers to, `(O1, O3)`. Each
    milestone says what is true when it's done and has one `Groups:` line naming its changes and

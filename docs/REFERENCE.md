@@ -972,12 +972,15 @@ wrote that a later one replaced, found by blame and asked about, never counted),
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
 trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
 reason, the issues triage closed without a change by verdict (`triaged`), the days from report
-to fix, the open ones by age, and the escapes: each introducing change with its tier, its bugs
+to fix, the open ones by age, and the escapes: each introducing change with its tier, its `way`
+of building (`unknown` when history doesn't hold it), its bugs
 and their paths (`escaped`), and the review it got (`review`): `state` is `file` when its
 `findings.md` is in history, each finding marked `on_paths` when its `Evidence:` sits on a bug's
 paths (null when they weren't recorded), `trailer` when only the `Sdlc-Findings` counts are, and
 `unknown`, never a clean review, when neither is. Then how many no one tied to a change
-(`unattributed`); `rate`, the escapes per closed change in this window and the one between the
+(`unattributed`); `rate`, the escapes per closed change in this window (with `window.by_way`,
+the same rate for each way: the bugs whose introducing change was built that way, over that way's
+changes closed in the window, null with none) and the one between the
 two retrospectives before it, by the bugs' reported dates, with a `trend` of `up`, `down`, `flat`,
 or `unknown` when either window has fewer than five closed changes; and `important`, the window's
 Important findings with their class, beside `important_unknown`, the changes with no
@@ -995,8 +998,24 @@ report gives it as `Landing catches: <caught> of <reviewed> factory-reviewed cha
 building, the changes, the median and the 85th percentile (nearest rank); each part's `share`,
 its sum over the changes that recorded it against their leads' sum, with how many `changes` that
 is; and `measured` and `unmeasured`, the changes with and without the line, which move no figure.
-It sits beside `process.cycle`'s `elapsed`, which is unchanged, and the report shows it under the
-*Cycle time* table.
+`ways` gives the count, median and 85th percentile for each way alone, over every tier. It sits
+beside `process.cycle`'s `elapsed`, which is unchanged, and the report shows it under the *Cycle
+time* table. Each week of `process.throughput` counts its changes by tier, by way (`ways`) and by
+work class (`classes`, `unclassed` for a change no rule classed), every key given with its 0, and
+the report's throughput table shows the last two beside *Tiers*.
+
+`by_way` compares the factory's changes with the person's. A change's way is its `Close` commit's
+`Sdlc-Mode` alone: `factory`, `manual`, or `unknown` when it records none, never guessed from its
+folder; so a change the factory built and the person shipped by hand is `factory`. Each of
+`changes`, `lead` (`process.lead.ways`), `throughput` (each way's `closed`, the window's `weeks`
+from `since`, or the first close, to today, and `per_week`), `cost` and `escapes`
+(`bugs.rate.window.by_way`) gives all three ways. `cost` gives each way `tokens`, the median of
+`in + cache_read + out` over its changes whose totals came from transcripts, and `usd`, the median
+dollars over its landed changes with `costs.jsonl` dollars, each with its `n` and
+`missing_because`: a hand-built change has no dollars and is counted `built by hand`, never $0.
+Tokens are measured the same way on both sides; dollars are never priced from tokens. The report
+ends its *Window* text with a *By way of building* table of these, columns *Factory*, *By hand*
+and *Unknown*, each figure followed by its `n` in brackets and `–` where it is null.
 
 Three figures say whether the work was aimed right, each with its `n` and what it left out,
 never a zero for missing data, and the report gives one sentence each under *Window*, from the
@@ -1004,8 +1023,9 @@ same function as the JSON. `work_mix` classes each closed change once, as its re
 (`class`, the signal it was classed `by`, and `also`, the other classes whose rules applied):
 `fix` when its intent's `fixes:` names a bug, its `reworks:` names a change, or a seed its `idea:`
 names was a `[bug]` in the register at its base; else `capability` for `impact: major|minor`;
-else `process` when every path it touched, past the change folders, the register and
-`.sdlc/setup.json`, is under `.sdlc/` or is the configured process, review or policy doc; else
+else `process` when every path it touched, past the change folders and the register, is under
+`.sdlc/` (setup's `.sdlc/setup.json` included) or is the configured process, review or policy
+doc; else
 `debt` for a seed that was a `[nit]` or has a theme among the guide's nit themes (`docs`,
 `refactor`, `robustness`, `tests`, `style`), or `impact: patch|none`. It counts each class and its
 share of `n`, the changes classed; `unmeasured` are those no rule classes (an unreadable impact
@@ -1017,8 +1037,9 @@ release tags. `follow_through` scores the last retrospective's plans: the seeds 
 to the register, each `done` (a change in the window names it on `idea:` or `fixes:`), `dropped`
 (an `inbox-commit` subject since says `Retire` with its id), `carried` (still in the register) or
 `vanished` (gone with neither); and the milestones open in its direction doc, `done` when struck
-Done or when every change and seed they group has closed or shipped, `dropped` when struck
-Dropped or Revised, `vanished` when gone from the doc, unmeasured when a grouped change is
+Done or when every change and seed they group has closed, shipped or been dropped with at least
+one closed or shipped, `dropped` when struck Dropped or Revised or when every row they group was
+dropped, `vanished` when gone from the doc, unmeasured when a grouped change is
 unknown, and `carried` otherwise. `share` is done and dropped over the `n` scored. `missing` names
 each source that couldn't be read, and always the intent titles a retrospective proposes, which
 nothing records; with no earlier retrospective `since`, `share`, `seeds` and `milestones` are null.
@@ -1272,7 +1293,11 @@ a path for `[review]`) is a seed with the exact text, made by a change that ship
 Goals and milestones in the direction doc keep ids across retrospectives (`- G1. …`, `### M1. …`
 with a `Groups:` line naming its changes and seeds), and each one ends struck through as `Done`,
 `Dropped: <reason>` or `Revised → M5: <reason>`, never silently gone: `retro` reports what each
-milestone's seeds and changes became, and `retro-commit` refuses a doc that drops an open id.
+milestone's seeds and changes became (`direction.milestones`: a change `closed`, `open` or
+`unknown`; a seed `shipped`, `open`, `dropped` when it left the register in an `inbox-commit`
+`Retire`, matched by id or by its title as the register held it, or `vanished` with none of
+these), and `retro-commit` refuses a doc that drops an open id. `status` says a milestone has
+nothing left in its groups when every row is `closed`, `shipped`, `dropped` or `vanished`.
 A goal ends with the outcomes in the product doc it answers to (`- G1. … (O1, O3)`), and a
 milestone has a `Serves:` line beside `Groups:` naming its goal, its outcomes or both
 (`Serves: G1, O4`). With a product doc, `retro`'s `product.uncited` reports each open goal or

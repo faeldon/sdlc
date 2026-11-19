@@ -527,6 +527,24 @@ def test_a_milestone_seed_shipped_second_on_an_idea_line_is_shipped(tmp_path: Pa
     assert _next(root)["done_milestones"] == ["M1"]
 
 
+def test_status_counts_a_milestone_with_a_retired_seed_done(tmp_path: Path) -> None:
+    """176 R11: a grouped seed retired by `inbox-commit` reads `dropped`, and a milestone whose
+    rows are all closed, shipped, dropped or vanished has nothing left, as before."""
+    root = _repo(tmp_path)
+    _ideas(root, _seed("2026-10-02", "Share drafts"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "File 2026-10-02-1")
+    _ideas(root)
+    _git(root, "commit", "-q", "-am", "Retire 2026-10-02-1")
+    _close(root, "001-reopen-drafts", "Reopen drafts")
+    _direction(root, _milestone("M1", "Drafts", '001, "Share drafts"'))
+    verdicts = sdlc._milestone_verdicts(
+        root, sdlc.direction_items((root / ".sdlc/DIRECTION.md").read_text())["items"], [], "main"
+    )
+    assert [r["verdict"] for r in verdicts["M1"]] == ["closed", "dropped"]
+    assert _next(root)["done_milestones"] == ["M1"]
+
+
 @pytest.mark.portable
 def test_themes_count_every_open_entry_by_kind_best_ranked_first(
     tmp_path: Path, capsys, monkeypatch
