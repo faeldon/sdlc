@@ -380,7 +380,7 @@ def test_release_edits_only_the_version_and_commits_only_those_files(tmp_path: P
     assert _unreleased(root)["since"] == "v0.5.0" and _unreleased(root)["changes"] == []
 
 
-def test_a_crlf_file_keeps_its_line_endings(tmp_path: Path) -> None:
+def test_a_crlf_file_keeps_its_line_endings() -> None:
     text = '{\r\n  "version": "0.4.2",\r\n  "x": 1\r\n}\r\n'
     assert sdlc.write_version(text, "0.5.0") == text.replace("0.4.2", "0.5.0")
 

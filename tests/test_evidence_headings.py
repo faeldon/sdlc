@@ -67,3 +67,20 @@ def test_a_read_then_a_blank_heading_keeps_the_section_open() -> None:
 def test_a_silent_read_before_the_next_section_still_owes_its_exit() -> None:
     text = "## Evidence\n\n$ cmp a b\n\n## Notes\n\nFine.\n"
     assert factory.read_evidence(text, "r") == ["r: `cmp a b` has no `exit:` line"]
+
+
+@pytest.mark.portable
+def test_a_blank_line_and_a_heading_end_a_command_owing_its_exit() -> None:
+    """Nit 2026-11-20-22, the blank-line rule on its own: a command that isn't a read, its output
+    then a blank line and a `## ` heading, owes its `exit:` there, and the section ends, so a
+    later `$ ` line is never read as evidence."""
+    text = "## Evidence\n\n$ ./check.sh\n1 passed\n\n## Notes\n\n$ ./later.sh\n"
+    assert factory.read_evidence(text, "r") == ["r: `./check.sh` has no `exit:` line"]
+
+
+@pytest.mark.portable
+def test_a_heading_with_no_blank_before_it_is_output() -> None:
+    """Nit 2026-11-20-22, the other side: a `## ` line straight after a command's output, with no
+    blank line before it, is that output, so the command's `exit:` past it is found."""
+    text = "## Evidence\n\n$ ./check.sh\n1 passed\n## Summary\nexit: 0\n"
+    assert factory.read_evidence(text, "r") == []

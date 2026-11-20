@@ -345,7 +345,7 @@ def test_a_host_repo_never_hands_off(tmp_path, gh, capsys, handoffs, monkeypatch
 
 @pytest.mark.parametrize("check", [False, True])
 def test_a_copy_that_isnt_mains_hands_the_close_to_mains_script(
-    tmp_path, gh, capsys, handoffs, monkeypatch, check
+    tmp_path, gh, handoffs, monkeypatch, check
 ) -> None:
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", tmp_path / "cache" / "1.1.0")
@@ -366,7 +366,7 @@ def test_mains_script_once_handed_the_close_runs_it(tmp_path, gh, capsys, handof
 
 @pytest.mark.parametrize("path", ["scripts/sdlc.py", "scripts/trackers/github.py"])
 def test_a_merge_that_brings_scripts_hands_the_rest_to_the_merged_code(
-    tmp_path, gh, capsys, handoffs, monkeypatch, path
+    tmp_path, gh, handoffs, monkeypatch, path
 ) -> None:
     root = _own(_repo(tmp_path))
     monkeypatch.setattr(sdlc, "PLUGIN_DIR", root)
@@ -850,7 +850,7 @@ def test_what_the_verifier_dropped_is_counted_on_each_reviewer(tmp_path, gh, cap
     assert back["reviews"]["code"]["dropped"] == 1 and back["reviews"]["test"]["dropped"] == 0
 
 
-def test_the_diffs_size_is_the_same_after_the_merge(tmp_path, gh, capsys) -> None:
+def test_the_diffs_size_is_the_same_after_the_merge(tmp_path, gh) -> None:
     root = _repo(tmp_path)
     name = _factory_shipped(root)
     before = sdlc.closing._change_diff(root, name)

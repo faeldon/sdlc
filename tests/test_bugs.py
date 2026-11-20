@@ -431,7 +431,7 @@ def test_inbox_commit_never_retires_a_seed_named_second_on_an_open_change(
     assert _git(root, "log", "-1", "--format=%s") == "open 001"
 
 
-def test_bug_commit_is_gone(capsys, monkeypatch) -> None:
+def test_bug_commit_is_gone(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "bug-commit"])
     with pytest.raises(SystemExit) as raised:
         sdlc.main()
@@ -523,7 +523,7 @@ def test_a_worktree_refuses_what_it_cant_file(tmp_path: Path, capsys) -> None:
 
 
 @pytest.mark.portable
-def test_inbox_commit_waits_for_the_lock_claim_takes(tmp_path: Path, capsys) -> None:
+def test_inbox_commit_waits_for_the_lock_claim_takes(tmp_path: Path) -> None:
     """Two sessions filing at once: the second waits until the first lets go."""
     root = _repo(tmp_path, _idea("2026-10-01-1", "One"))
     tree = _tree(root)
@@ -724,7 +724,7 @@ def test_retro_counts_no_bugs_as_nothing(tmp_path: Path) -> None:
     }
 
 
-def test_retro_counts_the_issues_triage_closed_by_verdict(tmp_path: Path, capsys) -> None:
+def test_retro_counts_the_issues_triage_closed_by_verdict(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     triaged = ["12=resolved:019-status-next", "13=wontfix", "14=wontfix"]
     whys = ["13=Out of scope", "14=Out of scope"]
@@ -942,7 +942,7 @@ def test_a_findings_file_that_no_longer_parses_says_so(tmp_path: Path) -> None:
     assert [i["id"] for i in out["important"]] == ["F1"] and out["important_unknown"] == 1
 
 
-def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path, capsys) -> None:
+def test_fixes_names_bugs_by_id_never_by_title(tmp_path: Path) -> None:
     root = _repo(tmp_path, _bug("2026-10-01-1", "One"))
     _fixing(root, '"One"')
     errors = sdlc.analyze(root)["open"][0]["errors"]

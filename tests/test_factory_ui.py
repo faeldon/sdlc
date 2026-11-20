@@ -403,7 +403,7 @@ def test_shots_take_a_new_port_when_theirs_is_lost(tmp_path, monkeypatch) -> Non
         bound.close()
 
 
-def test_a_port_is_lost_only_when_it_wont_bind_whichever_way_the_server_ended(tmp_path) -> None:
+def test_a_port_is_lost_only_when_it_wont_bind_whichever_way_the_server_ended() -> None:
     """111 round 3: every way `_up()` sees the server end decides lost the same way, by whether the
     port binds. One that answered, then exited with the port free, failed on its own; one whose
     port is still held (another's server answering) lost it."""
@@ -436,7 +436,7 @@ def test_a_port_is_lost_only_when_it_wont_bind_whichever_way_the_server_ended(tm
         assert got is lost, (frees, why)
 
 
-def test_a_server_that_answered_and_closed_first_has_not_lost_its_port(tmp_path) -> None:
+def test_a_server_that_answered_and_closed_first_has_not_lost_its_port() -> None:
     """111 round 4: a server that answered a real request, closing the connection first as a
     server ending its reply does (its port's side left in TIME_WAIT), then exited on its own,
     failed on its own: its port is free to bind again, so it is not lost."""

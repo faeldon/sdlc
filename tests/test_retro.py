@@ -792,7 +792,7 @@ def test_it_commits_the_direction_doc_and_the_seeds_and_nothing_else(tmp_path, c
     assert sdlc.last_retrospective(root, "main")["date"] == "2026-10-24"
 
 
-def test_retro_commit_writes_the_report_it_would_print(tmp_path: Path, capsys) -> None:
+def test_retro_commit_writes_the_report_it_would_print(tmp_path: Path) -> None:
     """R5, R6: the committed report is the one `retro --report` renders for the window the commit
     closes, figures from history and no placeholder left."""
     root = _repo(tmp_path)
@@ -4950,7 +4950,16 @@ def test_config_reports_the_insights_doc(tmp_path: Path, capsys) -> None:
     got = out["docs"]["insights"]
     assert got["path"] == ".sdlc/INSIGHTS.md" and got["exists"] is False
     assert got["layout"] == "answers" and got["guide"].endswith("guide/insights.md")
-    assert not any("INSIGHTS" in w for w in out["warnings"]), "off while it doesn't exist"
+    # Off while it doesn't exist (nit 2026-11-20-26): no warning, where the missing process doc
+    # does warn, and the questions are the guide's, one a pillar, as with no doc named at all.
+    warned = out["warnings"]
+    assert any(w.startswith("docs.process:") for w in warned), warned
+    assert not any(w.startswith("docs.insights") for w in warned), warned
+    cfg = sdlc.load_config(root)[0]
+    asked = sdlc.retro.insight_questions(root, cfg)
+    unset = sdlc.retro.insight_questions(root, {**cfg, "docs": {**cfg["docs"], "insights": None}})
+    assert asked == unset and asked[1] == []
+    assert [q["title"] for q in asked[0]] == list(sdlc.retro.INSIGHT_PILLARS)
 
 
 def _insights_json(root: Path, capsys) -> dict:
@@ -5204,7 +5213,7 @@ def test_retro_commit_renders_the_rating_and_removes_its_draft(tmp_path, capsys)
     assert _git(root, "status", "--porcelain") == ""
 
 
-def test_a_rating_with_no_line_says_so(tmp_path: Path) -> None:
+def test_a_rating_with_no_line_says_so() -> None:
     """190 R5: a rating with no line reads `No line given.`; a line with no rating keeps it."""
     assert sdlc.retro._experience_text("4 smooth", None).endswith(sdlc.retro.NO_LINE)
     text = sdlc.retro._experience_text("the builds | were slow", None)
@@ -5315,6 +5324,19 @@ def test_a_report_without_the_table_reads_back_as_no_last(tmp_path: Path) -> Non
     _git(root, "commit", "-q", "-m", "Retrospective 2026-10-12")
     got = sdlc.retro._last_rows(root, {"sha": "HEAD", "date": "2026-10-12"})["experience"]
     assert got == {"date": "2026-10-12", "rating": None, "line": "slow builds"}
+
+
+@pytest.mark.parametrize("cell", ["abc", "7", "0", "2.5", "inf", ""])
+def test_a_hand_edited_rating_reads_back_as_none(cell) -> None:
+    """Nit 2026-11-20-33: a report's rating cell, edited by hand to anything but a whole 1 to 4,
+    reads back as no rating, its line kept, never raising or passing on a rating the question
+    never offered."""
+    text = sdlc.retro._experience_text("3 slow builds", None)
+    edited = text.replace(_felt_row("3", "—", "unknown"), _felt_row(cell, "—", "unknown"))
+    assert edited != text
+    got = sdlc.retro._last_experience("# Report\n\n## Experience\n\n" + edited, "2026-10-12")
+    assert got == {"date": "2026-10-12", "rating": None, "line": "slow builds"}
+    assert sdlc.retro._last_experience("## Experience\n\n" + text, None)["rating"] == 3
 
 
 def test_experience_is_not_a_template_read() -> None:

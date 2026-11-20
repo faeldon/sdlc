@@ -2454,7 +2454,7 @@ def _experience_text(answer: str | None, last: dict | None) -> str:
     rating, line = experience_answer(answer) if answer is not None else (None, None)
     before = (last or {}).get("rating")
     table = _table(list(EXPERIENCE_HEAD), [
-        [EXPERIENCE_FIGURE, rating, before, _experience_trend(rating, before)],
+        [EXPERIENCE_FIGURE, _num(rating), _num(before), _experience_trend(rating, before)],
     ])  # fmt: skip
     if rating is None and line is None:
         return f"{table}\n\n{NOT_RATED}"
@@ -2477,7 +2477,8 @@ def _draft_experience(home: Path, day: date) -> tuple[str | None, list[str]]:
 
 def _last_experience(text: str, day: str | None) -> dict | None:
     """The rating and line a report's `## Experience` shows, with the report's `day`; None for a
-    report without the table."""
+    report without the table. A rating cell that isn't a whole 1 to 4, as a hand edit may leave,
+    reads as no rating (nit 2026-11-20-33)."""
     got = indicators.report_rows(text, EXPERIENCE_HEAD, (0,), 1)
     if (EXPERIENCE_FIGURE,) not in got:
         return None
@@ -2487,7 +2488,8 @@ def _last_experience(text: str, day: str | None) -> dict | None:
         (ln.removeprefix(LINE_PREFIX).strip() for ln in section.splitlines()
          if ln.startswith(LINE_PREFIX)), None,
     )  # fmt: skip
-    return {"date": day, "rating": None if rating is None else int(rating), "line": line or None}
+    rating = int(rating) if rating in EXPERIENCE_LABELS else None
+    return {"date": day, "rating": rating, "line": line or None}
 
 
 # ---------------------------------------------------------------- the scorecard (184)

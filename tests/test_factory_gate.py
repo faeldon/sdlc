@@ -93,7 +93,7 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
     assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
 
 
-def test_every_gate_attempt_records_its_slot_wait(tmp_path, capsys, monkeypatch) -> None:
+def test_every_gate_attempt_records_its_slot_wait(tmp_path, capsys) -> None:
     """175 R3: each attempt carries `Waited:` right after `Seconds:`, the wait `gate_slot()`
     yielded (0.0 for none), read back by the core's copy; a landing gate's record too."""
     root = _change(tmp_path)

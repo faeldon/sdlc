@@ -455,14 +455,14 @@ def test_git_attribution_must_be_true_or_false(tmp_path: Path, capsys):
     ('[archive]\ntarget = "github"\n[git]\npush = []\n', []),
     ('[git]\npush = ["close"]\n', ["close"]),
 ])  # fmt: skip
-def test_git_push_defaults_to_both_steps_only_with_github(tmp_path: Path, capsys, config, want):
+def test_git_push_defaults_to_both_steps_only_with_github(tmp_path: Path, config, want):
     (tmp_path / ".sdlc").mkdir()
     (tmp_path / ".sdlc" / "config.toml").write_text(config, encoding="utf-8")
     cfg = sdlc.load_config(tmp_path)[0]
     assert cfg["git"]["push"] == want
 
 
-def test_git_push_names_only_close_and_release(tmp_path: Path, capsys):
+def test_git_push_names_only_close_and_release(tmp_path: Path):
     (tmp_path / ".sdlc").mkdir()
     (tmp_path / ".sdlc" / "config.toml").write_text('[git]\npush = ["ship"]\n')
     cfg, warnings, _ = sdlc.load_config(tmp_path)

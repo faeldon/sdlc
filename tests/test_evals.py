@@ -412,7 +412,7 @@ def test_a_case_fails_only_twice() -> None:
     assert sdlc.verdict_lists(v)["failed"] == ["ship"]
 
 
-def test_a_full_run_fails_a_case_on_two_runs(tmp_path: Path) -> None:
+def test_a_full_run_fails_a_case_on_two_runs() -> None:
     """156 R7: three runs a case, no rerun; two failures of the skill's fail it, one is shown but
     doesn't, and runs the sandbox spoiled never count."""
     ok, bad = _a_run(1.0), _a_run(0.5, failing=("asks-script",))
@@ -489,7 +489,7 @@ def test_a_failed_case_reruns_once_alone(tmp_path: Path, monkeypatch, capsys) ->
     [(0.65, "4.35"), (0.30000000000000004, "4.7"), (0.305, "4.69")],
 )
 def test_the_rerun_ceiling_keeps_its_last_cent(
-    tmp_path: Path, monkeypatch, capsys, spent: float, ceiling: str
+    tmp_path: Path, monkeypatch, spent: float, ceiling: str
 ) -> None:
     """172 R9 (nit 2026-11-18-100): the rerun's ceiling is the cap less what was spent, to the
     cent: float noise never costs a cent, and a real fraction of one still rounds down."""

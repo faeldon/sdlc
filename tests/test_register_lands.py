@@ -95,7 +95,7 @@ def _register(root: Path) -> str:
     return (root / INBOX).read_text(encoding="utf-8")
 
 
-def test_ship_leaves_the_register_as_the_base_has_it(tmp_path, capsys, monkeypatch) -> None:
+def test_ship_leaves_the_register_as_the_base_has_it(tmp_path) -> None:
     """R1: the change's commit names no register path, whatever it took and holds."""
     root = _repo(tmp_path)
     tree, folder = _open(root, "reopen", "2026-10-01-2")

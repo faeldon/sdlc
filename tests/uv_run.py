@@ -13,9 +13,13 @@ import pytest
 # uv's own error when it couldn't reach the package index, printed before the script runs.
 UNREACHED = re.compile(r"error: (request failed after|failed to fetch|failed to download)", re.I)
 # uv's words, run `--offline`, for a dependency its cache doesn't hold. Several, since uv has
-# worded it more than one way, and a wording it adds later should skip, not fail the gate.
+# worded it more than one way, and a wording it adds later should skip, not fail the gate. Each
+# is a phrase of uv's, never a bare word: a script that ran and failed saying "offline" or "no
+# solution found" is its own result (nit 2026-11-20-16).
 UNCACHED = re.compile(
-    r"network (was|is) disabled|offline|not found in the cache|no solution found", re.I
+    r"network (was|is) disabled|network connectivity is disabled|not found in the cache"
+    r"|while offline|no solution found when resolving",
+    re.I,
 )
 
 

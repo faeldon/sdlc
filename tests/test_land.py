@@ -1838,7 +1838,7 @@ def test_a_landing_files_the_nits_sdlc_reads(tmp_path, capsys) -> None:
 
 
 @needs_uv
-def test_a_landing_rerun_files_each_nit_once(tmp_path, capsys) -> None:
+def test_a_landing_rerun_files_each_nit_once(tmp_path) -> None:
     """129 R11: a rerun of the yes's writes skips a nit the register already holds for this change,
     matched by its `Raised by:` and its text, never by its title alone."""
     root = _repo(tmp_path)
@@ -2635,7 +2635,7 @@ def test_a_fix_asked_at_landing_is_built_gated_and_reviewed_at_depth(
 
 
 @needs_uv
-def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
+def test_a_fix_commit_needs_an_ask(tmp_path, capsys) -> None:
     """R8, R10: a fix is asked only of a shipped change whose landing round passed, no reviewer
     has answered yet (154), or none is open; `--commit` amends nothing in a round with no ask, or
     with nothing the builder edited. The builder's task refuses with no ask."""

@@ -324,21 +324,34 @@ def test_a_ledger_holding_a_question_s_first_line_is_matched(tmp_path, capsys) -
     assert _ledger_text(root) == "# Decisions\n\n" + first + REWORDED_SUBS, "a rerun: no change"
 
 
-def test_a_decision_reraised_with_the_same_alternatives_lands_once(tmp_path, capsys) -> None:
+def test_a_decision_reworded_with_the_same_alternatives_lands_once(tmp_path, capsys) -> None:
     """193 (nit 2026-11-20-1): a resumed agent rewording a decision it raised, with the same
-    options and why from the same source, files nothing new; other alternatives, another source
-    or another kind are another decision."""
+    options and why from the same source, files nothing new."""
     root = _change(tmp_path)
     _build_report(root, 1, PAGING)
     assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D1"]
     _build_report(root, 1, PAGING.replace("at 50?", "at 50, one screen?"))
     assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == []
     assert _ledger_text(root) == "# Decisions\n\n" + PAGING_LEDGER
-    _build_report(root, 2, PAGING.replace("at 50?", "at 50, one screen?"))
-    _build_report(root, 3, PAGING.replace("at 50?", "at 50 again?").replace("100 —", "25 —"))
-    review = PAGING.replace("[default] Page", "[blocking] Page").replace("at 50?", "at 50 or not?")
-    _build_report(root, 4, review)
-    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D2", "D3", "D4"]
+
+
+@pytest.mark.parametrize(
+    "rnd, again",
+    [
+        (2, PAGING.replace("at 50?", "at 50, one screen?")),
+        (1, PAGING.replace("at 50?", "at 50 again?").replace("100 —", "25 —")),
+        (1, PAGING.replace("[default] Page", "[blocking] Page").replace("at 50?", "at 50 or not?")),
+    ],
+    ids=["another-source", "other-alternatives", "another-kind"],
+)
+def test_a_decision_raised_again_otherwise_is_another(tmp_path, capsys, rnd, again) -> None:
+    """193 (nit 2026-11-20-1; nit 2026-11-20-10, one case a test): reworded, from another round,
+    with other alternatives or as another kind, it is another decision."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING)
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D1"]
+    _build_report(root, rnd, again)
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D2"]
 
 
 def test_options_fill_a_bare_line_once(tmp_path, capsys) -> None:

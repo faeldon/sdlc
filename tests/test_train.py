@@ -1119,6 +1119,42 @@ def test_a_staged_modify_delete_resolution_lands(
 
 
 @needs_uv
+def test_a_path_staged_as_kept_is_no_deletion(tmp_path, capsys) -> None:
+    """Nit 2026-11-20-29: a modify/delete whose path the resolution staged as kept (`git add`, so
+    it is back in the index) is no deletion: `deleted_sides()` reads it from neither the index's
+    unmerged stages nor the commits, though one side deleted it and the other changed it."""
+    root, trees = _moving(tmp_path, deletes_second=True)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree = trees[1]
+    assert [d["path"] for d in factory.deleted_sides(tree)] == ["old.txt"]
+    _git(tree, "add", "old.txt")
+    assert factory._conflicted(tree) == [], "staged: no unmerged entry left"
+    assert factory.deleted_sides(tree) == []
+
+
+@needs_uv
+def test_a_moved_file_the_resolution_deleted_is_not_carried(tmp_path, capsys) -> None:
+    """Nit 2026-11-20-30: `_neither_side()` is True for a path git can't hash, but a moved file
+    the resolution deleted never reaches it: `deleted_sides()` names only moved files still in the
+    tree, so the deletion is refused as an edit outside the conflicted files, never carried."""
+    root, trees = _moving(tmp_path, deletes_second=True)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    (tree / "old.txt").unlink()
+    (tree / "new.txt").unlink()
+    assert factory.landing._neither_side(tree, "new.txt"), "git can't hash it"
+    assert [d["moved"] for d in factory.deleted_sides(tree)] == [[]]
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (1, "refused"), out
+    why = out["refusals"][0]
+    assert "new.txt" in why and "outside its conflicted files" in why, why
+    assert not (folder / "runs" / "land-resolved").exists(), "no marker"
+    assert factory._rebasing(tree), "the rebase is left under way"
+
+
+@needs_uv
 @pytest.mark.parametrize("staged", [False, True], ids=["deleted", "git-rm"])
 def test_a_deleted_both_modified_file_is_refused(tmp_path, capsys, staged) -> None:
     """197 (nit 2026-11-20-20): a conflicted file both sides changed (`UU`) that the resolution

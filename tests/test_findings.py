@@ -705,7 +705,7 @@ def test_a_pass_that_doesn_t_apply_needs_no_line(change, monkeypatch) -> None:
     assert sdlc.cmd_ship(root, "001") == 0
 
 
-def test_a_skipped_ui_review_still_ships(change, capsys, monkeypatch) -> None:
+def test_a_skipped_ui_review_still_ships(change, monkeypatch) -> None:
     """143 R12: a pass that can't run is no stop once its line says why."""
     root, folder = change
     _applying(monkeypatch, "ui")

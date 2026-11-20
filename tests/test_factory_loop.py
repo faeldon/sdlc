@@ -531,7 +531,7 @@ def test_every_change_is_answered_exactly_once(tmp_path, capsys, kept, dropped, 
     assert out["next"] == "stop" and any(problem in p for p in out["problems"]), out["problems"]
 
 
-def test_the_verify_prompt_numbers_each_change_once(tmp_path, capsys) -> None:
+def test_the_verify_prompt_numbers_each_change_once(tmp_path) -> None:
     root = _change(tmp_path)
     _build_report(root, 1)
     _review(root, 1, "test", "VERDICT: CHANGES", "src/a.py:1: test it", "src/a.py:1: test it")
@@ -683,7 +683,7 @@ def test_a_finding_takes_its_tagged_pass_else_its_roles(role, text, found) -> No
     assert factory.CHANGE_RE.pattern == r"^\s*- CHANGE:\s*(.+?)\s*$", "unchanged"
 
 
-def test_nits_are_read_and_never_verified(tmp_path, capsys) -> None:
+def test_nits_are_read_and_never_verified(tmp_path) -> None:
     """A reviewer's `- NIT:` lines are read apart from its changes: they never make a verdict
     CHANGES, never reach the arbiter and are never reworked."""
     root = _change(tmp_path)
@@ -911,7 +911,7 @@ def test_a_nit_not_raised_again_is_still_filed(tmp_path, capsys) -> None:
     ], "a restart's first round was handed nothing"
 
 
-def test_a_landing_round_never_changes_the_nits_filed(tmp_path, capsys) -> None:
+def test_a_landing_round_never_changes_the_nits_filed(tmp_path) -> None:
     """129, at its landing: only the build's rounds are weighed, since the landing files its nits
     before a landing round reaches the record. A landing round that raises a handed cheap nit again
     leaves it fixed, and a nit only a landing round raised is minor, never one to file."""
@@ -955,7 +955,7 @@ def test_carry_caps_the_nits_it_files_at_five(tmp_path, capsys) -> None:
     assert factory.NO_PATH_REASON == "names no path, so it can't be filed as a nit"
 
 
-def test_rework_hands_the_builder_its_cheap_nits(tmp_path, capsys) -> None:
+def test_rework_hands_the_builder_its_cheap_nits(tmp_path) -> None:
     """129 R4: a rework round N lists round N's `S` `med` nits after its kept changes, in the
     reviewers' words; round N+1's review names to each role the ones it raised, to raise again any
     the rework didn't make."""
@@ -1161,7 +1161,7 @@ NEXT_STEP = (
 )
 
 
-def test_an_early_escalation_names_its_reason_to_the_approver(tmp_path, capsys) -> None:
+def test_an_early_escalation_names_its_reason_to_the_approver(tmp_path) -> None:
     """136 R7: an approver sent a run that stopped early is told why, the repeated changes or the
     untestable lines, and asked to name its next step; a run with nothing kept is asked neither."""
     folder = _kept_again(_change(tmp_path))
@@ -1197,7 +1197,7 @@ REASK = (
 )
 
 
-def test_the_review_prompt_asks_for_an_undone_kept_change_word_for_word(tmp_path, capsys) -> None:
+def test_the_review_prompt_asks_for_an_undone_kept_change_word_for_word(tmp_path) -> None:
     """136 R4: round N+1's reviewers are told to raise again, word for word, a change kept last
     round that the rework didn't make, so the run can tell one kept twice; each reviewer's own
     prompt says the same, in the same sentence."""

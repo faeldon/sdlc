@@ -640,9 +640,7 @@ def test_the_board_writes_nothing(served) -> None:
 
 
 @pytest.mark.portable
-def test_a_second_board_reports_the_first_and_anything_else_is_refused(
-    served, capsys, tmp_path
-) -> None:
+def test_a_second_board_reports_the_first_and_anything_else_is_refused(served, capsys) -> None:
     root, url, port = served
     assert board.cmd_board(root, port) == 0
     assert json.loads(capsys.readouterr().out) == {"url": f"{url}/", "serving": "already"}
@@ -940,7 +938,7 @@ def test_a_garbled_step_record_is_a_problem(repo) -> None:
 
 
 @pytest.mark.portable
-def test_the_step_record_is_a_pinned_copy(tmp_path) -> None:
+def test_the_step_record_is_a_pinned_copy() -> None:
     """R7: the board's copies are `factory.py`'s, and its writer reads back through the board."""
     for name in ("STEP_RE", "ROUND_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "AFTER_RE",
                  "SECONDS_RE", "STUCK_RE", "UNTESTABLE_RE"):  # fmt: skip

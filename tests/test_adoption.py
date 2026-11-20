@@ -570,6 +570,25 @@ def test_an_uncached_script_skips_however_uv_words_it(tmp_path, monkeypatch, sai
     assert _uv(SCRIPT, tmp_path, ["next"], {}).returncode == 1
 
 
+@pytest.mark.parametrize(
+    "said",
+    [
+        "error: the board is offline\n",
+        "Traceback (most recent call last):\nValueError: no solution found for 012\n",
+    ],
+    ids=["offline", "no-solution"],
+)
+def test_a_script_saying_offline_is_its_own_failure(tmp_path, monkeypatch, said) -> None:
+    """Nit 2026-11-20-16: the offline run skips only on uv's own phrases. A script that ran and
+    failed, saying "offline" or "no solution found" in its own words, is the result."""
+    _stand_in_uv(monkeypatch, (2, FETCH_FAILED), (1, said))
+    try:
+        ran = _uv(SCRIPT, tmp_path, ["next"], {})
+    except pytest.skip.Exception:
+        pytest.fail(f"skipped on the script's own words: {said!r}")
+    assert ran.returncode == 1
+
+
 def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Path) -> None:
     """In the plugin's own repo, close runs main's script whatever copy started it, and then the
     code its merge brought: a change to close runs on its own close."""
