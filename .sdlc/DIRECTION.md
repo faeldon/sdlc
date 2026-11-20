@@ -28,44 +28,49 @@
 
 ## Since the last retrospective
 
-- G6 done: 078 named the window's escape classes in the review doc, and escapes fell from 3 of 27
-  changes (0.11) to 2 of 86 (0.02), each fixed within a day.
-- G7 carried: the factory now takes changes from intent to `main`. It built 68 of this window's 86,
-  and since 139 and 147 it lands them as a train after one yes. No pilot project has run it yet, so
-  there is still no evidence from a second repo.
-- G8 carried: factory changes stop a median 4 times against a target of 4 (n=68). A Tier 2 built
-  by hand still stops 8 times against 6 (n=9). Review cost moves to M16, and the machine's load to
-  M17.
-- M10 done: 069 shipped, and most Tier 2 work now runs through the factory, at 4 stops. The 9 built
-  by hand still sit at 8, which G8 keeps in view.
-- M11 done: 078; escapes are back below 3 of 27.
-- M12 done: 090.
-- M13 carried: 070 shipped the supervisor. The factory has built 68 changes here, but none in the
-  pilot project.
-- M14 revised → M16: 068 moved retro's readers out of `scripts/sdlc.py`. Ship's review of a Tier 2
-  built by hand still takes 10 agent minutes, against 9. The boundary that matters now is close,
-  push, the lock and the landing, which 153 moves.
-- M15 done: 092. This retrospective checks goals and `none` changes against the outcomes.
+- G7 carried: the factory built 43 of this window's 44 changes, and landed every one through a
+  train after the person's yes. No pilot project has run it yet, so there is still no evidence from
+  a second repo.
+- G8 carried: factory changes stop a median 3 times against a target of 4, at both tiers (n=17 and
+  26). A landed change costs a median $2.03 at Tier 1 and $7.30 at Tier 2. The gate takes twice as
+  long as it did: 158.5 seconds a round, against 86.5.
+- G9 carried: 185 ended the landing's stops for acceptance checks it had already approved (35 such
+  stops in 17 changes before it). Escapes rose from 0.02 to 0.20 per change, and 7 of the 9 came
+  from the factory's landing and reply-reading code.
+- M13 carried: its one seed shipped as 070, so `retro` counts the milestone done. But no change has
+  run in the pilot project yet, and that is what M13 says.
+- M16 done: 153 moved close, the push, the lock and the landing into modules of their own, and
+  `[review] sensitive` names them.
+- M17 done: 155. Agents' test runs take a `gate_jobs` slot.
+- M18 done: 156. A failed case says which step the skill took and which it skipped. No grader was
+  answered `wrong` this window.
+- M19 done: 191 and 173 paid down the two nit themes, 192 looked at the drifted tests again, and
+  166 stopped agents calling commands the harness refuses.
 
 ## Where we are
 
-Eighty-six changes closed in two days (068–152 and 154), released as v1.9.0 and v1.10.0. All were
-measured.
+Forty-four changes closed in three days (155–197), and all were measured. None has been released:
+v1.10.0 is still the latest tag. The models changed underneath this window (this is the first
+window with versions recorded), so read every trend below as a hint.
 
-- **Delivery:** the median cycle is 46 minutes at Tier 1 and 76 at Tier 2 (n=43 each). The agent's
-  share of the clock went from 0.18 to 0.84: factory runs leave little time away. 76 of the 86 ran
-  beside three or more others, at a median of 67.5 minutes. Too few ran alone to compare.
-- **Tiers and stops:** the tiers split evenly (43/43), up from a third at Tier 1. Factory changes
-  stop at their target of 4. A Tier 2 built by hand stops 8 times against 6. Stops after a gate
-  was answered recur: 15 in 11 changes.
-- **Review:** 2 findings were answered `wrong` across 34 answered reviews. Both were a skills'-cases
-  grader failing a skill that had done the right thing (100 and 150), which 156 takes on. Five
-  changes' Important findings share one class: a doc's claim left false by the change.
-- **Bugs:** 2 reported and 2 fixed, within 0 and 1 days. The escape rate is down from 0.11 to 0.02.
-- **Code:** `plugins/factory/scripts/factory.py` grew from 1,149 to 7,910 lines, and 23 of the last
-  30 changes touched it. `scripts/sdlc.py` is at 10,729 lines (+1,248). Tests went from 18,861 to
-  38,166 lines.
-- **Users:** one person runs the plugin, here. Hosts filed no issues in any release.
+- **Delivery:** the median factory lead time is 166 minutes (n=33): 51 at Tier 1 and 173 at
+  Tier 2. A quarter of it is queued and a fifth is waiting at ready. The median cycle is 34.5
+  minutes at Tier 1 and 75.5 at Tier 2. The agent's share of the clock is 0.96.
+- **Tiers and stops:** 18 at Tier 1, 26 at Tier 2. Factory changes stop at 3, one under target.
+  Defaults the agents assumed were kept 18 of 18 times. Nine changes stopped for a fault in the
+  process itself: 7 at build and 2 at landing. Bugs 186, 188, 196 and 197 fixed those faults.
+- **Review and escapes:** 9 escapes in 44 changes (0.20), up from 2 in 86. Four of them are in
+  `landing.py`'s git handling (097, 104, 139, 196), and one open bug, 2026-11-20-27, is the same
+  class. Three of the nine have no review on record.
+- **Bugs:** each one reported this window was fixed within a day. One is open.
+- **Code:**
+  - `scripts/retro.py` grew from 1,710 to 4,399 lines, and 13 of the last 30 changes touched it.
+  - `factory.py` shrank from 7,910 to 6,039, and `sdlc.py` from 10,729 to 9,884: the splits are
+    holding.
+  - Tests went from 37,776 to 48,537 lines, and the serial suite takes 41 minutes. The slowest
+    tests are `test_train`'s, at 25 to 40 seconds each.
+- **Nits:** 37 are open. `tests` has 26, and `robustness` 5, both at the process doc's threshold.
+- **Users:** one person runs the plugin, here. Hosts filed no issues.
 
 ## Goals
 
@@ -76,7 +81,6 @@ measured.
   its review quick (O3, O5)
 - G9. Trust in the factory rests on evidence: a landing stops only for what needs its person, and
   its escapes and stops are read beside the hand-built changes' (O6)
-- ~~G6. Ship's review catches the ways this repo's code has already failed, before a host meets them (O2)~~ Done: 078; escapes 3 of 27 → 2 of 86
 
 ## Milestones
 
@@ -91,42 +95,53 @@ Groups: 2026-11-17-5
 
 Serves: G7
 
-### M16. The deep review can name the risky code
+### M20. A landing stages only what its change owns
 
-Close, push, the main lock and the landing live in modules of their own, listed in `[review]
-sensitive`. A change to them gets the deep review, and the rest of `scripts/sdlc.py` and
-`factory.py` may still run light.
+`resolve --continue` and the landing's commits refuse any staged path outside the change's own,
+its conflicted files and its records. The landing's records can't be written by an agent in the
+change's folder, and the review knows the class of git-state bug that escaped four times this
+window.
 
-Groups: 153
+Groups: 2026-11-20-27, 2026-11-19-69, 2026-11-20-40
 
-Serves: G8, O2
+Serves: G9, O2
 
-### M17. Agents' test runs share the machine with the gate
+### M21. The gate stays quick as the suite grows
 
-A builder's or reviewer's `./check.sh` takes a `gate_jobs` slot as the gate does, so a batch built
-at once never has two full suites competing for the cores.
+The slowest train tests share their setup, the drifted tests are looked at again, and the `tests`
+and `robustness` nit themes are paid down. The gate's round median is back near 90 seconds.
 
-Groups: 155
-
-Serves: G8
-
-### M18. The skills' cases tell what a skill did
-
-A failed case says which step the skill took and which it skipped. It stops a landing only when
-the person says so, and the `wrong` answers this window gave the grader don't recur.
-
-Groups: 156
-
-Serves: G9
-
-### M19. The suite and the nits stay small
-
-The two nit themes at the threshold are paid down, and the drifted tests are looked at again.
-Agents stop calling commands the harness refuses.
-
-Groups: 2026-11-18-88, 2026-11-18-89, 2026-11-18-90, 2026-11-18-91
+Groups: 2026-11-20-41, 2026-11-20-42, 2026-11-20-43, 2026-11-20-18
 
 Serves: G8
+
+### M22. A default the person keeps never stops them
+
+An escalation whose only reason is an assumed default goes to the landing's one question instead of
+a separate decide, and the next window shows whether the approver can run on Sonnet without a
+worse decision.
+
+Groups: 2026-11-20-36, 2026-11-20-38
+
+Serves: G9, O3
+
+### M23. The scorecard reads true
+
+Every scorecard row names its real reason when it is null. Workarounds give every block its `n`,
+the surface measure stops reporting keys every change reads as unused, and the rating's dialog is
+confirmed from a real transcript.
+
+Groups: 2026-11-20-15, 2026-11-20-24, 2026-11-20-31, 2026-11-20-39
+
+Serves: O4
+
+### ~~M16. The deep review can name the risky code~~ Done: 153
+
+### ~~M17. Agents' test runs share the machine with the gate~~ Done: 155
+
+### ~~M18. The skills' cases tell what a skill did~~ Done: 156; no `wrong` grader answers this window
+
+### ~~M19. The suite and the nits stay small~~ Done: 191, 173, 192 and 166
 
 ### ~~M10. A Tier 2 change stops within its target~~ Done: 069; factory Tier 2 at 4 stops (n=34), hand-built still 8 (n=9)
 
@@ -140,33 +155,31 @@ Serves: G8
 
 ## Next major release
 
-None planned. 153 moves code between modules without changing a command. 155 and 156 change how
-the factory runs its agents and cases, not what a host does.
+None planned. M20 tightens what a landing accepts but changes no command a host runs. M22 moves
+one question, and the change that makes it decides whether that is minor.
 
 ## Dropped findings
 
-- **`factory.py`'s growth** (1,149 → 7,910 lines, 23 of the last 30 changes): its landing and train
-  are the part 153 moves out. The rest waits until 153 shows what the split costs.
-- **Rework questions** (375): the large ones are planned follow-ups, not missed fixes.
-  - 139's train replaced 103's and 114's one-at-a-time landing.
-  - 147's unattended loop built on 139's train.
-  - 145 and 151 regrouped the board's columns.
+- **Adding `factory.py` to `[review] sensitive`.** 4 of the 9 escapes touched it, but every factory
+  change touches it, so every run would go to full depth. The models changed underneath, and the
+  new review-doc class (2026-11-20-40) is cheaper. The next window will show whether it is enough.
+- **Splitting `scripts/retro.py`** (1,710 → 4,399 lines, 13 of the last 30 changes, 12 of them
+  together with `docs/REFERENCE.md`). No escape traces to it, and the scorecard work (waves 0–5)
+  that grew it is done. The next retrospective weighs a split if it keeps growing.
+- **Rework questions:** the large ones are planned follow-ups. 153's modules were what 155 and 156
+  built on, and 160's registry was what later changes registered in. The 9 declared links are the
+  window's rework.
+- **Register entries restored** (3, in 63e1700): a landing dropped them before 181 made it hold
+  entries for close to file. None was restored after 181.
+- **Spend outliers:**
+  - 166 (out per line 4.5×, tools per line 4.9×) and 173 (comment share 3.2×) were paydowns of
+    many small items.
+  - 192 and 194 are small diffs over many tests.
 
-  The 10 declared links are the window's rework: 080, 083, 085, 086, 089 and 091 follow 075 or
-  080; 084, 087, 119 and 123 follow earlier changes.
-- **Changes run in parallel:** 76 of the 86 ran beside three or more others, and only 2 ran alone.
-  Two changes are anecdote.
-- **The review's noise:** both `wrong` answers were the cases' grader, not a review pass. 156
-  covers it.
-- **`docs` as a recurring `none` theme** (090, 102, 116, 142): this is the repo's own upkeep of its
-  rules and docs, for whoever maintains the plugin, and not an aim of a host's. The share of `none`
-  changes fell from 8 of 27 to 15 of 86.
-- **Tightening or loosening the review:** the rate is down, and 153 already reworks `[review]
-  sensitive` on purpose.
-- **Spend outliers** (083's out per line 8.6×, 082's comment share 11×): both are small code
-  changes with large docs (14 and 50 code lines). Their size explains them.
-- **The three largest skills** (ship 7,721 tokens, retro 7,636, intent 5,468): this rests on sizes
-  alone. No mechanical step was found without reading them, so it is left to a pass that does.
+  Their size explains them.
+- **The three largest skills** (retro 9,230 tokens, ship 7,714, intent 5,499): retro grew with the
+  insights and the rating, which are judgment, not mechanism. No deterministic step was found.
+- **The Tradeoffs insight:** only one row has a last value, so no trade can be read yet.
 - **Unmeasured signals** (findings caught later, repeated tests, tests passing for the wrong
-  reason): not worth a seed until the pruning pass (2026-11-18-90) shows what per-test data
-  would add.
+  reason, an approver's call the person overturned): not worth a seed until M22 shows whether the
+  person overturns the approver's calls at all.

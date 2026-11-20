@@ -118,6 +118,7 @@ Raised 2026-11-18.
 Left undone by 156-cases-that-tell, carried forward when it landed: 26 `e-*` workspaces from earlier case runs sit in `/private/tmp` (made before runs removed their own); a one-off `run-cases --prune` or a line in CONTRIBUTING could clear them, behind the same `_workspace_of()` guard
 See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
+Theme: tests
 
 ## [2026-11-19-8] [nit] the R5 test only builds the `build` task, so the refusal for a broken `mend.md` or `land-review.md` under `land-mend` is untested.
 
@@ -204,6 +205,7 @@ Raised by: 171-factory-run-state (correctness)
 Left undone by 173-style-paydown, carried forward when it landed: The other factory agents (`approver.md`, `builder.md`, `resolver.md`, `reviewer-behaviour.md`, `reviewer-security.md`, `reviewer-test.md`, `reviewer-ui.md`, `spec-writer.md`, `verifier.md`) keep prose lines past 100 columns; no entry named them, so they stayed out of this change.
 See .sdlc/work/173-style-paydown/notes.md in its commit.
 Raised 2026-11-19.
+Theme: style
 
 ## [2026-11-19-28] [nit] the round-file sentence ("and `factory.py` writes it to `.sdlc/work/NNN-slug/reviews/round-N/test.md`…") is 105 columns, the same shape -81 fixed in `reviewer-code.md` and `reviewer-ux.md`; its "Under a decision's line" paragraph is probably the same; the change names only the first two files, so this is out of scope here
 
@@ -310,6 +312,7 @@ Raised by: 184-scorecard-report (correctness)
 Left undone by 185-landing-gates, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:2180: gate/build/accept records are trusted by the hash they state, which any agent that can write in the change's folder can write; a script-side signature or a record kept outside the tree would close it
 See .sdlc/work/185-landing-gates/notes.md in its commit.
 Raised 2026-11-19.
+Theme: landing
 
 ## [2026-11-19-73] [nit] the R9 test drives a real train to `accept` and then edits `checks.md`.
 
@@ -376,6 +379,7 @@ Raised by: 188-local-day-elapsed (correctness)
 Left undone by 191-tests-paydown, carried forward when it landed: `retro.py`'s workarounds block gives `unknown` a `count` and `rows` but no `n`, though `_workarounds()`'s docstring says "each count carries its `n`" (nit 2026-11-19-56). That is a code change, and this change is tests-only, so its test pins the row's `change` key and leaves `n` alone.
 See .sdlc/work/191-tests-paydown/notes.md in its commit.
 Raised 2026-11-20.
+Theme: retro
 
 ## [2026-11-20-16] [nit] `UNCACHED`'s `offline` and `no solution found` are broad, so a script failure that happens to print "offline" would skip the test when it should fail.
 
@@ -392,6 +396,7 @@ Raised by: 191-tests-paydown (correctness)
 Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
 See .sdlc/work/193-ledger-and-landing-fixes/notes.md in its commit.
 Raised 2026-11-20.
+Theme: landing
 
 ## [2026-11-20-10] [nit] the third test chains its cases in one body, so a failure in the first assertion hides the later cases
 
@@ -408,6 +413,7 @@ Raised by: 193-ledger-and-landing-fixes (correctness)
 Left undone by 195-designing-while-specified, carried forward when it landed: The board's step track (`_progress()`) shows nothing for a first spec draft, which records no `runs/step.md`; a card under Designing could show a `spec` step with its elapsed time.
 See .sdlc/work/195-designing-while-specified/notes.md in its commit.
 Raised 2026-11-20.
+Theme: board
 
 ## [2026-11-20-12] [nit] the edited line is now about 110 characters, while its neighbours wrap near 100.
 
@@ -434,6 +440,7 @@ Raised by: 195-designing-while-specified (correctness)
 Left undone by 192-tests-pruning, carried forward when it landed: Retro's `tests.drifted` takes a test's code to be every code file its last change touched, so a test edited beside `sdlc.py` or `retro.py` drifts for good (`test_metrics.py`, `test_function_heat.py`), and an exact golden (`close-output.json`, `land-fix.txt`, `land-record-cases.json`) is named though it can't drift silently. A narrower notion of a test's code (the files it loads, or a host's list of goldens) would make the list worth acting on.
 See .sdlc/work/192-tests-pruning/notes.md in its commit.
 Raised 2026-11-20.
+Theme: tests
 
 ## [2026-11-20-22] [nit] a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
 
@@ -450,6 +457,7 @@ Raised by: 196-evidence-and-deleted-conflicts (correctness)
 Left undone by 189-retro-insights, carried forward when it landed: The scorecard's lead-time rows by way still say `none in the window` when the window closed changes but none of that way (`test_a_figure_with_no_data_reads_a_dash_with_its_reason` pins it): R11 named four blocks, not `process.lead`'s ways. `no <way> change in the window` would match the escape rate's.
 See .sdlc/work/189-retro-insights/notes.md in its commit.
 Raised 2026-11-20.
+Theme: retro
 
 ## [2026-11-20-25] [nit] the lead-time-by-way rows still say `none in the window` when the window closed changes but none of that way.
 
@@ -478,6 +486,8 @@ pre-existing: plugins/factory/scripts/landing.py:1384: `_stray()` lets through a
 
 Severity: med
 Paths: plugins/factory/scripts/landing.py
+Theme: landing
+Priority: high
 
 ## [2026-11-20-28] [nit] `staged_gone` calls `git cat-file` once per staged deletion; harmless, but you could read `REBASE_HEAD`'s tree once.
 
@@ -514,6 +524,7 @@ Raised by: 197-moved-files-after-staging (correctness)
 Left undone by 190-retro-rating, carried forward when it landed: Before ship (spec, *Contracts touched*): read one real `/sdlc:retro` transcript with the two-question dialog and confirm `toolUseResult.answers` lists the approval first, so `metrics._answers()[0]` is the approval. R11 pins the shape `_answers()` reads, not the harness.
 See .sdlc/work/190-retro-rating/notes.md in its commit.
 Raised 2026-11-20.
+Theme: retro
 
 ## [2026-11-20-32] [nit] `_experience_text` does `table = _table(..., [[..., rating, before, ...]])`.
 
@@ -544,3 +555,114 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 190-retro-rating (correctness)
+
+## [2026-11-20-35] [idea] Say in the process doc when a batch of closed changes is released
+
+Forty-four changes closed since the last retrospective and none was released: v1.10.0 is still the
+latest tag. So `time_to_users` has nothing to measure (44 of 44 unreleased), and no change's
+**Moves** line can be checked against a user. The process doc says nothing about when to cut a
+release. Propose a cadence in it, for example a release after each batch the direction groups
+(each wave), so a retrospective always has something its users have had. Raised by the
+retrospective of 2026-11-20.
+Theme: release
+
+## [2026-11-20-36] [idea] An escalation whose only reason is an assumed default goes to the landing's question
+
+The person kept the default the agents assumed 18 of 18 times this window (0 changed, n=18). Yet
+an approver escalates a change while any default is open, so each such change stops once more, at
+`/sdlc-factory:decide`, before the landing's own question confirms its assumed decisions anyway.
+When the approver's only open reasons are assumed defaults, the change could be READY with them
+shown in the landing's question, which already offers `its assumed decisions confirmed as shown`.
+One stop less for most factory changes that raise one (O3). Raised by the retrospective of
+2026-11-20.
+Theme: autonomy
+
+## [2026-11-20-37] [idea] See whether fewer changes at once shortens lead time
+
+A factory change's lead time (median 166 minutes, n=33) is a quarter queued (0.25) and a fifth
+waiting at ready (0.22), against 0.21 in agents. A median of 3.5 changes ran at once (most 6), and
+the 32 that ran beside three or more others took a median 68.5 minutes elapsed, against 20 for the
+4 that ran alone. Four is anecdote. Try one wave built with at most three changes open, and compare
+its queued and ready-wait shares with this window's. Raised by the retrospective of 2026-11-20.
+Theme: autonomy
+Priority: low
+
+## [2026-11-20-38] [idea] Run the approver on Sonnet for one window
+
+Opus is 88% of the window's spend ($214.93 of $243.53). The approver runs on Opus at $16.07 over
+43 runs and 23 minutes, and reads and decides without editing. One window with `[models] approver
+= "sonnet"` in `.sdlc/factory.toml` would cost about a tenth as much. Use the approver's decisions
+as the guardrail: READY changes that escaped, and ESCALATEs the person found empty. Raised by the
+retrospective of 2026-11-20.
+Theme: cost
+
+## [2026-11-20-39] [idea] Check the surface's retire list before retiring anything on it
+
+The surface's retire list names 33 config keys unused for 3 windows, among them `git.base` and
+`git.push`. Every change reads `git.base`, and close pushes by `git.push`. So the measure counts
+a key as used only when something other than the config loader records it. First make the
+measure count what `load_config()` and the commands read. Then go through what is still listed:
+the 7 `commands.*` keys, the 3 `metrics.*` keys, and the `docs.*` and `release.*` keys a host may
+rely on. Raised by the retrospective of 2026-11-20.
+Theme: retro
+
+## [2026-11-20-40] [idea] Review doc: git state read after the step that changed it
+
+Four escapes this window are one class:
+- 097, 104, 139 (bug 2026-11-20-14) and 196 (bug 2026-11-20-23) each read the index or a rebase's
+  state at a moment when an earlier step had already changed it.
+- Bug 2026-11-20-27 is open, and it is the same class.
+
+The escape rate rose from 0.02 (2 of 86) to 0.20 (9 of 44). The models also changed underneath.
+Add this bullet to `.sdlc/REVIEW.md`'s Pass 1, "The ways this repo's code fails":
+
+- **Git state read after the step that changed it.** A landing or resolve step reads unmerged
+  entries, `REBASE_HEAD`, the index or a blank worktree column, but a step before it (a `git add`,
+  `git rm` or `rebase --continue`) has already moved what it reads. Check each read against the
+  step before it, and test it on the staged state, not the conflicted one.
+
+Raised by the retrospective of 2026-11-20.
+Theme: landing
+
+## [2026-11-20-41] [idea] Prune the slow train tests and the drifted ones
+
+`tests.due` is true. The serial suite takes 2,452 seconds over 3,563 tests (median 0.17s). The
+gate's round median doubled, from 86.5 to 158.5 seconds. These are the candidates:
+- **Slow tests** (each 150× or more the median):
+  - `test_train::test_every_ejection_names_its_cause` (39.8s)
+  - `test_a_train_fix_already_made_goes_on_to_the_gate` (31.6s)
+  - `test_a_train_stops_past_land_moves` (27.7s)
+  - `test_a_killed_train_run_resumes` (27.4s)
+  - `test_train_run_resumes_after_a_kept_change` (27.3s)
+  - `test_train_run_ejects_a_gate_fault_and_lands_the_rest` (26.4s)
+  - `test_train_run_lands_a_batch_of_three` (25.6s)
+  - `test_land::test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_factory_alone`
+    (25.0s)
+
+  Each builds a repo and a train of its own. A shared fixture, or one train walked through several
+  checks, may cover the same ground.
+- **Drifted tests** (code moved since, in that many later changes):
+  - `tests/fixtures/close-output.json` (172, 8)
+  - `tests/test_function_heat.py` (177, 8)
+  - `tests/prompts/land-fix.txt` (181, 7)
+  - `tests/prompts/land-checks.txt`, `tests/train_driver.py` (185, 4)
+  - `tests/test_bugs.py`, `tests/test_next_up.py` (176, 4)
+  - `tests/test_indicators.py`, `tests/test_surface.py` (184, 3)
+
+The later change's review decides what to merge, rewrite, move or delete. Raised by the
+retrospective of 2026-11-20.
+Theme: tests
+
+## [2026-11-20-42] [idea] Pay down the `tests` nits
+
+26 `[nit]` entries are open in the `tests` theme, the oldest from 2026-11-19, past the process
+doc's threshold of 5. 191 paid down 26 of them a day ago, and the landings since filed as many
+again. Take them in one change, and see whether one fixture or helper would stop the commonest
+kind of nit coming back. Raised by the retrospective of 2026-11-20.
+Theme: tests
+
+## [2026-11-20-43] [idea] Pay down the `robustness` nits
+
+5 `[nit]` entries are open in the `robustness` theme, the oldest from 2026-11-19, at the process
+doc's threshold of 5. Take them in one change. Raised by the retrospective of 2026-11-20.
+Theme: robustness
