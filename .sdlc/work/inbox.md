@@ -368,47 +368,11 @@ Cost: S
 Value: low
 Raised by: 184-scorecard-report (correctness)
 
-## [2026-11-19-68] [idea] Land skill description names the build at the tip and the approver's check judgement
-
-Left undone by 185-landing-gates, carried forward when it landed: The land skill's frontmatter `description` still lists what a landing runs without the build at the tip or the approver's judgement of changed checks; Step 3 and the steps list say both. A wording pass on the description alone, kept out of this change.
-See .sdlc/work/185-landing-gates/notes.md in its commit.
-Raised 2026-11-19.
-
 ## [2026-11-19-69] [idea] Landing records that an agent in the change's folder can't forge
 
 Left undone by 185-landing-gates, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:2180: gate/build/accept records are trusted by the hash they state, which any agent that can write in the change's folder can write; a script-side signature or a record kept outside the tree would close it
 See .sdlc/work/185-landing-gates/notes.md in its commit.
 Raised 2026-11-19.
-
-## [2026-11-19-70] [nit] the edited factory paragraph has two lines over the file's ~100-column wrap (`change calls for it (build_due()).
-
-Raised by the code review of 185-landing-gates, round 1: AGENTS.md:263: the edited factory paragraph has two lines over the file's ~100-column wrap (`change calls for it (build_due()). Landing, in …`, and `approver and the read-only list together, …`). Re-wrap them.
-
-Theme: docs
-Paths: AGENTS.md
-Cost: S
-Value: low
-Raised by: 185-landing-gates (correctness)
-
-## [2026-11-19-71] [nit] `_train_begin` calls `_preflight` once per change at begin, as the spec says.
-
-Raised by the code review of 185-landing-gates, round 1: plugins/factory/scripts/landing.py:1900: `_train_begin` calls `_preflight` once per change at begin, as the spec says. Where preflight can't be read, it records `checks: []` with a hash. This is safe, since every check then counts as changed, but a one-line comment saying so would help.
-
-Theme: docs
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: low
-Raised by: 185-landing-gates (correctness)
-
-## [2026-11-19-72] [nit] the docstring says a symlink out is refused "for a word naming an existing path"; say that a program walking the tree itself is not covered
-
-Raised by the security review of 185-landing-gates, round 1: plugins/factory/scripts/landing.py:842: the docstring says a symlink out is refused "for a word naming an existing path"; say that a program walking the tree itself is not covered
-
-Theme: docs
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: low
-Raised by: 185-landing-gates (contract)
 
 ## [2026-11-19-73] [nit] the R9 test drives a real train to `accept` and then edits `checks.md`.
 
@@ -419,16 +383,6 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 185-landing-gates (correctness)
-
-## [2026-11-19-74] [nit] GNU grep accepts unambiguous long-option prefixes, so `--der`/`--dereference` passes the exact `GREP_FOLLOWS_LONG` match and still follows symlinks while recursing; refuse any `--` word that is a prefix of `--dereference-recursive` (length ≥ 3), or refuse every grep long option not on a short allow-list
-
-Raised by the security review of 185-landing-gates, round 2: plugins/factory/scripts/landing.py:876: GNU grep accepts unambiguous long-option prefixes, so `--der`/`--dereference` passes the exact `GREP_FOLLOWS_LONG` match and still follows symlinks while recursing; refuse any `--` word that is a prefix of `--dereference-recursive` (length ≥ 3), or refuse every grep long option not on a short allow-list
-
-Theme: robustness
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: med
-Raised by: 185-landing-gates (contract)
 
 ## [2026-11-19-76] [nit] `"network was disabled" in cached.stderr` depends on uv's exact wording.
 
@@ -459,31 +413,6 @@ Paths: tests/test_train.py
 Cost: M
 Value: med
 Raised by: 186-gate-reliability (correctness)
-
-## [2026-11-19-79] [bug] A DECISION question that continues in sub-bullets is cut off and loses its options
-
-When an agent's `- DECISION:` line continues its question in its own indented sub-bullets, with the
-`- OPTION:` and `- WHY:` lines after them, `sub_lines()` stops at the first sub-bullet that is
-neither. So `decisions.md` keeps only the question's first line, and the options are never read:
-`ask` gives `options: []` and `why: null`, and `/sdlc-factory:decide` offers keep/change with a
-truncated question. Expected: the whole question, with its options and why. To see it: 187's
-builder raised D3 as "I reworded more than R7 and R9 list:" followed by three sub-bullets, and
-the ledger and `ask 187` show only that line, with no options.
-
-Severity: low
-Paths: plugins/factory/scripts/factory.py
-Introduced by: 137-approver-weighs-defaults
-Theme: factory
-
-## [2026-11-20-1] [nit] The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card).
-
-Raised by the code review of 187-one-word-one-meaning, round 1: .sdlc/work/187-one-word-one-meaning/decisions.md:34: The same two decisions are listed twice, as D1/D4 (R11 against R23) and D2/D5 (the `, passed`/`, failed` text on the card). D3 also has its reworded-docs list missing from the ledger line itself. Collapse the duplicates and keep D3's list under its line.
-
-Theme: docs
-Paths: .sdlc/work/187-one-word-one-meaning/decisions.md
-Cost: S
-Value: low
-Raised by: 187-one-word-one-meaning (correctness)
 
 ## [2026-11-20-2] [nit] the phrasing fixture's `# fmt: skip` list packs several phrasings per line, which makes a future edit harder to read
 
@@ -552,3 +481,39 @@ Paths: tests/uv_run.py
 Cost: S
 Value: low
 Raised by: 191-tests-paydown (correctness)
+
+## [2026-11-20-7] [idea] Read-only list refuses ugrep's symlink-following long options (`--dereference-files` and its prefixes)
+
+Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
+See .sdlc/work/193-ledger-and-landing-fixes/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-8] [nit] `by_alts` is built from every ledger entry with options.
+
+Raised by the code review of 193-ledger-and-landing-fixes, round 1: plugins/factory/scripts/factory.py:2018: `by_alts` is built from every ledger entry with options. The match relies on options and why being identical, so a very short shared option list could merge two real decisions. D1 already accepts this trade-off.
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 193-ledger-and-landing-fixes (correctness)
+
+## [2026-11-20-9] [nit] the threshold `len(name) >= 5` counts the leading `--`, while the comment above `GREP_FOLLOWS_LONG` says "three or more characters after its `--`".
+
+Raised by the security review of 193-ledger-and-landing-fixes, round 1: plugins/factory/scripts/landing.py:883: the threshold `len(name) >= 5` counts the leading `--`, while the comment above `GREP_FOLLOWS_LONG` says "three or more characters after its `--`". Writing it as `len(name) - 2 >= 3`, or naming the constant, would make the two read the same.
+
+Theme: style
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 193-ledger-and-landing-fixes (contract)
+
+## [2026-11-20-10] [nit] the third test chains its cases in one body, so a failure in the first assertion hides the later cases
+
+Raised by the test review of 193-ledger-and-landing-fixes, round 1: tests/test_factory.py:870: the third test chains its cases in one body, so a failure in the first assertion hides the later cases
+
+Theme: tests
+Paths: tests/test_factory.py
+Cost: S
+Value: low
+Raised by: 193-ledger-and-landing-fixes (correctness)
