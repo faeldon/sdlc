@@ -120,66 +120,6 @@ See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
 Theme: tests
 
-## [2026-11-19-8] [nit] the R5 test only builds the `build` task, so the refusal for a broken `mend.md` or `land-review.md` under `land-mend` is untested.
-
-Raised by the test review of 164-prompts-in-files, round 1: tests/test_prompts.py:439: the R5 test only builds the `build` task, so the refusal for a broken `mend.md` or `land-review.md` under `land-mend` is untested. `_task()` validates both files by the same code path, so the risk is low.
-
-Theme: tests
-Paths: tests/test_prompts.py
-Cost: S
-Value: low
-Raised by: 164-prompts-in-files (correctness)
-
-## [2026-11-19-7] [nit] a few helper names such as `_reached` and `_named` have no docstring
-
-Raised by the test review of 163-factory-records-reader, round 1: tests/test_modules.py: a few helper names such as `_reached` and `_named` have no docstring
-
-Theme: tests
-Paths: tests/test_modules.py
-Cost: S
-Value: low
-Raised by: 163-factory-records-reader (correctness)
-
-## [2026-11-19-11] [nit] `_bare_repo` creates a repo with no `user.name` or `user.email`.
-
-Raised by the test review of 167-board-knows-its-repo, round 1: tests/test_board.py:660: `_bare_repo` creates a repo with no `user.name` or `user.email`. It passes on this machine, but may fail on a clean CI box. Reuse the `repo` fixture's git config if it sets one.
-
-Theme: tests
-Paths: tests/test_board.py
-Cost: S
-Value: low
-Raised by: 167-board-knows-its-repo (correctness)
-
-## [2026-11-19-17] [nit] `test_retro_and_its_report_show_the_same_figures` compares only work mix and time to users with the report, and has no assertion on the follow-through sentence.
-
-Raised by the test review of 168-work-mix-and-follow-through, round 1: tests/test_retro.py:2126: `test_retro_and_its_report_show_the_same_figures` compares only work mix and time to users with the report, and has no assertion on the follow-through sentence. The spec asks that the report and the JSON not disagree. The other test checks the report text, but follow-through is checked only in the JSON tests.
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: med
-Raised by: 168-work-mix-and-follow-through (correctness)
-
-## [2026-11-19-20] [nit] R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone.
-
-Raised by the test review of 169-decisions-and-stops-counted, round 1: tests/test_retro.py:2606: R8's rate test lets one ledger give `kept=1, changed=1`, so `kept/(kept+changed)` and `kept/total_defaults` can't be told apart by the 0.5 rate alone. A test with `confirmed` or `settled` lines that outnumber the rest would fail if the denominator changed.
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 169-decisions-and-stops-counted (correctness)
-
-## [2026-11-19-23] [nit] `_killed_at_its_gate` waits up to 120 s for the gate to start, while the POSIX test it twins waits 60 s; neither is a defect, but the two differ for no stated reason
-
-Raised by the test review of 171-factory-run-state, round 1: tests/test_train.py:1830: `_killed_at_its_gate` waits up to 120 s for the gate to start, while the POSIX test it twins waits 60 s; neither is a defect, but the two differ for no stated reason
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 171-factory-run-state (correctness)
-
 ## [2026-11-19-24] [nit] R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s.
 
 Raised by the code review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s. Change R14 to 120 s, since startup here takes about 60 s.
@@ -217,132 +157,12 @@ Cost: S
 Value: low
 Raised by: 173-style-paydown (correctness)
 
-## [2026-11-19-29] [nit] the first check covers only the seven named files, so a rewrap that regressed another agent file would not be caught; fine for this scope
-
-Raised by the test review of 173-style-paydown, round 1: .sdlc/work/173-style-paydown/checks.md: the first check covers only the seven named files, so a rewrap that regressed another agent file would not be caught; fine for this scope
-
-Theme: tests
-Paths: .sdlc/work/173-style-paydown/checks.md
-Cost: S
-Value: low
-Raised by: 173-style-paydown (correctness)
-
-## [2026-11-19-38] [nit] the stop half of `test_an_ejection_is_recorded_and_amended_in` doesn't check `at` or `land` on its rows.
-
-Raised by the test review of 174-waste-tagged, round 1: tests/test_train.py: the stop half of `test_an_ejection_is_recorded_and_amended_in` doesn't check `at` or `land` on its rows. Only `cause` is asserted.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 174-waste-tagged (correctness)
-
-## [2026-11-19-40] [nit] R2's OSError case has no test; `_indicator_rows` treats it like the timeout path
-
-Raised by the test review of 177-indicators-structured, round 1: tests/test_retro.py:1957: R2's OSError case has no test; `_indicator_rows` treats it like the timeout path
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 177-indicators-structured (correctness)
-
-## [2026-11-19-49] [nit] the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
-
-Raised by the test review of 181-landing-nits-and-fixes, round 1: tests/test_land.py: the `_already_made` helper and `test_a_fix_commit_needs_an_ask` write `MADE` and `ALREADY` module constants in the middle of the file, and `tests/test_train.py` defines a second `MADE`; hoist them or rename them to avoid confusion
-
-Theme: tests
-Paths: tests/test_land.py
-Cost: S
-Value: low
-Raised by: 181-landing-nits-and-fixes (correctness)
-
-## [2026-11-19-51] [nit] no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
-
-Raised by the test review of 178-comment-health, round 1: tests/test_comment_health.py: no test pins that a line-1 shebang is left out of the comment count, though the plan records it as a departure
-
-Theme: tests
-Paths: tests/test_comment_health.py
-Cost: S
-Value: low
-Raised by: 178-comment-health (correctness)
-
-## [2026-11-19-55] [nit] R5's test covers the eject path only.
-
-Raised by the code review of 180-workarounds-tagged, round 1: tests/test_train.py: R5's test covers the eject path only. The same `problems.append(f"{name}: {problem}")` branch in `_train_stop` has no failing-append test.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 180-workarounds-tagged (correctness)
-
-## [2026-11-19-56] [nit] the `unknown` rows carry a `change` key that no test asserts, and `unknown` has no `n`
-
-Raised by the test review of 180-workarounds-tagged, round 1: tests/test_retro.py:3704: the `unknown` rows carry a `change` key that no test asserts, and `unknown` has no `n`
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 180-workarounds-tagged (correctness)
-
-## [2026-11-19-57] [nit] add one assertion that a stop before any commit leaves no row, since the spec's edge-case section names it
-
-Raised by the test review of 180-workarounds-tagged, round 1: tests/test_retro.py:3677: add one assertion that a stop before any commit leaves no row, since the spec's edge-case section names it
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 180-workarounds-tagged (correctness)
-
-## [2026-11-19-67] [nit] `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections").
-
-Raised by the test review of 184-scorecard-report, round 1: tests/test_retro.py: `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections"). It would still pass if they appeared anywhere in the Speed section, such as in prose rather than the landing line. Match the landing line's label instead.
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 184-scorecard-report (correctness)
-
 ## [2026-11-19-69] [idea] Landing records that an agent in the change's folder can't forge
 
 Left undone by 185-landing-gates, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:2180: gate/build/accept records are trusted by the hash they state, which any agent that can write in the change's folder can write; a script-side signature or a record kept outside the tree would close it
 See .sdlc/work/185-landing-gates/notes.md in its commit.
 Raised 2026-11-19.
 Theme: landing
-
-## [2026-11-19-73] [nit] the R9 test drives a real train to `accept` and then edits `checks.md`.
-
-Raised by the test review of 185-landing-gates, round 1: tests/test_train.py:2307: the R9 test drives a real train to `accept` and then edits `checks.md`. The edited command is `rm -f bb.txt`, which is off the list, so it never exercises the case where an edit passes R5 but loses the approver's clearance.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 185-landing-gates (correctness)
-
-## [2026-11-19-76] [nit] `"network was disabled" in cached.stderr` depends on uv's exact wording.
-
-Raised by the code review of 186-gate-reliability, round 1: tests/test_adoption.py:65: `"network was disabled" in cached.stderr` depends on uv's exact wording. If a later uv words it differently, an offline run with an empty cache returns the failing result instead of skipping, so the gate goes red on the network again. Matching "offline" or "disabled" as well, or checking `--offline`'s non-zero exit more loosely, would be sturdier.
-
-Theme: robustness
-Paths: tests/test_adoption.py
-Cost: S
-Value: med
-Raised by: 186-gate-reliability (correctness)
-
-## [2026-11-19-77] [nit] `test_with_the_index_unreachable_a_copy_of_the_script_runs_from_uvs_cache` passes on the old code too.
-
-Raised by the code review of 186-gate-reliability, round 1: tests/test_adoption.py:529: `test_with_the_index_unreachable_a_copy_of_the_script_runs_from_uvs_cache` passes on the old code too. It only fails once uv's cached index answers are stale, as the builder says. It shows the fallback works but isn't a regression guard.
-
-Theme: tests
-Paths: tests/test_adoption.py
-Cost: M
-Value: low
-Raised by: 186-gate-reliability (correctness)
 
 ## [2026-11-19-78] [nit] the builder's note is right that it also runs `uv run --script` and could share `_uv()`.
 
@@ -354,26 +174,6 @@ Cost: M
 Value: med
 Raised by: 186-gate-reliability (correctness)
 
-## [2026-11-20-2] [nit] the phrasing fixture's `# fmt: skip` list packs several phrasings per line, which makes a future edit harder to read
-
-Raised by the test review of 187-one-word-one-meaning, round 1: tests/test_feature_map.py:273: the phrasing fixture's `# fmt: skip` list packs several phrasings per line, which makes a future edit harder to read
-
-Theme: tests
-Paths: tests/test_feature_map.py
-Cost: S
-Value: low
-Raised by: 187-one-word-one-meaning (correctness)
-
-## [2026-11-20-4] [nit] the `east` fixture uses `time.tzset()`, which doesn't exist on Windows.
-
-Raised by the code review of 188-local-day-elapsed, round 1: tests/test_archive.py:2500: the `east` fixture uses `time.tzset()`, which doesn't exist on Windows. That is fine as long as these tests stay unmarked `portable`, but a comment saying so would stop someone adding the marker later.
-
-Theme: tests
-Paths: tests/test_archive.py
-Cost: S
-Value: low
-Raised by: 188-local-day-elapsed (correctness)
-
 ## [2026-11-20-15] [idea] Give the workarounds' `unknown` block its `n`, as `_workarounds()`'s docstring says
 
 Left undone by 191-tests-paydown, carried forward when it landed: `retro.py`'s workarounds block gives `unknown` a `count` and `rows` but no `n`, though `_workarounds()`'s docstring says "each count carries its `n`" (nit 2026-11-19-56). That is a code change, and this change is tests-only, so its test pins the row's `change` key and leaves `n` alone.
@@ -381,32 +181,12 @@ See .sdlc/work/191-tests-paydown/notes.md in its commit.
 Raised 2026-11-20.
 Theme: retro
 
-## [2026-11-20-16] [nit] `UNCACHED`'s `offline` and `no solution found` are broad, so a script failure that happens to print "offline" would skip the test when it should fail.
-
-Raised by the code review of 191-tests-paydown, round 1: tests/uv_run.py:17: `UNCACHED`'s `offline` and `no solution found` are broad, so a script failure that happens to print "offline" would skip the test when it should fail. The `--offline` run only gets here after the index was unreachable, which makes this unlikely, but a tighter match would cost little.
-
-Theme: robustness
-Paths: tests/uv_run.py
-Cost: S
-Value: low
-Raised by: 191-tests-paydown (correctness)
-
 ## [2026-11-20-7] [idea] Read-only list refuses ugrep's symlink-following long options (`--dereference-files` and its prefixes)
 
 Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
 See .sdlc/work/193-ledger-and-landing-fixes/notes.md in its commit.
 Raised 2026-11-20.
 Theme: landing
-
-## [2026-11-20-10] [nit] the third test chains its cases in one body, so a failure in the first assertion hides the later cases
-
-Raised by the test review of 193-ledger-and-landing-fixes, round 1: tests/test_factory.py:870: the third test chains its cases in one body, so a failure in the first assertion hides the later cases
-
-Theme: tests
-Paths: tests/test_factory.py
-Cost: S
-Value: low
-Raised by: 193-ledger-and-landing-fixes (correctness)
 
 ## [2026-11-20-11] [idea] Show a spec step and its elapsed time on a Designing card
 
@@ -435,16 +215,6 @@ Cost: S
 Value: low
 Raised by: 195-designing-while-specified (correctness)
 
-## [2026-11-20-22] [nit] a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
-
-Raised by the test review of 196-evidence-and-deleted-conflicts, round 1: tests/test_evidence_headings.py:1: a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
-
-Theme: tests
-Paths: tests/test_evidence_headings.py
-Cost: S
-Value: low
-Raised by: 196-evidence-and-deleted-conflicts (correctness)
-
 ## [2026-11-20-24] [idea] Lead-time-by-way scorecard rows name their real reason
 
 Left undone by 189-retro-insights, carried forward when it landed: The scorecard's lead-time rows by way still say `none in the window` when the window closed changes but none of that way (`test_a_figure_with_no_data_reads_a_dash_with_its_reason` pins it): R11 named four blocks, not `process.lead`'s ways. `no <way> change in the window` would match the escape rate's.
@@ -461,66 +231,6 @@ Paths: .sdlc/work/189-retro-insights/notes.md
 Cost: S
 Value: low
 Raised by: 189-retro-insights (correctness)
-
-## [2026-11-20-26] [nit] the `test_config_reports_the_insights_doc` "off while it doesn't exist" assertion only checks that no warning mentions INSIGHTS, so it is weak
-
-Raised by the test review of 189-retro-insights, round 1: tests/test_retro.py:4867: the `test_config_reports_the_insights_doc` "off while it doesn't exist" assertion only checks that no warning mentions INSIGHTS, so it is weak
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 189-retro-insights (correctness)
-
-## [2026-11-20-29] [nit] nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion.
-
-Raised by the test review of 197-moved-files-after-staging, round 1: tests/test_train.py: nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion. Only the gone-from-index direction is tested.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: med
-Raised by: 197-moved-files-after-staging (correctness)
-
-## [2026-11-20-30] [nit] `_neither_side()` returns True when git can't hash a moved file, so a moved file that is gone from the tree counts as `carried`.
-
-Raised by the test review of 197-moved-files-after-staging, round 1: tests/test_train.py: `_neither_side()` returns True when git can't hash a moved file, so a moved file that is gone from the tree counts as `carried`. No test covers that case.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 197-moved-files-after-staging (correctness)
-
-## [2026-11-20-32] [nit] `_experience_text` does `table = _table(..., [[..., rating, before, ...]])`.
-
-Raised by the code review of 190-retro-rating, round 1: scripts/retro.py:2425: `_experience_text` does `table = _table(..., [[..., rating, before, ...]])`. A `None` rating relies on `_table` rendering it as `—`. A test pins this, but the `—` spelling is implicit.
-
-Theme: tests
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 190-retro-rating (correctness)
-
-## [2026-11-20-33] [nit] `_last_experience` does `int(rating)` on the table cell.
-
-Raised by the code review of 190-retro-rating, round 1: scripts/retro.py:2467: `_last_experience` does `int(rating)` on the table cell. A hand-edited report with a non-numeric cell would raise instead of reading back as no rating. Guard it, or catch `ValueError`.
-
-Theme: robustness
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 190-retro-rating (correctness)
-
-## [2026-11-20-34] [nit] `test_a_rating_with_no_line_says_so` takes a `tmp_path` fixture it never uses
-
-Raised by the test review of 190-retro-rating, round 1: tests/test_retro.py: `test_a_rating_with_no_line_says_so` takes a `tmp_path` fixture it never uses
-
-Theme: tests
-Paths: tests/test_retro.py
-Cost: S
-Value: low
-Raised by: 190-retro-rating (correctness)
 
 ## [2026-11-20-37] [idea] See whether fewer changes at once shortens lead time
 
@@ -541,20 +251,6 @@ measure count what `load_config()` and the commands read. Then go through what i
 the 7 `commands.*` keys, the 3 `metrics.*` keys, and the `docs.*` and `release.*` keys a host may
 rely on. Raised by the retrospective of 2026-11-20.
 Theme: retro
-
-## [2026-11-20-42] [idea] Pay down the `tests` nits
-
-26 `[nit]` entries are open in the `tests` theme, the oldest from 2026-11-19, past the process
-doc's threshold of 5. 191 paid down 26 of them a day ago, and the landings since filed as many
-again. Take them in one change, and see whether one fixture or helper would stop the commonest
-kind of nit coming back. Raised by the retrospective of 2026-11-20.
-Theme: tests
-
-## [2026-11-20-43] [idea] Pay down the `robustness` nits
-
-5 `[nit]` entries are open in the `robustness` theme, the oldest from 2026-11-19, at the process
-doc's threshold of 5. Take them in one change. Raised by the retrospective of 2026-11-20.
-Theme: robustness
 
 ## [2026-11-20-44] [nit] the `staged_gone` comprehension still calls `_status_entries(root)` a second time, after `_stray()` has already read it.
 
@@ -647,3 +343,23 @@ Paths: .sdlc/work/200-tests-pruned-again/notes.md
 Cost: S
 Value: low
 Raised by: 200-tests-pruned-again (context)
+
+## [2026-11-20-54] [nit] `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed.
+
+Raised by the code review of 201-tests-and-robustness-nits, round 1: tests/test_suite_shape.py:12: `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed. Reading `kwonlyargs` too is a one-line fix
+
+Theme: tests
+Paths: tests/test_suite_shape.py
+Cost: S
+Value: low
+Raised by: 201-tests-and-robustness-nits (correctness)
+
+## [2026-11-20-55] [nit] the plan promises a line naming the test that settles each of the 20 nits 191 already fixed.
+
+Raised by the code review of 201-tests-and-robustness-nits, round 1: .sdlc/work/201-tests-and-robustness-nits/notes.md: the plan promises a line naming the test that settles each of the 20 nits 191 already fixed. I only confirmed that `notes.md` exists (74 lines) and did not check that all 20 are covered
+
+Theme: docs
+Paths: .sdlc/work/201-tests-and-robustness-nits/notes.md
+Cost: S
+Value: low
+Raised by: 201-tests-and-robustness-nits (context)
