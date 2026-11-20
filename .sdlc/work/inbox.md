@@ -582,3 +582,19 @@ recorded in its report. A change to a WAIT, so Tier 2. After S14 (184, landed). 
 docs/RETRO-SCORECARD.md's seeds.
 Theme: retro
 Raised 2026-11-20.
+
+## [2026-11-20-14] [bug] The landing's resolve crashes on a modify/delete conflict
+
+When a train stacks a change that deletes a file an earlier change in the train edited (or the
+other way round), git stops the rebase with a modify/delete conflict (`UD`/`DU`). The train names
+`resolve`, but `factory.py` raises `FileNotFoundError` on the deleted path before the resolver
+agent starts. The loop stops there, with the change mid-rebase. Expected: the resolver is handed
+the conflict like any other: which side deleted the file, what the other side changed, and where
+that content now lives, so it can carry the edit across. To see it: on 2026-11-20, 193 added tests
+to `tests/test_factory.py` and 194 deleted that file to split it; landing 193 then 194 stopped at
+`resolve 194` with `FileNotFoundError: .../tests/test_factory.py`.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
+Introduced by: 139-landing-train
+Theme: factory
