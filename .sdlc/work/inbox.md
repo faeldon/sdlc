@@ -479,26 +479,6 @@ Cost: S
 Value: low
 Raised by: 189-retro-insights (correctness)
 
-## [2026-11-20-27] [bug] resolve --continue lets a resolver's fully staged edit or deletion outside its files into the rebased commit
-
-Found by the review of 197-moved-files-after-staging.
-pre-existing: plugins/factory/scripts/landing.py:1384: `_stray()` lets through any entry whose worktree column is blank, so it can't tell a fully staged edit or deletion by the resolver from one the replayed commit made. The resolver has `Bash`, and only its prompt says "reads only". It could `git add` an edit to any file, or `git rm` a file only `HEAD` holds, and `--continue` would stage it into the rebased commit, which then lands on the base. This change's new `staged_gone` check closes only the deletion case, and only for files `REBASE_HEAD` still holds. The fix: compare each staged path (`git diff --cached --name-only HEAD`) against `REBASE_HEAD`'s own paths (`git diff-tree -r --name-only REBASE_HEAD^ REBASE_HEAD`) plus the conflicted, moved and record files, and refuse any other.
-
-Severity: med
-Paths: plugins/factory/scripts/landing.py
-Theme: landing
-Priority: high
-
-## [2026-11-20-28] [nit] `staged_gone` calls `git cat-file` once per staged deletion; harmless, but you could read `REBASE_HEAD`'s tree once.
-
-Raised by the code review of 197-moved-files-after-staging, round 1: plugins/factory/scripts/landing.py:2829: `staged_gone` calls `git cat-file` once per staged deletion; harmless, but you could read `REBASE_HEAD`'s tree once.
-
-Theme: robustness
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: low
-Raised by: 197-moved-files-after-staging (correctness)
-
 ## [2026-11-20-29] [nit] nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion.
 
 Raised by the test review of 197-moved-files-after-staging, round 1: tests/test_train.py: nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion. Only the gone-from-index direction is tested.
@@ -599,24 +579,6 @@ the 7 `commands.*` keys, the 3 `metrics.*` keys, and the `docs.*` and `release.*
 rely on. Raised by the retrospective of 2026-11-20.
 Theme: retro
 
-## [2026-11-20-40] [idea] Review doc: git state read after the step that changed it
-
-Four escapes this window are one class:
-- 097, 104, 139 (bug 2026-11-20-14) and 196 (bug 2026-11-20-23) each read the index or a rebase's
-  state at a moment when an earlier step had already changed it.
-- Bug 2026-11-20-27 is open, and it is the same class.
-
-The escape rate rose from 0.02 (2 of 86) to 0.20 (9 of 44). The models also changed underneath.
-Add this bullet to `.sdlc/REVIEW.md`'s Pass 1, "The ways this repo's code fails":
-
-- **Git state read after the step that changed it.** A landing or resolve step reads unmerged
-  entries, `REBASE_HEAD`, the index or a blank worktree column, but a step before it (a `git add`,
-  `git rm` or `rebase --continue`) has already moved what it reads. Check each read against the
-  step before it, and test it on the staged state, not the conflicted one.
-
-Raised by the retrospective of 2026-11-20.
-Theme: landing
-
 ## [2026-11-20-41] [idea] Prune the slow train tests and the drifted ones
 
 `tests.due` is true. The serial suite takes 2,452 seconds over 3,563 tests (median 0.17s). The
@@ -659,3 +621,23 @@ Theme: tests
 5 `[nit]` entries are open in the `robustness` theme, the oldest from 2026-11-19, at the process
 doc's threshold of 5. Take them in one change. Raised by the retrospective of 2026-11-20.
 Theme: robustness
+
+## [2026-11-20-44] [nit] the `staged_gone` comprehension still calls `_status_entries(root)` a second time, after `_stray()` has already read it.
+
+Raised by the code review of 198-landing-stages-its-own-paths, round 1: `plugins/factory/scripts/landing.py:2923`: the `staged_gone` comprehension still calls `_status_entries(root)` a second time, after `_stray()` has already read it. `_staged()` and `_stray()` also read the index separately. One shared read would be cleaner.
+
+Theme: refactor
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 198-landing-stages-its-own-paths (correctness)
+
+## [2026-11-20-45] [nit] the `[edit]` and `[mv]` cases both stray on `.gitignore`, and nothing separately pins that a staged rename's old path is named when only the new path is owned
+
+Raised by the test review of 198-landing-stages-its-own-paths, round 1: tests/test_train.py:1158: the `[edit]` and `[mv]` cases both stray on `.gitignore`, and nothing separately pins that a staged rename's old path is named when only the new path is owned
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 198-landing-stages-its-own-paths (correctness)
