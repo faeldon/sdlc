@@ -529,16 +529,6 @@ Cost: S
 Value: low
 Raised by: 190-retro-rating (correctness)
 
-## [2026-11-20-35] [idea] Say in the process doc when a batch of closed changes is released
-
-Forty-four changes closed since the last retrospective and none was released: v1.10.0 is still the
-latest tag. So `time_to_users` has nothing to measure (44 of 44 unreleased), and no change's
-**Moves** line can be checked against a user. The process doc says nothing about when to cut a
-release. Propose a cadence in it, for example a release after each batch the direction groups
-(each wave), so a retrospective always has something its users have had. Raised by the
-retrospective of 2026-11-20.
-Theme: release
-
 ## [2026-11-20-37] [idea] See whether fewer changes at once shortens lead time
 
 A factory change's lead time (median 166 minutes, n=33) is a quarter queued (0.25) and a fifth
@@ -651,3 +641,13 @@ Paths: tests/test_factory_decisions.py
 Cost: S
 Value: low
 Raised by: 202-defaults-to-landing (correctness)
+
+## [2026-11-20-49] [nit] the new block names no number of changes or days.
+
+Raised by the code review of 205-release-cadence, round 1: .sdlc/SDLC.md:83: the new block names no number of changes or days. The "once each wave has landed" rule is fine, but a person may wonder what to do if a wave stalls past the 14-day mark. One clause would settle it.
+
+Theme: docs
+Paths: .sdlc/SDLC.md
+Cost: S
+Value: low
+Raised by: 205-release-cadence (correctness)
