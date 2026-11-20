@@ -542,3 +542,21 @@ Paths: tests/test_evidence_headings.py
 Cost: S
 Value: low
 Raised by: 196-evidence-and-deleted-conflicts (correctness)
+
+## [2026-11-20-23] [bug] resolve --continue refuses a modify/delete resolution's carried file
+
+When a train's resolver settles a modify/delete conflict by carrying the deleted file's edits into
+a file the deleting commit added, `resolve --continue` in plugins/factory/scripts/landing.py
+refuses it: "edited outside its conflicted files: <that file>". The allowed list comes from
+`deleted_sides()` in plugins/factory/scripts/factory.py, which reads git's unmerged entries. By the
+time `--continue` checks, the deletion is staged and no unmerged entry is left, so the moved list
+is empty and the carried file looks like a stray edit. Expected: the moved list comes from the
+rebase's own commit (`REBASE_HEAD`), or is recorded before staging, so a correct resolution passes.
+To see it: on 2026-11-20 the landing of 194 (which deletes `tests/test_factory.py` and adds
+`tests/test_factory_decisions.py`) stacked on 193's edits to the deleted file. The resolver carried
+193's 69 new lines into `tests/test_factory_decisions.py`, and the train stopped at `resolve 194`.
+
+Severity: med
+Paths: plugins/factory/scripts/landing.py, plugins/factory/scripts/factory.py
+Introduced by: 196-evidence-and-deleted-conflicts
+Theme: factory
