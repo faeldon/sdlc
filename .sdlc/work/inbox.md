@@ -463,36 +463,6 @@ Left undone by 192-tests-pruning, carried forward when it landed: Retro's `tests
 See .sdlc/work/192-tests-pruning/notes.md in its commit.
 Raised 2026-11-20.
 
-## [2026-11-20-19] [nit] a read that printed output and then hits a blank line and a `## Notes` heading with no `exit:` keeps the section open.
-
-Raised by the code review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/factory.py:1586: a read that printed output and then hits a blank line and a `## Notes` heading with no `exit:` keeps the section open. Any later `$ ` line in that report is then counted as an evidence command. This is a deliberate trade-off and the docstring says so, but a test pinning that case would make it explicit.
-
-Theme: tests
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 196-evidence-and-deleted-conflicts (correctness)
-
-## [2026-11-20-20] [nit] restrict the missing-file pass to `deleted_sides()` paths so a `UU` file can't silently become a staged deletion
-
-Raised by the security review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/landing.py:2827: restrict the missing-file pass to `deleted_sides()` paths so a `UU` file can't silently become a staged deletion
-
-Theme: robustness
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: med
-Raised by: 196-evidence-and-deleted-conflicts (contract)
-
-## [2026-11-20-21] [nit] the docstring says a command that owes its `exit:` "never finds it in a later section", but a heading with no blank line before it doesn't end the section
-
-Raised by the security review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/factory.py:1569: the docstring says a command that owes its `exit:` "never finds it in a later section", but a heading with no blank line before it doesn't end the section
-
-Theme: docs
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 196-evidence-and-deleted-conflicts (contract)
-
 ## [2026-11-20-22] [nit] a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
 
 Raised by the test review of 196-evidence-and-deleted-conflicts, round 1: tests/test_evidence_headings.py:1: a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
@@ -502,24 +472,6 @@ Paths: tests/test_evidence_headings.py
 Cost: S
 Value: low
 Raised by: 196-evidence-and-deleted-conflicts (correctness)
-
-## [2026-11-20-23] [bug] resolve --continue refuses a modify/delete resolution's carried file
-
-When a train's resolver settles a modify/delete conflict by carrying the deleted file's edits into
-a file the deleting commit added, `resolve --continue` in plugins/factory/scripts/landing.py
-refuses it: "edited outside its conflicted files: <that file>". The allowed list comes from
-`deleted_sides()` in plugins/factory/scripts/factory.py, which reads git's unmerged entries. By the
-time `--continue` checks, the deletion is staged and no unmerged entry is left, so the moved list
-is empty and the carried file looks like a stray edit. Expected: the moved list comes from the
-rebase's own commit (`REBASE_HEAD`), or is recorded before staging, so a correct resolution passes.
-To see it: on 2026-11-20 the landing of 194 (which deletes `tests/test_factory.py` and adds
-`tests/test_factory_decisions.py`) stacked on 193's edits to the deleted file. The resolver carried
-193's 69 new lines into `tests/test_factory_decisions.py`, and the train stopped at `resolve 194`.
-
-Severity: med
-Paths: plugins/factory/scripts/landing.py, plugins/factory/scripts/factory.py
-Introduced by: 196-evidence-and-deleted-conflicts
-Theme: factory
 
 ## [2026-11-20-24] [idea] Lead-time-by-way scorecard rows name their real reason
 
@@ -546,3 +498,41 @@ Paths: tests/test_retro.py
 Cost: S
 Value: low
 Raised by: 189-retro-insights (correctness)
+
+## [2026-11-20-27] [bug] resolve --continue lets a resolver's fully staged edit or deletion outside its files into the rebased commit
+
+Found by the review of 197-moved-files-after-staging.
+pre-existing: plugins/factory/scripts/landing.py:1384: `_stray()` lets through any entry whose worktree column is blank, so it can't tell a fully staged edit or deletion by the resolver from one the replayed commit made. The resolver has `Bash`, and only its prompt says "reads only". It could `git add` an edit to any file, or `git rm` a file only `HEAD` holds, and `--continue` would stage it into the rebased commit, which then lands on the base. This change's new `staged_gone` check closes only the deletion case, and only for files `REBASE_HEAD` still holds. The fix: compare each staged path (`git diff --cached --name-only HEAD`) against `REBASE_HEAD`'s own paths (`git diff-tree -r --name-only REBASE_HEAD^ REBASE_HEAD`) plus the conflicted, moved and record files, and refuse any other.
+
+Severity: med
+Paths: plugins/factory/scripts/landing.py
+
+## [2026-11-20-28] [nit] `staged_gone` calls `git cat-file` once per staged deletion; harmless, but you could read `REBASE_HEAD`'s tree once.
+
+Raised by the code review of 197-moved-files-after-staging, round 1: plugins/factory/scripts/landing.py:2829: `staged_gone` calls `git cat-file` once per staged deletion; harmless, but you could read `REBASE_HEAD`'s tree once.
+
+Theme: robustness
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 197-moved-files-after-staging (correctness)
+
+## [2026-11-20-29] [nit] nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion.
+
+Raised by the test review of 197-moved-files-after-staging, round 1: tests/test_train.py: nothing pins the guard in `deleted_sides()` that a path staged as kept (present in the index, changed on one side and deleted on the other) is not treated as a deletion. Only the gone-from-index direction is tested.
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: med
+Raised by: 197-moved-files-after-staging (correctness)
+
+## [2026-11-20-30] [nit] `_neither_side()` returns True when git can't hash a moved file, so a moved file that is gone from the tree counts as `carried`.
+
+Raised by the test review of 197-moved-files-after-staging, round 1: tests/test_train.py: `_neither_side()` returns True when git can't hash a moved file, so a moved file that is gone from the tree counts as `carried`. No test covers that case.
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 197-moved-files-after-staging (correctness)
