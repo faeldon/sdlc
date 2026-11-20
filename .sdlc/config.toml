@@ -69,3 +69,6 @@ indicators = [
 # stdout. The report goes to a temp file, so the tree stays clean for `retro-commit`; pytest's own
 # output goes to /dev/null, and `;` lets a red suite still print its times.
 test_times = ['f=$(mktemp); uv run --group dev pytest -q -n auto --junitxml="$f" >/dev/null 2>&1; cat "$f"; rm -f "$f"']
+# The suite is `tests/` alone. The conventions also count a `spec` directory, which here is the
+# spec skill's (`skills/spec/`, `evals/spec/`), not a test.
+test_paths = ["tests/"]

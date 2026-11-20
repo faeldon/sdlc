@@ -359,8 +359,8 @@ def test_gate_is_never_pre_approved() -> None:
 
 
 def test_hand_gate_reads_none_current_and_stale(repo, capsys, monkeypatch) -> None:
-    """R7: None without a record; the last attempt's verdict, current while the build is the one
-    it judged and the checkout is on the change's branch."""
+    """R7: None without a record; the last attempt's verdict, command and summary (187), current
+    while the build is the one it judged and the checkout is on the change's branch."""
     folder = _folder(repo)
     assert sdlc.hand_gate(folder, repo, "main") is None
     _base_check(repo, 'test -z "$FAKE_GATE_FAIL"')
@@ -369,8 +369,10 @@ def test_hand_gate_reads_none_current_and_stale(repo, capsys, monkeypatch) -> No
     monkeypatch.delenv("FAKE_GATE_FAIL")
     _gate(repo, capsys)
     got = sdlc.hand_gate(folder, repo, "main")
-    assert {k: got[k] for k in ("verdict", "current", "exit", "attempts", "fails")} == {
+    keys = ("verdict", "current", "exit", "attempts", "fails", "command", "summary")
+    assert {k: got[k] for k in keys} == {
         "verdict": "PASS", "current": True, "exit": "0", "attempts": 2, "fails": 1,
+        "command": 'test -z "$FAKE_GATE_FAIL"', "summary": None,
     }  # fmt: skip
     assert isinstance(got["seconds"], float) and got["path"] == f".sdlc/work/{NAME}/build/gate.md"
     assert "problems" not in got
