@@ -1,0 +1,10 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Treat nit 2026-11-19-37 as already met by `test_land.py::test_a_landing_records_each_step_it_takes` and retire it with this change, adding no duplicate test. Going ahead unless told otherwise. → settled by the approver: The code already answers it. `tests/test_land.py::test_a_landing_records_each_step_it_takes` runs `factory.cmd_agent` for `land-review`, and at lines 2826–2829 asserts `(row["task"], row["purpose"], row["land"]) == ("land-review", "land", 1)` and that the row has no `round`. That is exactly what nit 2026-11-19-37 asks for, so the intent's outcome "The nit is fixed" holds, and a second copy of the test would add nothing.
+  - OPTION: retire it as met — no duplicate assertion; the intent's "apart from the new assertion" doesn't happen
+  - OPTION: add a second, factory-only test in `test_factory_agent.py` — matches the intent's wording; it duplicates coverage and needs a whole landing set up to reach a landing round
+  - WHY: the nit's exact ask (a `land-review` row from `cmd_agent` carries `land`) is already asserted word for word
+- [x] D2 (builder round 1, default): Split `factory.py`'s tests into seven area files rather than one file per module. Going ahead unless told otherwise. → settled by the approver: The intent answers it. Its Outcome allows a split "per area within `factory.py` where a single file would still be large", and asks for no file past about 2,000 lines. `plan.md` shows the old file held only `factory.py`'s tests, because `landing.py`'s and `run_state.py`'s tests are already in `test_land.py` and `test_train.py`. One file per module would therefore have stayed at about 6,000 lines. Both round-1 reviewers called the area split sound.
+  - OPTION: seven area files — each under 1,500 lines and following the old banners; more files to look across
+  - OPTION: one file per module — the old file holds only `factory.py`'s tests, so it would stay one 6,000-line file, past the 2,000-line limit
+  - WHY: the intent's 2,000-line outcome, and its own open question allows a split by area

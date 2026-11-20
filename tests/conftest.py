@@ -197,3 +197,42 @@ def gh(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("FAKE_GH_START", raising=False)
     monkeypatch.delenv("FAKE_GH_DEFAULT", raising=False)
     return lambda: json.loads(state.read_text()) if state.exists() else {"issues": [], "calls": []}
+
+
+# Claude Code, as a fake `claude` on PATH that replies as each test sets, so the factory's tests
+# (tests/test_factory_*.py) run an agent's session without a model: the `claude` fixture.
+FAKE_CLAUDE = """\
+#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
+    f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\\n")
+code = int(os.environ.get("FAKE_CLAUDE_EXIT", "0"))
+replies = json.loads(os.environ.get("FAKE_CLAUDE_REPLIES") or "null")
+replies = replies or [os.environ.get("FAKE_CLAUDE_REPLY", "")]
+figures = json.loads(os.environ.get("FAKE_CLAUDE_FIGURES", "{}"))
+# As `--output-format stream-json --verbose` prints a session: each reply an assistant event and
+# the result event after it, one JSON object a line.
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "s"}))
+for reply in replies:
+    content = [{"type": "text", "text": reply}] if reply else []
+    print(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": content}}))
+    print(json.dumps({"type": "result", "is_error": code != 0, "result": reply, **figures}))
+sys.exit(code)
+"""
+
+
+@pytest.fixture
+def claude(tmp_path: Path, monkeypatch):
+    """A fake `claude` on PATH that records each call's argv and cwd; returns a reader for them."""
+    bin_dir = tmp_path / "claude-bin"
+    bin_dir.mkdir()
+    (bin_dir / "claude").write_text(FAKE_CLAUDE, encoding="utf-8")
+    (bin_dir / "claude").chmod(0o755)
+    log = tmp_path / "claude.jsonl"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "the report\n\n## Evidence\n$ ./check.sh\nok\nexit: 0")
+    monkeypatch.delenv("FAKE_CLAUDE_EXIT", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_FIGURES", raising=False)
+    monkeypatch.delenv("FAKE_CLAUDE_REPLIES", raising=False)
+    return lambda: [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []

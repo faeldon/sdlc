@@ -3329,8 +3329,8 @@ def cli_stage(root: Path, args) -> int:
     return cmd_stage(root, args.id, args.stage)
 
 
-# `sdlc.py`'s scaffold rule, copied (never imported) and pinned by `tests/test_factory.py`: a file
-# with this many lines opening a `<…>` prompt is still the template it was scaffolded from.
+# `sdlc.py`'s scaffold rule, copied (never imported) and pinned by `tests/test_factory_agent.py`:
+# a file with this many lines opening a `<…>` prompt is still the template it was scaffolded from.
 PROMPT_RE = re.compile(r"^<[^>]", re.M)
 UNFILLED_THRESHOLD = 2
 
