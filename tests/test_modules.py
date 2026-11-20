@@ -173,6 +173,7 @@ PAIRS = [
 
 
 def _tree(path: Path) -> ast.Module:
+    """The parsed source of the file at `path`."""
     return ast.parse(path.read_text(encoding="utf-8"))
 
 
@@ -192,6 +193,7 @@ def _defined(tree: ast.Module) -> set[str]:
 
 
 def _functions(tree: ast.Module) -> dict[str, ast.AST]:
+    """Each top-level function of `tree`, by its name."""
     return {
         node.name: node
         for node in tree.body
@@ -211,10 +213,12 @@ def _reached(tree: ast.AST, via: str) -> set[str]:
 
 
 def _named(tree: ast.AST) -> set[str]:
+    """Every bare name `tree` reads or writes, a call's function included."""
     return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
 
 
 def _load(name: str, path: Path):
+    """The module at `path`, loaded by path under `name`, as the scripts load each other."""
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -645,6 +649,8 @@ def test_no_factory_record_is_named_outside_its_reader() -> None:
 
 
 def _comparable(value) -> bool:
+    """Whether `value` is plain data, so two copies of it compare by value: no function, no
+    object."""
     if isinstance(value, tuple):
         return all(_comparable(v) for v in value)
     if isinstance(value, dict):
@@ -653,6 +659,8 @@ def _comparable(value) -> bool:
 
 
 def _shape(value):
+    """`value` with every regex replaced by its pattern and flags, and every dict by its sorted
+    items, so two copies loaded apart compare equal when they say the same."""
     if isinstance(value, tuple):
         return tuple(_shape(v) for v in value)
     if isinstance(value, dict):

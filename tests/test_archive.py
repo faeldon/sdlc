@@ -2502,18 +2502,22 @@ EAST = "UTC-8"
 
 @pytest.fixture
 def east():
-    """The process's local timezone set to UTC+8 for the test, and put back after it."""
+    """The process's local timezone set to UTC+8 for the test, and put back after it, however it
+    ends. `time.tzset()` exists only on Unix, so a test using this fixture is never marked
+    `portable`: CI's Windows job would fail it on the missing function."""
     import time
 
     was = os.environ.get("TZ")
     os.environ["TZ"] = EAST
     time.tzset()
-    yield
-    if was is None:
-        os.environ.pop("TZ", None)
-    else:
-        os.environ["TZ"] = was
-    time.tzset()
+    try:
+        yield
+    finally:
+        if was is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = was
+        time.tzset()
 
 
 # 02:00 at UTC+8 on 2026-10-01, the day `_opened` gives the intent: still 2026-09-30 in UTC.

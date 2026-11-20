@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from uv_run import uv_script as _uv
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sdlc.py"
 GIT_ID = {
@@ -39,33 +40,6 @@ def _run(cwd: Path, *args: str, path: str | None = None) -> subprocess.Completed
     if path is not None:
         env["PATH"] = path
     return _uv(SCRIPT, cwd, args, env)
-
-
-# uv's own error when it couldn't reach the package index, printed before the script runs.
-UNREACHED = re.compile(r"error: (request failed after|failed to fetch|failed to download)", re.I)
-
-
-def _uv(script: Path, cwd: Path, args, env: dict) -> subprocess.CompletedProcess:
-    """`uv run --script`, as the skills run it. When uv can't reach the package index (no network,
-    as on a gate whose machine lost its DNS), the script never ran, so it runs once more from the
-    packages uv's cache holds; with none there, the test skips naming the network. With the
-    network up nothing changes: a dependency the script doesn't declare still fails it."""
-
-    def run(*flags: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["uv", "run", "--quiet", *flags, "--script", str(script), *args],
-            cwd=cwd, capture_output=True, encoding="utf-8", env=env,
-        )  # fmt: skip
-
-    ran = run()
-    if ran.returncode == 0 or not UNREACHED.match(ran.stderr):
-        return ran
-    cached = run("--offline")
-    if "network was disabled" in cached.stderr:
-        first = ran.stderr.splitlines()[0]
-        pytest.skip(f"no network: the package index can't be reached ({first}), and uv's cache "
-                    "lacks the script's dependencies")  # fmt: skip
-    return cached
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -542,6 +516,58 @@ def test_with_the_index_unreachable_and_nothing_cached_the_test_skips_naming_the
     empty = UNREACHABLE | {"UV_CACHE_DIR": str(tmp_path / "empty-cache")}
     with pytest.raises(pytest.skip.Exception, match="no network: the package index"):
         _by(script, tmp_path, "next", env=empty)
+
+
+def _stand_in_uv(monkeypatch, *replies: tuple[int, str]) -> list[list[str]]:
+    """`subprocess.run` as `uv_script()` calls it, replying with each `(exit, stderr)` in turn;
+    the argv of every call, kept."""
+    import uv_run
+
+    calls: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        code, err = replies[len(calls) - 1]
+        return subprocess.CompletedProcess(argv, code, "001\n" if code == 0 else "", err)
+
+    monkeypatch.setattr(uv_run.subprocess, "run", run)
+    return calls
+
+
+FETCH_FAILED = "error: Failed to fetch: `https://pypi.org/simple/python-frontmatter/`\n"
+
+
+def test_an_unreached_index_runs_the_script_again_from_the_cache(tmp_path, monkeypatch) -> None:
+    """Nit 2026-11-19-77: the fallback itself, which the cached test above can't fail unless uv's
+    cached answers are stale. A refused fetch runs the script once more `--offline`, and that run
+    is the result; a failure that isn't the index's runs it once."""
+    calls = _stand_in_uv(monkeypatch, (2, FETCH_FAILED), (0, ""))
+    ran = _uv(SCRIPT, tmp_path, ["next"], {})
+    assert ran.returncode == 0 and len(calls) == 2
+    assert "--offline" not in calls[0] and "--offline" in calls[1], calls
+    calls = _stand_in_uv(monkeypatch, (1, "Traceback (most recent call last):\n"))
+    assert _uv(SCRIPT, tmp_path, ["next"], {}).returncode == 1 and len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "hint: Packages were unavailable because the network was disabled",
+        "error: python-frontmatter was not found in the cache",
+        "error: cannot fetch while offline",
+        "  × No solution found when resolving script dependencies:",
+    ],
+    ids=["network-disabled", "not-in-cache", "offline", "no-solution"],
+)
+def test_an_uncached_script_skips_however_uv_words_it(tmp_path, monkeypatch, said) -> None:
+    """Nit 2026-11-19-76: the offline run's failure skips the test in each wording uv has used
+    for a dependency its cache lacks, never only the one; the script's own failure there is the
+    result, as with the network up."""
+    _stand_in_uv(monkeypatch, (2, FETCH_FAILED), (2, said + "\n"))
+    with pytest.raises(pytest.skip.Exception, match="no network: the package index"):
+        _uv(SCRIPT, tmp_path, ["next"], {})
+    _stand_in_uv(monkeypatch, (2, FETCH_FAILED), (1, "Traceback (most recent call last):\n"))
+    assert _uv(SCRIPT, tmp_path, ["next"], {}).returncode == 1
 
 
 def test_the_plugins_own_close_runs_mains_code_then_the_merged_code(tmp_path: Path) -> None:

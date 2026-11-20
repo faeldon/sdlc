@@ -120,6 +120,15 @@ def test_density_counts_comment_and_docstring_lines_once():
     assert _parsed(health.rows({"a.py": m}, []))[("a.py", "comment density")] == 0.417
 
 
+def test_a_line_one_shebang_is_not_a_comment():
+    """Nit 2026-11-19-51: a `#!` on line 1 runs the file, so it is no comment; the same text on
+    any later line is one."""
+    first = health.measure("#!/usr/bin/env python3\nx = 1\n")
+    assert (first["nonblank"], first["marked"], first["comment_lines"]) == (2, 0, 0)
+    later = health.measure("x = 1\n#!/usr/bin/env python3\n")
+    assert (later["nonblank"], later["marked"], later["comment_lines"]) == (2, 1, 1)
+
+
 def test_the_band_counts_files_below_and_above():
     """R3: 0.05 and 0.45 are outside the band; 0.10 and 0.40, its edges, are inside."""
     measured = {f"f{n}.py": _m(marked=n) for n in (5, 10, 20, 40, 45)}

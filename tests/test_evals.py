@@ -565,11 +565,14 @@ def test_only_the_evals_own_workspace_is_removed(tmp_path: Path) -> None:
                 p.chmod(0o700)
             shutil.rmtree(ws)
     outside, trace = workspace(tmp_path)
-    runs = sdlc.case_runs(_a_result(ship=[_a_run(1.0, trace)]))
-    assert sdlc._keep_traces(run, tmp_path, runs, "", keep=False) == [outside.as_posix()]
-    assert outside.is_dir()
-    outside.chmod(0o700)
-    (outside / "sealed").chmod(0o700)
+    try:
+        runs = sdlc.case_runs(_a_result(ship=[_a_run(1.0, trace)]))
+        assert sdlc._keep_traces(run, tmp_path, runs, "", keep=False) == [outside.as_posix()]
+        assert outside.is_dir()
+    finally:
+        # However the test ends, pytest's tmp cleanup must be able to read what it removes.
+        for p in (outside, outside / "sealed"):
+            p.chmod(0o700)
 
 
 def test_a_runs_summary_reads_verdicts_or_its_result(tmp_path: Path) -> None:

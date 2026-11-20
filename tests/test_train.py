@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 from train_driver import DRIVER_STEPS, asked, drive_train, fake_claude, verdict, verified
+from uv_run import uv_script
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -205,10 +206,9 @@ def test_a_close_that_hands_off_runs_under_the_parents_hold(tmp_path) -> None:
     script = root / "scripts" / "sdlc.py"
 
     def by(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["uv", "run", "--quiet", "--script", str(script), *args],
-            cwd=cwd, capture_output=True, encoding="utf-8", env=_close_env(), timeout=600,
-        )  # fmt: skip
+        # Idea 2026-11-19-75: a copy at a new path resolves its dependencies, so with no network
+        # it runs from uv's cache, or the test skips naming the network, as the adoption tests do.
+        return uv_script(script, cwd, args, _close_env(), timeout=600)
 
     made = by(root, "new", "lock-probe", "--worktree")
     assert made.returncode == 0, made.stderr
@@ -1698,7 +1698,10 @@ def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> N
     assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 1
 
 
-MADE = "FIX: ALREADY MADE\n\naa.txt says it.\n\n## Evidence\n$ grep -c aa aa.txt\n1\nexit: 0\n"
+# The builder's report that a landing fix was already made, for change `aa`.
+ALREADY_MADE_REPLY = (
+    "FIX: ALREADY MADE\n\naa.txt says it.\n\n## Evidence\n$ grep -c aa aa.txt\n1\nexit: 0\n"
+)
 
 
 def _fix_stored(tmp_path: Path, capsys) -> tuple[Path, list[Path]]:
@@ -1726,7 +1729,7 @@ def test_a_train_fix_already_made_goes_on_to_the_gate(tmp_path, capsys, monkeypa
 
     def already(tree: Path) -> None:
         folder = _folder(tree)
-        (folder / "build" / f"land-{factory.land_round(folder)}.md").write_text(MADE)
+        (folder / "build" / f"land-{factory.land_round(folder)}.md").write_text(ALREADY_MADE_REPLY)
 
     root, trees = _fix_stored(tmp_path / "driven", capsys)
     readings = drive_train(factory, root, capsys, fix=already)
@@ -1742,7 +1745,7 @@ def test_a_train_fix_already_made_goes_on_to_the_gate(tmp_path, capsys, monkeypa
 
     root, trees = _fix_stored(tmp_path / "run", capsys)
     calls = fake_claude(tmp_path / "run", monkeypatch, {
-        f"{trees[0].name}:builder": {"reply": MADE},
+        f"{trees[0].name}:builder": {"reply": ALREADY_MADE_REPLY},
     })  # fmt: skip
     code, out, err = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), (out, err)
@@ -1811,6 +1814,12 @@ def test_train_run_starts_a_rounds_reviewers_together(tmp_path, capsys, monkeypa
     assert (root / "README.md").read_text(encoding="utf-8").startswith("first's one, and second's")
 
 
+# How long a killed-loop test waits for its loop to reach the point it is killed at, in seconds:
+# a bound on a hang, never a pause, since each poll ends the moment the marker file appears. The
+# loop's startup takes a minute or more on a loaded machine; one bound for every kill test.
+STARTED_WITHIN = 120
+
+
 @needs_uv
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="kills a process group")
 def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
@@ -1827,7 +1836,7 @@ def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )  # fmt: skip
     started = Path(str(flag) + ".started")
-    deadline = time.monotonic() + 120  # the loop's startup takes a minute or more under load
+    deadline = time.monotonic() + STARTED_WITHIN
     while not started.exists() and loop.poll() is None and time.monotonic() < deadline:
         time.sleep(0.05)
     assert started.exists(), "the reviewer never started"
@@ -1871,7 +1880,7 @@ def _killed_at_its_gate(tmp_path: Path, capsys, popen: dict, kill) -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen,
     )  # fmt: skip
     started = Path(str(flag) + ".started")
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + STARTED_WITHIN
     while not started.exists() and loop.poll() is None and time.monotonic() < deadline:
         time.sleep(0.05)
     assert started.exists(), f"the gate never started (exit {loop.poll()})"
@@ -1953,6 +1962,7 @@ def test_an_ejection_is_recorded_and_amended_in(tmp_path, capsys) -> None:
     _begin(root, capsys)
     readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
     moved = [n for n, c in readings[-1]["changes"].items() if c.get("pre")]
+    assert moved, readings[-1]
     code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
     assert code == 0 and out["state"] == "stopped", out
     for tree in trees:
@@ -1965,7 +1975,11 @@ def test_an_ejection_is_recorded_and_amended_in(tmp_path, capsys) -> None:
             assert not found, "a change the train never moved has nothing to record"
             continue
         rows = [json.loads(x) for x in found.splitlines()]
-        assert [r["cause"] for r in rows] == ["stop"], (tree.name, rows)
+        # Nit 2026-11-19-38: a stop's row has the eject's keys, its time and the landing round
+        # the change had reached, which its commit still holds.
+        land = factory.land_round(_folder(tree))
+        assert [(r["land"], r["cause"]) for r in rows] == [(land, "stop")], (tree.name, rows)
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", rows[0]["at"]), rows
 
 
 @pytest.mark.portable
@@ -2026,6 +2040,38 @@ def test_an_ejection_that_cant_be_recorded_still_ejects(tmp_path, capsys) -> Non
     [did] = [r["did"] for r in readings if r.get("next") == "eject"]
     assert did["state"] == "ejected" and did["undo"], did
     assert [p for p in did["problems"] if "runs/ejections.jsonl" in p], did
+
+
+@needs_uv
+def test_a_stop_that_cant_be_recorded_still_stops(tmp_path, capsys) -> None:
+    """Nit 2026-11-19-55, 180 R5: the stop's half of it. When a change's row can't be appended,
+    the train stops all the same, that change put back, and the failure is a problem naming the
+    change and the file."""
+    root, trees = _three(tmp_path)
+    tree = trees[0]
+    (_folder(tree) / "runs" / "ejections.jsonl").mkdir(parents=True)
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o["next"] == "close")
+    assert readings[-1]["changes"][tree.name].get("pre"), readings[-1]
+    code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
+    assert code == 0 and out["state"] == "stopped", out
+    assert tree.name in [p["change"] for p in out["put_back"]], out
+    assert [p for p in out["problems"] if p.startswith(f"{tree.name}: ")
+            and "runs/ejections.jsonl" in p], out  # fmt: skip
+    assert factory.read_train(root) is None or factory.read_train(root)["state"] == "stopped"
+
+
+@needs_uv
+def test_a_stop_before_any_change_moved_leaves_no_row(tmp_path, capsys) -> None:
+    """Nit 2026-11-19-57, 180's edge case: a train stopped before it stacked anything moved no
+    branch, so each change has no undo and no row to count."""
+    root, trees = _three(tmp_path)
+    _begin(root, capsys)
+    code, out = _run(capsys, factory.landing.cmd_train, root, stop=True)
+    assert code == 0 and out["state"] == "stopped" and out["problems"] == [], out
+    assert [p["undo"] for p in out["put_back"]] == [None, None, None], out
+    for tree in trees:
+        assert not (_folder(tree) / "runs" / "ejections.jsonl").exists(), tree.name
 
 
 # ------------------------------------------------- acceptance checks as stacked (185 R1–R10)
@@ -2328,6 +2374,13 @@ def test_the_loop_rechecks_before_it_runs_accept(tmp_path, capsys) -> None:
     assert groups is None and stopped["next"] == "accept", stopped
     assert "checks.md changed since the yes" in stopped["reason"], stopped
     assert "rm -f bb.txt" in stopped["reason"], stopped
+    # Nit 2026-11-19-73: an edit the read-only list passes still loses the yes's clearance, and
+    # with no approver's judgement of the file as it stands the loop plans no `accept` either.
+    _checks(tree, ("Its file", "test -f bb.txt"), ("Says it", "grep -q bb bb.txt"))
+    groups, stopped = factory.landing._run_plan(root, reading)
+    assert groups is None and stopped["next"] == "accept", stopped
+    assert "checks.md changed since the yes" in stopped["reason"], stopped
+    assert "the approver judges what changed" in stopped["reason"], stopped
 
 
 @needs_uv

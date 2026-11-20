@@ -1920,7 +1920,10 @@ def test_the_source_guards_reach_retro_py() -> None:
 
 def test_the_source_guards_reach_closing_py() -> None:
     """153 R8: close moved out of `sdlc.py`; the guards above read `closing.py` too, so moving
-    the code didn't move it out of their reach."""
+    the code didn't move it out of their reach. The spec's other two plants sit beside the
+    guards they test: a literal `work/` in `test_work_folder.py`'s
+    `test_the_work_path_guard_reaches_closing_py`, and a second push in `test_skills.py`'s
+    `test_the_push_guard_reaches_closing_py`."""
     closing = CORE[2].read_text(encoding="utf-8")
     assert CORE[2].name == "closing.py"
     assert not _main_refs(closing) and not _gh_calls(closing)

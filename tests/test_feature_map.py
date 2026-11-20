@@ -270,13 +270,26 @@ def _prose(root: Path) -> dict[str, str]:
 def test_no_doc_uses_a_retired_phrasing(tmp_path: Path) -> None:
     """187 R10: no doc, skill, agent or manifest uses a word in a meaning it no longer has. A
     fixture doc holding each phrasing, in prose and in code, proves each pattern matches prose."""
+    # One phrasing a line, so adding or removing one is a one-line edit.
     lines = [
-        "The verifier keeps it.", "A human gate.", "Each WAIT gate.", "The approval gates.",
-        "A gate at every stage.", "Gates at the WAIT.", "A gated skill.", "The gated spans.",
-        "The slower check.", "A slower gate.", "Its cases accepted as shown.",
-        "The yes accepts it.", "It runs the checks.", "Its checks pass.", "A change's checks.",
-        "The change's checks.", "Its own checks.",
-    ]  # fmt: skip
+        "The verifier keeps it.",
+        "A human gate.",
+        "Each WAIT gate.",
+        "The approval gates.",
+        "A gate at every stage.",
+        "Gates at the WAIT.",
+        "A gated skill.",
+        "The gated spans.",
+        "The slower check.",
+        "A slower gate.",
+        "Its cases accepted as shown.",
+        "The yes accepts it.",
+        "It runs the checks.",
+        "Its checks pass.",
+        "A change's checks.",
+        "The change's checks.",
+        "Its own checks.",
+    ]
     code = "Not prose: `the verifier`, `Sdlc-AfterGate`.\n\n```sh\nits checks\n```\n"
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "fixture.md").write_text(

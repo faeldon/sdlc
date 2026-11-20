@@ -121,6 +121,12 @@ def test_main_runs_a_stand_in_handler(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(sdlc, "cmd_config", lambda root: 41)
     monkeypatch.setattr(sys, "argv", ["sdlc.py", "config"])
     assert sdlc.main() == 41
+    # No command at all runs `status`, looked up as it runs too, and without `--all`.
+    seen = []
+    monkeypatch.setattr(sdlc, "cli_status", lambda root, home, args: seen.append(args) or 40)
+    monkeypatch.setattr(sys, "argv", ["sdlc.py"])
+    assert sdlc.main() == 40
+    assert seen[0].cmd is None and getattr(seen[0], "all", False) is False
     factory = _load(FACTORY_PY, "registry_factory_stand_in")
     monkeypatch.setattr(factory, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(factory, "cmd_config", lambda root: 42)

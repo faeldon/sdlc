@@ -32,6 +32,13 @@ factory = _load("factory_landing", ROOT / "plugins" / "factory" / "scripts" / "f
 sdlc = _load("sdlc_for_landing", ROOT / "scripts" / "sdlc.py")
 
 needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do")
+# A landing fix's builder report that the fix was already made, with its evidence and no edit:
+# the answer line alone, and the whole report (`test_train.py`'s copy is its own change's).
+ALREADY_MADE = "FIX: ALREADY MADE"
+MADE_REPORT = (
+    f"{ALREADY_MADE}\n\nREADME.md already says it.\n\n"
+    "## Evidence\n$ grep -c one README.md\n1\nexit: 0\n"
+)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -2575,24 +2582,18 @@ def test_a_fix_commit_needs_an_ask(tmp_path, capsys, monkeypatch) -> None:
     report = folder / "build" / "land-1.md"
     for text, said in (
         ("Done.\n\n## Evidence\n$ true\nexit: 0\n", "doesn't say `FIX: ALREADY MADE`"),
-        (f"Hm.\n{ALREADY}\nFIX: NOT MADE\n\n## Evidence\n$ true\nexit: 0\n", "first"),
-        (f"{ALREADY}\n\nIt holds.\n", "## Evidence"),
-        (f"{ALREADY}\n\n## Evidence\n$ grep -c TWO README.md\n", "has no `exit:` line"),
+        (f"Hm.\n{ALREADY_MADE}\nFIX: NOT MADE\n\n## Evidence\n$ true\nexit: 0\n", "first"),
+        (f"{ALREADY_MADE}\n\nIt holds.\n", "## Evidence"),
+        (f"{ALREADY_MADE}\n\n## Evidence\n$ grep -c TWO README.md\n", "has no `exit:` line"),
     ):
         report.write_text(text, encoding="utf-8")
         code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", None, True)
         assert code == 1 and "changed nothing" in out["refusals"][0], out
         assert said in " ".join(out["refusals"]), (text, out)
         # 185 R17: `FIX: ALREADY MADE` named once across the refusals, each line short.
-        assert " ".join(out["refusals"]).count(ALREADY) <= 1, out["refusals"]
+        assert " ".join(out["refusals"]).count(ALREADY_MADE) <= 1, out["refusals"]
         assert all(len(line) < 160 for line in out["refusals"]), out["refusals"]
         assert _git(tree, "rev-parse", "HEAD") == head, "nothing amended"
-
-
-ALREADY = "FIX: ALREADY MADE"
-MADE = (
-    f"{ALREADY}\n\nREADME.md already says it.\n\n## Evidence\n$ grep -c one README.md\n1\nexit: 0\n"
-)
 
 
 def _already_made(root: Path, capsys, slug: str, by: str = "person") -> tuple[Path, Path, dict]:
@@ -2609,7 +2610,7 @@ def _already_made(root: Path, capsys, slug: str, by: str = "person") -> tuple[Pa
     assert (code, out["state"]) == (0, "committed"), out
     code, out = _run(capsys, factory.landing.cmd_land_fix, tree, "001", "R1", False)
     assert (code, out["round"]) == (0, 1), out
-    (folder / "build" / "land-1.md").write_text(MADE, encoding="utf-8")
+    (folder / "build" / "land-1.md").write_text(MADE_REPORT, encoding="utf-8")
     return tree, folder, out
 
 

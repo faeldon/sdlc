@@ -467,6 +467,18 @@ def test_a_prompt_file_that_doesnt_match_is_refused(
 
 
 @needs_files
+@pytest.mark.parametrize("name", ["mend", "land-review"])
+def test_land_mend_is_refused_on_either_of_its_files(tmp_path, monkeypatch, name) -> None:
+    """Nit 2026-11-19-8: `land-mend` sends parts of two files, `mend.md` and `land-review.md`, and
+    a part missing from either refuses it, naming that file, before anything else is read."""
+    assert factory.prompt_refusal("land-mend") is None
+    part = "## evidence\n" if name == "mend" else "## clean\n"
+    _doctored(tmp_path, monkeypatch, name, part, "## evidences\n")
+    refusal = factory.prompt_refusal("land-mend")
+    assert refusal and refusal.startswith(f"prompts/{name}.md, part "), refusal
+
+
+@needs_files
 def test_a_missing_prompt_file_is_a_refusal(tmp_path, monkeypatch) -> None:
     """164 R5: a prompt file gone is a refusal, never a traceback."""
     monkeypatch.setattr(factory, "PROMPTS_DIR", tmp_path / "nowhere")

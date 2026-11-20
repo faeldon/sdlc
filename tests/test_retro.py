@@ -2007,6 +2007,17 @@ def test_a_failed_or_cut_indicator_passes_through_with_its_reason(tmp_path: Path
     assert (slow["rows"], slow["not_rows"]) == (None, "timed out")
 
 
+def test_an_indicator_that_cannot_start_is_a_failure_not_rows(tmp_path: Path, monkeypatch) -> None:
+    """Nit 2026-11-19-40, 177 R2: a command the shell can't start (an OSError, as with no `sh`)
+    has no exit, and is `failed: could not start`, never a timeout and never rows."""
+    root = _repo(tmp_path)
+    monkeypatch.setattr(sdlc, "_sh", lambda command: [str(tmp_path / "no-such-shell"), command])
+    ran = sdlc.retro._evidence(root, ['echo \'{"name": "a", "value": 1}\''])
+    (row,) = sdlc.retro._indicator_rows(root, None, ran)
+    assert row["exit"] is None and "no-such-shell" in row["error"], row
+    assert (row["rows"], row["not_rows"]) == (None, "failed: could not start")
+
+
 def _retro_report_at(root: Path, day: str, report: str) -> None:
     """A `Retrospective` commit holding `report` as that day's report."""
     path = root / ".sdlc" / "retros" / f"{day}.md"
@@ -2383,6 +2394,9 @@ def test_retro_and_its_report_show_the_same_figures(tmp_path: Path, capsys) -> N
     assert f"debt {mix['classes']['debt']} (100%), of {mix['n']} classed changes" in text
     assert f"{ttu['why']['unreleased']} not yet released" in text
     assert f"{ttu['releases']} releases in the window" in text
+    # Nit 2026-11-19-17: follow-through too, which has nothing to follow here on either side.
+    assert out["follow_through"]["since"] is None and out["follow_through"]["n"] == 0
+    assert "Follow-through: no earlier retrospective to follow through on." in text
     assert sdlc.retro.cmd_retro(root, report=True) == 0
     assert capsys.readouterr().out.startswith("# Retrospective report\n")
     assert not (root / "ran-evidence").exists() and not (root / "ran-times").exists()
@@ -3163,6 +3177,12 @@ def test_the_report_shows_the_value_figures_in_its_window(tmp_path: Path) -> Non
         "Follow-through on the retrospective of 2026-10-01: 1 of 2 done or dropped (50%), seeds 1 "
         "of 1 and milestones 0 of 1; intent titles aren't recorded." in window
     )
+    # Nit 2026-11-19-17: the sentence's figures are `retro`'s own.
+    ft = _retro(root)["follow_through"]
+    seeds, milestones = ft["seeds"], ft["milestones"]
+    assert (ft["since"], ft["n"], ft["share"]) == ("2026-10-01", 2, 0.5)
+    assert (seeds["n"], seeds["done"] + seeds["dropped"]) == (1, 1)
+    assert (milestones["n"], milestones["done"] + milestones["dropped"]) == (1, 0)
 
 
 def test_without_a_value_band_the_window_is_as_before() -> None:
@@ -3307,6 +3327,21 @@ def test_retro_autonomy_rates_kept_defaults_without_the_landings_yes(tmp_path: P
     _factory(root, "001-keep-one-draft", {"decision.md": READY, "decisions.md": LEDGER})
     kept = _autonomy(root)["kept_default"]
     assert kept == {"kept": 1, "changed": 1, "rate": 0.5, "n": 2, "confirmed": 1, "settled": 1}
+    # Nit 2026-11-19-20: with confirmed and settled lines outnumbering the rest, the rate's
+    # denominator is still kept and changed alone: 2 of 3, never 2 of 8 or 2 of 5.
+    _factory(root, "002-draft-titles", {"decision.md": READY, "decisions.md": MORE_CONFIRMED})
+    kept = _autonomy(root)["kept_default"]
+    assert kept == {"kept": 2, "changed": 1, "rate": 0.67, "n": 3, "confirmed": 3, "settled": 2}
+
+
+MORE_CONFIRMED = """\
+# Decisions
+
+- [x] D1 (builder round 1, default): Page at 50? → decided: the assumed default, confirmed
+- [x] D2 (builder round 1, default): Keep 30 days? → decided: the assumed default, confirmed when landing
+- [x] D3 (builder round 1, default): Sort by date? → decided: the assumed default, confirmed when landing
+- [x] D4 (builder round 2, default): Badge? → settled by the approver: the spec's R3 says so
+"""  # noqa: E501
 
 
 def test_retro_autonomy_says_a_decision_it_cannot_read(tmp_path: Path) -> None:
@@ -4233,6 +4268,8 @@ def test_a_change_with_no_start_leaves_its_commits_unknown(tmp_path: Path, monke
     assert found["outside"]["count"] == 0 and found["hand_record"]["count"] == 0
     assert found["unknown"]["count"] == 1
     assert [r["subject"] for r in found["unknown"]["rows"]] == ["ship 001-reopen-drafts"]
+    # Nit 2026-11-19-56: each unknown commit names the change whose start couldn't be found.
+    assert [r["change"] for r in found["unknown"]["rows"]] == ["001-reopen-drafts"]
     assert any(p.startswith("001-reopen-drafts: its start is unknown") for p in out["problems"])
 
 
@@ -4632,9 +4669,10 @@ def test_the_pillar_sections_show_autonomy_pipeline_and_cost(tmp_path: Path) -> 
     _factory_window(root)
     text = _report(root)
     assert "Escalations:" in _part(text, "Autonomy")
-    speed = _part(text, "Speed")
-    for said in ("gates", "ejections", "bisections", "base moves", "accept stops"):
-        assert said in speed.lower(), said
+    speed = _part(text, "Speed").splitlines()
+    # Nit 2026-11-19-67: each figure on its own line of the landing's list, by the line's label.
+    for label in ("Landing gates:", "Ejections:", "Bisections:", "Base moves:", "Accept stops:"):
+        assert any(line.startswith(f"- {label} ") for line in speed), label
     assert "Waste share:" in _part(text, "Cost")
     assert "Red gates:" in _part(text, "Quality")
 

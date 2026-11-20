@@ -658,7 +658,8 @@ def test_a_second_board_reports_the_first_and_anything_else_is_refused(
 
 
 def _bare_repo(path: Path) -> Path:
-    """A second repo, unrelated to `repo`, with one open change."""
+    """A second repo, unrelated to `repo`, with one open change. Its commit's author is
+    conftest's `git_identity`, set for every test, as `repo`'s is."""
     path.mkdir()
     _write(path / "README.md", "another repo\n")
     _git(path, "init", "-q", "-b", "main")
@@ -3032,6 +3033,34 @@ def test_factory_land_steps_match_the_boards_track() -> None:
     """151 R3: the steps `status` reads as a landing in flight are the board's track's."""
     assert set(sdlc.factory_records.LAND_STEPS) == set(board.LAND_AT)
     assert set(sdlc.factory_records.LAND_STOPS) <= set(sdlc.factory_records.LAND_STEPS) | {"stop"}
+
+
+def _land_steps_written(path: Path) -> set[str]:
+    """Each step `path` records by name: the third argument of a `_record_land()` call."""
+    import ast
+
+    return {
+        node.args[2].value
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) == "_record_land"
+        and len(node.args) > 2
+        and isinstance(node.args[2], ast.Constant)
+    }
+
+
+@pytest.mark.portable
+def test_the_stops_status_reads_are_the_ones_the_factory_writes() -> None:
+    """Nit 2026-11-19-6: `LAND_STOPS` has no twin in `factory.py`, so it is pinned against what
+    the factory writes. Every step a landing records is on the track or a stop core reads, and
+    every stop core reads is one a landing records."""
+    scripts = ROOT / "plugins" / "factory" / "scripts"
+    written = _land_steps_written(scripts / "factory.py") | _land_steps_written(
+        scripts / "landing.py"
+    )
+    stops = set(sdlc.factory_records.LAND_STOPS)
+    assert written - set(factory.LAND_STEPS) <= stops, written
+    assert stops <= written, written
 
 
 @pytest.mark.portable
