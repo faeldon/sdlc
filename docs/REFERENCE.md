@@ -1117,8 +1117,13 @@ with its `why`, where none could: a skill that runs outside a change's sessions 
 `/sdlc:status`, `/sdlc:release` and the rest, whose sessions no `Close` commit measures), a
 command no skill's bash runs, or a skill or command when no change in the window recorded its
 kind of line. A skill's use is the runs on its `Sdlc-Skill` lines, a command's the calls on the
-`Sdlc-Tool` lines naming it (`Bash:sdlc.py:<command>`), never `Sdlc-Calls` on top, and a key is
-used when the base branch's `.sdlc/config.toml` sets it, a default being no setting. The
+`Sdlc-Tool` lines naming it (`Bash:sdlc.py:<command>`), never `Sdlc-Calls` on top. A key's use is
+the base branch's `.sdlc/config.toml` setting it, a default alone being no setting, and its
+readers' uses: each `sdlc.py` command that reads it by name, through every function it calls
+(`load_config()` included, so `git.base` and `git.push` are read by every command that loads the
+config), and each skill whose files name it as `section.key`. A key is `unused` when a reader a
+record could show didn't run, or nothing reads it; `unmeasured` when every reader runs where no
+record shows it (`read only where no record shows it`), or no change recorded a reader. The
 factory's supervisor keeps a change's typed `/sdlc-factory:build` or `land` but none of its calls,
 so a command only those skills run is unmeasured; one an agent ran is still used. `share` is used
 over used and unused, per kind (`skills`, `commands`, `keys`) and `overall`, the unmeasured in
@@ -1293,7 +1298,8 @@ register commit whose every `; ` part is `File`, `Retire`, `Update` or `Triage`,
 subject over `n`, the window's commits. `restored` lists each register entry a commit in the
 window added back after an earlier commit removed it, over the entries the window added. A closed
 change whose start can't be found claims only its own commit, and the commits before it back to
-the last `Close` or `Drop` are `unknown`, never outside, with a problem naming the change.
+the last `Close` or `Drop` are `unknown`, never outside, with a problem naming the change; each
+of the three counts is over `n`, and null with its reason when the window has no commit.
 `overrides` is read from each closed change's own commit and each dropped change's tip, over the
 changes a factory run built (`n`): `ejections`, the landing train's ejections by `cause` (`gate`,
 `review` or `refusal`; a `gate` one is a fault the train found, not the person's call), `stops`,
@@ -1336,9 +1342,9 @@ the surface's share used (the plugin's own repo alone), and the commits outside 
 edited by hand and register entries restored. A null value reads `—`, with its block's most
 counted `missing_because` reason (`none in the window` without one) as its note, never 0: the
 person's response by `process.response`, a question answered per factory change `built by hand`,
-the escape rate by way `no <way> change in the window`, the commits outside the loop and records
-edited by hand `no commit on the base branch in the window`, and the entries restored `no
-register entry added in the window`. A greyed block's note says `a hint: under half the changes`.
+the escape rate and lead time by way `no <way> change in the window`, the commits outside the
+loop and records edited by hand `no commit on the base branch in the window`, and the entries
+restored `no register entry added in the window`. A greyed block's note says `a hint: under half the changes`.
 Minutes are written to one decimal place, so a short median response isn't flattened to a whole
 minute; the first retrospective after 189 compares against its predecessor's whole-minute values,
 so a response row's trend there can move by rounding alone. `last` is the same row's value in the last

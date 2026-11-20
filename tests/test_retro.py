@@ -4310,6 +4310,8 @@ def test_a_change_with_no_start_leaves_its_commits_unknown(tmp_path: Path, monke
     found = out["simplicity"]["workarounds"]
     assert found["outside"]["count"] == 0 and found["hand_record"]["count"] == 0
     assert found["unknown"]["count"] == 1
+    # Seed 2026-11-20-15: the unknown block carries its `n`, as each other count does.
+    assert found["unknown"]["n"] == found["outside"]["n"] > 0
     assert [r["subject"] for r in found["unknown"]["rows"]] == ["ship 001-reopen-drafts"]
     # Nit 2026-11-19-56: each unknown commit names the change whose start couldn't be found.
     assert [r["change"] for r in found["unknown"]["rows"]] == ["001-reopen-drafts"]
@@ -4507,7 +4509,8 @@ def _card_row(text: str, figure: str) -> list[str]:
 
 
 def test_a_figure_with_no_data_reads_a_dash_with_its_reason(tmp_path: Path) -> None:
-    """184 R5: with no factory change, the factory lead time reads `—` with a reason, never 0."""
+    """184 R5: with no factory change, the factory lead time reads `—` with a reason, never 0:
+    the escape rate's, `no factory change in the window` (seed 2026-11-20-24)."""
     root = _repo(tmp_path)
     _close(
         root, "001-reopen-drafts", trailers=("Sdlc-Mode: manual", "Sdlc-Lead: lead=30 source=git")
@@ -4515,9 +4518,13 @@ def test_a_figure_with_no_data_reads_a_dash_with_its_reason(tmp_path: Path) -> N
     text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], date(2026, 10, 24))
     cells = _card_row(text, "Median lead time, factory")
     assert cells[4] == "—" and cells[8], cells
-    assert cells[8] == "none in the window"
+    assert cells[8] == "no factory change in the window"
     row = next(r for r in _retro(root)["scorecard"]["rows"] if r["figure"] == cells[2])
-    assert (row["value"], row["n"], row["note"]) == (None, 0, "none in the window")
+    assert (row["value"], row["n"], row["note"]) == (None, 0, "no factory change in the window")
+    escape = next(
+        r for r in _retro(root)["scorecard"]["rows"] if r["figure"] == "Escape rate, factory"
+    )
+    assert escape["note"] == row["note"], "the two rows give one reason"
 
 
 def test_a_greyed_lead_time_is_marked_a_hint(tmp_path: Path) -> None:
@@ -4855,6 +4862,9 @@ def test_every_null_scorecard_row_names_its_reason(tmp_path: Path) -> None:
     for figure in ("Commits outside the loop", "Records edited by hand"):
         assert card[figure]["value"] is None
         assert card[figure]["note"] == "no commit on the base branch in the window", figure
+    unknown = _retro(quiet)["simplicity"]["workarounds"]["unknown"]
+    assert (unknown["count"], unknown["n"]) == (None, 0), "null, never 0, with no commit"
+    assert unknown["missing_because"] == {"no commit on the base branch in the window": 0}
 
 
 def _scorecard_questions() -> dict[str, str]:

@@ -191,12 +191,90 @@ def test_a_call_counts_once(tmp_path: Path) -> None:
     assert _item(s, "command", "sdlc.py:ship")["state"] == "unused"
 
 
-def test_a_key_is_used_when_the_config_sets_it(tmp_path: Path) -> None:
-    """R4: a key is used when the base branch's config sets it, never by its default."""
+def test_a_key_is_used_when_the_config_sets_it(tmp_path: Path, monkeypatch) -> None:
+    """R4: a key is used when the base branch's config sets it, never by its default alone."""
+    monkeypatch.setitem(sdlc.CONFIG_KEYS, "made", {"up": None})
     root = _repo(tmp_path, '[git]\nbase = "main"\n')
     s = _surface(root)
     assert _item(s, "key", "git.base")["state"] == "used"
-    assert _item(s, "key", "docs.process")["state"] == "unused", "a default is not a setting"
+    assert _item(s, "key", "made.up")["state"] == "unused", "a default is not a setting"
+
+
+# ---------------------------------------------------------------- 204: a key its readers use
+
+SCANNED = """
+@command("one", "reads by name")
+def one(root, home, args):
+    cfg = load_config(root)[0]
+    rel = cfg["release"]
+    helper(cfg["metrics"], tag=rel["tag"])
+    return cfg["git"]["base"]
+
+@command("two", "writes, and reads by get")
+def two(root, home, args):
+    cfg = {}
+    cfg["git"]["push"] = []
+    return cfg["docs"].get("process")
+
+def helper(settings, tag=None):
+    return settings["idle_minutes"]
+
+class Tracker:
+    def make(self):
+        return self.cfg["archive"]["command"]
+
+@command("three", "reaches a method")
+def three(root, home, args):
+    return tracker.make()
+"""
+
+
+def test_the_scan_follows_what_a_command_reads_by_name() -> None:
+    """A command reads a key by name: `cfg["section"]["key"]`, `.get("key")`, through a name bound
+    to the section, through a section handed to a function it calls, or in a method it reaches;
+    never a key it only writes."""
+    keys = {s: dict(k) for s, k in sdlc.CONFIG_KEYS.items()}
+    reads = sdlc.retro._code_reads((SCANNED,), keys)
+    assert reads["one"] == {"release.tag", "metrics.idle_minutes", "git.base"}
+    assert reads["two"] == {"docs.process"}, "git.push is only written"
+    assert reads["three"] == {"archive.command"}
+
+
+def test_git_base_and_push_are_read_by_the_commands_that_load_the_config() -> None:
+    """Seed 2026-11-20-39: every command that loads the config reads `git.base` and `git.push`,
+    which `load_config()` resolves; a skill reads each key its files name."""
+    readers = sdlc.retro._key_readers(True)
+    for key in ("git.base", "git.push"):
+        assert {("command", "sdlc.py:ship"), ("command", "sdlc.py:status")} <= readers[key], key
+    assert ("command", "sdlc.py:close") in readers["metrics.idle_minutes"], "a section handed on"
+    assert ("skill", "sdlc:ship") in readers["commands.build"]
+    assert ("skill", "sdlc:close") in readers["commands.close_list"]
+
+
+def test_every_key_has_a_reader() -> None:
+    """Each key the config holds is read by some command or skill: one the scan can't find would
+    read as unused, a retire candidate, while the code still reads it."""
+    readers = sdlc.retro._key_readers(True)
+    keys = {f"{s}.{k}" for s, ks in sdlc.CONFIG_KEYS.items() for k in ks} - set(sdlc.RETIRED_KEYS)
+    assert sorted(k for k in keys if not readers.get(k)) == []
+
+
+def test_a_key_is_used_when_a_reader_of_it_ran(tmp_path: Path) -> None:
+    """A key unset in the config is used when a command or skill that reads it ran in the window;
+    unused when a reader a record could show didn't; unmeasured, with why, when no reader's use
+    could be shown."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    s = _surface(root)
+    assert _item(s, "key", "git.base")["why"] == "no change recorded it"
+    _close(root, "002-keep-one-draft", "Sdlc-Skill: sdlc:ship runs=1", TOOLS)
+    s = _surface(root)
+    for key in ("git.base", "git.push", "commands.build"):
+        assert _item(s, "key", key)["state"] == "used", key
+    assert _item(s, "key", "git.base")["uses"] >= 1
+    assert _item(s, "key", "commands.close_list")["state"] == "unused", "close didn't run"
+    outside = _item(s, "key", "release.after_bump")
+    assert (outside["state"], outside["why"]) == ("unmeasured", sdlc.retro.UNSEEN_READ_WHY)
 
 
 def test_an_unrecorded_item_is_never_unused(tmp_path: Path, monkeypatch) -> None:
@@ -315,6 +393,18 @@ def test_the_walk_stops_where_a_kind_was_not_yet_counted(tmp_path: Path) -> None
     names, _ = _retire(root)
     assert "sdlc:close" not in names
     assert "sdlc.py:status" in names, "commands were counted there: the walk goes on for them"
+
+
+def test_a_key_its_readers_use_is_never_a_retire_candidate(tmp_path: Path, monkeypatch) -> None:
+    """Seed 2026-11-20-39: `git.base` and `git.push`, unset but read by every command that ran,
+    are not retired; a key nothing reads, unset in three measured windows, is."""
+    monkeypatch.setitem(sdlc.CONFIG_KEYS, "made", {"up": None})
+    root = _repo(tmp_path)
+    _windows(root, (SKILLS, TOOLS), (SKILLS, TOOLS), (SKILLS, TOOLS))
+    names, _ = _retire(root)
+    assert "made.up" in names
+    assert not {"git.base", "git.push"} & names
+    assert "release.after_bump" not in names, "read only where no record shows it"
 
 
 def test_retire_with_too_few_windows_names_nothing(tmp_path: Path) -> None:

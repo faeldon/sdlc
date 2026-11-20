@@ -14,6 +14,7 @@ stays in `sdlc.py`.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import math
@@ -1583,6 +1584,12 @@ def _median(values: list):
     return statistics.median(values) if values else None
 
 
+def _no_way(way: str) -> dict:
+    """Why a figure of one way is null when the window closed no change built that way: the one
+    reason the escape rate and the lead time by way both give."""
+    return {f"no {way} change in the window": 0}
+
+
 def by_way(
     changes: list[dict], lead: dict, landed: list[dict], bugs: dict, since: dict | None,
     today: date,
@@ -1627,8 +1634,7 @@ def by_way(
     def escapes(way: str) -> dict:
         got = rate.get(way) or {"escapes": 0, "changes": 0, "rate": None}
         # A way with no change has no rate, and says so (189 R11).
-        why = {} if got["changes"] else {f"no {way} change in the window": 0}
-        return {**got, "missing_because": why}
+        return {**got, "missing_because": {} if got["changes"] else _no_way(way)}
 
     return {
         "changes": {way: len(of[way]) for way in WAYS},
@@ -2565,8 +2571,10 @@ def scorecard(
     lead = process["lead"]
     for way, said in CARD_WAYS.items():
         got = (lead.get("ways") or {}).get(way) or {"n": 0, "median": None}
+        # No change of the way: the escape rate's reason, not the coverage's (seed 2026-11-20-24).
+        block = lead if ways["changes"][way] else {**lead, "missing_because": _no_way(way)}
         add("Speed", "headline", f"Median lead time, {said}", "minutes",
-            _minutes(got["median"]), got["n"], lead)  # fmt: skip
+            _minutes(got["median"]), got["n"], block)  # fmt: skip
     add("Speed", "guardrail", "Rework links per closed change", "per change",
         process["rework"]["per_change"], w["closed"])  # fmt: skip
     esc = process["escapes"]
@@ -2721,6 +2729,8 @@ OWN_REPO_COMMANDS = ("cases", "run-cases")
 OUTSIDE_WHY = "runs outside a change's sessions"
 NO_CALLER_WHY = "no skill runs it"
 UNRECORDED_WHY = "no change recorded it"
+# A key whose every reader, command or skill, runs where no record shows its use.
+UNSEEN_READ_WHY = "read only where no record shows it"
 
 
 def _skill_where(name: str) -> str:
@@ -2785,6 +2795,134 @@ def _callers(factory: bool) -> dict[str, set[str]]:
     return found
 
 
+def _text_of(node) -> str | None:
+    """A string literal's value, or None for any other node."""
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _callee(call: ast.Call) -> str | None:
+    """The name a call calls: `f(...)`'s `f`, `x.f(...)`'s `f`."""
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+
+
+def _code_reads(texts: tuple[str, ...], config: dict) -> dict[str, set[str]]:
+    """Each `@command("name")` in `texts`, scripts sharing one namespace, with the `section.key`s
+    of `config` it reads by name, it or any function it reaches by name (a method included):
+    `x["section"]["key"]`, `x["section"].get("key")`, the same through a name bound to
+    `x["section"]`, and through a parameter a section is handed to, followed from call to call.
+    A key only written is not read; a whole section printed or iterated reads no key by name.
+    Reaching a function is any mention of its name, so a key read on one branch counts: a read
+    the scan wrongly finds keeps a key off the retire list, which is the safer error. Pure."""
+    defs: dict[str, list] = {}
+    commands: dict[str, str] = {}
+    for text in texts:
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                defs.setdefault(node.name, []).append(node)
+                for d in node.decorator_list:
+                    name = _text_of(d.args[0]) if isinstance(d, ast.Call) and d.args else None
+                    if name and _callee(d) == "command":
+                        commands[name] = node.name
+    info: dict = {}  # each function: its parents, calls, names it mentions, sections it binds
+    for nodes in defs.values():
+        for node in nodes:
+            parent, calls, refs, local = {}, [], set(), {}
+            for n in ast.walk(node):
+                for child in ast.iter_child_nodes(n):
+                    parent[child] = n
+                if isinstance(n, ast.Name | ast.Attribute):
+                    refs.add(n.id if isinstance(n, ast.Name) else n.attr)
+                if isinstance(n, ast.Call) and _callee(n) in defs:
+                    calls.append(n)
+                if (
+                    isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Subscript)
+                    and _text_of(n.value.slice) in config
+                ):  # fmt: skip
+                    local[n.targets[0].id] = _text_of(n.value.slice)
+            info[node] = (parent, calls, refs & defs.keys(), local)
+    bound: dict = {node: {} for node in info}  # each function's parameters handed a section
+
+    def section(n, names: dict) -> str | None:
+        if isinstance(getattr(n, "ctx", None), ast.Load):
+            if isinstance(n, ast.Subscript) and _text_of(n.slice) in config:
+                return _text_of(n.slice)
+            if isinstance(n, ast.Name):
+                return names.get(n.id)
+        return None
+
+    changed = True
+    while changed:
+        changed = False
+        for node, (_, calls, _, local) in info.items():
+            names = {**bound[node], **local}
+            for call in calls:
+                for target in defs[_callee(call)]:
+                    params = [a.arg for a in target.args.posonlyargs + target.args.args]
+                    if params[:1] in (["self"], ["cls"]) and isinstance(call.func, ast.Attribute):
+                        params = params[1:]
+                    given = list(zip(params, call.args, strict=False))
+                    given += [(k.arg, k.value) for k in call.keywords if k.arg]
+                    for param, arg in given:
+                        sec = section(arg, names)
+                        if sec and bound[target].get(param) != sec:
+                            bound[target][param], changed = sec, True
+    reads: dict[str, set[str]] = {}
+    for node, (parent, _, _, local) in info.items():
+        names, got = {**bound[node], **local}, reads.setdefault(node.name, set())
+        for n in parent:
+            sec = section(n, names)
+            up = parent.get(n)
+            key = None
+            if sec and isinstance(up, ast.Subscript) and up.value is n:
+                key = _text_of(up.slice) if isinstance(up.ctx, ast.Load) else None
+            elif sec and isinstance(up, ast.Attribute) and up.attr == "get":
+                call = parent.get(up)
+                key = _text_of(call.args[0]) if isinstance(call, ast.Call) and call.args else None
+            if key in config.get(sec or "", {}):
+                got.add(f"{sec}.{key}")
+    out = {}
+    for name, fn in commands.items():
+        seen, todo = set(), [fn]
+        while todo:
+            if (at := todo.pop()) not in seen:
+                seen.add(at)
+                todo += [ref for node in defs[at] for ref in info[node][2]]
+        out[name] = set().union(*(reads[f] for f in seen))
+    return out
+
+
+# Each key's readers, by the plugin's folder, whether the factory is in play and the keys: the
+# scan reads every script once a run.
+_READERS: dict[tuple, dict[str, set[tuple[str, str]]]] = {}
+
+
+def _key_readers(factory: bool) -> dict[str, set[tuple[str, str]]]:
+    """Each config key's readers, from the code as it is now: the `sdlc.py` commands that read it
+    by name (`_code_reads()`, over the core's scripts and trackers as one namespace; `factory.py`
+    reads its own settings, never these keys), and the skills, the factory's with `factory`, whose
+    files name it as `section.key`, as `(kind, name)` like the surface's items."""
+    cache = (sdlc.PLUGIN_DIR, factory, tuple((s, tuple(k)) for s, k in sdlc.CONFIG_KEYS.items()))
+    if cache in _READERS:
+        return _READERS[cache]
+    found: dict[str, set[tuple[str, str]]] = {}
+    paths = sorted(p for g in ("scripts/*.py", "scripts/trackers/*.py")
+                   for p in sdlc.PLUGIN_DIR.glob(g))  # fmt: skip
+    texts = tuple(p.read_text(encoding="utf-8") for p in paths)
+    for cmd, keys in _code_reads(texts, sdlc.CONFIG_KEYS).items():
+        for key in keys:
+            found.setdefault(key, set()).add(("command", f"sdlc.py:{cmd}"))
+    names = [f"{s}.{k}" for s, keys in sdlc.CONFIG_KEYS.items() for k in keys]
+    named = re.compile(r"(?<![\w.])(" + "|".join(map(re.escape, names)) + r")(?![\w])")
+    for skill, folder in _skill_dirs(factory):
+        for path in sorted(folder.glob("*.md")):
+            for key in named.findall(path.read_text(encoding="utf-8")):
+                found.setdefault(key, set()).add(("skill", skill))
+    _READERS[cache] = found
+    return found
+
+
 def _keys_set(home: Path, ref: str | None) -> set[str] | None:
     """The `section.key`s the config at `ref` sets itself, read raw, never merged over the
     defaults; None with no ref to read."""
@@ -2830,30 +2968,47 @@ def _uses(changes: list[dict]) -> Counter:
 
 
 def _states(
-    items: list[dict], changes: list[dict], keys: set[str] | None, callers: dict[str, set[str]]
+    items: list[dict],
+    changes: list[dict],
+    keys: set[str] | None,
+    callers: dict[str, set[str]],
+    readers: dict[str, set[tuple[str, str]]],
 ) -> list[dict]:
     """Each item with its `uses` and `state` in one window: `used` when anything counted it;
     `unmeasured`, with its `why`, when nothing could have (run outside a change, run by no skill,
-    or recorded by no change in the window); `unused` only where a record could have shown it."""
+    or recorded by no change in the window); `unused` only where a record could have shown it.
+    A key's uses are the config setting it (1) and its `readers`' uses (`_key_readers()`); unused
+    is a reader a record could show not running, or no reader at all; unmeasured otherwise, with
+    `no change recorded it` when that is a reader's why, else `UNSEEN_READ_WHY`."""
     uses = _uses(changes)
     recorded = {k: any(_recorded(c, k) for c in changes) for k in ("skill", "command")}
+
+    def measured(kind: str, name: str) -> tuple[int, str | None]:
+        if kind == "skill" and _skill_where(name) == "outside":
+            why = OUTSIDE_WHY
+        elif kind == "command" and not callers.get(name):
+            why = NO_CALLER_WHY
+        elif kind == "command" and all(_skill_where(s) != "inside" for s in callers[name]):
+            why = OUTSIDE_WHY
+        else:
+            why = None if recorded[kind] else UNRECORDED_WHY
+        return uses[(kind, name)], why
+
     out = []
     for item in items:
         kind, name = item["kind"], item["name"]
-        why = None
         if kind == "key":
-            n = int(name in keys) if keys is not None else 0
-            why = "no base branch" if keys is None else None
+            seen = [measured(*r) for r in sorted(readers.get(name, ()))]
+            n = (int(name in keys) if keys is not None else 0) + sum(u for u, _ in seen)
+            whys = {w for _, w in seen}
+            if keys is None:
+                why = "no base branch"
+            elif not seen or None in whys:
+                why = None
+            else:
+                why = UNRECORDED_WHY if UNRECORDED_WHY in whys else UNSEEN_READ_WHY
         else:
-            n = uses[(kind, name)]
-            if kind == "skill" and _skill_where(name) == "outside":
-                why = OUTSIDE_WHY
-            elif kind == "command" and not callers.get(name):
-                why = NO_CALLER_WHY
-            elif kind == "command" and all(_skill_where(s) != "inside" for s in callers[name]):
-                why = OUTSIDE_WHY
-            elif not recorded[kind]:
-                why = UNRECORDED_WHY
+            n, why = measured(kind, name)
         state = "used" if n else ("unmeasured" if why else "unused")
         out.append({**item, "uses": n, "state": state, **({"why": why} if state == "unmeasured"
                                                               else {})})  # fmt: skip
@@ -2889,8 +3044,9 @@ def surface(home: Path, cfg: dict, changes: list[dict], since: dict | None) -> d
     own repo, the surface's growth per release. Read-only."""
     trunk = cfg["git"]["base"]
     items = _inventory(home)
-    callers = _callers(_factory_in_play(home))
-    states = _states(items, changes, _keys_set(home, trunk), callers)
+    factory = _factory_in_play(home)
+    callers, readers = _callers(factory), _key_readers(factory)
+    states = _states(items, changes, _keys_set(home, trunk), callers, readers)
     footprint, footprint_why = _footprint(home, trunk)
     growth, growth_why = _growth(home, cfg, since)
     why = {"footprint": footprint_why, "growth": growth_why}
@@ -2900,7 +3056,7 @@ def surface(home: Path, cfg: dict, changes: list[dict], since: dict | None) -> d
         **_coverage(
             changes, lambda c: _recorded(c, "skill") or _recorded(c, "command"), _surface_why
         ),
-        "retire": _retire(home, trunk, items, states, callers),
+        "retire": _retire(home, trunk, items, states, callers, readers),
         "footprint": footprint,
         "growth": growth,
         "why": {k: v for k, v in why.items() if v},
@@ -2927,17 +3083,19 @@ def _window_trailers(home: Path, older: str | None, newer: str) -> list[dict]:
 
 
 def _retire(
-    home: Path, trunk: str | None, items: list[dict], current: list[dict], callers: dict
-) -> dict:
+    home: Path, trunk: str | None, items: list[dict], current: list[dict], callers: dict,
+    readers: dict,
+) -> dict:  # fmt: skip
     """The items unused in each of the last `RETIRE_AFTER` windows they were measured in, the
     current one first. A window that couldn't measure an item is passed over, neither counting
-    nor breaking its run; an item whose use is never recorded (`OUTSIDE_WHY`, `NO_CALLER_WHY`) is
-    never a candidate. The walk back stops once every item is decided, and for a kind at a window
-    closed before that kind was counted (`_counted_before()`), since no older one was either.
+    nor breaking its run; an item whose use is never recorded (`OUTSIDE_WHY`, `NO_CALLER_WHY`,
+    and a key's `UNSEEN_READ_WHY`) is never a candidate. The walk back stops once every item is
+    decided, and for a kind at a window closed before that kind was counted
+    (`_counted_before()`), since no older one was either.
     `windows` is how many windows the answer rests on: the windows actually read, which is below
     `RETIRE_AFTER` when every item was decided early (each used, or never a candidate), and no
     candidate is hidden then."""
-    never = (OUTSIDE_WHY, NO_CALLER_WHY)
+    never = (OUTSIDE_WHY, NO_CALLER_WHY, UNSEEN_READ_WHY)
     runs: dict[tuple, list[str]] = {
         (r["kind"], r["name"]): [] for r in current if r.get("why") not in never
     }
@@ -2965,7 +3123,7 @@ def _retire(
                 if _counted_before(changes, kind):
                     spent.add(kind)
             wanted = [i for i in items if (i["kind"], i["name"]) in open_items()]
-            states = _states(wanted, changes, _keys_set(home, newer), callers)
+            states = _states(wanted, changes, _keys_set(home, newer), callers, readers)
         read += 1
         for r in states:
             key = (r["kind"], r["name"])
@@ -3352,14 +3510,13 @@ def _workarounds(
     block = {
         kind: {"count": len(rows[kind]) if n else None, "n": n, "rows": rows[kind],
                "missing_because": no_commit}
-        for kind in ("outside", "hand_record")
+        for kind in ("outside", "hand_record", "unknown")
     }  # fmt: skip
     block["restored"] = (
         _restored(home, trunk, set(line))
         if trunk
         else {"count": None, "n": 0, "rows": [], "missing_because": dict(NO_ENTRY_ADDED)}
     )
-    block["unknown"] = {"count": len(rows["unknown"]), "rows": rows["unknown"]}
     block["overrides"] = _overrides(home, changes, dropped)
     return block, problems
 
