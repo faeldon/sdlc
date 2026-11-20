@@ -1,0 +1,24 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Should `sdlc.py gate`'s refusal (R7) cover changes built by hand, not only factory runs? Going ahead with every change, as the spec says, unless told otherwise. → settled by the approver: spec R7 says `sdlc.py gate`, `factory.py gate` and `factory.py accept` all refuse an unvouched record, and the approved spec's *Contracts touched* names the hand gate and the AGENTS.md sentence it changes.
+  - OPTION: every change — one rule everywhere; an in-flight hand-built change whose `build/gate.md` predates the ledger needs one `rm` before its next hand gate
+  - OPTION: only factory runs (folder holds `runs/`) — no friction for hand-built changes, where the record clears nothing the factory reads; the two hand gates behave differently
+  - WHY: R7 as written; a hand-built change's record clears nothing today, but the rule then holds if it ever does
+- [x] D2 (builder round 1, default): What happens to changes in flight when this lands? Their existing records have no ledger line, so `land` refuses them and `gate`/`accept` refuse to add to them until each record is removed and rerun. Going ahead with that, as the spec draft took it. → settled by the approver: spec R3 and R7 and the spec's "Left for you" answer refuse in-flight records until each is removed and rerun, and *Alternatives rejected* rules out a one-time vouch command because it would reopen the hole.
+  - OPTION: refuse — closes the hole with no exception; each in-flight record is removed and its gate or checks rerun
+  - OPTION: a one-time "vouch what's there" command — no reruns; it vouches files the script didn't write, which is the hole this change closes
+  - WHY: the spec's "Left for you" question; any command that vouches an existing file reopens the hole
+- [x] D3 (builder round 1, default): Leave `build/land-<n>.checks.md` (the approver's `CHECKS: HARMLESS` judgement) unprotected in this change? Going ahead with leaving it out; it's the same kind of hole and could be a seed. → decided: the assumed default, confirmed
+  - OPTION: leave it out — matches the intent's scope (gate, build and accept records); a forged judgement can still let a changed `checks.md` run unattended in `train --run`
+  - OPTION: add it — closes that hole too; one more writer (the `land-checks` filing) and one more reader (`checks_clearance()`), beyond the approved requirements
+  - WHY: the spec's "Left for you" question; the intent names only gate, build and accept records
+- [x] D4 (builder round 1, default): Should records left by changes already in flight be refused until removed and run again? Going ahead with the refusal, as the spec draft took it. → settled by the approver: it duplicates D2, and spec R3 and R7 plus *Alternatives rejected* answer it the same way: refuse until removed and rerun.
+  - OPTION: refuse — no exception to the rule; each in-flight record is removed and its gate or checks rerun
+  - OPTION: a one-time "vouch what's there" command — no reruns; it vouches files the script didn't write, which is the hole this change closes
+  - WHY: the spec's "Left for you" question
+- [x] D5 (builder round 1, default): Should `build/land-<n>.checks.md` (the approver's `CHECKS: HARMLESS` judgement) stay unprotected here? Going ahead with leaving it out; it could become a seed. → decided: the assumed default, confirmed
+  - OPTION: leave it out — within the intent's scope; a forged judgement can still let a changed `checks.md` run unattended in `train --run`
+  - OPTION: add it — closes that hole too; one more writer and one more reader beyond the approved requirements
+  - WHY: the intent names only gate, build and accept records
+- [x] D6 (approver round 1, look): `plugins/factory/scripts/landing.py` (`land_verdict()`, `_read_gates()`, `_read_builds()`) — this is a sensitive path and it is the code that decides what reaches `main`, so a person should confirm each unvouched record ends in `stop`, never `mend` or `pass`. → decided: seen
+- [x] R1 (person, fix): say the ledger protects against the Edit and Write tools, not a shell that can reach the git common dir, in the README, REFERENCE.md and the land skill; and in cmd_gate, in both factory.py and sdlc.py, check that the earlier record is still vouched after the slot wait, before reading it

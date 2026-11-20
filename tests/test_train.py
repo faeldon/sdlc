@@ -1543,6 +1543,45 @@ def _committed_step(root: Path, name: str) -> dict:
 
 
 @needs_uv
+@pytest.mark.parametrize("record", ["gate", "build"])
+def test_train_run_stops_on_a_hand_written_record(tmp_path, capsys, monkeypatch, record) -> None:
+    """199 R5: a green `build/land-1.gate.md` (or `.build.md`) written by hand on the tip's stacked
+    commit is never copied into the train's state: `train --run` stops, naming it, and closes
+    nothing."""
+    build = '\nbuild = "true"\n' if record == "build" else ""
+    root = _repo(tmp_path, check="true")
+    if build:
+        (root / ".sdlc" / "config.toml").write_text(
+            '[commands]\ncheck = "true"' + build, encoding="utf-8"
+        )
+        _git(root, "commit", "-qam", "build")
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    want = "build" if build else "gate"
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == want)
+    assert readings[-1]["next"] == want and readings[-1]["change"] == trees[1].name, readings[-1]
+    tip = trees[1]
+    stacked = readings[-1]["changes"][tip.name]["stacked"]
+    path = _folder(tip) / "build" / f"land-1.{record}.md"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(
+        f"{record.upper()}: PASS\n\n## Attempt 1\n\nVerdict: PASS\n"
+        f"Build: {stacked[:16]}\nExit: 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    code, out, _ = _loop(root, capsys)
+    assert code == 1, out
+    said = json.dumps(out)
+    assert f"build/land-1.{record}.md isn't a record the script wrote" in said, out
+    assert not [s for s in _first_parent(root) if s.startswith("Close ")], "nothing closed"
+    state = json.loads(_state_file(root).read_text(encoding="utf-8"))
+    kept = state["gates"] if record == "gate" else state.get("builds", [])
+    assert not [g for g in kept if g["change"] == tip.name], kept
+
+
+@needs_uv
 def test_train_run_records_each_step(tmp_path, capsys, monkeypatch) -> None:
     """147 R2: each step the loop takes is recorded by its command in the change's
     `runs/land-step.md`, which each landed commit holds as `close` with its place in the train;

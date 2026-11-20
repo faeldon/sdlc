@@ -295,6 +295,34 @@ def test_a_rebased_change_is_gated_by_the_script_before_its_review(tmp_path, cap
 
 
 @needs_uv
+@pytest.mark.parametrize("record", ["build/land-1.gate.md", "build/land-accept.md"])
+def test_land_verdict_stops_on_a_hand_written_record(tmp_path, capsys, record) -> None:
+    """199 R4: a green landing gate or accept record on the change as it stands, written by hand,
+    is a stop naming the file, never `mend` or `pass`, settled or not."""
+    root = _repo(tmp_path)
+    _config(root, '[commands]\ncheck = "true"\n')
+    tree = _ready(root, "forged", "forged's one")
+    (root / "elsewhere.txt").write_text("moved on\n", encoding="utf-8")
+    _git(root, "add", "elsewhere.txt")
+    _git(root, "commit", "-q", "-m", "main moves on")
+    out = _stack(root, tree, capsys)
+    assert (out["state"], out["round"]) == ("stacked", 1), out
+    folder = _folder(tree)
+    head = factory.landed_build(tree)
+    if record.endswith("accept.md"):
+        assert _run(capsys, factory.cmd_gate, tree, "001", True)[0] == 0
+        (folder / "checks.md").write_text(CHECKS, encoding="utf-8")
+        _forge(folder / record, "ACCEPT", factory.accept_build(tree, folder))
+    else:
+        _forge(folder / record, "GATE", head)
+    cfg = factory.load_config(tree)[0]
+    for settled in (False, True):
+        out = factory.landing.land_verdict(tree, folder, cfg, 1, settled)
+        assert out["next"] == "stop", out
+        assert any(f"{record} isn't a record the script wrote" in p for p in out["problems"]), out
+
+
+@needs_uv
 def test_a_refused_step_lands_nothing_of_that_change(tmp_path, capsys) -> None:
     """A change the approver proposed no impact for can't be shipped by land: it is refused before
     anything is written, and its folder and worktree stay as they were."""
@@ -1272,6 +1300,72 @@ def test_factory_accept_records_sdlc_accepts_verdict(tmp_path, capsys) -> None:
     assert factory.landing._accept_state(tree, folder) == "FAIL"
     (tree / "README.md").write_text("changed again\n", encoding="utf-8")
     assert factory.landing._accept_state(tree, folder) is None, "a new build needs a new run"
+
+
+def _ledger_rows(tree: Path) -> list[dict]:
+    common = Path(_git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    path = common / factory.RECORDS_LEDGER
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    return [json.loads(line) for line in lines]
+
+
+@needs_uv
+def test_accept_vouches_for_its_record_and_refuses_one_it_didnt_write(tmp_path, capsys) -> None:
+    """199 R1, R7: `factory.py accept` puts each version of `build/land-accept.md` in the ledger
+    before it writes it; a record it didn't write is refused, unchanged, its checks never run."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "vouched", "vouched's one")
+    folder = _folder(tree)
+    marker = tmp_path / "ran"
+    (folder / "checks.md").write_text(CHECKS.replace("true", f"touch {marker}"), encoding="utf-8")
+    assert _run(capsys, factory.cmd_accept, tree, "001")[0] == 0 and marker.is_file()
+    record = folder / "build" / "land-accept.md"
+    want = factory._record_digest(record.read_text(encoding="utf-8"))
+    assert {"change": tree.name, "record": "build/land-accept.md", "sha256": want} in (
+        _ledger_rows(tree)
+    )
+    marker.unlink()
+    forged = record.read_text(encoding="utf-8").replace("Attempt 1", "Attempt 1 ")
+    record.write_text(forged, encoding="utf-8", newline="\n")
+    code, out = _run(capsys, factory.cmd_accept, tree, "001")
+    assert (
+        code == 1 and "build/land-accept.md isn't a record the script wrote" in (out["refusals"][0])
+    ), out
+    assert not marker.exists() and record.read_text(encoding="utf-8") == forged
+
+
+def _forge(path: Path, head: str, build: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"{head}: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: {build}\nExit: 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+@needs_uv
+@pytest.mark.parametrize("record", ["accept", "round gate"])
+def test_land_refuses_a_hand_written_record(tmp_path, capsys, record) -> None:
+    """199 R3: a well-formed green `build/land-accept.md` with the right `Build:`, or a green
+    `build/round-1.gate.md` on the round's build, written by hand: `land` refuses, naming it,
+    before it commits anything."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "forged", "forged's one")
+    folder = _folder(tree)
+    if record == "accept":
+        (folder / "checks.md").write_text(CHECKS, encoding="utf-8")
+        rel = "build/land-accept.md"
+        _forge(folder / rel, "ACCEPT", factory.accept_build(tree, folder))
+        assert factory.landing._accept_state(tree, folder) == "PASS", "it reads as green"
+    else:
+        rel = "build/round-1.gate.md"
+        _forge(folder / rel, "GATE", factory.build_hash(folder, 1))
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (1, "refused"), out
+    assert f"{rel} isn't a record the script wrote" in out["refusals"][0], out
+    assert _git(tree, "rev-parse", "HEAD") == head, "the branch is unmoved"
+    assert "stage: test" in (folder / "intent.md").read_text(encoding="utf-8"), "nothing written"
 
 
 @needs_uv

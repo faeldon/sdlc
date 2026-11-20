@@ -30,6 +30,7 @@ card's fields; that is for a change that means to.
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import re
 import tempfile
@@ -944,6 +945,46 @@ TAIL_RE = re.compile(r"^Last \d+ lines of its output:\s*$")
 # The record, in the change's folder: beside the factory's round files, and matched by none of
 # their readers (`round-*`, `*.gate.md`).
 HAND_GATE = Path("build") / "gate.md"
+
+
+# The factory's records ledger, in the git common dir: one line for each version of a gate,
+# build or accept record a script wrote, the factory reading a record as a verdict only while a
+# line vouches for it (199). `sdlc.py gate` appends the hand gate's line through these copies of
+# `factory.py`'s `RECORDS_LEDGER`, `RECORDS_LOCK`, `_record_digest()` and `_ledger_line()`,
+# pinned by `tests/test_records_ledger.py`; core never reads the ledger to decide anything but
+# whether the hand gate may append to its own record.
+RECORDS_LEDGER = "sdlc-factory-records.jsonl"
+RECORDS_LOCK = "sdlc-factory-records.lock"
+
+
+def record_digest(text: str) -> str:
+    """A record's hash: sha256 of its text with `\\r\\n` read as `\\n`."""
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+def ledger_line(change: str, record: str, text: str) -> str:
+    """The ledger's line for one version of `record` (its path from the change's folder, POSIX)
+    in change folder `change`."""
+    row = {"change": change, "record": record, "sha256": record_digest(text)}
+    return json.dumps(row) + "\n"
+
+
+def vouched_in(ledger: Path, change: str, record: str, text: str) -> bool:
+    """Whether `ledger` holds the line for this version of the record, as `factory.py`'s
+    `vouched()` reads it: a missing or unreadable ledger vouches nothing, a garbled line is
+    skipped."""
+    want = json.loads(ledger_line(change, record, text))
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    for line in lines:
+        try:
+            if json.loads(line) == want:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def gate_attempts(path: Path) -> list[dict]:

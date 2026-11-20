@@ -181,6 +181,15 @@ spec.
   change for you. Light runs are gated like full ones. The gate's command can't be changed by the
   change, but the script it runs (a `check.sh`) is in the change's tree: list it in
   `[review] sensitive` to have an edit to it reviewed at the full depth and named at ship.
+- **Records the script vouches for.** Before it writes a gate, build or accept record
+  (`build/round-<N>.gate.md`, `build/land-<n>.gate.md`, `build/land-<n>.build.md`,
+  `build/land-accept.md`, and `sdlc.py gate`'s `build/gate.md`), the script appends the record's
+  hash to `sdlc-factory-records.jsonl` in the git common dir, beside the train's state. A record
+  no line vouches for is never read as a verdict: `land` refuses the change, a landing round stops
+  on it, the train stops before copying from it, a hand gate clears nothing, and `gate` and `accept`
+  refuse to add to it (remove it and run them again). The ledger protects against an agent's Edit
+  and Write tools, which work in the change's worktree; it does not protect against a shell
+  command that can reach the git common dir, which could append to the ledger itself.
 - **One gate at a time, by default.** Gates and `check` runs from every worktree share
   `gate_jobs` slots (1 unless the base branch's `factory.toml` says more), so parallel runs'
   checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1
@@ -336,7 +345,9 @@ server, so a round's two start together.
 .sdlc/work/NNN-slug/
   build/round-<N>.md            the builder's reports, each ending with its ## Evidence
   build/round-<N>.files         what each round's build left, hashed by path
-  build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate
+  build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate;
+                                read only while the records ledger vouches for it, as every
+                                landing gate, build and accept record is
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for, by its id
   decisions.md                  the ledger of the calls that are yours, each one's options under it

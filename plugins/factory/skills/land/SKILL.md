@@ -228,6 +228,11 @@ commands, and only one loop runs at a time (the run lock). The steps:
   path matching its `build_when`, `build_when` unset or not a valid regex, or a `[review]
   sensitive` path), as `/sdlc:ship` runs it for a change built by hand; recorded in
   `.sdlc/work/NNN-slug/build/land-<n>.build.md`. Never bisected: a red build stops the train.
+- Each of these records, `build/land-accept.md` too, is vouched for by the script in its records
+  ledger in the git common dir as it is written; one the script didn't write is never read as a
+  verdict: `land` refuses the change and the train stops, naming the file. Remove it and run its
+  gate or checks again. The ledger protects against an agent's Edit and Write tools, which work
+  in the change's worktree, not against a shell command that can reach the git common dir.
 - **`eject`** with `cause` `gate`: the change at fault leaves the train, as the yes approved
   (`train --eject <NNN>`): its branch goes back to its pre-train commit (`git reset --keep`; the
   `undo` is kept in the loop's output), with the reason and the gate file amended into its

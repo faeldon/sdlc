@@ -103,6 +103,15 @@ def _land_refused(root: Path, folder: Path, out: dict, why: str, plain: str | No
     return factory.emit({**out, "state": "refused", "refusals": [why]}, 1)
 
 
+def forged_records(root: Path, folder: Path) -> list[str]:
+    """The records in change `folder` (`factory.RECORD_GLOBS`) the script didn't write
+    (`factory.vouched()`), as paths from the folder, sorted: what `land` refuses (199)."""
+    found = {p for pattern in factory.RECORD_GLOBS for p in folder.glob(pattern) if p.is_file()}
+    return sorted(
+        p.relative_to(folder).as_posix() for p in found if not factory.vouched(root, folder, p)
+    )
+
+
 def _land_gate_state(root: Path, folder: Path, n: int, settled: bool = False) -> dict | None:
     """The gate on landing round `n`'s rebased change, as `_gate_state` reads a build's: None when
     the base branch names no check. `settled` reads a round already reviewed: its last attempt's
@@ -1263,6 +1272,13 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     if ready_["refusal"]:
         return factory.emit({**out, "refusals": [ready_["refusal"]]}, 1)
     meta, impact, pre, unreviewed = (ready_[k] for k in ("meta", "impact", "pre", "unreviewed"))
+    # Before anything is committed, every gate, build and accept record in the folder is one the
+    # script wrote (199): a train of one that never moved lands on its round's gate alone.
+    landing_ = meta.get("stage") == "test" or _commit_failed(root, folder)
+    if landing_ and (forged := forged_records(root, folder)):
+        why = (f"{', '.join(forged)} isn't a record the script wrote: remove it and run its gate "
+               "or checks again")  # fmt: skip
+        return factory.emit({**out, "refusals": [why]}, 1)
     if meta.get("stage") == "test":
         # Every refusal before the first write: what the person's yes approved running has run,
         # on the change as it stands.
@@ -2175,7 +2191,8 @@ def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> d
     tip = state["changes"][live[-1]]
     if m == 1 and tip.get("stacked") == tip.get("pre"):
         return None  # a train of one that never moved: gated as its build was
-    _read_gates(main, state, trees)
+    if forged := _read_gates(main, state, trees):
+        return {"next": "stop", "reason": _forged_reason(forged)}
     verdicts: dict[int, dict] = {}
     for i, name in enumerate(live):
         stacked = state["changes"][name].get("stacked")
@@ -2242,7 +2259,8 @@ def _train_build(main: Path, state: dict, trees: dict[str, Path]) -> dict | None
         return None
     if not any(build_due(trees[name], base) for name in live):
         return None
-    _read_builds(main, state, trees)
+    if forged := _read_builds(main, state, trees):
+        return {"next": "stop", "reason": _forged_reason(forged)}
     tip = live[-1]
     stacked = state["changes"][tip].get("stacked")
     builds = state["builds"]
@@ -2258,15 +2276,27 @@ def _train_build(main: Path, state: dict, trees: dict[str, Path]) -> dict | None
     )}  # fmt: skip
 
 
-def _read_builds(main: Path, state: dict, trees: dict[str, Path]) -> None:
+def _forged_reason(forged: list[str]) -> str:
+    """The train's stop for records the script didn't write (199)."""
+    return (f"{', '.join(forged)} isn't a record the script wrote: remove it, run its gate "
+            "again, then rerun /sdlc-factory:land")  # fmt: skip
+
+
+def _read_builds(main: Path, state: dict, trees: dict[str, Path]) -> list[str]:
     """Every attempt in the live changes' current build files that ran on a stacked commit of the
-    train, recorded once each in the state (`builds`), oldest first, as `_read_gates()` does."""
+    train, recorded once each in the state (`builds`), oldest first, as `_read_gates()` does; and
+    each file the script didn't write (`factory.vouched()`), as `<change>/<record>`, copied from
+    never."""
     builds = state.setdefault("builds", [])
     seen = {(b["change"], b["commit"], b["attempt"]) for b in builds}
+    forged = []
     for name in train_live(state):
         tree = trees[name]
         folder = tree / factory.work_rel(tree) / name
         path = factory.land_build_path(folder, factory.land_round(folder) or 1)
+        if path.is_file() and not factory.vouched(tree, folder, path):
+            forged.append(f"{name}/{path.relative_to(folder).as_posix()}")
+            continue
         stacked = state["changes"][name].get("stacked") or ""
         for i, attempt in enumerate((factory.read_gate_file(path) or {"attempts": []})["attempts"],
                                     1):  # fmt: skip
@@ -2279,16 +2309,22 @@ def _read_builds(main: Path, state: dict, trees: dict[str, Path]) -> None:
                 "change": name, "commit": stacked, "attempt": i, "verdict": attempt["verdict"],
                 "exit": attempt["exit"], "file": f"{name}/{path.relative_to(folder).as_posix()}",
             })  # fmt: skip
+    return forged
 
 
-def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
+def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> list[str]:
     """Every attempt in the live changes' current gate files that gated a stacked commit of the
-    train, recorded once each in the state (`gates`), oldest first."""
+    train, recorded once each in the state (`gates`), oldest first; and each file the script
+    didn't write (`factory.vouched()`), as `<change>/<record>`, copied from never."""
     seen = {(g["change"], g["commit"], g["attempt"]) for g in state["gates"]}
+    forged = []
     for name in train_live(state):
         tree = trees[name]
         folder = tree / factory.work_rel(tree) / name
         path = factory.land_gate_path(folder, factory.land_round(folder) or 1)
+        if path.is_file() and not factory.vouched(tree, folder, path):
+            forged.append(f"{name}/{path.relative_to(folder).as_posix()}")
+            continue
         record = factory.read_gate_file(path)
         if record is None:
             continue
@@ -2304,6 +2340,7 @@ def _read_gates(main: Path, state: dict, trees: dict[str, Path]) -> None:
                 "exit": attempt["exit"], "prefix": train_live(state).index(name) + 1,
                 "file": f"{name}/{path.relative_to(folder).as_posix()}",
             })  # fmt: skip
+    return forged
 
 
 def _record_ejection(folder: Path, cause: str, train: str | None) -> str | None:
@@ -3063,6 +3100,14 @@ def land_verdict(root: Path, folder: Path, cfg: dict, n: int, settled: bool = Fa
     for role in land_mended(folder, n) & set(mendable):
         del mendable[role]
     every = {p for found in mendable.values() for p in found}
+    # A gate or accept record the script didn't write is never read as a verdict (199): a stop,
+    # never mended, whatever the round has settled.
+    for record in (factory.land_gate_path(folder, n), factory.accept_path(folder)):
+        if record.is_file() and not factory.vouched(root, folder, record):
+            problems.append(
+                f"{record.relative_to(folder).as_posix()} isn't a record the script wrote: ship "
+                "it by hand"
+            )
     # The rebased change is gated by the script before any reviewer reads it, as each build was.
     # Red is a stop, never a fix: the landing has no builder round, so the person ships it.
     gate = _land_gate_state(root, folder, n, settled)

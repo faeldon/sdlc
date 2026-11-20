@@ -3022,6 +3022,8 @@ def cli_accept(root: Path, home: Path, args) -> int:
 # own copies (its path, regexes, reader and placeholders) are `factory_records`'.
 GATE_TIMEOUT = 30 * 60
 GATE_TAIL = 80
+# How long the hand gate waits for the records ledger's lock: `factory.py`'s `RECORDS_LOCK_WAIT`.
+LEDGER_LOCK_WAIT = 30.0
 
 
 def _hand_paths(checkout: Path, trunk: str) -> tuple[str | None, list[str]]:
@@ -3259,6 +3261,52 @@ def _refused(why: str) -> int:
     return 1
 
 
+def _ledger_dir(root: Path) -> Path | None:
+    """The git common dir, where the factory's records ledger lives; None outside a repo."""
+    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return Path(common) if common else None
+
+
+def _vouch(root: Path, folder: Path, path: Path, text: str) -> None:
+    """Append the factory's records ledger line for `text`, about to be written to the hand
+    gate's `path` in change `folder`, under the ledger's lock, as `factory.py`'s `_vouch()` does
+    (pinned by `tests/test_records_ledger.py`): the factory reads a green hand gate only while the
+    ledger vouches for it. Raises OSError when it can't, so no record is written unvouched."""
+    where = _ledger_dir(root)
+    if where is None:
+        raise OSError("no git common dir to keep the records ledger in")
+    line = factory_records.ledger_line(folder.name, path.relative_to(folder).as_posix(), text)
+    fd = os.open(where / factory_records.RECORDS_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        start = time.monotonic()
+        while not _try_lock(fd):
+            if time.monotonic() - start >= LEDGER_LOCK_WAIT:
+                raise OSError(f"the records ledger stayed locked for {LEDGER_LOCK_WAIT:g}s")
+            time.sleep(0.05)
+        try:
+            ledger = where / factory_records.RECORDS_LEDGER
+            with open(ledger, "a", encoding="utf-8", newline="\n") as f:
+                f.write(line)
+        finally:
+            closing._unlock(fd)
+    finally:
+        os.close(fd)
+
+
+def _hand_vouched(root: Path, folder: Path, path: Path) -> bool:
+    """Whether the hand gate's record at `path` is one a script wrote, by the factory's ledger
+    (`factory_records.vouched_in()`)."""
+    where = _ledger_dir(root)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    rel = path.relative_to(folder).as_posix()
+    return where is not None and factory_records.vouched_in(
+        where / factory_records.RECORDS_LEDGER, folder.name, rel, text
+    )
+
+
 def cmd_gate(root: Path, ident: str) -> int:
     """Run the base branch's `[commands] check` on a change built by hand, from its checkout, and
     add the attempt to its folder's `build/gate.md`, as `factory.py gate` records a round's: PASS
@@ -3289,6 +3337,13 @@ def cmd_gate(root: Path, ident: str) -> int:
         return _refused(
             f"{_shown(checkout, home)} is on {branch or '?'!r}, not {folder.name}: the record "
             "must judge the change's own branch"
+        )
+    # Never appended to a record no script wrote (199): its forged attempts would be vouched too.
+    path = folder / factory_records.HAND_GATE
+    if path.is_file() and not _hand_vouched(checkout, folder, path):
+        return _refused(
+            f"{factory_records.HAND_GATE.as_posix()} isn't a record the script wrote: remove it, "
+            "then run this again; nothing was run"
         )
     # With the factory, the hand gate takes one of its slots; without it, none, as before 113.
     jobs = _gate_jobs_at(home, trunk) if factory_enabled(home)[0] else None
@@ -3323,7 +3378,13 @@ def cmd_gate(root: Path, ident: str) -> int:
         )
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
-    path = folder / factory_records.HAND_GATE
+    # Checked again after the slot wait and the run, before the earlier record is read: one
+    # rewritten by hand meanwhile would be vouched along with this attempt.
+    if path.is_file() and not _hand_vouched(checkout, folder, path):
+        return _refused(
+            f"{factory_records.HAND_GATE.as_posix()} isn't a record the script wrote: remove it, "
+            "then run this again; this attempt was not recorded"
+        )
     attempt = len(factory_records.gate_attempts(path)) + 1
     output = factory_records.placeholders(output, checkout, _hand_main(checkout))
     tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
@@ -3339,7 +3400,14 @@ def cmd_gate(root: Path, ident: str) -> int:
     earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
     earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"GATE: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    text = f"GATE: {verdict}\n{earlier}\n{section}"
+    # Vouched before it is written, as `factory.py gate` does.
+    try:
+        _vouch(checkout, folder, path, text)
+    except OSError as e:
+        return _refused(f"couldn't vouch for {factory_records.HAND_GATE.as_posix()}, so wrote "
+                        f"nothing: {e}")  # fmt: skip
+    path.write_text(text, encoding="utf-8", newline="\n")
     out = {"change": folder.name, "attempt": attempt, "verdict": verdict, "exit": exit_text}
     out.update(seconds=seconds, waited=waited, slot=held, tree=tree)
     out["to"] = path.relative_to(checkout).as_posix()

@@ -686,7 +686,13 @@ base, makes it stale. It prints a JSON summary and exits 0 on PASS, 1 otherwise,
 factory run still building (its folder holds `runs/`, at `design` or `build`; `factory.py gate`
 gates it), a checkout not on the change's branch, and a base branch with no check. A factory run at
 `stage: test` it gates like any change: its record is no round's, never counted as the factory's
-gate, and while it is current and green it clears the approver's `gate` reasons. It is the person's step after building, never
+gate, and while it is current and green it clears the approver's `gate` reasons. Each version of
+the record is vouched for first in the factory's records ledger, `sdlc-factory-records.jsonl` in the
+git common dir, outside every worktree, and the factory reads a green hand gate only while a line
+there vouches for it, so a `build/gate.md` written by hand clears nothing; `sdlc.py gate` refuses
+to add to a record the ledger doesn't vouch for (remove it and run the gate again). The ledger
+protects against an agent's Edit and Write tools, which work in the change's worktree, not against
+a shell command that can reach the git common dir. It is the person's step after building, never
 pre-approved, since it runs a command: no skill runs it, and ship's own gate is unchanged. The board
 and `/sdlc:status` read the record (`· gate green` or `· gate red` on the change's line) only while
 it is current, and ship commits it with the change's folder. While `sdlc-factory` is enabled,

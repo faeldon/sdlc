@@ -751,3 +751,74 @@ def test_the_factorys_hand_build_is_sdlcs(repo) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "built")
     assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")
+
+
+# ---------------------------------------------------------------- the records ledger (199)
+
+
+def _ledger_rows(root: Path) -> list[dict]:
+    path = _common(root) / factory.RECORDS_LEDGER
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    return [json.loads(line) for line in lines]
+
+
+def test_the_hand_gate_vouches_for_its_record(repo, capsys) -> None:
+    """199 R1: `sdlc.py gate` puts each version of `build/gate.md` in the factory's ledger before
+    it writes it, so the factory reads it as one the script wrote."""
+    assert _gate(repo, capsys)[0] == 0
+    record = _folder(repo) / sdlc.factory_records.HAND_GATE
+    want = factory._record_digest(record.read_text(encoding="utf-8"))
+    assert _ledger_rows(repo) == [{"change": NAME, "record": "build/gate.md", "sha256": want}]
+    assert factory.vouched(repo, _folder(repo), record)
+    assert _gate(repo, capsys)[0] == 0
+    assert len(_ledger_rows(repo)) == 2 and factory.vouched(repo, _folder(repo), record)
+
+
+def test_the_hand_gate_refuses_an_unvouched_record(repo, capsys, tmp_path) -> None:
+    """199 R7: a `build/gate.md` the script didn't write is never appended to: refused, naming it,
+    the file unchanged and the check never run."""
+    marker = tmp_path / "ran"
+    _base_check(repo, f"touch {marker}")
+    record = _folder(repo) / sdlc.factory_records.HAND_GATE
+    forged = "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: abc\nExit: 0\n"
+    _write(record, forged)
+    code, out = _gate(repo, capsys)
+    assert code == 1 and "build/gate.md isn't a record the script wrote" in out["refusals"][0]
+    assert "remove it" in out["refusals"][0], out
+    assert not marker.exists() and record.read_text(encoding="utf-8") == forged
+    assert _ledger_rows(repo) == []
+
+
+def test_a_hand_written_hand_gate_clears_nothing(repo, capsys) -> None:
+    """199 R6: a green `build/gate.md` on the build as it stands, written by hand on an escalated
+    factory run at `test`, leaves the approver's `gate` reasons uncleared; one the script wrote
+    clears them."""
+    _factory_at(repo, "test")
+    folder = _folder(repo)
+    _write(folder / "decision.md", "DECISION: ESCALATE\n\n- ESCALATED: gate: red on round 1\n")
+    record = folder / sdlc.factory_records.HAND_GATE
+    build = factory.hand_build(repo, "main")
+    _write(record, f"GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: {build}\nExit: 0\n")
+    assert factory.read_gate_file(record)["attempts"][-1]["build"] == build, "well formed"
+    assert factory.hand_gate_state(repo, folder)["green"] is False
+    assert factory.gate_reasons(repo, folder)["reasons"][0]["cleared"] is False
+    assert factory.landing.escalation_lines(repo, folder) == ["gate: not cleared"]
+    record.unlink()
+    assert _gate(repo, capsys)[0] == 0
+    assert factory.hand_gate_state(repo, folder)["green"] is True
+    assert factory.gate_reasons(repo, folder)["reasons"][0]["cleared"] is True
+
+
+def test_a_hand_gate_record_forged_while_it_ran_is_never_appended_to(repo, capsys, tmp_path):
+    """199 R7: `sdlc.py gate` checks the earlier record again after the slot wait, before it reads
+    it: one rewritten by hand while the gate waited or ran is refused and gets no line."""
+    assert _gate(repo, capsys)[0] == 0
+    rows = _ledger_rows(repo)
+    record = _folder(repo) / sdlc.factory_records.HAND_GATE
+    forged = "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: abc\nExit: 0\n"
+    source = tmp_path / "forged.md"
+    _write(source, forged)
+    _base_check(repo, f"cp {source} {record}")
+    code, out = _gate(repo, capsys)
+    assert code == 1 and "build/gate.md isn't a record the script wrote" in out["refusals"][0]
+    assert record.read_text(encoding="utf-8") == forged and _ledger_rows(repo) == rows

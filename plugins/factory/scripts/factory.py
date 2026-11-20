@@ -2889,6 +2889,96 @@ def read_gate_file(path: Path) -> dict | None:
     return {"attempts": attempts, "fails": fails}
 
 
+# The records ledger: one JSON line for each version of a gate, build or accept record the script
+# wrote (`_vouch()`), in the git common dir beside the train's state and the gate slots, outside
+# every worktree, so an agent editing the change's folder can't vouch for a record it wrote
+# itself. A record is read as a verdict only while `vouched()`. Lines are never rewritten: a
+# `train --eject`'s `reset --keep` back to an older version still reads. `sdlc.py gate` appends
+# the hand gate's line through core's copies (`factory_records.ledger_line()`), pinned to these by
+# `tests/test_records_ledger.py`. It guards against a write in a worktree, never one into the git
+# common dir itself.
+RECORDS_LEDGER = "sdlc-factory-records.jsonl"
+RECORDS_LOCK = "sdlc-factory-records.lock"
+RECORDS_LOCK_WAIT = 30.0
+# Every record the ledger vouches for, as globs from the change's folder.
+RECORD_GLOBS = (
+    "build/round-*.gate.md",
+    "build/land-*.gate.md",
+    "build/land-*.build.md",
+    "build/land-accept.md",
+    "build/gate.md",
+)
+
+
+def _record_digest(text: str) -> str:
+    """A record's hash: sha256 of its text with `\\r\\n` read as `\\n`, so a CRLF checkout of
+    the same record reads alike."""
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+def _ledger_line(change: str, record: str, text: str) -> str:
+    """The ledger's line for one version of a record: change folder's name, the record's path from
+    the folder (POSIX) and `_record_digest()`."""
+    row = {"change": change, "record": record, "sha256": _record_digest(text)}
+    return json.dumps(row) + "\n"
+
+
+def _vouch(root: Path, folder: Path, path: Path, text: str) -> None:
+    """Append the ledger's line for `text`, about to be written to `path` in change `folder`,
+    under an exclusive lock on `RECORDS_LOCK`, waited for up to `RECORDS_LOCK_WAIT` seconds.
+    Raises OSError when it can't, so the caller writes no record the ledger doesn't hold."""
+    where = _slot_dir(root)
+    if where is None:
+        raise OSError("no git common dir to keep the records ledger in")
+    line = _ledger_line(folder.name, path.relative_to(folder).as_posix(), text)
+    fd = os.open(where / RECORDS_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        start = time.monotonic()
+        while not _try_lock(fd):
+            if time.monotonic() - start >= RECORDS_LOCK_WAIT:
+                raise OSError(f"{RECORDS_LOCK} stayed locked for {RECORDS_LOCK_WAIT:g}s")
+            time.sleep(0.05)
+        try:
+            with open(where / RECORDS_LEDGER, "a", encoding="utf-8", newline="\n") as f:
+                f.write(line)
+        finally:
+            _unlock(fd)
+    finally:
+        os.close(fd)
+
+
+def vouched(root: Path, folder: Path, path: Path) -> bool:
+    """Whether the record at `path`, in change `folder`, is one the script wrote: a ledger line
+    names this change, this record's path and the hash of the file as it stands. A missing or
+    unreadable file or ledger vouches nothing, and a line that won't parse is skipped."""
+    where = _slot_dir(root)
+    if where is None:
+        return False
+    try:
+        want = json.loads(_ledger_line(folder.name, path.relative_to(folder).as_posix(),
+                                       path.read_text(encoding="utf-8")))  # fmt: skip
+        lines = (where / RECORDS_LEDGER).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    for line in lines:
+        try:
+            if json.loads(line) == want:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _unvouched_refusal(root: Path, folder: Path, path: Path) -> str | None:
+    """Why a writer won't append to the record at `path`: it exists and isn't `vouched()`, so a
+    genuine attempt written after a forged one would vouch for both. None to go ahead."""
+    if not path.is_file() or vouched(root, folder, path):
+        return None
+    rel = path.relative_to(folder).as_posix()
+    return (f"{rel} isn't a record the script wrote: remove it, then run this again; nothing "
+            "was run")  # fmt: skip
+
+
 def landed_build(root: Path) -> str:
     """The change as a landing gates it: its commit, rebased onto the base branch."""
     return (_git(root, "rev-parse", "HEAD") or "")[:16]
@@ -2935,7 +3025,7 @@ def hand_gate_state(root: Path, folder: Path) -> dict:
     """The hand gate as it stands on change `folder`, in checkout `root`: its `record` path (from
     `root`), the last attempt's `verdict` and number (`attempt`), and `green`, a PASS on the build
     as it stands (`hand_build()`), on the change's own branch. A record that is missing or won't
-    read is never green."""
+    read, or that the script didn't write (`vouched()`), is never green."""
     path = folder / HAND_GATE
     out = {"record": path.relative_to(root).as_posix(), "verdict": None, "attempt": 0,
            "green": False}  # fmt: skip
@@ -2956,6 +3046,7 @@ def hand_gate_state(root: Path, folder: Path) -> dict:
         and last["verdict"] == "PASS"
         and last["build"]
         and last["build"] == hand_build(root, base)
+        and vouched(root, folder, path)
     )
     return out
 
@@ -3276,6 +3367,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         if n == 0:
             return emit({"refusals": ["no landing round is under way: run land first"]}, 1)
         path = (land_build_path if build else land_gate_path)(folder, n)
+        if why := _unvouched_refusal(root, folder, path):
+            return emit({"change": folder.name, "refusals": [why]}, 1)
         built = landed_build(root)
         # Before the tree is hashed, so the gate finds it as the record leaves it.
         _record_land(root, folder, "gate")
@@ -3284,6 +3377,8 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         if n == 0:
             return emit({"refusals": ["no builder report yet: build/round-1.md comes first"]}, 1)
         path, built = gate_path(folder, n), build_hash(folder, n)
+        if why := _unvouched_refusal(root, folder, path):
+            return emit({"change": folder.name, "refusals": [why]}, 1)
     jobs = load_config(root)[0]["gate_jobs"]
     with gate_slot(root, jobs, folder.name) as (slot, waited):
         before = _tree_hashes(root, base)
@@ -3304,6 +3399,11 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         after = _tree_hashes(root, base)
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
     verdict = "PASS" if code == 0 and not changed else "FAIL"
+    # Checked again after the slot wait and the run, before the earlier record is read: one
+    # rewritten by hand meanwhile would be vouched along with this attempt.
+    if why := _unvouched_refusal(root, folder, path):
+        why = why.replace("nothing was run", "this attempt was not recorded")
+        return emit({"change": folder.name, "refusals": [why]}, 1)
     attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
     output = _placeholders(output, root)
     tail = "".join(f"    {line}\n" for line in output.rstrip().splitlines()[-GATE_TAIL:])
@@ -3320,7 +3420,15 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
     earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
     path.parent.mkdir(parents=True, exist_ok=True)
     head = "BUILD" if build else "GATE"
-    path.write_text(f"{head}: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    text = f"{head}: {verdict}\n{earlier}\n{section}"
+    # Vouched before it is written: a stop between the two leaves a hash no file holds, never a
+    # record the ledger doesn't.
+    try:
+        _vouch(root, folder, path, text)
+    except OSError as e:
+        why = f"couldn't vouch for {path.relative_to(folder).as_posix()}, so wrote nothing: {e}"
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    path.write_text(text, encoding="utf-8", newline="\n")
     out = {"change": folder.name, "round": n, "attempt": attempt, "verdict": verdict}
     out.update(exit=exit_text, seconds=seconds, waited=waited, slot=slot, tree=tree)
     out["to"] = path.relative_to(root).as_posix()
@@ -5114,6 +5222,9 @@ def cmd_accept(root: Path, ident: str) -> int:
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
+    path = accept_path(folder)
+    if why := _unvouched_refusal(root, folder, path):
+        return emit({"change": folder.name, "refusals": [why]}, 1)
     build = accept_build(root, folder)
     _record_land(root, folder, "checks" if _before_commit(folder) else "recheck")
     code, found, said = _sdlc(["accept", folder.name], root)
@@ -5121,7 +5232,6 @@ def cmd_accept(root: Path, ident: str) -> int:
         why = f"sdlc.py accept: {said.strip()[-500:]}"
         return emit({"change": folder.name, "refusals": [why]}, 1)
     verdict = "PASS" if code == 0 and found.get("passed") else "FAIL"
-    path = accept_path(folder)
     attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
     lines = []
     for check in found.get("checks") or []:
@@ -5138,7 +5248,13 @@ def cmd_accept(root: Path, ident: str) -> int:
     earlier = path.read_text(encoding="utf-8").partition("\n")[2] if path.is_file() else ""
     earlier = earlier.rstrip("\n") + "\n" if earlier.strip() else ""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"ACCEPT: {verdict}\n{earlier}\n{section}", encoding="utf-8", newline="\n")
+    text = f"ACCEPT: {verdict}\n{earlier}\n{section}"
+    try:
+        _vouch(root, folder, path, text)
+    except OSError as e:
+        why = f"couldn't vouch for {path.relative_to(folder).as_posix()}, so wrote nothing: {e}"
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    path.write_text(text, encoding="utf-8", newline="\n")
     out = {**found, "verdict": verdict, "attempt": attempt, "to": path.relative_to(root).as_posix()}
     return emit(out, 0 if verdict == "PASS" else 1)
 

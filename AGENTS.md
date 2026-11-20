@@ -253,7 +253,9 @@ and `factory.py`'s docstring describe it. `sdlc`'s cached copy carries the folde
 settings files (`factory_enabled()`, `config`'s `factory`, nothing run), for intent's
 `yes, for the factory` and the hand gate. `factory.py` never imports `sdlc.py`, and `sdlc` only
 reads the files a run leaves in a change's folder, the base branch's `gate_jobs` and the gate slots'
-lock files, for the hand gate (`_hand_slot()`), the train's run lock, for the board
+lock files, for the hand gate (`_hand_slot()`), and appends the hand gate's line to the
+factory's records ledger in the git common dir (`_vouch()`, its line `factory_records.py`'s copy,
+pinned), the one file core writes for the factory to read, the train's run lock, for the board
 (`train_run_held()`), and the base branch's `[ui]` and the screenshot sets under
 `.sdlc/reports/shots/<change>/`, for ship's UI review (`_ui_at()`, `_current_shots()`), and its
 skill folders' names and `factory.py`'s `@command` names, as text, for the retrospective's `surface`
@@ -283,8 +285,11 @@ steps; `fresh` moves a change's branch onto the base before a build or a spec, t
 `base` and `resolve`; `upgrade` makes a Tier 1 change Tier 2 mid-run, only on the person's blocking
 answer starting `upgrade to Tier 2`, through `sdlc`'s own `upgrade`, once, its round counted as a
 restart's (`read_upgrade()`); a gate holds one of `gate_jobs` slots, locks in the git common dir,
-never `sdlc.lock`; its WAIT approves itself only when no change carries a risk signal, recorded as
-`Sdlc-Landed: by=auto` (never a bare word, which `parse_trailers` drops), never as the person's.
+never `sdlc.lock`; a gate, build or accept record is read as a verdict only while the records
+ledger in the git common dir vouches for it (`vouched()`, `RECORDS_LEDGER`), which its writer
+appends to before it writes, so a record written in a worktree is never one; its WAIT approves
+itself only when no change carries a risk signal, recorded as `Sdlc-Landed: by=auto` (never a
+bare word, which `parse_trailers` drops), never as the person's.
 `verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder report
 and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its `exit:` but
 a read that shows its output, which only the script judges (`is_read()`); a reply missing it,
