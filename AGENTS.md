@@ -289,7 +289,8 @@ never `sdlc.lock`; its WAIT approves itself only when no change carries a risk s
 and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its `exit:` but
 a read that shows its output, which only the script judges (`is_read()`); a reply missing it,
 holding verdict or decision lines that disagree, none of them first (`opening()`, `preamble()`,
-`decision_preamble()`), or a `verified.md` the script can't read, is the one stop a run mends, once
+`decision_preamble()`), a READY decision that leaves an open default it may not carry to the
+landing (`uncarried()`), or a `verified.md` the script can't read, is the one stop a run mends, once
 a round for each role, a landing round counting as its own (`agent --task mend` or
 `--task land-mend`, recorded in `runs/mended`). No agent but the builder runs `checks.md`
 (`test_no_agent_but_the_builder_runs_checks`). Only the current `decision.md` is ever a run's

@@ -38,7 +38,9 @@ unticked: each is an assumption the build rests on that the person hasn't confir
 approval below confirms it or sends the change back. A line marked `→ superseded by D<m>` is no
 assumption the build rests on: show it as one line beside D<m>, the default that replaced it
 (`D2, superseded by D4: …`), never as its own open item. Show each open default with its `- OPTION:`
-and `- WHY:` lines as the ledger holds them, the default first. Then, as a list of its own, each
+and `- WHY:` lines as the ledger holds them, the default first. A default the approver carried to
+the landing (`- CONFIRM: D<n>: <reason>` in `decision.md`, on a READY) is still an open item: show
+its reason beside it, and say the approval below confirms it, as the landing's yes would. Then, as a list of its own, each
 line marked `→ settled by the approver:` with its reason (`Settled by the approver: D3: … (spec R4
 forbids it)`): neither decided nor assumed, never an open item and never the person's word. Then
 each reviewer's verdict from the highest

@@ -344,7 +344,9 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
     acceptance checks, its skills' cases with the cap, its undone notes, each with its whole text
     (`note_items()`) and the disposition the approver proposed for its first line or its whole
     text (a seed titled by the note's first sentence when none was; a bug with what the question
-    shows of it), its assumed decisions (the open defaults), the defaults the approver settled,
+    shows of it), its assumed decisions (the open defaults, each with what the build assumed, its
+    first `- OPTION:`, and the approver's `- CONFIRM:` reason, each None when it has none), the
+    defaults the approver settled,
     each with its reason, never among those to confirm, the `How to recover:` lines its commit
     will carry, and,
     read from its worktree `root` with `cfg`, the agents' nits to file as `[nit]` entries
@@ -376,12 +378,15 @@ def land_parts(folder: Path, pre: dict, root: Path | None = None, cfg: dict | No
         for n in (i["file"] for i in found) if n
     ]  # fmt: skip
     ledger = factory.read_ledger(folder)
+    confirms = factory.approver_weighing(folder)[2]
     return {
         "checks": [{"name": c["name"], "command": c["command"]}
                    for c in (pre.get("checks") or {}).get("checks") or []],
         "cases": _cases_part(root or folder.parents[2], folder, scope) if scope else {},
         "undone": undone,
-        "assumed": [{"id": d["id"], "text": d["text"]} for d in ledger
+        "assumed": [{"id": d["id"], "text": d["text"],
+                     "default": d["options"][0]["option"] if d["options"] else None,
+                     "reason": confirms.get(d["id"])} for d in ledger
                     if d["open"] and d["kind"] == "default"],
         "settled": [{"id": d["id"], "text": d["text"], "reason": d["settled"]} for d in ledger
                     if d["settled"]],
@@ -444,9 +449,9 @@ def land_shown(batch: list[dict]) -> str:
     """What the batch's question calls `as shown`, for the dialog to show beside its yes: each
     change by its name and intent's title, then each part `land_parts()` gives it, only those it
     has: its checks, its cases and their cap, each undone note with its disposition, each assumed
-    decision, each default the approver settled with its reason, its `How to recover:` lines,
-    the agents' nits to file, by their `shown` line, and for an escalation how each of its reasons
-    was cleared."""
+    decision with what the build assumed and the approver's reason (`_assumed_shown()`), each
+    default the approver settled with its reason, its `How to recover:` lines, the agents' nits
+    to file, by their `shown` line, and for an escalation how each of its reasons was cleared."""
 
     def listed(head: str, items: list[str]) -> list[str]:
         return [f"  {head}:", *(f"  - {i}" for i in items)] if items else []
@@ -467,8 +472,7 @@ def land_shown(batch: list[dict]) -> str:
             for u in c["undone"]
         ]  # fmt: skip
         lines += listed("Undone notes", disposed)
-        lines += listed("Assumed decisions to confirm",
-                        [f"{d['id']}: {d['text']}" for d in c["assumed"]])  # fmt: skip
+        lines += listed("Assumed decisions to confirm", [_assumed_shown(d) for d in c["assumed"]])
         lines += listed("Settled by the approver",
                         [f"{d['id']}: {d['text']} ({d['reason']})"
                          for d in c.get("settled") or []])  # fmt: skip
@@ -477,6 +481,17 @@ def land_shown(batch: list[dict]) -> str:
         lines += listed("Escalated", c.get("escalations") or [])
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def _assumed_shown(d: dict) -> str:
+    """An assumed default as the landing shows it: `D2: <question> — assumed: <default> (the
+    approver: <reason>)`, each of the last two only when `land_parts()` has it."""
+    line = f"{d['id']}: {d['text']}"
+    if d.get("default"):
+        line += f" — assumed: {d['default']}"
+    if d.get("reason"):
+        line += f" (the approver: {d['reason']})"
+    return line
 
 
 def _cases_shown(cases: dict) -> list[str]:

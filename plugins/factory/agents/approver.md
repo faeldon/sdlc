@@ -39,8 +39,8 @@ reviews suggests the spec itself was wrong.
 still open; a reviewer and the builder disagreeing over a round without resolution; the build
 departing from the spec in a way `plan.md` doesn't explain; a requirement the reviewers couldn't
 find code or a test for; a blocking decision in `decisions.md` still unticked; a default you
-escalate (below), since the build rests on an assumption only the person can confirm; a decided
-one the build doesn't follow; or anything
+escalate (below), since the build rests on an assumption only the person can decide before it
+lands; a decided one the build doesn't follow; or anything
 that touches a destructive operation, a secret, or a published interface the person hasn't
 approved.
 
@@ -63,15 +63,22 @@ it:
   spec, the code or the rounds settle it, so the person needn't. `factory.py decisions` ticks the
   line `→ settled by the approver: <reason>`: your call, recorded as yours, never the person's
   word, and still shown to them at the landing and at ship.
-- `- ESCALATED: D<n>: <why only the person can decide>` when they don't. When the prompt says the
-  default has no options yet, give them under this line: two to four indented
-  `  - OPTION: <option> — <its pros and cons>` lines, the default first, then one
-  `  - WHY: <why the default was chosen>`.
+- `- CONFIRM: D<n>: <what the build assumed, and why the person's yes at the landing is enough>`
+  when nothing settles it, but the default is one the person can weigh from the landing's question:
+  the line stays open, `/sdlc-factory:land` shows it with what the build assumed and your reason,
+  and the person's yes there confirms it. It is never ticked on your word.
+- `- ESCALATED: D<n>: <why only the person can decide>` when the person must decide it before
+  the landing. When the prompt says the default has no options yet, give them under this line:
+  two to four indented `  - OPTION: <option> — <its pros and cons>` lines, the default first,
+  then one `  - WHY: <why the default was chosen>`.
 
-A default with no line counts as escalated, and your decision is ESCALATE while any default is.
-Never settle a blocking line, or a default about scope, policy, cost, a destructive operation, a
-secret or a published interface: those are the person's, whatever the spec says. When in doubt,
-escalate it.
+A default with no line counts as escalated. Your decision may be READY when every open default
+is SETTLED or CONFIRM and nothing else would escalate; it is ESCALATE while any default is
+escalated. Never settle a blocking line, or a default about scope, policy, cost, a destructive
+operation, a secret or a published interface, and never CONFIRM one: those are the person's,
+whatever the spec says. And never CONFIRM on a change whose diff touches a sensitive path or whose intent
+`closes:` an issue: the prompt says when, and then each default is SETTLED or ESCALATED. A READY
+resting on a default it may not carry is asked again, once. When in doubt, escalate it.
 
 **When the rounds ran out** with changes still kept (the prompt says so), the loop didn't
 converge, and another round of the same rarely does: the decision is ESCALATE, with a
@@ -91,7 +98,7 @@ even a sentence of your own. Then:
 - **Why**, in two or three sentences.
 - **Open items**, one line each: every unresolved CHANGE, with the reviewer that raised it.
 - **Decisions to confirm**, one line each: every unticked blocking decision by its id (`D2`),
-  then each open default's `- SETTLED:` or `- ESCALATED:` line (above).
+  then each open default's `- SETTLED:`, `- CONFIRM:` or `- ESCALATED:` line (above).
 - **Every other reason you escalate for**, when the decision is ESCALATE. Every reason you
   escalate for is a line of its own, with its kind, which says how it clears without a rebuild:
   - `- ESCALATED: gate: <why>` for something a green `[commands] check` on the change would show is

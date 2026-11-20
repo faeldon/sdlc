@@ -19,7 +19,11 @@ A full run of the suite, when you want one, is `uv run --quiet --script ${script
 
 ## weigh
 
-Weigh each open default in decisions.md, ${ids}, with exactly one line each: `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers it>`, or `- ESCALATED: D<n>: <why only the person can decide>`. A default with no line counts as escalated, and the decision is ESCALATE while any is. Never settle a blocking line, or a default about scope, policy, cost, a destructive operation, a secret or a published interface.
+Weigh each open default in decisions.md, ${ids}, with exactly one line each: `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers it>`; `- CONFIRM: D<n>: <what the build assumed, and why the person's yes at the landing is enough>`, which leaves it open for the landing's question to show and the person's yes to confirm; or `- ESCALATED: D<n>: <why only the person can decide>`. A default with no line counts as escalated. The decision may be READY when every open default is SETTLED or CONFIRM and nothing else escalates; it is ESCALATE while any default is escalated. Never settle or confirm a blocking line, or a default about scope, policy, cost, a destructive operation, a secret or a published interface: escalate those.
+
+## weigh-no-confirm
+
+Weigh each open default in decisions.md, ${ids}, with exactly one line each: `- SETTLED: D<n>: <the reason, naming where the spec, the code or a round answers it>`, or `- ESCALATED: D<n>: <why only the person can decide>`. None may be carried to the landing with `- CONFIRM:`, since ${why}. A default with no line counts as escalated, and the decision is ESCALATE while any is. Never settle a blocking line, or a default about scope, policy, cost, a destructive operation, a secret or a published interface.
 
 ## weigh-bare
 

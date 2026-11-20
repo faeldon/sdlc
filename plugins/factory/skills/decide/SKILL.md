@@ -1,6 +1,6 @@
 ---
 name: decide
-description: Walk the person through one factory change's open decisions and assumed defaults at stage test, one at a time — each with its background, the default, the alternatives the agent weighed and why it chose the default — and after one approval record their answers in the change's decisions.md and say what the change needs next. Use after a factory run escalates, or when status says a change needs its defaults confirmed. Not for a run still building (the supervisor asks its own blocking decisions), not for more than one change at once, and never to rebuild, ship or land a change.
+description: Walk the person through one factory change's open decisions and assumed defaults at stage test, one at a time — each with its background, the default, the alternatives the agent weighed and why it chose the default — and after one approval record their answers in the change's decisions.md and say what the change needs next. Use after a factory run escalates, when status says a change needs its defaults confirmed, or to answer a READY change's defaults carried to the landing before it lands. Not for a run still building (the supervisor asks its own blocking decisions), not for more than one change at once, and never to rebuild, ship or land a change.
 argument-hint: "[NNN — the change whose decisions to take]"
 allowed-tools:
   - Read
@@ -16,7 +16,10 @@ disable-model-invocation: true
 A factory run leaves the calls its agents couldn't make in the change's ledger,
 `.sdlc/work/NNN-slug/decisions.md`: blocking decisions the supervisor didn't get to, and defaults the
 build went ahead on. The approver settles the defaults it can from the spec, the code and the
-rounds, and escalates the rest, with any other reason it escalates for: a `look`, filed in the
+rounds, carries to the landing those the person can weigh from its question (`- CONFIRM:`, on a
+READY: the landing's yes confirms them, and this skill takes them too, carried to the landing or
+not, for a person who would answer them first, its item's `confirm` the approver's reason), and
+escalates the rest, with any other reason it escalates for: a `look`, filed in the
 ledger for the person to acknowledge, or a `gate`, which the hand gate clears once it is green on
 the change as it stands. This skill asks the person what is left, on one change, one item
 at a time, with what they need to judge it in front of them, and records their answers where the
@@ -46,7 +49,7 @@ A refusal is said, naming the change, with what the person can do instead, and t
 
 Otherwise `ask` prints `decision`, the approver's,
 `items`, each open line in id order (`id`, `kind`, `source`, `reply`, `question`, `options`, `why`,
-`escalated`), `settled`, the defaults the approver settled with its reasons, and `gate`: each
+`escalated`, `confirm`), `settled`, the defaults the approver settled with its reasons, and `gate`: each
 `gate` reason with whether it is `cleared`, and the hand gate's `record`, or null with none.
 
 Tell the person about each uncleared `gate` reason, naming the change: what the approver said, and
@@ -66,7 +69,8 @@ Approach, at Tier 1) it touches. Then ask it with `AskUserQuestion`, one item to
 items and never two changes in one: the question's text says the change's `NNN-slug`, who raised
 it in which round (`source`), the background in two or three sentences of your own from what you
 read, the question as the agent put it, the approver's reason it is the person's (`escalated`),
-the default and why it was chosen (`why`), and each alternative with its notes. Its options:
+or, for a default carried to the landing, its reason the landing's yes is enough (`confirm`), the
+default and why it was chosen (`why`), and each alternative with its notes. Its options:
 
 - With `options`: the default first, labelled as its option text, then at most three alternatives,
   each its option text, its notes as the option's description. Any more are listed in the

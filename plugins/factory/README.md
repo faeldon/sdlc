@@ -278,8 +278,11 @@ They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, e
   weighs each one: one the spec, the code or a round settles, it settles, and the ledger ticks it
   `→ settled by the approver: <reason>`, its call and never your word, still shown to you at the
   landing (a signal of its own, so a batch holding one never passes itself) and at ship; one it
-  can't, it escalates to you, and the change is escalated while any is. `/sdlc-factory:decide
-  NNN` then asks you each open one, one at a time, with the alternatives; `/sdlc:ship` shows every
+  can't settle but you can weigh from the landing's question, it carries there (`- CONFIRM:`):
+  the change can be READY, and the landing shows each one with what the build assumed and why, its
+  yes confirming them. Never on a change that touches a sensitive path or closes an issue. One it
+  can't, it escalates to you, and the change with it. `/sdlc-factory:decide NNN` asks you each
+  open one, one at a time, with the alternatives, carried ones included; `/sdlc:ship` shows every
   one, so your approval there confirms it or sends the change back. A later default that replaces
   one names it, `- DECISION: [default] (supersedes D2) ...`, and the ledger ticks D2 `→ superseded
   by D4`: no longer assumed, shown beside the default that replaced it. A decided line can't be

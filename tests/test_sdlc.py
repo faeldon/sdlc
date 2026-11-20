@@ -2846,6 +2846,25 @@ def test_an_escalation_with_only_settled_defaults_is_not_answered(tmp_path) -> N
 
 
 @pytest.mark.portable
+def test_ready_with_assumed_defaults_is_ready(tmp_path) -> None:
+    """202 R6: a READY at `test` carrying open defaults to the landing needs nothing of the
+    person before it: Ready, no decide step; the card still counts the defaults assumed."""
+    (tmp_path / "decision.md").write_text(
+        "DECISION: READY\n\nWhy.\n\n- CONFIRM: D2: 50 a page\n", encoding="utf-8"
+    )
+    (tmp_path / "decisions.md").write_text(WEIGHED, encoding="utf-8")
+    found = sdlc.factory_records.reading(tmp_path)
+    assert [d["id"] for d in found["assumed"]] == ["D2"], found
+    rec = _rec(stage="test", **{k: found[k] for k in ("decision", "assumed", "ledger_lines")})
+    rec |= {"id": "008", "mode": "factory"}
+    assert sdlc.needs_of(rec) == [], rec
+    rec["needs"] = sdlc.needs_of(rec)
+    assert sdlc.column(rec) == "ready" and sdlc.decide_step(rec) is None
+    page = (REPO / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert "default(s) assumed" in page, "the card still counts them"
+
+
+@pytest.mark.portable
 def test_an_escalation_needs_what_its_ledger_holds() -> None:
     """R4: what the ledger and decision still hold, in order; an empty ledger needs reading."""
     esc = {"stage": "test", "decision": "ESCALATE"}

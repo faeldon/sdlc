@@ -78,7 +78,11 @@ can continue its question in lines indented under it, folded into its ledger lin
 alternatives, indented `- OPTION:` lines and a `- WHY:` after them, which `decisions` files under
 that line. The approver weighs every open default: one it settles from the spec,
 the code or a round (`- SETTLED: D<n>: <reason>`) `decisions` ticks `→ settled by the approver:`,
-its own mark and never the person's; one it escalates stays open. `ask`, read-only, lists what is
+its own mark and never the person's; one it carries to the landing (`- CONFIRM: D<n>: <reason>`)
+stays open, for the landing's yes to confirm, and lets the decision be READY, unless the diff
+touches a sensitive path or the change `closes:` an issue (`no_confirm_why()`); one it escalates
+stays open, and the change with it. A READY resting on an open default it may not carry is a stop
+the approver mends once (`run_state.uncarried()`). `ask`, read-only, lists what is
 left for the person at `stage: test`, for `/sdlc-factory:decide`, and given the ids answered says
 what the change needs next.
 
@@ -383,8 +387,11 @@ SUPERSEDED = " → superseded by "
 OPTION_RE = re.compile(r"^\s+- OPTION:\s*(.+?)\s+—\s+(.+?)\s*$")
 WHY_RE = re.compile(r"^\s+- WHY:\s*(.+?)\s*$")
 # The approver's weighing of each open default, in `decision.md`: settled from the spec, the code
-# or a round, which `decisions` ticks with SETTLED (never the person's word), or escalated to them.
+# or a round, which `decisions` ticks with SETTLED (never the person's word); carried to the
+# landing, whose yes confirms it (CONFIRM: the line stays open, so the landing still shows it as
+# assumed); or escalated to them.
 SETTLED_RE = re.compile(r"^\s*- SETTLED:\s*(D\d+):\s*(.+?)\s*$")
+CONFIRM_RE = re.compile(r"^\s*- CONFIRM:\s*(D\d+):\s*(.+?)\s*$")
 ESCALATED_RE = re.compile(r"^\s*- ESCALATED:\s*(D\d+):\s*(.+?)\s*$")
 # Any other reason the approver escalates for, a line each with its kind, which says how it clears:
 # `gate` (a green `[commands] check` on the change would show it fixed: the hand gate's record,
@@ -1909,22 +1916,28 @@ def raised_decisions(
     return found
 
 
-def approver_weighing(folder: Path) -> tuple[list[tuple[str, str]], dict[str, dict]]:
+def approver_weighing(
+    folder: Path,
+) -> tuple[list[tuple[str, str]], dict[str, dict], dict[str, str]]:
     """What the current `decision.md` says of the open defaults, never an archived one: each
-    `- SETTLED: D<n>: <reason>` as (id, reason) in its order, and each `- ESCALATED: D<n>: <why>`
-    by id, the first of each, with the `sub_lines()` under it, as {"why", "options", "chose"}."""
+    `- SETTLED: D<n>: <reason>` as (id, reason) in its order, each `- ESCALATED: D<n>: <why>`
+    by id, the first of each, with the `sub_lines()` under it, as {"why", "options", "chose"}, and
+    each `- CONFIRM: D<n>: <reason>`, a default carried to the landing's yes, by id, the first of
+    each."""
     path = folder / "decision.md"
     if not path.is_file():
-        return [], {}
-    settles, escalated = [], {}
+        return [], {}, {}
+    settles, escalated, confirms = [], {}, {}
     lines = path.read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(lines):
         if m := SETTLED_RE.match(line):
             settles.append((m.group(1), m.group(2)))
+        elif m := CONFIRM_RE.match(line):
+            confirms.setdefault(m.group(1), m.group(2))
         elif (m := ESCALATED_RE.match(line)) and m.group(1) not in escalated:
             options, chose = sub_lines(lines[i + 1 :])
             escalated[m.group(1)] = {"why": m.group(2), "options": options, "chose": chose}
-    return settles, escalated
+    return settles, escalated, confirms
 
 
 def escalation_reasons(folder: Path) -> list[dict]:
@@ -1957,14 +1970,51 @@ def look_current(folder: Path, source: str, text: str) -> bool:
     return any(r["kind"] == "look" and r["text"] == text for r in escalation_reasons(folder))
 
 
-def weigh_text(ledger: list[dict]) -> str:
-    """What the approve prompt asks of the open defaults in `ledger`, named by id: one `SETTLED`
-    or `ESCALATED` line each, what it may never settle, and the options owed for each bare one it
-    escalates. Empty with none open."""
+def intent_closes(folder: Path) -> str | None:
+    """The issues change `folder`'s `intent.md` says it closes (`closes:`), as text, never through
+    YAML; None when the key is absent or empty (`[]`)."""
+    path = folder / "intent.md"
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    value = frontmatter(text).get("closes", "").strip()
+    return None if value in ("", "[]") else value
+
+
+def no_confirm_why(sensitive: list[str], closes: str | None) -> list[str]:
+    """Why no open default of a change may be carried to the landing with `- CONFIRM:`: the
+    `[review] sensitive` paths its diff touches (`depth()`'s, from the base branch), and the issue
+    its intent closes. Empty when it may."""
+    why = []
+    if sensitive:
+        shown = ", ".join(sensitive[:5]) + (
+            f" and {len(sensitive) - 5} more" if len(sensitive) > 5 else ""
+        )
+        why.append(f"the diff touches sensitive path(s) {shown}")
+    if closes:
+        why.append(f"the change closes an issue (closes: {closes})")
+    return why
+
+
+# A READY decision that rests on an open default it may not carry to the landing: no `- CONFIRM:`
+# line for it, or a CONFIRM `no_confirm_why()` bars. Its problems open with this; the approver is
+# asked again once a round (`mend.md`'s `confirm`).
+UNCARRIED = "decision.md is READY on an open default it may not carry to the landing"
+
+
+def weigh_text(ledger: list[dict], sensitive: list[str] = (), closes: str | None = None) -> str:
+    """What the approve prompt asks of the open defaults in `ledger`, named by id: one `SETTLED`,
+    `CONFIRM` or `ESCALATED` line each, what it may never settle, and the options owed for each
+    bare one it escalates; with no `CONFIRM` on offer, and why, when the diff touches `sensitive`
+    paths or the change `closes` an issue (`no_confirm_why()`). Empty with none open."""
     open_ids = [d["id"] for d in ledger if d["kind"] == "default" and d["open"]]
     if not open_ids:
         return ""
-    text = " " + prompt_part("common", "weigh", ids=", ".join(open_ids))
+    barred = no_confirm_why(list(sensitive), closes)
+    if barred:
+        text = " " + prompt_part(
+            "common", "weigh-no-confirm", ids=", ".join(open_ids), why=" and ".join(barred)
+        )
+    else:
+        text = " " + prompt_part("common", "weigh", ids=", ".join(open_ids))
     bare = [d["id"] for d in ledger if d["id"] in open_ids and len(d["options"]) < 2]
     if bare:
         text += " " + prompt_part("common", "weigh-bare", ids=", ".join(bare))
@@ -2072,8 +2122,12 @@ def cmd_decisions(root: Path, ident: str) -> int:
             entry = next(d for d in ledger if d["id"] == named.group(1))
             entry.update(superseded_by=added[-1], open=False)
             marks[entry["id"]] = f"{SUPERSEDED}{added[-1]}"
-    settles, escalated = approver_weighing(folder)
-    weighed, settled, unsettled = set(escalated), [], []
+    settles, escalated, confirms = approver_weighing(folder)
+    # A CONFIRM marks nothing: its line stays open, assumed, for the landing's yes. An id given two
+    # of SETTLED, ESCALATED and CONFIRM is named twice.
+    weighed, settled, unsettled = set(escalated) | set(confirms), [], []
+    for target in sorted(set(escalated) & set(confirms), key=lambda t: int(t[1:])):
+        unsettled.append({"id": target, "why": f"{target} is named twice in decision.md"})
     for target, reason in settles:
         entry = next((d for d in ledger if d["id"] == target), None)
         if target in weighed:
@@ -2158,7 +2212,8 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     writing nothing: the approver's `decision`; `items`, every open ledger line in id order, each
     with the reply that raised it (`reply_path()`), its question, its options (the default first;
     none on a ledger from before them), why the default was chosen, and the approver's reason for
-    escalating it from the current `decision.md` (`escalated`); and `settled`, the defaults the
+    escalating it from the current `decision.md` (`escalated`), or for carrying it
+    to the landing (`confirm`, a READY's `- CONFIRM:` line); and `settled`, the defaults the
     approver settled, with its reasons; a `look` line replies to `decision.md`. `gate` is each
     `gate` reason of the current decision, whether a green hand gate cleared it
     (`hand_gate_state()`), and the record's path; None with none. A run still building asks its
@@ -2181,12 +2236,13 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
         )]}, 1)  # fmt: skip
     ledger = read_ledger(folder)
     decision, _ = read_decision(folder)
-    _, escalated = approver_weighing(folder)
+    _, escalated, confirms = approver_weighing(folder)
     items = [
         {"id": d["id"], "kind": d["kind"], "source": d["source"]}
         | {"reply": "decision.md" if d["kind"] == "look" else reply_path(d["source"])}
         | {"question": d["text"], "options": d["options"]}
         | {"why": d["why"], "escalated": (escalated.get(d["id"]) or {}).get("why")}
+        | {"confirm": confirms.get(d["id"])}
         for d in sorted(ledger, key=lambda d: int(d["id"][1:]))
         if d["open"]
     ]
@@ -3635,7 +3691,7 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
     name: {key: frozenset(names.split()) for key, names in parts.items()}
     for name, parts in {
         "common": {"head": "rel root", "check": "script ident", "land-diff": "fork base",
-                   "weigh": "ids", "weigh-bare": "ids"},
+                   "weigh": "ids", "weigh-no-confirm": "ids why", "weigh-bare": "ids"},
         "spec": {"draft": "", "upgraded": "round decision question answer before",
                  "revise": "words", "recheck": ""},
         "build": {"first": "", "restart": "before rel archive round", "restart-words": "words",
@@ -3649,7 +3705,8 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
                     "untestable": "untestable", "next-step": "reconsider", "exhausted": "",
                     "undone": "", "irreversible": "base touched"},
         "decided": {"main": "decided answer", "reviews": "round rel"},
-        "mend": {"evidence": "", "verdict": "", "decision": "", "arbitrate": "problems"},
+        "mend": {"evidence": "", "verdict": "", "decision": "", "confirm": "problems",
+                 "arbitrate": "problems"},
         "resolve": {"main": "files", "gone": "gone inbox"},
         "train-resolve": {"main": "count base change files",
                           "change": "name this title pre rel spec", "this": "",
@@ -4202,7 +4259,9 @@ def _task_prompt(
             prompt += " " + prompt_part("approve", "next-step", reconsider=RECONSIDER)
         elif state["exhausted"]:
             prompt += " " + prompt_part("approve", "exhausted")
-        prompt += weigh_text(read_ledger(folder))
+        prompt += weigh_text(
+            read_ledger(folder), state.get("sensitive") or [], intent_closes(folder)
+        )
         prompt += " " + prompt_part("approve", "undone")
         base = _base(root)
         touched = risk_paths(_changed_paths(root, base), _irreversible(root, base)) if base else []
@@ -4238,6 +4297,10 @@ def _task_prompt(
     # the approver one decision, the arbiter resumed to answer in its shape, the builder resumed
     # for its evidence, or a new behaviour check for its own.
     if role == "approver":
+        carried = [p[len(UNCARRIED) + 2 :] for p in state["problems"] if p.startswith(UNCARRIED)]
+        if carried:
+            told = prompt_part("mend", "confirm", problems="; ".join(carried))
+            return told, folder / "decision.md", False
         return prompt_part("mend", "decision"), folder / "decision.md", False
     if role == "arbiter":
         where = f"reviews/round-{reviewed}/{VERIFIED}"

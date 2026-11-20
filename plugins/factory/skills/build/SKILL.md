@@ -57,9 +57,11 @@ asks the person, writes the answer into the ledger, and the builder carries on w
 **default** one lets the run go on with the agent's stated default, recorded as assumed, with
 the alternatives the agent weighed under its line. The approver weighs each open default: one the
 spec, the code or a round settles it marks `SETTLED`, and `decisions` ticks it `→ settled by the
-approver:`, its call and never the person's word; one it can't, it escalates, and it escalates the
-change while any default is. `/sdlc:ship` shows them all, and `/sdlc-factory:decide NNN` walks
-the person through what is left, one at a time.
+approver:`, its call and never the person's word; one the person can weigh from the landing's
+question it carries there (`- CONFIRM:`), left open for the landing's yes to confirm, so a READY
+needn't stop for it, unless the change touches a sensitive path or closes an issue; one it can't,
+it escalates, and with it the change. `/sdlc:ship` shows them all, and `/sdlc-factory:decide NNN`
+walks the person through what is left, one at a time.
 
 **Under the factory, the plan is accepted by approving this run.** The builder writes `plan.md` and
 builds on it without a person reading it first, which plan mode would otherwise require; it may
@@ -472,7 +474,8 @@ the person made during the run and those still assumed (by id, with the default 
 on; a line marked `→ superseded by D<m>` is no assumption, shown as one line beside D<m>, the
 default that replaced it, never counted as open), the defaults the approver settled, apart from
 those still assumed, each with its reason (the approver's calls, never the person's), and with any still open, that
-`/sdlc-factory:decide <NNN>` asks them one at a time; what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
+`/sdlc-factory:decide <NNN>` asks them one at a time (on a READY, the defaults the approver carried
+to the landing, which the landing's yes confirms as shown, or `decide` takes first); what `carry` added to `notes.md`, the files changed (`git diff --stat` in its worktree), and
 what the run cost: the `cost` that `stage <NNN> test` printed, its `usd` total and the split
 `by_role` and `by_model`, called the API-equivalent cost Claude Code reported (on a subscription,
 where the spend went, not a bill), with `unknown` runs said when there are any. Say plainly that

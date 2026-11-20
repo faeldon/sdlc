@@ -4,7 +4,8 @@ What lives here is `loop_state()`, the one reading of a build run that `verdicts
 `agent` builds its prompt from, and the helpers only it calls: the early stop (`early_stop()`),
 what earlier rounds settled (`settled()`), the untouched changes (`_untouched()`), the cheap nits a
 rework is handed (`cheap_nits()`), what a rework changed (`reworked()`), whether the approver's
-reply disagrees with itself (`decision_preamble()`) and the gate as it stands (`_gate_state()`,
+reply disagrees with itself (`decision_preamble()`), the open defaults a READY may not carry to
+the landing (`uncarried()`) and the gate as it stands (`_gate_state()`,
 `read_gate()`). It decides from the rounds alone, reading no state file but
 `runs/mended`; it writes nothing, and runs no process but the `git` calls `factory._git` makes for
 it: never `claude`, never a host's command.
@@ -73,6 +74,38 @@ def decision_preamble(folder: Path) -> bool:
     """Whether `decision.md` holds `DECISION:` lines that disagree, none of them first:
     `preamble()`'s rule for the approver's reply, which the run may mend once by asking again."""
     return factory._disagrees(folder / "decision.md", factory.DECISION_RE)
+
+
+def uncarried_text(ident: str, why: str) -> str:
+    """The problem `loop_state()` gives for default `ident` a READY can't carry, and why."""
+    return f"{factory.UNCARRIED}: {ident}: {why}"
+
+
+def uncarried(
+    folder: Path, ledger: list[dict], decision: str | None, sensitive: list[str], closes: str | None
+) -> list[tuple[str, str]]:
+    """The open defaults a READY decision may not carry to the landing, each (id, why): one the
+    approver gave no `- CONFIRM:` line alone (none at all, an ESCALATED one, or both), and every
+    CONFIRMed one when `factory.no_confirm_why()` bars it (a sensitive path the diff touches, an
+    issue the change closes). [] for any other decision, which carries nothing."""
+    if decision != "READY":
+        return []
+    settles, escalated, confirms = factory.approver_weighing(folder)
+    barred = "; ".join(factory.no_confirm_why(sensitive, closes))
+    named = {i for i, _ in settles}
+    found = []
+    for d in ledger:
+        if d["kind"] != "default" or not d["open"]:
+            continue
+        if d["id"] in escalated:
+            found.append((d["id"], "it is ESCALATED, which READY can't carry"))
+        elif d["id"] not in confirms:
+            found.append((d["id"], "no `- CONFIRM:` line"))
+        elif d["id"] in named:
+            found.append((d["id"], "it is named twice in decision.md"))
+        elif barred:
+            found.append((d["id"], f"no CONFIRM here: {barred}"))
+    return found
 
 
 def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | None]:
@@ -160,6 +193,16 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
             mendable["arbiter"] = wrong
     if decision_preamble(folder):
         mendable["approver"] = [factory.NO_DECISION]
+    # A READY resting on an open default it may not carry to the landing: the approver's to give
+    # again, a line it may give for each, or ESCALATE.
+    closes = factory.intent_closes(folder)
+    carried = [
+        uncarried_text(i, why)
+        for i, why in uncarried(folder, ledger, decision, run["sensitive"], closes)
+    ]
+    if carried:
+        problems += carried
+        mendable.setdefault("approver", []).extend(carried)
     # Each role is mended once a round: one already mended (`runs/mended`) is a stop like any other.
     done = factory.mended(folder)
     rnd = last["round"] if last else 0

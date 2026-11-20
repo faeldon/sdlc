@@ -1677,6 +1677,38 @@ def test_the_approver_weighs_each_open_default() -> None:
     assert "→ settled by the approver:" in flat and "never the person's word" in flat
 
 
+def test_the_approver_doc_offers_confirm() -> None:
+    """202 R1: the approver may carry a default to the landing with a CONFIRM line, READY when
+    every open default is SETTLED or CONFIRM, and no longer escalates for any default open."""
+    flat = " ".join((FACTORY / "agents" / "approver.md").read_text(encoding="utf-8").split())
+    assert "`- CONFIRM: D<n>: " in flat
+    assert "READY when every open default is SETTLED or CONFIRM" in flat
+    assert "ESCALATE while any default is." not in flat
+    assert "a sensitive path" in flat and "`closes:`" in flat, "where CONFIRM is barred"
+
+
+DEFAULT_DOCS = (
+    "plugins/factory/README.md",
+    "plugins/factory/skills/build/SKILL.md",
+    "plugins/factory/skills/decide/SKILL.md",
+    "plugins/factory/scripts/factory.py",
+    "AGENTS.md",
+)
+
+
+def test_no_doc_says_any_default_escalates() -> None:
+    """202 R12: no doc says an open default always escalates the change, and the decide skill
+    takes a READY change's carried defaults too."""
+    for rel in DEFAULT_DOCS:
+        flat = " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+        for phrase in ("ESCALATE while any", "escalated while any"):
+            assert phrase not in flat, f"{rel}: {phrase}"
+    decide = " ".join((FACTORY / "skills" / "decide" / "SKILL.md").read_text("utf-8").split())
+    assert "carried to the landing" in decide
+    agents = " ".join((ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
+    assert "a READY decision that leaves an open default it may not carry to the landing" in agents
+
+
 def test_the_approver_gives_every_reason_a_line_with_its_kind() -> None:
     """145 R1: every reason the approver escalates for is a line of its own with a kind: an open
     ledger line by its id or its `- ESCALATED: D<n>:` line, else `gate:` or `look:`."""
@@ -1728,6 +1760,15 @@ def test_ship_shows_settled_defaults_apart() -> None:
     assert "`- [x] … → settled by the approver: <reason>`" in flat
     assert "neither decided nor assumed, never an open item and never the person's word" in flat
     assert "with its `- OPTION:` and `- WHY:` lines as the ledger holds them" in flat
+
+
+def test_ship_shows_carried_defaults() -> None:
+    """202 R11: ship still shows every unticked default, now with the approver's CONFIRM reason
+    beside a carried one, and says the approval confirms it."""
+    flat = " ".join((ROOT / "skills" / "ship" / "factory.md").read_text(encoding="utf-8").split())
+    assert "every decision in `decisions.md` still unticked" in flat
+    assert "`- CONFIRM: D<n>: <reason>`" in flat
+    assert "the approval below confirms it" in flat
 
 
 def test_decide_writes_answers_only_after_its_wait() -> None:

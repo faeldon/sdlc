@@ -453,7 +453,9 @@ def test_land_check_shows_each_changes_checks_cases_notes_decisions_and_recovery
         {"line": 3, "text": "Page the list", "seed": "Page the list"},
         {"line": 5, "text": "Rename the flag", "dropped": "the flag went away in round 2"},
     ]
-    assert by[full.name]["assumed"] == [{"id": "D1", "text": "Page at 50? Going with 50."}]
+    assert by[full.name]["assumed"] == [
+        {"id": "D1", "text": "Page at 50? Going with 50.", "default": None, "reason": None}
+    ]
     assert by[full.name]["recover"] == ["deploy/: fix forward: a release without deploy/run.sh"]
     assert "skills' cases in scope: 1" in by[full.name]["signals"]
     intent = factory.landing.intent_parts(folder)
@@ -486,7 +488,9 @@ def test_the_landing_shows_settled_defaults_apart_and_never_confirms_them(tmp_pa
     (folder / "decisions.md").write_text(SETTLED_LEDGER, encoding="utf-8")
     code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
     [c] = batch["batch"]
-    assert c["assumed"] == [{"id": "D1", "text": "Page at 50? Going with 50."}], c
+    assert c["assumed"] == [
+        {"id": "D1", "text": "Page at 50? Going with 50.", "default": "50", "reason": None}
+    ], c
     assert c["settled"] == [
         {"id": "D2", "text": "Log the draft id?", "reason": "spec R4 forbids it"}
     ], c
@@ -518,6 +522,92 @@ def test_a_settled_default_keeps_the_batch_from_passing_itself(tmp_path, capsys)
     signals = batch["batch"][0]["signals"]
     assert "defaults settled by the approver: D2" in signals, signals
     assert not any("assumed" in s or "still open" in s for s in signals), signals
+
+
+CARRIED_LEDGER = (
+    "# Decisions\n\n"
+    "- [ ] D1 (builder round 1, default): Page at 50? Going with 50.\n"
+    "  - OPTION: 50 — one screen; a second page past it\n"
+    "  - OPTION: 100 — fewer pages; a slower first paint\n"
+    "  - WHY: the spec's list shows 50\n"
+    "- [ ] D2 (code round 1, default): Log the draft id?\n"
+    "- [x] D3 (code round 1, default): Trim logs? → settled by the approver: spec R2\n"
+    "- [ ] D4 (builder round 1, blocking): Keep drafts 30 days?\n"
+)
+
+
+def _carried(root: Path) -> tuple[Path, Path]:
+    """A READY change whose approver carried D1 and D2 to the landing (D1 with its options, D2
+    bare), beside a settled D3 and an open blocking D4."""
+    tree = _ready(root, "carried", "carried's one")
+    folder = _folder(tree)
+    (folder / "decisions.md").write_text(CARRIED_LEDGER, encoding="utf-8")
+    decision = folder / "decision.md"
+    decision.write_text(
+        decision.read_text(encoding="utf-8")
+        + "- CONFIRM: D1: 50 matches the spec's list; the landing's yes is enough\n",
+        encoding="utf-8",
+    )
+    return tree, folder
+
+
+@needs_uv
+def test_carried_defaults_keep_the_gate_the_persons(tmp_path, capsys) -> None:
+    """202 R7: a READY change with defaults carried to the landing is a signal: the batch is not
+    clear, its question confirms them as shown, and `--by auto` refuses it."""
+    root = _repo(tmp_path)
+    tree, folder = _carried(root)
+    (folder / "decisions.md").write_text(CARRIED_LEDGER.split("- [ ] D2")[0], encoding="utf-8")
+    code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
+    assert batch["clear"] is False, batch
+    assert "assumed decisions to confirm: D1" in batch["batch"][0]["signals"], batch
+    assert "its assumed decisions confirmed as shown" in batch["question"], batch["question"]
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "auto")
+    assert code == 1 and "the gate is the person's" in out["refusals"][0], out
+    assert "Sdlc-Landed: by=auto" not in _git(tree, "log", "-1", "--format=%B")
+
+
+@needs_uv
+def test_the_landing_shows_each_assumed_default_with_its_default(tmp_path, capsys) -> None:
+    """202 R8: each assumed default carries what the build assumed (its first option) and the
+    approver's CONFIRM reason, and `shown` prints both, leaving out whichever it lacks."""
+    root = _repo(tmp_path)
+    _carried(root)
+    code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
+    [c] = batch["batch"]
+    assert c["assumed"] == [
+        {"id": "D1", "text": "Page at 50? Going with 50.", "default": "50",
+         "reason": "50 matches the spec's list; the landing's yes is enough"},
+        {"id": "D2", "text": "Log the draft id?", "default": None, "reason": None},
+    ], c["assumed"]  # fmt: skip
+    shown = batch["shown"]
+    assert (
+        "  - D1: Page at 50? Going with 50. — assumed: 50 (the approver: 50 matches the spec's "
+        "list; the landing's yes is enough)\n  - D2: Log the draft id?\n"
+    ) in shown, shown
+
+
+@needs_uv
+def test_the_landing_yes_confirms_carried_defaults(tmp_path, capsys) -> None:
+    """202 R9: the person's yes ticks each default it showed as confirmed when landing, and
+    changes no other line: the settled one, the options, the blocking one."""
+    root = _repo(tmp_path)
+    tree, folder = _carried(root)
+    ledger = CARRIED_LEDGER.replace("- [ ] D4 (builder round 1, blocking): Keep drafts 30 days?",
+                                    "- [x] D4 (builder round 1, blocking): Keep drafts 30 days?"
+                                    " → decided: 30")  # fmt: skip
+    (folder / "decisions.md").write_text(ledger, encoding="utf-8")
+    code, out = _run(capsys, factory.landing.cmd_land, tree, "001", "person")
+    assert (code, out["state"]) == (0, "committed"), out
+    confirmed = factory.DECIDED + factory.CONFIRMED
+    d1, d2 = "Page at 50? Going with 50.", "Log the draft id?"
+    want = (
+        ledger.replace(f"- [ ] D1 (builder round 1, default): {d1}\n",
+                       f"- [x] D1 (builder round 1, default): {d1}{confirmed}\n")
+        .replace(f"- [ ] D2 (code round 1, default): {d2}\n",
+                 f"- [x] D2 (code round 1, default): {d2}{confirmed}\n")
+    )  # fmt: skip
+    assert (folder / "decisions.md").read_text(encoding="utf-8") == want
 
 
 def _entry(name: str, **parts) -> dict:

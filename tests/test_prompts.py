@@ -191,14 +191,30 @@ def _approve_irreversible(c: Case) -> str:
     return _approve(c)
 
 
-def _approve_defaults(c: Case, bare: bool) -> str:
+def _approve_defaults(c: Case, bare: bool, **over) -> str:
     c.ledger = LEDGER if bare else LEDGER[:1]
-    return _approve(c)
+    return _approve(c, **over)
+
+
+def _approve_defaults_closes(c: Case) -> str:
+    """202 R4: a change that closes an issue may carry no default to the landing."""
+    c.write("intent.md", INTENT.replace("idea: ", "closes: [12]\nidea: "))
+    return _approve_defaults(c, bare=False)
 
 
 def _decided(c: Case, source: str) -> str:
     c.ledger = [{**LEDGER[0], "decided": True, "open": False, "answer": "50", "source": source}]
     return c.task(_reviewed(1, next="rework"), "decided", "builder", "D1")
+
+
+def _mend_confirm(c: Case) -> str:
+    """202 R3: a READY resting on defaults it may not carry is asked again, naming each."""
+    problems = [
+        factory.run_state.uncarried_text("D1", "no `- CONFIRM:` line"),
+        factory.run_state.uncarried_text("D2", "the diff touches sensitive path(s) src/auth.py"),
+    ]
+    state = _reviewed(1, next="stop", problems=problems, mend=["approver"])
+    return c.task(state, "mend", "approver")
 
 
 def _mend(c: Case, role: str) -> str:
@@ -296,10 +312,15 @@ CASES: dict[str, Callable[[Case], str]] = {
     "approve-exhausted": lambda c: _approve(c, exhausted=True),
     "approve-defaults": lambda c: _approve_defaults(c, bare=False),
     "approve-defaults-bare": lambda c: _approve_defaults(c, bare=True),
+    "approve-defaults-sensitive": lambda c: _approve_defaults(
+        c, bare=False, sensitive=["src/auth.py"]
+    ),
+    "approve-defaults-closes": _approve_defaults_closes,
     "approve-irreversible": _approve_irreversible,
     "decided-builder": lambda c: _decided(c, "builder round 1"),
     "decided-other": lambda c: _decided(c, "code round 1"),
     "mend-approver": lambda c: _mend(c, "approver"),
+    "mend-confirm": _mend_confirm,
     "mend-arbiter": lambda c: _mend(c, "arbiter"),
     "mend-verdict": lambda c: _mend(c, "code"),
     "mend-builder": lambda c: _mend(c, "builder"),

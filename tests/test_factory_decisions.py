@@ -465,6 +465,148 @@ def test_the_approver_is_asked_to_weigh_each_open_default(tmp_path, capsys) -> N
     assert "no options yet: D2." in prompt, prompt
 
 
+# ---------------------------------------------------------------- defaults carried to the landing
+
+
+LOG_ID = "- DECISION: [default] Log the draft id? Assuming no.\n"
+
+
+def test_a_confirm_line_leaves_the_default_open(tmp_path, capsys) -> None:
+    """202 R2: a CONFIRM line is read apart and never marks the ledger: D2 stays `- [ ]` and
+    assumed, never settled; a SETTLED beside it still ticks D1."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING, LOG_ID)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _decision(root, "- SETTLED: D1: spec R4 shows 50 a page\n",
+              "- CONFIRM: D2: assumed no logging; the person's yes at the landing is enough\n",
+              head="DECISION: READY")  # fmt: skip
+    folder = root / ".sdlc" / "work" / NAME
+    _, _, confirms = factory.approver_weighing(folder)
+    assert confirms == {"D2": "assumed no logging; the person's yes at the landing is enough"}, (
+        confirms
+    )
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["settled"] == ["D1"] and out["unsettled"] == [], out
+    assert out["assumed"] == ["D2"], out
+    assert "- [ ] D2 (builder round 1, default): Log the draft id?" in _ledger_text(root)
+    assert "D2" not in [d["id"] for d in factory.read_ledger(folder) if d["settled"]]
+
+
+def test_a_confirm_and_an_escalated_line_are_named_twice(tmp_path, capsys) -> None:
+    """202 R2: an id given two of SETTLED, ESCALATED and CONFIRM is named twice, and marks
+    nothing."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING, LOG_ID)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    before = _ledger_text(root)
+    _decision(root, "- CONFIRM: D1: 50 a page\n", "- SETTLED: D1: spec R4\n",
+              "- CONFIRM: D2: no logging\n", "- ESCALATED: D2: the person's call\n")  # fmt: skip
+    out = _run(capsys, factory.cmd_decisions, root, "008")[1]
+    assert out["settled"] == [] and _ledger_text(root) == before, out
+    assert sorted(u["id"] for u in out["unsettled"]) == ["D1", "D2"], out
+    assert all("named twice" in u["why"] for u in out["unsettled"]), out
+
+
+def _carried(tmp_path: Path, capsys, *lines: str, head: str = "DECISION: READY",
+             config: str | None = None) -> Path:  # fmt: skip
+    """A change one round in, its default D1 open, the approver's decision `head` with `lines`."""
+    root = _change(tmp_path, config=config)
+    _build_report(root, 1, PAGING)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _round(root, 1)
+    _decision(root, *lines, "\n- IMPACT: minor — a test change\n", head=head)
+    _run(capsys, factory.cmd_decisions, root, "008")
+    return root
+
+
+@pytest.mark.parametrize("case", ["unlined", "escalated", "sensitive", "closes"])
+def test_ready_with_an_uncarried_default_is_mended(tmp_path, capsys, case) -> None:
+    """202 R3: a READY resting on an open default it may not carry (no CONFIRM line, an ESCALATED
+    one, a CONFIRM on a sensitive path or on a `closes:` change) is a stop the approver mends,
+    each id named with why; a CONFIRM on a plain change is done."""
+    line = {"unlined": "", "escalated": "- ESCALATED: D1: the person's call\n"}.get(
+        case, "- CONFIRM: D1: 50 a page; the landing's yes is enough\n"
+    )
+    root = _carried(tmp_path, capsys, line, config=LISTED if case == "sensitive" else None)
+    if case == "sensitive":
+        _touch(root, "src/secret/key.py")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "touch")
+    if case == "closes":
+        intent = root / ".sdlc" / "work" / NAME / "intent.md"
+        intent.write_text(intent.read_text().replace("idea:", "closes: [12]\nidea:"))
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["approver"]), out
+    [problem] = [p for p in out["problems"] if p.startswith(factory.UNCARRIED)]
+    why = {"unlined": "no `- CONFIRM:`", "escalated": "ESCALATED",
+           "sensitive": "src/secret/key.py", "closes": "closes: [12]"}[case]  # fmt: skip
+    assert "D1" in problem and why in problem, problem
+
+
+def test_a_confirmed_default_on_a_plain_change_is_done(tmp_path, capsys) -> None:
+    """202 R3: a CONFIRM the change may give leaves the run done, READY."""
+    root = _carried(tmp_path, capsys, "- CONFIRM: D1: 50 a page; the landing's yes is enough\n")
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["decision"], out["assumed"]) == ("done", "READY", ["D1"]), out
+
+
+def test_a_second_uncarried_ready_is_a_rerun(tmp_path, capsys, claude, monkeypatch) -> None:
+    """202 R3: the approver is asked again once a round, by the `confirm` part naming each id; a
+    second READY still resting on it is a rerun stop."""
+    root = _carried(tmp_path, capsys, "")
+    folder = root / ".sdlc" / "work" / NAME
+    (folder / "runs").mkdir()
+    (folder / "runs" / "approver.sessions").write_text("s-a\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "DECISION: READY\n\nStill fine.")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "approver", None)
+    assert code == 0, out
+    told = claude()[-1]["argv"][1]
+    assert "may not carry to the landing: D1: no `- CONFIRM:` line" in told, told
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["way"], out["mend"]) == ("stop", "rerun", []), out
+
+
+def test_confirm_on_an_escalate_still_needs_deciding(tmp_path, capsys) -> None:
+    """202 R5: on an ESCALATE a CONFIRMed default is an open default to decide, as before: the
+    run is done, `ask` lists it, and core's needs still confirm it at /sdlc-factory:decide."""
+    root = _carried(tmp_path, capsys, "- CONFIRM: D1: 50 a page\n",
+                    head="DECISION: ESCALATE")  # fmt: skip
+    out = _verdicts(root, capsys)
+    assert (out["next"], out["problems"], out["assumed"]) == ("done", [], ["D1"]), out
+    folder = root / ".sdlc" / "work" / NAME
+    found = sdlc.factory_records.reading(folder)
+    rec = {"id": "008", "stage": "test", "problems": []}
+    rec |= {k: found[k] for k in ("decision", "assumed", "ledger_lines")}
+    rec["needs"] = sdlc.needs_of(rec)
+    assert rec["needs"] == ["confirm 1 default"], rec
+    assert sdlc.decide_step(rec) == "/sdlc-factory:decide 008"
+
+
+@pytest.mark.parametrize("answer", ["kept", "changed"])
+def test_decide_answers_a_ready_changes_carried_defaults(tmp_path, capsys, answer) -> None:
+    """202 R10: `ask` lists a READY change's carried default with the approver's CONFIRM reason
+    (`confirm`), never as escalated; the kept default answered means ship, any other rebuild,
+    then `/sdlc:ship`."""
+    root = _carried(tmp_path, capsys, "- CONFIRM: D1: 50 a page; the landing's yes is enough\n")
+    intent = root / ".sdlc" / "work" / NAME / "intent.md"
+    intent.write_text(intent.read_text().replace("stage: design", "stage: test"))
+    code, out = _run(capsys, factory.cmd_ask, root, "008", None)
+    assert code == 0 and out["decision"] == "READY", out
+    [item] = out["items"]
+    assert (item["id"], item["escalated"]) == ("D1", None), item
+    assert item["confirm"] == "50 a page; the landing's yes is enough", item
+    words = factory.KEPT_ANSWER if answer == "kept" else "100 a page"
+    path = root / ".sdlc" / "work" / NAME / "decisions.md"
+    path.write_text(path.read_text().replace("- [ ] D1", "- [x] D1").replace(
+        "at 50?", f"at 50? → decided: {words}"))  # fmt: skip
+    code, out = _run(capsys, factory.cmd_ask, root, "008", "D1")
+    assert code == 0, out
+    if answer == "kept":
+        assert out["next"] == "ship", out
+    else:
+        assert (out["next"], out["then"]) == ("rebuild", "/sdlc:ship 008"), out
+
+
 # ---------------------------------------------------------------- what the person decides (ask)
 
 
@@ -504,10 +646,10 @@ def test_ask_lists_open_items_with_their_background_and_writes_nothing(tmp_path,
              {"option": "100", "notes": "fewer pages; a slower first paint"},
          ],
          "why": "the spec's list view shows 50",
-         "escalated": "the page size is the product's call"},
+         "escalated": "the page size is the product's call", "confirm": None},
         {"id": "D3", "kind": "blocking", "source": "security round 1",
          "reply": "reviews/round-1/security.md", "question": "Keep drafts 30 days?",
-         "options": [], "why": None, "escalated": None},
+         "options": [], "why": None, "escalated": None, "confirm": None},
     ]  # fmt: skip
     assert out["settled"] == [
         {
@@ -1337,7 +1479,7 @@ def test_ask_lists_look_items_and_the_gate(tmp_path, capsys) -> None:
     assert out["items"] == [{
         "id": "D1", "kind": "look", "source": "approver round 1", "reply": "decision.md",
         "question": "the drafts page reads oddly at phone width", "options": [], "why": None,
-        "escalated": None,
+        "escalated": None, "confirm": None,
     }]  # fmt: skip
     assert out["gate"] == {
         "reasons": [{"text": "tests/test_nothing_local.py fails on the behaviour record",
