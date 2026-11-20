@@ -519,13 +519,6 @@ Cost: S
 Value: low
 Raised by: 197-moved-files-after-staging (correctness)
 
-## [2026-11-20-31] [idea] Confirm a real two-question retro transcript lists the approval first
-
-Left undone by 190-retro-rating, carried forward when it landed: Before ship (spec, *Contracts touched*): read one real `/sdlc:retro` transcript with the two-question dialog and confirm `toolUseResult.answers` lists the approval first, so `metrics._answers()[0]` is the approval. R11 pins the shape `_answers()` reads, not the harness.
-See .sdlc/work/190-retro-rating/notes.md in its commit.
-Raised 2026-11-20.
-Theme: retro
-
 ## [2026-11-20-32] [nit] `_experience_text` does `table = _table(..., [[..., rating, before, ...]])`.
 
 Raised by the code review of 190-retro-rating, round 1: scripts/retro.py:2425: `_experience_text` does `table = _table(..., [[..., rating, before, ...]])`. A `None` rating relies on `_table` rendering it as `—`. A test pins this, but the `—` spelling is implicit.
