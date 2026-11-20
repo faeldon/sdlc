@@ -439,22 +439,6 @@ docs/RETRO-SCORECARD.md's seeds.
 Theme: retro
 Raised 2026-11-20.
 
-## [2026-11-20-14] [bug] The landing's resolve crashes on a modify/delete conflict
-
-When a train stacks a change that deletes a file an earlier change in the train edited (or the
-other way round), git stops the rebase with a modify/delete conflict (`UD`/`DU`). The train names
-`resolve`, but `factory.py` raises `FileNotFoundError` on the deleted path before the resolver
-agent starts. The loop stops there, with the change mid-rebase. Expected: the resolver is handed
-the conflict like any other: which side deleted the file, what the other side changed, and where
-that content now lives, so it can carry the edit across. To see it: on 2026-11-20, 193 added tests
-to `tests/test_factory.py` and 194 deleted that file to split it; landing 193 then 194 stopped at
-`resolve 194` with `FileNotFoundError: .../tests/test_factory.py`.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
-Introduced by: 139-landing-train
-Theme: factory
-
 ## [2026-11-20-15] [idea] Give the workarounds' `unknown` block its `n`, as `_workarounds()`'s docstring says
 
 Left undone by 191-tests-paydown, carried forward when it landed: `retro.py`'s workarounds block gives `unknown` a `count` and `rows` but no `n`, though `_workarounds()`'s docstring says "each count carries its `n`" (nit 2026-11-19-56). That is a code change, and this change is tests-only, so its test pins the row's `change` key and leaves `n` alone.
@@ -476,26 +460,6 @@ Raised by: 191-tests-paydown (correctness)
 Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
 See .sdlc/work/193-ledger-and-landing-fixes/notes.md in its commit.
 Raised 2026-11-20.
-
-## [2026-11-20-8] [nit] `by_alts` is built from every ledger entry with options.
-
-Raised by the code review of 193-ledger-and-landing-fixes, round 1: plugins/factory/scripts/factory.py:2018: `by_alts` is built from every ledger entry with options. The match relies on options and why being identical, so a very short shared option list could merge two real decisions. D1 already accepts this trade-off.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 193-ledger-and-landing-fixes (correctness)
-
-## [2026-11-20-9] [nit] the threshold `len(name) >= 5` counts the leading `--`, while the comment above `GREP_FOLLOWS_LONG` says "three or more characters after its `--`".
-
-Raised by the security review of 193-ledger-and-landing-fixes, round 1: plugins/factory/scripts/landing.py:883: the threshold `len(name) >= 5` counts the leading `--`, while the comment above `GREP_FOLLOWS_LONG` says "three or more characters after its `--`". Writing it as `len(name) - 2 >= 3`, or naming the constant, would make the two read the same.
-
-Theme: style
-Paths: plugins/factory/scripts/landing.py
-Cost: S
-Value: low
-Raised by: 193-ledger-and-landing-fixes (contract)
 
 ## [2026-11-20-10] [nit] the third test chains its cases in one body, so a failure in the first assertion hides the later cases
 
@@ -533,24 +497,48 @@ Cost: S
 Value: low
 Raised by: 195-designing-while-specified (correctness)
 
-## [2026-11-20-17] [bug] A read whose output starts with "## " is flagged as missing its exit
-
-`read_evidence()` in plugins/factory/scripts/factory.py ends a reply's `## Evidence` section at the
-first line starting with `## `. A read that prints Markdown, such as a report or a doc, whose
-first output line is a `## ` heading, therefore ends the section on its own output. The read is
-then counted as having printed nothing, and is flagged "has no `exit:` line", though `is_read()`
-accepts it. It costs a mend, and a second one stops the run. Expected: only a heading outside a
-command's output ends the section, so a read that showed its output owes no exit. To see it:
-189's builder ran `sed -n '/^## Insights/,/^## Speed/p' /tmp/rep189.md`, whose output begins
-`## Insights`, and the run stopped at its second mend on 2026-11-20.
-
-Severity: med
-Paths: plugins/factory/scripts/factory.py
-Introduced by: 123-evidence-reads
-Theme: factory
-
 ## [2026-11-20-18] [idea] Narrow retro's tests.drifted to a test's own code and skip exact goldens
 
 Left undone by 192-tests-pruning, carried forward when it landed: Retro's `tests.drifted` takes a test's code to be every code file its last change touched, so a test edited beside `sdlc.py` or `retro.py` drifts for good (`test_metrics.py`, `test_function_heat.py`), and an exact golden (`close-output.json`, `land-fix.txt`, `land-record-cases.json`) is named though it can't drift silently. A narrower notion of a test's code (the files it loads, or a host's list of goldens) would make the list worth acting on.
 See .sdlc/work/192-tests-pruning/notes.md in its commit.
 Raised 2026-11-20.
+
+## [2026-11-20-19] [nit] a read that printed output and then hits a blank line and a `## Notes` heading with no `exit:` keeps the section open.
+
+Raised by the code review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/factory.py:1586: a read that printed output and then hits a blank line and a `## Notes` heading with no `exit:` keeps the section open. Any later `$ ` line in that report is then counted as an evidence command. This is a deliberate trade-off and the docstring says so, but a test pinning that case would make it explicit.
+
+Theme: tests
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 196-evidence-and-deleted-conflicts (correctness)
+
+## [2026-11-20-20] [nit] restrict the missing-file pass to `deleted_sides()` paths so a `UU` file can't silently become a staged deletion
+
+Raised by the security review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/landing.py:2827: restrict the missing-file pass to `deleted_sides()` paths so a `UU` file can't silently become a staged deletion
+
+Theme: robustness
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: med
+Raised by: 196-evidence-and-deleted-conflicts (contract)
+
+## [2026-11-20-21] [nit] the docstring says a command that owes its `exit:` "never finds it in a later section", but a heading with no blank line before it doesn't end the section
+
+Raised by the security review of 196-evidence-and-deleted-conflicts, round 1: plugins/factory/scripts/factory.py:1569: the docstring says a command that owes its `exit:` "never finds it in a later section", but a heading with no blank line before it doesn't end the section
+
+Theme: docs
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 196-evidence-and-deleted-conflicts (contract)
+
+## [2026-11-20-22] [nit] a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
+
+Raised by the test review of 196-evidence-and-deleted-conflicts, round 1: tests/test_evidence_headings.py:1: a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
+
+Theme: tests
+Paths: tests/test_evidence_headings.py
+Cost: S
+Value: low
+Raised by: 196-evidence-and-deleted-conflicts (correctness)
