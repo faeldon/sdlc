@@ -113,17 +113,6 @@ See .sdlc/work/152-board-drawer-browser-test/notes.md in its commit.
 Theme: ci
 Raised 2026-11-18.
 
-## [2026-11-18-90] [idea] A pruning pass over the tests that drifted
-
-Retro's `tests.drifted` names ten test files whose code moved without them over the last 30 changes:
-- the board fixture `012-draft-publish` (seven files), last touched by 133, while `factory.py`, `board.py` and `board.html` changed in 17 later changes;
-- `tests/test_config_resolution.py` and `tests/test_indicators.py`, last touched by 130, with 17 later changes;
-- `tests/test_adoption.py`, last touched by 134, with 16 later changes.
-
-A later change looks at each one again (merge, rewrite, move or delete it), and its review decides. There are no run times to weigh, because `retro.test_times` is unset.
-Theme: tests
-Raised by the retrospective of 2026-11-18.
-
 ## [2026-11-18-99] [idea] Clear the eval workspaces left in /tmp by earlier case runs
 
 Left undone by 156-cases-that-tell, carried forward when it landed: 26 `e-*` workspaces from earlier case runs sit in `/private/tmp` (made before runs removed their own); a one-off `run-cases --prune` or a line in CONTRIBUTING could clear them, behind the same `_workspace_of()` guard
@@ -559,3 +548,9 @@ Severity: med
 Paths: plugins/factory/scripts/factory.py
 Introduced by: 123-evidence-reads
 Theme: factory
+
+## [2026-11-20-18] [idea] Narrow retro's tests.drifted to a test's own code and skip exact goldens
+
+Left undone by 192-tests-pruning, carried forward when it landed: Retro's `tests.drifted` takes a test's code to be every code file its last change touched, so a test edited beside `sdlc.py` or `retro.py` drifts for good (`test_metrics.py`, `test_function_heat.py`), and an exact golden (`close-output.json`, `land-fix.txt`, `land-record-cases.json`) is named though it can't drift silently. A narrower notion of a test's code (the files it loads, or a host's list of goldens) would make the list worth acting on.
+See .sdlc/work/192-tests-pruning/notes.md in its commit.
+Raised 2026-11-20.
