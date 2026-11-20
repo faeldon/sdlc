@@ -77,8 +77,9 @@ after two releases or one major; the skills that file seeds run whenever somethi
 flowchart TD
   history["history since the last Retrospective commit: Close and Drop commits, releases, trailers"] --> retro
   retro["/sdlc:retro<br/>calls: config, retro, next-entry, retro-commit<br/>five passes: cost, architecture, process, product, direction"]
-  retro --> wretro["WAIT: /sdlc:retro"]
-  wretro --> written["writes: the direction doc, the product doc's outcomes, seeds, the report; one Retrospective commit"]
+  retro --> insights["retro --insights<br/>one sdlc:insight agent per synthesis question, all at once"]
+  insights --> wretro["WAIT: /sdlc:retro"]
+  wretro --> written["writes: the direction doc, the product doc's outcomes, seeds, the insights draft, the report with its Insights; one Retrospective commit, never the draft"]
   health["/sdlc:health<br/>calls: config, vet<br/>tiers each finding"] --> idea
   idea["/sdlc:idea<br/>calls: config, status, next-entry, inbox-commit"] --> widea["WAIT: /sdlc:idea"]
   bug["/sdlc:bug<br/>calls: config, bugs, next-entry, inbox-commit"] --> wbug["WAIT: /sdlc:bug"]

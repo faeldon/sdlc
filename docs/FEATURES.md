@@ -200,3 +200,5 @@ graph LR
 - **`lead time`**: how long changes took from opened to close, by part. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Lead`.
 - **`stops`**: the window's stops against the gates its changes owed. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Totals`.
 - **`prose`**: each skill's size, what every session that runs it reads. Specified: `scripts/retro.py`. Depends on: `/sdlc:retro`.
+- **`insights`**: the report's answers to the synthesis questions, one per pillar from `guide/insights.md` and any the host's `docs.insights` adds, each from that pillar's figures alone (`sdlc.py retro --insights`), in the one shape `retro-commit` reads. Specified: `guide/insights.md`. Depends on: `retro`, `sdlc:insight`.
+- **`sdlc:insight`**: the read-only agent `/sdlc:retro` spawns once per synthesis question, given that question's figures and nothing of the session's reasoning. Specified: `agents/insight.md`. Depends on: `/sdlc:retro`.

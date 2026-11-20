@@ -1013,6 +1013,8 @@ def _autonomy(home: Path, changes: list[dict]) -> tuple[dict, list[str]]:
             "look": looked,
             "per_change": _share(asked, n),
             "n": n,
+            # A hand-built change asks the person nothing the records count (189 R11).
+            "missing_because": {"built by hand": len(changes) - n} if len(changes) > n else {},
         },
         "kept_default": {
             "kept": get("defaults", "kept"),
@@ -1502,6 +1504,10 @@ def process_views(
         # A window the factory built nothing in has no landing to catch anything: no figure.
         "landing_catches": bugs.get("landing_catches") if factory else None,
         "cycle": None, "time": None, "wip": None, "capacity": None,
+        # Each tier's reach for the person's minutes, over all its changes, measured or not, so a
+        # null median says why even when `time` is None (189 R11).
+        "response": {tier: _coverage(rows, _minutes_measured, _minutes_why)
+                     for tier, rows in by_tier(changes).items()},
         "lead": lead_view(changes),
         "underneath": underneath(changes, previous),
     }  # fmt: skip
@@ -1601,7 +1607,13 @@ def by_way(
         }  # fmt: skip
 
     rate = ((bugs.get("rate") or {}).get("window") or {}).get("by_way") or {}
-    none = {"escapes": 0, "changes": 0, "rate": None}
+
+    def escapes(way: str) -> dict:
+        got = rate.get(way) or {"escapes": 0, "changes": 0, "rate": None}
+        # A way with no change has no rate, and says so (189 R11).
+        why = {} if got["changes"] else {f"no {way} change in the window": 0}
+        return {**got, "missing_because": why}
+
     return {
         "changes": {way: len(of[way]) for way in WAYS},
         "lead": {way: (lead.get("ways") or {}).get(way) for way in WAYS},
@@ -1615,7 +1627,7 @@ def by_way(
             for way in WAYS
         },  # fmt: skip
         "cost": {way: cost(way) for way in WAYS},
-        "escapes": {way: rate.get(way, none) for way in WAYS},
+        "escapes": {way: escapes(way) for way in WAYS},
     }
 
 
@@ -1626,6 +1638,12 @@ RETROS = "retros"
 def report_rel(today: date) -> str:
     """The report `retro-commit` writes for `today`, as a repo path."""
     return f"{sdlc.HOST_DIR}/{RETROS}/{today.isoformat()}.md"
+
+
+def insights_rel(today: date) -> str:
+    """The insights draft the retro skill writes for `today` after its yes, which `retro-commit`
+    renders into the report and removes, never commits (189 R6)."""
+    return f"{sdlc.HOST_DIR}/{RETROS}/{today.isoformat()}.insights.md"
 
 
 def _hm(minutes: float | None) -> str:
@@ -2219,36 +2237,33 @@ def _simplicity_text(workarounds: dict | None, shown: dict | None) -> str:
 
 def render_report(
     template: str,
-    process: dict,
-    spend: dict | None = None,
-    value: dict | None = None,
-    metrics: dict | None = None,
-    cost: dict | None = None,
-    indicators: list[dict] | None = None,
-    ways: dict | None = None,
+    figures: dict,
     *,
-    autonomy: dict | None = None,
-    pipeline: dict | None = None,
-    workarounds: dict | None = None,
-    surface: dict | None = None,
-    card: dict | None = None,
+    indicators: list[dict] | None = None,
+    insights: list[dict] | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
-    "not measured" where close measured none of the window's changes. `spend` is `_spend()`'s
-    block, "not counted" without it. `value` is `value_band()`'s, its sentences after the
-    window's paragraph; nothing is added without it. `metrics` is `metrics_summary()`'s, whose
-    coverage line says "not given" without it, as `cost`'s (`_cost()`) two do. The coverage lines
-    follow the window's sentence, in `{{window}}`. `indicators` is `_indicator_rows()`'s, and with
-    none `{{indicators}}` says no indicators are set. `ways` is `by_way()`'s, its table ending
-    `{{window}}`; nothing is added without it.
+    "not measured" where close measured none of the window's changes. `figures` is
+    `report_figures()`'s dict (189 R10): it must hold `process`, and any other key it lacks reads
+    as None. Its `spend` is `_spend()`'s block, "not counted" without it. `value` is
+    `value_band()`'s, its sentences after the window's paragraph; nothing is added without it.
+    `metrics` is `metrics_summary()`'s, whose coverage line says "not given" without it, as
+    `cost`'s (`_cost()`) two do. The coverage lines follow the window's sentence, in `{{window}}`.
+    `indicators` is `_indicator_rows()`'s, and with none `{{indicators}}` says no indicators are
+    set. `by_way` is `by_way()`'s, its table ending `{{window}}`; nothing is added without it.
+    `insights` is `insight_answers()`'s, and with none `{{insights}}` says they weren't answered.
 
     A template with `{{scorecard}}` (184) gets the scorecard there instead (`_scorecard_text()`,
-    `card` being `scorecard()`'s), `{{window}}` is the window's sentence alone, and each pillar's
-    section is built from the same parts the old placeholders get: `{{speed}}` (cycle, throughput,
-    time, capacity, the by-way table and the pipeline's landing), `{{quality}}` (escapes, rework,
-    the pipeline's red gates), `{{autonomy}}`, `{{cost}}` and `{{simplicity}}` (`surface` only in
-    the plugin's own repo). One without it renders as before, so each figure appears once either
-    way."""
+    `scorecard` being `scorecard()`'s), `{{window}}` is the window's sentence alone, and each
+    pillar's section is built from the same parts the old placeholders get: `{{speed}}` (cycle,
+    throughput, time, capacity, the by-way table and the pipeline's landing), `{{quality}}`
+    (escapes, rework, the pipeline's red gates), `{{autonomy}}`, `{{cost}}` and `{{simplicity}}`
+    (`surface` only in the plugin's own repo). One without it renders as before, so each figure
+    appears once either way."""
+    process = figures["process"]
+    spend, value, metrics, cost = (figures.get(k) for k in ("spend", "value", "metrics", "cost"))
+    ways, autonomy, pipeline = (figures.get(k) for k in ("by_way", "autonomy", "pipeline"))
+    workarounds, surface, card = (figures.get(k) for k in ("workarounds", "surface", "scorecard"))
     w = process["window"]
     unmeasured = f"Not measured: none of the {w['closed']} changes closed has its numbers."
     tiers = ", ".join(f"tier {t}: {n}" for t, n in w["tiers"].items()) or "none"
@@ -2279,6 +2294,7 @@ def render_report(
         "cycle": unmeasured, "time": unmeasured, "capacity": unmeasured,
         "spend": _spend_text(spend, w["closed"]),
         "indicators": _indicators_text(indicators),
+        "insights": _insights_text(insights),
     }  # fmt: skip
     scored = "{{scorecard}}" in template
     if not scored:
@@ -2344,6 +2360,26 @@ def render_report(
     return template
 
 
+NOT_ANSWERED = "Not answered: this report was written without the retrospective's insights."
+
+
+def _insights_text(answers: list[dict] | None) -> str:
+    """`## Insights` (189 R7): each answer as `### <title>: <headline>`, its question in italics,
+    then its Evidence, Recommendation and Disposition as bullets; `NOT_ANSWERED` with none, never
+    an empty section."""
+    if not answers:
+        return NOT_ANSWERED
+    parts = []
+    for a in answers:
+        question = " ".join(a["question"].split())
+        bullets = "\n".join(
+            f"- {field}: {' '.join(a[field.lower()].split())}" for field in INSIGHT_FIELDS[1:]
+        )
+        parts.append(f"### {a['title']}: {' '.join(a['headline'].split())}\n\n*{question}*\n\n"
+                     + bullets)  # fmt: skip
+    return "\n\n".join(parts)
+
+
 # ---------------------------------------------------------------- the scorecard (184)
 
 # The pillar table's header line, which the next retrospective reads back (`_last_rows()`).
@@ -2379,12 +2415,17 @@ def _trend(value, n: int, last: tuple | None) -> str:
         return "unknown"
     if min(n, last[1]) < RATE_MIN_CHANGES:
         return "unknown"
-    return "up" if value > last[0] else "down" if value < last[0] else "flat"
+    # The value as the table writes it and the next retrospective reads it (nit 2026-11-19-65).
+    shown = indicators._parsed(_num(value))
+    if shown is None:
+        return "unknown"
+    return "up" if shown > last[0] else "down" if shown < last[0] else "flat"
 
 
-def _minutes(value) -> int | None:
-    """A median in minutes as the table writes it: a whole number, so it reads back the same."""
-    return None if value is None else round(value)
+def _minutes(value) -> float | None:
+    """A median in minutes as the table writes it: to one decimal place, so a short response isn't
+    flattened to a whole minute (nit 2026-11-19-66), and it reads back the same."""
+    return None if value is None else round(value, 1)
 
 
 def scorecard(
@@ -2424,14 +2465,15 @@ def scorecard(
         said = f"Median response, tier {tier}" if tier else "Median response"
         timed = ((process.get("time") or {}).get("tiers") or {}).get(tier) or {}
         n = ((process.get("cycle") or {}).get(tier) or {}).get("n", 0)
-        add("Autonomy", "headline", said, "minutes", _minutes(timed.get("response")), n)
+        reach = (process.get("response") or {}).get(tier)
+        add("Autonomy", "headline", said, "minutes", _minutes(timed.get("response")), n, reach)
     asked = autonomy["asked"]
     add("Autonomy", "headline", "Questions answered per factory change", "per change",
-        asked["per_change"], asked["n"])  # fmt: skip
+        asked["per_change"], asked["n"], asked)  # fmt: skip
     for way, said in CARD_WAYS.items():
         got = ways["escapes"][way]
         add("Autonomy", "guardrail", f"Escape rate, {said}", "per change", got["rate"],
-            got["changes"])  # fmt: skip
+            got["changes"], got)  # fmt: skip
     for tier in tiers or [None]:
         said = "Median dollars per landed change" + (f", tier {tier}" if tier else "")
         got = cost["per_change"].get(tier) or {"n": 0, "usd": {"median": None}}
@@ -2446,7 +2488,7 @@ def scorecard(
         ("restored", "Register entries restored", "entries"),
     ):
         got = workarounds[kind]
-        add("Simplicity", "headline", said, unit, got["count"], got["n"])
+        add("Simplicity", "headline", said, unit, got["count"], got["n"], got)
     return {"rows": rows, "since": w["since"]}
 
 
@@ -2502,19 +2544,16 @@ def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict
     }  # fmt: skip
 
 
-def retro_report(home: Path, cfg: dict, today: date) -> str:
+def retro_report(home: Path, cfg: dict, today: date, insights: list[dict] | None = None) -> str:
     """The report for the window since the last retrospective: `report_figures()`, without the
     product pass, the rest of the architecture or the prose, and the plugin's surface only in its
     own repo; and the host's `retro.indicators`, run through `_evidence()` as the architecture pass
-    runs them, the only host command it runs."""
+    runs them, the only host command it runs. `insights` are the answers `{{insights}}` renders
+    (`insight_answers()`'s)."""
     f = report_figures(home, cfg, today, surface=sdlc._own_repo(home))
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
     host = _indicator_rows(home, f["since"], _evidence(home, cfg["retro"]["indicators"]))
-    return render_report(
-        template, f["process"], f["spend"], f["value"], f["metrics"], f["cost"], host,
-        f["by_way"], autonomy=f["autonomy"], pipeline=f["pipeline"],
-        workarounds=f["workarounds"], surface=f["surface"], card=f["scorecard"],
-    )  # fmt: skip
+    return render_report(template, f, indicators=host, insights=insights)
 
 
 # ---------------------------------------------------------------- the surface: what is used
@@ -3069,6 +3108,10 @@ def _log_blocks(home: Path, *args: str) -> list[tuple[str, str, str, str]]:
     return found
 
 
+# Why `restored` is null: nothing was added that could have been restored (189 R11).
+NO_ENTRY_ADDED = {"no register entry added in the window": 0}
+
+
 def _restored(home: Path, trunk: str, window: set[str]) -> dict:
     """The entries the register gained in the window that it held before (R3): every first-parent
     commit to the tip, read in order, keeps the ids the register holds and has ever held; an id a
@@ -3094,7 +3137,8 @@ def _restored(home: Path, trunk: str, window: set[str]) -> dict:
             ]
         held = (held - removed) | added
         ever |= added
-    return {"count": len(rows) if gained else None, "n": gained, "rows": rows}
+    return {"count": len(rows) if gained else None, "n": gained, "rows": rows,
+            "missing_because": {} if gained else dict(NO_ENTRY_ADDED)}  # fmt: skip
 
 
 def _overrides(home: Path, changes: list[dict], dropped: list[dict]) -> dict:
@@ -3185,12 +3229,17 @@ def _workarounds(
         else:
             rows["outside"].append(row)
     n = len(commits)
+    # Why a count is null (189 R11): with no commit, nothing could be outside the loop.
+    no_commit = {} if n else {"no commit on the base branch in the window": 0}
     block = {
-        kind: {"count": len(rows[kind]) if n else None, "n": n, "rows": rows[kind]}
+        kind: {"count": len(rows[kind]) if n else None, "n": n, "rows": rows[kind],
+               "missing_because": no_commit}
         for kind in ("outside", "hand_record")
-    }
+    }  # fmt: skip
     block["restored"] = (
-        _restored(home, trunk, set(line)) if trunk else {"count": None, "n": 0, "rows": []}
+        _restored(home, trunk, set(line))
+        if trunk
+        else {"count": None, "n": 0, "rows": [], "missing_because": dict(NO_ENTRY_ADDED)}
     )
     block["unknown"] = {"count": len(rows["unknown"]), "rows": rows["unknown"]}
     block["overrides"] = _overrides(home, changes, dropped)
@@ -3847,16 +3896,206 @@ def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
     }
 
 
-def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
-    """The retrospective's counts as JSON, each change's measured numbers only with `metrics`
-    (their medians are always there), or with `report` the report `retro-commit` would write, as
-    Markdown. Writes nothing, and reads nothing outside the repo."""
-    home = sdlc.main_root(root)
-    cfg, _, parsed = sdlc.load_config(home)
-    if report:
-        print(retro_report(home, cfg, date.today()), end="")
-        return 0 if parsed else 1
-    out = retro(home, cfg)
+# ---------------------------------------------------------------- the insights (189)
+
+# The pillars the synthesis questions are asked on, in the guide's order (`guide/insights.md`).
+INSIGHT_PILLARS = ("Value", "Speed", "Quality", "Autonomy", "Cost", "Simplicity", "Tradeoffs")
+# The one answer shape, fixed here, never by a guide a host could reword: `agents/insight.md`
+# returns it, the skill writes it to the draft, `insight_answers()` reads it back.
+INSIGHT_FIELDS = ("Headline", "Evidence", "Recommendation", "Disposition")
+# A Disposition's kinds: `seed <entry id>`, `intent: <title>`, `dropped: <reason>`, `none: <why>`.
+INSIGHT_KINDS = ("seed", "intent", "dropped", "none")
+# The paths in `retro()`'s output each pillar's question is given, and nothing else (189 R3): every
+# bundle also gets its pillar's scorecard rows (Tradeoffs all of them), `process.window` and
+# `process.underneath`. None names `product.evidence`, `architecture.host` or `tests`: a host
+# command's output never reaches an agent (R4). `surface` is the plugin's own repo's alone.
+INSIGHT_DATA: dict[str, tuple[str, ...]] = {
+    "Value": ("work_mix", "time_to_users", "follow_through", "direction.milestones"),
+    "Speed": (
+        "process.cycle", "process.lead", "process.throughput", "process.time", "process.wip",
+        "process.capacity", "by_way", "pipeline.gates", "pipeline.landing",
+    ),
+    "Quality": (
+        "process.escapes", "process.rework", "process.review_sources", "rework_questions", "bugs",
+        "pipeline.red_gate", "pipeline.depth", "pipeline.unreviewed", "architecture", "nits",
+    ),
+    "Autonomy": ("autonomy", "process.response", "metrics.extra", "metrics.prompts"),
+    "Cost": (
+        "cost", "spend", "metrics.groups", "metrics.captured", "metrics.uncaptured",
+        "metrics.coverage", "metrics.missing_because",
+    ),
+    "Simplicity": ("simplicity.workarounds", "surface", "prose"),
+    "Tradeoffs": ("work_mix", "time_to_users", "follow_through"),
+}  # fmt: skip
+# Under a path a bundle names, what it never carries: the host's indicator rows.
+INSIGHT_LEFT_OUT = ("architecture.host",)
+# The host commands `retro --insights` empties before it counts, so none of them runs (R4).
+HOST_COMMANDS = ("evidence", "indicators", "test_times")
+
+
+def _question_blocks(text: str) -> list[tuple[str | None, int, str, str]]:
+    """A question doc's heading blocks, in order, from `doc_units()`: each as `(the ## title above
+    it, None for a ## itself; its level; its title; its text)`, a `- **lead**` bullet's block
+    folded into the heading block above it."""
+    out: list[list] = []
+    top: str | None = None
+    for key, block in sdlc.doc_units(text):
+        if key == "#":
+            continue
+        first, _, rest = block.partition("\n")
+        m = sdlc.HEADING_RE.match(first)
+        if not m:  # a bullet's block, which belongs to the heading above it
+            if out:
+                out[-1][3] += "\n" + block
+            continue
+        level, title = len(m.group(1)), first[m.end() :].strip()
+        if level == 2:
+            top = title
+        out.append([None if level == 2 else top, level, title, rest])
+    return [(a, b, c, d.strip()) for a, b, c, d in out]
+
+
+def insight_questions(home: Path, cfg: dict) -> tuple[list[dict], list[str]]:
+    """The synthesis questions this retrospective asks (189 R2), each with its `title`, `pillar`
+    and `question`, in the guide's pillar order, and what is wrong with the repo's doc. The guide's
+    `##` per pillar comes first; then the repo's `[docs] insights`, block by block: a pillar's
+    `##` holding text replaces its question, one without only places what follows, a `###` under a
+    pillar's `##` adds a question on that pillar's figures, and any other `##` (or a `###` under
+    one) adds one on the tradeoffs'. A second question with a title already asked is a problem,
+    and dropped."""
+    guide = (sdlc.GUIDE_DIR / sdlc.GUIDES["insights"]).read_text(encoding="utf-8")
+    asked = {p: [{"title": p, "pillar": p, "question": ""}] for p in INSIGHT_PILLARS}
+    for _, level, title, text in _question_blocks(guide):
+        if level == 2 and title in asked:
+            asked[title][0]["question"] = text
+    rel = cfg["docs"].get("insights")
+    path = home / rel if rel else None
+    problems: list[str] = []
+    seen = set(INSIGHT_PILLARS)
+    if path and path.is_file():
+        for top, level, title, text in _question_blocks(path.read_text(encoding="utf-8")):
+            if level == 2 and title in INSIGHT_PILLARS:
+                if text:
+                    asked[title][0]["question"] = text
+                continue
+            if not text:
+                continue  # a heading alone only places what follows
+            if title in seen:
+                problems.append(f"{rel}: the question {title!r} is asked twice; the second is "
+                                "dropped")  # fmt: skip
+                continue
+            seen.add(title)
+            pillar = top if level > 2 and top in INSIGHT_PILLARS else "Tradeoffs"
+            asked[pillar].append({"title": title, "pillar": pillar, "question": text})
+    return [q for p in INSIGHT_PILLARS for q in asked[p]], problems
+
+
+def _pick(out: dict, path: str) -> tuple[bool, object]:
+    """`out`'s value at a dotted `path`, and whether it is there."""
+    node: object = out
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
+def _put(into: dict, path: str, value: object) -> None:
+    """Set `into`'s value at a dotted `path`, making the dicts above it."""
+    *parents, last = path.split(".")
+    for part in parents:
+        into = into.setdefault(part, {})
+    into[last] = value
+
+
+def insight_bundles(out: dict, questions: list[dict], own: bool) -> list[dict]:
+    """Each question with its `data`: the paths of `retro()`'s (lean) output `INSIGHT_DATA` names
+    for its pillar, less `INSIGHT_LEFT_OUT`, its pillar's scorecard rows (every row for
+    Tradeoffs), and `process.window` and `process.underneath`. `surface` only when `own`, the
+    plugin's own repo. Pure."""
+    rows = (out.get("scorecard") or {}).get("rows") or []
+    bundles = []
+    for q in questions:
+        data: dict = {}
+        for path in ("process.window", "process.underneath", *INSIGHT_DATA[q["pillar"]]):
+            found, value = _pick(out, path)
+            if not found or (path == "surface" and not own):
+                continue
+            # A copy without what is left out beneath it: `architecture` without its `host`.
+            drop = {
+                x.removeprefix(path + ".") for x in INSIGHT_LEFT_OUT if x.startswith(path + ".")
+            }
+            if drop and isinstance(value, dict):
+                value = {k: v for k, v in value.items() if k not in drop}
+            _put(data, path, value)
+        mine = [r for r in rows if q["pillar"] == "Tradeoffs" or r["pillar"] == q["pillar"]]
+        data["scorecard"] = {"rows": mine}
+        bundles.append({**q, "data": data})
+    return bundles
+
+
+FIELD_RE = re.compile(rf"^({'|'.join(INSIGHT_FIELDS)}):[ \t]*(.*)$")
+DISPOSITION_RE = re.compile(r"^(?:seed\s+(\S+)|(?:intent|dropped|none):\s*\S.*)$")
+
+
+def insight_answers(
+    text: str, questions: list[dict], register: set[str]
+) -> tuple[list[dict], list[str]]:
+    """The answers an insights draft holds (189 R6), in `questions`' order, and every problem with
+    it: a title no question has, one answered twice, a question not answered, a field missing or
+    empty, a Disposition of no known kind, or a `seed` naming no id in `register`. The draft is a
+    `## <title>` block per question, each field a `<Field>: ` line running to the next field's.
+    Pure."""
+    blocks: list[tuple[str, dict[str, list[str]]]] = []
+    field: list[str] | None = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            blocks.append((line[3:].strip(), {}))
+            field = None
+        elif blocks and (m := FIELD_RE.match(line)):
+            field = blocks[-1][1].setdefault(m.group(1), [])
+            field.append(m.group(2))
+        elif field is not None:
+            field.append(line)
+    known = {q["title"]: q for q in questions}
+    got: dict[str, dict] = {}
+    problems: list[str] = []
+    for title, fields in blocks:
+        if title not in known:
+            problems.append(f"insights: {title!r} is not a question this retrospective asks")
+            continue
+        if title in got:
+            problems.append(f"insights: {title!r} is answered twice")
+            continue
+        said = {f: " ".join(" ".join(fields.get(f, [])).split()) for f in INSIGHT_FIELDS}
+        problems += [f"insights: {title!r} has no {f}" for f in INSIGHT_FIELDS if not said[f]]
+        d = said["Disposition"]
+        if d and not (m := DISPOSITION_RE.match(d)):
+            problems.append(f"insights: {title!r}: Disposition {d!r} is none of seed <id>, "
+                            "intent: <title>, dropped: <reason>, none: <why>")  # fmt: skip
+        elif d and m.group(1) and m.group(1) not in register:
+            problems.append(f"insights: {title!r}: Disposition names seed {m.group(1)}, which the "
+                            "register doesn't hold")  # fmt: skip
+        got[title] = {**known[title], **{f.lower(): v for f, v in said.items()}}
+    problems += [f"insights: {t!r} is not answered" for t in known if t not in got]
+    return [got[t] for t in known if t in got], problems
+
+
+def _draft_answers(home: Path, cfg: dict, day: date) -> tuple[list[dict] | None, list[str]]:
+    """The answers in `day`'s insights draft, against this retrospective's questions and the
+    register as it stands; None, with no problem, when there is no draft."""
+    path = home / insights_rel(day)
+    if not path.is_file():
+        return None, []
+    questions, _ = insight_questions(home, cfg)
+    register = sdlc.register_path(sdlc.work_dir(home))
+    text = register.read_text(encoding="utf-8") if register.is_file() else ""
+    ids = {e["id"] for e in sdlc.parse_entries(text) if e["id"]}
+    return insight_answers(path.read_text(encoding="utf-8"), questions, ids)
+
+
+def _lean_out(out: dict, metrics: bool) -> dict:
+    """`retro()`'s output as `retro` prints it: each change's own numbers only with `metrics`."""
     out["changes"], out["dropped"] = (
         sdlc._lean(out["changes"], metrics),
         sdlc._lean(out["dropped"], metrics),
@@ -3868,6 +4107,42 @@ def cmd_retro(root: Path, metrics: bool = False, report: bool = False) -> int:
             out["spend"]["agents"] = {k: v for k, v in agents.items() if k != "changes"}
         out["cost"] = {k: v for k, v in out["cost"].items() if k != "changes"}
         out["pipeline"] = {k: v for k, v in out["pipeline"].items() if k != "changes"}
+    return out
+
+
+def retro_insights(home: Path, cfg: dict, today: date | None = None) -> dict:
+    """`retro --insights` (189 R3, R4): each question `insight_questions()` gives, with its
+    figures (`insight_bundles()`), and `problems`, the question doc's. The figures are `retro()`'s
+    with every host command list emptied, so none runs and no output of one is in a bundle.
+    Read-only."""
+    quiet = {**cfg, "retro": {**cfg["retro"], **{k: [] for k in HOST_COMMANDS}}}
+    out = _lean_out(retro(home, quiet, today), metrics=False)
+    out = json.loads(json.dumps(out, default=str))  # what an agent is shown, as `retro` prints it
+    questions, problems = insight_questions(home, cfg)
+    return {
+        "questions": insight_bundles(out, questions, sdlc._own_repo(home)),
+        "problems": problems,
+    }
+
+
+def cmd_retro(
+    root: Path, metrics: bool = False, report: bool = False, insights: bool = False
+) -> int:
+    """The retrospective's counts as JSON, each change's measured numbers only with `metrics`
+    (their medians are always there), or with `report` the report `retro-commit` would write, as
+    Markdown, or with `insights` each synthesis question and its figures (`retro_insights()`).
+    Writes nothing, and reads nothing outside the repo."""
+    home = sdlc.main_root(root)
+    cfg, _, parsed = sdlc.load_config(home)
+    if report:
+        # A draft there is previewed as `retro-commit` would render it; nothing is written.
+        answers, _ = _draft_answers(home, cfg, date.today())
+        print(retro_report(home, cfg, date.today(), answers), end="")
+        return 0 if parsed else 1
+    if insights:
+        print(json.dumps(retro_insights(home, cfg), indent=2, ensure_ascii=False))
+        return 0 if parsed else 1
+    out = _lean_out(retro(home, cfg), metrics)
     print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
     return 0 if parsed else 1
 
@@ -3901,8 +4176,10 @@ def register_drift(old: str, new: str) -> list[str]:
 def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     """Record a retrospective: one commit, `Retrospective YYYY-MM-DD`, holding the direction doc,
     the register, the product doc's outcomes, and the report it writes itself, and nothing else,
-    so main is never left dirty.
-    Every refusal is found before anything is written."""
+    so main is never left dirty. The day's insights draft (`insights_rel()`), when there is one, is
+    rendered into the report's `{{insights}}`, never committed, and removed once the commit is
+    made (189 R6).
+    Every refusal is found before anything is written, the draft's problems included."""
     home = sdlc.main_root(root)
     cfg, _, _ = sdlc.load_config(home)
     stamp = (today or date.today()).isoformat()
@@ -3944,6 +4221,9 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     report_at = report_rel(day)
     if (home / report_at).exists():
         refusals.append(f"{report_at} already exists: retro-commit writes the report itself")
+    # The insights draft is read, never committed: it leaves the list of what the commit takes.
+    draft_at = insights_rel(day)
+    changed = [p for p in changed if p != draft_at]
     stray = [p for p in changed if p not in allowed and p != report_at]
     if stray:
         refusals.append(
@@ -3981,11 +4261,13 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         refusals += register_drift(
             committed, path.read_text(encoding="utf-8") if path.is_file() else ""
         )
+    answers, problems = _draft_answers(home, cfg, day)
+    refusals += problems
     if refusals:
         return emit(1)
     path = home / report_at
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(retro_report(home, cfg, day), encoding="utf-8", newline="\n")
+    path.write_text(retro_report(home, cfg, day, answers), encoding="utf-8", newline="\n")
     changed = sorted({*changed, report_at})
     report["paths"] = changed
     for args in (["add", "--", *changed], ["commit", "-q", "-m", report["commit"], "--", *changed]):
@@ -3998,4 +4280,8 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
             return emit(1)
     report["done"].append("commit")
     report["sha"] = sdlc._git(home, "rev-parse", "--short", "HEAD")
+    # Only once the commit holds the report: a failed git step above leaves it for a rerun.
+    if answers is not None:
+        (home / draft_at).unlink(missing_ok=True)
+        report["done"].append("draft removed")
     return emit(0)

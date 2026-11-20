@@ -680,6 +680,7 @@ def test_retro_proposes_review_changes_as_seeds_and_never_writes_them() -> None:
         "Read",
         "Write",
         "Edit",
+        "Agent",
         'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)',
         'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro *)',
         'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit *)',
@@ -1101,7 +1102,7 @@ def test_sdlc_loads_nothing_from_plugins() -> None:
     sdlc = _manifest(ROOT)
     assert not {"skills", "agents", "commands", "hooks"} & set(sdlc), "a manifest key widens a scan"
     assert {p.name for p in (ROOT / "agents").iterdir()} == {
-        f"{name}.md" for name in ("reviewer", *SHIP_AGENTS)
+        f"{name}.md" for name in ("reviewer", "insight", *SHIP_AGENTS)
     }
     assert not (ROOT / "commands").exists()
     assert not (ROOT / "hooks").exists()
@@ -1967,3 +1968,38 @@ def test_setup_subjects_are_the_skills_own() -> None:
     for subject in sdlc.SETUP_SUBJECTS:
         tail = "<" if subject.endswith(" ") else '"'
         assert f'-m "{subject}{tail}' in text, subject
+
+
+def test_the_insight_agent_reads_and_returns_the_shape() -> None:
+    """189 R5: `sdlc:insight` reads and returns the one answer shape the script reads: its fields
+    and Disposition kinds are `retro.py`'s constants, and it has nothing that writes or runs."""
+    post = frontmatter.load(ROOT / "agents" / "insight.md")
+    assert post["name"] == "insight" and len(post["description"]) > 80
+    assert "Not for" in post["description"]
+    assert {t.strip() for t in str(post["tools"]).split(",")} == {"Read", "Grep", "Glob"}
+    retro = sdlc.retro
+    shape = post.content.split("```\n", 2)[1]
+    assert [ln.split(":", 1)[0] for ln in shape.splitlines() if ln] == list(retro.INSIGHT_FIELDS)
+    disposition = next(ln for ln in shape.splitlines() if ln.startswith("Disposition:"))
+    kinds = [k.strip().split(" ")[0].rstrip(":") for k in disposition.split(":", 1)[1].split("|")]
+    assert kinds == list(retro.INSIGHT_KINDS)
+    flat = " ".join(post.content.split())
+    assert "never writes, runs or commits anything" in flat
+    assert "Nothing to act on this window" in flat and "`n`" in flat
+
+
+def test_the_retro_insights_file_spawns_its_agent() -> None:
+    """189 R9: the side file cuts the figures with `retro --insights`, spawns `sdlc:insight` once
+    per question in one message with nothing of the session's reasoning, never drops an answer,
+    and folds each Disposition into Step 3; the WAIT names the insights, and Step 6 writes the
+    draft after the yes."""
+    text = " ".join((ROOT / "skills" / "retro" / "insights.md").read_text("utf-8").split())
+    assert "sdlc.py retro --insights" in text
+    assert 'subagent_type: "sdlc:insight"' in text and "in one message" in text
+    assert "Nothing of this session's reasoning" in text and "Never drop one" in text
+    assert "none: not answered, <why>" in text and "Step 3" in text
+    skill = frontmatter.load(ROOT / "skills" / "retro" / "SKILL.md")
+    assert "Agent" in skill["allowed-tools"] and "`insights.md`" in skill.content
+    steps = _steps("retro")
+    assert "with the report at <report> and its <Q> insights" in steps["5"]
+    assert "insights.md" in steps["4"] and ".sdlc/retros/<today>.insights.md" in steps["6"]

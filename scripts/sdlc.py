@@ -222,7 +222,7 @@ DEFAULTS_DIR = PLUGIN_DIR / "defaults"
 # The plugin's process and review guides, read in place and never copied: a host's doc holds only
 # its answers, each block standing in for the guide's of the same key or read after its parent's.
 GUIDE_DIR = PLUGIN_DIR / "guide"
-GUIDES = {"process": "process.md", "review": "review.md"}
+GUIDES = {"process": "process.md", "review": "review.md", "insights": "insights.md"}
 # The register's name, and the one it had before 1.2.0, which only readers of history still name.
 INBOX = "inbox.md"
 OLD_INBOX = "ideas.md"
@@ -268,6 +268,9 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # Who the product is for and the outcomes it is after, by id, which every intent then
         # names in `serves:` and /sdlc:retro scores. Off while the file doesn't exist.
         "product": ".sdlc/PRODUCT.md",
+        # The repo's own synthesis questions, read after the plugin's `guide/insights.md`, which
+        # /sdlc:retro's insights answer. Off while the file doesn't exist.
+        "insights": ".sdlc/INSIGHTS.md",
     },
     # Where /sdlc:close mirrors a shipped change's folder before removing it from main. History is
     # the copy that counts; the tracker is where people read it.
@@ -366,7 +369,9 @@ ARCHIVE_TARGETS = (
     "none",
 )
 # The [docs] keys that name a file, as opposed to `explore`, which names a tool.
-DOC_FILES = ("process", "review", "policy", "health", "direction", "project", "product")
+DOC_FILES = (
+    "process", "review", "policy", "health", "direction", "project", "product", "insights",
+)  # fmt: skip
 # The issue fields a project doc can turn on, and the one that holds a single value.
 PROJECT_FIELDS = ("milestone", "project", "assignees")
 SINGLE_FIELDS = ("milestone",)
@@ -552,8 +557,8 @@ def register_path(work: Path) -> Path:
 
 
 def doc_path(root: Path, key: str, rel: str) -> dict:
-    """Where a host doc is, and whether it exists. The process and review docs also name the
-    plugin's guide to read before them (`guide`) and their `layout`, always `answers`. Only
+    """Where a host doc is, and whether it exists. The process, review and insights docs also name
+    the plugin's guide to read before them (`guide`) and their `layout`, always `answers`. Only
     the review stands in for a missing doc, with the guide alone: a ship with no review passes to
     work through isn't a ship, while a missing policy doc is a fact the skill should say out loud
     rather than paper over with a generic one."""
@@ -659,9 +664,9 @@ def cmd_config(root: Path) -> int:
     ]
     # Not warned about: the defaults name two places a CLAUDE.md can be, and a repo has one.
     docs["context"] = [doc_path(root, "context", rel) for rel in cfg["docs"]["context"]]
-    # Not the direction doc, which the first retrospective writes, nor the project, product and
-    # health docs, which are off while they don't exist.
-    optional = ("direction", "project", "product", "health")
+    # Not the direction doc, which the first retrospective writes, nor the project, product,
+    # health and insights docs, which are off while they don't exist.
+    optional = ("direction", "project", "product", "health", "insights")
     for key in (*(k for k in DOC_FILES if k not in optional), "read_before_design"):
         entries = docs[key] if isinstance(docs[key], list) else [docs[key]]
         warnings += [
@@ -6687,14 +6692,20 @@ def cli_close(root: Path, home: Path, args) -> int:
     "what the retrospective counts since the last one, as JSON; writes nothing",
     arg("--metrics", action="store_true", help=METRICS_HELP),
     arg("--report", action="store_true", help="the report retro-commit would write, as Markdown"),
+    arg(
+        "--insights",
+        action="store_true",
+        help="each synthesis question with its pillar's figures, as JSON; runs no host command",
+    ),
 )
 def cli_retro(root: Path, home: Path, args) -> int:
-    return retro.cmd_retro(root, args.metrics, args.report)
+    return retro.cmd_retro(root, args.metrics, args.report, args.insights)
 
 
 @command(
     "retro-commit",
-    "commit the direction doc, the inbox and the report as `Retrospective <date>`",
+    "commit the direction doc, the inbox and the report as `Retrospective <date>`, the insights "
+    "draft rendered into the report",
 )
 def cli_retro_commit(root: Path, home: Path, args) -> int:
     return retro.cmd_retro_commit(root)

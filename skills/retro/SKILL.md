@@ -7,6 +7,7 @@ allowed-tools:
   - Read
   - Write
   - Edit
+  - Agent
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit *)'
@@ -369,6 +370,10 @@ Every finding ends in exactly one of these, or it doesn't go in the report:
 
 A finding that duplicates an open change (in `open`) or an existing seed is dropped, naming which.
 
+**Then the insights, in `insights.md`:** cut each synthesis question's figures with
+`retro --insights`, answer every question with its own `sdlc:insight` agent at once, and fold
+each answer's Disposition in here, beside the passes' findings.
+
 ## Step 4 — Draft and show it
 
 Draft the whole direction doc from `templates["direction.md"]` in `config`, every section filled
@@ -387,7 +392,9 @@ left exactly as it is. A change to its users, problem, measures or bets is the h
 as an intent title. Show each doc's changes, followed by the intent titles, and list the status
 changes first: they are the decisions this approval makes. Then the re-rank, as a table of the
 lines that change (id, title, priority and theme from → to, the reason), and the retire
-candidates, which this approval doesn't touch.
+candidates, which this approval doesn't touch. Then every insight from `insights.md`, as the
+report will show it: its title and headline, the question, and its Evidence, Recommendation and
+Disposition, a `seed` with the id it takes; and any `problems` `retro --insights` gave.
 
 ## Step 5 — WAIT for explicit approval
 
@@ -400,7 +407,8 @@ outcomes in <docs.product> with these <K> status changes…, then commit all thr
 re-rank changes any line, add it after the seeds: `…append these <N> seeds to .sdlc/work/inbox.md,
 set these <M> priority and theme lines in .sdlc/work/inbox.md, then commit…`; with none, leave it
 out. Before `then commit`, always add `, with the report at <report>,` (`report` from Step 0): the
-commit holds it too.
+commit holds it too. With the insights answered, that is `, with the report at <report> and its <Q>
+insights,`, `<Q>` being how many: the report holds them.
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
 them an option in that order, labelled as written, `header` the skill's name. Only a
@@ -420,16 +428,31 @@ seeds after its last entry. If it doesn't
 exist, `Write` it at that path first from `templates["inbox.md"]` in `config`, as it is, then
 append. **The register is the file `config`'s `work.register` names:** `.sdlc/work/inbox.md`.
 Write entries there, never into a second file beside it, which would hide every entry the first
-one holds. Then:
+one holds. Then `Write` the approved insights to `.sdlc/retros/<today>.insights.md`, one block
+per question, its title as the heading and each field on its own line, every `seed` with its id:
+
+```
+## Speed
+
+Headline: …
+Evidence: …
+Recommendation: …
+Disposition: seed <id>
+```
+
+Then:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
 ```
 
-It writes the report at `report` itself, from history, and commits it with exactly those files as
-`Retrospective <today>`: never write or edit the report by hand. It refuses (writing nothing) when
+It writes the report at `report` itself, from history and the insights draft, and commits it with
+exactly those files as `Retrospective <today>`: never write or edit the report by hand. The draft
+is rendered into the report's `## Insights` and removed once the commit is made, never committed;
+with no draft, the section says the insights weren't answered. It refuses (writing nothing) when
 anything else in the tree is changed, when it isn't the main checkout on `main`, when today
-already has one or the report is already there, or when a new doc drops a goal, milestone or outcome the committed one left open,
+already has one or the report is already there, when the draft misses a question, a field or a
+known Disposition, or names a seed the register lacks, or when a new doc drops a goal, milestone or outcome the committed one left open,
 or breaks the id format, or when a register entry was removed or changed beyond its `Priority:`
 and `Theme:` lines. A refusal naming an id means the draft lost it: put it back, carried or
 struck with its status (or the entry as it was), show the change and ask again. That commit is the

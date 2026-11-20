@@ -47,6 +47,7 @@ context = ["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"]  # the default: what g
 direction = ".sdlc/DIRECTION.md"            # the default: goals and milestones, rewritten by /sdlc:retro
 project = ".sdlc/PROJECT.md"                # the default: which issue fields to fill; off while absent
 product = ".sdlc/PRODUCT.md"                # the default: users and outcomes every intent serves; off while absent
+insights = ".sdlc/INSIGHTS.md"              # the default: your own synthesis questions for /sdlc:retro; off while absent
 
 [archive]
 target = "github"                           # a module in scripts/trackers/; "none", the default, numbers locally
@@ -244,6 +245,13 @@ The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left t
 - **`docs.health`** (`.sdlc/HEALTH.md`) holds what each finding your scan can report
   means, and the response tier it usually gets. Off while absent; `/sdlc:setup` drafts it from
   `defaults/HEALTH.md` once `commands.scan` is set.
+- **`docs.insights`** (`.sdlc/INSIGHTS.md`) holds your own synthesis questions for the
+  retrospective's *Insights*, read after the plugin's `guide/insights.md` (`docs.insights.guide`),
+  block by block: a pillar's `##` (Value, Speed, Quality, Autonomy, Cost, Simplicity, Tradeoffs)
+  holding text replaces its question, one with nothing under it only places what follows, a `###`
+  under a pillar's `##` adds a question on that pillar's figures, and any other `##` adds one on
+  the Tradeoffs figures. A title asked twice is a problem, and the second is dropped. Off while
+  absent; setup never copies or drifts it.
 - A missing doc is reported, never silently replaced (except the review).
 
 **Three commands, three questions.** `commands.check` is the gate `/sdlc:ship` runs on this diff:
@@ -254,7 +262,7 @@ is usually your scan; setup proposes it for `commands.scan`. It is unrelated to 
 `sdlc.py readiness`, which only says whether the repo is set up for the plugin.
 
 **`guide/`, `defaults/` and `templates/`.** A file in the plugin's `guide/` is read in place and
-never copied: the process and review guides. A file in `defaults/` is a doc `/sdlc:setup` copies
+never copied: the process, review and insights guides. A file in `defaults/` is a doc `/sdlc:setup` copies
 into your repo once; from then on it's yours, and the plugin only reads it. A file in `templates/`
 is the shape of a file the plugin writes itself, each time it creates or rewrites one, and a
 same-named file in `.sdlc/templates/` replaces it.
@@ -1073,7 +1081,9 @@ the window's closed changes) and `missing_because`, the rest by reason, whose co
   unreadable`, `timing failed` (` lead=none`, ` lead=bad-opened`, ` lead=failed`), or `closed
   before lead time was recorded`.
 - **The person's minutes:** `not measured at close`, or the reason a `Sdlc-Coverage: none:` gives
-  (`no transcripts for this repo`, `metrics.transcripts is off`).
+  (`no transcripts for this repo`, `metrics.transcripts is off`). `process.response` gives the
+  same per tier, over every change of that tier, so the scorecard's median response says why it
+  is null even when no change was measured.
 - **Spend:** its `why`.
 - **Escape rate:** none; it rests on every closed change.
 
@@ -1298,10 +1308,12 @@ unthemed entry a `Theme:`, on open ideas and bugs only (never a nit, or an entry
 names the seeds it judges no longer wanted for you to retire with `/sdlc:idea`. `sdlc.py
 retro-commit` commits those files and nothing else, as the next retrospective's boundary, and
 refuses a register entry removed or changed beyond those two lines. With them it commits a report
-it writes itself, `.sdlc/retros/<date>.md`, from history alone, rendered from `templates/retro.md`.
+it writes itself, `.sdlc/retros/<date>.md`, rendered from `templates/retro.md`: its figures from
+history, and its *Insights* from the answers approved at the retrospective's question.
 After the window's sentence it opens with the scorecard (`## Scorecard`): the Value band (work mix,
 time to users, follow-through), the pillar table, and the Trust band (the *Coverage* lines, *What
-changed underneath*, and the signals no record holds). Each pillar's figures then follow in a
+changed underneath*, and the signals no record holds). Then `## Insights` (below). Each pillar's
+figures then follow in a
 section of its own: *Speed* (cycle time per tier, changes closed per week, where the time went, how
 many changes ran at once and what that did to them, the *By way of building* table and the
 pipeline's gates and landing), *Quality* (escapes, who found what, rework, and the pipeline's red
@@ -1317,18 +1329,52 @@ rework links per closed change, the escape rate, the person's median response by
 answered per factory change, the escape rate by way, the median dollars per landed change by tier,
 the surface's share used (the plugin's own repo alone), and the commits outside the loop, records
 edited by hand and register entries restored. A null value reads `—`, with its block's most
-counted `missing_because` reason (`none in the window` without one) as its note, never 0; a greyed
-block's note says `a hint: under half the changes`. `last` is the same row's value in the last
+counted `missing_because` reason (`none in the window` without one) as its note, never 0: the
+person's response by `process.response`, a question answered per factory change `built by hand`,
+the escape rate by way `no <way> change in the window`, the commits outside the loop and records
+edited by hand `no commit on the base branch in the window`, and the entries restored `no
+register entry added in the window`. A greyed block's note says `a hint: under half the changes`.
+Minutes are written to one decimal place, so a short median response isn't flattened to a whole
+minute; the first retrospective after 189 compares against its predecessor's whole-minute values,
+so a response row's trend there can move by rounding alone. `last` is the same row's value in the last
 retrospective's committed report, read back from its table as the indicators are (the escape rate
 keeps `process.escapes`' own `previous` and `trend`), and `trend` is `up`, `down` or `flat`
-against it, `unknown` with no `last` or when either side rests on fewer than five changes. The
+against it, the value compared as the table writes it, `unknown` with no `last` or when either side rests on fewer than five changes. The
 report and the JSON come from one function, so they never disagree.
+
+**Insights.** `## Insights` answers the synthesis questions: one per pillar from the plugin's
+`guide/insights.md`, Value, Speed, Quality, Autonomy, Cost, Simplicity and Tradeoffs, and any your
+`docs.insights` adds. `sdlc.py retro --insights` prints each question (`title`, `pillar`,
+`question`) with its `data`: only the figures of `retro`'s output that pillar is given, its
+scorecard rows (every row for Tradeoffs), `process.window` and `process.underneath`, and
+`problems`, your question doc's. It writes nothing and runs no host command: the figures are
+counted with `retro.evidence`, `retro.indicators` and `retro.test_times` emptied, and no bundle
+holds their output. `/sdlc:retro` gives each question to its own `sdlc:insight` agent at once
+(`Read`, `Grep` and `Glob` alone), which returns one shape, fixed by the script and never by a
+question doc:
+
+```
+Headline: <one sentence>
+Evidence: <the figures, each with its n>
+Recommendation: <one thing to do, or nothing>
+Disposition: seed <entry id> | intent: <title> | dropped: <reason> | none: <why>
+```
+
+"Nothing to act on this window" is a valid `none`. After the retrospective's yes the skill writes
+the answers to `.sdlc/retros/<date>.insights.md`, one `## <title>` block per question, and
+`retro-commit` refuses, before writing anything, a draft that misses a question or a field,
+answers an unknown title or one twice, gives a Disposition of no known kind, or names a seed the
+register doesn't hold. It renders each answer as `### <title>: <headline>`, the question, and the
+Evidence, Recommendation and Disposition, and removes the draft once its commit is made: the draft
+is never committed. With no draft the section says `Not answered: this report was written without
+the retrospective's insights.` `sdlc.py retro --report` renders a draft that is there, and writes
+nothing.
 
 Override the template in `.sdlc/templates/`: an override without its `## Scorecard`, `## Spend` or
 `## Indicators` section and their `{{scorecard}}`, `{{spend}}` and `{{indicators}}` is reported as
 breaking after an update, since the next retrospective reads the scorecard and indicator tables
 back. The pillar sections (`{{speed}}`, `{{quality}}`, `{{autonomy}}`, `{{cost}}`,
-`{{simplicity}}`) are optional: an override without one just doesn't show it. An override without
+`{{simplicity}}`) and `{{insights}}` are optional: an override without one just doesn't show it. An override without
 `{{scorecard}}` renders as before, its `{{window}}` holding the Value band, the coverage lines and
 the *By way of building* table, and every older placeholder (`{{cycle}}`, `{{throughput}}`,
 `{{time}}`, `{{capacity}}`, `{{rework}}`, `{{escapes}}`) still filled. Its figures are `sdlc.py

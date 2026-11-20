@@ -150,9 +150,13 @@ path kept for good (whatever reads what history holds) is not a shim. REFERENCE.
 
 **Retrospectives: `retro()`.** Read-only but for its report, and bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes, holding the direction
-doc, the register, the product doc and the report, nothing else. It runs the host's
-`retro.evidence`, `retro.indicators` and `retro.test_times` (`_evidence()`, the only place they
-run), and its report runs `retro.indicators` alone, read back by the next one, so `retro` is
+doc, the register, the product doc and the report, nothing else. It reads the day's insights
+draft, `.sdlc/retros/<date>.insights.md`, which the skill writes after its yes, into the report's
+`## Insights`, and removes it once the commit is made, never committing it; the report is from
+history but for those answers, each from an `sdlc:insight` agent the skill spawns on one pillar's
+figures (`retro --insights`, which empties every host command list, so none runs). It runs the
+host's `retro.evidence`, `retro.indicators` and `retro.test_times` (`_evidence()`, the only place
+they run), and its report runs `retro.indicators` alone, read back by the next one, so `retro` is
 not in `READ_ONLY`. Rework across changes is only what a change declares (`_rework()`); blame's
 matches are questions, never counted. Its `surface` is built from the code (`COMMANDS`,
 `CONFIG_KEYS`, the skill folders), never a list kept by hand, and an item no record could show is

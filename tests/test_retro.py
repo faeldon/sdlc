@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -663,7 +664,8 @@ def test_prose_counts_each_of_the_plugins_skills(tmp_path: Path, monkeypatch) ->
     assert ship["lines"] == len(skill.splitlines())
     beside = {p.name for p in (ROOT / "skills" / "ship").glob("*.md")} - {"SKILL.md"}
     # 170: a host never reads the skills' cases' branch, which only this repo's ship names.
-    assert set(ship["branches"]) == beside - {"cases.md"} and "branches" not in retro
+    assert set(ship["branches"]) == beside - {"cases.md"}
+    assert set(retro["branches"]) == {"insights.md"}, "189: the insights are retro's branch"
     monkeypatch.setattr(sdlc, "_own_repo", lambda home: True)
     assert set(_retro(root)["prose"]["skills"]["ship"]["branches"]) == beside
     setup = prose["skills"]["setup"]
@@ -2120,7 +2122,7 @@ def test_indicator_rows_round_trip_through_the_report() -> None:
              "rows": [{**r, "last": 1, "change": round(r["value"] - 1, 3), "extra": {}}
                       for r in rows]}]  # fmt: skip
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
-    text = sdlc.retro.render_report(template, _views([]), indicators=host)
+    text = sdlc.retro.render_report(template, {"process": _views([])}, indicators=host)
     assert sdlc.retro.indicators.report_rows(text) == {
         (r["name"], r["unit"]): r["value"] for r in rows
     }
@@ -2345,7 +2347,7 @@ def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
     assert out["window"]["measured"] == 0 and out["throughput"][0]["total"] == 1
     assert [out[k] for k in ("cycle", "time", "wip", "capacity")] == [None] * 4
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
-    text = sdlc.retro.render_report(template, out)
+    text = sdlc.retro.render_report(template, {"process": out})
     assert text.count("Not measured: none of the 1 changes closed has its numbers.") == 3
     assert "0m" not in text
 
@@ -2353,7 +2355,9 @@ def test_with_nothing_measured_the_timed_views_say_so_never_zero() -> None:
 def test_no_figure_folds_speed_and_stability_into_one() -> None:
     """R3: no velocity, no score, in the template or what it renders."""
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
-    text = sdlc.retro.render_report(template, _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)]))
+    text = sdlc.retro.render_report(
+        template, {"process": _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)])}
+    )
     # 184: the `Scorecard` heading holds the letters, never the word.
     for word in (r"\bvelocity\b", r"\bscores?\b"):
         assert not re.search(word, template.lower()) and not re.search(word, text.lower())
@@ -2802,12 +2806,14 @@ def test_the_report_shows_lead_time_under_cycle_time() -> None:
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
     both = [_led("001-a", 2, "factory", {"lead": 250, "ready_wait": 100}, elapsed=60),
             _led("002-b", 2, "factory", None, elapsed=30)]  # fmt: skip
-    text = sdlc.retro.render_report(template, _views(both))
+    text = sdlc.retro.render_report(template, {"process": _views(both)})
     assert "| Tier | Changes | Median elapsed |" in text
     assert "| Tier | Way | Changes | Median lead | 85th percentile |" in text
     assert "| 2 | factory | 1 | 4h 10m | 4h 10m |" in text
     assert "ready and waiting 40% (of 1)" in text and "1 change has no lead time" in text
-    alone = sdlc.retro.render_report(template, _views([_led("001-a", 1, "manual", {"lead": 30})]))
+    alone = sdlc.retro.render_report(
+        template, {"process": _views([_led("001-a", 1, "manual", {"lead": 30})])}
+    )
     assert "| 1 | manual | 1 | 30m | 30m |" in alone and "Median elapsed" not in alone
 
 
@@ -3187,7 +3193,7 @@ def test_the_report_shows_the_value_figures_in_its_window(tmp_path: Path) -> Non
 
 def test_without_a_value_band_the_window_is_as_before() -> None:
     process = _views([])
-    text = sdlc.retro.render_report("{{window}}", process)
+    text = sdlc.retro.render_report("{{window}}", {"process": process})
     assert "Work mix" not in text and "Time to users" not in text
 
 
@@ -3316,7 +3322,8 @@ def test_retro_autonomy_counts_auto_landed_from_the_change_commit(tmp_path: Path
     assert out["spurious_stops"] == {
         "build": 1, "landing": 1, "changes": 1, "per_change": 0.67, "n": 3,
     }  # fmt: skip
-    assert out["asked"] == {"blocking": 1, "default": 2, "look": 2, "per_change": 1.67, "n": 3}
+    assert out["asked"] == {"blocking": 1, "default": 2, "look": 2, "per_change": 1.67, "n": 3,
+                            "missing_because": {"built by hand": 1}}  # fmt: skip
     assert out["looks"] == {"seen": 1, "checked": 1, "open": 1, "seen_share": 0.5, "n": 2}
 
 
@@ -3477,9 +3484,9 @@ def test_the_report_greys_a_thin_headline(tmp_path: Path) -> None:
     # Without the metrics block, its line says so; with no change closed there is no line.
     template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
     views = _views([_rec("001-a", 1, "2026-10-05", "12:00", 60)])
-    alone = sdlc.retro.render_report(template, views)
+    alone = sdlc.retro.render_report(template, {"process": views})
     assert "- Coverage, the person's minutes: not given." in alone
-    empty = sdlc.retro.render_report(template, _views([]))
+    empty = sdlc.retro.render_report(template, {"process": _views([])})
     assert "Coverage, " not in empty
 
 
@@ -3870,7 +3877,10 @@ def test_by_way_gives_every_figure_for_each_way_with_its_n(tmp_path: Path) -> No
         "closed": 0, "weeks": 3.0, "per_week": 0.0, "why": None,
     }  # fmt: skip
     assert by_way["lead"] == out["process"]["lead"]["ways"]
-    assert by_way["escapes"] == out["bugs"]["rate"]["window"]["by_way"]
+    lean = {w: {k: v for k, v in e.items() if k != "missing_because"}
+            for w, e in by_way["escapes"].items()}  # fmt: skip
+    assert lean == out["bugs"]["rate"]["window"]["by_way"]
+    assert by_way["escapes"]["unknown"]["missing_because"] == {"no unknown change in the window": 0}
     assert "_landed" not in out["cost"]
 
 
@@ -3918,7 +3928,9 @@ def test_the_report_compares_the_ways_of_building(tmp_path: Path) -> None:
     assert rows["Median dollars"] == "| Median dollars | – (0) | – (0) | – (0) |"
     assert rows["Escape rate"] == "| Escape rate | 0 (1) | 0 (1) | – (0) |"
     assert "| Week of | Tiers | Ways | Classes | Closed |" in text
-    assert "By way of building" not in sdlc.retro.render_report("{{window}}", _views([]))
+    assert "By way of building" not in sdlc.retro.render_report(
+        "{{window}}", {"process": _views([])}
+    )
 
 
 def test_the_report_says_how_far_cost_and_waste_rest(tmp_path: Path) -> None:
@@ -4253,6 +4265,7 @@ def test_an_entry_filed_again_after_it_was_retired_is_restored(tmp_path: Path) -
     assert out == {
         "count": 1, "n": 2,
         "rows": [{"id": "2026-10-02-1", "sha": again, "subject": "File 2026-10-02-1"}],
+        "missing_because": {},
     }  # fmt: skip
 
 
@@ -4596,6 +4609,7 @@ OLD_TEMPLATE = """\
 SECTIONS = [
     "Window",
     "Scorecard",
+    "Insights",
     "Speed",
     "Quality",
     "Indicators",
@@ -4735,3 +4749,367 @@ def test_the_retro_skill_s_process_pass_reads_workarounds() -> None:
     assert "- `scorecard`:" in step0
     process = step2.split("3. **Process.**", 1)[1].split("4. **Product**", 1)[0]
     assert "`simplicity.workarounds`" in process and "seed" in process
+
+
+# ---------------------------------------------------------------- the Insights section (189)
+
+
+def _written_back(process: dict, values: list) -> dict:
+    """Each value written through the scorecard's table and read back by `_last_rows()`'s
+    reader, keyed by its figure."""
+    rows = [
+        {"pillar": "Speed", "role": "headline", "figure": f"F{i}", "unit": "u", "value": v,
+         "n": 9, "last": None, "trend": "unknown", "note": ""}
+        for i, v in enumerate(values)
+    ]  # fmt: skip
+    text = sdlc.retro._scorecard_text({"rows": rows}, None, process, None, None, None)
+    read = sdlc.retro.indicators.report_rows
+    head, keys = sdlc.retro.SCORECARD_HEAD, sdlc.retro.SCORECARD_KEYS
+    return {k[1]: v for k, v in read(text, head, keys, sdlc.retro.SCORECARD_VALUE).items()}
+
+
+def test_a_trend_reads_flat_against_its_own_written_value(tmp_path: Path) -> None:
+    """189 R12 (nit 2026-11-19-65): a value read back from the table it was written to trends
+    `flat` against itself, and 0.174 against a written 0.17 is `up`: two numbers the person sees."""
+    process = _retro(_repo(tmp_path))["process"]
+    values = [1 / 3, 0.174, 1.4]
+    back = _written_back(process, values)
+    for i, v in enumerate(values):
+        assert sdlc.retro._trend(v, 9, (back[f"F{i}"], 9)) == "flat", v
+    assert sdlc.retro._trend(0.174, 9, (_written_back(process, [0.17])["F0"], 9)) == "up"
+
+
+def test_minutes_keep_one_decimal() -> None:
+    """189 R13 (nit 2026-11-19-66): a median of 1.44 minutes is written 1.4, not 1."""
+    assert sdlc.retro._minutes(1.44) == 1.4
+    assert sdlc.retro.indicators.number(sdlc.retro._minutes(1.44)) == "1.4"
+    assert sdlc.retro._minutes(30.0) == 30 and sdlc.retro._minutes(None) is None
+
+
+def test_render_report_takes_the_figures_whole() -> None:
+    """189 R10 (2026-11-19-63): the figures as one dict, and the host's indicators and the
+    insights beside it, by keyword."""
+    import inspect
+
+    params = inspect.signature(sdlc.retro.render_report).parameters
+    assert [(p.name, p.kind.name) for p in params.values()] == [
+        ("template", "POSITIONAL_OR_KEYWORD"), ("figures", "POSITIONAL_OR_KEYWORD"),
+        ("indicators", "KEYWORD_ONLY"), ("insights", "KEYWORD_ONLY"),
+    ]  # fmt: skip
+
+
+def test_every_null_scorecard_row_names_its_reason(tmp_path: Path) -> None:
+    """189 R11 (2026-11-19-64): a window that closed changes, none measured and none built by the
+    factory: every null row says why, never `none in the window`."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts", tier=1, trailers=("Sdlc-Mode: manual",))
+    _close(root, "002-draft-titles", tier=2, trailers=("Sdlc-Mode: manual",))
+    rows = _retro(root)["scorecard"]["rows"]
+    null = {r["figure"]: r["note"] for r in rows if r["value"] is None}
+    assert {"Median response, tier 1", "Questions answered per factory change",
+            "Escape rate, factory", "Register entries restored"} <= set(null), null  # fmt: skip
+    assert [f for f, note in null.items() if note == sdlc.retro.NONE_NOTE] == []
+    assert null["Questions answered per factory change"] == "built by hand"
+    assert null["Escape rate, factory"] == "no factory change in the window"
+    assert null["Register entries restored"] == "no register entry added in the window"
+    assert null["Median response, tier 1"].startswith("not measured at close")
+    out = _retro(root)
+    ws = out["simplicity"]["workarounds"]
+    assert ws["outside"]["missing_because"] == {}, "a window with commits counts them"
+    (tmp_path / "quiet").mkdir()
+    quiet = _repo(tmp_path / "quiet")
+    _record(quiet)  # a retrospective at the tip: nothing on the base branch since
+    card = {r["figure"]: r for r in _retro(quiet)["scorecard"]["rows"]}
+    for figure in ("Commits outside the loop", "Records edited by hand"):
+        assert card[figure]["value"] is None
+        assert card[figure]["note"] == "no commit on the base branch in the window", figure
+
+
+def _scorecard_questions() -> dict[str, str]:
+    """The synthesis questions as `docs/RETRO-SCORECARD.md`'s table holds them, by pillar."""
+    text = (ROOT / "docs" / "RETRO-SCORECARD.md").read_text(encoding="utf-8")
+    table = text.split("## Insights: the synthesis questions", 1)[1].split("\n## ", 1)[0]
+    rows = [sdlc.retro.indicators._cells(ln) for ln in table.splitlines() if ln.startswith("| ")]
+    return {cells[0]: cells[1] for cells in rows[1:] if cells[0] != "Pillar"}
+
+
+def test_the_insights_guide_asks_one_question_per_pillar() -> None:
+    """189 R1: one `##` section per pillar, in order, each holding that pillar's question."""
+    text = (ROOT / "guide" / "insights.md").read_text(encoding="utf-8")
+    units = [(k, t) for k, t in sdlc.doc_units(text) if k != "#"]
+    assert [k for k, _ in units] == [f"## {p}" for p in sdlc.retro.INSIGHT_PILLARS]
+    asked = _scorecard_questions()
+    assert list(asked) == list(sdlc.retro.INSIGHT_PILLARS)
+    for key, block in units:
+        assert block.split("\n", 1)[1].strip() == asked[key.removeprefix("## ")], key
+    assert not [ln for ln in text.splitlines() if ln.startswith("<")]
+
+
+HOST_INSIGHTS = """\
+# Insights
+
+> This repo's own questions.
+
+## Speed
+
+Where does the review's time go?
+
+## Quality
+
+### Flaky tests
+
+Which tests fail now and then, and why?
+
+- **Hint**: read the red gates.
+
+### Speed
+
+A title already asked.
+
+## Cost
+
+## Customer churn
+
+Did anything shipped lose a user?
+"""
+
+
+def _questions(root: Path) -> tuple[list[dict], list[str]]:
+    return sdlc.retro.insight_questions(root, sdlc.load_config(root)[0])
+
+
+def test_a_host_insights_doc_replaces_adds_and_places(tmp_path: Path) -> None:
+    """189 R2: a pillar's block with text replaces the guide's question; a heading alone places;
+    a `###` under a pillar adds one on its figures; any other `##` one on the tradeoffs'; a second
+    question with one title is a problem, and dropped."""
+    root = _repo(tmp_path)
+    guide, problems = _questions(root)
+    assert [(q["title"], q["pillar"]) for q in guide] == [
+        (p, p) for p in sdlc.retro.INSIGHT_PILLARS
+    ]
+    assert problems == []
+    (root / ".sdlc").mkdir()
+    (root / ".sdlc" / "INSIGHTS.md").write_text(HOST_INSIGHTS, encoding="utf-8")
+    got, problems = _questions(root)
+    asked = _scorecard_questions()
+    assert [(q["title"], q["pillar"]) for q in got] == [
+        ("Value", "Value"), ("Speed", "Speed"), ("Quality", "Quality"),
+        ("Flaky tests", "Quality"), ("Autonomy", "Autonomy"), ("Cost", "Cost"),
+        ("Simplicity", "Simplicity"), ("Tradeoffs", "Tradeoffs"),
+        ("Customer churn", "Tradeoffs"),
+    ]  # fmt: skip
+    by = {q["title"]: q["question"] for q in got}
+    assert by["Speed"] == "Where does the review's time go?", "a block with text replaces"
+    assert by["Cost"] == asked["Cost"] and by["Quality"] == asked["Quality"], "a heading places"
+    assert (
+        by["Flaky tests"].startswith("Which tests fail now and then")
+        and "**Hint**" in (by["Flaky tests"])
+    )
+    assert by["Customer churn"] == "Did anything shipped lose a user?"
+    assert len(problems) == 1 and "Speed" in problems[0] and "twice" in problems[0], problems
+
+
+def test_config_reports_the_insights_doc(tmp_path: Path, capsys) -> None:
+    """189 R2: `docs.insights` is `.sdlc/INSIGHTS.md`, off while it doesn't exist, read after the
+    guide."""
+    root = _repo(tmp_path)
+    assert sdlc.cmd_config(root) == 0
+    out = json.loads(capsys.readouterr().out)
+    got = out["docs"]["insights"]
+    assert got["path"] == ".sdlc/INSIGHTS.md" and got["exists"] is False
+    assert got["layout"] == "answers" and got["guide"].endswith("guide/insights.md")
+    assert not any("INSIGHTS" in w for w in out["warnings"]), "off while it doesn't exist"
+
+
+def _insights_json(root: Path, capsys) -> dict:
+    assert sdlc.retro.cmd_retro(root, insights=True) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_each_insight_gets_only_its_pillars_figures(tmp_path: Path, capsys) -> None:
+    """189 R3: each question's `data` holds only its pillar's paths, its scorecard rows, the
+    window and what changed underneath."""
+    root = _repo(tmp_path)
+    _factory_window(root)
+    out = _insights_json(root, capsys)
+    assert out["problems"] == []
+    by = {q["title"]: q for q in out["questions"]}
+    assert list(by) == list(sdlc.retro.INSIGHT_PILLARS)
+    for q in out["questions"]:
+        assert set(q) == {"title", "pillar", "question", "data"}
+        assert {"window", "underneath"} <= set(q["data"]["process"]), q["title"]
+        rows = q["data"]["scorecard"]["rows"]
+        if q["pillar"] != "Tradeoffs":
+            assert {r["pillar"] for r in rows} <= {q["pillar"]}, q["title"]
+    assert "cost" not in by["Speed"]["data"] and "cycle" in by["Speed"]["data"]["process"]
+    assert "cost" in by["Cost"]["data"] and "cycle" not in by["Cost"]["data"]["process"]
+    assert "host" not in by["Quality"]["data"]["architecture"]
+    assert "surface" not in by["Simplicity"]["data"], "a host's Simplicity has no surface"
+    assert {r["pillar"] for r in by["Tradeoffs"]["data"]["scorecard"]["rows"]} > {"Speed"}
+    assert "changes" not in by["Cost"]["data"]["cost"], "no change's own numbers"
+
+
+def test_retro_insights_runs_no_host_command(tmp_path: Path, capsys) -> None:
+    """189 R4: `retro --insights` runs none of the host's evidence, indicator or test-time
+    commands, and writes nothing; `retro` itself runs them, so the marker would show."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    (root / ".sdlc").mkdir(exist_ok=True)
+    shutil.copy(ROOT / "defaults" / "PRODUCT.md", root / ".sdlc" / "PRODUCT.md")
+    (root / ".sdlc" / "config.toml").write_text(
+        '[retro]\nevidence = ["touch ran-evidence"]\nindicators = ["touch ran-indicators"]\n'
+        'test_times = ["touch ran-times"]\n',
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "set up")
+    before = _state(root)
+    out = _insights_json(root, capsys)
+    assert len(out["questions"]) == len(sdlc.retro.INSIGHT_PILLARS)
+    assert _state(root) == before and not list(root.glob("ran-*"))
+    assert sdlc.retro.cmd_retro(root) == 0
+    capsys.readouterr()
+    assert {p.name for p in root.glob("ran-*")} == {"ran-evidence", "ran-indicators", "ran-times"}
+
+
+def _answer(title: str, **fields: str) -> str:
+    said = {
+        "Headline": f"{title} held steady.",
+        "Evidence": "Median lead time 42 minutes (n 7).",
+        "Recommendation": "Nothing.",
+        "Disposition": "none: nothing to act on this window",
+        **fields,
+    }
+    return f"## {title}\n\n" + "".join(f"{k}: {v}\n" for k, v in said.items() if v is not None)
+
+
+def _draft(root: Path, day: date, **by_title: dict) -> Path:
+    """An insights draft answering every guide question, `by_title` overriding fields."""
+    text = "\n".join(_answer(p, **by_title.get(p, {})) for p in sdlc.retro.INSIGHT_PILLARS)
+    path = root / sdlc.retro.insights_rel(day)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+DAY = date(2026, 10, 24)
+
+
+def test_retro_commit_refuses_an_insight_missing_a_field(tmp_path: Path, capsys) -> None:
+    """189 R6: a field left out, or empty, is a refusal naming the question and the field, found
+    before anything is written."""
+    root = _repo(tmp_path)
+    _direction(root)
+    _draft(root, DAY, Speed={"Recommendation": None}, Cost={"Headline": ""})
+    before = _state(root)
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    assert any("'Speed'" in r and "Recommendation" in r for r in refusals), refusals
+    assert any("'Cost'" in r and "Headline" in r for r in refusals), refusals
+    assert _state(root) == before
+
+
+@pytest.mark.parametrize(
+    "fields, why",
+    [
+        ({"Disposition": "seed 2026-10-30-9"}, "2026-10-30-9, which the register doesn't hold"),
+        ({"Disposition": "maybe later"}, "is none of"),
+    ],
+)
+def test_retro_commit_refuses_a_seed_the_register_lacks(tmp_path, capsys, fields, why) -> None:
+    """189 R6: a `seed` names an entry in the register as it stands, and a Disposition is one of
+    the kinds; an unknown title is refused too."""
+    root = _repo(tmp_path)
+    _direction(root)
+    path = _draft(root, DAY, Value=fields)
+    path.write_text(path.read_text(encoding="utf-8") + _answer("Churn"), encoding="utf-8")
+    before = _state(root)
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    assert any("'Value'" in r and why in r for r in refusals), refusals
+    assert any("'Churn'" in r and "not a question" in r for r in refusals), refusals
+    assert _state(root) == before
+
+
+def test_retro_commit_renders_the_insights_and_removes_the_draft(tmp_path, capsys) -> None:
+    """189 R6: the answers go into the report's `## Insights`, the commit holds the report and
+    never the draft, and the draft is gone once the commit is made."""
+    root = _repo(tmp_path)
+    _direction(root)
+    path = _draft(root, DAY, Speed={"Headline": "Reviews wait on the person.",
+                                    "Disposition": "seed 2026-10-24-1"})  # fmt: skip
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    out = json.loads(capsys.readouterr().out)
+    draft = sdlc.retro.insights_rel(DAY)
+    assert draft not in out["paths"] and not path.exists()
+    assert draft not in _git(root, "show", "--name-only", "--format=", "HEAD").splitlines()
+    report = (root / ".sdlc" / "retros" / "2026-10-24.md").read_text(encoding="utf-8")
+    insights = _part(report, "Insights")
+    assert "### Speed: Reviews wait on the person." in insights
+    assert "- Disposition: seed 2026-10-24-1" in insights
+    assert f"*{_scorecard_questions()['Speed']}*" in insights
+    assert _git(root, "status", "--porcelain") == ""
+
+
+def test_the_insights_say_not_answered_without_a_draft(tmp_path: Path, capsys) -> None:
+    """189 R7: with no draft the section is a sentence, never empty; `retro --report` renders a
+    draft that is there, and writes nothing."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    assert _part(_report(root), "Insights").strip() == sdlc.retro.NOT_ANSWERED
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
+    assert _part(capsys.readouterr().out, "Insights").strip() == sdlc.retro.NOT_ANSWERED
+    _draft(root, date.today(), Cost={"Headline": "Spend is flat."})
+    before = _state(root)
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
+    assert "### Cost: Spend is flat." in _part(capsys.readouterr().out, "Insights")
+    assert _state(root) == before
+
+
+def test_an_override_without_insights_still_renders(tmp_path: Path, capsys) -> None:
+    """189 R8: a host's override from before this change (the 184 template) renders every section
+    it has, and `retro-commit` takes a draft with it all the same."""
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    old = template.replace("## Insights\n\n{{insights}}\n\n", "")
+    assert old != template and "{{insights}}" not in old
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "templates").mkdir(parents=True)
+    (root / ".sdlc" / "templates" / "retro.md").write_text(old, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "override")
+    text = _report(root)
+    assert re.findall(r"^## (.+)$", text, re.M) == [s for s in SECTIONS if s != "Insights"]
+    assert "{{" not in text
+    _direction(root)
+    _draft(root, DAY)
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+
+
+def test_insights_is_not_a_template_read() -> None:
+    """189 R8: `{{insights}}` is optional, so an override without it isn't breaking."""
+    reads = sdlc.TEMPLATE_READS["retro.md"]
+    assert "{{insights}}" not in reads.get("placeholders", ())
+    assert "Insights" not in reads.get("headings", ())
+
+
+def test_a_failed_commit_leaves_the_insights_draft_for_a_rerun(tmp_path, capsys) -> None:
+    """189 R6: the draft is removed only once the commit is made; a refused `git commit` (a hook
+    that fails) leaves it, and the report, as they were, and the rerun commits and removes it."""
+    root = _repo(tmp_path)
+    _direction(root)
+    path = _draft(root, DAY, Speed={"Headline": "Reviews wait on the person."})
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    head = _git(root, "rev-parse", "HEAD")
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any(r.startswith("git commit failed") for r in out["refusals"]), out["refusals"]
+    assert path.is_file() and _git(root, "rev-parse", "HEAD") == head
+    assert not (root / sdlc.retro.report_rel(DAY)).exists()
+    hook.unlink()
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    assert not path.exists()
+    report = (root / sdlc.retro.report_rel(DAY)).read_text(encoding="utf-8")
+    assert "### Speed: Reviews wait on the person." in _part(report, "Insights")
