@@ -572,7 +572,8 @@ that change is under its stage's state in `status`.
 **The board.** `/sdlc:dashboard` runs `sdlc.py board [--port N]` (5170 unless named), which serves
 the same open changes as a live page on `127.0.0.1` until it is stopped, in columns that name the
 state of the work, the same for a change built by hand or by the factory: **Planned** (an intent,
-nothing built), **Designing** (a Tier 2's spec), **Building** (code being written, by hand or in
+nothing built), **Designing** (a Tier 2's spec, a factory change at `stage: plan` included while
+its spec-writer runs or its draft waits for the yes, its `stage:` untouched), **Building** (code being written, by hand or in
 the factory's rounds), **Ready** (built and checked, nothing committed: a factory change the
 approver called READY or whose escalation is answered, or a change built by hand whose review is
 written or whose gate is green), **Landing** (committed and on its way to the base branch: shipped

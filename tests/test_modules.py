@@ -458,14 +458,14 @@ RECORD_NAMES = {
     "HOME_MARK", "TMP_MARK", "USER_MARK", "TERM_MARK", "DEFUSE", "TERMS_FILE", "DECISION_FILE",
     "LEDGER_FILE", "BUILDER_SESSIONS", "SESSIONS", "ARCHIVE_RE", "MENDED", "KEPT_ANSWER",
     "CONFIRMED", "SUPERSEDED", "LOOK_SEEN", "PURPOSES", "WASTE", "EJECTIONS", "PARTS",
-    "LAND_TRAIN", "LAND_ACCEPT",
+    "LAND_TRAIN", "LAND_ACCEPT", "SPEC_SESSIONS", "SPEC_DRAFT",
     # readers
     "opening", "no_verdict", "read_stop", "read_land_stop", "landing", "first_build",
     "upgraded_build", "newest_round", "reasons", "reading", "read_step", "read_land_step",
     "read_land_times", "cost", "card_reading", "reviewed", "builder_started", "run_counts",
     "session_roles", "session_models", "gate_kind", "gate_seconds", "gate_attempts", "_login",
     "_terms", "placeholders", "timed_rows", "land_sinces", "autonomy_counts", "spend_rows",
-    "read_gate_attempts", "resolved_files", "pipeline_counts",
+    "read_gate_attempts", "resolved_files", "pipeline_counts", "specifying",
     # 180: the overrides retro reads, and core's reader of a fix asked at landing.
     "ejections", "land_asks", "LAND_ASK_RE",
 }  # fmt: skip
@@ -726,6 +726,16 @@ def test_land_ask_re_reads_the_factorys_path(tmp_path) -> None:
     rel = factory.land_ask_path(folder, 3).relative_to(folder).as_posix()
     assert records.LAND_ASK_RE.match(rel), rel
     assert records.land_asks(lambda _: f"{rel}\nbuild/round-1.md") == 1
+
+
+def test_spec_sessions_is_the_spec_writers_file() -> None:
+    """195: `SPEC_SESSIONS` is core's own name for the file `factory.py agent` adds a spec-writer's
+    session to, so it is pinned to the factory's naming of it, not to a name the two share."""
+    records = _load("factory_records_spec", RECORDS_PY)
+    factory = _load("factory_records_spec_theirs", FACTORY_PY)
+    theirs = Path("runs") / f"{factory.agent_name('spec-writer')}.sessions"
+    assert theirs == records.SPEC_SESSIONS
+    assert factory.TASK_ROLE["spec"] == "spec-writer"
 
 
 def test_look_seen_is_the_decide_skills_answer() -> None:

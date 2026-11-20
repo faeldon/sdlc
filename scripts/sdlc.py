@@ -5078,8 +5078,9 @@ def column(entry: dict) -> str:
     `factory_records.landing()`); Ready for a factory change at `test` the approver called READY,
     or whose escalation is answered, and a change built by hand whose review is written or whose
     gate is green (`seen_stage()`); else by how far it has got: Planned, Designing or Building (a
-    factory change at `test` with no decision, a restart cut short, too). The one rule: the board
-    and `status` both call it."""
+    factory change at `test` with no decision, a restart cut short, too; a factory change at
+    `plan` whose spec is under way, `specifying` from `factory_records.specifying()`, is
+    Designing, its `stage:` line untouched). The one rule: the board and `status` both call it."""
     stage = entry["stage"]
     if entry["problems"] or entry.get("needs"):
         return "needs-you"
@@ -5088,6 +5089,8 @@ def column(entry: dict) -> str:
     if stage == "test" and entry["mode"] == "factory":
         ready = entry.get("decision") == "READY" or answered(entry)
         return "ready" if ready else "building"
+    if stage == "plan" and entry["mode"] == "factory" and entry.get("specifying"):
+        return "designing"
     return BY_STAGE.get(entry.get("seen") or stage or "", "needs-you")
 
 

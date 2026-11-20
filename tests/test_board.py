@@ -3159,6 +3159,42 @@ def test_status_places_each_change_under_its_board_column(repo, monkeypatch, cap
         assert placed[name[:3]] == LABEL[state], (name, placed.get(name[:3]))
 
 
+@pytest.mark.portable
+def test_a_plan_change_being_specified_is_designing(repo, monkeypatch, capsys) -> None:
+    """195: a factory change at `plan` whose spec-writer runs (an upgraded run's `STEP: spec`, or
+    a spec-writer session not yet returned) or whose draft waits for the person's yes sits under
+    Designing, on the board and in `status`, its `stage:` line untouched; one with neither, or
+    whose returned draft is gone, stays under Planned."""
+    scaffold = "# spec\n\n<Numbered requirements.>\n<Design.>\n"
+    runs = {
+        "096-spec-step": {"runs/step.md": "STEP: spec\nROUND: 2\nAFTER: upgrade\n"},
+        "097-spec-draft": {"runs/spec-writer.sessions": "s-1\n", "runs/spec-draft.md": "# d\n",
+                           "runs/costs.jsonl": '{"session": "s-1", "role": "spec-writer"}\n'},
+        "098-spec-running": {"runs/spec-writer.sessions": "s-1\ns-2\n",
+                             "runs/costs.jsonl": '{"session": "s-1", "role": "spec-writer"}\n'},
+        "099-spec-gone": {"runs/spec-writer.sessions": "s-1\n",
+                          "runs/costs.jsonl": '{"session": "s-1", "role": "spec-writer"}\n'},
+        "100-spec-none": {"runs/costs.jsonl": ""},
+    }  # fmt: skip
+    for name, files in runs.items():
+        folder = _worktree(repo, name, 2, "plan")
+        _write(folder / "spec.md", scaffold)
+        for rel, text in files.items():
+            _write(folder / rel, text)
+    want = {"096-spec-step": "designing", "097-spec-draft": "designing",
+            "098-spec-running": "designing", "099-spec-gone": "planned",
+            "100-spec-none": "planned"}  # fmt: skip
+    cards = _cards(repo)
+    out, _ = _status(repo, monkeypatch, capsys)
+    placed = _placed(out)
+    for name, state in want.items():
+        assert cards[name]["mode"] == "factory", name
+        assert (cards[name]["stage"], cards[name]["column"]) == ("plan", state), name
+        assert placed[name[:3]] == LABEL[state], (name, placed.get(name[:3]))
+        intent = repo / ".claude" / "worktrees" / name / ".sdlc" / "work" / name / "intent.md"
+        assert "stage: plan" in intent.read_text(encoding="utf-8"), name
+
+
 def test_status_never_loads_the_board(repo, monkeypatch, capsys) -> None:
     """R1 (091), 151 R10: only `board`'s dispatch loads `board.py`, so no other command pays for
     it, `status` included."""

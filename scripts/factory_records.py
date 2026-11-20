@@ -48,6 +48,10 @@ ARCHIVE_RE = re.compile(r"^decision-(\d+)\.md$")
 MENDED = Path("runs") / "mended"
 BUILDER_SESSIONS = Path("runs") / "builder.sessions"
 SESSIONS = ".sessions"
+# A Tier 2's spec-writer: its sessions, one id a line, each added as it starts, and the draft it
+# returns, which waits there for the person's yes (`factory.py`'s `agent --task spec`).
+SPEC_SESSIONS = Path("runs") / "spec-writer.sessions"
+SPEC_DRAFT = Path("runs") / "spec-draft.md"
 
 VERDICT_RE = re.compile(r"^VERDICT: (PASS|CHANGES)\s*$")
 DECISION_RE = re.compile(r"^DECISION: (READY|ESCALATE)\s*$")
@@ -293,6 +297,29 @@ def builder_started(folder: Path) -> float | None:
     return path.stat().st_mtime if path.is_file() else None
 
 
+def specifying(folder: Path) -> bool:
+    """Whether a run's spec is under way: its draft waits for the person's yes
+    (`runs/spec-draft.md`), an upgraded run's last reading named `spec` (`runs/step.md`), or the
+    newest spec-writer session has no `runs/costs.jsonl` row yet, so it hasn't returned (a first
+    draft records no step). A returned session whose draft is gone is none. Never raises."""
+    try:
+        if (folder / SPEC_DRAFT).is_file():
+            return True
+        path = folder / STEP
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+        if (read_step(text) or {}).get("step") == "spec":
+            return True
+        path = folder / SPEC_SESSIONS
+        ids = path.read_text(encoding="utf-8", errors="replace").split() if path.is_file() else []
+        if not ids:
+            return False
+        path = folder / COSTS
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except OSError:
+        return False
+    return ids[-1] not in {row.get("session") for row in _json_rows(text)}
+
+
 def newest_round(folder: Path) -> int:
     """The newest round built or reviewed: a copy of `factory.py`'s `newest_round()` (and its
     `build_round()`), pinned to it by a test."""
@@ -329,10 +356,12 @@ def reading(folder: Path) -> dict:
     open box the ledger can't read, or a file that won't. `reasons` are the current decision's
     `gate` and `look` reasons, each with whether it is `filed` (a look with a current ledger line)
     and `cleared` (a look acknowledged; a gate never here: `needs_of()` reads the hand gate), and
-    `looks` the current look lines still open. A look line is current only while it names the
-    newest round and the current decision gives it word for word. Never raises."""
+    `looks` the current look lines still open, and `specifying`, whether its spec is under way
+    (`specifying()`). A look line is current only while it names the newest round and the
+    current decision gives it word for word. Never raises."""
     found = {"decision": None, "reconsider": False, "pending": [], "assumed": [],
-             "ledger_lines": 0, "problems": [], "reasons": [], "looks": []}  # fmt: skip
+             "ledger_lines": 0, "problems": [], "reasons": [], "looks": [],
+             "specifying": False}  # fmt: skip
     lines: list[str] = []
     try:
         path = folder / DECISION_FILE
@@ -376,13 +405,14 @@ def reading(folder: Path) -> dict:
     ]  # fmt: skip
     if garbled:
         found["problems"].append(GARBLED_LEDGER)
+    found["specifying"] = specifying(folder)
     return found
 
 
 def card_reading(folder: Path, problems: list[str]) -> dict:
     """What a factory run left, as a board card shows it: its rounds, the approver's decision, the
-    ledger, the cost and the last acceptance run's verdict, each file that won't parse a line
-    added to `problems`."""
+    ledger, the cost, the last acceptance run's verdict and whether its spec is under way
+    (`specifying()`), each file that won't parse a line added to `problems`."""
     rounds = []
     base = folder / "reviews"
     dirs = [p for p in base.glob("round-*") if p.is_dir() and p.name[6:].isdigit()]
@@ -443,7 +473,7 @@ def card_reading(folder: Path, problems: list[str]) -> dict:
         "rounds": rounds, "built": built, "decision": decision, "pending": pending,
         "assumed": assumed, "cost": cost(folder), "reconsider": reconsider,
         "ledger_lines": ledger_lines, "reasons": read["reasons"], "looks": read["looks"],
-        "accept": accept_verdict(folder),
+        "accept": accept_verdict(folder), "specifying": read["specifying"],
     }  # fmt: skip
 
 
