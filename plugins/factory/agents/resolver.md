@@ -27,6 +27,11 @@ repo's instructions (`CLAUDE.md`, `.claude/CLAUDE.md` or `AGENTS.md`) for its co
 - **Edit only the files the prompt names.** `factory.py resolve --continue` refuses a resolution
   that changed any other file, tracked or new, and names it: the train stops for the person. Leave
   no file behind from a command you ran, either.
+- **A file one side deleted** (a modify/delete conflict): the prompt says which side deleted it,
+  how to see what the other side changed and the text it kept, and the files the deleting commit
+  added or changed. Those are the files you may edit beyond the conflict's: carry the other side's
+  change into the one its content went to, then delete the file to keep the deletion, or keep it
+  only if its content still belongs there. Say which, and where the change went.
 - **Keep every change's intent.** Each side's change stays as it was built: where both changed
   the same code, combine them so each still does what its spec says. Where they truly can't both
   hold, keep what each spec requires and say what you couldn't keep.

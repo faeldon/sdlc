@@ -1566,7 +1566,11 @@ def is_read(command: str) -> bool:
 def read_evidence(text: str, where: str) -> list[str]:
     """What's wrong with a reply's `## Evidence` section: missing, no command in it, or a command
     whose `exit:` line never comes before the next command or the section's end, unless it is a
-    read (`is_read()`) that printed a line, neither blank nor a fence, which is its result."""
+    read (`is_read()`) that printed a line, neither blank nor a fence, which is its result. A `## `
+    line ends the section only outside a command's output: with no command open (after its
+    `exit:`), or after a blank line unless the open command is a read that has printed. Any other
+    is the open command's output, so a read that prints Markdown keeps its headings (bug
+    2026-11-20-17), and a command that owes its `exit:` never finds it in a later section."""
     lines = text.splitlines()
     if EVIDENCE not in [line.strip() for line in lines]:
         return [f"{where} has no `{EVIDENCE}` section: each command it ran, its output, its exit"]
@@ -1577,9 +1581,13 @@ def read_evidence(text: str, where: str) -> list[str]:
         if open_cmd and not (printed and is_read(open_cmd)):
             problems.append(f"{where}: `{open_cmd}` has no `exit:` line")
 
+    blank = False
     for line in lines[start:]:
-        if line.startswith("## "):
+        if line.startswith("## ") and (
+            open_cmd is None or (blank and not (printed and is_read(open_cmd)))
+        ):
             break
+        blank = not line.strip()
         if line.lstrip().startswith("$ "):
             close()
             open_cmd, printed, commands = line.strip()[2:], False, commands + 1
@@ -1989,17 +1997,17 @@ def cmd_decisions(root: Path, ident: str) -> int:
     line's text, which is what keeps it from being added twice.
 
     A raise is already filed when a line holds its text, its first line alone (a ledger written
-    before a question's continuation was read, `raised_decisions()`), or, when it has options, the
-    same source, kind, options and why: a resumed agent rewording a decision it raised, whose
-    earlier reply is gone. A raise's alternatives (`sub_lines()`) are filed under its new line.
-    A line with no options is filled once, by the first that `decisions` reads of a later raise
-    of the same text with options or the approver's `- ESCALATED:` line for it with options, and
-    never again (`bare` lists the open defaults still short of two). The approver's `- SETTLED:
-    D<n>: <reason>`, read from the current `decision.md` alone, ticks an open default with
-    ` → settled by the approver: <reason>`, never the person's mark; one naming any other line, or
-    an id named twice, marks nothing and is listed in `unsettled` with why. Each `look` reason of
-    the current decision (`escalation_reasons()`) is filed once for the newest round, `(approver
-    round <R>, look)`, for the person to acknowledge. A rerun writes nothing."""
+    before a question's continuation was read, `raised_decisions()`), or, when it has two options or
+    more, the same source, kind, options and why: a resumed agent rewording a decision it raised,
+    whose earlier reply is gone. A raise's alternatives (`sub_lines()`) are filed under its new
+    line. A line with no options is filled once, by the first that `decisions` reads of a later
+    raise of the same text with options or the approver's `- ESCALATED:` line for it with options,
+    and never again (`bare` lists the open defaults still short of two). The approver's `- SETTLED:
+    D<n>: <reason>`, read from the current `decision.md` alone, ticks an open default with ` →
+    settled by the approver: <reason>`, never the person's mark; one naming any other line, or an id
+    named twice, marks nothing and is listed in `unsettled` with why. Each `look` reason of the
+    current decision (`escalation_reasons()`) is filed once for the newest round, `(approver round
+    <R>, look)`, for the person to acknowledge. A rerun writes nothing."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -2015,15 +2023,17 @@ def cmd_decisions(root: Path, ident: str) -> int:
     def alternatives(source: str, kind: str, options: list[dict], why: str | None) -> tuple:
         return source, kind, tuple((o["option"], o["notes"]) for o in options), why
 
+    # Only a real choice, two options or more, is matched by its alternatives: one shared option
+    # and why could stand under two different decisions (nit 2026-11-20-8).
     by_alts = {alternatives(d["source"], d["kind"], d["options"], d["why"]): d
-               for d in ledger if d["kind"] != "look" and d["options"]}  # fmt: skip
+               for d in ledger if d["kind"] != "look" and len(d["options"]) >= 2}  # fmt: skip
     for source, kind, raised, options, why, first in raised_decisions(folder):
         named = SUPERSEDES_RE.match(raised) if kind == "default" else None
         text = named.group(2) if named else raised
         # A ledger written before a question's continuation was read holds its first line alone.
         alone = SUPERSEDES_RE.match(first) if named else None
         known = by_text.get(text) or by_text.get(alone.group(2) if alone else first)
-        if known is None and options:
+        if known is None and len(options) >= 2:
             known = by_alts.get(alternatives(source, kind, options, why))
         if known is not None:
             fill(known, options, why)
@@ -2035,7 +2045,7 @@ def cmd_decisions(root: Path, ident: str) -> int:
             | {"settled": None, "options": options, "why": why, "current": True}
         )
         by_text[text] = ledger[-1]
-        if options:
+        if len(options) >= 2:
             by_alts[alternatives(source, kind, options, why)] = ledger[-1]
         new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
         new_lines += sub_text(options, why)
@@ -3627,7 +3637,8 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
         "mend": {"evidence": "", "verdict": "", "decision": "", "arbitrate": "problems"},
         "resolve": {"main": "files", "gone": "gone inbox"},
         "train-resolve": {"main": "count base change files",
-                          "change": "name this title pre rel spec", "this": ""},
+                          "change": "name this title pre rel spec", "this": "",
+                          "deleted": "path side commit base kept stage moved"},
         "land-fix": {"main": "ask"},
         "land-review": {"main": "round what diff", "rebased": "base why", "resolved": "round",
                         "clean": "", "asked": "round ask"},
@@ -4315,6 +4326,13 @@ def _land_task(root: Path, folder: Path, task: str, role: str) -> tuple[str, Pat
             "train-resolve", "main", count=len(listed), base=base, change=folder.name,
             files=", ".join(files),
         )  # fmt: skip
+        # A modify/delete conflict: which side deleted the file and where its content went.
+        for each in deleted_sides(root):
+            main += " " + prompt_part(
+                "train-resolve", "deleted", path=each["path"], side=each["side"],
+                commit=(each["commit"] or "a commit git didn't find")[:12], base=each["base"][:12],
+                kept=each["kept"], stage=each["stage"], moved=", ".join(each["moved"]) or "none",
+            )  # fmt: skip
         return (
             head + main + "\n" + "\n".join(listed) + f"\n\n{check_line(folder)}",
             folder / "build" / f"land-{n}.md",
@@ -5190,6 +5208,58 @@ def _conflicted(root: Path) -> list[str]:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return []
     return [p for p in done.stdout.split("\0") if p]
+
+
+# A modify/delete conflict mid-rebase, by the index stages its path holds beside the base's (1):
+# who deleted the file, the stage holding the side that kept it, the side that kept it and the side
+# that deleted it. Stage 2 alone is git's `UD`: the commit being replayed (this change) deleted it;
+# stage 3 alone is `DU`: the commit it is replayed onto did.
+DELETED = {
+    frozenset("12"): ("this change", 2, "HEAD", "REBASE_HEAD"),
+    frozenset("13"): ("the change it is stacked on", 3, "REBASE_HEAD", "HEAD"),
+}
+
+
+def deleted_sides(root: Path) -> list[dict]:
+    """Each modify/delete conflict a rebase left in `root` (`DELETED`), as the resolver is told it
+    (bug 2026-11-20-14): its `path`, the `side` that deleted it, the index `stage` holding the text
+    the other side kept, the merge `base` and the side that `kept` it (`git diff <base> <kept> --
+    <path>` is what that side changed), the `commit` that deleted it, and `moved`: the files that
+    commit added or changed, outside the change folders and the counter, still in the tree, which
+    is where the deleted content may have gone. The resolver judges which it went to: a split is
+    rarely a rename git detects. Empty when git fails or there is none."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--unmerged", "-z"],
+            capture_output=True, encoding="utf-8", check=True,
+        )  # fmt: skip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    stages: dict[str, set[str]] = {}
+    for entry in filter(None, done.stdout.split("\0")):
+        info, _, path = entry.partition("\t")
+        stages.setdefault(path, set()).add(info.split()[-1])
+    paths = [(p, DELETED[frozenset(s)]) for p, s in stages.items() if frozenset(s) in DELETED]
+    if not paths:
+        return []
+    base = _git(root, "merge-base", "HEAD", "REBASE_HEAD") or ""
+    work = work_rel(root) + "/"
+    found = []
+    for path, (side, stage, kept, gone) in paths:
+        commit = base and _git(
+            root, "log", "-1", "--format=%H", "--diff-filter=D", f"{base}..{gone}", "--", path
+        )
+        listed = commit and _git(
+            root, "diff-tree", "--no-commit-id", "-r", "--name-only", "-z", "--diff-filter=AM",
+            commit,
+        )  # fmt: skip
+        moved = [
+            p for p in (listed or "").split("\0")
+            if p and not p.startswith(work) and p != COUNTER and (root / p).is_file()
+        ]  # fmt: skip
+        found.append({"path": path, "side": side, "stage": stage, "base": base, "kept": kept,
+                      "commit": commit or None, "moved": moved})  # fmt: skip
+    return found
 
 
 # The change's own records a resolve run writes mid-rebase, the builder's or the resolver's (its

@@ -106,6 +106,7 @@ class Case:
         mp.setattr(factory, "read_ledger", lambda folder: self.ledger)
         mp.setattr(factory, "preamble", lambda path: self.preamble)
         mp.setattr(factory.landing, "train_names", self._train_names)
+        mp.setattr(factory, "deleted_sides", lambda root: [])
         mp.setattr(factory.landing, "land_verdict", lambda root, folder, cfg, n: self.verdict)
 
     def _git(self, root: Path, *args: str) -> str:
@@ -207,6 +208,15 @@ def _mend(c: Case, role: str) -> str:
     return c.task(state, "mend", role)
 
 
+def _train_resolve_deleted(c: Case) -> str:
+    """A modify/delete conflict: this change deleted src/b.py, which it split into two files."""
+    deleted = {"path": "src/b.py", "side": "this change", "stage": 2, "base": "f0f0f0f",
+               "kept": "HEAD", "commit": "8888888",
+               "moved": ["src/b1.py", "src/b2.py"]}  # fmt: skip
+    c.mp.setattr(factory, "deleted_sides", lambda root: [deleted])
+    return c.land("train-resolve", "resolver")
+
+
 def _resolve(c: Case, gone: bool) -> str:
     files = ["src/a.py", factory.INBOX.as_posix()] if gone else ["src/a.py"]
     c.mp.setattr(factory, "_conflicted", lambda root: files)
@@ -297,6 +307,7 @@ CASES: dict[str, Callable[[Case], str]] = {
     "resolve": lambda c: _resolve(c, gone=False),
     "resolve-inbox": lambda c: _resolve(c, gone=True),
     "train-resolve": lambda c: c.land("train-resolve", "resolver"),
+    "train-resolve-deleted": _train_resolve_deleted,
     "land-fix": _land_fix,
     "land-review": lambda c: _land_review(c, "clean"),
     "land-review-resolved": lambda c: _land_review(c, "resolved"),

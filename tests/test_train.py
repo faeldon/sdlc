@@ -323,10 +323,12 @@ def _repo(tmp_path: Path, check: str | None = None) -> Path:
     return root
 
 
-def _ready(root: Path, slug: str, edit: dict[str, str], tier: int = 1) -> Path:
-    """A change made by `sdlc.py new`, built (each path in `edit` written), at `stage: test` with
-    the approver's READY and a minor impact, one build round every reviewer passed, as a factory
-    run leaves one. Returns its worktree."""
+def _ready(
+    root: Path, slug: str, edit: dict[str, str], tier: int = 1, gone: tuple[str, ...] = ()
+) -> Path:
+    """A change made by `sdlc.py new`, built (each path in `edit` written, each in `gone`
+    deleted), at `stage: test` with the approver's READY and a minor impact, one build round every
+    reviewer passed, as a factory run leaves one. Returns its worktree."""
     code, _, said = factory._sdlc(["new", slug, "--tier", str(tier), "--worktree"], root)
     assert code == 0, said
     tree = next(p for p in (root / ".claude" / "worktrees").iterdir() if p.name.endswith(slug))
@@ -347,6 +349,8 @@ def _ready(root: Path, slug: str, edit: dict[str, str], tier: int = 1) -> Path:
     for path, content in edit.items():
         (tree / path).parent.mkdir(parents=True, exist_ok=True)
         (tree / path).write_text(content, encoding="utf-8")
+    for path in gone:
+        (tree / path).unlink()
     (folder / "build").mkdir()
     (folder / "build" / "round-1.md").write_text("Built.\n", encoding="utf-8")
     hashes = factory._tree_hashes(tree, "main")
@@ -1016,6 +1020,86 @@ def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
     code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
     assert (code, out["state"]) == (0, "resolved"), out
     assert _git(tree, "show", "HEAD:notes.txt") == "second's notes"
+
+
+def _moving(tmp_path: Path, deletes_second: bool) -> tuple[Path, list[Path]]:
+    """Two ready changes over `old.txt`: one moves it to `new.txt` (deletes it, adds the copy),
+    the other edits its first line. With `deletes_second`, the second moves it (git's `UD` when it
+    stacks); else the first does (`DU`)."""
+    root = _repo(tmp_path, "true")
+    (root / "old.txt").write_text("one\ntwo\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "old.txt")
+    edit = {"old.txt": "edited one\ntwo\n"}
+    move = {"new.txt": "one\nthree\nfour\nfive\n"}  # a split, never a rename git detects
+    first = _ready(
+        root, "first", edit if deletes_second else move, gone=() if deletes_second else ("old.txt",)
+    )
+    second = _ready(
+        root,
+        "second",
+        move if deletes_second else edit,
+        gone=("old.txt",) if deletes_second else (),
+    )
+    return root, [first, second]
+
+
+def _carrying(tree: Path, files: list[str]) -> None:
+    """The resolver's answer to a modify/delete: the deletion stands and the edit goes where the
+    content went."""
+    assert files == ["old.txt"], files
+    (tree / "old.txt").unlink()
+    (tree / "new.txt").write_text("edited one\nthree\nfour\nfive\n", encoding="utf-8")
+
+
+@needs_uv
+@pytest.mark.parametrize("deletes_second", [True, False], ids=["UD", "DU"])
+def test_a_modify_delete_conflict_reaches_the_resolver_and_lands(
+    tmp_path, capsys, deletes_second
+) -> None:
+    """196 (bug 2026-11-20-14): a stack where one change deletes a file the other edited goes to
+    the resolver, told which side deleted it, where the surviving text is, what the other side
+    changed and where the content went; it keeps the deletion and carries the edit into the moved
+    file, `--continue` stages both and continues, the marker names both for the review, and the
+    train lands."""
+    root, trees = _moving(tmp_path, deletes_second)
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    assert readings[-1]["files"] == ["old.txt"], readings[-1]
+    tree, folder = trees[1], _folder(trees[1])
+    prompt, _, _ = factory._land_task(tree, folder, "train-resolve", "resolver")
+    side = "this change" if deletes_second else "the change it is stacked on"
+    stage = ":2:" if deletes_second else ":3:"
+    assert f"old.txt is deleted by {side}" in prompt, prompt
+    assert f"git show {stage}old.txt" in prompt and "new.txt" in prompt, prompt
+    assert "git diff " in prompt and " -- old.txt" in prompt, prompt
+    _carrying(tree, ["old.txt"])
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert _git(tree, "ls-tree", "--name-only", "HEAD", "old.txt") == "", "the deletion stands"
+    assert _git(tree, "show", "HEAD:new.txt") == "edited one\nthree\nfour\nfive"
+    marker = (folder / "runs" / "land-resolved").read_text(encoding="utf-8").splitlines()
+    assert marker[1] == "old.txt, new.txt", marker
+    assert _git(tree, "status", "--porcelain") == ""
+    readings = drive_train(factory, root, capsys, resolve=_carrying)
+    assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
+    assert not (root / "old.txt").exists()
+    assert (root / "new.txt").read_text(encoding="utf-8") == "edited one\nthree\nfour\nfive\n"
+
+
+@needs_uv
+def test_a_modify_delete_resolution_outside_the_moved_files_is_refused(tmp_path, capsys) -> None:
+    """196: the files the deleting commit added or changed are the only ones beyond the conflict a
+    modify/delete resolution may edit: another tracked file is still refused."""
+    root, trees = _moving(tmp_path, deletes_second=True)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree = trees[1]
+    _carrying(tree, ["old.txt"])
+    (tree / "README.md").write_text("not the conflict's\n", encoding="utf-8")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert code == 1 and "README.md" in out["refusals"][0], out
+    assert "new.txt" not in out["refusals"][0], out
 
 
 # ------------------------------------------------------------- the base moves under the train (R10)

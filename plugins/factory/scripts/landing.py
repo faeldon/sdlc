@@ -791,8 +791,10 @@ READ_ONLY_GIT_REFUSED = ("--output", "--ext-diff", "--textconv")
 # rule can't see: a link inside the checkout read through to a file outside it.
 GREP_FOLLOWS = frozenset("RSO")
 # GNU grep takes any unambiguous prefix of a long option, so every name with three or more
-# characters after its `--` that begins this one is refused (`--der` on), with `=value` or not.
+# characters after its `--` (`GREP_FOLLOWS_MIN`) that begins this one is refused (`--der` on),
+# with `=value` or not.
 GREP_FOLLOWS_LONG = "--dereference-recursive"
+GREP_FOLLOWS_MIN = 3
 # Outside single quotes: a redirect, a substitution, an escape, a subshell or group.
 READ_ONLY_REFUSED = frozenset(">`$\\(){}<")
 GLOBS = frozenset("*?[")
@@ -880,7 +882,7 @@ def read_only_command(text: str, checkout: Path) -> str | None:
             short = word.startswith("-") and not word.startswith("--")
             name = word.partition("=")[0] if word.startswith("--") else ""
             if program == "grep" and (
-                (len(name) >= 5 and GREP_FOLLOWS_LONG.startswith(name))
+                (len(name) - 2 >= GREP_FOLLOWS_MIN and GREP_FOLLOWS_LONG.startswith(name))
                 or (short and GREP_FOLLOWS & set(word[1:]))
             ):
                 return f"`{word}` makes grep follow symlinks, which can lead out of the checkout"
@@ -2723,8 +2725,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     `--onto` takes only the base branch, by name or by its tip: the change's own commits, from
     their merge base with it, rebased onto it, with no train state and no landing round: `current`,
     `stacked` or `conflict`. Either way `.sdlc/last-id` settles itself (`_rebase_settling()`).
-    `--continue` checks no conflict marker is left in the conflicted files and that nothing
-    outside them and the change's landing records changed (`_stray()`), writes
+    `--continue` checks no conflict marker is left in the conflicted files (one the resolution
+    deleted is staged as a deletion) and that nothing outside them, the files a modify/delete's
+    deleting commit added or changed (`factory.deleted_sides()`, `carried` when edited) and the
+    change's landing records changed (`_stray()`), writes
     `runs/land-resolved`, stages the files, the marker, the agent's reply and the other
     records (`RESOLVE_RECORDS`), and continues, so the rebased commit holds them and the worktree is
     clean; on a second conflict it aborts, which takes the staged marker with it.
@@ -2814,9 +2818,13 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
                      "head": (factory._git(root, "rev-parse", "HEAD") or "")[:12],
                      "round": factory.land_round(folder)})  # fmt: skip
     files = factory._conflicted(root)
+    # Where a deleted file's content went (`factory.deleted_sides()`): the resolver may carry the
+    # other side's edit into those files, so they pass the fence and are staged with the conflict's.
+    moved = list(dict.fromkeys(p for d in factory.deleted_sides(root) for p in d["moved"]))
+    # A conflicted file the resolution deleted is a staged deletion, with nothing to read.
     marked = [
         f for f in files
-        if factory.CONFLICT_MARKER_RE.search(
+        if (root / f).is_file() and factory.CONFLICT_MARKER_RE.search(
             (root / f).read_text(encoding="utf-8", errors="replace"))
     ]  # fmt: skip
     if marked:
@@ -2834,9 +2842,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     marker = folder / "runs" / "land-resolved"
     own = (*factory.RESOLVE_RECORDS, marker.relative_to(folder), Path("build") / f"land-{n}.md")
     records = [(folder / r).relative_to(root).as_posix() for r in own]
-    stray = _stray(root, records)
+    stray = _stray(root, [*records, *moved])
     if stray is None:
         return _land_refused(root, folder, {}, "git status failed in the change's worktree")
+    carried = [p for xy, p in _status_entries(root) or [] if p in moved and xy[1] != " "]
     if stray:
         num = folder.name.split("-")[0]
         listed = ", ".join(stray)
@@ -2854,13 +2863,16 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         text = (folder / "intent.md").read_text(encoding="utf-8")
         ids = [*factory.frontmatter_ids(text, "idea"), *factory.frontmatter_ids(text, "fixes")]
         dropped = drop_entries(root, [*ids, *factory.named_nits(root, folder)])
-    for f in files:
+    for f in [*files, *carried]:
         factory._git(root, "add", "--", f)
     # The resolution's marker, written before the rebase goes on, so it goes into the rebased
     # commit with the resolver's reply and the worktree is left clean (R14); an abort below
-    # takes the staged marker with it.
+    # takes the staged marker with it. It names the files a deleted one's content was carried
+    # into too, for the review.
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(f"land-{n}\n" + ", ".join(files) + "\n", encoding="utf-8", newline="\n")
+    marker.write_text(
+        f"land-{n}\n" + ", ".join([*files, *carried]) + "\n", encoding="utf-8", newline="\n"
+    )
     # The agent's resolve run added its cost line to this tracked file mid-rebase: the change's
     # own record, so it goes into the rebased commit, or `--continue` refuses on it.
     # So did the agent's step, `resolve`, in the landing's step record.
@@ -2884,8 +2896,8 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     if named is not None and named[1].get("stacking"):
         _stacked_now(root, folder, named[0], named[1])
     head = factory._git(root, "rev-parse", "--short", "HEAD")
-    return factory.emit({"change": folder.name, "resolved": files, "state": "resolved",
-                 "dropped": dropped, "head": head})  # fmt: skip
+    return factory.emit({"change": folder.name, "resolved": files, "carried": carried,
+                 "state": "resolved", "dropped": dropped, "head": head})  # fmt: skip
 
 
 def cmd_land_verdicts(root: Path, ident: str, record: bool = False) -> int:
