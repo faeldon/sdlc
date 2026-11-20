@@ -1,1 +1,0 @@
-say the ledger protects against the Edit and Write tools, not a shell that can reach the git common dir, in the README, REFERENCE.md and the land skill; and in cmd_gate, in both factory.py and sdlc.py, check that the earlier record is still vouched after the slot wait, before reading it

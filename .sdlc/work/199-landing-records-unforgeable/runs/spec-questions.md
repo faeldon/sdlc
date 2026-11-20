@@ -1,9 +1,0 @@
-
-**Resolved**
-- *Keyed signature or a ledger in the git common dir?* A ledger. A key could only live in the git common dir, beside the ledger, so a signature would protect no more. It would also add a secret and change what the board and `status` parse (`_slot_dir()`, `TRAIN_STATE`). You can overrule this; *Alternatives rejected* has the trade-off.
-- *Does the hand gate's `build/gate.md` need the same protection?* Yes, from the code. A green `build/gate.md` clears the approver's `gate` reasons in `factory.gate_reasons()`, which `/sdlc-factory:decide` uses, and in `landing.escalation_lines()`, which the landing's question shows. So a forged one changes what a landing asks. The cost is the contract edit flagged in *Contracts touched*: core writes the ledger line. To drop it, cut R6, the core half of R1, R7 and R8, and the AGENTS.md sentence.
-- *Round gates (`round-<N>.gate.md`), not named in the intent.* Covered at landing (R3). A train of one that never moved lands on its build round's gate alone, so a forged round gate would reach a commit.
-
-**Left for you**
-- *Changes in flight when this lands.* Their existing records have no ledger lines, so `land` refuses them (R3), and the gate and accept refuse to append to them (R7). Each record must be removed and its gate or checks run again. The alternative is a one-time "vouch what's there" step, but a command that vouches a file the script didn't write is the exact hole this closes. The draft takes the refusal.
-- *`build/land-<n>.checks.md`.* This is the approver's `CHECKS: HARMLESS` judgement, trusted by the `Judged:` hash it states (`checks_clearance()`). A forged one lets a changed `checks.md` run unattended in `train --run`. It is the same class of hole, but the intent names only gate, build and accept records, so the draft leaves it out. Adding it is one more writer (the `land-checks` agent filing) and one more reader.
