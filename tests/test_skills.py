@@ -770,6 +770,15 @@ def test_ship_files_the_agents_recorded_nits() -> None:
     assert "`filed_nits`" in land.split("## Step 3")[1]
 
 
+def test_the_land_description_names_what_a_landing_runs() -> None:
+    """193 (idea 2026-11-19-68): the description names the slow gate at the tip and the approver's
+    judgement of changed acceptance checks, as Step 3 and the steps list do."""
+    path = ROOT / "plugins" / "factory" / "skills" / "land" / "SKILL.md"
+    description = frontmatter.load(path)["description"]
+    assert "the slow gate run there when a change calls for it" in description
+    assert "the approver judges an acceptance check changed since the yes" in description
+
+
 def test_the_factory_reviewers_weigh_their_nits() -> None:
     """129 R1: the code, security and test reviewers end each nit with its weights, by the process
     doc's rubric, in the shape `read_nit()` reads."""

@@ -1,0 +1,5 @@
+{"step": "ship", "round": null, "seconds": 401.0, "since": "2026-11-20T00:22:32Z"}
+{"step": "stack", "round": 1, "seconds": 201.0, "since": "2026-11-20T00:32:37Z"}
+{"step": "wait", "round": 1, "seconds": 127.0, "since": "2026-11-20T00:35:58Z"}
+{"step": "review", "round": 1, "seconds": 65.0, "since": "2026-11-20T00:38:05Z"}
+{"step": "wait", "round": 1, "seconds": 22.0, "since": "2026-11-20T00:39:10Z"}

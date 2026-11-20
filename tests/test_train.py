@@ -2091,6 +2091,8 @@ READ_ONLY_PASSES = [
     "git show HEAD:README.md",
     "git diff --stat HEAD~1 -- src",
     "git log --format=%H -1",
+    "grep -r --directories=skip keep src",
+    "grep -r --de keep src",
     "test -f README.md\ngrep -q one README.md",
 ]
 
@@ -2128,6 +2130,9 @@ READ_ONLY_REFUSALS = [
     ("grep -rnS keep .", "-rnS"),
     ("grep -O -r keep .", "-O"),
     ("grep --dereference-recursive keep .", "--dereference-recursive"),
+    ("grep --der keep .", "--der"),
+    ("grep -n --dereference keep .", "--dereference"),
+    ("grep --dereference-recursive=x keep .", "--dereference-recursive=x"),
     ("cat 'unclosed", "quote"),
     ("cat README.md &&", "empty"),
 ]

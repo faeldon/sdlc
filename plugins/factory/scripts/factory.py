@@ -74,8 +74,9 @@ policy, scope) raises a `- DECISION: [blocking] ...` or `- DECISION: [default] .
 reply. `decisions` gathers them into `decisions.md`; `verdicts` says `decide` while a blocking one
 is unanswered, and the session running the build, the only one that can talk to the person, asks
 them. A default one lets the run go on, recorded as assumed until the person confirms it. Each
-can carry its alternatives, indented `- OPTION:` lines and a `- WHY:` under it, which `decisions`
-files under its ledger line. The approver weighs every open default: one it settles from the spec,
+can continue its question in lines indented under it, folded into its ledger line, and carry its
+alternatives, indented `- OPTION:` lines and a `- WHY:` after them, which `decisions` files under
+that line. The approver weighs every open default: one it settles from the spec,
 the code or a round (`- SETTLED: D<n>: <reason>`) `decisions` ticks `→ settled by the approver:`,
 its own mark and never the person's; one it escalates stays open. `ask`, read-only, lists what is
 left for the person at `stage: test`, for `/sdlc-factory:decide`, and given the ids answered says
@@ -1837,10 +1838,34 @@ def sub_text(options: list[dict], why: str | None) -> list[str]:
     return lines + ([f"  - WHY: {why}\n"] if why else [])
 
 
-def raised_decisions(folder: Path) -> list[tuple[str, str, str, list[dict], str | None]]:
+def question_lines(line: str, lines: list[str]) -> tuple[list[str], int]:
+    """The lines a raised decision's question `line` continues in, from `lines`, the reply's
+    lines after it: each line indented deeper than `line`, blank lines between them included,
+    stripped and a leading `- ` or `* ` dropped, up to the `- OPTION:`/`- WHY:` run or the first
+    line that isn't deeper; and how many of `lines` they take, blank lines before that run
+    included, so the run reads from there."""
+    indent = len(line) - len(line.lstrip())
+    found, taken = [], 0
+    for i, text in enumerate(lines):
+        if not text.strip():
+            continue
+        if OPTION_RE.match(text) or WHY_RE.match(text):
+            return found, i
+        if len(text) - len(text.lstrip()) <= indent:
+            break
+        found.append(re.sub(r"^[-*]\s+", "", text.strip()))
+        taken = i + 1
+    return found, taken
+
+
+def raised_decisions(
+    folder: Path,
+) -> list[tuple[str, str, str, list[dict], str | None, str]]:
     """Every `- DECISION:` line an agent's reply holds, oldest first, as (source, kind, text,
-    options, why), its alternatives being the `sub_lines()` straight after it: the builder's
-    reports in `build/round-<N>.md`, and the reviews in `reviews/round-<N>/<role>.md`."""
+    options, why, first): its text is the line's with the lines it continues in folded in, one
+    space between (`question_lines()`), `first` the line's text alone, and its alternatives the
+    `sub_lines()` straight after them: the builder's reports in `build/round-<N>.md`, and the
+    reviews in `reviews/round-<N>/<role>.md`."""
     found = []
 
     def rounds(base: Path, pattern: str) -> list[Path]:
@@ -1855,7 +1880,9 @@ def raised_decisions(folder: Path) -> list[tuple[str, str, str, list[dict], str 
         for i, line in enumerate(lines):
             m = RAISED_RE.match(line)
             if m:
-                found.append((source, m.group(1), m.group(2), *sub_lines(lines[i + 1 :])))
+                more, taken = question_lines(line, lines[i + 1 :])
+                text, rest = " ".join([m.group(2), *more]), lines[i + 1 + taken :]
+                found.append((source, m.group(1), text, *sub_lines(rest), m.group(2)))
     return found
 
 
@@ -1961,15 +1988,18 @@ def cmd_decisions(root: Path, ident: str) -> int:
     when D<n> is a default still open (`unmarked` says why not); the prefix stays out of the new
     line's text, which is what keeps it from being added twice.
 
-    A raise's alternatives (`sub_lines()`) are filed under its new line. A line with no options is
-    filled once, by the first that `decisions` reads of a later raise of the same text with
-    options or the approver's `- ESCALATED:` line for it with options, and never again (`bare`
-    lists the open defaults still short of two). The approver's `- SETTLED: D<n>: <reason>`, read
-    from the current `decision.md` alone, ticks an open default with ` → settled by the approver:
-    <reason>`, never the person's mark; one naming any other line, or an id named twice, marks
-    nothing and is listed in `unsettled` with why. Each `look` reason of the current decision
-    (`escalation_reasons()`) is filed once for the newest round, `(approver round <R>, look)`, for
-    the person to acknowledge. A rerun writes nothing."""
+    A raise is already filed when a line holds its text, its first line alone (a ledger written
+    before a question's continuation was read, `raised_decisions()`), or, when it has options, the
+    same source, kind, options and why: a resumed agent rewording a decision it raised, whose
+    earlier reply is gone. A raise's alternatives (`sub_lines()`) are filed under its new line.
+    A line with no options is filled once, by the first that `decisions` reads of a later raise
+    of the same text with options or the approver's `- ESCALATED:` line for it with options, and
+    never again (`bare` lists the open defaults still short of two). The approver's `- SETTLED:
+    D<n>: <reason>`, read from the current `decision.md` alone, ticks an open default with
+    ` → settled by the approver: <reason>`, never the person's mark; one naming any other line, or
+    an id named twice, marks nothing and is listed in `unsettled` with why. Each `look` reason of
+    the current decision (`escalation_reasons()`) is filed once for the newest round, `(approver
+    round <R>, look)`, for the person to acknowledge. A rerun writes nothing."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -1982,11 +2012,21 @@ def cmd_decisions(root: Path, ident: str) -> int:
             entry.update(options=options, why=why)
             fills[entry["id"]] = sub_text(options, why)
 
-    for source, kind, raised, options, why in raised_decisions(folder):
+    def alternatives(source: str, kind: str, options: list[dict], why: str | None) -> tuple:
+        return source, kind, tuple((o["option"], o["notes"]) for o in options), why
+
+    by_alts = {alternatives(d["source"], d["kind"], d["options"], d["why"]): d
+               for d in ledger if d["kind"] != "look" and d["options"]}  # fmt: skip
+    for source, kind, raised, options, why, first in raised_decisions(folder):
         named = SUPERSEDES_RE.match(raised) if kind == "default" else None
         text = named.group(2) if named else raised
-        if text in by_text:
-            fill(by_text[text], options, why)
+        # A ledger written before a question's continuation was read holds its first line alone.
+        alone = SUPERSEDES_RE.match(first) if named else None
+        known = by_text.get(text) or by_text.get(alone.group(2) if alone else first)
+        if known is None and options:
+            known = by_alts.get(alternatives(source, kind, options, why))
+        if known is not None:
+            fill(known, options, why)
             continue
         added.append(f"D{len(ledger) + 1}")
         ledger.append(
@@ -1995,6 +2035,8 @@ def cmd_decisions(root: Path, ident: str) -> int:
             | {"settled": None, "options": options, "why": why, "current": True}
         )
         by_text[text] = ledger[-1]
+        if options:
+            by_alts[alternatives(source, kind, options, why)] = ledger[-1]
         new_lines.append(f"- [ ] {added[-1]} ({source}, {kind}): {text}\n")
         new_lines += sub_text(options, why)
         if named:

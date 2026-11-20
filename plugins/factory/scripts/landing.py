@@ -790,6 +790,8 @@ READ_ONLY_GIT_REFUSED = ("--output", "--ext-diff", "--textconv")
 # grep's flags that follow a symlink while recursing (GNU `-R`, BSD `-S` and `-O`), which the path
 # rule can't see: a link inside the checkout read through to a file outside it.
 GREP_FOLLOWS = frozenset("RSO")
+# GNU grep takes any unambiguous prefix of a long option, so every name with three or more
+# characters after its `--` that begins this one is refused (`--der` on), with `=value` or not.
 GREP_FOLLOWS_LONG = "--dereference-recursive"
 # Outside single quotes: a redirect, a substitution, an escape, a subshell or group.
 READ_ONLY_REFUSED = frozenset(">`$\\(){}<")
@@ -848,10 +850,14 @@ def read_only_command(text: str, checkout: Path) -> str | None:
     (185 R5), or None when it is: every simple command in it (`_simple_commands()`) starts with
     one of `READ_ONLY_PROGRAMS`, named bare, with no `VAR=value` before it; `git` takes one of
     `READ_ONLY_GIT` as its very next word and none of `READ_ONLY_GIT_REFUSED`; `grep` none of the
-    flags that follow symlinks as it recurses (`GREP_FOLLOWS`); and no word, nor an
-    option's value (after `=`, or glued to a short option), is absolute, starts `~`, has a `..`
-    component, or names an existing path that resolves outside `checkout`. It never runs
-    anything, and never judges intent: `cat .env` passes, which is why the approver reads it too."""
+    flags that follow symlinks as it recurses (`GREP_FOLLOWS`, and any prefix of
+    `GREP_FOLLOWS_LONG` grep would take for it); and no word, nor an option's value (after `=`, or
+    glued to a short option), is absolute, starts `~`, has a `..` component, or names an existing
+    path that resolves outside `checkout`. That last rule sees only the paths the words name: a
+    symlink out met by a program walking the tree itself is refused only by the grep flags above,
+    grep being the one program on the list that can follow a link as it recurses. It never runs
+    anything, and never judges intent: `cat .env` passes, which is why the approver reads it
+    too."""
     parts, why = _simple_commands(text)
     if why:
         return why
@@ -872,8 +878,10 @@ def read_only_command(text: str, checkout: Path) -> str | None:
             if program == "git" and word.startswith(READ_ONLY_GIT_REFUSED):
                 return f"`{word}` makes git write a file or run a program"
             short = word.startswith("-") and not word.startswith("--")
+            name = word.partition("=")[0] if word.startswith("--") else ""
             if program == "grep" and (
-                word == GREP_FOLLOWS_LONG or (short and GREP_FOLLOWS & set(word[1:]))
+                (len(name) >= 5 and GREP_FOLLOWS_LONG.startswith(name))
+                or (short and GREP_FOLLOWS & set(word[1:]))
             ):
                 return f"`{word}` makes grep follow symlinks, which can lead out of the checkout"
             values = [word]
@@ -1920,7 +1928,8 @@ def _train_begin(
         folder = tree / factory.work_rel(tree) / r["change"]
         before[r["change"]] = factory.land_round(folder)
         # What the person's yes covered of its acceptance checks (185 R1): the file's hash, and
-        # each check as the parser that runs them reads it. Unreadable, none: all count changed.
+        # each check as the parser that runs them reads it. Where preflight can't be read, this
+        # records `checks: []` beside the hash, which is safe: every check then counts as changed.
         sha = checks_sha(folder)
         approved[r["change"]] = {"checks_sha": sha,
                                  "checks": _checks_now(folder, tree)[0] if sha else []}  # fmt: skip

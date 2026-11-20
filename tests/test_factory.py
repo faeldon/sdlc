@@ -809,6 +809,75 @@ def test_a_ledger_without_alternatives_reads_as_before(tmp_path) -> None:
     ]  # fmt: skip
 
 
+REWORDED = (
+    "- DECISION: [default] I reworded more than R7 and R9 list:\n"
+    '  - "gate" meaning a yes became approval;\n'
+    "  - NOTICE lists `agents/arbiter.md`.\n"
+    "\n"
+    "  Going ahead with all of it.\n"
+    "  - OPTION: reword everywhere — one meaning per word; a larger diff\n"
+    "  - OPTION: only the listed spots — a smaller diff; leaves the old meaning\n"
+    "  - WHY: the intent's outcome\n"
+    "Then the next slice.\n"
+)
+REWORDED_TEXT = (
+    'I reworded more than R7 and R9 list: "gate" meaning a yes became approval; NOTICE lists '
+    "`agents/arbiter.md`. Going ahead with all of it."
+)
+REWORDED_SUBS = (
+    "  - OPTION: reword everywhere — one meaning per word; a larger diff\n"
+    "  - OPTION: only the listed spots — a smaller diff; leaves the old meaning\n"
+    "  - WHY: the intent's outcome\n"
+)
+
+
+def test_a_question_in_sub_bullets_keeps_every_line_and_its_options(tmp_path, capsys) -> None:
+    """193 (bug 2026-11-19-79): the lines a DECISION's question continues in, indented under it,
+    are folded into its ledger line, and the OPTION and WHY run after them is read."""
+    root = _change(tmp_path)
+    _build_report(root, 1, REWORDED)
+    code, out = _run(capsys, factory.cmd_decisions, root, "008")
+    assert code == 0 and out["added"] == ["D1"] and out["bare"] == [], out
+    assert _ledger_text(root) == (
+        f"# Decisions\n\n- [ ] D1 (builder round 1, default): {REWORDED_TEXT}\n{REWORDED_SUBS}"
+    )
+    [d1] = factory.read_ledger(root / ".sdlc" / "work" / NAME)
+    assert d1["text"] == REWORDED_TEXT and len(d1["options"]) == 2
+    assert d1["why"] == "the intent's outcome"
+
+
+def test_a_ledger_holding_a_question_s_first_line_is_matched(tmp_path, capsys) -> None:
+    """193: a ledger written before continuations were read holds the first line alone; the same
+    raise read again files nothing new, and fills the bare line's options once."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    first = "- [ ] D1 (builder round 1, default): I reworded more than R7 and R9 list:\n"
+    (folder / "decisions.md").write_text("# Decisions\n\n" + first, encoding="utf-8")
+    _build_report(root, 1, REWORDED)
+    out = _run(capsys, factory.cmd_decisions, root, "008")[1]
+    assert out["added"] == [] and out["bare"] == [], out
+    assert _ledger_text(root) == "# Decisions\n\n" + first + REWORDED_SUBS
+    _run(capsys, factory.cmd_decisions, root, "008")
+    assert _ledger_text(root) == "# Decisions\n\n" + first + REWORDED_SUBS, "a rerun: no change"
+
+
+def test_a_decision_reraised_with_the_same_alternatives_lands_once(tmp_path, capsys) -> None:
+    """193 (nit 2026-11-20-1): a resumed agent rewording a decision it raised, with the same
+    options and why from the same source, files nothing new; other alternatives, another source
+    or another kind are another decision."""
+    root = _change(tmp_path)
+    _build_report(root, 1, PAGING)
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D1"]
+    _build_report(root, 1, PAGING.replace("at 50?", "at 50, one screen?"))
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == []
+    assert _ledger_text(root) == "# Decisions\n\n" + PAGING_LEDGER
+    _build_report(root, 2, PAGING.replace("at 50?", "at 50, one screen?"))
+    _build_report(root, 3, PAGING.replace("at 50?", "at 50 again?").replace("100 —", "25 —"))
+    review = PAGING.replace("[default] Page", "[blocking] Page").replace("at 50?", "at 50 or not?")
+    _build_report(root, 4, review)
+    assert _run(capsys, factory.cmd_decisions, root, "008")[1]["added"] == ["D2", "D3", "D4"]
+
+
 def test_options_fill_a_bare_line_once(tmp_path, capsys) -> None:
     """137 R3: a later raise of the same text with options fills a bare line; a line that has
     options never gets more; a rerun changes no byte."""
