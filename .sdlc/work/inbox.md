@@ -435,13 +435,6 @@ Cost: S
 Value: low
 Raised by: 195-designing-while-specified (correctness)
 
-## [2026-11-20-18] [idea] Narrow retro's tests.drifted to a test's own code and skip exact goldens
-
-Left undone by 192-tests-pruning, carried forward when it landed: Retro's `tests.drifted` takes a test's code to be every code file its last change touched, so a test edited beside `sdlc.py` or `retro.py` drifts for good (`test_metrics.py`, `test_function_heat.py`), and an exact golden (`close-output.json`, `land-fix.txt`, `land-record-cases.json`) is named though it can't drift silently. A narrower notion of a test's code (the files it loads, or a host's list of goldens) would make the list worth acting on.
-See .sdlc/work/192-tests-pruning/notes.md in its commit.
-Raised 2026-11-20.
-Theme: tests
-
 ## [2026-11-20-22] [nit] a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
 
 Raised by the test review of 196-evidence-and-deleted-conflicts, round 1: tests/test_evidence_headings.py:1: a read whose printed heading follows a blank line (the `## Speed` line in 189's report) is only covered by the one combined case, so a regression to the blank-line rule would show up only there
@@ -549,35 +542,6 @@ the 7 `commands.*` keys, the 3 `metrics.*` keys, and the `docs.*` and `release.*
 rely on. Raised by the retrospective of 2026-11-20.
 Theme: retro
 
-## [2026-11-20-41] [idea] Prune the slow train tests and the drifted ones
-
-`tests.due` is true. The serial suite takes 2,452 seconds over 3,563 tests (median 0.17s). The
-gate's round median doubled, from 86.5 to 158.5 seconds. These are the candidates:
-- **Slow tests** (each 150× or more the median):
-  - `test_train::test_every_ejection_names_its_cause` (39.8s)
-  - `test_a_train_fix_already_made_goes_on_to_the_gate` (31.6s)
-  - `test_a_train_stops_past_land_moves` (27.7s)
-  - `test_a_killed_train_run_resumes` (27.4s)
-  - `test_train_run_resumes_after_a_kept_change` (27.3s)
-  - `test_train_run_ejects_a_gate_fault_and_lands_the_rest` (26.4s)
-  - `test_train_run_lands_a_batch_of_three` (25.6s)
-  - `test_land::test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_factory_alone`
-    (25.0s)
-
-  Each builds a repo and a train of its own. A shared fixture, or one train walked through several
-  checks, may cover the same ground.
-- **Drifted tests** (code moved since, in that many later changes):
-  - `tests/fixtures/close-output.json` (172, 8)
-  - `tests/test_function_heat.py` (177, 8)
-  - `tests/prompts/land-fix.txt` (181, 7)
-  - `tests/prompts/land-checks.txt`, `tests/train_driver.py` (185, 4)
-  - `tests/test_bugs.py`, `tests/test_next_up.py` (176, 4)
-  - `tests/test_indicators.py`, `tests/test_surface.py` (184, 3)
-
-The later change's review decides what to merge, rewrite, move or delete. Raised by the
-retrospective of 2026-11-20.
-Theme: tests
-
 ## [2026-11-20-42] [idea] Pay down the `tests` nits
 
 26 `[nit]` entries are open in the `tests` theme, the oldest from 2026-11-19, past the process
@@ -651,3 +615,35 @@ Paths: .sdlc/SDLC.md
 Cost: S
 Value: low
 Raised by: 205-release-cadence (correctness)
+
+## [2026-11-20-50] [idea] The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping.
+
+Left undone by 200-tests-pruned-again, carried forward when it landed: The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping. Caching what doesn't change within one reading would speed both.
+See .sdlc/work/200-tests-pruned-again/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-51] [idea] No test fails when the train's readiness refusal (`_land_readiness()`'s `refusal`, in `cmd_train`) is ejected under another cause: mutating its `"refusal"` to `"review"` passed every train and landing test.
+
+Left undone by 200-tests-pruned-again, carried forward when it landed: No test fails when the train's readiness refusal (`_land_readiness()`'s `refusal`, in `cmd_train`) is ejected under another cause: mutating its `"refusal"` to `"review"` passed every train and landing test. The removed `test_every_ejection_names_its_cause` never reached that path either: its stray file is the `failed` path, which `test_train_run_stops_at_a_refusal` covers.
+See .sdlc/work/200-tests-pruned-again/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-52] [nit] `_names()` is the one place a string-to-path match is decided, and its docstring wraps mid-sentence and is hard to read.
+
+Raised by the code review of 200-tests-pruned-again, round 1: scripts/indicators.py:478: `_names()` is the one place a string-to-path match is decided, and its docstring wraps mid-sentence and is hard to read. Splitting it into two sentences would help.
+
+Theme: docs
+Paths: scripts/indicators.py
+Cost: S
+Value: low
+Raised by: 200-tests-pruned-again (correctness)
+
+## [2026-11-20-53] [nit] the paragraph opens "one is left", then lists several tests under "Kept", and only `test_function_heat.py` still drifts.
+
+Raised by the code review of 200-tests-pruned-again, round 1: .sdlc/work/200-tests-pruned-again/notes.md:8: the paragraph opens "one is left", then lists several tests under "Kept", and only `test_function_heat.py` still drifts. Rewording it to say that would match what follows.
+
+Theme: docs
+Paths: .sdlc/work/200-tests-pruned-again/notes.md
+Cost: S
+Value: low
+Raised by: 200-tests-pruned-again (context)
