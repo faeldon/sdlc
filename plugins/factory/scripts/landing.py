@@ -1378,11 +1378,11 @@ UNMERGED = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
 
 
 def _stray(root: Path, records: list[str]) -> list[str] | None:
-    """The paths a resolution changed outside its conflicted files and the change's landing
-    `records` (root-relative POSIX paths), from one `_status_entries()` listing: an entry that
-    isn't unmerged whose worktree column isn't blank, or an untracked one (`??`). What the
-    replayed commit staged cleanly (worktree column blank) is the commit's own and passes. None
-    when git fails."""
+    """The paths a resolution changed in its worktree outside its conflicted files and the
+    change's landing `records` (root-relative POSIX paths), from one `_status_entries()` listing:
+    an entry that isn't unmerged whose worktree column isn't blank, or an untracked one (`??`). A
+    staged path (worktree column blank) is never judged here: `--continue` holds each to
+    `REBASE_HEAD`'s own paths (`_replayed()`, `_staged()`). None when git fails."""
     entries = _status_entries(root)
     if entries is None:
         return None
@@ -1391,6 +1391,38 @@ def _stray(root: Path, records: list[str]) -> list[str] | None:
         path for xy, path in entries
         if xy not in UNMERGED and (xy == "??" or xy[1] != " ") and path not in allowed
     ]  # fmt: skip
+
+
+def _z_listing(root: Path, *args: str) -> list[str] | None:
+    """The `\\0`-separated fields a git listing prints in `root`, read as git printed them: never
+    through `_git()`, whose strip takes a leading space. None when git fails."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, encoding="utf-8", check=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return [f for f in done.stdout.split("\0") if f]
+
+
+def _replayed(root: Path) -> dict[str, str] | None:
+    """`REBASE_HEAD`'s own paths, each with its status letter (`A`, `M`, `D`, ...), from one
+    listing of the commit a rebase is replaying: a rename is its deletion and its addition. Read
+    only while a rebase is under way, since `REBASE_HEAD` outlives it. None when git fails."""
+    fields = _z_listing(
+        root, "diff-tree", "-r", "--root", "--no-commit-id", "--no-renames", "--name-status", "-z",
+        "REBASE_HEAD",
+    )  # fmt: skip
+    if fields is None or len(fields) % 2:
+        return None
+    return {fields[i + 1]: fields[i][:1] for i in range(0, len(fields), 2)}
+
+
+def _staged(root: Path) -> list[str] | None:
+    """Every path the index holds differently from `HEAD`, unmerged ones included: what the next
+    commit would add. A rename is its old path and its new one (`--no-renames`), so a `git mv`
+    can't hide the path it took away. None when git fails."""
+    return _z_listing(root, "diff", "--cached", "--name-only", "--no-renames", "-z")
 
 
 def _neither_side(root: Path, path: str) -> bool:
@@ -2721,15 +2753,17 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     `--onto` takes only the base branch, by name or by its tip: the change's own commits, from
     their merge base with it, rebased onto it, with no train state and no landing round: `current`,
     `stacked` or `conflict`. Either way `.sdlc/last-id` settles itself (`_rebase_settling()`).
-    `--continue` checks no conflict marker is left in the conflicted files, that a file the
-    resolution deleted (staged or not) is one side of a modify/delete (`factory.deleted_sides()`,
-    which reads one whose deletion is already staged from the commits), and that nothing outside
+    `--continue` refuses when no rebase is under way, since `REBASE_HEAD` outlives one. It checks
+    no conflict marker is left in the conflicted files, that a file the resolution deleted (staged
+    or not) is one side of a modify/delete (`factory.deleted_sides()`, which reads one whose
+    deletion is already staged from the commits), that nothing in the worktree changed outside
     them, the files a modify/delete's deleting commit added or changed (`carried` when their text
-    is neither side's, staged or not) and the change's landing records changed (`_stray()`),
-    writes
-    `runs/land-resolved`, stages the files, the marker, the agent's reply and the other
-    records (`RESOLVE_RECORDS`), and continues, so the rebased commit holds them and the worktree is
-    clean; on a second conflict it aborts, which takes the staged marker with it.
+    is neither side's, staged or not) and the change's landing records (`_stray()`), and that
+    every staged path is one of those or `REBASE_HEAD`'s own (`_replayed()`, `_staged()`, each
+    read once, before anything is staged), then writes `runs/land-resolved`, stages the files, the
+    marker, the agent's reply and the other records (`RESOLVE_RECORDS`), and continues, so the
+    rebased commit holds them and the worktree is clean; on a second conflict it aborts, which
+    takes the staged marker with it.
     Every git step is this script's: the resolver, or the builder, only edits the files it is
     given. A conflicted register loses, before it is staged, every entry the landing deleted from
     it, whatever the agent kept: the change's `idea:` and `fixes:` entries and the nits it retired,
@@ -2815,25 +2849,40 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         return factory.emit({"change": folder.name, "state": "stacked", "onto": onto,
                      "head": (factory._git(root, "rev-parse", "HEAD") or "")[:12],
                      "round": factory.land_round(folder)})  # fmt: skip
+    num = folder.name.split("-")[0]
+    # `REBASE_HEAD` outlives its rebase: with none under way, nothing is read or staged (198 R8).
+    if not factory._rebasing(root):
+        why = "no rebase under way: nothing to continue"
+        plain = (
+            f"resolve {num} --continue found no rebase under way: run git status in its worktree "
+            f"to see where it stands"
+        )
+        return _land_refused(root, folder, {}, why, plain)
     files = factory._conflicted(root)
     # Where a deleted file's content went (`factory.deleted_sides()`): the resolver may carry the
     # other side's edit into those files, so they pass the fence and are staged with the conflict's.
     sides = factory.deleted_sides(root)
     moved = list(dict.fromkeys(p for d in sides for p in d["moved"]))
+    # The replayed commit's own paths and the index as the resolution left it, each read once,
+    # before this script stages anything (198 R8, R9).
+    replayed, staged = _replayed(root), _staged(root)
+    if replayed is None or staged is None:
+        why = "git couldn't read the index or REBASE_HEAD in the change's worktree"
+        return _land_refused(root, folder, {}, why)
     # Only one side of a modify/delete may go (nit 2026-11-20-20): a conflicted file that is gone,
     # or a deletion staged of a file the replayed commit keeps, is the resolution's, so it must be
-    # one `deleted_sides()` names, never a file both sides changed.
+    # one `deleted_sides()` names, never a file both sides changed. A staged deletion of a path the
+    # replayed commit doesn't own is the fence's, below.
     deletable = {d["path"] for d in sides}
     staged_gone = [
         p for xy, p in _status_entries(root) or []
-        if xy == "D " and factory._git(root, "cat-file", "-e", f"REBASE_HEAD:{p}") is not None
+        if xy == "D " and replayed.get(p, "D") != "D"
     ]  # fmt: skip
     gone = [
         f for f in dict.fromkeys([*files, *staged_gone])
         if not (root / f).exists() and f not in deletable
     ]  # fmt: skip
     if gone:
-        num = folder.name.split("-")[0]
         listed = ", ".join(gone)
         why = f"deleted {listed}, which no modify/delete conflict lets go"
         plain = (
@@ -2849,7 +2898,6 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
             (root / f).read_text(encoding="utf-8", errors="replace"))
     ]  # fmt: skip
     if marked:
-        num = folder.name.split("-")[0]
         plain = (
             f"the resolution left conflict markers in {', '.join(marked)}: remove them in its "
             f"worktree, then sdlc.py resolve {num} --continue finishes the rebase (or --abort "
@@ -2857,8 +2905,10 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         )
         why = f"conflict markers left in: {', '.join(marked)}"
         return _land_refused(root, folder, {}, why, plain)
-    # Only the conflicted files and the change's landing records may have changed: the script, not
-    # the prompt, holds a resolution to the files it was given (149 R8, R9), whoever resolved it.
+    # Only the conflicted files, the moved files and the change's landing records may have changed
+    # in the worktree, and a staged path must be one of those or `REBASE_HEAD`'s own (198 R1-R4):
+    # the script, not the prompt, holds a resolution to the files it was given (149 R8, R9),
+    # whoever resolved it, whether it staged its change or not.
     n = factory.land_round(folder)
     marker = folder / "runs" / "land-resolved"
     own = (*factory.RESOLVE_RECORDS, marker.relative_to(folder), Path("build") / f"land-{n}.md")
@@ -2866,15 +2916,17 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
     stray = _stray(root, [*records, *moved])
     if stray is None:
         return _land_refused(root, folder, {}, "git status failed in the change's worktree")
+    allowed = {*replayed, *files, *moved, *records}
+    stray = list(dict.fromkeys([*stray, *(p for p in staged if p not in allowed)]))
     # A moved file the resolution changed, staged or not: its text is neither side's.
     carried = [p for p in moved if _neither_side(root, p)]
     if stray:
-        num = folder.name.split("-")[0]
         listed = ", ".join(stray)
         why = f"edited outside its conflicted files: {listed}"
         plain = (
             f"the resolution changed {listed}, outside the conflicted files: undo those edits in "
-            f"its worktree (git checkout -- <path>, or delete a new file), then factory.py resolve "
+            f"its worktree (git checkout HEAD -- <path>, or git rm --cached and delete a new "
+            f"file), then factory.py resolve "
             f"{num} --continue, or eject {num} from the train"
         )
         return _land_refused(root, folder, {}, why, plain)
@@ -2909,7 +2961,6 @@ def cmd_resolve(root: Path, ident: str, cont: bool, onto: str | None = None) -> 
         if named is not None:
             named[1]["stacking"] = None
             write_train(root, named[0])
-        num = folder.name.split("-")[0]
         why = "a second conflict: the rebase was aborted, ship it by hand"
         plain = (
             f"its rebase conflicted a second time and was undone: /sdlc:ship {num} by hand brings "

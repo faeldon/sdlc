@@ -52,6 +52,10 @@
   `test_paths_shown_are_posix` (`tests/test_windows.py`), caught only in CI's Windows job (it passes
   on any other platform whatever the code does), and
   `test_a_non_ascii_hotspot_on_the_base_branch_is_not_gone` (`tests/test_retro.py`).
+- **Git state read after the step that changed it.** A landing or resolve step reads unmerged
+  entries, `REBASE_HEAD`, the index or a blank worktree column, but a step before it (a `git add`,
+  `git rm` or `rebase --continue`) has already moved what it reads. Check each read against the
+  step before it, and test it on the staged state, not the conflicted one.
 
 - **A finding counted for the wrong reviewer.** A factory agent's finding (`By:` a factory role)
   counted in a `Sdlc-Findings` key that means ship's review, or ship's own counted as an agent's:

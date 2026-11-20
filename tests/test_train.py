@@ -1155,6 +1155,116 @@ def test_a_modify_delete_resolution_outside_the_moved_files_is_refused(tmp_path,
     assert "new.txt" not in out["refusals"][0], out
 
 
+@needs_uv
+@pytest.mark.parametrize("how", ["edit", "add", "rm", "mv"])
+def test_a_staged_path_the_replayed_commit_doesnt_own_is_refused(tmp_path, capsys, how) -> None:
+    """198 R1-R5 (bug 2026-11-20-27): a resolution that stages a path outside the replayed
+    commit's own (an edit to a file it didn't touch, a new file, a `git rm` of a file only `HEAD`
+    holds, a `git mv` of a file it didn't touch onto one it added) is refused by `--continue`,
+    naming the path, with no marker and the rebase left under way; undone, the same resolution
+    goes through, the file the replayed commit staged cleanly passing as its own."""
+    root, trees = _conflicting(tmp_path, extra={"notes.txt": "second's notes\n"})
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    _resolving(tree, ["README.md"])
+    head_only = f".sdlc/work/{trees[0].name}/intent.md"
+    assert _git(tree, "ls-tree", "--name-only", "REBASE_HEAD", head_only) == ""
+    if how == "edit":
+        stray = ".gitignore"
+        with (tree / stray).open("a", encoding="utf-8") as f:
+            f.write("# touched\n")
+        _git(tree, "add", stray)
+    elif how == "add":
+        stray = "LICENSE.txt"
+        (tree / stray).write_text("not the conflict's\n", encoding="utf-8")
+        _git(tree, "add", stray)
+    elif how == "rm":
+        stray = head_only
+        _git(tree, "rm", "-q", stray)
+    else:
+        stray = ".gitignore"
+        _git(tree, "mv", "-f", stray, "notes.txt")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert code == 1 and out["state"] == "refused", out
+    why = out["refusals"][0]
+    assert stray in why and "outside its conflicted files" in why, why
+    assert not (folder / "runs" / "land-resolved").exists(), "no marker"
+    assert factory._rebasing(tree), "the rebase is left under way"
+    assert factory._conflicted(tree) == ["README.md"], "nothing staged"
+    if how == "add":
+        _git(tree, "rm", "-q", "--cached", stray)
+        (tree / stray).unlink()
+    else:
+        _git(tree, "checkout", "HEAD", "--", stray)
+    if how == "mv":
+        _git(tree, "checkout", "REBASE_HEAD", "--", "notes.txt")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert _git(tree, "show", "HEAD:notes.txt") == "second's notes"
+    assert _git(tree, "status", "--porcelain") == ""
+
+
+@needs_uv
+def test_resolve_continue_with_no_rebase_under_way_is_refused(tmp_path, capsys) -> None:
+    """198 R8: `REBASE_HEAD` outlives its rebase; a `--continue` after the rebase finished refuses
+    before it reads or stages anything, saying no rebase is under way."""
+    root, trees = _conflicting(tmp_path)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    _resolving(tree, ["README.md"])
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert not factory._rebasing(tree) and _git(tree, "rev-parse", "-q", "--verify", "REBASE_HEAD")
+    marker = folder / "runs" / "land-resolved"
+    before = marker.read_bytes()
+    with (tree / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write("# touched\n")
+    _git(tree, "add", ".gitignore")
+    head = _git(tree, "rev-parse", "HEAD")
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert code == 1 and "no rebase under way" in out["refusals"][0], out
+    assert _git(tree, "diff", "--cached", "--name-only") == ".gitignore", "nothing else staged"
+    assert marker.read_bytes() == before and _git(tree, "rev-parse", "HEAD") == head
+
+
+@needs_uv
+def test_resolve_continue_reads_rebase_head_once(tmp_path, capsys, monkeypatch) -> None:
+    """198 R9 (nit 2026-11-20-28): a `--continue` with two staged deletions (the resolver's `git
+    rm` of a modify/delete's file, and one the replayed commit made cleanly) reads `REBASE_HEAD`'s
+    paths with one `diff-tree`, never a `cat-file` per deletion, and continues."""
+    root = _repo(tmp_path, "true")
+    (root / "old.txt").write_text("one\ntwo\n", encoding="utf-8")
+    (root / "spare.txt").write_text("spare\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "old.txt and spare.txt")
+    _ready(root, "first", {"old.txt": "edited one\ntwo\n"})
+    second = _ready(root, "second", {"new.txt": "one\nthree\nfour\nfive\n"},
+                    gone=("old.txt", "spare.txt"))  # fmt: skip
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    _carrying(second, ["old.txt"])
+    _git(second, "rm", "-q", "--cached", "old.txt")
+    staged = _git(second, "diff", "--cached", "--name-only", "--diff-filter=D").splitlines()
+    assert sorted(staged) == ["old.txt", "spare.txt"], staged
+    calls: list[list[str]] = []
+    real = subprocess.run
+
+    def recording(argv, *args, **kwargs):
+        calls.append([str(a) for a in argv])
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording)
+    code, out = _run(capsys, factory.landing.cmd_resolve, second, "002", True)
+    monkeypatch.undo()
+    assert (code, out["state"]) == (0, "resolved"), out
+    git = [c for c in calls if c and c[0] == "git"]
+    assert not [c for c in git if "cat-file" in c], "no cat-file per deletion"
+    reads = [c for c in git if "diff-tree" in c and "REBASE_HEAD" in c]
+    assert len(reads) == 1, reads
+
+
 # ------------------------------------------------------------- the base moves under the train (R10)
 
 
