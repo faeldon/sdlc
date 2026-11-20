@@ -1,6 +1,7 @@
-# The factory's settings for this repo (plugins/factory/README.md). Only [ui] differs from the
-# defaults: the board `sdlc.py board` serves is this plugin's one front end, so a factory change to
-# it gets the UI and UX reviewers, judging screenshots of the board as that change built it.
+# The factory's settings for this repo (plugins/factory/README.md). Only [ui] and [models] differ
+# from the defaults: the board `sdlc.py board` serves is this plugin's one front end, so a factory
+# change to it gets the UI and UX reviewers, judging screenshots of the board as that change built
+# it; and the approver runs on sonnet for one window (the comment above [models]).
 
 [ui]
 # The board over a scratch repo built from the fixture's copy, with a change in every state a card
@@ -10,3 +11,11 @@ fixture = "tests/fixtures/board/changes"
 paths = ["scripts/board.html", "scripts/board.py", "tests/fixtures/board/"]
 # The board fills in from /state.json after it loads: wait for its columns before the shot.
 shoot = "uvx --from playwright playwright screenshot --wait-for-selector '.col' --viewport-size '{width}, {height}' {url} {out}"
+
+[models]
+# A one-window trial, from the retrospective of 2026-11-20: the approver reads and decides without
+# editing, and on opus it cost $16.07 over 43 runs. One `approver` entry covers both depths. The
+# next retrospective judges it by the READY changes that escaped (a bug filed against a change the
+# approver passed) and the ESCALATEs the person found empty (answered with no change asked for):
+# no worse than this window's, and it stays; worse, and this table goes.
+approver = "sonnet"
