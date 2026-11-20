@@ -549,15 +549,6 @@ its queued and ready-wait shares with this window's. Raised by the retrospective
 Theme: autonomy
 Priority: low
 
-## [2026-11-20-38] [idea] Run the approver on Sonnet for one window
-
-Opus is 88% of the window's spend ($214.93 of $243.53). The approver runs on Opus at $16.07 over
-43 runs and 23 minutes, and reads and decides without editing. One window with `[models] approver
-= "sonnet"` in `.sdlc/factory.toml` would cost about a tenth as much. Use the approver's decisions
-as the guardrail: READY changes that escaped, and ESCALATEs the person found empty. Raised by the
-retrospective of 2026-11-20.
-Theme: cost
-
 ## [2026-11-20-39] [idea] Check the surface's retire list before retiring anything on it
 
 The surface's retire list names 33 config keys unused for 3 windows, among them `git.base` and
