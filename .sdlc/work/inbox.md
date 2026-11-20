@@ -113,22 +113,6 @@ See .sdlc/work/152-board-drawer-browser-test/notes.md in its commit.
 Theme: ci
 Raised 2026-11-18.
 
-## [2026-11-18-79] [nit] the test takes about 49s here, mostly waiting on the poll interval.
-
-Raised by the test review of 152-board-drawer-browser-test, round 1: tests/test_board_browser.py:98: the test takes about 49s here, mostly waiting on the poll interval. A shorter bounded wait or a faster poll in the fixture would speed up `./check.sh`
-
-Theme: tests
-Paths: tests/test_board_browser.py
-Cost: M
-Value: low
-Raised by: 152-board-drawer-browser-test (correctness)
-
-## [2026-11-18-88] [idea] Pay down the tests nits in one change
-
-Five `[nit]` entries are open under `tests` (2026-11-18-64, -70, -71, -79 and -85), which is the threshold the process guide sets for paying a theme down. Two of them are slow polls in the train's kill test (-71 and -79, about 49 seconds here). One change takes all five, and its review decides each.
-Theme: tests
-Raised by the retrospective of 2026-11-18.
-
 ## [2026-11-18-90] [idea] A pruning pass over the tests that drifted
 
 Retro's `tests.drifted` names ten test files whose code moved without them over the last 30 changes:
@@ -145,36 +129,6 @@ Raised by the retrospective of 2026-11-18.
 Left undone by 156-cases-that-tell, carried forward when it landed: 26 `e-*` workspaces from earlier case runs sit in `/private/tmp` (made before runs removed their own); a one-off `run-cases --prune` or a line in CONTRIBUTING could clear them, behind the same `_workspace_of()` guard
 See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
-
-## [2026-11-18-101] [nit] the workspace test chmods to 0 and then restores in `finally`.
-
-Raised by the test review of 156-cases-that-tell, round 1: tests/test_evals.py:523: the workspace test chmods to 0 and then restores in `finally`. A failure partway through could leave `outside` unreadable for pytest's tmp cleanup.
-
-Theme: tests
-Paths: tests/test_evals.py
-Cost: S
-Value: low
-Raised by: 156-cases-that-tell (correctness)
-
-## [2026-11-18-104] [nit] the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push).
-
-Raised by the test review of 153-risky-code-in-its-own-modules, round 1: tests/test_sdlc.py:1921: the spec's `test_the_source_guards_reach_closing_py` plants all four cases (main ref, `gh` call, literal `work/`, second push). It plants only two, and the other two live in `test_work_folder.py` and presumably `test_skills.py`.
-
-Theme: tests
-Paths: tests/test_sdlc.py
-Cost: S
-Value: low
-Raised by: 153-risky-code-in-its-own-modules (correctness)
-
-## [2026-11-18-109] [nit] `test_main_runs_a_stand_in_handler` already passed before the move (the plan says so).
-
-Raised by the test review of 160-command-registry, round 1: tests/test_registry.py:104: `test_main_runs_a_stand_in_handler` already passed before the move (the plan says so). It guards R7 and would catch a later regression, but it never failed on the old code. Only the `config` command is stubbed, so an adapter that bound its handler at import time would be caught for that one command and no other. Stubbing one more, such as `status` with the default no-command path, would cover R5's `--all` default through `main()`.
-
-Theme: tests
-Paths: tests/test_registry.py
-Cost: S
-Value: low
-Raised by: 160-command-registry (correctness)
 
 ## [2026-11-19-8] [nit] the R5 test only builds the `build` task, so the refusal for a broken `mend.md` or `land-review.md` under `land-mend` is untested.
 
@@ -205,16 +159,6 @@ Paths: tests/test_board.py
 Cost: S
 Value: low
 Raised by: 167-board-knows-its-repo (correctness)
-
-## [2026-11-19-6] [nit] the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable.
-
-Raised by the code review of 163-factory-records-reader, round 1: tests/test_board.py: the `FACTORY_LAND_STOPS == board.LAND_STOPS` pin is dropped, which the plan records and which is reasonable. It was a comparison of two copies, and with one copy it would compare the module with itself. `LAND_STOPS` still has no factory twin, so nothing checks it against the factory. It is only pinned against `LAND_STEPS` through the board's `LAND_AT` test.
-
-Theme: tests
-Paths: tests/test_board.py
-Cost: S
-Value: low
-Raised by: 163-factory-records-reader (correctness)
 
 ## [2026-11-19-17] [nit] `test_retro_and_its_report_show_the_same_figures` compares only work mix and time to users with the report, and has no assertion on the follow-through sentence.
 
@@ -486,12 +430,6 @@ Cost: S
 Value: med
 Raised by: 185-landing-gates (contract)
 
-## [2026-11-19-75] [idea] test_train's by() should share _uv()'s offline fallback
-
-Left undone by 186-gate-reliability, carried forward when it landed: `tests/test_train.py`'s `by()` runs `uv run --script` on a copy of the plugin at a new path, as the adoption tests did, so a gate with no network can fail it the same way. It could share the adoption tests' `_uv()` (offline from uv's cache, else a skip naming the network).
-See .sdlc/work/186-gate-reliability/notes.md in its commit.
-Raised 2026-11-19.
-
 ## [2026-11-19-76] [nit] `"network was disabled" in cached.stderr` depends on uv's exact wording.
 
 Raised by the code review of 186-gate-reliability, round 1: tests/test_adoption.py:65: `"network was disabled" in cached.stderr` depends on uv's exact wording. If a later uv words it differently, an offline run with an empty cache returns the failing result instead of skipping, so the gate goes red on the network again. Matching "offline" or "disabled" as well, or checking `--offline`'s non-zero exit more loosely, would be sturdier.
@@ -598,3 +536,19 @@ Severity: med
 Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/landing.py
 Introduced by: 139-landing-train
 Theme: factory
+
+## [2026-11-20-15] [idea] Give the workarounds' `unknown` block its `n`, as `_workarounds()`'s docstring says
+
+Left undone by 191-tests-paydown, carried forward when it landed: `retro.py`'s workarounds block gives `unknown` a `count` and `rows` but no `n`, though `_workarounds()`'s docstring says "each count carries its `n`" (nit 2026-11-19-56). That is a code change, and this change is tests-only, so its test pins the row's `change` key and leaves `n` alone.
+See .sdlc/work/191-tests-paydown/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-16] [nit] `UNCACHED`'s `offline` and `no solution found` are broad, so a script failure that happens to print "offline" would skip the test when it should fail.
+
+Raised by the code review of 191-tests-paydown, round 1: tests/uv_run.py:17: `UNCACHED`'s `offline` and `no solution found` are broad, so a script failure that happens to print "offline" would skip the test when it should fail. The `--offline` run only gets here after the index was unreachable, which makes this unlikely, but a tighter match would cost little.
+
+Theme: robustness
+Paths: tests/uv_run.py
+Cost: S
+Value: low
+Raised by: 191-tests-paydown (correctness)
