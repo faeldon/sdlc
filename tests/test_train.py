@@ -1005,7 +1005,7 @@ def test_a_resolution_outside_its_files_is_refused(tmp_path, capsys) -> None:
         why = out["refusals"][0]
         assert stray in why and "outside its conflicted files" in why, (label, why)
         assert not marker.exists(), f"{label}: no marker"
-        assert factory.landing._rebasing(tree), f"{label}: the rebase is left under way"
+        assert factory._rebasing(tree), f"{label}: the rebase is left under way"
         assert factory._conflicted(tree) == ["README.md"], f"{label}: nothing staged"
         step = factory.read_land_step((folder / factory.LAND_STEP).read_text(encoding="utf-8"))
         assert any("resolve 002 --continue" in p for p in step["problems"]), (label, step)
@@ -1085,6 +1085,59 @@ def test_a_modify_delete_conflict_reaches_the_resolver_and_lands(
     assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
     assert not (root / "old.txt").exists()
     assert (root / "new.txt").read_text(encoding="utf-8") == "edited one\nthree\nfour\nfive\n"
+
+
+@needs_uv
+@pytest.mark.parametrize("deletes_second", [True, False], ids=["UD", "DU"])
+@pytest.mark.parametrize("stage_carried", [False, True], ids=["edited", "staged"])
+def test_a_staged_modify_delete_resolution_lands(
+    tmp_path, capsys, deletes_second, stage_carried
+) -> None:
+    """197 (bug 2026-11-20-23): in the order a landing runs it, the resolver carries the edit into
+    the moved file, then the deletion is staged (`git rm`, as 194's resolver did), then
+    `--continue`: no unmerged entry is left, and still the moved file passes the fence, the marker
+    names both, and the train lands. Staged by the resolver too, the carried file is still named
+    for the review."""
+    root, trees = _moving(tmp_path, deletes_second)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    _carrying(tree, ["old.txt"])
+    _git(tree, "rm", "-q", "--cached", "old.txt")
+    if stage_carried:
+        _git(tree, "add", "new.txt")
+    assert factory._conflicted(tree) == [], "the staging left no unmerged entry"
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (0, "resolved"), out
+    assert out["carried"] == ["new.txt"], out
+    assert _git(tree, "ls-tree", "--name-only", "HEAD", "old.txt") == "", "the deletion stands"
+    assert _git(tree, "show", "HEAD:new.txt") == "edited one\nthree\nfour\nfive"
+    marker = (folder / "runs" / "land-resolved").read_text(encoding="utf-8").splitlines()
+    assert marker[1] == "old.txt, new.txt", marker
+    readings = drive_train(factory, root, capsys, resolve=_carrying)
+    assert readings[-1]["next"] == "done" and len(readings[-1]["landed"]) == 2, readings[-1]
+
+
+@needs_uv
+@pytest.mark.parametrize("staged", [False, True], ids=["deleted", "git-rm"])
+def test_a_deleted_both_modified_file_is_refused(tmp_path, capsys, staged) -> None:
+    """197 (nit 2026-11-20-20): a conflicted file both sides changed (`UU`) that the resolution
+    deletes, by hand or staged with `git rm`, is refused by `--continue`, naming it, with the
+    rebase left under way: only one side of a modify/delete may go."""
+    root, trees = _conflicting(tmp_path)
+    _begin(root, capsys)
+    drive_train(factory, root, capsys, until=lambda o: o.get("next") == "resolve")
+    tree, folder = trees[1], _folder(trees[1])
+    if staged:
+        _git(tree, "rm", "-q", "-f", "README.md")
+    else:
+        (tree / "README.md").unlink()
+    code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
+    assert (code, out["state"]) == (1, "refused"), out
+    why = out["refusals"][0]
+    assert "README.md" in why and "modify/delete" in why, why
+    assert not (folder / "runs" / "land-resolved").exists(), "no marker"
+    assert factory._rebasing(tree), "the rebase is left under way"
 
 
 @needs_uv

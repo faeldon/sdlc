@@ -55,6 +55,15 @@ def test_a_heading_after_an_exit_ends_the_section() -> None:
 
 
 @pytest.mark.portable
+def test_a_read_then_a_blank_heading_keeps_the_section_open() -> None:
+    """197 (nit 2026-11-20-19): after a read that printed, a blank line and a `## ` heading are
+    still its output, so the section stays open and a later `$ ` line is an evidence command,
+    which owes its `exit:`. The price of keeping a read's printed headings."""
+    text = "## Evidence\n\n$ cat notes.md\nfine\n\n## Notes\n\n$ ./later.sh\n"
+    assert factory.read_evidence(text, "r") == ["r: `./later.sh` has no `exit:` line"]
+
+
+@pytest.mark.portable
 def test_a_silent_read_before_the_next_section_still_owes_its_exit() -> None:
     text = "## Evidence\n\n$ cmp a b\n\n## Notes\n\nFine.\n"
     assert factory.read_evidence(text, "r") == ["r: `cmp a b` has no `exit:` line"]

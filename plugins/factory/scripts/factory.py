@@ -531,6 +531,19 @@ def current_branch(root: Path) -> str:
     return ""
 
 
+def _rebasing(root: Path) -> bool:
+    """Whether a rebase is under way in `root`, stopped at a conflict: git keeps its state in
+    `rebase-merge/` (or `rebase-apply/`) until it ends. Never `REBASE_HEAD`, which outlives it."""
+    for name in ("rebase-merge", "rebase-apply"):
+        where = _git(root, "rev-parse", "--git-path", name)
+        path = Path(where) if where else None
+        if path is not None and not path.is_absolute():
+            path = root / path
+        if path is not None and path.is_dir():
+            return True
+    return False
+
+
 def _all_checkouts(root: Path) -> list[Path]:
     """Every checkout of this repo, a detached one (a rebase under way) included."""
     out = _git(root, "worktree", "list", "--porcelain") or ""
@@ -1570,7 +1583,9 @@ def read_evidence(text: str, where: str) -> list[str]:
     line ends the section only outside a command's output: with no command open (after its
     `exit:`), or after a blank line unless the open command is a read that has printed. Any other
     is the open command's output, so a read that prints Markdown keeps its headings (bug
-    2026-11-20-17), and a command that owes its `exit:` never finds it in a later section."""
+    2026-11-20-17). So a command that owes its `exit:` finds it past a heading only when no blank
+    line comes before that heading, and after a read that printed, a blank line and a heading,
+    the section stays open: a later `$ ` line is a command that owes its own `exit:`."""
     lines = text.splitlines()
     if EVIDENCE not in [line.strip() for line in lines]:
         return [f"{where} has no `{EVIDENCE}` section: each command it ran, its output, its exit"]
@@ -5220,6 +5235,15 @@ DELETED = {
 }
 
 
+def _changed_since(root: Path, base: str, tip: str, kind: str) -> set[str]:
+    """The paths `tip` deleted (`D`) or changed (`M`) since `base`, renames never paired, so a
+    split stays a deletion and its additions. Empty when git fails."""
+    listed = _git(
+        root, "diff", "--no-renames", "--name-only", "-z", f"--diff-filter={kind}", base, tip
+    )
+    return set(filter(None, (listed or "").split("\0")))
+
+
 def deleted_sides(root: Path) -> list[dict]:
     """Each modify/delete conflict a rebase left in `root` (`DELETED`), as the resolver is told it
     (bug 2026-11-20-14): its `path`, the `side` that deleted it, the index `stage` holding the text
@@ -5227,10 +5251,13 @@ def deleted_sides(root: Path) -> list[dict]:
     <path>` is what that side changed), the `commit` that deleted it, and `moved`: the files that
     commit added or changed, outside the change folders and the counter, still in the tree, which
     is where the deleted content may have gone. The resolver judges which it went to: a split is
-    rarely a rename git detects. Empty when git fails or there is none."""
+    rarely a rename git detects. A conflict is read from the index's unmerged stages or, once its
+    deletion is staged and they are gone (a resolver's `git rm`, bug 2026-11-20-23), from the
+    commits: a path out of the index that one side deleted since the base and the other changed.
+    A path someone staged as kept is no deletion. Empty when git fails or there is none."""
     try:
         done = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--unmerged", "-z"],
+            ["git", "-C", str(root), "ls-files", "--stage", "-z"],
             capture_output=True, encoding="utf-8", check=True,
         )  # fmt: skip
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -5239,16 +5266,24 @@ def deleted_sides(root: Path) -> list[dict]:
     for entry in filter(None, done.stdout.split("\0")):
         info, _, path = entry.partition("\t")
         stages.setdefault(path, set()).add(info.split()[-1])
-    paths = [(p, DELETED[frozenset(s)]) for p, s in stages.items() if frozenset(s) in DELETED]
+    paths = {p: DELETED[frozenset(s)] for p, s in stages.items() if frozenset(s) in DELETED}
+    base = _git(root, "merge-base", "HEAD", "REBASE_HEAD") or ""
+    # `REBASE_HEAD` outlives its rebase: the commits are read only while one is under way.
+    if base and _rebasing(root):
+        for how in DELETED.values():
+            _, _, kept, gone = how
+            staged = _changed_since(root, base, gone, "D") & _changed_since(root, base, kept, "M")
+            for path in sorted(staged - set(stages)):
+                paths.setdefault(path, how)
     if not paths:
         return []
-    base = _git(root, "merge-base", "HEAD", "REBASE_HEAD") or ""
     work = work_rel(root) + "/"
     found = []
-    for path, (side, stage, kept, gone) in paths:
+    for path, (side, stage, kept, gone) in paths.items():
         commit = base and _git(
-            root, "log", "-1", "--format=%H", "--diff-filter=D", f"{base}..{gone}", "--", path
-        )
+            root, "log", "-1", "--format=%H", "--no-renames", "--diff-filter=D", f"{base}..{gone}",
+            "--", path,
+        )  # fmt: skip
         listed = commit and _git(
             root, "diff-tree", "--no-commit-id", "-r", "--name-only", "-z", "--diff-filter=AM",
             commit,
