@@ -543,3 +543,19 @@ Paths: scripts/factory_records.py
 Cost: S
 Value: low
 Raised by: 195-designing-while-specified (correctness)
+
+## [2026-11-20-17] [bug] A read whose output starts with "## " is flagged as missing its exit
+
+`read_evidence()` in plugins/factory/scripts/factory.py ends a reply's `## Evidence` section at the
+first line starting with `## `. A read that prints Markdown, such as a report or a doc, whose
+first output line is a `## ` heading, therefore ends the section on its own output. The read is
+then counted as having printed nothing, and is flagged "has no `exit:` line", though `is_read()`
+accepts it. It costs a mend, and a second one stops the run. Expected: only a heading outside a
+command's output ends the section, so a read that showed its output owes no exit. To see it:
+189's builder ran `sed -n '/^## Insights/,/^## Speed/p' /tmp/rep189.md`, whose output begins
+`## Insights`, and the run stopped at its second mend on 2026-11-20.
+
+Severity: med
+Paths: plugins/factory/scripts/factory.py
+Introduced by: 123-evidence-reads
+Theme: factory
