@@ -19,7 +19,8 @@ runs git and hands the text here.
     comment_lines(text, include)              -> {added, comment_lines, unknown_lines}  `-U0`
     spend(rows)                               -> {tiers, outliers, tools, recorded, unrecorded}
     junit_times(text)                         -> {cases, error}             a JUnit XML report
-    drifted_tests(lookback, kind, skip, present) -> [row]
+    loads(path, read, paths, kind)            -> {path}                    the code a test loads
+    drifted_tests(lookback, kind, skip, present, read) -> [row]
     host_rows(output)                         -> (rows, None) | (None, reason)  `retro.indicators`
     report_rows(text, head, keys, value)      -> {key: value | None}   a report's tables
     cell(text), number(value), signed(change) -> str                            a table's cells
@@ -39,6 +40,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Callable
@@ -63,6 +65,20 @@ PAIR_FILES_MAX = 50
 DRIFT_LEAST = 3
 # How many of a drifted test's code files its row names.
 DRIFT_CODE_MAX = 5
+# A test file that holds data, not code: a golden, a fixture, a prompt. It loads nothing, so it
+# never drifts: an exact test against it fails, never drifts, when its code's output moves.
+DATA_SUFFIXES = (
+    ".md", ".rst", ".adoc", ".txt", ".markdown", ".json", ".jsonl", ".yaml", ".yml", ".toml",
+    ".xml", ".csv", ".html", ".snap", ".golden",
+)  # fmt: skip
+# The lines that load a module, in the languages a test is written in: Python's `import` and
+# `from … import`, JavaScript's `import`, `require(…)` and `import(…)`, Rust's `use`, C's
+# `#include`. Each word in one is a stem it may load.
+LOAD_LINE = re.compile(
+    r"""^[ \t]*(?:from[ \t]+\S+[ \t]+import\b|import\b|use[ \t]|\#include\b).*$"""
+    r"""|\b(?:require|import)\(\s*['"][^'"\n]*['"]""",
+    re.M,
+)
 
 Row = tuple[str, int | None, int | None]
 
@@ -442,31 +458,94 @@ def junit_times(text: str) -> dict:
     return {"cases": cases, "error": None}
 
 
+def _is_data(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in DATA_SUFFIXES
+
+
+def _names(text: str, path: str) -> bool:
+    """Whether `text` names `path`'s file as a test loads one by path: in a string
+    (`"sdlc.py"`) or as a path (`src/drafts.py`, `../src/drafts.py`) that `path` ends with, its
+    `.` and `..` parts aside, never in backticks, as
+    prose names one, nor as a longer name (`my_drafts.py`, `sdlc.pyc`). A name with no suffix is
+    a word, and names nothing."""
+    name = PurePosixPath(path).name
+    if "." not in name.strip("."):
+        return False
+    pattern = rf"(?<![\w./`-])(/?(?:[\w.-]+/)*){re.escape(name)}(?![\w-])"
+    for m in re.finditer(pattern, text):
+        before = text[m.start() - 1] if m.start() else ""
+        named = "/".join(part for part in m.group().split("/") if part not in ("", ".", ".."))
+        if (m.group(1) or before in "\"'") and f"/{path}".endswith(f"/{named}"):
+            return True
+    return False
+
+
+def loads(
+    path: str, read: Callable[[str], str | None], paths: set[str], kind: Callable[[str], str]
+) -> set[str]:
+    """The code among `paths` that test file `path` loads: each code file its text names
+    (`_names()`), or whose stem one of its load lines (`LOAD_LINE`) names, and through each test
+    file among `paths` whose stem a load line names, as a helper it imports, that helper's in
+    turn. A data file (`DATA_SUFFIXES`) is never read, loads nothing and is no one's code; nor
+    does a file `read` gives no text for load anything."""
+    found: set[str] = set()
+    todo, seen = [path], {path}
+    while todo:
+        here = todo.pop()
+        text = None if _is_data(here) else read(here)
+        if not text:
+            continue
+        words = set(re.findall(r"[\w-]+", " ".join(m.group() for m in LOAD_LINE.finditer(text))))
+        for other in paths - seen - found:
+            if _is_data(other):
+                continue
+            imported = PurePosixPath(other).stem in words
+            if kind(other) == "code" and (imported or _names(text, other)):
+                found.add(other)
+            elif kind(other) == "tests" and imported:
+                seen.add(other)
+                todo.append(other)
+    return found
+
+
 def drifted_tests(
     lookback: list[tuple[str, list[Row]]],
     kind: Callable[[str], str],
     skip: Callable[[str], bool],
     present: set[str] | None,
+    read: Callable[[str], str | None],
     top: int = TOP,
 ) -> list[dict]:
-    """The tests whose code moved without them. `lookback` is `[(change, rows)]`, oldest first; a
-    change of more than `PAIR_FILES_MAX` files is left out, as in `co_change()`. For each test
-    file still in `present` (every path when None), its code is the code files its last change
-    touched, and `later` the changes after that touching any of them: drifted at `DRIFT_LEAST`,
-    with the code touched since (at most `DRIFT_CODE_MAX`), the most `later` first."""
-    changes = []
-    for name, rows in lookback:
-        files = _files(rows, skip)
-        if len(files) <= PAIR_FILES_MAX:
-            changes.append((name, files))
+    """The tests whose code moved without them. `lookback` is `[(change, rows)]`, oldest first.
+    For each test file still in `present` (every path when None), its code is the code files its
+    last change touched that it loads (`loads()`, through `read`, the text of a file, and the test
+    files in `present` as its helpers), and `later` the changes after that touching any of them:
+    drifted at `DRIFT_LEAST`, with the code touched since (at most `DRIFT_CODE_MAX`), the most
+    `later` first. Only a test that would drift by every code file its last change touched is
+    read. A change of more than `PAIR_FILES_MAX` files pairs nothing, as in `co_change()`: it is
+    still a test's last change, which gives it no code, and it moves no test's code."""
+    touched = [(name, _files(rows, skip)) for name, rows in lookback]
+    changes = [(name, files if len(files) <= PAIR_FILES_MAX else set()) for name, files in touched]
     last: dict[str, int] = {}
-    for i, (_, files) in enumerate(changes):
+    for i, (_, files) in enumerate(touched):
         for path in files:
             if kind(path) == "tests" and (present is None or path in present):
                 last[path] = i
+    every = present if present is not None else {p for _, files in touched for p in files}
+    helpers = {p for p in every if kind(p) == "tests" and not _is_data(p)}
+    texts: dict[str, str | None] = {}
+
+    def text(path: str) -> str | None:
+        if path not in texts:
+            texts[path] = read(path)
+        return texts[path]
+
     rows = []
     for test, i in last.items():
         code = {p for p in changes[i][1] if kind(p) == "code"}
+        if sum(1 for _, files in changes[i + 1 :] if files & code) < DRIFT_LEAST:
+            continue
+        code &= loads(test, text, code | helpers, kind)
         since = [files & code for _, files in changes[i + 1 :]]
         later = sum(1 for moved in since if moved)
         if later >= DRIFT_LEAST:

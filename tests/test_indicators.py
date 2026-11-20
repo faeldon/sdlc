@@ -365,6 +365,19 @@ def _change(*paths: str) -> list:
 
 
 TESTED = {"tests/test_drafts.py", "src/drafts.py", "src/store.py", "src/sync.py"}
+# What each test file says, at the base branch: test_drafts.py loads drafts and store.
+TEXTS = {
+    "tests/test_drafts.py": "from src.drafts import reopen\nfrom src.store import Store\n",
+    "tests/test_gone.py": "import drafts\n",
+}
+
+
+def _read(texts: dict[str, str] = TEXTS):
+    return texts.get
+
+
+def _drifted(lookback, present, skip=_none, texts=TEXTS) -> list[dict]:
+    return indicators.drifted_tests(lookback, indicators.classify, skip, present, _read(texts))
 
 
 def test_a_test_whose_code_moved_without_it_is_drifted() -> None:
@@ -375,12 +388,12 @@ def test_a_test_whose_code_moved_without_it_is_drifted() -> None:
         ("003-b", _change("src/store.py", "src/sync.py")),
         ("004-c", _change("src/drafts.py", "src/store.py")),
     ]
-    rows = indicators.drifted_tests(lookback, indicators.classify, _none, TESTED)
+    rows = _drifted(lookback, TESTED)
     assert rows == [
         {"file": "tests/test_drafts.py", "last_change": "001-reopen-drafts",
          "code": ["src/drafts.py", "src/store.py"], "later": 3},
     ]  # fmt: skip
-    assert indicators.drifted_tests(lookback[:3], indicators.classify, _none, TESTED) == []
+    assert _drifted(lookback[:3], TESTED) == []
 
 
 def test_a_test_moved_with_its_code_is_not_drifted() -> None:
@@ -391,16 +404,14 @@ def test_a_test_moved_with_its_code_is_not_drifted() -> None:
         ("004-d", _change("src/drafts.py", "tests/test_drafts.py")),
         ("005-e", _change("src/drafts.py")),
     ]
-    assert indicators.drifted_tests(lookback, indicators.classify, _none, TESTED) == []
+    assert _drifted(lookback, TESTED) == []
 
 
 def test_a_deleted_test_is_never_drifted() -> None:
     lookback = [("001-a", _change("tests/test_gone.py", "src/drafts.py"))]
     lookback += [(f"00{n}-x", _change("src/drafts.py")) for n in range(2, 6)]
-    assert indicators.drifted_tests(lookback, indicators.classify, _none, TESTED) == []
-    rows = indicators.drifted_tests(
-        lookback, indicators.classify, _none, TESTED | {"tests/test_gone.py"}
-    )
+    assert _drifted(lookback, TESTED) == []
+    rows = _drifted(lookback, TESTED | {"tests/test_gone.py"})
     assert [r["file"] for r in rows] == ["tests/test_gone.py"]
 
 
@@ -408,8 +419,20 @@ def test_a_change_too_large_to_pair_drifts_nothing() -> None:
     huge = [f"src/m{n}.py" for n in range(indicators.PAIR_FILES_MAX)]
     lookback = [("001-reformat", _change("tests/test_drafts.py", *huge))]
     lookback += [(f"00{n}-x", _change(*huge)) for n in range(2, 6)]
-    present = TESTED | set(huge)
-    assert indicators.drifted_tests(lookback, indicators.classify, _none, present) == []
+    texts = {"tests/test_drafts.py": "".join(f"import m{n}\n" for n in range(len(huge)))}
+    assert _drifted(lookback, TESTED | set(huge), texts=texts) == []
+
+
+def test_a_test_touched_by_a_change_too_large_to_pair_starts_again() -> None:
+    """200: a test a large change touched was looked at there, so the changes before it never
+    drift it; the large change gives it no code, so nothing after it does either."""
+    huge = [f"src/m{n}.py" for n in range(indicators.PAIR_FILES_MAX)]
+    lookback = [("001-a", _change("tests/test_drafts.py", "src/drafts.py"))]
+    lookback += [(f"00{n}-x", _change("src/drafts.py")) for n in range(2, 6)]
+    assert [r["file"] for r in _drifted(lookback, TESTED)] == ["tests/test_drafts.py"]
+    lookback += [("006-reformat", _change("tests/test_drafts.py", *huge))]
+    lookback += [(f"00{n}-y", _change("src/drafts.py")) for n in range(7, 10)]
+    assert _drifted(lookback, TESTED | set(huge)) == []
 
 
 def test_drift_skips_what_skip_says_and_reads_only_tests() -> None:
@@ -417,7 +440,89 @@ def test_drift_skips_what_skip_says_and_reads_only_tests() -> None:
     lookback += [(f"00{n}-x", _change("README.md", ".sdlc/x.py")) for n in range(2, 6)]
     skip = lambda p: p.startswith(".sdlc/")  # noqa: E731
     present = TESTED | {"README.md", ".sdlc/x.py"}
-    assert indicators.drifted_tests(lookback, indicators.classify, skip, present) == []
+    texts = {"tests/test_drafts.py": "import x\n# README.md\n"}
+    assert _drifted(lookback, present, skip, texts) == []
+
+
+def test_a_test_drifts_only_with_the_code_it_loads() -> None:
+    """200: a test edited beside code it doesn't load never drifts with that code; the code it
+    loads still drifts it, and its row names only that code."""
+    lookback = [("001-a", _change("tests/test_drafts.py", "src/drafts.py", "src/big.py"))]
+    lookback += [(f"00{n}-x", _change("src/big.py")) for n in range(2, 6)]
+    texts = {"tests/test_drafts.py": "from src.drafts import reopen\n"}
+    present = TESTED | {"src/big.py"}
+    assert _drifted(lookback, present, texts=texts) == []
+    lookback += [(f"00{n}-y", _change("src/big.py", "src/drafts.py")) for n in range(6, 9)]
+    rows = _drifted(lookback, present, texts=texts)
+    assert [(r["file"], r["code"], r["later"]) for r in rows] == [
+        ("tests/test_drafts.py", ["src/drafts.py"], 3)
+    ]
+    assert _drifted(lookback, present, texts={}) == [], "a test with no text loads nothing"
+
+
+def test_a_golden_never_drifts() -> None:
+    """200: a fixture or a prompt an exact test compares against loads nothing, whatever it names,
+    and is never read."""
+    goldens = ["tests/fixtures/close-output.json", "tests/prompts/land-fix.txt"]
+    lookback = [("001-a", _change(*goldens, "src/drafts.py"))]
+    lookback += [(f"00{n}-x", _change("src/drafts.py")) for n in range(2, 6)]
+    asked: list[str] = []
+
+    def read(path: str) -> str:
+        asked.append(path)
+        return "drafts.py\nimport drafts\n"
+
+    rows = indicators.drifted_tests(
+        lookback, indicators.classify, _none, TESTED | set(goldens), read
+    )
+    assert rows == [] and asked == []
+
+
+def test_loads_follows_a_helper_the_test_imports() -> None:
+    """200: the code a test helper loads is the test's, as the helper is: `test_train.py` loads
+    `factory.py` through `train_driver.py`; a cycle between helpers ends, and a test file only
+    named, never imported, is no helper."""
+    texts = {
+        "tests/test_train.py": 'from train_driver import drive_train\nOTHER = "test_other.py"\n',
+        "tests/test_other.py": 'SDLC = "sdlc.py"\n',
+        "tests/train_driver.py": 'import helpers\nFACTORY = "factory.py"\n',
+        "tests/helpers.py": "import train_driver\n",
+    }
+    paths = {*texts, "scripts/factory.py", "scripts/sdlc.py"}
+    found = indicators.loads("tests/test_train.py", texts.get, paths, indicators.classify)
+    assert found == {"scripts/factory.py"}
+
+
+@pytest.mark.parametrize(
+    ("text", "loaded"),
+    [
+        ('SCRIPT = ROOT / "scripts" / "sdlc.py"\n', {"scripts/sdlc.py"}),
+        ("run('scripts/sdlc.py')\n", {"scripts/sdlc.py"}),
+        ("from src.drafts import reopen\n", {"src/drafts.py"}),
+        ("from src import drafts, store\n", {"src/drafts.py", "src/store.py"}),
+        ("import src.store as s\n", {"src/store.py"}),
+        ("const s = require('../src/store');\n", {"src/store.py"}),
+        ("import { open } from './drafts.js';\n", {"src/drafts.py"}),
+        ('#include "store.h"\n', {"src/store.py"}),
+        ("use crate::drafts::open;\n", {"src/drafts.py"}),
+        ("# the drafts are reopened from the store\n", set()),
+        ("my_drafts.py and drafts.pyc\n", set()),
+        ("# checks src/drafts.py\n", {"src/drafts.py"}),
+        ('run("./src/drafts.py") and run("../src/store.py")\n', {"src/drafts.py", "src/store.py"}),
+        ('"""`scripts/sdlc.py` reads it, as `sdlc.py retro` says."""\n', set()),
+        ("load('evals/base/drafts.py')\n", set()),
+        ("the branch and the main\n", set()),
+        ('open("src/config.json")\n', set()),
+    ],
+)
+def test_loads_reads_names_and_imports(text: str, loaded: set[str]) -> None:
+    """200: a test loads a file it names in a string or by a path, or one whose stem a load line
+    names; a word in prose or in backticks, a longer name, another file of the same name, a file
+    with no suffix, or a data file loads nothing."""
+    paths = {"tests/test_drafts.py", "src/drafts.py", "src/store.py", "scripts/sdlc.py",
+             "src/config.json", "branch", "src/main"}  # fmt: skip
+    read = {"tests/test_drafts.py": text}.get
+    assert indicators.loads("tests/test_drafts.py", read, paths, indicators.classify) == loaded
 
 
 # ---------------------------------------------------------------- the host's indicator rows (177)

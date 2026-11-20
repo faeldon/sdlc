@@ -259,15 +259,31 @@ def _times(home: Path, commands: list[str]) -> dict:
     }
 
 
+def _reader(home: Path, ref: str):
+    """A reader of a file's text at `ref`: None when git can't show it. Read as UTF-8, any byte
+    that isn't replaced, since a test file's bytes are the host's."""
+
+    def read(path: str) -> str | None:
+        shown = subprocess.run(
+            ["git", "-C", str(home), "show", f"{ref}:{path}"],
+            capture_output=True, encoding="utf-8", errors="replace",
+        )  # fmt: skip
+        return shown.stdout if shown.returncode == 0 else None
+
+    return read
+
+
 def _tests(home: Path, cfg: dict, lookback: tuple | None) -> dict:
     """What the pruning pass reads: the suite's run times (`_times()`); the tests whose code moved
-    without them over `lookback` (`_lookback()`), None without one, as with no base branch; and
-    whether a pass is `due`, when any test is slow or drifted."""
+    without them over `lookback` (`_lookback()`), each test read as the base branch holds it,
+    None without one, as with no base branch; and whether a pass is `due`, when any test is slow
+    or drifted."""
     times = _times(home, cfg["retro"]["test_times"])
     drifted = None
     if lookback is not None:
         _, rows, present = lookback
-        drifted = indicators.drifted_tests(rows, _kind(cfg), _skip(home), present)
+        read = _reader(home, cfg["git"]["base"])
+        drifted = indicators.drifted_tests(rows, _kind(cfg), _skip(home), present, read)
     return {"times": times, "drifted": drifted, "due": bool(times.get("slow") or drifted)}
 
 

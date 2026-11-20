@@ -145,7 +145,8 @@ What `retro` gives:
   its `share` of the total) and `slow`, those at least ten times the median and a second.
   `drifted` names each test whose code moved without it over the same 30 changes as
   `architecture`: the change that last touched it (`last_change`), the `code` files beside it
-  there that changed since, and in how many `later` changes; null with no base branch. `due` is
+  there that it loads and that changed since, and in how many `later` changes; a golden or
+  fixture loads nothing and never drifts; null with no base branch. `due` is
   true when any test is `slow` or `drifted`.
 - `direction`: the current direction doc's goals and milestones by id (`items`, each `open`,
   `done`, `dropped` or `revised`, with `serves`: the outcomes a goal's line ends with, `(O1, O3)`,

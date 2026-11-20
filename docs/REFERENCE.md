@@ -1182,8 +1182,13 @@ why: its exit, a timeout, a cut report, or XML that doesn't parse), and `ok` oth
 counts, the total `seconds`, the `median`, the ten `slowest` with each one's share of the total,
 and `slow`: those at least ten times the median and at least a second. No command's output is
 kept. `drifted` reads the same 30 changes as `architecture`: a test file still on the base branch
-whose last change also touched code files that three or more later changes moved without it,
-with that change, the code and how many `later` (null with no base branch). `due` is true when
+whose last change also touched code files it loads, which three or more later changes moved
+without it, with that change, the code and how many `later` (null with no base branch). A test
+loads the files its text on the base branch names (`sdlc.py`), and those whose stem an import
+line names (an `import`, `from … import`, `require(…)`, `use` or `#include`), and through each
+test helper it loads, that helper's. A data file under the tests (a golden, a fixture, a prompt:
+`.json`, `.txt`, `.md`, `.yaml` and the like) loads nothing and never drifts, since an exact test
+against it fails when its code's output moves. `due` is true when
 any test is `slow` or `drifted`, and `/sdlc:retro` then proposes a pruning pass: one seed naming
 every candidate and why. The retrospective never edits or deletes a test; pruning is a later
 change, reviewed at ship. A test a newer one repeats, or one that passes for the wrong reason, is

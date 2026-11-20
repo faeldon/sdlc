@@ -1771,9 +1771,14 @@ def test_the_tests_block_stays_small_however_large_the_suite(tmp_path: Path) -> 
     assert len(json.dumps(out["tests"])) < 8000
 
 
+# A test's text that loads `src/drafts.py`, as the base branch holds it.
+LOADS_DRAFTS = "# checks src/drafts.py\n"
+
+
 def _drifting(root: Path, test: str = "tests/test_drafts.py") -> None:
-    """A test closed beside its code, then three changes that move the code without it."""
-    _close(root, "001-reopen-drafts", files=(test, "src/drafts.py"))
+    """A test closed beside its code, which it loads, then three changes that move the code
+    without it."""
+    _close(root, "001-reopen-drafts", files=("src/drafts.py",), texts={test: LOADS_DRAFTS})
     for n, slug in enumerate(("draft-titles", "draft-sync", "keep-one-draft"), 2):
         _close(root, f"00{n}-{slug}", files=("src/drafts.py",))
 
@@ -1790,6 +1795,28 @@ def test_drift_follows_the_hosts_test_paths(tmp_path: Path) -> None:
     ]  # fmt: skip
 
 
+def test_drift_reads_the_test_at_the_base_branch(tmp_path: Path) -> None:
+    """200: a test's code is what it loads on the base branch: edited beside code it doesn't
+    load it never drifts with that code, a golden never drifts, and the working tree's copy of a
+    test is never what's read."""
+    root = _repo(tmp_path)
+    _close(
+        root, "001-reopen-drafts", files=("src/drafts.py", "src/big.py"),
+        texts={"tests/test_drafts.py": "from src import drafts\n",
+               "tests/fixtures/out.json": '{"loads": "src/drafts.py"}\n'},
+    )  # fmt: skip
+    for n, slug in enumerate(("big-one", "big-two", "big-three"), 2):
+        _close(root, f"00{n}-{slug}", files=("src/big.py",))
+    assert _retro(root)["tests"]["drifted"] == []
+    for n, slug in enumerate(("draft-titles", "draft-sync", "keep-one-draft"), 5):
+        _close(root, f"00{n}-{slug}", files=("src/drafts.py",))
+    (root / "tests" / "test_drafts.py").write_text("nothing loaded\n", encoding="utf-8")
+    drifted = _retro(root)["tests"]["drifted"]
+    assert [(r["file"], r["code"], r["later"]) for r in drifted] == [
+        ("tests/test_drafts.py", ["src/drafts.py"], 3)
+    ]
+
+
 def test_no_base_branch_means_no_drift(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _drifting(root)
@@ -1801,7 +1828,10 @@ def test_no_base_branch_means_no_drift(tmp_path: Path) -> None:
 def test_due_is_slow_or_drifted(tmp_path: Path) -> None:
     """R9: a pruning pass is due exactly when a test is slow or drifted."""
     root = _repo(tmp_path)
-    _close(root, "001-reopen-drafts", files=("tests/test_drafts.py", "src/drafts.py"))
+    _close(
+        root, "001-reopen-drafts", files=("src/drafts.py",),
+        texts={"tests/test_drafts.py": LOADS_DRAFTS},
+    )  # fmt: skip
     assert _retro(root)["tests"]["due"] is False
     _junit(root / "junit.xml", [5.0, *[0.1] * 20])
     _config(root, '[retro]\ntest_times = ["cat junit.xml"]\n')

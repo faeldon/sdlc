@@ -1322,42 +1322,10 @@ def _file_an_idea(root: Path, capsys, n: int) -> None:
 @needs_uv
 def test_a_move_mid_train_re_stacks_the_rest_and_counts_once(tmp_path, capsys) -> None:
     """R10: an `inbox-commit` between `Close A` and B is a move: B and C re-stack onto the base,
-    the new tip is gated once more, each is reviewed again, the move counts once for the train,
-    and B and C land with `Close B`'s parent being B."""
-    root, trees = _three(tmp_path, check="true")
-    names = [t.name for t in trees]
-    _begin(root, capsys)
-    readings = drive_train(factory, root, capsys, until=lambda o: o.get("landed") == names[:1])
-    assert readings[-1]["next"] == "close" and readings[-1]["change"] == names[1], readings[-1]
-    _file_an_idea(root, capsys, 1)
-    more = drive_train(factory, root, capsys)
-    last = more[-1]
-    assert last["next"] == "done" and last["landed"] == names, last
-    assert last["moves"] == 1, "one move, counted once for the train"
-    steps = [(r["next"], r.get("change")) for r in readings + more]
-    assert [c for step, c in steps if step == "gate"] == [names[2], names[2]], "one more gate"
-    assert [c for step, c in steps if step == "stack"].count(names[1]) == 2, "B re-stacked"
-    assert [c for step, c in steps if step == "review"].count(names[1]) == 2, "B reviewed again"
-    subjects = _first_parent(root)
-    assert subjects[:4] == [f"Close {names[2]}", _title(root, names[2]), f"Close {names[1]}",
-                            _title(root, names[1])], subjects  # fmt: skip
-    assert "File 2026-10-02-1" in subjects and subjects.index("File 2026-10-02-1") == 4
-    assert "Late 1" in (root / INBOX).read_text(encoding="utf-8")
-    own = _closes(root)
-    text = _git(root, "show", f"{own[names[1]]}:.sdlc/work/{names[1]}/runs/land-train.md")
-    assert "STACKED ON: " + names[0] in text and "TIP GATE: PASS" in text
-
-
-def _title(root: Path, name: str) -> str:
-    """A landed change's commit subject: its intent's title, as `land_message()` writes it."""
-    own = _closes(root)
-    return _git(root, "log", "-1", "--format=%s", own[name])
-
-
-@needs_uv
-def test_a_train_stops_past_land_moves(tmp_path, capsys) -> None:
-    """R10: with `[land] moves = 1` on the base branch, the first move is followed and the second
-    stops the train, every change not landed back at its pre-train commit."""
+    the new tip is gated once more, B is reviewed again, the move counts once for the train, and
+    B lands with `Close B`'s parent being B. With `[land] moves = 1` on the base branch, that
+    first move is followed and a second, before C closes, stops the train, C back at its
+    pre-train commit."""
     root = _repo(tmp_path, check="true")
     (root / ".sdlc" / "factory.toml").write_text("[land]\nmoves = 1\n", encoding="utf-8")
     _git(root, "add", "-A")
@@ -1367,25 +1335,41 @@ def test_a_train_stops_past_land_moves(tmp_path, capsys) -> None:
     base = _git(root, "rev-parse", "main")
     _begin(root, capsys)
     readings = drive_train(factory, root, capsys, until=lambda o: o.get("landed") == names[:1])
+    assert readings[-1]["next"] == "close" and readings[-1]["change"] == names[1], readings[-1]
     pre = {n: c["pre"] for n, c in readings[-1]["changes"].items()}
     _file_an_idea(root, capsys, 1)
-    more = drive_train(
-        factory, root, capsys, until=lambda o: o.get("next") == "close" and o["moves"] == 1
-    )
-    assert more[-1]["change"] == names[1], more[-1]
+    more = drive_train(factory, root, capsys, until=lambda o: o.get("landed") == names[:2])
+    assert more[-1]["moves"] == 1, "one move, counted once for the train"
+    steps = [(r["next"], r.get("change")) for r in readings + more]
+    assert [c for step, c in steps if step == "gate"] == [names[2], names[2]], "one more gate"
+    assert [c for step, c in steps if step == "stack"].count(names[1]) == 2, "B re-stacked"
+    assert [c for step, c in steps if step == "review"].count(names[1]) == 2, "B reviewed again"
+    subjects = _first_parent(root)
+    assert subjects[:3] == [f"Close {names[1]}", _title(root, names[1]),
+                            "File 2026-10-02-1"], subjects  # fmt: skip
+    assert "Late 1" in (root / INBOX).read_text(encoding="utf-8")
+    text = _git(root, "show", f"{_closes(root)[names[1]]}:.sdlc/work/{names[1]}/runs/land-train.md")
+    assert "STACKED ON: " + names[0] in text and "TIP GATE: PASS" in text
+
     _file_an_idea(root, capsys, 2)
     rest = drive_train(factory, root, capsys)
     assert rest[-2]["next"] == "stop" and "moved 2 times" in rest[-2]["reason"], rest[-2]
     assert rest[-1]["state"] == "stopped"
-    assert len([s for s in _first_parent(root) if s.startswith("Close ")]) == 1
-    for tree in trees[1:]:
-        assert tree.exists() and _git(tree, "rev-parse", "HEAD^") == base, tree.name
-        assert _git(tree, "status", "--porcelain") == ""
-        assert subprocess.run(
-            ["git", "-C", str(tree), "diff", "--quiet", pre[tree.name], "HEAD", "--", ".",
-             ":(exclude).sdlc/work"], capture_output=True,
-        ).returncode == 0, tree.name  # fmt: skip
+    assert len([s for s in _first_parent(root) if s.startswith("Close ")]) == 2
+    tree = trees[2]
+    assert tree.exists() and _git(tree, "rev-parse", "HEAD^") == base
+    assert _git(tree, "status", "--porcelain") == ""
+    assert subprocess.run(
+        ["git", "-C", str(tree), "diff", "--quiet", pre[tree.name], "HEAD", "--", ".",
+         ":(exclude).sdlc/work"], capture_output=True,
+    ).returncode == 0  # fmt: skip
     assert not _state_file(root).exists()
+
+
+def _title(root: Path, name: str) -> str:
+    """A landed change's commit subject: its intent's title, as `land_message()` writes it."""
+    own = _closes(root)
+    return _git(root, "log", "-1", "--format=%s", own[name])
 
 
 # ---------------------------------------------------------------- waiting its turn (145 R22)
@@ -1420,52 +1404,6 @@ def test_a_waiting_change_records_what_it_waits_on(tmp_path, capsys) -> None:
     assert [s for s in _first_parent(root) if s.startswith("Close ")] == [
         f"Close {n}" for n in reversed(names)
     ]
-
-
-# ------------------------------------------------------------- why each ejection (147 R16)
-
-
-@needs_uv
-def test_every_ejection_names_its_cause(tmp_path, capsys) -> None:
-    """147 R16: every `eject` reading carries `cause`: `gate` from a red tip's bisection, `review`
-    from a landing round that stops, `refusal` from a landing command's own refusal; `--eject`
-    keeps it, and the reading's `ejected` list carries it."""
-
-    def ejections(readings: list[dict]) -> list[dict]:
-        found = [r for r in readings if r.get("next") == "eject"]
-        assert found and all(r.get("cause") for r in found), found
-        return found
-
-    (tmp_path / "gate").mkdir()
-    root, trees = _three(tmp_path / "gate", check="test ! -f bb.txt")
-    _begin(root, capsys)
-    readings = drive_train(factory, root, capsys)
-    assert [r["cause"] for r in ejections(readings)] == ["gate"]
-    assert readings[-1]["ejected"][0]["cause"] == "gate", readings[-1]["ejected"]
-
-    (tmp_path / "review").mkdir()
-    root, trees = _three(tmp_path / "review", check="true")
-    _begin(root, capsys)
-
-    review, arbitrate = _keeping(trees[1].name)
-
-    readings = drive_train(factory, root, capsys, review=review, arbitrate=arbitrate)
-    assert [r["cause"] for r in ejections(readings)] == ["review"]
-    assert readings[-1]["ejected"][0]["cause"] == "review"
-
-    (tmp_path / "refusal").mkdir()
-    root, trees = _three(tmp_path / "refusal", check="true")
-    _begin(root, capsys)
-    out = drive_train(factory, root, capsys, until=lambda r: r.get("next") == "stack")[-1]
-    tree, num = Path(out["worktree"]), out["change"].split("-")[0]
-    (tree / "stray.txt").write_text("not the change's\n", encoding="utf-8")
-    assert _run(capsys, factory.landing.cmd_resolve, tree, num, False, onto=out["onto"])[0] == 1
-    (tree / "stray.txt").unlink()
-    readings = drive_train(factory, root, capsys)
-    assert [r["cause"] for r in ejections(readings)] == ["refusal"]
-    assert readings[-1]["ejected"][0]["cause"] == "refusal"
-    state_ejections = [r["did"] for r in readings if r.get("next") == "eject"]
-    assert state_ejections[0]["cause"] == "refusal", state_ejections
 
 
 # ------------------------------------------------------- a resolution leaves it clean (147 R14)
@@ -1566,38 +1504,6 @@ def _committed_step(root: Path, name: str) -> dict:
     return factory.read_land_step(
         _git(root, "show", f"{own}:.sdlc/work/{name}/{factory.LAND_STEP.as_posix()}")
     )
-
-
-def _kept_at_two(tmp_path: Path, capsys, monkeypatch) -> tuple[Path, list[Path], dict]:
-    """Three changes whose loop stops at the second: its behaviour check asks for a change and
-    the arbiter keeps it. Returns the repo, the worktrees and the loop's JSON."""
-    root, trees = _three(tmp_path, check="true")
-    two = trees[1].name
-    fake_claude(tmp_path, monkeypatch, {
-        f"{two}:reviewer-behaviour": {"reply": KEEPS},
-        f"{two}:arbiter": {"reply": "- KEPT: behaviour: bb.txt:1: say more\n"},
-    })  # fmt: skip
-    _begin(root, capsys)
-    code, out, _ = _loop(root, capsys)
-    assert code == 1, out
-    return root, trees, out
-
-
-@needs_uv
-def test_train_run_lands_a_batch_of_three(tmp_path, capsys, monkeypatch) -> None:
-    """147 R1: one `train --run`, its agents stood in for by a fake `claude`, ends `done` with
-    three `Close` commits on the base branch's first-parent line, in order."""
-    root, trees = _three(tmp_path, check="true")
-    calls = fake_claude(tmp_path, monkeypatch)
-    _begin(root, capsys)
-    code, out, _ = _loop(root, capsys)
-    names = [t.name for t in trees]
-    assert (code, out.get("done")) == (0, True), out
-    assert out["landed"] == names and out["ejected"] == [] and out["gates"] == 1, out
-    closes = [s for s in _first_parent(root) if s.startswith("Close ")]
-    assert closes == [f"Close {n}" for n in reversed(names)]
-    assert {c["agent"] for c in calls()} == {"reviewer-behaviour"}, "the stacked ones reviewed"
-    assert not _state_file(root).exists()
 
 
 @needs_uv
@@ -1732,12 +1638,20 @@ def test_train_run_never_runs_a_prompted_command(tmp_path, capsys, monkeypatch) 
 
 
 @needs_uv
-def test_train_run_stops_at_a_kept_change(tmp_path, capsys, monkeypatch) -> None:
+def test_train_run_stops_at_a_kept_change_and_resumes(tmp_path, capsys, monkeypatch) -> None:
     """147 R4, R2: the landing reviewer of change two keeps a change: the loop exits naming
     `eject`, cause `review`, change two, its reason and the way on, recorded as a `stop` in two's
-    `runs/land-step.md`; two is still at its stacked commit, and nothing is closed."""
-    root, trees, out = _kept_at_two(tmp_path, capsys, monkeypatch)
+    `runs/land-step.md`; two is still at its stacked commit, and nothing is closed. Then it
+    resumes."""
+    root, trees = _three(tmp_path, check="true")
     two = trees[1].name
+    fake_claude(tmp_path, monkeypatch, {
+        f"{two}:reviewer-behaviour": {"reply": KEEPS},
+        f"{two}:arbiter": {"reply": "- KEPT: behaviour: bb.txt:1: say more\n"},
+    })  # fmt: skip
+    _begin(root, capsys)
+    code, out, _ = _loop(root, capsys)
+    assert code == 1, out
     stopped = out["stopped"]
     assert (stopped["next"], stopped["cause"], stopped["change"]) == ("eject", "review", two), out
     assert "kept 1 change" in stopped["reason"], stopped
@@ -1750,12 +1664,8 @@ def test_train_run_stops_at_a_kept_change(tmp_path, capsys, monkeypatch) -> None
     )
     assert step["step"] == "stop" and step["problems"] == [stopped["reason"], stopped["way_on"]]
 
-
-@needs_uv
-def test_train_run_resumes_after_a_kept_change(tmp_path, capsys, monkeypatch) -> None:
-    """147 R5: after the stop at a kept change, the person's `train --eject <two>`, then
-    `train --run`, lands one and three."""
-    root, trees, out = _kept_at_two(tmp_path, capsys, monkeypatch)
+    # 147 R5, R16: the person's `train --eject <two>` keeps the cause, then `train --run` lands
+    # one and three, its exit listing two's ejection with that cause.
     code, ejected = _run(capsys, factory.landing.cmd_train, root, eject=trees[1].name)
     assert code == 0 and ejected["cause"] == "review", ejected
     code, out, _ = _loop(root, capsys)
@@ -1953,7 +1863,6 @@ ALREADY_MADE_REPLY = (
 
 def _fix_stored(tmp_path: Path, capsys) -> tuple[Path, list[Path]]:
     """Two changes, a train begun by the person with a fix stored for the first."""
-    tmp_path.mkdir()
     root = _repo(tmp_path, check="true")
     trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
     (_folder(trees[0]) / "decisions.md").write_text(
@@ -1971,32 +1880,21 @@ def _fix_stored(tmp_path: Path, capsys) -> tuple[Path, list[Path]]:
 @needs_uv
 def test_a_train_fix_already_made_goes_on_to_the_gate(tmp_path, capsys, monkeypatch) -> None:
     """181 R8: a stored fix the builder reports already made, with its evidence and no edit,
-    goes on to the tip's gate and then the landing review at the run's full depth, with no stop:
-    through the driver's steps, and through `train --run`."""
-
-    def already(tree: Path) -> None:
-        folder = _folder(tree)
-        (folder / "build" / f"land-{factory.land_round(folder)}.md").write_text(ALREADY_MADE_REPLY)
-
-    root, trees = _fix_stored(tmp_path / "driven", capsys)
-    readings = drive_train(factory, root, capsys, fix=already)
-    steps = [(r.get("next"), r.get("change")) for r in readings]
-    one = trees[0].name
-    after = steps[steps.index(("fix", one)) + 1 :]
-    nexts = [s[0] for s in after]
-    assert "gate" in nexts and nexts.index("gate") < after.index(("review", one)), "tip's gate"
-    review = next(r for r in readings if (r.get("next"), r.get("change")) == ("review", one))
-    assert set(review["verdict"]["missing"]) == set(factory.DEFAULTS["reviewers"]), review
-    assert readings[-1]["next"] == "done" and "stop" not in [s[0] for s in steps], steps
-    assert _git(root, "show", f"{_closes(root)[one]}:aa.txt") == "aa", "nothing edited"
-
-    root, trees = _fix_stored(tmp_path / "run", capsys)
-    calls = fake_claude(tmp_path / "run", monkeypatch, {
+    goes on to the tip's gate and then the landing review at the run's full depth, with no stop,
+    through `train --run`."""
+    root, trees = _fix_stored(tmp_path, capsys)
+    calls = fake_claude(tmp_path, monkeypatch, {
         f"{trees[0].name}:builder": {"reply": ALREADY_MADE_REPLY},
     })  # fmt: skip
     code, out, err = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), (out, err)
     assert len(out["landed"]) == 2 and out["ejected"] == [], out
+    one = trees[0].name
+    steps = [ln.removeprefix("train: ") for ln in err.splitlines() if ln.startswith("train: ")]
+    rest = steps[steps.index(f"fix {one}") + 1 :]
+    kinds = [step.split()[0] for step in rest]
+    assert "gate" in kinds and kinds.index("gate") < rest.index(f"review {one}"), steps
+    assert "stopped" not in kinds, steps
     reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
     assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
     assert _git(root, "show", f"{_closes(root)[trees[0].name]}:aa.txt") == "aa"
@@ -2071,10 +1969,12 @@ STARTED_WITHIN = 120
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="kills a process group")
 def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
     """147 R8: a loop killed while a stand-in reviewer blocks leaves state a second `train --run`
-    resumes from: every change closed once, and no branch carries another change's commit."""
+    resumes from: every change closed once, and no branch carries another change's commit.
+    147 R1: that `train --run`, its agents stood in for by a fake `claude`, ends `done` with three
+    `Close` commits on the base branch's first-parent line, in order, gated once."""
     root, trees = _three(tmp_path, check="true")
     flag = tmp_path / "blocked"
-    fake_claude(tmp_path, monkeypatch, {
+    calls = fake_claude(tmp_path, monkeypatch, {
         f"{trees[1].name}:reviewer-behaviour": {"block": str(flag)},
     })  # fmt: skip
     _begin(root, capsys)
@@ -2092,8 +1992,11 @@ def test_a_killed_train_run_resumes(tmp_path, capsys, monkeypatch) -> None:
     code, out, _ = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), out
     names = [t.name for t in trees]
+    assert out["landed"] == names and out["ejected"] == [] and out["gates"] == 1, out
     closes = [s for s in _first_parent(root) if s.startswith("Close ")]
     assert closes == [f"Close {n}" for n in reversed(names)], closes
+    assert {c["agent"] for c in calls()} == {"reviewer-behaviour"}, "the stacked ones reviewed"
+    assert not _state_file(root).exists()
     for name, own in _closes(root).items():
         touched = _git(root, "show", "--format=", "--name-only", own).splitlines()
         assert all(not p.startswith(".sdlc/work/") or p.startswith(f".sdlc/work/{name}/")

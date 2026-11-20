@@ -1916,30 +1916,30 @@ def _stack(root: Path, tree: Path, capsys, by: str = "auto") -> dict:
 def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_factory_alone(
     tmp_path, capsys
 ) -> None:
-    """103 R13: a batch of three, one with acceptance checks, one with an undone note, one touching
-    an irreversible path, lands behind the person's one yes through `factory.py` alone: every
-    change closed on main, the carried seed in the register, `How to recover:` in the commit."""
+    """103 R13: a batch with acceptance checks, an undone note and an irreversible path (two
+    changes: one with the checks and the note, one with the path) lands behind the person's one
+    yes through `factory.py` alone: every change closed on main, the carried seed in the
+    register, `How to recover:` in the commit."""
     root = _repo(tmp_path)
     _config(root, '[review]\nirreversible = ["deploy/"]\n')
     checked = _ready(root, "checked", "one")
-    noted = _ready(root, "noted", "one")
     deployed = _ready(root, "deployed", "one")
-    for tree in (checked, noted, deployed):
+    for tree in (checked, deployed):
         (tree / "README.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
         (tree / f"{tree.name}.txt").write_text("built\n", encoding="utf-8")
     (_folder(checked) / "checks.md").write_text(
         CHECKS.replace("```sh\ntrue", f"```sh\ntest -f {checked.name}.txt"), encoding="utf-8"
     )
-    (_folder(noted) / "notes.md").write_text("# Notes\n\n- [ ] Page the list\n", encoding="utf-8")
+    (_folder(checked) / "notes.md").write_text("# Notes\n\n- [ ] Page the list\n", encoding="utf-8")
     (deployed / "deploy").mkdir()
     (deployed / "deploy" / "run.sh").write_text("echo hi\n", encoding="utf-8")
     with (_folder(deployed) / "decision.md").open("a", encoding="utf-8") as f:
         f.write("- RECOVER: deploy/: fix forward: a release without deploy/run.sh\n")
 
     code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
-    assert [c["change"] for c in batch["batch"]] == [checked.name, noted.name, deployed.name]
+    assert [c["change"] for c in batch["batch"]] == [checked.name, deployed.name]
     assert batch["excluded"] == [] and batch["clear"] is False
-    assert [c["build"] for c in batch["batch"]] == [False] * 3, "185 R10: no build on the base"
+    assert [c["build"] for c in batch["batch"]] == [False] * 2, "185 R10: no build on the base"
     question = batch["question"]
     for clause in ("its acceptance checks run as shown", "undone notes carried or dropped",
                    "with how to recover shown"):  # fmt: skip
@@ -1948,18 +1948,18 @@ def test_a_batch_with_checks_a_note_and_an_irreversible_path_lands_through_facto
     # The person's yes; then the train, as the skill's Step 3 runs it: the checks first, each
     # change committed, stacked (each numbered locally conflicts on `.sdlc/last-id` alone, which
     # settles itself), reviewed as stacked, and closed in order.
-    readings = drive_train(factory, root, capsys, [checked, noted, deployed], "person", strict=True)
+    readings = drive_train(factory, root, capsys, [checked, deployed], "person", strict=True)
     assert readings[0]["next"] == "commit" and readings[0]["before"] == ["accept"], readings[0]
 
     log = _git(root, "log", "--format=%s", "--first-parent", "main").splitlines()
-    for tree in (checked, noted, deployed):
+    for tree in (checked, deployed):
         assert f"Close {tree.name}" in log
     entries = sdlc.inbox_entries(root)
     assert [(e["status"], e["title"]) for e in entries] == [("idea", "Page the list")]
     bodies = _git(root, "log", "--format=%B", "main")
     assert "How to recover:\n- deploy/: fix forward: a release without deploy/run.sh" in bodies
     assert f"Carried forward:\n- Page the list → {entries[0]['id']}" in bodies
-    assert bodies.count("Sdlc-Landed: by=person") == 3
+    assert bodies.count("Sdlc-Landed: by=person") == 2
 
 
 # ---------------------------------------------------------------- following main (104)
