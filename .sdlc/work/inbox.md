@@ -315,38 +315,6 @@ Cost: S
 Value: low
 Raised by: 180-workarounds-tagged (correctness)
 
-## [2026-11-19-63] [idea] Pass report_figures() to render_report() as one dict
-
-Left undone by 184-scorecard-report, carried forward when it landed: `render_report()` now takes eight positional blocks and five keyword ones. One figures dict (`report_figures()`'s) passed whole would read better, but the tests' many `render_report(template, process)` calls would all change with it, so it stays out of 184.
-See .sdlc/work/184-scorecard-report/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-64] [idea] Give response, autonomy and workarounds blocks a missing_because so scorecard rows name their real reason
-
-Left undone by 184-scorecard-report, carried forward when it landed: A scorecard row whose block has no `missing_because` (response by tier, autonomy, the workarounds) says `none in the window` when null, even when the window held changes that just weren't measured: R5's rule as written. A per-row reason would need those blocks to carry one.
-See .sdlc/work/184-scorecard-report/notes.md in its commit.
-Raised 2026-11-19.
-
-## [2026-11-19-65] [nit] `_trend` compares the unrounded `value` with the `last` read back from the report's cell, which was written through `indicators.number`.
-
-Raised by the code review of 184-scorecard-report, round 1: scripts/retro.py:423: `_trend` compares the unrounded `value` with the `last` read back from the report's cell, which was written through `indicators.number`. A figure that rounds to the same cell (for example 0.174 against a written 0.17) could read `up` when the person saw two equal numbers. Compare after rounding `value` the way the table writes it, or confirm `number()` writes full precision.
-
-Theme: robustness
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 184-scorecard-report (correctness)
-
-## [2026-11-19-66] [nit] `_minutes` rounds a median response to a whole number.
-
-Raised by the code review of 184-scorecard-report, round 1: scripts/retro.py:433: `_minutes` rounds a median response to a whole number. The report above shows a median response of "1" minute in both tiers, so small values lose their trend resolution. This follows the spec's "integers" rule, so it is only worth a Note in REFERENCE.md.
-
-Theme: docs
-Paths: scripts/retro.py
-Cost: S
-Value: low
-Raised by: 184-scorecard-report (correctness)
-
 ## [2026-11-19-67] [nit] `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections").
 
 Raised by the test review of 184-scorecard-report, round 1: tests/test_retro.py: `test_the_pillar_sections_show_autonomy_pipeline_and_cost` checks the Speed pipeline terms as bare lowercase substrings ("gates", "bisections"). It would still pass if they appeared anywhere in the Speed section, such as in prose rather than the landing line. Match the landing line's label instead.
@@ -422,14 +390,6 @@ Paths: tests/test_archive.py
 Cost: S
 Value: low
 Raised by: 188-local-day-elapsed (correctness)
-
-## [2026-11-20-5] [idea] The retrospective's Insights section (S15)
-
-S15: The retrospective's Insights section — the synthesis questions in a guide file a host can
-extend, each answered by a read-only sub-agent on its pillar's data, in the fixed answer shape.
-After S14 (184, landed). From docs/RETRO-SCORECARD.md's seeds.
-Theme: retro
-Raised 2026-11-20.
 
 ## [2026-11-20-6] [idea] The person's experience at the retrospective (S16)
 
@@ -560,3 +520,29 @@ Severity: med
 Paths: plugins/factory/scripts/landing.py, plugins/factory/scripts/factory.py
 Introduced by: 196-evidence-and-deleted-conflicts
 Theme: factory
+
+## [2026-11-20-24] [idea] Lead-time-by-way scorecard rows name their real reason
+
+Left undone by 189-retro-insights, carried forward when it landed: The scorecard's lead-time rows by way still say `none in the window` when the window closed changes but none of that way (`test_a_figure_with_no_data_reads_a_dash_with_its_reason` pins it): R11 named four blocks, not `process.lead`'s ways. `no <way> change in the window` would match the escape rate's.
+See .sdlc/work/189-retro-insights/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-25] [nit] the lead-time-by-way rows still say `none in the window` when the window closed changes but none of that way.
+
+Raised by the code review of 189-retro-insights, round 1: .sdlc/work/189-retro-insights/notes.md: the lead-time-by-way rows still say `none in the window` when the window closed changes but none of that way. R11 named four blocks and not `process.lead`'s ways, so this is outside the spec. Ship will give it a disposition.
+
+Theme: robustness
+Paths: .sdlc/work/189-retro-insights/notes.md
+Cost: S
+Value: low
+Raised by: 189-retro-insights (correctness)
+
+## [2026-11-20-26] [nit] the `test_config_reports_the_insights_doc` "off while it doesn't exist" assertion only checks that no warning mentions INSIGHTS, so it is weak
+
+Raised by the test review of 189-retro-insights, round 1: tests/test_retro.py:4867: the `test_config_reports_the_insights_doc` "off while it doesn't exist" assertion only checks that no warning mentions INSIGHTS, so it is weak
+
+Theme: tests
+Paths: tests/test_retro.py
+Cost: S
+Value: low
+Raised by: 189-retro-insights (correctness)
