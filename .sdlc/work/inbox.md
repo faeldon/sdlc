@@ -174,13 +174,6 @@ Cost: M
 Value: med
 Raised by: 186-gate-reliability (correctness)
 
-## [2026-11-20-15] [idea] Give the workarounds' `unknown` block its `n`, as `_workarounds()`'s docstring says
-
-Left undone by 191-tests-paydown, carried forward when it landed: `retro.py`'s workarounds block gives `unknown` a `count` and `rows` but no `n`, though `_workarounds()`'s docstring says "each count carries its `n`" (nit 2026-11-19-56). That is a code change, and this change is tests-only, so its test pins the row's `change` key and leaves `n` alone.
-See .sdlc/work/191-tests-paydown/notes.md in its commit.
-Raised 2026-11-20.
-Theme: retro
-
 ## [2026-11-20-7] [idea] Read-only list refuses ugrep's symlink-following long options (`--dereference-files` and its prefixes)
 
 Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
@@ -215,23 +208,6 @@ Cost: S
 Value: low
 Raised by: 195-designing-while-specified (correctness)
 
-## [2026-11-20-24] [idea] Lead-time-by-way scorecard rows name their real reason
-
-Left undone by 189-retro-insights, carried forward when it landed: The scorecard's lead-time rows by way still say `none in the window` when the window closed changes but none of that way (`test_a_figure_with_no_data_reads_a_dash_with_its_reason` pins it): R11 named four blocks, not `process.lead`'s ways. `no <way> change in the window` would match the escape rate's.
-See .sdlc/work/189-retro-insights/notes.md in its commit.
-Raised 2026-11-20.
-Theme: retro
-
-## [2026-11-20-25] [nit] the lead-time-by-way rows still say `none in the window` when the window closed changes but none of that way.
-
-Raised by the code review of 189-retro-insights, round 1: .sdlc/work/189-retro-insights/notes.md: the lead-time-by-way rows still say `none in the window` when the window closed changes but none of that way. R11 named four blocks and not `process.lead`'s ways, so this is outside the spec. Ship will give it a disposition.
-
-Theme: robustness
-Paths: .sdlc/work/189-retro-insights/notes.md
-Cost: S
-Value: low
-Raised by: 189-retro-insights (correctness)
-
 ## [2026-11-20-37] [idea] See whether fewer changes at once shortens lead time
 
 A factory change's lead time (median 166 minutes, n=33) is a quarter queued (0.25) and a fifth
@@ -241,16 +217,6 @@ the 32 that ran beside three or more others took a median 68.5 minutes elapsed, 
 its queued and ready-wait shares with this window's. Raised by the retrospective of 2026-11-20.
 Theme: autonomy
 Priority: low
-
-## [2026-11-20-39] [idea] Check the surface's retire list before retiring anything on it
-
-The surface's retire list names 33 config keys unused for 3 windows, among them `git.base` and
-`git.push`. Every change reads `git.base`, and close pushes by `git.push`. So the measure counts
-a key as used only when something other than the config loader records it. First make the
-measure count what `load_config()` and the commands read. Then go through what is still listed:
-the 7 `commands.*` keys, the 3 `metrics.*` keys, and the `docs.*` and `release.*` keys a host may
-rely on. Raised by the retrospective of 2026-11-20.
-Theme: retro
 
 ## [2026-11-20-44] [nit] the `staged_gone` comprehension still calls `_status_entries(root)` a second time, after `_stray()` has already read it.
 
@@ -363,3 +329,19 @@ Paths: .sdlc/work/201-tests-and-robustness-nits/notes.md
 Cost: S
 Value: low
 Raised by: 201-tests-and-robustness-nits (context)
+
+## [2026-11-20-56] [idea] Surface key scan follows calls only, to separate always-read keys from branch-read keys
+
+Left undone by 204-scorecard-reads-true, carried forward when it landed: The scan's reach could follow only calls, not every mention of a name, if the surface's key share should separate keys a command reads on every run from keys it reads on one branch.
+See .sdlc/work/204-scorecard-reads-true/notes.md in its commit.
+Raised 2026-11-20.
+
+## [2026-11-20-57] [nit] the line `restored \`no register entry added in the window\`.
+
+Raised by the code review of 204-scorecard-reads-true, round 1: docs/REFERENCE.md:1344: the line `restored \`no register entry added in the window\`. A greyed block's note…` is now over-long after the reflow; rewrap it
+
+Theme: docs
+Paths: docs/REFERENCE.md
+Cost: S
+Value: low
+Raised by: 204-scorecard-reads-true (correctness)
