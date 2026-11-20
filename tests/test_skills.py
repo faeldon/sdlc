@@ -646,6 +646,36 @@ def test_retro_cites_the_report_and_lets_the_script_write_it() -> None:
     assert "the report's path" in steps["7"]
 
 
+RATING_QUESTION = (
+    "How did working with the process feel since the last retrospective? Pick one, or type its "
+    "number and a line in Other (4 smooth / 3 fine / 2 rough / 1 in the way)"
+)
+
+
+def test_the_retro_wait_asks_the_rating_second_in_its_dialog() -> None:
+    """190 R1–R3: Step 5 asks the rating in the approval's own dialog call, the approval first, and
+    the rating never approves; a dismissed or empty one is no rating; Step 6 writes the answer
+    verbatim, only after the yes."""
+    steps = _steps("retro")
+    assert f"`{RATING_QUESTION}`" in steps["5"]
+    for needed in ("in one `AskUserQuestion` call", "the approval first", "never approves",
+                   "a dismissed or empty rating is no rating, never a default"):  # fmt: skip
+        assert needed in steps["5"], needed
+    assert steps["5"].index("Ask literally") < steps["5"].index(RATING_QUESTION)
+    assert "`.sdlc/retros/<today>.experience.md`" in steps["6"] and "`Answer:" in steps["6"]
+    assert "verbatim" in steps["6"]
+
+
+def test_the_retro_skill_reads_the_last_rating() -> None:
+    """190 R12: Step 0 names `experience`, the Direction pass weighs it as a hint, and Step 7 says
+    whether a rating was recorded."""
+    steps = _steps("retro")
+    assert "`experience`" in steps["0"]
+    direction = steps["2"].split("5. **Direction.**")[1]
+    assert "`experience`" in direction and "never a finding on its own" in direction
+    assert "rating" in steps["7"]
+
+
 def test_retro_counts_through_the_script_and_records_after_its_gate() -> None:
     """The retrospective audits prose doing a script's work, so it keeps that rule itself: history
     comes from `sdlc.py retro`, never `git log`, and the one write

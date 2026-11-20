@@ -151,8 +151,9 @@ path kept for good (whatever reads what history holds) is not a shim. REFERENCE.
 **Retrospectives: `retro()`.** Read-only but for its report, and bounded by the newest
 `Retrospective YYYY-MM-DD` commit, which only `cmd_retro_commit` writes, holding the direction
 doc, the register, the product doc and the report, nothing else. It reads the day's insights
-draft, `.sdlc/retros/<date>.insights.md`, which the skill writes after its yes, into the report's
-`## Insights`, and removes it once the commit is made, never committing it; the report is from
+draft, `.sdlc/retros/<date>.insights.md`, and its experience draft (`<date>.experience.md`, the
+person's rating), which the skill writes after its yes, into the report's `## Insights` and
+`## Experience`, and removes each once the commit is made, never committing it; the report is from
 history but for those answers, each from an `sdlc:insight` agent the skill spawns on one pillar's
 figures (`retro --insights`, which empties every host command list, so none runs). It runs the
 host's `retro.evidence`, `retro.indicators` and `retro.test_times` (`_evidence()`, the only place

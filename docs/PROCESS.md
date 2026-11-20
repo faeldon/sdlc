@@ -79,7 +79,7 @@ flowchart TD
   retro["/sdlc:retro<br/>calls: config, retro, next-entry, retro-commit<br/>five passes: cost, architecture, process, product, direction"]
   retro --> insights["retro --insights<br/>one sdlc:insight agent per synthesis question, all at once"]
   insights --> wretro["WAIT: /sdlc:retro"]
-  wretro --> written["writes: the direction doc, the product doc's outcomes, seeds, the insights draft, the report with its Insights; one Retrospective commit, never the draft"]
+  wretro --> written["writes: the direction doc, the product doc's outcomes, seeds, the insights draft and the experience draft, the report with its Insights and Experience; one Retrospective commit, never the drafts"]
   health["/sdlc:health<br/>calls: config, vet<br/>tiers each finding"] --> idea
   idea["/sdlc:idea<br/>calls: config, status, next-entry, inbox-commit"] --> widea["WAIT: /sdlc:idea"]
   bug["/sdlc:bug<br/>calls: config, bugs, next-entry, inbox-commit"] --> wbug["WAIT: /sdlc:bug"]

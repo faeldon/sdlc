@@ -1646,6 +1646,13 @@ def insights_rel(today: date) -> str:
     return f"{sdlc.HOST_DIR}/{RETROS}/{today.isoformat()}.insights.md"
 
 
+def experience_rel(today: date) -> str:
+    """The experience draft the retro skill writes for `today` after its yes, holding the person's
+    rating answer verbatim, which `retro-commit` renders into the report and removes, never
+    commits (190 R3, R5)."""
+    return f"{sdlc.HOST_DIR}/{RETROS}/{today.isoformat()}.experience.md"
+
+
 def _hm(minutes: float | None) -> str:
     """Minutes as `1h 16m`, `—` for none."""
     if minutes is None:
@@ -2241,6 +2248,7 @@ def render_report(
     *,
     indicators: list[dict] | None = None,
     insights: list[dict] | None = None,
+    experience: str | None = None,
 ) -> str:
     """The report: `template` with each `{{key}}` replaced by its view as a table, or by
     "not measured" where close measured none of the window's changes. `figures` is
@@ -2252,6 +2260,9 @@ def render_report(
     `indicators` is `_indicator_rows()`'s, and with none `{{indicators}}` says no indicators are
     set. `by_way` is `by_way()`'s, its table ending `{{window}}`; nothing is added without it.
     `insights` is `insight_answers()`'s, and with none `{{insights}}` says they weren't answered.
+    `experience` is the person's rating answer (`_draft_experience()`'s), rendered into
+    `{{experience}}` against `figures["experience_last"]` (`_experience_text()`); with none it
+    says no rating was given.
 
     A template with `{{scorecard}}` (184) gets the scorecard there instead (`_scorecard_text()`,
     `scorecard` being `scorecard()`'s), `{{window}}` is the window's sentence alone, and each
@@ -2295,6 +2306,7 @@ def render_report(
         "spend": _spend_text(spend, w["closed"]),
         "indicators": _indicators_text(indicators),
         "insights": _insights_text(insights),
+        "experience": _experience_text(experience, figures.get("experience_last")),
     }  # fmt: skip
     scored = "{{scorecard}}" in template
     if not scored:
@@ -2378,6 +2390,88 @@ def _insights_text(answers: list[dict] | None) -> str:
         parts.append(f"### {a['title']}: {' '.join(a['headline'].split())}\n\n*{question}*\n\n"
                      + bullets)  # fmt: skip
     return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------- the experience (190)
+
+# The Experience table's header line, which the next retrospective reads back (`_last_rows()`).
+EXPERIENCE_HEAD = ("Figure", "Value", "Last retrospective", "Trend")
+EXPERIENCE_FIGURE = "How working with the process felt (1 to 4)"
+EXPERIENCE_LABELS = {4: "smooth", 3: "fine", 2: "rough", 1: "in the way"}
+LINE_PREFIX = "Their line: "
+NO_LINE = "No line given."
+NOT_RATED = "Not rated: the person gave no rating at this retrospective's question."
+RATING_RE = re.compile(r"([1-4])(?!\d)(.*)", re.S)
+
+
+def experience_answer(text: str) -> tuple[int | None, str | None]:
+    """The rating and the line in the person's answer (190 R4): a leading 1 to 4, not followed by
+    another digit, is the rating, and the rest, its leading spaces and `—-:,.` stripped, the line,
+    none when it is only that rating's option label; anything else is no rating and all of it the
+    line. Empty is neither. Pure."""
+    text = (text or "").strip()
+    if not text:
+        return None, None
+    m = RATING_RE.match(text)
+    if not m:
+        return None, text
+    rating = int(m.group(1))
+    rest = m.group(2).lstrip(" \t—-:,.").strip()
+    if not rest or rest.casefold() == EXPERIENCE_LABELS[rating]:
+        return rating, None
+    return rating, rest
+
+
+def _experience_trend(rating: int | None, last: int | None) -> str:
+    """`up`, `down` or `flat` from the rating against the last retrospective's, `unknown` without
+    both. No minimum count, unlike `_trend()`: it is one person's single answer (190 R9)."""
+    if rating is None or last is None:
+        return "unknown"
+    return "up" if rating > last else "down" if rating < last else "flat"
+
+
+def _experience_text(answer: str | None, last: dict | None) -> str:
+    """`## Experience` (190 R5, R6): the one-row table under `EXPERIENCE_HEAD`, the rating against
+    `last` (`_last_rows()`'s `experience`), then the line, outside the table so a `|` in it can't
+    break the read-back, its whitespace collapsed; `NO_LINE` with none, and `NOT_RATED` with no
+    answer, never an empty section."""
+    rating, line = experience_answer(answer) if answer is not None else (None, None)
+    before = (last or {}).get("rating")
+    table = _table(list(EXPERIENCE_HEAD), [
+        [EXPERIENCE_FIGURE, rating, before, _experience_trend(rating, before)],
+    ])  # fmt: skip
+    if rating is None and line is None:
+        return f"{table}\n\n{NOT_RATED}"
+    said = LINE_PREFIX + " ".join(line.split()) if line else NO_LINE
+    return f"{table}\n\n{said}"
+
+
+def _draft_experience(home: Path, day: date) -> tuple[str | None, list[str]]:
+    """The answer in `day`'s experience draft, its first `Answer:` line's text; None, with no
+    problem, when there is no draft, and a problem when it has no such line (190 R7)."""
+    rel = experience_rel(day)
+    path = home / rel
+    if not path.is_file():
+        return None, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Answer:"):
+            return line.removeprefix("Answer:").strip(), []
+    return None, [f"experience: {rel} has no Answer: line"]
+
+
+def _last_experience(text: str, day: str | None) -> dict | None:
+    """The rating and line a report's `## Experience` shows, with the report's `day`; None for a
+    report without the table."""
+    got = indicators.report_rows(text, EXPERIENCE_HEAD, (0,), 1)
+    if (EXPERIENCE_FIGURE,) not in got:
+        return None
+    rating = got[(EXPERIENCE_FIGURE,)]
+    section = text.split("\n## Experience\n", 1)[-1].split("\n## ", 1)[0]
+    line = next(
+        (ln.removeprefix(LINE_PREFIX).strip() for ln in section.splitlines()
+         if ln.startswith(LINE_PREFIX)), None,
+    )  # fmt: skip
+    return {"date": day, "rating": None if rating is None else int(rating), "line": line or None}
 
 
 # ---------------------------------------------------------------- the scorecard (184)
@@ -2500,7 +2594,8 @@ def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict
     the process views, the metrics, the cost (`_cost()`'s one call, `_landed` popped into
     `by_way()`), the figures by way, autonomy, the pipeline, the workarounds and the spend; with
     `surface`, the plugin's surface (a host's report leaves it out); and the `scorecard()`, its
-    surface row only in the plugin's own repo. Each closed change keeps
+    surface row only in the plugin's own repo; and the last retrospective's rating
+    (`experience_last`, 190 R9), from the same read of its report. Each closed change keeps
     its `problems`, which `retro()` pops; `problems` here are what the passes found. Read-only."""
     trunk = cfg["git"]["base"]
     since = sdlc.last_retrospective(home, trunk)
@@ -2528,9 +2623,10 @@ def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict
     ways = by_way(changes, process["lead"], cost.pop("_landed"), bugs, since, today)
     pipeline = _pipeline(home, changes, previous)
     shown = _surface(home, cfg, changes, since) if surface else None
+    last = _last_rows(home, since)
     card = scorecard(
         process, autonomy, ways, cost, workarounds, shown if sdlc._own_repo(home) else None,
-        _last_rows(home, since)["scorecard"],
+        last["scorecard"],
     )  # fmt: skip
     return {
         "since": since, "changes": changes, "dropped": dropped, "bases": bases, "rows": rows,
@@ -2540,20 +2636,24 @@ def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict
         "cost": cost, "by_way": ways, "autonomy": autonomy,
         "pipeline": pipeline, "workarounds": workarounds,
         "spend": _spend(home, cfg, changes, diffs), "surface": shown, "scorecard": card,
+        "experience_last": last["experience"],
         "problems": [*unread, *unnamed, *unknown],
     }  # fmt: skip
 
 
-def retro_report(home: Path, cfg: dict, today: date, insights: list[dict] | None = None) -> str:
+def retro_report(
+    home: Path, cfg: dict, today: date, insights: list[dict] | None = None,
+    experience: str | None = None,
+) -> str:  # fmt: skip
     """The report for the window since the last retrospective: `report_figures()`, without the
     product pass, the rest of the architecture or the prose, and the plugin's surface only in its
     own repo; and the host's `retro.indicators`, run through `_evidence()` as the architecture pass
     runs them, the only host command it runs. `insights` are the answers `{{insights}}` renders
-    (`insight_answers()`'s)."""
+    (`insight_answers()`'s), and `experience` the rating answer `{{experience}}` renders."""
     f = report_figures(home, cfg, today, surface=sdlc._own_repo(home))
     template = sdlc.template_path(home, "retro.md")[0].read_text(encoding="utf-8")
     host = _indicator_rows(home, f["since"], _evidence(home, cfg["retro"]["indicators"]))
-    return render_report(template, f, indicators=host, insights=insights)
+    return render_report(template, f, indicators=host, insights=insights, experience=experience)
 
 
 # ---------------------------------------------------------------- the surface: what is used
@@ -3351,6 +3451,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "surface": f["surface"],
         "simplicity": {"workarounds": f["workarounds"]},
         "scorecard": f["scorecard"],
+        "experience": {"last": f["experience_last"]},
         **f["value"],
     }
 
@@ -3559,7 +3660,8 @@ def _last_rows(home: Path, since: dict | None) -> dict[str, dict]:
     """The rows the last retrospective's report shows, read from its own commit by the one table
     reader: `indicators`, each indicator row's value by `(name, unit)`; and `scorecard`, each
     pillar row's `(value, n)` by `(pillar, figure)`. Each empty with no retrospective, none
-    committed at that commit, or a report without that table."""
+    committed at that commit, or a report without that table. And `experience`, its rating and
+    line (`_last_experience()`), None for any of those (190 R9)."""
     text = ""
     if since:
         rel = report_rel(date.fromisoformat(since["date"]))
@@ -3570,6 +3672,7 @@ def _last_rows(home: Path, since: dict | None) -> dict[str, dict]:
     return {
         "indicators": read(text),
         "scorecard": {k: (v, ns.get(k)) for k, v in values.items()},
+        "experience": _last_experience(text, since["date"]) if since else None,
     }
 
 
@@ -4137,7 +4240,8 @@ def cmd_retro(
     if report:
         # A draft there is previewed as `retro-commit` would render it; nothing is written.
         answers, _ = _draft_answers(home, cfg, date.today())
-        print(retro_report(home, cfg, date.today(), answers), end="")
+        experience, _ = _draft_experience(home, date.today())
+        print(retro_report(home, cfg, date.today(), answers, experience), end="")
         return 0 if parsed else 1
     if insights:
         print(json.dumps(retro_insights(home, cfg), indent=2, ensure_ascii=False))
@@ -4178,7 +4282,8 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     the register, the product doc's outcomes, and the report it writes itself, and nothing else,
     so main is never left dirty. The day's insights draft (`insights_rel()`), when there is one, is
     rendered into the report's `{{insights}}`, never committed, and removed once the commit is
-    made (189 R6).
+    made (189 R6); the day's experience draft (`experience_rel()`) the same way, into
+    `{{experience}}` (190 R5).
     Every refusal is found before anything is written, the draft's problems included."""
     home = sdlc.main_root(root)
     cfg, _, _ = sdlc.load_config(home)
@@ -4222,8 +4327,8 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     if (home / report_at).exists():
         refusals.append(f"{report_at} already exists: retro-commit writes the report itself")
     # The insights draft is read, never committed: it leaves the list of what the commit takes.
-    draft_at = insights_rel(day)
-    changed = [p for p in changed if p != draft_at]
+    draft_at, felt_at = insights_rel(day), experience_rel(day)
+    changed = [p for p in changed if p not in (draft_at, felt_at)]
     stray = [p for p in changed if p not in allowed and p != report_at]
     if stray:
         refusals.append(
@@ -4263,11 +4368,15 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
         )
     answers, problems = _draft_answers(home, cfg, day)
     refusals += problems
+    experience, problems = _draft_experience(home, day)
+    refusals += problems
     if refusals:
         return emit(1)
     path = home / report_at
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(retro_report(home, cfg, day, answers), encoding="utf-8", newline="\n")
+    path.write_text(
+        retro_report(home, cfg, day, answers, experience), encoding="utf-8", newline="\n"
+    )
     changed = sorted({*changed, report_at})
     report["paths"] = changed
     for args in (["add", "--", *changed], ["commit", "-q", "-m", report["commit"], "--", *changed]):
@@ -4284,4 +4393,7 @@ def cmd_retro_commit(root: Path, today: date | None = None) -> int:
     if answers is not None:
         (home / draft_at).unlink(missing_ok=True)
         report["done"].append("draft removed")
+    if experience is not None:
+        (home / felt_at).unlink(missing_ok=True)
+        report["done"].append("experience draft removed")
     return emit(0)

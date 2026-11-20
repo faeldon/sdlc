@@ -85,6 +85,9 @@ What `retro` gives:
   landing to release, the unreleased apart; and how many of the last retrospective's seeds and
   milestones were done or dropped, against carried or vanished. Each has its `n` and what it left
   out (`unmeasured`, `why`, `missing`), null where nothing could be read: never read as zero.
+- `experience`: `last`, the last retrospective's rating of how working with the process felt
+  (`date`, `rating` 1 to 4 or null, and the person's `line`), null with no earlier one or one
+  that asked none.
 - `entries`: the register's open ideas and bugs this retrospective may re-rank, each with its
   `priority` and `theme` as they stand. Nits (their `Cost:` and `Value:` rank them) and entries
   being built (their change's) are left out.
@@ -332,7 +335,9 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    - **carried**: left open, saying what's left. Partial progress is carried, never "partly done".
 
    A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it and
-   no `Retire` (a `dropped` one was retired on purpose). Then,
+   no `Retire` (a `dropped` one was retired on purpose). Weigh `experience` (its `last`) beside the
+   figures: a low rating, or its line, is a hint from one person about where the process got in
+   the way, worth checking against the figures, never a finding on its own. Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each goal ends with the outcomes it answers to, `(O1, O3)`. Each
    milestone says what is true when it's done and has one `Groups:` line naming its changes and
@@ -410,11 +415,19 @@ out. Before `then commit`, always add `, with the report at <report>,` (`report`
 commit holds it too. With the insights answered, that is `, with the report at <report> and its <Q>
 insights,`, `<Q>` being how many: the report holds them.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
+Then the rating, literally:
+
+> `How did working with the process feel since the last retrospective? Pick one, or type its number and a line in Other (4 smooth / 3 fine / 2 rough / 1 in the way)`
+
+Ask it with `AskUserQuestion`: both questions in one `AskUserQuestion` call, the approval first
+and the rating second, each the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name. Only a
 chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+refused is a no. The rating never approves, and never decides the approval: a yes with the rating
+dismissed, empty or refused still approves, and a dismissed or empty rating is no rating, never a
+default. On `revise` or `no` the rating is discarded, and asked again with the next draft. If the
+tool is unavailable or refused, ask the same text, the approval first, answers in parentheses,
+and stop; a rating typed after the yes is the rating's answer.
 
 **Write nothing until the human says yes.** Approval is for this draft only: after a revision, show
 it again and ask again.
@@ -440,7 +453,9 @@ Recommendation: …
 Disposition: seed <id>
 ```
 
-Then:
+When the rating question got an answer, `Write` it to `.sdlc/retros/<today>.experience.md` as
+one line, `Answer: <the answer>`, verbatim, exactly as chosen or typed: never parse or reword it.
+With no answer, write no file. Then:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
@@ -449,10 +464,13 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py retro-commit
 It writes the report at `report` itself, from history and the insights draft, and commits it with
 exactly those files as `Retrospective <today>`: never write or edit the report by hand. The draft
 is rendered into the report's `## Insights` and removed once the commit is made, never committed;
-with no draft, the section says the insights weren't answered. It refuses (writing nothing) when
+with no draft, the section says the insights weren't answered. The experience draft is read the
+same way into `## Experience`, the script reading the rating and the line out of it; with none,
+the section says no rating was given. It refuses (writing nothing) when
 anything else in the tree is changed, when it isn't the main checkout on `main`, when today
 already has one or the report is already there, when the draft misses a question, a field or a
-known Disposition, or names a seed the register lacks, or when a new doc drops a goal, milestone or outcome the committed one left open,
+known Disposition, or names a seed the register lacks, or when the experience draft has no
+`Answer:` line, or when a new doc drops a goal, milestone or outcome the committed one left open,
 or breaks the id format, or when a register entry was removed or changed beyond its `Priority:`
 and `Theme:` lines. A refusal naming an id means the draft lost it: put it back, carried or
 struck with its status (or the entry as it was), show the change and ask again. That commit is the
@@ -461,7 +479,8 @@ next retrospective's boundary.
 ## Step 7 — Report and stop
 
 Give the commit, the direction doc's path, the report's path, the status changes, the seeds added, the priority and
-theme lines set, and the proposed intent titles with `run /sdlc:intent to open it`. Name each
+theme lines set, whether a rating was recorded (and the rating, or that none was given), and the
+proposed intent titles with `run /sdlc:intent to open it`. Name each
 retire candidate with `/sdlc:idea <id>`, for the person to retire, or not, one at a time. With no product doc, end with: `No product doc,
 so no product pass: run /sdlc:setup product to add one.` When `tests.times.state` isn't `ok`, end
 with: `No test times, so the pruning pass rests on history alone: set retro.test_times to run it

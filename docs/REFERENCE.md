@@ -1370,11 +1370,28 @@ is never committed. With no draft the section says `Not answered: this report wa
 the retrospective's insights.` `sdlc.py retro --report` renders a draft that is there, and writes
 nothing.
 
+**Experience.** `## Experience` records how working with the process felt to the person who lives
+in it. The retrospective's one dialog asks it second, after the approval: a rating from 1 to 4 (4
+smooth, 3 fine, 2 rough, 1 in the way), with a line typed in Other beside the number if they want
+to say more. Only the approval approves: a dismissed or empty rating is no rating, never a
+default. After the yes the skill writes the answer verbatim to
+`.sdlc/retros/<date>.experience.md`, as `Answer: <the answer>`, and `retro-commit` reads the
+rating and the line out of it (a leading 1 to 4 is the rating, the rest the line; anything else is
+a line with no rating), refuses a draft with no `Answer:` line before writing anything, renders
+it, and removes the draft once its commit is made: like the insights draft, it is never committed.
+The section is a table headed `| Figure | Value | Last retrospective | Trend |` with the one row
+`How working with the process felt (1 to 4)`, then `Their line: <line>` or `No line given.`; with
+no draft, the row's value is `—` and the line says `Not rated: the person gave no rating at this
+retrospective's question.` The next retrospective reads the row back: `sdlc.py retro`'s
+`experience` gives `last`, the last report's `date`, `rating` (null for `—`) and `line`, null with
+no earlier retrospective or a report without the table, and the row's trend is `up`, `down` or
+`flat` against it, `unknown` without both, with no minimum count, since it is one person's answer.
+
 Override the template in `.sdlc/templates/`: an override without its `## Scorecard`, `## Spend` or
 `## Indicators` section and their `{{scorecard}}`, `{{spend}}` and `{{indicators}}` is reported as
 breaking after an update, since the next retrospective reads the scorecard and indicator tables
 back. The pillar sections (`{{speed}}`, `{{quality}}`, `{{autonomy}}`, `{{cost}}`,
-`{{simplicity}}`) and `{{insights}}` are optional: an override without one just doesn't show it. An override without
+`{{simplicity}}`), `{{insights}}` and `{{experience}}` are optional: an override without one just doesn't show it. An override without
 `{{scorecard}}` renders as before, its `{{window}}` holding the Value band, the coverage lines and
 the *By way of building* table, and every older placeholder (`{{cycle}}`, `{{throughput}}`,
 `{{time}}`, `{{capacity}}`, `{{rework}}`, `{{escapes}}`) still filled. Its figures are `sdlc.py

@@ -629,6 +629,23 @@ def test_a_gate_answered_in_a_dialog_is_the_gate_and_other_dialogs_questions(tmp
     assert intent["reply"] == ["approve"]
 
 
+@pytest.mark.parametrize("first, second, reply", [
+    ("yes", "3 fine", "approve"), ("revise", "4 smooth", "revise"),
+])  # fmt: skip
+def test_a_two_question_gate_reads_its_approval_from_the_first_answer(
+    tmp_path, first, second, reply
+) -> None:
+    """190 R11: the retro's WAIT asks the approval and then the rating in one dialog; the answer
+    is the first question's, so the rating never reads as the reply."""
+    answers = {"Write the direction doc?": first, "How did it feel?": second}
+    events = _events(tmp_path, [
+        cmd(0, "sdlc:retro"),
+        asst(1, "m1", [tool("AskUserQuestion", "q1")]),
+        result(2, "q1", False, BRANCH, toolUseResult={"answers": answers}),
+    ])  # fmt: skip
+    assert [e["reply"] for e in events if e["kind"] == "answer"] == [reply]
+
+
 def test_a_dialog_nobody_answered_is_a_question_and_never_the_gate(tmp_path) -> None:
     events = _events(tmp_path, [
         cmd(0, "sdlc:spec"),

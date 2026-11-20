@@ -4610,6 +4610,7 @@ SECTIONS = [
     "Window",
     "Scorecard",
     "Insights",
+    "Experience",
     "Speed",
     "Quality",
     "Indicators",
@@ -4787,14 +4788,15 @@ def test_minutes_keep_one_decimal() -> None:
 
 
 def test_render_report_takes_the_figures_whole() -> None:
-    """189 R10 (2026-11-19-63): the figures as one dict, and the host's indicators and the
-    insights beside it, by keyword."""
+    """189 R10 (2026-11-19-63): the figures as one dict, and the host's indicators, the insights
+    and (190) the experience beside it, by keyword."""
     import inspect
 
     params = inspect.signature(sdlc.retro.render_report).parameters
     assert [(p.name, p.kind.name) for p in params.values()] == [
         ("template", "POSITIONAL_OR_KEYWORD"), ("figures", "POSITIONAL_OR_KEYWORD"),
         ("indicators", "KEYWORD_ONLY"), ("insights", "KEYWORD_ONLY"),
+        ("experience", "KEYWORD_ONLY"),  # 190
     ]  # fmt: skip
 
 
@@ -5113,3 +5115,224 @@ def test_a_failed_commit_leaves_the_insights_draft_for_a_rerun(tmp_path, capsys)
     assert not path.exists()
     report = (root / sdlc.retro.report_rel(DAY)).read_text(encoding="utf-8")
     assert "### Speed: Reviews wait on the person." in _part(report, "Insights")
+
+
+# ---------------------------------------------------------------- the Experience section (190)
+
+
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("3 fine", (3, None)),
+        ("2 the reviews dragged", (2, "the reviews dragged")),
+        ("4 — quick this time", (4, "quick this time")),
+        ("1 In the Way", (1, None)),
+        ("3, the reviews waited on me", (3, "the reviews waited on me")),
+        ("4", (4, None)),
+        ("5 great", (None, "5 great")),
+        ("12 things", (None, "12 things")),
+        ("the builds were slow", (None, "the builds were slow")),
+        ("", (None, None)),
+        ("   ", (None, None)),
+    ],
+)
+def test_an_experience_answer_reads_its_rating_and_line(answer, expected) -> None:
+    """190 R4: a leading 1 to 4 is the rating, the rest the line, the option's own label no line;
+    anything else is no rating and all of it the line."""
+    assert sdlc.retro.experience_answer(answer) == expected
+
+
+def _experience(root: Path, day: date, text: str) -> Path:
+    """The day's experience draft, holding `text` as the skill writes it."""
+    path = root / sdlc.retro.experience_rel(day)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _felt_row(rating: str, last: str, trend: str) -> str:
+    return f"| {sdlc.retro.EXPERIENCE_FIGURE} | {rating} | {last} | {trend} |"
+
+
+def test_retro_commit_renders_the_rating_and_removes_its_draft(tmp_path, capsys) -> None:
+    """190 R5: the rating and the line go into `## Experience`, the commit holds the report and
+    never the draft, and the draft is gone once the commit is made."""
+    root = _repo(tmp_path)
+    _direction(root)
+    path = _experience(root, DAY, "Answer: 2 the reviews dragged\n")
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    out = json.loads(capsys.readouterr().out)
+    draft = sdlc.retro.experience_rel(DAY)
+    assert draft not in out["paths"] and not path.exists()
+    assert "experience draft removed" in out["done"]
+    assert draft not in _git(root, "show", "--name-only", "--format=", "HEAD").splitlines()
+    report = (root / sdlc.retro.report_rel(DAY)).read_text(encoding="utf-8")
+    part = _part(report, "Experience")
+    assert "| " + " | ".join(sdlc.retro.EXPERIENCE_HEAD) + " |" in part
+    assert _felt_row("2", "—", "unknown") in part
+    assert "Their line: the reviews dragged" in part
+    assert _git(root, "status", "--porcelain") == ""
+
+
+def test_a_rating_with_no_line_says_so(tmp_path: Path) -> None:
+    """190 R5: a rating with no line reads `No line given.`; a line with no rating keeps it."""
+    assert sdlc.retro._experience_text("4 smooth", None).endswith(sdlc.retro.NO_LINE)
+    text = sdlc.retro._experience_text("the builds | were slow", None)
+    assert _felt_row("—", "—", "unknown") in text and "Their line: the builds | were slow" in text
+
+
+def test_the_experience_says_not_rated_without_a_draft(tmp_path: Path, capsys) -> None:
+    """190 R6: with no draft the row's value is `—`, its trend `unknown`, and the line says no
+    rating was given, in `retro-commit`'s report and in `retro --report`, which previews a draft
+    that is there and writes nothing."""
+    root = _repo(tmp_path)
+    _close(root, "001-reopen-drafts")
+    part = _part(_report(root), "Experience")
+    assert _felt_row("—", "—", "unknown") in part and sdlc.retro.NOT_RATED in part
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
+    part = _part(capsys.readouterr().out, "Experience")
+    assert _felt_row("—", "—", "unknown") in part and sdlc.retro.NOT_RATED in part
+    _experience(root, date.today(), "Answer: 3 fine\n")
+    before = _state(root)
+    assert sdlc.retro.cmd_retro(root, report=True) == 0
+    part = _part(capsys.readouterr().out, "Experience")
+    assert _felt_row("3", "—", "unknown") in part and sdlc.retro.NO_LINE in part
+    assert _state(root) == before
+    (root / sdlc.retro.experience_rel(date.today())).unlink()
+    _direction(root)
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    report = (root / sdlc.retro.report_rel(DAY)).read_text(encoding="utf-8")
+    assert sdlc.retro.NOT_RATED in _part(report, "Experience")
+
+
+def test_retro_commit_refuses_an_experience_draft_without_an_answer(tmp_path, capsys) -> None:
+    """190 R7: a draft with no `Answer:` line is refused, found before anything is written."""
+    root = _repo(tmp_path)
+    _direction(root)
+    _experience(root, DAY, "3 fine\n")
+    before = _state(root)
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 1
+    refusals = json.loads(capsys.readouterr().out)["refusals"]
+    rel = sdlc.retro.experience_rel(DAY)
+    assert f"experience: {rel} has no Answer: line" in refusals, refusals
+    assert _state(root) == before
+
+
+def test_a_failed_commit_leaves_the_experience_draft_for_a_rerun(tmp_path, capsys) -> None:
+    """190 R8: a refused `git commit` leaves the draft and removes the report, HEAD unmoved; the
+    rerun commits and removes the draft."""
+    root = _repo(tmp_path)
+    _direction(root)
+    path = _experience(root, DAY, "Answer: 4 smooth\n")
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    head = _git(root, "rev-parse", "HEAD")
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any(r.startswith("git commit failed") for r in out["refusals"]), out["refusals"]
+    assert path.is_file() and _git(root, "rev-parse", "HEAD") == head
+    assert not (root / sdlc.retro.report_rel(DAY)).exists()
+    hook.unlink()
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    assert not path.exists()
+    report = (root / sdlc.retro.report_rel(DAY)).read_text(encoding="utf-8")
+    assert _felt_row("4", "—", "unknown") in _part(report, "Experience")
+
+
+def test_the_next_retro_reads_the_last_rating_back(tmp_path: Path, capsys) -> None:
+    """190 R9: the second retrospective's row reads the first's rating as its last, with the
+    trend; `retro`'s `experience.last` is the newest report's rating and line."""
+    root = _repo(tmp_path)
+    assert sdlc.retro.retro(root, sdlc.load_config(root)[0], DAY)["experience"] == {"last": None}
+    _direction(root)
+    _experience(root, DAY, "Answer: 2 the reviews dragged\n")
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    later = date(2026, 10, 25)
+    (root / ".sdlc" / "DIRECTION.md").write_text("# Direction\n\nNew goals.\n", encoding="utf-8")
+    _experience(root, later, "Answer: 3, quicker now\n")
+    assert sdlc.retro.cmd_retro_commit(root, later) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    report = (root / sdlc.retro.report_rel(later)).read_text(encoding="utf-8")
+    assert _felt_row("3", "2", "up") in _part(report, "Experience")
+    got = sdlc.retro.retro(root, sdlc.load_config(root)[0], date(2026, 10, 26))["experience"]
+    assert got == {"last": {"date": "2026-10-25", "rating": 3, "line": "quicker now"}}
+
+
+@pytest.mark.parametrize(
+    "rating, last, trend",
+    [(3, 2, "up"), (2, 3, "down"), (3, 3, "flat"), (None, 3, "unknown"), (3, None, "unknown")],
+)
+def test_the_experience_trend_needs_both_ratings(rating, last, trend) -> None:
+    """190 R9: one person's single answer, so no minimum count: only both sides."""
+    assert sdlc.retro._experience_trend(rating, last) == trend
+
+
+def test_a_report_without_the_table_reads_back_as_no_last(tmp_path: Path) -> None:
+    """190 R9: a last report from before this change (no Experience table) gives `last: null`;
+    a `—` rating is `rating: null` with its line kept."""
+    root = _repo(tmp_path)
+    _record(root)
+    assert sdlc.retro._last_rows(root, {"sha": "HEAD", "date": "2026-10-10"})["experience"] is None
+    rel = sdlc.retro.report_rel(date(2026, 10, 12))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(
+        "# Report\n\n## Experience\n\n" + sdlc.retro._experience_text("slow builds", None) + "\n",
+        encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Retrospective 2026-10-12")
+    got = sdlc.retro._last_rows(root, {"sha": "HEAD", "date": "2026-10-12"})["experience"]
+    assert got == {"date": "2026-10-12", "rating": None, "line": "slow builds"}
+
+
+def test_experience_is_not_a_template_read() -> None:
+    """190 R10: `{{experience}}` is optional, so an override without it isn't breaking."""
+    reads = sdlc.TEMPLATE_READS["retro.md"]
+    assert "{{experience}}" not in reads.get("placeholders", ())
+    assert "Experience" not in reads.get("headings", ())
+
+
+def test_an_override_without_experience_still_renders(tmp_path: Path, capsys) -> None:
+    """190 R10: the 189 template (no `## Experience`) renders every section it has, and
+    `retro-commit` takes a draft with it all the same."""
+    template = (ROOT / "templates" / "retro.md").read_text(encoding="utf-8")
+    old = template.replace("## Experience\n\n{{experience}}\n\n", "")
+    assert old != template and "{{experience}}" not in old
+    root = _repo(tmp_path)
+    (root / ".sdlc" / "templates").mkdir(parents=True)
+    (root / ".sdlc" / "templates" / "retro.md").write_text(old, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "override")
+    text = _report(root)
+    assert re.findall(r"^## (.+)$", text, re.M) == [s for s in SECTIONS if s != "Experience"]
+    assert "{{" not in text
+    _direction(root)
+    path = _experience(root, DAY, "Answer: 3 fine\n")
+    assert sdlc.retro.cmd_retro_commit(root, DAY) == 0, capsys.readouterr().out
+    assert not path.exists()
+
+
+def test_reference_names_the_rating_and_its_draft() -> None:
+    """190 R13: *Retrospectives* names `experience`, the scale, the draft and that it is never
+    committed, and still says what `retro-commit` holds."""
+    text = (ROOT / "docs" / "REFERENCE.md").read_text(encoding="utf-8")
+    retros = " ".join(text.split("## Retrospectives")[1].split("\n## ")[0].split())
+    for needed in ("`experience`", "1 to 4", "`.sdlc/retros/<date>.experience.md`",
+                   "never committed", "retro-commit` commits those files and nothing else",
+                   "`{{experience}}`"):  # fmt: skip
+        assert needed in retros, needed
+    process = (ROOT / "docs" / "PROCESS.md").read_text(encoding="utf-8")
+    assert "the experience draft" in process.split('written["writes:')[1].split("\n")[0]
+
+
+def test_reference_and_step_0_name_the_aim_keys() -> None:
+    """190 R14 (nit 2026-11-19-18): the aim keys 168 added are named where a reader looks."""
+    text = (ROOT / "docs" / "REFERENCE.md").read_text(encoding="utf-8")
+    retros = text.split("## Retrospectives")[1].split("\n## ")[0]
+    skill = (ROOT / "skills" / "retro" / "SKILL.md").read_text(encoding="utf-8")
+    step0 = skill.split("## Step 0")[1].split("\n## Step 1")[0]
+    for key in ("`work_mix`", "`time_to_users`", "`follow_through`"):
+        assert key in retros, key
+        assert key in step0, key
