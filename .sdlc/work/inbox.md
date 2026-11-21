@@ -388,3 +388,18 @@ Paths: tests/test_records_ledger.py
 Cost: S
 Value: low
 Raised by: 199-landing-records-unforgeable (correctness)
+
+## [2026-11-21-1] [idea] A host's /sdlc:bug files a bug in the plugin upstream
+
+A host's /sdlc:bug can file a bug in the plugin itself upstream, on the plugin's repo, behind a
+preview and one WAIT. The issue holds the person's own words (what happened, what they expected,
+how to see it), the failing plugin command with its exit and the refusal or error it printed (paths
+cut to repo-relative), and a diagnostic block: sdlc and sdlc-factory versions and install scope,
+Claude Code, OS and uv versions, and the names of the config keys set, never their values. It sends
+no Sdlc-* numbers, titles, branch names or file contents. It is filed through the GitHub tracker
+under the person's own gh login. Its send path, allowlist renderer, preview-then-WAIT and an opaque
+host id are meant to be reused later by an opt-in usage report, not yet filed. Found while using the
+plugin in a host.
+
+Theme: intake
+Raised 2026-11-21.
