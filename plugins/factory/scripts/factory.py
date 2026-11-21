@@ -1041,6 +1041,23 @@ def _listed(names: list[str]) -> str:
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+# The most lines a WAIT's dialog preview shows before it is cut (210).
+PREVIEW_LINES = 40
+
+
+def _preview_cut(text: str, path: str | None) -> str:
+    """A WAIT's preview cut to `PREVIEW_LINES`: past it, the first lines and a closing line saying
+    how many more there are, in `path`, or `shown above` when no file holds them yet. `sdlc.py`
+    and `factory.py` each hold this text, since neither imports the other, pinned by a test."""
+    lines = text.splitlines()
+    more = len(lines) - PREVIEW_LINES
+    if more <= 0:
+        return text
+    where = f" in {path}" if path else ", shown above"
+    closing = f"… {more} more line{'s' if more > 1 else ''}{where}"
+    return "\n".join([*lines[:PREVIEW_LINES], closing])
+
+
 def build_question(start: dict, check: str | None, sensitive: list[str]) -> str:
     """The build gate's question, worded here so the skill never words its own, from `start`'s
     output and the base branch's `[commands] check` and `[review] sensitive`: the restart form for
@@ -1102,6 +1119,53 @@ def build_question(start: dict, check: str | None, sensitive: list[str]) -> str:
     return f"{opening}{gate}{review}{tail} (yes / {revise}change the reviewers or rounds / no)"
 
 
+def build_preview(start: dict, check: str | None, spec: str | None = None) -> str:
+    """The build gate's dialog preview (210), from the same `start` output and base-branch check
+    `build_question()` words the question from, so the two never disagree: the gate, each depth's
+    rounds and reviewers, `max_runs`, every role's model at each depth, and, with a `restart`, the
+    archive and the round, or, with `upgraded`, its record and `spec`, the spec.md it wrote. Cut to
+    `PREVIEW_LINES`: the skill shows all of it above."""
+    gate = (
+        f"Gate: {check}, on each build before any reviewer (up to 2 fixes a round)"
+        if check
+        else "Gate: no gate configured"
+    )
+    light = start["light"]
+    rounds = (
+        f"Rounds: full, up to {start['rounds']} ({_listed(start['reviewers'])}); light, up to "
+        f"{light['rounds']} ({_listed(light['reviewers'])}); at most {start['max_runs']} agent runs"
+    )
+    lines = [gate, rounds]
+    for level in ("full", "light"):
+        models = start["models_at"][level]
+        lines.append(f"Models, {level}: " + ", ".join(f"{r} {m}" for r, m in models.items()))
+    if restart := start.get("restart"):
+        lines.append(
+            f"Restart: decision.md kept as {restart['archive']}; the builder rebuilds from round "
+            f"{restart['round']}"
+        )
+    if upgraded := start.get("upgraded"):
+        lines.append(
+            f"Upgraded: before round {upgraded['round']}, on {upgraded['decision']}: "
+            f"{upgraded['answer']}"
+        )
+        lines += (spec or "").splitlines()
+    return _preview_cut("\n".join(lines), None)
+
+
+def _upgraded_spec(root: Path, folder: Path) -> str:
+    """The spec.md an upgraded run's `upgrade` wrote, for the build gate's preview: its
+    Requirements, or, while it is still the scaffold, that the spec-writer's draft holds them."""
+    path = folder / "spec.md"
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if _scaffold(text):
+        return (
+            f"{path.relative_to(root).as_posix()} is still the scaffold upgrade wrote: the "
+            "spec-writer's draft holds the requirements"
+        )
+    return _requirements_preview(text, path.relative_to(root))
+
+
 def spec_question(root: Path, change: str) -> str:
     """The spec gate's question, worded here as `build_question()` is, so the skill never words
     its own: the folder its yes writes `spec.md` into, and the stage it moves to."""
@@ -1116,7 +1180,7 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
     cfg, warnings = load_config(root)
     out: dict = {"change": None, "folder": None, "for": purpose, "tier": None, "stage": None}
     out.update(head=_git(root, "rev-parse", "--short", "HEAD"), **cfg, max_runs=max_runs(cfg))
-    out.update(behind_base(root), warnings=warnings, refusals=[], question=None)
+    out.update(behind_base(root), warnings=warnings, refusals=[], question=None, preview=None)
     folder, refusal = find_change(root, ident)
     if refusal:
         out["refusals"].append(refusal)
@@ -1160,7 +1224,10 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         out["refusals"].append("no base branch: set [git] base in .sdlc/config.toml")
     if purpose == "build" and not out["refusals"]:
         base = out["base"]
-        out["question"] = build_question(out, _base_check(root, base), _sensitive(root, base))
+        check = _base_check(root, base)
+        out["question"] = build_question(out, check, _sensitive(root, base))
+        spec = _upgraded_spec(root, folder) if out["upgraded"] else None
+        out["preview"] = build_preview(out, check, spec)
     return emit(out, 1 if out["refusals"] else 0)
 
 
@@ -4640,7 +4707,25 @@ def _file_draft(root: Path, folder: Path, reply: str) -> dict:
             end = "" if text.endswith("\n") else "\n"
             to.write_text(text + end, encoding="utf-8", newline="\n")
     shown = path.relative_to(root).as_posix() if questions is not None else None
-    return {"questions": shown, "preamble": preamble}
+    return {"questions": shown, "preamble": preamble, "preview": _spec_preview(root, folder)}
+
+
+def _spec_preview(root: Path, folder: Path) -> str | None:
+    """The spec draft's `## Requirements`, the part the gate's yes approves, as its WAIT's dialog
+    preview (210), cut against `runs/spec-draft.md`, which holds the rest. None with no draft."""
+    path = folder / SPEC_DRAFT
+    if not path.is_file():
+        return None
+    return _requirements_preview(path.read_text(encoding="utf-8"), path.relative_to(root))
+
+
+def _requirements_preview(text: str, path: Path) -> str:
+    """`text`'s `## Requirements` section, heading and all, cut to `PREVIEW_LINES` against `path`;
+    a line saying it has none when it has none."""
+    body = _section(text, "## Requirements").strip("\n")
+    if not body:
+        return f"{path.as_posix()} has no ## Requirements section"
+    return _preview_cut(f"## Requirements\n\n{body}", path.as_posix())
 
 
 def cmd_agent(

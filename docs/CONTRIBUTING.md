@@ -179,7 +179,10 @@ change.
 **One approval per writing skill.** Every skill that writes drafts the exact content, shows it,
 asks a literal question in an `AskUserQuestion` dialog (as text where none can be shown) and
 waits: exactly one step headed WAIT, never zero (approval is never standing) and never two (the
-second gets skipped).
+second gets skipped). The dialog's yes options carry the draft as their `preview`, so a draft that
+scrolled off the screen, or never reached it, is never approved unseen: past 40 lines it keeps its
+approving part and ends naming where the rest is, and where a script words the question, the
+script renders the preview too. Its WAIT says what the preview holds, and the tests check it.
 
 **The gate is offline and deterministic.** A gate that needs the network gets skipped, and a
 skipped gate still reports green from memory.

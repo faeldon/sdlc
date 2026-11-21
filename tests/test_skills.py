@@ -238,11 +238,26 @@ def _wait_section(name: str) -> str:
 GATE_QUESTION_RE = re.compile(r"`([^`]*\?[^`?()]*) \(([^()`]*)\)`")
 
 
+# What a WAIT's yes options carry as their `preview`: the clause naming it (210 R1).
+PREVIEW_CLAUSE_RE = re.compile(
+    r"`header` the skill's name, and (.+?) as the `preview` of each yes option"
+)
+
+
+def _preview_holds(name: str) -> str:
+    """What `name`'s WAIT says its yes options' preview holds, or "" when it says nothing."""
+    found = PREVIEW_CLAUSE_RE.search(" ".join(_wait_section(name).split()))
+    return found.group(1).strip() if found else ""
+
+
 @pytest.mark.parametrize("name", sorted(GATED))
 def test_every_wait_asks_in_a_dialog(name: str) -> None:
     """The gate is the plugin's main moment, and a line of text at the end of a draft is its least
     prominent; on a phone its answers aren't even offered. Each WAIT asks in a dialog, approves
-    only on an explicit yes, and falls back to the text where no dialog can be shown."""
+    only on an explicit yes, and falls back to the text where no dialog can be shown. Its yes
+    options carry what the yes writes as their `preview`, so a draft that never reached the screen
+    is never approved unseen (210): past 40 lines, the preview keeps its approving part and names
+    where the rest is, and the text fallback asks right after what the preview holds."""
     wait = _wait_section(name)
     flat = " ".join(wait.split())
     assert "Ask it with `AskUserQuestion`" in flat, name
@@ -250,6 +265,60 @@ def test_every_wait_asks_in_a_dialog(name: str) -> None:
     assert "dismissed, empty, timed out or refused is a no" in flat, name
     assert "If the tool is unavailable or refused, ask the same text" in flat, name
     assert "AskUserQuestion" in frontmatter.load(BY_ID[name])["allowed-tools"], name
+    assert _preview_holds(name), f"{name}: its WAIT never says what its preview holds"
+    assert (
+        'A preview past 40 lines keeps its approving part and ends "… <k> more lines in <path>", '
+        'or "… <k> more lines, shown above" when no file holds them yet.'
+    ) in flat, name
+    assert "right after what the preview holds" in flat, name
+
+
+# What each WAIT's preview names, by a word or two of R9's table (210), or, where a script renders
+# it, that script's output (R8), so a skill can't word its own.
+PREVIEW_NAMES = {
+    "sdlc:idea": ["the entry exactly as it will be appended", "retirement", "retag", "--themes"],
+    "sdlc:bug": ["the entry exactly as it will be appended", "retirement", "the body as rendered"],
+    "sdlc:triage": ["entries", "`Issue:`", "`closes:`", "needs-info question"],
+    "sdlc:intent": ["frontmatter", "`## Problem`", "`## Outcome`"],
+    "sdlc:spec": ["`## Requirements`"],
+    "sdlc:close": ["the commit", "`deletes`", "`push.unpushed.ahead`", "`cleanup`"],
+    "sdlc:drop": ["`## Dropped`", "paths"],
+    "sdlc:setup": ["path", "diff"],
+    "sdlc:release": ["notes", "files", "tag"],
+    "sdlc:publish": ["`unpushed.ahead`", "tag", "command"],
+    "sdlc:retro": ["status changes", "seed's heading line"],
+    "sdlc:uninstall": ["`remove`", "`edit`"],
+    "sdlc:update": ["`claude plugin`", "numbered", "`cwd`"],
+    "sdlc:ship": [
+        "the commit message exactly as it will be committed",
+        "`preflight <NNN> --preview`",
+    ],
+    "sdlc-factory:spec": ["`agent`'s `preview`"],
+    "sdlc-factory:build": ["`agent`'s `preview`", "`start`'s `preview`"],
+    "sdlc-factory:eval": ["bugs", "reviewers"],
+    "sdlc-factory:review": ["paths", "`why`"],
+    "sdlc-factory:land": ["`land-check`'s `shown`"],
+    "sdlc-factory:decide": ["each answer"],
+}
+
+
+def test_every_gated_skill_names_its_preview() -> None:
+    assert set(PREVIEW_NAMES) == GATED
+
+
+@pytest.mark.parametrize("name", sorted(GATED))
+def test_every_wait_names_its_preview(name: str) -> None:
+    """210 R8, R9: the preview holds what that yes writes, named for the skill; where a script
+    renders it, the skill asks the script's output as printed."""
+    holds = _preview_holds(name)
+    for word in PREVIEW_NAMES[name]:
+        assert word in holds, f"{name}: its preview names no {word!r}: {holds!r}"
+
+
+def test_retros_rating_has_no_preview() -> None:
+    """210 R10: retro asks two questions in one call; only the approval's yes previews a draft."""
+    flat = " ".join(_wait_section("sdlc:retro").split())
+    assert "The rating has no preview" in flat
 
 
 @pytest.mark.parametrize("name", sorted(GATED))
@@ -1157,9 +1226,10 @@ def test_ship_branches_are_the_files_beside_ship() -> None:
 
 
 def test_ship_s_skill_stays_under_its_budget() -> None:
-    """Every ship run reads `SKILL.md` whole: what only some runs need goes in a branch file."""
+    """Every ship run reads `SKILL.md` whole: what only some runs need goes in a branch file.
+    210's preview clause and `--preview` call bind every run, so they stay: the budget rose by 5."""
     lines = len(BY_ID["sdlc:ship"].read_text(encoding="utf-8").splitlines())
-    assert lines <= 475, f"ship's SKILL.md is {lines} lines"
+    assert lines <= 480, f"ship's SKILL.md is {lines} lines"
 
 
 def test_the_rule_matcher_can_fail() -> None:

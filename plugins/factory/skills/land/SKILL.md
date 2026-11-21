@@ -134,13 +134,14 @@ names:
 
 `<moves>` is `config`'s `land.moves`.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name, and `land-check`'s
-`shown`, as printed, the `preview` of the `yes` and `yes, with a fix` options, so what the yes
-files and confirms is in the dialog itself, not only above it. Only a
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and `land-check`'s `shown`,
+exactly as printed, as the `preview` of each yes option, so what the yes files and confirms is in
+the dialog itself, not only above it. A preview past 40 lines keeps its approving part and ends
+"… <k> more lines in <path>", or "… <k> more lines, shown above" when no file holds them yet. Only a
 chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, right after `shown`, and stop.
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in parentheses,
+right after what the preview holds, and stop.
 
 **Do nothing until the person says yes.** Approval is for this batch only. `leave one out` is
 the person naming which: run Step 0 again with the rest, and ask again. To change a proposed

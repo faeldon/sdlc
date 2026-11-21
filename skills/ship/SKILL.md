@@ -334,19 +334,20 @@ Show it under the commit message as `Impact: <part>, because <reason>`.
 
 ## Step 5 — WAIT for explicit approval
 
-The script words the question from what Step 4 decided and from `findings.md`, and reads for
-itself the sensitive paths the diff touches, whether it needed `How to recover:`, whether the fresh
-review ran, and which findings you recommend fixing, so none can be left out. Pass `--context` when
-the context pass proposed an edit, `--nits` when nits are added or retired, `--bugs` when
-pre-existing findings are filed as bugs, and each issue on `closes:` once, as `--closing N` when
-this change resolved it or `--split N` when it is split off as a seed:
+The script words the question from Step 4's decisions and `findings.md`, and the preview from the
+diff and `findings.md`, reading for itself the sensitive paths the diff touches, whether it needed
+`How to recover:`, whether the fresh review ran and which findings you recommend fixing, so none is
+left out. Pass `--context` when the context pass proposed an edit, `--nits` when nits are added or
+retired, `--bugs` when pre-existing findings are filed as bugs, and each issue on `closes:` once,
+`--closing N` when this change resolved it, `--split N` when it is split off as a seed:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --closing <N> --split <K>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --question --context --nits --bugs --closing <N> --split <K> && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py preflight <NNN> --preview
 ```
 
-Ask exactly what it prints. **Its first option, `yes`, is always your recommendation.** With every
-clause in and two findings proposed `fix`, it reads:
+Ask exactly what it prints for `--question`. **Its first option, `yes`, is always your
+recommendation.** With every clause in and two findings proposed `fix`, it reads:
 
 > `Fix F2 and F4, then commit this, touching sensitive paths <a> and <b>, without the fresh review (<why>), with how to recover it shown, with the context update shown, the nits shown recorded in .sdlc/work/inbox.md, the bugs shown filed in .sdlc/work/inbox.md, closing #N and #M when it lands and splitting #K off as a seed, and .sdlc/work/NNN-<slug>/ stamped shipped, then update its issue? (yes / fix all 5 first / commit without fixing, recording F2 and F4 as nits / edit the message)`
 
@@ -355,7 +356,7 @@ commit: `Fix F1 and F2, then review again? (yes / fix all 3 first / edit the fin
 first` appears only when more findings could be fixed than you recommend, and `commit without
 fixing` only when every `fix` finding is a Nit. A refusal names an issue left out, given twice, or
 not on `closes:`, or a problem in `findings.md`: settle it in Step 4, then run it again. Never word
-the question by hand.
+the question by hand, nor the preview.
 
 What each answer does:
 
@@ -369,17 +370,19 @@ What each answer does:
 - **`edit the message`** or **`edit the findings`:** a different set to fix, a disposition changed,
   or the message reworded; the file is rewritten and the question asked again.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and the commit message
+exactly as it will be committed, then `preflight <NNN> --preview`'s output as printed as the
+`preview` of each yes option. A preview past 40 lines keeps its approving part and ends "… <k> more
+lines in <path>", or "… <k> more lines, shown above" when no file holds them yet. Only a chosen
+`yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or refused is a
+no. If the tool is unavailable or refused, ask the same text, answers in parentheses, right after
+what the preview holds, and stop.
 
 **Do not commit until the human says go.** Approval is per-invocation, never standing. Never
-`git push` — that is not part of this skill under any circumstances. The approval covers the undone
-items' dispositions, every finding's disposition in `findings.md`, the `Fix:` changes it names, the
-nits, the bugs, the context update, `How to recover:` and the release impact too. A change to one of
-them is an "edit the message" answer, and the question is asked again.
+`git push`, under any circumstances. The approval covers the undone items' dispositions, every
+finding's disposition, the `Fix:` changes it names, the nits, the bugs, the context update, `How to
+recover:` and the release impact too: changing one is an "edit the message" answer, asked again.
 
 ## Step 6 — Land it
 

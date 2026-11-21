@@ -771,6 +771,43 @@ def test_the_spec_draft_is_written_whole_to_runs(tmp_path, capsys, claude, monke
     assert not (folder / "runs" / "spec-questions.md").exists()
 
 
+def test_spec_agent_reply_previews_requirements(tmp_path, capsys, claude, monkeypatch) -> None:
+    """210 R5, R12: the filed reply carries the draft's `## Requirements` as the WAIT's preview,
+    nothing outside it, and writes nothing beyond the draft's own files."""
+    root = _change(tmp_path, tier=2, stage="plan")
+    design = "## Design\n\nOne table.\n"
+    monkeypatch.setenv(
+        "FAKE_CLAUDE_REPLY",
+        FENCED_REPLY.replace("\nR2. Nothing else.\n", "\nR2. Nothing else.\n\n" + design),
+    )
+    before = _git(root, "status", "--porcelain", "--untracked-files=all")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
+    assert code == 0, out
+    preview = out["preview"]
+    assert preview.startswith("## Requirements\n\nR1. The config reads as:")
+    assert preview.rstrip().endswith("R2. Nothing else.")
+    assert "One table" not in preview and "# 008" not in preview and "Resolved" not in preview
+    after = _git(root, "status", "--porcelain", "--untracked-files=all").splitlines()
+    runs = f".sdlc/work/{NAME}/runs/"
+    assert [ln for ln in after if ln not in before.splitlines() and runs not in ln] == []
+
+
+def test_a_long_spec_preview_is_cut(tmp_path, capsys, claude, monkeypatch) -> None:
+    """210 R4, R5: Requirements past 40 lines keep the first 40, naming the draft for the rest; a
+    recheck previews its own new draft."""
+    root = _change(tmp_path, tier=2, stage="plan")
+    reqs = "\n".join(f"R{n}. Requirement {n}." for n in range(1, 46))
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", f"---\nid: 008\n---\n\n## Requirements\n\n{reqs}\n")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None)
+    assert code == 0, out
+    lines = out["preview"].splitlines()
+    assert len(lines) == factory.PREVIEW_LINES + 1
+    assert lines[-1] == f"… 7 more lines in .sdlc/work/{NAME}/runs/spec-draft.md"
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "---\nid: 008\n---\n\n## Requirements\n\nR1. One.\n")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "spec", None, None, None, True)
+    assert code == 0 and out["preview"] == "## Requirements\n\nR1. One.", out
+
+
 SCAFFOLD = "---\nid: 008\nkind: spec\n---\n\n# 008 — spec\n\n<requirements>\n\n<design>\n"
 
 

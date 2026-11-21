@@ -445,15 +445,18 @@ Then the rating, literally:
 
 > `How did working with the process feel since the last retrospective? Pick one, or type its number and a line in Other (4 smooth / 3 fine / 2 rough / 1 in the way)`
 
-Ask it with `AskUserQuestion`: both questions in one `AskUserQuestion` call, the approval first
-and the rating second, each the text before its parentheses as the question, each answer in them
-an option in that order, labelled as written, `header` the skill's name. Only a
+Ask it with `AskUserQuestion`: both questions in one `AskUserQuestion` call, the approval first and
+the rating second, each the text before its parentheses as the question, each answer in them an
+option in that order, labelled as written, `header` the skill's name, and the status changes, then
+each new seed's heading line as the `preview` of each yes option, which is the approval's `yes`
+alone. The rating has no preview. A preview past 40 lines keeps its approving part and ends
+"… <k> more lines in <path>", or "… <k> more lines, shown above" when no file holds them yet. Only a
 chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
 refused is a no. The rating never approves, and never decides the approval: a yes with the rating
 dismissed, empty or refused still approves, and a dismissed or empty rating is no rating, never a
 default. On `revise` or `no` the rating is discarded, and asked again with the next draft. If the
-tool is unavailable or refused, ask the same text, the approval first, answers in parentheses,
-and stop; a rating typed after the yes is the rating's answer.
+tool is unavailable or refused, ask the same text, the approval first, answers in parentheses, right
+after what the preview holds, and stop; a rating typed after the yes is the rating's answer.
 
 **Write nothing until the human says yes.** Approval is for this draft only: after a revision, show
 it again and ask again.

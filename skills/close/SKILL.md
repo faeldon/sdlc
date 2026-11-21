@@ -115,11 +115,14 @@ main checkout <ignored paths> (now ignored) and <other paths>`: up to five paths
 `ignored` first, then `and N more` for the rest, leaving out a part that is empty. With `deletes.unknown`, follow it with `, though which files it deletes from the
 main checkout couldn't be listed`. With both lists empty, the question is as above, word for word.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and the commit `main` moves
+to, then, each when present, the paths `deletes` lists, the commits `push.unpushed.ahead` sends, and
+the command `cleanup` runs as the `preview` of each yes option. A preview past 40 lines keeps its
+approving part and ends "… <k> more lines in <path>", or "… <k> more lines, shown above" when no
+file holds them yet. Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves;
+dismissed, empty, timed out or refused is a no. If the tool is unavailable or refused, ask the same
+text, answers in parentheses, right after what the preview holds, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 

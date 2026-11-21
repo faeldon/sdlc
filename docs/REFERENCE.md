@@ -819,7 +819,10 @@ beside ship's skill those parts call for, which ship reads and no others. It wri
 setup's read-only rules allow it, `nits` and `findings` too.
 `preflight NNN --question` words ship's approval question from what its review decided
 (`--context`, `--nits`, and each issue on `closes:` once as `--closing N` or `--split N`), and
-refuses an issue left out.
+refuses an issue left out. `preflight NNN --preview` prints what goes under the commit message in
+the question's dialog preview: each finding's id, rank and disposition, every path the diff touches,
+and the stamp line, cut past 40 lines. It writes nothing, and refuses a `findings.md` that won't
+read as `--question` does.
 
 `.claude/worktrees/` belongs in `.gitignore`, and `.sdlc/work/` must not be in it: `sdlc.py new` refuses
 an ignored `.sdlc/work/`, and `sdlc.py vet` flags it. The main checkout stays on `main`: close

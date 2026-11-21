@@ -127,7 +127,9 @@ as is a test change with no decision or one that won't read. **A run upgraded to
 (see `upgrade` in Step 3) is named by `start`'s `upgraded`, its `round` (P, the upgraded run's first),
 the `decision` that upgraded it and the person's `answer`; null otherwise. **If there are refusals,
 show them and stop.** `start` also gives `base`, the branch the change lands on, and `behind`, how many of
-its commits the change lacks, and `question`, Step 2's question, worded by the script in the form
+its commits the change lacks, and `question`, Step 2's question, and `preview`, the run it approves
+(the gate, each depth's rounds, every role's model, a `restart`'s archive or an `upgraded` run's
+spec), each worded by the script in the form
 this run takes (a spec draft, none, a `restart` or `upgraded`), with the base branch's gate, its
 `[review] sensitive` list and its `[ui]` already read into it.
 
@@ -168,7 +170,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its JSON: `to`, the
 complete draft, `.sdlc/work/NNN-slug/runs/spec-draft.md`; `questions`, the open questions it
 resolved and left, `.sdlc/work/NNN-slug/runs/spec-questions.md` (null when it gave none);
-`preamble`, anything written before the draft, no part of it. Read both files. Check the draft
+`preamble`, anything written before the draft, no part of it; `preview`, the draft's
+`## Requirements`, cut to 40 lines, for Step 2's dialog. Read both files. Check the draft
 against `intent.md` before showing it: every `<...>` prompt replaced, requirements numbered and
 each checkable, a **Contracts touched** line for each invariant the change comes near. If one of
 those is missing, send it back once, to the same spec-writer, which keeps its draft in context, and
@@ -236,11 +239,14 @@ sound; the person comes back to it with `/sdlc-factory:build`, `/sdlc-factory:sp
 
 A typed `yes, <words>` to it is a yes with the person's direction for the builder.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and `agent`'s `preview`
+then `start`'s `preview` with a spec draft, or `start`'s `preview` alone without one, each exactly
+as printed, as the `preview` of each yes option. A preview past 40 lines keeps its approving part
+and ends "… <k> more lines in <path>", or "… <k> more lines, shown above" when no file holds them
+yet. Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed
+out or refused is a no. If the tool is unavailable or refused, ask the same text, answers in
+parentheses, right after what the preview holds, and stop.
 
 **Do nothing more for this change until the person says yes.** Approval is for this run only.
 `revise a requirement` takes their words to the spec-writer, and the question is asked again on its

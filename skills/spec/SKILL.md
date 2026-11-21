@@ -124,11 +124,13 @@ Leave out ` update its issue` (keeping the comma) when `config` says `archive.ta
 Starting plan mode approves nothing: the plan is approved when plan mode ends, as always. It is in
 the question so the person doesn't have to type it after the yes.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and the spec's `##
+Requirements` as they will be written as the `preview` of each yes option. A preview past 40 lines
+keeps its approving part and ends "… <k> more lines in <path>", or "… <k> more lines, shown above"
+when no file holds them yet. Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves;
+dismissed, empty, timed out or refused is a no. If the tool is unavailable or refused, ask the same
+text, answers in parentheses, right after what the preview holds, and stop.
 
 **Do not write until the human says go.** Approval is per-invocation, never standing. The yes
 covers the issue update too: it is visible to everyone with access to the repo.

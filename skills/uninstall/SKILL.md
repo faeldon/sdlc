@@ -62,11 +62,13 @@ Ask literally, listing every path:
 
 > `Remove these files and edits: <paths>? (yes / no)`
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and every path in `remove`
+and every edit in `edit` as the `preview` of each yes option. A preview past 40 lines keeps its
+approving part and ends "… <k> more lines in <path>", or "… <k> more lines, shown above" when no
+file holds them yet. Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves;
+dismissed, empty, timed out or refused is a no. If the tool is unavailable or refused, ask the same
+text, answers in parentheses, right after what the preview holds, and stop.
 
 **Remove nothing until the human says yes.** Approval is for this list only: run `--check` again
 first if anything in the repo changed since Step 0.

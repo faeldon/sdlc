@@ -340,8 +340,12 @@ Changing a skill or the script usually means satisfying these, so know them befo
   `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's
   `spec`, `build`, `eval`, `review`, `land` and `decide`) have exactly one heading containing
   `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog (2–4
-  answers, publish's `no` first, only a chosen yes approves) and as text where none can be shown
-  (`test_every_wait_asks_in_a_dialog`); metrics read a dialog's answer in the WAIT's span as the
+  answers, publish's `no` first, only a chosen yes approves), its yes options carrying what the yes
+  writes as their `preview` (cut past 40 lines to its approving part, naming where the rest is;
+  the script's own text where a script renders it, as `preflight --preview`, `start`'s and
+  `agent`'s `preview` and `land-check`'s `shown`), and as text, right after the preview's text,
+  where none can be shown (`test_every_wait_asks_in_a_dialog`,
+  `test_every_wait_names_its_preview`); metrics read a dialog's answer in the WAIT's span as the
   approval. A skill's side files (any other `*.md` in its folder) are part of it: `SKILL.md` names
   each, none holds frontmatter, a WAIT, a commit or `sdlc.py ship`, and the rules below cover
   their commands too. Every call to a script is literally

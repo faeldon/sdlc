@@ -658,3 +658,98 @@ def test_stale_shots_are_not_current(change, capsys) -> None:
     os.utime(css, (1_700_000_000, 1_700_000_000))
     out = _passes_of(capsys, root)["passes"]["ui"]
     assert out["shots"] == [] and out["why"] == "screenshots older than web/drafts.css"
+
+
+# ---------------------------------------------------------------- ship's preview (210)
+
+TWO_FINDINGS = (
+    "# Findings\n\n> The note.\n\n"
+    "## F1. [nit] [cost] A helper with one caller\n\nEvidence: a.py:1\nClass: c\n"
+    "Disposition: fix\nFix: inline it\n\n"
+    "## F2. [important] [correctness] The empty list crashes\n\nEvidence: b.py:2\nClass: c\n"
+    "Disposition: fixed\n"
+)
+
+
+def _preview(root: Path, capsys, *flags: str) -> tuple[int, str, str]:
+    import os
+
+    here = os.getcwd()
+    os.chdir(root)
+    try:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["sdlc.py", "preflight", "001", *flags])
+            code = sdlc.main()
+    finally:
+        os.chdir(here)
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_preflight_preview_lists_findings_paths_and_stamp(change, capsys) -> None:
+    """210 R7: what ship's yes commits, by the script: each finding with its id, rank and
+    disposition, every path the diff touches against the merge base (a rename by both), and the
+    stamp line, plain text, whatever clause flags `--question` was given."""
+    root, folder = change
+    (folder / "findings.md").write_text(TWO_FINDINGS, encoding="utf-8")
+    _git(root, "mv", "README.md", "READ.md")
+    code, out, err = _preview(root, capsys, "--preview", "--context", "--closing", "12")
+    assert code == 0, err
+    assert out.splitlines() == [
+        "Findings:",
+        "F1 nit → fix: A helper with one caller",
+        "F2 important → fixed: The empty list crashes",
+        "Paths:",
+        "A .sdlc/work/001-reopen-drafts/checks.md",
+        "A .sdlc/work/001-reopen-drafts/intent.md",
+        "A .sdlc/work/001-reopen-drafts/notes.md",
+        "R README.md → READ.md",
+        "A scripts/sdlc.py",
+        "A .sdlc/work/001-reopen-drafts/findings.md",
+        ".sdlc/work/001-reopen-drafts/ stamped shipped",
+    ]
+
+
+def test_preflight_preview_without_findings_says_none(change, capsys) -> None:
+    root, _ = change
+    code, out, _ = _preview(root, capsys, "--preview")
+    assert code == 0 and out.splitlines()[0] == "Findings: none"
+
+
+def test_preflight_preview_is_cut_past_forty_lines(change, capsys) -> None:
+    """210 R4, R7: a diff of many files keeps the first 40 lines; ship shows the rest above."""
+    root, _ = change
+    for n in range(50):
+        (root / f"f{n:02}.txt").write_text("x\n", encoding="utf-8")
+    code, out, _ = _preview(root, capsys, "--preview")
+    lines = out.splitlines()
+    assert code == 0 and len(lines) == sdlc.PREVIEW_LINES + 1
+    assert lines[-1].startswith("… ") and lines[-1].endswith(" more lines, shown above")
+
+
+def test_preflight_preview_writes_nothing(change, capsys) -> None:
+    """210 R12."""
+    root, folder = change
+    (folder / "findings.md").write_text(TWO_FINDINGS, encoding="utf-8")
+    before = _git(root, "status", "--porcelain")
+    assert _preview(root, capsys, "--preview")[0] == 0
+    assert _git(root, "status", "--porcelain") == before
+
+
+def test_preflight_preview_refuses_a_bad_findings_md_as_the_question_does(change, capsys) -> None:
+    root, folder = change
+    (folder / "findings.md").write_text(
+        "# Findings\n\n## F1. [nit] [cost] A helper\n\nEvidence: a.py:1\nClass: c\n"
+        "Disposition: fix\n",
+        encoding="utf-8",
+    )
+    code, out, err = _preview(root, capsys, "--preview")
+    question = _preview(root, capsys, "--question", "--closing", "12", "--split", "15")
+    assert (code, out) == (1, "") and err == question[2]
+    assert "`fix` with no `Fix:`" in err
+
+
+def test_preflight_preview_and_question_are_refused_together(change, capsys) -> None:
+    root, _ = change
+    code, out, err = _preview(root, capsys, "--preview", "--question")
+    assert (code, out) == (1, "") and "--question and --preview" in err

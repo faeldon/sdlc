@@ -74,11 +74,13 @@ Ask literally:
 `<where>` is `its GitHub issue` or the host's command. When `archive.kept_because` is set, leave out `archive it to <where> and close it as not
 planned, `.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and the `## Dropped`
+section as it will be written and the paths committed as the `preview` of each yes option. A preview
+past 40 lines keeps its approving part and ends "… <k> more lines in <path>", or "… <k> more lines,
+shown above" when no file holds them yet. Only a chosen `yes` (or `yes, …`), or a yes typed in
+Other, approves; dismissed, empty, timed out or refused is a no. If the tool is unavailable or
+refused, ask the same text, answers in parentheses, right after what the preview holds, and stop.
 
 **Do nothing more until the human says yes.** Approval is for this change only.
 

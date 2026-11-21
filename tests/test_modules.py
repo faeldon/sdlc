@@ -745,3 +745,36 @@ def test_look_seen_is_the_decide_skills_answer() -> None:
     skill = (ROOT / "plugins" / "factory" / "skills" / "decide" / "SKILL.md").read_text("utf-8")
     assert f"`→ decided: {records.LOOK_SEEN}`" in skill
     assert f"`{records.KEPT_ANSWER}`" in skill
+
+
+def _source_of(path: Path, name: str) -> str:
+    """The source of the top-level function or assignment `name` in the script at `path`."""
+    text = path.read_text(encoding="utf-8")
+    for node in ast.parse(text).body:
+        if getattr(node, "name", None) == name or any(
+            getattr(t, "id", None) == name for t in getattr(node, "targets", [])
+        ):
+            return ast.get_source_segment(text, node)
+    raise AssertionError(f"{path.name} has no {name}")
+
+
+def test_preview_cut_is_a_pinned_copy() -> None:
+    """210 R4: `factory.py` never imports `sdlc.py`, so it holds a copy of the cut every WAIT's
+    preview follows, the same text as `sdlc.py`'s."""
+    for name in ("PREVIEW_LINES", "_preview_cut"):
+        assert _source_of(SDLC_PY, name) == _source_of(FACTORY_PY, name), name
+
+
+@pytest.mark.parametrize("script", [SDLC_PY, FACTORY_PY], ids=["sdlc", "factory"])
+def test_preview_cut_keeps_forty_lines(script: Path) -> None:
+    """210 R4: past 40 lines a preview keeps the first 40 and names how many more there are, and
+    where; at 40 or under nothing is added."""
+    mod = _load(f"preview_cut_{script.stem}", script)
+    assert mod.PREVIEW_LINES == 40
+    forty = "\n".join(f"line {n}" for n in range(1, 41))
+    assert mod._preview_cut(forty, "a/b.md") == forty
+    assert mod._preview_cut(forty + "\n", None) == forty + "\n"
+    cut = mod._preview_cut(forty + "\nline 41", "a/b.md")
+    assert cut == forty + "\n… 1 more line in a/b.md"
+    cut = mod._preview_cut(forty + "\nline 41\nline 42", None)
+    assert cut == forty + "\n… 2 more lines, shown above"

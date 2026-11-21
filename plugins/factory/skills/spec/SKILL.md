@@ -68,7 +68,8 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py agent <NNN> -
 Say `NNN-slug: spec-writer started`, and end the turn. When it exits, read its JSON: `to`, the
 draft, `.sdlc/work/NNN-slug/runs/spec-draft.md`; `questions`, the open questions it resolved and
 left, `.sdlc/work/NNN-slug/runs/spec-questions.md` (null when it gave none); `preamble`, anything
-it wrote before the draft, which is no part of it; or `problem`, a stop to report. Read both files.
+it wrote before the draft, which is no part of it; `preview`, the draft's `## Requirements`, cut to
+40 lines, for the WAIT's dialog; or `problem`, a stop to report. Read both files.
 Check the draft against `intent.md` before showing it: every `<...>` prompt replaced, requirements
 numbered and each checkable, a **Contracts touched** line for each invariant the change comes near.
 If one of those is missing, send it back once, to the same spec-writer, which keeps its draft in
@@ -90,11 +91,13 @@ What it prints reads like this, the change's folder in place of `NNN-<slug>`:
 
 > `Write this as .sdlc/work/NNN-<slug>/spec.md and advance the change to stage: design? (yes / revise a requirement)`
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and `agent`'s `preview`, as
+printed as the `preview` of each yes option. A preview past 40 lines keeps its approving part and
+ends "… <k> more lines in <path>", or "… <k> more lines, shown above" when no file holds them yet.
+Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in parentheses,
+right after what the preview holds, and stop.
 
 **Do not write `spec.md` until the person says yes.** Approval is per-invocation, never standing.
 `revise a requirement` is a new draft: the person's words go to the same spec-writer, and the

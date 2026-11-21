@@ -170,11 +170,14 @@ Ask literally, naming what each kind of line does:
 Leave out the clauses with nothing in them. A changed line changes what is written, and nothing is
 checked again unless the human asks.
 
-Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in
-them an option in that order, labelled as written, `header` the skill's name. Only a
-chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
-refused is a no. If the tool is unavailable or refused, ask the same text, answers in
-parentheses, and stop.
+Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
+an option in that order, labelled as written, `header` the skill's name, and the entries as they
+will be appended, then each `Issue:` and `closes:` line, then each needs-info question as it will be
+posted as the `preview` of each yes option. A preview past 40 lines keeps its approving part and
+ends "… <k> more lines in <path>", or "… <k> more lines, shown above" when no file holds them yet.
+Only a chosen `yes` (or `yes, …`), or a yes typed in Other, approves; dismissed, empty, timed out or
+refused is a no. If the tool is unavailable or refused, ask the same text, answers in parentheses,
+right after what the preview holds, and stop.
 
 **Write nothing until the human says yes**, on GitHub or in the repo. Approval is for these lines
 only.

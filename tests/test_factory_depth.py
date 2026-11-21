@@ -609,6 +609,72 @@ def test_no_build_question_without_a_base_branch(tmp_path, capsys) -> None:
     assert "no base branch: set [git] base in .sdlc/config.toml" in out["refusals"]
 
 
+# ---------------------------------------------------------------- the build gate's preview (210)
+
+
+def _preview(root: Path, capsys, purpose: str = "build") -> dict:
+    _, out = _run(capsys, factory.cmd_start, root, "008", purpose)
+    return out
+
+
+def test_start_build_previews_the_run(tmp_path, capsys) -> None:
+    """210 R6: the run the yes approves, from the same `start` output and base-branch check as
+    the question: the gate, every role's model at each depth, each depth's rounds, `max_runs`."""
+    config = '[commands]\ncheck = "./check.sh"\n\n[review]\nsensitive = ["src/auth/"]\n'
+    out = _preview(_change(tmp_path, 1, "plan", config=config), capsys)
+    lines = out["preview"].splitlines()
+    assert lines[0] == "Gate: ./check.sh, on each build before any reviewer (up to 2 fixes a round)"
+    assert lines[1] == (
+        "Rounds: full, up to 3 (code, security, test and behaviour); light, up to 2 "
+        "(code and behaviour); at most 26 agent runs"
+    )
+    for at, level in ((2, "full"), (3, "light")):
+        models = out["models_at"][level]
+        assert lines[at] == f"Models, {level}: " + ", ".join(f"{r} {m}" for r, m in models.items())
+    assert set(out["models_at"]["full"]) == set(factory.ROLES)
+    assert len(lines) == 4
+
+
+def test_start_previews_no_gate(tmp_path, capsys) -> None:
+    out = _preview(_change(tmp_path, 1, "plan"), capsys)
+    assert out["preview"].splitlines()[0] == "Gate: no gate configured"
+
+
+def test_start_previews_a_restart(tmp_path, capsys) -> None:
+    root = _change(tmp_path, 1, "test")
+    _escalated(root)
+    lines = _preview(root, capsys)["preview"].splitlines()
+    assert (
+        lines[-1] == "Restart: decision.md kept as decision-1.md; the builder rebuilds from round 4"
+    )
+
+
+def test_start_previews_an_upgraded_run(tmp_path, capsys) -> None:
+    """With `upgraded`, the record and the Requirements of the spec.md `upgrade` wrote; the
+    scaffold's prompts are never quoted as requirements."""
+    root, folder = _tier1_run(tmp_path)
+    _upgraded(root, folder)
+    lines = _preview(root, capsys)["preview"].splitlines()
+    assert lines[4].startswith("Upgraded: before round 2, on D1: ")
+    assert lines[5] == (
+        f".sdlc/work/{NAME}/spec.md is still the scaffold upgrade wrote: the spec-writer's draft "
+        "holds the requirements"
+    )
+    spec = (
+        "---\nid: 008\n---\n\n# 008\n\n## Requirements\n\nR1. A draft reopens.\n\n## Design\n\nx\n"
+    )
+    (folder / "spec.md").write_text(spec, encoding="utf-8")
+    lines = _preview(root, capsys)["preview"].splitlines()
+    assert lines[5:] == ["## Requirements", "", "R1. A draft reopens."]
+
+
+def test_no_preview_for_spec_or_a_refusal(tmp_path, capsys) -> None:
+    out = _preview(_change(tmp_path, 2, "plan"), capsys, "spec")
+    assert out["question"] and out["preview"] is None, "the draft doesn't exist yet"
+    out = _preview(_change(tmp_path / "b", 2, "test"), capsys)
+    assert out["refusals"] and out["preview"] is None
+
+
 @pytest.mark.parametrize(
     "names, said",
     [([], "no reviewer"), (["code"], "code"), (["code", "test"], "code and test"),

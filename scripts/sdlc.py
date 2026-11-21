@@ -2684,16 +2684,24 @@ def risk_paths(paths: list[str], patterns: list[str]) -> list[str]:
     return [p for p in paths if named(p)]
 
 
+def _diff_rows(root: Path, path: Path) -> list[tuple[str, str, str | None]] | None:
+    """What change `path`'s checkout changes against its merge base with the base branch, as
+    `changed_paths()` gives it, for ship's question and its preview alike. None with no base
+    branch or no merge base."""
+    trunk = load_config(main_root(root))[0]["git"]["base"]
+    found = changed_paths(checkout_of(path), trunk) if trunk else None
+    return None if found is None else found[1]
+
+
 def _risk_report(root: Path, path: Path) -> dict | None:
     """What a change's diff against the base branch touches of `review.sensitive` and
     `review.irreversible`, for `preflight` and ship's question: a rename counts by both its paths.
     `deep` when a sensitive path is touched. None when the checkout has no merge base."""
     cfg = load_config(main_root(root))[0]
-    trunk = cfg["git"]["base"]
-    found = changed_paths(checkout_of(path), trunk) if trunk else None
-    if found is None:
+    rows = _diff_rows(root, path)
+    if rows is None:
         return None
-    paths = list(dict.fromkeys(p for _, p_, to in found[1] for p in (p_, to) if p))
+    paths = list(dict.fromkeys(p for _, p_, to in rows for p in (p_, to) if p))
     sensitive = risk_paths(paths, cfg["review"]["sensitive"])
     irreversible = risk_paths(paths, cfg["review"]["irreversible"])
     return {"sensitive": sensitive, "irreversible": irreversible, "deep": bool(sensitive)}
@@ -8109,6 +8117,24 @@ def _question_head(findings: list[dict]) -> tuple[str, list[str], bool]:
     return "Commit this", ["yes", *fix_all, "edit the message"], True
 
 
+# The most lines a WAIT's dialog preview shows before it is cut (210). Copied into `factory.py`,
+# which never imports this script, and pinned to it by a test.
+PREVIEW_LINES = 40
+
+
+def _preview_cut(text: str, path: str | None) -> str:
+    """A WAIT's preview cut to `PREVIEW_LINES`: past it, the first lines and a closing line saying
+    how many more there are, in `path`, or `shown above` when no file holds them yet. `sdlc.py`
+    and `factory.py` each hold this text, since neither imports the other, pinned by a test."""
+    lines = text.splitlines()
+    more = len(lines) - PREVIEW_LINES
+    if more <= 0:
+        return text
+    where = f" in {path}" if path else ", shown above"
+    closing = f"… {more} more line{'s' if more > 1 else ''}{where}"
+    return "\n".join([*lines[:PREVIEW_LINES], closing])
+
+
 def ship_question(
     folder: str,
     closes: list[int],
@@ -8200,12 +8226,8 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
     home = main_root(root)
     cfg = load_config(home)[0]
     rel = work_rel(root)
-    found = findings_entries(path)
-    if found["problems"]:
-        print(
-            f"⚠  {path.name}/{FINDINGS}: {'; '.join(found['problems'])}. Not asking.",
-            file=sys.stderr,
-        )
+    found = _readable_findings(path)
+    if found is None:
         return 1
     found_risk = _risk_report(root, path)
     risk = found_risk or {"sensitive": [], "irreversible": []}
@@ -8223,10 +8245,55 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
     return 0
 
 
+def _readable_findings(path: Path) -> dict | None:
+    """Change `path`'s findings, or None, its problems said, when findings.md won't read: ship's
+    question and its preview refuse it alike."""
+    found = findings_entries(path)
+    if found["problems"]:
+        print(
+            f"⚠  {path.name}/{FINDINGS}: {'; '.join(found['problems'])}. Not asking.",
+            file=sys.stderr,
+        )
+        return None
+    return found
+
+
+def ship_preview(folder: str, findings: list[dict], rows: list[tuple[str, str, str | None]]) -> str:
+    """What ship's yes commits, for its WAIT's dialog preview: each finding by id, rank and
+    disposition, every path the diff touches (`<status> <path>`, a rename `R <old> → <new>`), and
+    the stamp line for change `folder`, cut to `PREVIEW_LINES` (ship shows all of it above). The
+    commit message comes before it, in the skill: the message is the model's, never the script's."""
+    said = [f"{e['id']} {e['rank']} → {e['disposition']}: {e['title']}" for e in findings]
+    lines = ["Findings:", *said] if said else ["Findings: none"]
+    lines.append("Paths:")
+    lines += [f"{s} {p} → {to}" if to else f"{s} {p}" for s, p, to in rows]
+    lines.append(f"{folder}/ stamped shipped")
+    return _preview_cut("\n".join(lines), None)
+
+
+def cmd_ship_preview(root: Path, ident: str) -> int:
+    """Print ship's WAIT preview for a change (`ship_preview()`), refusing a findings.md that won't
+    read as its question does. Writes nothing."""
+    path = _one_change(root, ident)
+    if path is None:
+        return 1
+    found = _readable_findings(path)
+    if found is None:
+        return 1
+    rows = _diff_rows(root, path)
+    if rows is None:
+        trunk = load_config(main_root(root))[0]["git"]["base"]
+        print(f"⚠  no merge base with {trunk!r}: is this a git checkout?", file=sys.stderr)
+        return 1
+    print(ship_preview(f"{work_rel(root)}/{path.name}", found["entries"], rows))
+    return 0
+
+
 @command(
     "preflight",
     "everything ship looks up about a change, as JSON; writes nothing",
     arg("id", help="the 3-digit id, e.g. 025"),
+    arg("--preview", action="store_true", help="print ship's WAIT preview instead"),
     arg("--question", action="store_true", help="print ship's WAIT question instead, from:"),
     arg("--context", action="store_true", help="a context update was proposed"),
     arg("--nits", action="store_true", help="nits are added or retired"),
@@ -8241,6 +8308,14 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
     ),
 )  # fmt: skip
 def cli_preflight(root: Path, home: Path, args) -> int:
+    if args.question and args.preview:
+        print(
+            "⚠  preflight: --question and --preview are two outputs: run each on its own.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.preview:
+        return cmd_ship_preview(root, args.id)
     if args.question:
         return cmd_ship_question(
             root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
