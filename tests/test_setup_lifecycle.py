@@ -10,6 +10,7 @@ move what these assert.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -651,19 +652,105 @@ def test_readiness_drift_item(repo: Path, plugin: Path, capsys) -> None:
     assert _readiness(repo, capsys)["status"] == "n/a"
 
 
-def test_status_nudges_on_old_manifest(repo: Path, plugin: Path, monkeypatch) -> None:
+def _status(repo: Path, capsys) -> str:
+    capsys.readouterr()
+    assert sdlc.cli_status(repo, repo, argparse.Namespace(all=False)) == 0
+    return capsys.readouterr().out
+
+
+def test_a_release_that_changed_nothing_leaves_no_nudge(tmp_path, monkeypatch, capsys) -> None:
+    """R1, the bug's steps, on the setup case's fixture, which `readiness` calls complete: set up
+    at 1.1.0, then the plugin is 1.2.0 with every default as it was. Setup would stop at
+    `complete`, so status sends no one to it."""
+    repo = tmp_path / "set-up"
+    repo.mkdir()
+    subprocess.run(
+        ["sh", str(ROOT / "evals" / "scaffold.sh"), "set-up"],
+        cwd=repo, check=True, capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.1.0")
+    _record(repo)
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.2.0")
+    capsys.readouterr()
+    assert sdlc.cmd_readiness(repo) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["complete"] is True, [i for i in out["items"] if i["status"] not in ("ok", "n/a")]
+    assert sdlc.setup_nudge(repo) is None
+    assert "■ Setup" not in _status(repo, capsys)
+
+
+def test_a_release_that_changed_a_default_nudges_until_setup_records(
+    repo: Path, plugin: Path, monkeypatch
+) -> None:
+    """R2, R4: a changed default under an older record keeps today's line until `record` runs;
+    no config, no record and an unreadable record keep their own."""
     assert "no record" in sdlc.setup_nudge(repo)
     _record(repo)
     assert sdlc.setup_nudge(repo) is None
     monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.2.0")
+    _default(plugin, REVIEW.replace("It asserts nothing.", "It asserts nothing real."))
     assert sdlc.setup_nudge(repo) == "set up with 1.1.0, the plugin is 1.2.0  /sdlc:setup"
+    _record(repo)
+    assert sdlc.setup_nudge(repo) is None
+    manifest = repo / ".sdlc" / "setup.json"
+    manifest.write_text("{not json", encoding="utf-8")
+    assert sdlc.setup_nudge(repo).endswith("/sdlc:setup")
     (repo / ".sdlc" / "config.toml").unlink()
     assert sdlc.setup_nudge(repo) is None, "a repo not set up gets no nudge"
 
 
-def test_check_strict_ignores_drift(repo: Path, plugin: Path) -> None:
+def test_a_report_only_drift_keeps_the_nudge(repo, plugin, monkeypatch, capsys) -> None:
+    """R3: a new config key alone is drift setup would draft from, so the nudge and `complete`
+    agree that setup has something to do."""
+    manifest = _record(repo)
+    manifest["config_keys"].remove("metrics.stop_allowance")
+    (repo / ".sdlc" / "setup.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.2.0")
+    found = sdlc.drift(repo)
+    assert found["report"] and not found["breaking"] and not found["refresh"]
+    assert sdlc.drift_pending(found)
+    assert sdlc.setup_nudge(repo) == "set up with 1.1.0, the plugin is 1.2.0  /sdlc:setup"
+    capsys.readouterr()
+    assert sdlc.cmd_readiness(repo) == 0
+    assert json.loads(capsys.readouterr().out)["complete"] is False
+
+
+def test_a_current_record_runs_no_drift(repo: Path, plugin: Path, monkeypatch) -> None:
+    """R4: a record at the running version, or newer, is one file read."""
+    _record(repo)
+
+    def boom(root):
+        raise AssertionError("drift ran")
+
+    monkeypatch.setattr(sdlc, "drift", boom)
+    assert sdlc.setup_nudge(repo) is None
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.0.0")
+    assert sdlc.setup_nudge(repo) is None
+
+
+def test_a_doc_drift_cannot_read_keeps_the_nudge(repo, plugin, monkeypatch, capsys) -> None:
+    """R5: a review doc that isn't UTF-8 keeps the line, and status still exits 0."""
+    _record(repo)
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.2.0")
+    (repo / ".sdlc" / "REVIEW.md").write_bytes(b"# Review\n\n\xff\xfe not utf-8\n")
+    line = "set up with 1.1.0, the plugin is 1.2.0  /sdlc:setup"
+    assert sdlc.setup_nudge(repo) == line
+    assert f"■ Setup: {line}" in _status(repo, capsys)
+
+    def broken(root):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(sdlc, "drift", broken)
+    assert sdlc.setup_nudge(repo) == line
+
+
+def test_check_strict_ignores_drift(repo: Path, plugin: Path, monkeypatch) -> None:
+    """R9: a stale record with drift pending is a nudge, never a problem `vet` counts."""
+    _record(repo)
+    monkeypatch.setattr(sdlc, "plugin_version", lambda: "1.2.0")
     _default(plugin, REVIEW + "\n## Pass 3\n\nNew.\n")
     assert sdlc.drift(repo)["refresh"], "there is drift"
+    assert sdlc.setup_nudge(repo), "and a nudge"
     assert sdlc.analyze(repo)["problems"] == [], "and it isn't a problem `vet` counts"
 
 

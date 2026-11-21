@@ -87,7 +87,7 @@ graph LR
 - **`/sdlc:setup`**: sets a repo up for the plugin, or refreshes what an update changed under it. Specified: `skills/setup/SKILL.md`. Depends on: `drift`, `process doc`.
 - **`/sdlc:uninstall`**: takes setup's files and lines back out of a repo. Specified: `skills/uninstall/SKILL.md`. Depends on: `/sdlc:setup`.
 - **`/sdlc:update`**: prints the steps that take a newer release in this repo (`sdlc.py update`), and runs its `claude plugin update` commands after its WAIT. Specified: `skills/update/SKILL.md`. Depends on: `/sdlc:setup`, `the update check`.
-- **`the update check`**: the plugin's one hook, at a session's start: it prints one line when a newer release is out (`sdlc.py update --hook`), checks at most once a day, and only advises. `/sdlc:status` repeats the line. Specified: `hooks/hooks.json`. Depends on: `/sdlc:status`.
+- **`the update check`**: the plugin's one hook, at a session's start: it prints one line when a newer release is out (`sdlc.py update --hook`), else when this repo's setup has something to draft, checks at most once a day, and only advises. `/sdlc:status` repeats the line. Specified: `hooks/hooks.json`. Depends on: `/sdlc:status`.
 - **`/sdlc:dashboard`**: opens the board in a browser. Specified: `skills/dashboard/SKILL.md`. Depends on: `Planned`.
 - **`/sdlc-factory:spec`**: has the factory's spec-writer draft a Tier 2 spec, shown and written after one approval. Specified: `plugins/factory/skills/spec/SKILL.md`. Depends on: `spec.md`, `factory`.
 - **`/sdlc-factory:build`**: adds a change to the supervisor: the builder plans and builds it, reviewers check it in rounds, and an approver decides. Specified: `plugins/factory/skills/build/SKILL.md`. Depends on: `plan.md`, `decisions.md`, `factory`.

@@ -434,6 +434,71 @@ def test_status_reads_the_cache_alone(
     assert sdlc.update_nudge(host) is None
 
 
+# ---------------------------------------------------------------- setup's line (213)
+
+
+def _behind(host: Path, plugin: Path, recorded: str, running: str) -> None:
+    """`host` set up by a plugin at `recorded`, a config key new since, and `running` now."""
+    source = sdlc.release_source()
+    (host / ".sdlc").mkdir(exist_ok=True)
+    (host / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', encoding="utf-8")
+    _manifest(plugin, recorded, source)
+    assert sdlc.cmd_record(host, [], False) == 0
+    path = host / ".sdlc" / "setup.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["config_keys"].remove("metrics.stop_allowance")
+    path.write_text(json.dumps(record), encoding="utf-8")
+    _manifest(plugin, running, source)
+
+
+def _no_release(host: Path) -> None:
+    """The day's check, found no release: no release line to print."""
+    data = {
+        "checked": datetime.now(UTC).isoformat(),
+        "source": sdlc.release_source(),
+        "latest": None,
+        "reason": "offline",
+        "installs": [],
+        "installs_reason": None,
+    }
+    sdlc._update_cache_path(host).write_text(json.dumps(data), encoding="utf-8")
+
+
+SETUP_LINE = "sdlc setup: set up with 1.9.0, the plugin is 1.10.0  /sdlc:setup"
+
+
+def test_hook_says_setup_is_behind(host: Path, plugin: Path, claude: dict, capsys) -> None:
+    """R6: no release line, and setup behind with something to draft: setup's line."""
+    _behind(host, plugin, "1.9.0", "1.10.0")
+    _no_release(host)
+    capsys.readouterr()
+    assert json.loads(_hook(host, capsys)) == {"systemMessage": SETUP_LINE}
+
+
+def test_hook_prefers_the_release_line(host: Path, plugin: Path, claude: dict, capsys) -> None:
+    """R7: both are due: the release line alone, since `/sdlc:update`'s steps run setup."""
+    _behind(host, plugin, "1.9.0", "1.10.0")
+    capsys.readouterr()
+    assert sdlc.setup_nudge(host), "setup is behind"
+    assert _hook(host, capsys) == json.dumps({"systemMessage": LINE}) + "\n"
+
+
+def test_hook_setup_half_never_fails_the_session(
+    host: Path, plugin: Path, claude: dict, capsys, monkeypatch
+) -> None:
+    """R8: a setup half that raises says nothing and exits 0; a repo not set up says nothing."""
+    _no_release(host)
+    assert _hook(host, capsys) == "", "not set up"
+
+    def broken(root):
+        raise RuntimeError("boom")
+
+    _behind(host, plugin, "1.9.0", "1.10.0")
+    capsys.readouterr()
+    monkeypatch.setattr(sdlc, "setup_nudge", broken)
+    assert _hook(host, capsys) == ""
+
+
 # ---------------------------------------------------------------- end to end, as the hook runs
 
 
@@ -495,3 +560,13 @@ def test_the_maps_name_the_hook_and_the_command() -> None:
     assert "`hooks/hooks.json`" in features and "sdlc.py update" in features
     process = (ROOT / "docs" / "PROCESS.md").read_text(encoding="utf-8")
     assert "calls: config, update" in process and "update --installed" in process
+
+
+@pytest.mark.portable
+def test_reference_says_the_hook_carries_setup_s_line() -> None:
+    """213 R11: *After an update* says the hook prints setup's line when there is no release line,
+    and that status names the record only when setup has something to draft."""
+    text = (ROOT / "docs" / "REFERENCE.md").read_text(encoding="utf-8")
+    section = text.split("## After an update", 1)[1].split("\n## ", 1)[0]
+    assert "sdlc setup: set up with" in section and "no release line" in section
+    assert "drift" in section.split("**`.sdlc/setup.json`**", 1)[1].split("\n\n", 1)[0]

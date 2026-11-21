@@ -1,5 +1,5 @@
 {
-  "description": "Says once, at a session's start, when a newer sdlc release is out than this repo runs. Advisory: it updates nothing, checks the network at most once a day, and prints nothing when it can't tell.",
+  "description": "Says once, at a session's start, when a newer sdlc release is out than this repo runs, else when this repo's setup has something to draft. Advisory: it updates nothing, checks the network at most once a day, and prints nothing when it can't tell.",
   "hooks": {
     "SessionStart": [
       {

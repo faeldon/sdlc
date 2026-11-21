@@ -187,6 +187,10 @@ shape line.
 
 With none of these, recommend `/sdlc:intent`. Don't invent work to fill the report.
 
+**When `status` printed `■ Setup`, the report's last line is that line, as printed.** It says the
+repo's setup has something to draft since the plugin it last recorded. It is not a recommendation,
+and it changes nothing in the order above.
+
 ## Step 4 — Only if asked: one change in depth
 
 If the human names a change ("what's 004 about?", "why is 002 stuck?"), read **only** that folder's

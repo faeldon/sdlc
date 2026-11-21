@@ -2174,3 +2174,12 @@ def test_idea_and_bug_offer_an_origin_line() -> None:
         step = _steps(skill)["3"]
         assert "Origin: host" in step, skill
         assert "Origin: self" not in _skill_text(ROOT / "skills" / skill / "SKILL.md"), skill
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("name", ["status", "intent"])
+def test_status_and_intent_pass_the_setup_nudge_on(name: str) -> None:
+    """213 R10: the two skills where the person asks what needs them, or starts new work, pass
+    status's `■ Setup` line on rather than swallow it."""
+    text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+    assert "■ Setup" in text, f"{name} no longer passes the setup nudge on"

@@ -217,9 +217,12 @@ failure is `Sdlc-Coverage: none: <reason>`. A change's own numbers are printed o
 
 **Setup: `drift()` and `readiness`.** `sdlc.py record` writes `.sdlc/setup.json` each time setup
 writes, and `drift` compares three ways (the default now, the recorded hash, the host's text), so
-a block the host changed is never proposed. `breaking` is only what the plugin would now misread:
-rename or drop a config key, or make the script read a new template heading, and `RETIRED_KEYS`
-or `TEMPLATE_READS` gets the entry in the same change. `git.attribution` has no default on
+a block the host changed is never proposed. `status`'s setup nudge (`setup_nudge()`) runs `drift`
+only when the record is older than the plugin, and shows only while `drift_pending()`, the rule
+`complete` shares, so a release that changed nothing leaves no nudge and no record to write.
+`breaking` is only what the plugin would now misread: rename or drop a config key, or make the
+script read a new template heading, and `RETIRED_KEYS` or `TEMPLATE_READS` gets the entry in the
+same change. `git.attribution` has no default on
 purpose: unset is a question setup asks. `readiness`'s `complete` lets a rerun read setup's
 `SKILL.md` alone, and errs towards false: a wrong true skips a host's setup without a word. The
 `setup` case's fixture must stay complete (`test_the_set_up_fixture_is_complete`). A nudge in
@@ -228,12 +231,13 @@ purpose: unset is a question setup asks. `readiness`'s `complete` lets a rerun r
 
 **Updates: `cmd_update()` and the one hook.** The plugin's only hook, `hooks/hooks.json`, runs
 `sdlc.py update --hook` at a session's `startup` (`test_sdlc_loads_nothing_from_plugins` pins it
-as the one). It only advises: one line or nothing, exit 0 always, never an update. The check
-(`check_update()`) is one `git ls-remote` on the running manifest's `repository` and one
-`claude plugin list --json` (`plugin_installs()`, its one reader), at most once a day: the answer
-is cached in `sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache is the one write
-made with no WAIT outside the five above, since it is state like the main lock, not an artifact,
-and it dirties no checkout. `status` reads only the cache (`update_nudge()`); a copy read in place
+as the one). It only advises: one line or nothing, exit 0 always, never an update; the line is
+the release's, else setup's (`setup_nudge()`). The check (`check_update()`) is one
+`git ls-remote` on the running manifest's `repository` and one `claude plugin list --json`
+(`plugin_installs()`, its one reader), at most once a day: the answer is cached in
+`sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache is the one write made with
+no WAIT outside the five above, since it is state like the main lock, not an artifact, and it
+dirties no checkout. `status` reads only the cache (`update_nudge()`); a copy read in place
 (`in_place()`, its root has `.git`) is never checked or told. `update` writes and reaches the
 network, so it is not in `READ_ONLY`. `/sdlc:update` runs the `claude plugin` steps the script
 lists behind its WAIT, and setup stops on `update --installed`'s `restart_first`.

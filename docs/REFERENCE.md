@@ -333,7 +333,10 @@ changed under them, and drafts the changes you haven't made yourself, behind its
 `startup` it runs `sdlc.py update --hook`, which prints one line when a newer release is out,
 `sdlc 1.11.0 is out (this session runs 1.10.0): /sdlc:update`, or, when this session is current
 but an install here isn't, `sdlc 1.11.0 is out (sdlc-factory 1.10.0 at project scope): /sdlc:update`.
-`sdlc.py status` repeats the line, read from the day's check alone. The check is one
+`sdlc.py status` repeats the line, read from the day's check alone. When there is no release line,
+the hook prints setup's instead, the line `status` shows as `■ Setup`, when this repo's setup has
+something to draft: `sdlc setup: set up with 1.10.0, the plugin is 1.11.0  /sdlc:setup`. Never
+both: the release's steps already end with `/sdlc:setup`. The check is one
 `git ls-remote --tags --refs` on the running manifest's `repository` (the newest `vX.Y.Z` tag) and
 one `claude plugin list --json`, at most once a day: the answer is cached in `sdlc-update.json` in
 the repo's git common dir, shared by its worktrees and in no checkout. The hook never updates,
@@ -355,8 +358,11 @@ committed with the rest. It holds the plugin version, the config keys that versi
 of each block of each default behind one of your docs (`process`, `review`, `health`, `product`,
 `project`), a hash of each plugin template, the files setup created, and whether it added the
 `.claude/worktrees/` line to `.gitignore`. A block is a `##`, `###` or `####` section, or a
-`- **lead**` bullet. Nothing else reads it, and `sdlc.py status` names it when it is older than
-the plugin, or missing.
+`- **lead**` bullet. Nothing else reads it, and `sdlc.py status` names it when it is missing or
+won't read, or when it is older than the plugin and `drift` finds something setup would draft (the
+same rule that makes `readiness` say `complete: false`). So after a release that changed nothing
+under your setup there is no nudge, and the record keeps the version setup last wrote at: setup
+stops at `complete` and writes nothing.
 
 **`sdlc.py drift`** (read-only, JSON) compares each block of your doc with the default now and the
 recorded hash, and sorts what it finds:

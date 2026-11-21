@@ -8673,8 +8673,8 @@ def cmd_readiness(root: Path) -> int:
     `required` items stop a skill until fixed; the rest the plugin works without, less well. A
     re-run on a repo that is set up is how setup says so: `complete` is true when every item is
     answered (but the `UNSET_IS_A_CHOICE` ones, listed in `unset`, and an `archive.target` of
-    `none`) and `drift` has nothing in `breaking`, `refresh` or `report`, and setup then stops
-    before its drafts."""
+    `none`) and `drift` has nothing in `breaking`, `refresh` or `report` (`drift_pending()`, the
+    rule `setup_nudge()` shares), and setup then stops before its drafts."""
     home = main_root(root)
     cfg, warnings, parsed = load_config(root)
     items: list[dict] = []
@@ -8800,7 +8800,7 @@ def cmd_readiness(root: Path) -> int:
         # Nothing for setup to draft: every item answered, and nothing the plugin changed under it.
         "complete": found is not None
         and all(i["status"] in ("ok", "n/a") or i["name"] in chosen for i in items)
-        and not (found["breaking"] or found["refresh"] or found["report"]),
+        and not drift_pending(found),
         # The commands a repo usually sets, left unset, which a complete run lists.
         "unset": unset,
         # The paths setup owns with uncommitted changes, which its report names the commit for.
@@ -9328,9 +9328,19 @@ def cli_drift(root: Path, home: Path, args) -> int:
     return cmd_drift(root)
 
 
+def drift_pending(found: dict) -> bool:
+    """Whether `drift()` found anything setup would draft from: the one rule `readiness`'s
+    `complete` and `setup_nudge()` share, so setup never says complete while status sends the
+    person to it."""
+    return bool(found["breaking"] or found["refresh"] or found["report"])
+
+
 def setup_nudge(root: Path) -> str | None:
-    """One line for status when setup hasn't seen this plugin version; None when it has, or the
-    repo isn't set up."""
+    """One line for status (and the hook) when setup has something to do since the plugin it last
+    recorded: no record, one that won't read, or one older than the running plugin with
+    `drift_pending()`. None when the repo isn't set up, the record is current (one file read, no
+    drift), or an older record's drift is clean, which is where setup would stop at `complete`.
+    A drift that can't be read keeps the line."""
     if not (root / HOST_DIR / "config.toml").is_file():
         return None
     manifest, unreadable = read_manifest(root)
@@ -9339,9 +9349,13 @@ def setup_nudge(root: Path) -> str | None:
         return f"{unreadable}  /sdlc:setup"
     if manifest is None:
         return f"no record of the plugin version that set this repo up (now {plugin})  /sdlc:setup"
-    if _older(manifest.get("version"), plugin):
-        return f"set up with {manifest.get('version')}, the plugin is {plugin}  /sdlc:setup"
-    return None
+    if not _older(manifest.get("version"), plugin):
+        return None
+    line = f"set up with {manifest.get('version')}, the plugin is {plugin}  /sdlc:setup"
+    try:
+        return line if drift_pending(drift(root)) else None
+    except (OSError, ValueError):  # it can't tell: the line stays, never a crash
+        return line
 
 
 # ---------------------------------------------------------------- updates
@@ -9642,10 +9656,19 @@ def update_report(root: Path, home: Path) -> dict:
 
 
 def hook_line(root: Path, home: Path) -> str | None:
-    """The hook's line, or None: nothing checked in place or outside a repo."""
+    """The hook's one line, or None: the release's line, else setup's (`setup_nudge()`), worked
+    out only when there is no release line, since `/sdlc:update`'s steps already run setup.
+    Nothing checked or told in place or outside a repo; a setup half that fails says nothing."""
     if in_place() or _ledger_dir(root) is None:
         return None
-    return update_line(plugin_version(), check_update(root, home, fresh=False))
+    line = update_line(plugin_version(), check_update(root, home, fresh=False))
+    if line:
+        return line
+    try:
+        nudge = setup_nudge(root)
+    except Exception:  # the hook only advises: a broken setup half says nothing
+        return None
+    return f"sdlc setup: {nudge}" if nudge else None
 
 
 def cmd_update(root: Path, home: Path, mode: str | None) -> int:

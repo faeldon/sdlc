@@ -60,6 +60,9 @@ the factory. Note `git.base` too: the branch every change starts from, `main` un
 is another. Where this skill says `main`, it means that branch. When it is null, stop here and say why: `new`
 refuses without one, and `/sdlc:setup` sets it.
 
+When `status` printed `■ Setup`, say that line once, as printed, before Step 1, and go on: the
+nudge never stops this skill.
+
 **`.sdlc/work/` is committed**: each change's folder lives on its own branch, in its own worktree, and
 open changes in other worktrees are listed by `status`. If `config` says `work.ignored: true`, stop
 here and say why: `new` refuses while `.sdlc/work/` is in `.gitignore`, and better now than after the
