@@ -1023,6 +1023,25 @@ def test_a_landed_change_owes_one_gate_for_ship_and_close_and_an_auto_pass_is_ap
     assert (first["ship"], first["close"]) == (("auto", "auto") if by == "auto" else ("yes", "yes"))
 
 
+def test_landed_by_autopilot_is_its_own_value() -> None:
+    """216 R3: `by=autopilot` reads back as itself, counted as `autopilot=1` beside `auto=0`, its
+    ship and close marked `autopilot`, which no first-time rate counts, and its `unreviewed=`
+    carried as a landing's: never read as `auto`, never as the person's."""
+    tip = metrics.parse_trailers("Sdlc-Landed: by=autopilot unreviewed=1")
+    assert tip["landed"]["by"] == "autopilot"
+    s = metrics.summarize(LANDED, {}, CFG, "factory", 1, "autopilot")
+    metrics.landed_unreviewed(s, tip)
+    back = metrics.parse_trailers("\n".join(metrics.trailers(s)))
+    assert back["totals"]["autopilot"] == 1 and back["totals"]["auto"] == 0
+    assert back["totals"]["unreviewed"] == 1
+    person = metrics.summarize([*LANDED, say(9, "approve")], {}, CFG, "factory", 1, "person")
+    assert "autopilot" not in person["totals"], "only an autopilot landing says it"
+    first = metrics.happy(LANDED, s, None, 1, metrics.rework(LANDED, s, None, None, 1), 0,
+                          "autopilot")  # fmt: skip
+    assert (first["ship"], first["close"]) == ("autopilot", "autopilot")
+    assert first["first"] == first["of"] - 0 and "autopilot" not in ("yes", "fixed", "no")
+
+
 @pytest.mark.parametrize("unreviewed", [2, "unknown"])
 def test_a_landing_with_unreviewed_paths_carries_them_to_totals(unreviewed) -> None:
     """104 R15: `unreviewed=` on a landed change's `Sdlc-Landed` is carried to `Sdlc-Totals`,

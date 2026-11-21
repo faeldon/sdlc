@@ -20,3 +20,7 @@ Revise your draft, as the person asks: ${words}
 ## recheck
 
 Your draft is missing one of these: every <...> prompt replaced, the requirements numbered and each checkable, a Contracts touched line for each invariant the change comes near. Draft it again with all three.
+
+## autopilot
+
+This run is autopilot's, while the person is away: no one reads it before it lands. If the change can only be built by breaking a contract, a hard rule or a guard (in ${policy}, AGENTS.md or the invariant tests), say so on its own line, `- CONTRACT: <invariant>: <why>`; if it would be far simpler with one relaxed, `- RELAX: <invariant>: <why>`. Either holds the change for the person: never break or relax one yourself.

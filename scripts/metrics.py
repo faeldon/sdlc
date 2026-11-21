@@ -135,6 +135,13 @@ A change `/sdlc-factory:land` landed may say on its `Sdlc-Landed` how many paths
 last review (`unreviewed=<n>`, or `unknown` with no snapshot to compare). `landed_unreviewed()`
 carries it to `Sdlc-Totals` as `unreviewed=`, beside `auto=`; a change without it has none.
 
+`Sdlc-Landed: by=<who>` has three values, each kept apart from the others: `person`, whose yes
+passed the batch's gate; `auto`, a batch with no risk signal that passed itself; and `autopilot`
+(216), a change the factory's autopilot landed while the person was away, signals and all. A
+reader that branches on the value names all three. An `autopilot` landing is counted as
+`autopilot=1` in `Sdlc-Totals`, beside `auto=`, and its ship and close read `autopilot` in
+`Sdlc-Happy`, which no first-time rate counts: neither is ever the person's.
+
 Where a change's finding came from goes on a line of its own, `Sdlc-Origin: <host|self>`, read
 back as `origin`, its text. Close writes it on `Close` commits only, from the intent's `origin:`
 line, and only for one of the two words. A `Close` commit without it was closed before origins
@@ -1347,6 +1354,8 @@ def summarize(
         "ship_runs": sum(1 for e in events if e["kind"] == "skill" and e["name"] == "sdlc:ship"),
         # A gate that passed itself: beside `stops`, never in it.
         "auto": 1 if landed == "auto" else 0,
+        # A landing autopilot made (216): beside `auto`, never folded into it or the person's.
+        **({"autopilot": 1} if landed == "autopilot" else {}),
         "reenter": reenter,
         # What the person typed, and every tool call: their presence says this commit counted them.
         "words": sum(s["words"] for s in stages.values()),
@@ -1530,7 +1539,8 @@ def happy(
     more than once with no revise reply, and its findings.md holds `review_fixed` findings marked
     `fixed`, so it stopped for what its own review found, which is the review working, not a
     miss. `first` counts it with `yes`. A change `landed` by the factory has ship and close marked
-    `auto` when its gate passed itself, which no rate counts, else by the landing's own replies."""
+    `auto` when its gate passed itself, `autopilot` when autopilot landed it, neither of which a
+    rate counts, else by the landing's own replies."""
     seen = {s for s, v in summary["stages"].items() if v.get("segments")}
     walked = [w for w in _walk(events) if w[1] != "spike"]
     revised = _revised(walked)
@@ -1567,8 +1577,8 @@ def happy(
     for stage in HAPPY_STAGES:
         if stage == "design" and tier < 2:
             continue
-        if landed == "auto" and stage in ("ship", "close"):
-            out[stage] = "auto"
+        if landed in ("auto", "autopilot") and stage in ("ship", "close"):
+            out[stage] = landed
             continue
         mark = "yes" if rules[stage] else "fixed" if stage == "ship" and ship_fixed else "no"
         out[stage] = mark if stage in seen or (landed and stage == "close") else "unknown"
@@ -1753,7 +1763,7 @@ def landed_unreviewed(summary: dict, tip: dict | None) -> None:
     `unknown`: only for a change a landing made, whose tip has the field. Anything else is left
     out, never guessed: measuring never refuses."""
     landed = (tip or {}).get("landed")
-    if not isinstance(landed, dict) or landed.get("by") not in ("auto", "person"):
+    if not isinstance(landed, dict) or landed.get("by") not in ("auto", "person", "autopilot"):
         return
     value = landed.get("unreviewed")
     if (isinstance(value, int) and value >= 0) or value == "unknown":

@@ -433,14 +433,15 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
         created = date.fromisoformat(str(post.get("created")))
     except Exception:
         tier, created = 2, None
-    # Who passed the gate of a change `/sdlc-factory:land` landed: `person`, or `auto` when the
-    # batch had no risk signal, written on the change's own commit, the branch's tip.
+    # Who passed the gate of a change `/sdlc-factory:land` landed: `person`, `auto` when the
+    # batch had no risk signal, or `autopilot` (216), written on the change's own commit, the
+    # branch's tip.
     tip = (
         sdlc.metrics.parse_trailers(sdlc._git(main, "show", "-s", "--format=%B", branch) or "")
         or {}
     )
     landed = (tip.get("landed") or {}).get("by") if isinstance(tip.get("landed"), dict) else None
-    landed = landed if landed in ("auto", "person") else None
+    landed = landed if landed in ("auto", "person", "autopilot") else None
 
     def finish(summary: dict, events: list[dict]) -> tuple[dict, list[str]]:
         # Rework within the change, on lines of its own. A failure here drops only those lines.

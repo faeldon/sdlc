@@ -36,3 +36,7 @@ For each unticked `- [ ]` item in notes.md, propose its disposition at landing: 
 ## irreversible
 
 The diff touches irreversible paths ([review] irreversible on ${base}): ${touched}. A revert won't undo what they reach: for each, or each group, one `- RECOVER: <path or glob>: <the way back>` line, its command or `fix forward:` and what the follow-up would do.
+
+## autopilot
+
+This run is autopilot's, while the person is away: no one reads it before it lands. If the change can only be built by breaking a contract, a hard rule or a guard (in ${policy}, AGENTS.md or the invariant tests), say so on its own line, `- CONTRACT: <invariant>: <why>`; if it would be far simpler with one relaxed, `- RELAX: <invariant>: <why>`. Either holds the change for the person: never break or relax one yourself.

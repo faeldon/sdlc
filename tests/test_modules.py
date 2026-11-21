@@ -21,6 +21,7 @@ CLOSING_PY = ROOT / "scripts" / "closing.py"
 FACTORY_PY = ROOT / "plugins" / "factory" / "scripts" / "factory.py"
 LANDING_PY = ROOT / "plugins" / "factory" / "scripts" / "landing.py"
 RUN_STATE_PY = ROOT / "plugins" / "factory" / "scripts" / "run_state.py"
+AUTOPILOT_PY = ROOT / "plugins" / "factory" / "scripts" / "autopilot.py"
 
 # R1's named entries: the lock family, close and its own helpers, and the push.
 CLOSING_NAMES = {
@@ -133,6 +134,25 @@ RUN_STATE_NAMES = {
     "decision_preamble",
 }
 
+# 216: autopilot's command, its run's named state, and its loop. `factory.py` keeps the lock and
+# what other modules read (`autopilot_running()`, `answer`, the agent's change-less tasks).
+AUTOPILOT_NAMES = {
+    "cmd_autopilot",
+    "AUTOPILOT_CANCEL",
+    "AUTOPILOT_STEPS",
+    "TRAIN_COMMANDS",
+    "autopilot_lock",
+    "autopilot_config",
+    "candidates",
+    "review_debt",
+    "change_risk",
+    "hold_causes",
+    "run_step",
+    "run_loop",
+    "summary",
+    "write_summary",
+}
+
 # 171 R7: `verdicts` and the records it writes, which the board's copies follow, stay.
 VERDICTS_NAMES = {
     "cmd_verdicts",
@@ -158,7 +178,13 @@ PAIRS = [
         id="closing",
     ),
     pytest.param(
-        FACTORY_PY, LANDING_PY, "landing", "factory", LANDING_NAMES, [RUN_STATE_PY], id="landing"
+        FACTORY_PY,
+        LANDING_PY,
+        "landing",
+        "factory",
+        LANDING_NAMES,
+        [RUN_STATE_PY, AUTOPILOT_PY],
+        id="landing",
     ),
     pytest.param(
         FACTORY_PY,
@@ -168,6 +194,15 @@ PAIRS = [
         RUN_STATE_NAMES,
         [LANDING_PY],
         id="run_state",
+    ),
+    pytest.param(
+        FACTORY_PY,
+        AUTOPILOT_PY,
+        "autopilot",
+        "factory",
+        AUTOPILOT_NAMES,
+        [LANDING_PY, RUN_STATE_PY],
+        id="autopilot",
     ),
 ]
 
@@ -231,6 +266,7 @@ def _load(name: str, path: Path):
         pytest.param(SDLC_PY, CLOSING_PY, CLOSING_NAMES, id="closing"),
         pytest.param(FACTORY_PY, LANDING_PY, LANDING_NAMES, id="landing"),
         pytest.param(FACTORY_PY, RUN_STATE_PY, RUN_STATE_NAMES, id="run_state"),
+        pytest.param(FACTORY_PY, AUTOPILOT_PY, AUTOPILOT_NAMES, id="autopilot"),
     ],
 )
 def test_the_named_code_lives_in_its_module(script: Path, module: Path, names: set[str]) -> None:
@@ -367,6 +403,7 @@ def test_the_modules_are_bound_live() -> None:
     factory = _load("factory_modules_test", FACTORY_PY)
     assert factory.landing.factory.__dict__ is vars(factory)
     assert factory.run_state.factory.__dict__ is vars(factory)
+    assert factory.autopilot.factory.__dict__ is vars(factory)
 
 
 def _at_load(tree: ast.Module):
@@ -390,6 +427,7 @@ def _at_load(tree: ast.Module):
         pytest.param(CLOSING_PY, "sdlc", id="closing"),
         pytest.param(LANDING_PY, "factory", id="landing"),
         pytest.param(RUN_STATE_PY, "factory", id="run_state"),
+        pytest.param(AUTOPILOT_PY, "factory", id="autopilot"),
     ],
 )
 def test_the_modules_read_nothing_while_loading(module: Path, binding: str) -> None:
@@ -411,7 +449,9 @@ def test_the_modules_read_nothing_while_loading(module: Path, binding: str) -> N
     assert not early, f"{module.name} reads {binding} while loading: {early}"
 
 
-@pytest.mark.parametrize("path", [FACTORY_PY, LANDING_PY, RUN_STATE_PY], ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "path", [FACTORY_PY, LANDING_PY, RUN_STATE_PY, AUTOPILOT_PY], ids=lambda p: p.name
+)
 def test_the_factory_never_loads_sdlc_py(path: Path) -> None:
     """R9, 171 R8: `factory.py`, `landing.py` and `run_state.py` never import `sdlc.py` nor load
     it by path; the factory runs `sdlc.py` as a process (`_sdlc()`), and copies what it parses."""

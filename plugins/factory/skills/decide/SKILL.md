@@ -57,6 +57,13 @@ that once they have fixed it, the hand gate run from the change's worktree (the 
 --answered` names in `then`), green on the change as it stands, clears it; an edit after makes it
 stale. Run nothing for it: the gate is the person's own command, never this skill's.
 
+`ask` also prints `autopilot`: each line the factory's autopilot answered while the person was
+away (`id`, `kind`, `question`, `answer`), its calls and never theirs. Whenever it holds any, show
+them first, naming the change, under their own heading, `Autopilot's calls`, one line each (`D2
+(blocking): Keep drafts 30 days or forever? → 30 days`), none of them asked. A call the person
+disagrees with is fixed forward: a new seed through `/sdlc:idea`, or a revert once the change has
+landed; never an edit of the ledger here.
+
 With no `items`, say that nothing is open on `NNN-slug` and stop. Otherwise show first, naming the
 change: the approver's `decision`, and the `settled` list as one block (`The approver settled
 these: D3: Log the draft id? (spec R4 forbids it)`), none of them asked.

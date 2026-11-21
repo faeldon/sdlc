@@ -48,6 +48,9 @@ flowchart TD
   shipped --> close["/sdlc:close<br/>calls: config, close<br/>writes: the Close commit and its Sdlc trailers; mirrors to the tracker"]
   close --> wclose["WAIT: /sdlc:close"]
   wland --> landed["landed on the base branch"]
+  intent -.->|away| autopilot["/sdlc-factory:autopilot<br/>calls: config, autopilot<br/>opens seeds, builds and lands them unattended, its calls its own"]
+  autopilot --> wautopilot["WAIT: /sdlc-factory:autopilot"]
+  wautopilot --> landed
   wclose --> landed
   plan -.->|won't ship| drop["/sdlc:drop<br/>calls: config, drop, close<br/>writes: stage: dropped, the Drop commit"]
   drop --> wdrop["WAIT: /sdlc:drop"]

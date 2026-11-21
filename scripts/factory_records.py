@@ -65,6 +65,9 @@ REASON_RE = re.compile(r"^\s*- ESCALATED:\s*([^\s:]+):\s*(.+?)\s*$")
 REASON_KINDS = ("gate", "look")
 LOOK_SOURCE_RE = re.compile(r"^approver round (\d+)$")
 DECIDED = " → decided: "
+# A line autopilot answered (216): ticked, never the person's answer, so every count keeps it
+# apart, as `autopilot`. A copy of `factory.py`'s, pinned by a test.
+DECIDED_AUTOPILOT = " → decided by autopilot: "
 # The mark `factory.py decisions` ticks a default with when the approver settled it: never the
 # person's answer, so no reader counts it as one.
 SETTLED = " → settled by the approver: "
@@ -694,12 +697,18 @@ def autonomy_counts(show, listing) -> dict | None:
             unread.append(rel)
         elif answer[1].group(1) == "ESCALATE":
             escalations += 1
-    defaults = dict.fromkeys(("kept", "changed", "confirmed", "settled", "superseded", "open"), 0)
-    blocking = {"answered": 0, "open": 0}
-    looks = {"seen": 0, "checked": 0, "open": 0}
+    defaults = dict.fromkeys(
+        ("kept", "changed", "confirmed", "settled", "superseded", "open", "autopilot"), 0
+    )
+    blocking = {"answered": 0, "open": 0, "autopilot": 0}
+    looks = {"seen": 0, "checked": 0, "open": 0, "autopilot": 0}
     for e in filter(None, map(LEDGER_RE.match, (show(LEDGER_FILE) or "").splitlines())):
         kind, text = e.group(4), e.group(5)
         answer = text.split(DECIDED, 1)[1].strip() if DECIDED in text else ""
+        if DECIDED_AUTOPILOT in text and e.group(1) == "x":
+            # Autopilot's call, never the person's answer nor an override (216 R23).
+            {"default": defaults, "blocking": blocking}.get(kind, looks)["autopilot"] += 1
+            continue
         if kind == "default":
             # Only a default carries `SUPERSEDED` or `SETTLED`: `factory.py decisions` writes those
             # marks on defaults alone, so a blocking or look line never needs the check.

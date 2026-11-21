@@ -94,6 +94,7 @@ graph LR
 - **`/sdlc-factory:build`**: adds a change to the supervisor: the builder plans and builds it, reviewers check it in rounds, and an approver decides. Specified: `plugins/factory/skills/build/SKILL.md`. Depends on: `plan.md`, `decisions.md`, `factory`.
 - **`/sdlc-factory:decide`**: walks the person through a change's open decisions and records their answers. Specified: `plugins/factory/skills/decide/SKILL.md`. Depends on: `decisions.md`.
 - **`/sdlc-factory:land`**: lands a batch of ready changes as one train: each shipped and closed in order, the gate run at the tip. Specified: `plugins/factory/skills/land/SKILL.md`. Depends on: `/sdlc:ship`, `/sdlc:close`, `Sdlc-Landed`.
+- **`/sdlc-factory:autopilot`**: runs the factory from seed to landing while the person is away, behind one approval of the run's bounds: it opens the register's compelling seeds, builds each once what it depends on has landed, answers escalated calls on their defaults as its own, holds what touches a guard or a contract, and lands the rest in batches, until a budget, the dollar cap or the hours run out, then writes a summary to review. Specified: `plugins/factory/skills/autopilot/SKILL.md`. Depends on: `/sdlc-factory:build`, `/sdlc-factory:land`, `Sdlc-Landed`, `decisions.md`.
 - **`/sdlc-factory:eval`**: replays the factory's reviewers on the diffs that let real bugs through, and scores which would have caught each. Specified: `plugins/factory/skills/eval/SKILL.md`. Depends on: `seed`, `factory`.
 - **`/sdlc-factory:review`**: reviews code no change touches and proposes what it finds as bugs. Specified: `plugins/factory/skills/review/SKILL.md`. Depends on: `seed`, `factory`.
 
@@ -188,7 +189,7 @@ graph LR
 - **`Sdlc-Spike`**: a spike's time, kept apart from rework. Specified: `scripts/metrics.py`. Depends on: `stage: spike`.
 - **`Sdlc-Base`**: where the change's branch started, so its size is all of its commits. Specified: `scripts/sdlc.py`. Depends on: `change`.
 - **`Sdlc-Findings`**: ship's findings by rank and disposition, on the change's own commit. Specified: `scripts/sdlc.py`. Depends on: `findings.md`.
-- **`Sdlc-Landed`**: who gave a factory landing its approval, the person or the WAIT itself (`by=auto`, which keeps its name). Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`.
+- **`Sdlc-Landed`**: who gave a factory landing its approval: the person, the WAIT itself (`by=auto`, which keeps its name), or the factory's autopilot (`by=autopilot`), three values never read as one another. Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`, `/sdlc-factory:autopilot`.
 - **`Sdlc-Fixes`**: each bug a change's `fixes:` names, with its severity, when it was reported and the change that introduced it. Specified: `scripts/closing.py`. Depends on: `seed`.
 - **`Sdlc-Origin`**: where the change's finding came from, `host` or `self`, from its intent's `origin:`; none when it named none. Specified: `scripts/closing.py`. Depends on: `origin:`.
 - **`Sdlc-Retired`**: a bug retired from the register without a fix, with its severity and the reason. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:bug`.

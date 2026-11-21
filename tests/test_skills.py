@@ -84,6 +84,7 @@ GATED = {
     "sdlc-factory:review",
     "sdlc-factory:land",
     "sdlc-factory:decide",
+    "sdlc-factory:autopilot",
 }
 
 # Every config key a skill reads, by skill. A skill that stops naming its key has gone back to
@@ -192,6 +193,7 @@ READS_CONFIG = {
     "sdlc-factory:review": ["factory.models"],
     "sdlc-factory:land": ["factory.land", "factory.land.moves"],
     "sdlc-factory:decide": [],
+    "sdlc-factory:autopilot": ["factory.land"],
 }
 
 
@@ -201,7 +203,7 @@ def test_skills_were_found() -> None:
     more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea", "dashboard", "update"}
     assert {f"sdlc:{n}" for n in names | more} | {
         "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review",
-        "sdlc-factory:land", "sdlc-factory:decide",
+        "sdlc-factory:land", "sdlc-factory:decide", "sdlc-factory:autopilot",
     } == set(BY_ID)  # fmt: skip
 
 
@@ -299,6 +301,7 @@ PREVIEW_NAMES = {
     "sdlc-factory:review": ["paths", "`why`"],
     "sdlc-factory:land": ["`land-check`'s `shown`"],
     "sdlc-factory:decide": ["each answer"],
+    "sdlc-factory:autopilot": ["`autopilot --preview`'s `shown`"],
 }
 
 
@@ -1185,8 +1188,9 @@ _MD_NAMES = {
     ).stdout.splitlines()
 }  # fmt: skip
 # The files a skill names that the factory's agents write into a change's folder, with no copy in
-# the repo to find: the run's verdict and the person's calls it raised.
-WRITTEN_ELSEWHERE = {"decision.md", "decisions.md", "conflicts.md", "entries.md"}
+# the repo to find: the run's verdict and the person's calls it raised; and the calls autopilot's
+# run made, which it writes in its report folder.
+WRITTEN_ELSEWHERE = {"decision.md", "decisions.md", "conflicts.md", "entries.md", "escalations.md"}
 
 
 @pytest.mark.parametrize("skill", SKILLS, ids=_id)
@@ -1333,6 +1337,9 @@ AGENT_TOOLS = {
     # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
     "arbiter": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
+    # 216: autopilot's two judges, whose replies the script files and checks.
+    "autopilot-planner": {"Read", "Grep", "Glob"},
+    "intent-writer": {"Read", "Grep", "Glob"},
 }
 ADAPTED = {"spec-writer", "builder", "reviewer-code", "reviewer-security", "reviewer-test"}
 
@@ -2295,3 +2302,52 @@ def test_status_and_intent_pass_the_setup_nudge_on(name: str) -> None:
     status's `■ Setup` line on rather than swallow it."""
     text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
     assert "■ Setup" in text, f"{name} no longer passes the setup nudge on"
+
+
+# ---------------------------------------------------------------- autopilot (216)
+
+
+BY_AUTOPILOT_RE = re.compile(r"(--)?by[ =]autopilot")
+
+
+def test_only_autopilot_names_by_autopilot() -> None:
+    """216 R6: no skill but autopilot's, side files included, holds `by autopilot`, `--by
+    autopilot` or `by=autopilot`; and autopilot's own bash blocks never pass it, which only the
+    script's children may."""
+    found = []
+    for skill in SKILLS:
+        if _id(skill) == "sdlc-factory:autopilot":
+            continue
+        for path in [skill, *_side_files(skill)]:
+            text = path.read_text(encoding="utf-8")
+            found += [
+                f"{path.relative_to(ROOT)}: {m.group(0)}" for m in BY_AUTOPILOT_RE.finditer(text)
+            ]
+    assert not found, found
+    own = _block_commands(_skill_text(BY_ID["sdlc-factory:autopilot"]))
+    assert own and not [c for c in own if "--by" in c], own
+
+
+# The writing commands of the other skills autopilot's rules must never reach.
+OTHER_WRITES = ("land", "train", "accept", "cases", "answer", "write-spec", "ship", "close",
+                "run-cases")  # fmt: skip
+
+
+def test_autopilot_grants_no_other_skills_writes() -> None:
+    """216 R7: autopilot's `allowed-tools` holds a rule for each `factory.py` command it runs and
+    no other: none matches a writing command another skill runs behind its own WAIT."""
+    rules = _bash_rules(BY_ID["sdlc-factory:autopilot"])
+    prefix = 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py '
+    assert all(r.startswith(prefix) for r in rules), rules
+    said = sorted(r[len(prefix) : -1] for r in rules)
+    assert said == sorted([
+        "config *", "autopilot --preview *", "autopilot --begin *", "autopilot --run",
+        "autopilot --summary", "autopilot --cancel",
+    ]), said  # fmt: skip
+    script = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py'
+    for rule in map(_rule_regex, rules):
+        for word in OTHER_WRITES:
+            for tail in ("", " 012", " --run", " 012 --by autopilot"):
+                assert not rule.match(f"{script} {word}{tail}"), (rule.pattern, word)
+    tools = frontmatter.load(BY_ID["sdlc-factory:autopilot"])["allowed-tools"]
+    assert not {"Write", "Edit", "Agent"} & set(tools), tools

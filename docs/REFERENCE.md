@@ -1312,8 +1312,10 @@ the file. `asked`: the questions the person answered, `blocking` decisions, `def
 or changed and `look`s they cleared, and `per_change`. `kept_default`: `rate` is kept over kept
 and changed; `confirmed`, the defaults the landing's one yes confirmed, and `settled`, those the
 approver settled, sit beside it and never enter it. `auto_landed`: from each change's own
-`Sdlc-Landed`, `auto` (the landing's WAIT approved itself), `person`, or `shipped` (no line: shipped
-by hand), with `share`, auto over `n`. `spurious_stops`: the mends, the one stop a run clears
+`Sdlc-Landed`, `auto` (the landing's WAIT approved itself), `person`, `autopilot` (the factory's
+autopilot landed it while the person was away), or `shipped` (no line: shipped by hand), with
+`share`, auto over `n`; a ledger line autopilot answered (`→ decided by autopilot:`) is counted
+apart as `autopilot` in each of the ledger's counts, never as asked, kept or changed. `spurious_stops`: the mends, the one stop a run clears
 without the person, a build's (`build`) apart from a landing's (`landing`), the changes with any,
 and `per_change`. `looks`: `seen` (answered `seen`), `checked` (any other answer) and `open`, with
 `seen_share`. `overturned` has no count: no record holds an approver's settled call the person
@@ -1364,7 +1366,7 @@ any; `accept_stops`, the attempts in `build/land-accept.md`, each a stop for the
 names (`ship`). `depth`: the runs whose last `runs/step.md` says `DEPTH: full` or `light`, with
 `share`, full over both; a run never lightens, so its last reading is its deepest, and a run from
 before the line is in `missing_because` as `depth not recorded`, never light. `unreviewed`: over
-the landings `Sdlc-Landed` says were the factory's (`auto` or `person`), those whose
+the landings `Sdlc-Landed` says were the factory's (`auto`, `person` or `autopilot`), those whose
 `unreviewed=` is a count above 0 (`with_paths`, and `paths`, their sum), `unknown`, or 0
 (`none`); a landing from before the field is missing, `unreviewed not recorded`. Mends aren't
 counted here: `autonomy.spurious_stops` gives them, a build's apart from a landing's. `changes`,
@@ -1551,9 +1553,13 @@ landed owes `land` in place of `ship` and `close`: one approval per batch, which
 batch with no risk signal (`[land] auto` in `.sdlc/factory.toml`, read from the base branch, default
 on; `[land] batch`, default 5). The batch lands as a train: stacked in order, the base branch's
 check run once at the tip, each change closed in order by close's fast-forward, so the base
-branch's first-parent line reads as it does for changes landed one at a time. Its commit says who passed it, `Sdlc-Landed: by=person|auto`; a pass
+branch's first-parent line reads as it does for changes landed one at a time. Its commit says who passed it, `Sdlc-Landed: by=person|auto|autopilot`; a pass
 nobody gave is `auto=1` on `Sdlc-Totals`, never a stop, and its ship and close read `auto` on
-`Sdlc-Happy`, which no first-time rate counts. A change landed with paths that changed after its
+`Sdlc-Happy`, which no first-time rate counts. A landing the factory's autopilot made
+(`/sdlc-factory:autopilot`, its `[autopilot]` table in `.sdlc/factory.toml`, read from the base
+branch and off until `enabled = true`) is `by=autopilot`, `autopilot=1` on `Sdlc-Totals` beside
+`auto=`, and its ship and close read `autopilot`: three values, never read as one another, and
+an intent autopilot opened says `opened_by: autopilot`, which `vet` reads and `status` shows. A change landed with paths that changed after its
 last review round (a hand edit after the approver) says how many on the same line,
 `Sdlc-Landed: by=person unreviewed=<n>`, or `unreviewed=unknown` when the run left no snapshot to
 compare, with the paths in the commit's body, never in a trailer. Close carries it to

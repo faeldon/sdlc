@@ -1053,7 +1053,9 @@ def _autonomy(home: Path, changes: list[dict]) -> tuple[dict, list[str]]:
         "auto_landed": {
             "auto": by["auto"],
             "person": by["person"],
-            "shipped": n - by["auto"] - by["person"],
+            # Autopilot's landings (216), apart from both: never the person's, never `auto`.
+            "autopilot": by["autopilot"],
+            "shipped": n - by["auto"] - by["person"] - by["autopilot"],
             "share": _share(by["auto"], n),
             "n": n,
         },
@@ -1139,7 +1141,7 @@ def _pipeline(home: Path, changes: list[dict], previous: list[dict] | None) -> d
     deep = [c["depth"] for c in found if c["depth"] is not None]
 
     def by_landing(c: dict) -> bool:
-        return ((c["rec"].get("landed") or {}).get("by")) in ("auto", "person")
+        return ((c["rec"].get("landed") or {}).get("by")) in ("auto", "person", "autopilot")
 
     def recorded(c: dict) -> bool:
         value = (c["rec"].get("landed") or {}).get("unreviewed")
@@ -2146,7 +2148,7 @@ def _autonomy_text(autonomy: dict | None, metrics: dict | None) -> str:
         f"- Defaults kept: {kept['kept']} of {kept['n']} (rate {_num(kept['rate'])}); changed "
         f"{kept['changed']}, confirmed {kept['confirmed']}, settled {kept['settled']}.",
         f"- Auto-landed: {auto['auto']} of {auto['n']} (share {_num(auto['share'])}); by the "
-        f"person {auto['person']}, shipped {auto['shipped']}.",
+        f"person {auto['person']}, by autopilot {auto['autopilot']}, shipped {auto['shipped']}.",
         f"- Spurious stops: build {stops['build']}, landing {stops['landing']}, in "
         f"{stops['changes']} of {stops['n']} changes ({_num(stops['per_change'])} per change).",
         f"- Looks: seen {looks['seen']}, checked {looks['checked']}, open {looks['open']} (seen "
@@ -2720,6 +2722,7 @@ SKILL_RUNS = {
     "sdlc:triage": "outside",
     "sdlc:uninstall": "outside",
     "sdlc:update": "outside",
+    "sdlc-factory:autopilot": "outside",
     "sdlc-factory:build": "supervised",
     "sdlc-factory:decide": "outside",
     "sdlc-factory:eval": "outside",

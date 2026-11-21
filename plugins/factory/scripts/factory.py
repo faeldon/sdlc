@@ -186,7 +186,7 @@ HELP_ORDER = (
     "config", "start", "fresh", "verdicts", "decisions", "ask", "carry", "defuse", "snapshot",
     "gate", "check", "shots", "write-spec", "stage", "restart", "upgrade", "agent", "sdlc-path",
     "land-check", "land", "resolve", "train", "land-verdicts", "accept", "cases", "land-fix",
-    "ready", "escapes", "report-dir", "score", "slice",
+    "ready", "escapes", "report-dir", "score", "slice", "answer", "autopilot",
 )  # fmt: skip
 
 
@@ -222,6 +222,8 @@ DEFAULTS: dict = {
         "serve": None, "url": "http://127.0.0.1:{port}", "pages": ["/"], "paths": [],
         "shoot": None, "widths": [[1280, 800], [390, 844]], "timeout": 60, "fixture": None,
     },
+    # Autopilot's table (216), read from the base branch alone by `autopilot.autopilot_config()`.
+    "autopilot": {},
     # The most `factory.py gate` runs at once across every worktree of the repo: one by default,
     # so parallel runs' gates never fight each other for every core.
     "gate_jobs": 1,
@@ -378,6 +380,11 @@ RAISED_RE = re.compile(r"^\s*- DECISION:\s*\[(blocking|default)\]\s*(.+?)\s*$")
 # (`escalation_reasons()`), filed by `decisions`, never raised by an agent.
 LEDGER_RE = re.compile(r"^- \[( |x)\] (D\d+) \(([^,)]+), (blocking|default|look)\): (.+?)\s*$")
 DECIDED = " → decided: "
+# A line autopilot answered (216 R5): ticked, so the run goes on, but never the person's word.
+# `answer --by autopilot` alone writes it, and every reader keeps it apart from `DECIDED`.
+DECIDED_AUTOPILOT = " → decided by autopilot: "
+# What autopilot answers a look with: the same word `/sdlc-factory:decide` writes for the person's.
+LOOK_SEEN = "seen"
 # A later default naming the one it replaces, `- DECISION: [default] (supersedes D2) …`; `decisions`
 # ticks the named line with SUPERSEDED, which every reader of an unticked line then passes over.
 SUPERSEDES_RE = re.compile(r"^\(supersedes (D\d+)\)\s*(.+)$")
@@ -1897,7 +1904,9 @@ def read_ledger(folder: Path) -> list[dict]:
         m = LEDGER_RE.match(line)
         if m:
             text, _, settled = m.group(5).partition(SETTLED)
-            text, _, answer = text.partition(DECIDED)
+            text, robot, answer = text.partition(DECIDED_AUTOPILOT)
+            if not robot:
+                text, _, answer = text.partition(DECIDED)
             text, _, by = text.partition(SUPERSEDED)
             ticked, by, settled = m.group(1) == "x", by.strip() or None, settled.strip() or None
             options, why = sub_lines(lines[i + 1 :])
@@ -1910,6 +1919,12 @@ def read_ledger(folder: Path) -> list[dict]:
                     "open": not ticked and current,
                     "answer": answer.strip() or None,
                     "current": current,
+                    # Who decided a decided line: `autopilot` for its own answer, else the person.
+                    "decided_by": (
+                        ("autopilot" if robot else "person")
+                        if ticked and not by and not settled
+                        else None
+                    ),
                 }
                 | {"superseded_by": by, "settled": settled, "options": options, "why": why}
             )
@@ -2284,8 +2299,9 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     to the landing (`confirm`, a READY's `- CONFIRM:` line); and `settled`, the defaults the
     approver settled, with its reasons; a `look` line replies to `decision.md`. `gate` is each
     `gate` reason of the current decision, whether a green hand gate cleared it
-    (`hand_gate_state()`), and the record's path; None with none. A run still building asks its
-    own, so any other stage is refused.
+    (`hand_gate_state()`), and the record's path; None with none; and `autopilot`, each line
+    autopilot answered (`DECIDED_AUTOPILOT`), its id, kind, question and answer. A run still
+    building asks its own, so any other stage is refused.
 
     With `answered`, the ids the person just answered, comma-separated (never their words), it
     also says `next`: `decide` while any line is open; `rebuild` when an answer (a look's aside)
@@ -2319,6 +2335,12 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     out["settled"] = [
         {"id": d["id"], "text": d["text"], "reason": d["settled"]} for d in ledger if d["settled"]
     ]
+    # The lines autopilot answered while the person was away (216 R5): its calls, never theirs,
+    # listed apart so the person can weigh each and overturn it.
+    out["autopilot"] = [
+        {"id": d["id"], "kind": d["kind"], "question": d["text"], "answer": d["answer"]}
+        for d in ledger if d["decided_by"] == "autopilot"
+    ]  # fmt: skip
     if answered is not None:
         ids = [i.strip() for i in answered.split(",") if i.strip()]
         by_id = {d["id"]: d for d in ledger}
@@ -2350,6 +2372,72 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
 )
 def cli_ask(root: Path, args) -> int:
     return cmd_ask(root, args.id, args.answered)
+
+
+AUTOPILOT_UPGRADES = (
+    "autopilot never upgrades a change: an answer of `upgrade to Tier 2` is the person's"
+)
+
+
+def autopilot_answer(entry: dict) -> tuple[str | None, str | None]:
+    """What autopilot answers an open ledger line with, and why it can't: a default its assumed
+    default (`KEPT_ANSWER`), a look `LOOK_SEEN`, a blocking line the first `- OPTION:` its raiser
+    gave, its recommendation. A blocking line with none, or whose first is `upgrade to Tier 2`
+    (216 R18), is the person's."""
+    if entry["kind"] == "default":
+        return KEPT_ANSWER, None
+    if entry["kind"] == "look":
+        return LOOK_SEEN, None
+    if not entry["options"]:
+        return None, f"{entry['id']} is blocking with no option recommended: it is the person's"
+    answer = entry["options"][0]["option"]
+    if UPGRADE_ANSWER_RE.match(answer):
+        return None, AUTOPILOT_UPGRADES
+    return answer, None
+
+
+def cmd_answer(root: Path, ident: str, decision: str, by: str) -> int:
+    """Answer open ledger line `decision` as autopilot (216 R5, R17): ticked, with
+    `DECIDED_AUTOPILOT` and `autopilot_answer()`'s answer, never `DECIDED`, the person's word.
+    Refused, writing nothing, outside a live run's children (R2), for a line that isn't open, and
+    for a call `autopilot_answer()` leaves the person."""
+    if why := by_refusal(root, by) or (
+        None if by == "autopilot" else "answer needs --by autopilot"
+    ):
+        return emit({"refusals": [why]}, 1)
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    entry = next((d for d in read_ledger(folder) if d["id"] == decision), None)
+    if entry is None or not entry["open"]:
+        return emit(
+            {"change": folder.name, "refusals": [f"{decision} isn't open in decisions.md"]}, 1
+        )
+    answer, why = autopilot_answer(entry)
+    if why:
+        return emit({"change": folder.name, "refusals": [why]}, 1)
+    path = folder / "decisions.md"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = LEDGER_RE.match(line)
+        if m and m.group(2) == decision:
+            body = line.rstrip("\r\n").replace("- [ ] ", "- [x] ", 1)
+            lines[i] = f"{body}{DECIDED_AUTOPILOT}{answer}\n"
+            break
+    path.write_text("".join(lines), encoding="utf-8", newline="\n")
+    return emit({"change": folder.name, "decision": decision, "kind": entry["kind"],
+                 "answer": answer, "by": "autopilot"})  # fmt: skip
+
+
+@command(
+    "answer",
+    "answer an open ledger line as autopilot, under its run lock",
+    arg("id"),
+    arg("decision", help="the ledger id, D<n>"),
+    arg("--by", choices=("autopilot",), required=True),
+)
+def cli_answer(root: Path, args) -> int:
+    return cmd_answer(root, args.id, args.decision, args.by)
 
 
 def stop_text(
@@ -3332,6 +3420,76 @@ def _unlock(fd: int) -> None:
     # Elsewhere, closing the descriptor releases a flock.
 
 
+# Autopilot's run lock (216 R1), in the git common dir, held by `autopilot --run` for its whole
+# life on an open descriptor, as `train --run` holds its own; its children are told by
+# `AUTOPILOT_RUN_ENV`, which names the lock file. `--by autopilot` is accepted only while that env
+# names this repo's lock and another process holds it (`autopilot_running()`, R2), so no skill, no
+# person and no other loop can record a call as autopilot's.
+AUTOPILOT_RUN_LOCK = "sdlc-factory-autopilot-run.lock"
+AUTOPILOT_RUN_ENV = "SDLC_FACTORY_AUTOPILOT_RUN"
+BY_AUTOPILOT_REFUSED = "--by autopilot is autopilot's alone: no autopilot --run holds its lock"
+# The run's state, beside `TRAIN_STATE` in the git common dir, never in a tree: the bounds as
+# approved, the base branch's `[autopilot]` fixed at `--begin`, and every change and call.
+AUTOPILOT_STATE = "sdlc-factory-autopilot.json"
+# Who passed a landing's gate, or answered a call: the person, the batch itself (no risk signal),
+# or autopilot. Three values, never folded into one another (216 R4).
+BY_VALUES = ("auto", "person", "autopilot")
+
+
+# The loops' markers this process was started with (`AUTOPILOT_RUN_ENV`, `landing.TRAIN_RUN_ENV`),
+# taken out of its own environment as it starts (`take_markers()`, 216 R2), so no process it
+# starts inherits one: not the host's check, `sdlc.py` (and the acceptance checks it runs), git
+# and any hook, a dev server, nor an agent session. Only a loop's own children are given one,
+# by `loop_env()`, which `autopilot.run_step()` and the train's `_run_env()` build on.
+LOOP_MARKERS: dict[str, str] = {}
+
+
+def take_markers() -> None:
+    """Move the loops' markers from `os.environ` into `LOOP_MARKERS`: `main()`'s first step."""
+    for name in (AUTOPILOT_RUN_ENV, landing.TRAIN_RUN_ENV):
+        if name in os.environ:
+            LOOP_MARKERS[name] = os.environ.pop(name)
+
+
+def loop_marker(name: str) -> str | None:
+    """A loop's marker as this process was started with it (or, in process, as it is set now)."""
+    return LOOP_MARKERS.get(name) or os.environ.get(name)
+
+
+def loop_env() -> dict[str, str]:
+    """The environment for a loop's own `factory.py` child: this one with the markers this process
+    was started with put back, to which the loop adds its own."""
+    return {**os.environ, **LOOP_MARKERS}
+
+
+def autopilot_running(root: Path) -> bool:
+    """Whether this process is one of a live `autopilot --run`'s children in this repo: the env
+    names this repo's lock file, and another descriptor holds that lock now. A lock file that
+    isn't there, or an env naming any other path, is never a run."""
+    said, where = loop_marker(AUTOPILOT_RUN_ENV), _slot_dir(root)
+    if not said or where is None:
+        return False
+    lock = where / AUTOPILOT_RUN_LOCK
+    try:
+        if Path(said).resolve() != lock.resolve():
+            return False
+        fd = os.open(lock, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        took = _try_lock(fd)
+        if took:
+            _unlock(fd)
+        return not took
+    finally:
+        os.close(fd)
+
+
+def by_refusal(root: Path, by: str | None) -> str | None:
+    """`BY_AUTOPILOT_REFUSED` for `--by autopilot` outside a live run's children, else None."""
+    return BY_AUTOPILOT_REFUSED if by == "autopilot" and not autopilot_running(root) else None
+
+
 @contextmanager
 def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, float]]:
     """Hold one of `jobs` gate slots for the `with` block, waiting until one is free, and yield
@@ -3582,10 +3740,13 @@ def _scaffold(text: str) -> bool:
     return len(PROMPT_RE.findall(text)) >= UNFILLED_THRESHOLD
 
 
-def cmd_write_spec(root: Path, ident: str) -> int:
-    """Copy `runs/spec-draft.md` into `spec.md`, byte for byte, once the person said yes. Refused,
+def cmd_write_spec(root: Path, ident: str, by: str | None = None) -> int:
+    """Copy `runs/spec-draft.md` into `spec.md`, byte for byte, once the person said yes, or, with
+    `by` `autopilot`, once its run's yes did (216 R11), only in a live run's children (R2). Refused,
     writing nothing, with no draft, for a change that isn't a Tier 2 at `stage: plan`, or once
     `spec.md` is no longer its scaffold, so a person's text is never written over."""
+    if why := by_refusal(root, by):
+        return emit({"refusals": [why]}, 1)
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -3615,9 +3776,10 @@ def cmd_write_spec(root: Path, ident: str) -> int:
     "write-spec",
     "copy runs/spec-draft.md into spec.md, once",
     arg("id"),
+    arg("--by", choices=("autopilot",), help="autopilot's run, under its lock: no other value"),
 )
 def cli_write_spec(root: Path, args) -> int:
-    return cmd_write_spec(root, args.id)
+    return cmd_write_spec(root, args.id, args.by)
 
 
 def cmd_upgrade(root: Path, ident: str) -> int:
@@ -3879,9 +4041,9 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
         "common": {"head": "rel root", "check": "script ident", "land-diff": "fork base",
                    "weigh": "ids", "weigh-no-confirm": "ids why", "weigh-bare": "ids"},
         "spec": {"draft": "", "upgraded": "round decision question answer before",
-                 "revise": "words", "recheck": ""},
+                 "revise": "words", "recheck": "", "autopilot": "policy"},
         "build": {"first": "", "restart": "before rel archive round", "restart-words": "words",
-                  "upgraded": "decision answer round rel"},
+                  "upgraded": "decision answer round rel", "autopilot": "policy"},
         "fix": {"main": "round rel"},
         "review": {"main": "round", "upgraded": "decision", "reworked": "reworked kept settled",
                    "raise-again": "", "handed": "handed"},
@@ -3889,7 +4051,7 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
         "rework": {"main": "round rel verified", "handed": ""},
         "approve": {"main": "", "upgraded": "round decision", "stuck": "round before stuck",
                     "untestable": "untestable", "next-step": "reconsider", "exhausted": "",
-                    "undone": "", "irreversible": "base touched"},
+                    "undone": "", "irreversible": "base touched", "autopilot": "policy"},
         "decided": {"main": "decided answer", "reviews": "round rel"},
         "mend": {"evidence": "", "verdict": "", "decision": "", "confirm": "problems",
                  "arbitrate": "problems"},
@@ -3902,6 +4064,7 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
                         "clean": "", "asked": "round ask"},
         "land-arbitrate": {"main": "round diff"},
         "land-checks": {"main": "approved current changed removed"},
+        "autopilot": {"wave": "brief", "intent": "brief seed template"},
     }.items()
 }  # fmt: skip
 # The files each task's prompt reads beyond `common`: a mend reads a review's opening, a landing's
@@ -3911,7 +4074,16 @@ TASK_PROMPTS = {
     **{t: (t,) for t in ("spec", "build", "fix", "review", "arbitrate", "rework", "approve",
                          "decided", "resolve", "train-resolve", "land-fix", "land-review",
                          "land-arbitrate", "land-checks")},
+    "wave": ("autopilot",), "intent": ("autopilot",),
 }  # fmt: skip
+# Autopilot's own tasks (216): judgments with no change of their own, run only in its run's
+# children (`autopilot_running()`), each reply filed in the run's report folder, its cost too,
+# never a change's, so no change's purposes count it. The planner picks the next wave of seeds;
+# the intent-writer drafts one seed's intent. Both read and reply alone.
+AUTOPILOT_TASKS = {"wave": "autopilot-planner", "intent": "intent-writer"}
+AUTOPILOT_MODEL = "opus"
+# The build's tasks that, under autopilot, are told to say a contract they'd break or relax (R20).
+CONTRACT_TASKS = ("spec", "build", "approve")
 PART_RE = re.compile(r"^## ([a-z][a-z0-9-]*)$")
 
 
@@ -4137,6 +4309,15 @@ def _stream(stdout: str) -> tuple[list[str], list[dict]]:
     return replies, results
 
 
+def agent_env() -> dict[str, str]:
+    """The environment an agent session runs in: this one without the loops' markers
+    (`AUTOPILOT_RUN_ENV`, `landing.TRAIN_RUN_ENV`), so no agent, and nothing it runs, is ever one
+    of a loop's own children: `--by autopilot` and a train's in-loop steps stay the loops' alone
+    (216 R2), whatever a session runs with its `Bash`."""
+    markers = (AUTOPILOT_RUN_ENV, landing.TRAIN_RUN_ENV)
+    return {k: v for k, v in os.environ.items() if k not in markers}
+
+
 def _claude(argv: list[str], cwd: Path) -> tuple[int, list[str], str | None, dict | None]:
     """Run one headless agent session and return its exit, its replies in order (`_stream()`),
     what went wrong, and its figures (`_figures()`), a failed session's included. A session
@@ -4146,7 +4327,7 @@ def _claude(argv: list[str], cwd: Path) -> tuple[int, list[str], str | None, dic
     try:
         done = subprocess.run(
             argv, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, timeout=AGENT_TIMEOUT,
+            stdin=subprocess.DEVNULL, timeout=AGENT_TIMEOUT, env=agent_env(),
         )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, [], f"the agent ran past {AGENT_TIMEOUT // 60} minutes", None
@@ -4174,8 +4355,10 @@ def holds(role: str, reply: str, task: str | None = None) -> bool:
         return any(map(CHECKS_RE.match if task == "land-checks" else DECISION_RE.match, lines))
     if role == "arbiter":
         return any(KEPT_RE.match(line) or DROPPED_RE.match(line) for line in lines)
-    if role == "spec-writer":
+    if role in ("spec-writer", "intent-writer"):
         return any(line.rstrip("\r\n") == "---" for line in lines)
+    if role == "autopilot-planner":
+        return any(re.match(r"^\s*(- WAVE:|NONE\s*$)", line) for line in lines)
     return EVIDENCE in [line.strip() for line in lines]
 
 
@@ -4791,6 +4974,10 @@ def cmd_agent(
     if isinstance(planned, str):
         return emit({"refusals": [planned]}, 1)
     prompt, target, append = planned
+    # Under autopilot alone, the spec-writer, builder and approver are asked to name a contract
+    # they'd break or relax (R20), which holds the change.
+    if task in CONTRACT_TASKS and autopilot_running(root):
+        prompt += "\n\n" + autopilot_part(task, policy_doc(root))
     # The file the approver judges, hashed before it reads it: the record's first line.
     judged = landing.checks_sha(folder)[:16] if task == "land-checks" else None
     if role in UI_REVIEWERS and task in ("review", "land-review"):
@@ -4900,15 +5087,109 @@ def cmd_agent(
 @command(
     "agent",
     "run one agent session for a step, and file its reply",
-    arg("id"),
-    arg("--task", choices=TASKS, required=True),
+    arg("id", nargs="?", help="the change; none for autopilot's wave and intent"),
+    arg("--task", choices=[*TASKS, *AUTOPILOT_TASKS], required=True),
+    arg("--seed", help="the seed an intent is drafted for, for --task intent"),
     arg("--role", choices=[*REVIEWERS, "builder", "approver", "arbiter", "resolver"]),
     arg("--decision", help="the decided ledger id, for --task decided"),
     arg("--revise", help="the person's revision in decisions.md (R1), for spec"),
     arg("--recheck", action="store_true", help="send a spec draft back once"),
 )
 def cli_agent(root: Path, args) -> int:
+    if args.task in AUTOPILOT_TASKS:
+        if args.id:
+            raise UsageError(f"--task {args.task} is autopilot's, about no change: drop the id")
+        return cmd_autopilot_agent(root, args.task, args.seed)
+    if not args.id:
+        raise UsageError(f"--task {args.task} needs the change's id")
     return cmd_agent(root, args.id, args.task, args.role, args.decision, args.revise, args.recheck)
+
+
+def policy_doc(root: Path) -> str:
+    """The policy doc's path as `sdlc.py config` resolves it, for the prompt's autopilot part."""
+    _, cfg, _ = _sdlc(["config"], root)
+    doc = ((cfg or {}).get("docs") or {}).get("policy")
+    return str(doc["path"]) if isinstance(doc, dict) and doc.get("path") else "the policy doc"
+
+
+def autopilot_part(task: str, policy: str) -> str:
+    """The autopilot part of `task`'s prompt (R20), sent only in autopilot's run: the
+    `- CONTRACT:` and `- RELAX:` lines it asks for, naming the policy doc."""
+    return prompt_part(task, "autopilot", policy=policy)
+
+
+def autopilot_prompt(task: str, brief: str, seed: str | None, template: str) -> str:
+    """The planner's (`wave`) or the intent-writer's (`intent`) prompt, naming its brief."""
+    if task == "wave":
+        return prompt_part("autopilot", "wave", brief=brief)
+    return prompt_part("autopilot", "intent", brief=brief, seed=seed, template=template)
+
+
+def _intent_template(main: Path) -> str:
+    """The intent template `sdlc.py new` scaffolds from: the host's override, else the plugin's."""
+    host = main / ".sdlc" / "templates" / "intent.md"
+    if host.is_file():
+        return host.relative_to(main).as_posix()
+    path, _ = sdlc_path()
+    return (path.parents[1] / "templates" / "intent.md").as_posix() if path else "intent.md"
+
+
+def cmd_autopilot_agent(root: Path, task: str, seed: str | None) -> int:
+    """Run autopilot's planner (`wave`) or its intent-writer (`intent --seed`) as a fresh session
+    in the main checkout, and file its reply in the run's report folder (216 R11): only in a live
+    run's children, and only with the brief the loop wrote for it. Writes only under the run's
+    `.sdlc/reports/autopilot/<id>/`: the reply, the session's id and its figures."""
+    if not autopilot_running(root):
+        return emit(
+            {"refusals": [f"--task {task} runs only in autopilot's run: {BY_AUTOPILOT_REFUSED}"]}, 1
+        )
+    trees = worktrees(root)
+    main = trees[0][0] if trees else root
+    where = _slot_dir(main)
+    try:
+        state = json.loads((where / AUTOPILOT_STATE).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return emit({"refusals": ["no autopilot run's state to read"]}, 1)
+    if task == "intent" and not seed:
+        return emit({"refusals": ["--task intent needs --seed <id>"]}, 1)
+    run = main / REPORTS / "autopilot" / state["id"]
+    brief = run / "briefs" / ("wave.md" if task == "wave" else f"intent-{seed}.md")
+    if not brief.is_file():
+        return emit({"refusals": [f"no brief for --task {task}: the loop writes it first"]}, 1)
+    if refusal := prompt_refusal(task):
+        return emit({"refusals": [refusal]}, 1)
+    role = AUTOPILOT_TASKS[task]
+    rel = brief.relative_to(main).as_posix()
+    prompt = autopilot_prompt(task, rel, seed, _intent_template(main))
+    if task == "wave":
+        done = len(list((run / "waves").glob("wave-*.md")))
+        target = run / "waves" / f"wave-{done + 1}.md"
+    else:
+        target = run / "intents" / f"{seed}.md"
+    session = str(uuid.uuid4())
+    sessions = run / "runs" / f"{role}.sessions"
+    sessions.parent.mkdir(parents=True, exist_ok=True)
+    with sessions.open("a", encoding="utf-8", newline="\n") as f:
+        f.write(session + "\n")
+    cfg, _ = load_config(main)
+    argv = ["claude", "-p", prompt, "--agent", f"sdlc-factory:{role}", "--model", AUTOPILOT_MODEL]
+    argv += ["--permission-mode", cfg["mode"], "--output-format", "stream-json", "--verbose"]
+    argv += ["--session-id", session]
+    started = _utc_now()
+    code, replies, problem, figures = _claude(argv, main)
+    if figures:
+        record_cost(run, session, role, AUTOPILOT_MODEL, figures, started, _utc_now(),
+                    {"purpose": "autopilot", "task": task})  # fmt: skip
+    out = {"task": task, "role": role, "model": AUTOPILOT_MODEL, "session": session,
+           "to": target.relative_to(main).as_posix(), "exit": code}  # fmt: skip
+    if problem:
+        return emit({**out, "problem": problem}, 1)
+    reply = next((r for r in reversed(replies) if holds(role, r, task)), replies[-1])
+    reply = _placeholders(reply, main)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(reply if reply.endswith("\n") else reply + "\n", encoding="utf-8",
+                      newline="\n")  # fmt: skip
+    return emit(out)
 
 
 def _waits(change: dict, names: list[str]) -> bool:
@@ -6249,6 +6530,45 @@ def _load_run_state():
 run_state = _load_run_state()
 
 
+def _load_autopilot():
+    """`autopilot.py`, beside this file: the run from seed to landing (216), kept apart so
+    `[review] sensitive` can name it. Loaded by path, never imported, and bound to a live view of
+    this module's globals as `factory`."""
+    spec = importlib.util.spec_from_file_location(
+        "factory_autopilot", Path(__file__).resolve().parent / "autopilot.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.factory = _Names(globals())
+    return mod
+
+
+autopilot = _load_autopilot()
+
+
+@command(
+    "autopilot",
+    "run the factory from seed to landing, unattended, within bounds",
+    exclusive(
+        arg("--preview", dest="mode", action="store_const", const="preview"),
+        arg("--begin", dest="mode", action="store_const", const="begin"),
+        arg("--run", dest="mode", action="store_const", const="run"),
+        arg("--cancel", dest="mode", action="store_const", const="cancel"),
+        arg("--summary", dest="mode", action="store_const", const="summary"),
+        required=True,
+    ),
+    arg("--seeds", nargs="+", metavar="ID", help="only these seeds"),
+    arg("--themes", nargs="+", metavar="THEME", help="only seeds of these themes"),
+    arg("--usd", type=float, help="the dollar cap"),
+    arg("--hours", type=float, help="the hours it may run"),
+    arg("--level", type=int, choices=(1, 2), help="the highest tier it opens (default 2)"),
+)
+def cli_autopilot(root: Path, args) -> int:
+    return autopilot.cmd_autopilot(
+        root, args.mode, args.seeds, args.themes, args.usd, args.hours, args.level
+    )
+
+
 @command(
     "land-check",
     "the batch to land, its signals, and whether clear",
@@ -6262,14 +6582,14 @@ def cli_land_check(root: Path, args) -> int:
     "land",
     "ship, commit and rebase a change; or close it",
     arg("id"),
-    arg("--by", choices=("auto", "person")),
+    arg("--by", choices=BY_VALUES),
     arg("--close", action="store_true", help="close it, from the main checkout"),
 )
 def cli_land(root: Path, args) -> int:
     if args.close:
         return landing.cmd_land_close(root, args.id)
     if not args.by:
-        return emit({"refusals": ["land needs --by auto|person, or --close"]}, 1)
+        return emit({"refusals": ["land needs --by auto|person|autopilot, or --close"]}, 1)
     return landing.cmd_land(root, args.id, args.by)
 
 
@@ -6291,7 +6611,7 @@ def cli_resolve(root: Path, args) -> int:
     "train",
     "the landing train: what it does next",
     arg("--begin", nargs="+", metavar="NNN", help="start one over these changes"),
-    arg("--by", choices=("auto", "person"), help="who passed the batch's gate"),
+    arg("--by", choices=BY_VALUES, help="who passed the batch's gate"),
     arg("--eject", metavar="NNN", help="put the change at fault back, and go on"),
     arg("--stop", action="store_true", help="put every unlanded change back"),
     arg("--run", action="store_true", help="take every step until done or a stop"),
@@ -6330,6 +6650,7 @@ def cli_land_fix(root: Path, args) -> int:
 
 def main() -> int:
     _utf8_streams()
+    take_markers()
     ap = _parser("The sdlc-factory layer's mechanism.", True)
     args = ap.parse_args()
     root = repo_root()

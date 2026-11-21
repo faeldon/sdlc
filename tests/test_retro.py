@@ -3293,9 +3293,10 @@ def test_autonomy_counts_read_each_ledger_answer_by_its_mark() -> None:
     counts = fr.autonomy_counts(*_run({"decision.md": READY, "decisions.md": LEDGER}))
     assert counts["defaults"] == {
         "kept": 1, "confirmed": 1, "changed": 1, "settled": 1, "superseded": 1, "open": 1,
+        "autopilot": 0,
     }  # fmt: skip
-    assert counts["blocking"] == {"answered": 1, "open": 1}
-    assert counts["looks"] == {"seen": 1, "checked": 1, "open": 1}
+    assert counts["blocking"] == {"answered": 1, "open": 1, "autopilot": 0}
+    assert counts["looks"] == {"seen": 1, "checked": 1, "open": 1, "autopilot": 0}
 
 
 def test_autonomy_counts_tell_a_landing_mend_from_a_build_mend() -> None:
@@ -3332,6 +3333,32 @@ def test_retro_autonomy_leaves_hand_built_changes_out(tmp_path: Path) -> None:
     assert out["overturned"]["count"] is None
 
 
+def test_auto_landed_counts_autopilot_apart(tmp_path: Path) -> None:
+    """216 R3, R23: a change autopilot landed is counted as `autopilot`, apart from `auto` and
+    `person`, and its `→ decided by autopilot:` lines are neither the person's answers nor kept
+    or changed defaults: `asked` and `kept_default` count none of them."""
+    root = _repo(tmp_path)
+    ledger = (
+        "# Decisions\n\n"
+        "- [x] D1 (builder round 1, default): Page at 50? → decided by autopilot: the assumed "
+        "default, confirmed\n"
+        "- [x] D2 (builder round 1, blocking): Keep 30 days? → decided by autopilot: 30 days\n"
+    )
+    _factory(root, "001-keep-one-draft", {"decision.md": READY, "decisions.md": ledger},
+             own=("Sdlc-Landed: by=autopilot",))  # fmt: skip
+    _factory(root, "002-draft-titles", {"decision.md": READY}, own=("Sdlc-Landed: by=auto",))
+    out = _autonomy(root)
+    assert out["auto_landed"] == {
+        "auto": 1, "person": 0, "autopilot": 1, "shipped": 0, "share": 0.5, "n": 2
+    }  # fmt: skip
+    assert (out["asked"]["blocking"], out["asked"]["default"]) == (0, 0)
+    assert (out["kept_default"]["kept"], out["kept_default"]["changed"]) == (0, 0)
+    counts = sdlc.factory_records.autonomy_counts(*_run({"decision.md": READY,
+                                                        "decisions.md": ledger}))  # fmt: skip
+    assert counts["defaults"]["autopilot"] == 1 and counts["blocking"]["autopilot"] == 1
+    assert counts["defaults"]["changed"] == 0 and counts["blocking"]["answered"] == 0
+
+
 def test_retro_autonomy_counts_auto_landed_from_the_change_commit(tmp_path: Path) -> None:
     """169 R7, R16: `Sdlc-Landed` on the change's own commit says who landed it; one on the
     `Close` commit alone is a change shipped by hand. Escalations, asks and mends add up over the
@@ -3347,7 +3374,9 @@ def test_retro_autonomy_counts_auto_landed_from_the_change_commit(tmp_path: Path
     out = _autonomy(root)
     assert _state(root) == before
     assert (out["factory"], out["by_hand"]) == (3, 1)
-    assert out["auto_landed"] == {"auto": 1, "person": 1, "shipped": 1, "share": 0.33, "n": 3}
+    assert out["auto_landed"] == {
+        "auto": 1, "person": 1, "autopilot": 0, "shipped": 1, "share": 0.33, "n": 3
+    }  # fmt: skip
     assert out["escalations"] == {"total": 2, "changes": 1, "per_change": 0.67, "n": 3}
     assert out["spurious_stops"] == {
         "build": 1, "landing": 1, "changes": 1, "per_change": 0.67, "n": 3,

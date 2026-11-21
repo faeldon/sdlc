@@ -41,6 +41,9 @@ What stays deterministic, and the person's, is manual mode's:
   WAIT and its one commit, and `/sdlc:close` lands it. Or `/sdlc-factory:land` runs ship's and
   close's own code for a batch of ready changes, behind one approval that approves itself only
   when no change in it carries a risk signal, the factory's rounds standing in for ship's review.
+  The one exception is autopilot (below): its one WAIT approves a bounded run in which intents
+  are opened and specs copied and built on with no person reading them first, each such call
+  recorded as autopilot's and counted as review debt, never as yours.
 - **The measuring.** Close counts a factory change's rework from the same trailers as one built
   by hand.
 
@@ -438,6 +441,34 @@ auto = true                                # a batch with no risk signal lands w
 batch = 5                                  # the most changes one landing takes
 moves = 3                                  # the most times a landing follows the base branch
 
+[autopilot]                                # /sdlc-factory:autopilot, read from the base branch
+# enabled = true                           # off until set: autopilot refuses to begin
+parallel = 3                               # the most changes taking a step at once
+wait = 30                                  # minutes a batch waits for a nearly ready change
+debt = 40                                  # review debt's limit
+risk = 30                                  # change risk's limit
+# guards = [".sdlc/SDLC.md"]               # paths it never lands a change touching; unset, the
+                                           # policy and review docs, [review] irreversible and
+                                           # [review] sensitive
+
+[autopilot.debt_weights]                   # each call's weight in review debt
+default = 1                                # a default taken as assumed
+look = 2                                   # a look taken as seen
+blocking = 3                               # a blocking call answered with its recommendation
+spec = 2                                   # a spec copied unseen
+intent = 1                                 # an intent opened
+
+[autopilot.risk_weights]                   # each landed change's signal kinds; any other is 1
+sensitive = 3
+impact = 3                                 # a major impact; any other impact signal is 1
+escalated = 3
+resolved = 2
+fixed = 2
+unreviewed = 2
+issue = 2
+pushed = 2                                 # times this when its close pushed
+stacked = 1.5                              # times this when its train held more than one
+
 [ui]                                       # a front end, read from the base branch; unset, no
                                            # UI review runs
 # serve = "npm run dev -- --port {port}"   # the dev server, on the port shots picks
@@ -450,7 +481,7 @@ timeout = 60                               # seconds the server gets to answer
 # fixture = "fixtures/demo"                # data in the checkout serve is given, as {fixture}
 ```
 
-`mode`, `gate_jobs`, `[models]`, `[land]` and `[ui]` are read from the base branch's copy of the
+`mode`, `gate_jobs`, `[models]`, `[land]`, `[autopilot]` and `[ui]` are read from the base branch's copy of the
 file, never a change's own, so a change can't widen what its agents may do unasked, pick its own
 agents' models, or choose the command a UI review starts, and a setting committed on the base
 branch reaches every open change at once, its worktree made before it or not. `serve`, `shoot` and
@@ -472,6 +503,64 @@ A run takes at most `2 + rounds × (reviewers + 4)` agent runs at the full depth
 defaults: each round's reviewers, the arbiter, the builder's rework and its two fixes of a red
 gate; two more a round with `[ui]` set), and the build skill shows the number before you approve
 it, whatever depth the diff turns out to need.
+
+## Autopilot
+
+`/sdlc-factory:autopilot` is for when you're away. It asks one WAIT, which bounds the run: which
+seeds or themes it may take, a dollar cap, the hours it may run, and the highest tier it opens.
+On the yes it begins the run (`factory.py autopilot --begin`, which fixes the bounds and the base
+branch's `[autopilot]` in `sdlc-factory-autopilot.json` in the git common dir) and starts its loop
+in the background (`autopilot --run`, under `sdlc-factory-autopilot-run.lock`). The script is the
+scheduler: a closed terminal or a compacted session loses nothing, and a rerun of `--run` resumes.
+
+Each pass of the loop reads the off switch (`autopilot --cancel` writes
+`sdlc-factory-autopilot.cancel`, read between steps), the clock, the dollars spent and both
+budgets; takes one step for each change in flight, at most `parallel` at once, each as a
+subprocess of `factory.py`: `verdicts`' next step, through the same commands the build skill runs
+(`AUTOPILOT_STEPS`), a change waiting at `stage: plan` until every change it `depends_on` has its
+`Close` commit, a Tier 2's spec drafted and copied (`write-spec --by autopilot`); asks the planner
+for the next wave while there is room (`agent --task wave`, its reply checked by the script) and
+the intent-writer for each seed's intent (`agent --task intent --seed`), opened by `sdlc.py new`
+with `idea:` and `opened_by: autopilot`; and lands what is ready as a train (`land-check`, `train
+--begin --by autopilot`, `train --run`), waiting up to `wait` minutes for a change nearly ready
+when landing them together saves a run.
+
+**No WAIT stops it, and none of its calls is yours.** An open default is answered as its default,
+a look as seen, a blocking call with its raiser's first option (`answer --by autopilot`), each
+ticked `→ decided by autopilot:`, each in the change's `runs/autopilot.md` and the run's
+`escalations.md`, and each landing carries `Sdlc-Landed: by=autopilot`. `--by autopilot` is
+refused to any process but the run's own children, which the lock tells (`autopilot_running()`).
+That stops a process inheriting the marker by accident (the host's check, a hook, an agent's
+session, none of which gets it), not a process running as you that sets it on purpose while the
+run holds the lock: no check inside the run can tell that one from the loop's child. What bounds a
+misled builder is its own permissions and sandbox (`mode`), so set them as you would for any
+unattended run.
+
+**What it takes.** The register's ready seeds within the bounds, in `next_up`'s order; a seed
+whose `Issue:` line names a public issue only when `--seeds` names it, since its text is an
+outsider's and nobody reads it before it is built. Such a seed is opened with the `closes:` line
+`/sdlc:intent` writes, so its landing carries the `issue` signal and the issue is closed; one whose
+`Issue:` line can't be read is held before any agent runs.
+
+**What it holds**, unlanded, with nothing that depends on it built: a change touching a path in
+`guards` (unset, the policy and review docs, `[review] irreversible` and `[review] sensitive`, so
+the code that runs the rest of the run is never landed unseen); one any agent's reply says can only be built by breaking a contract (`- CONTRACT:`) or
+would be far simpler with one relaxed (`- RELAX:`), which the spec-writer, builder and approver are
+asked for only under autopilot; an approver's ESCALATE that asks to reconsider the approach or
+gives a `gate` reason; a `verdicts` stop; one `land-check` excludes or the train stops on; one with
+an acceptance check the read-only list refuses, or with skills' cases in scope, since neither runs
+unattended; and a blocking call with no recommendation, or one recommending `upgrade to Tier 2`.
+
+**The budgets** are the script's, never a model's: review debt sums its calls' weights
+(`[autopilot.debt_weights]`), and change risk sums each landed change's signal kinds' weights
+(`[autopilot.risk_weights]`, from `land-check`'s `signal_kinds`), times `pushed` and `stacked`.
+Once either reaches its limit nothing new starts (no wave, no intent, no train) and what is in
+flight is taken on to `stage: test` and left there unlanded; once the dollar cap or the hours are
+spent, no agent session starts at all. The run ends then, or when no candidate is left, or on a
+cancel, and writes `.sdlc/reports/autopilot/<started>/summary.md` beside `escalations.md`: how long
+it ran and what it cost, what landed, what is mid-build and where, what is held and why, every
+call it made, each budget and what spent it, and the risks to weigh. A call you disagree with is
+fixed forward, by a revert or a new seed; autopilot never edits a landed change.
 
 ### Why these defaults
 
@@ -529,9 +618,13 @@ approver's judgement of changed checks, `agent --task land-checks`); for the eva
 (`escapes`), the slice of code to look at (`slice`), a report folder (`report-dir`) and the eval's
 scores (`score`). It never imports `sdlc.py`: installed from the marketplace, each plugin is cached
 on its own, so it reads the register and the `Close` commits' trailers with copies of `sdlc.py`'s
-parsing, pinned by tests. For `fresh`, `upgrade` and landing alone it runs the `sdlc.py` of its own
-version, beside it (`sdlc-path`: the clone's, or the cache's), so ship, base, upgrade and close have
-one implementation; another version is refused.
+parsing, pinned by tests. For `fresh`, `upgrade`, landing and autopilot (`new`, `status --json`,
+`config`) alone it runs the `sdlc.py` of its own version, beside it (`sdlc-path`: the clone's, or
+the cache's), so ship, base, upgrade, new and close have one implementation; another version is
+refused.
+
+Autopilot's own code (`autopilot`, its state, its loop, its holds and its budgets) lives in
+`scripts/autopilot.py`, loaded and bound the same way, so `[review] sensitive` can name it too.
 
 The landing's own code (`land`, `land-check`, `train`, `resolve` and `land-verdicts`, the one place
 the factory commits) lives in `scripts/landing.py` beside it, which `factory.py` loads by path and

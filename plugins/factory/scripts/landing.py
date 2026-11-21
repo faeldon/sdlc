@@ -536,6 +536,15 @@ def land_unreviewed(root: Path, folder: Path, cfg: dict) -> list[str] | None:
 UNREVIEWED_UNKNOWN = "no snapshot of its last review"
 
 
+# Each signal's kind (216 R25), in the order `land_signals()` can give them: what autopilot's
+# change-risk budget weighs (`[autopilot.risk]`), counted by the script, never judged by a model.
+# `unread` is a preflight that couldn't be read, so nothing else is known.
+SIGNAL_KINDS = (
+    "sensitive", "irreversible", "issue", "impact", "escalated", "open", "assumed", "settled",
+    "resolved", "fixed", "unreviewed", "auto_off", "undone", "checks", "cases", "nits", "unread",
+)  # fmt: skip
+
+
 def land_signals(
     folder: Path,
     worktree: Path,
@@ -543,6 +552,7 @@ def land_signals(
     cfg: dict,
     pre: dict | None = None,
     unreviewed: list[str] | None = (),
+    kinds: list[str] | None = None,
 ) -> tuple[list, list]:
     """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
     in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
@@ -551,17 +561,26 @@ def land_signals(
     are an irreversible path the approver proposed no way back for, and a bug it proposed that
     `bad_bugs()` refuses. A nit to file is a signal, so no agent's nit is filed without the
     person's yes. `unreviewed` is
-    `land_unreviewed()` as the caller read it at `stage: test`: paths, or None for no snapshot."""
+    `land_unreviewed()` as the caller read it at `stage: test`: paths, or None for no snapshot.
+    `kinds`, when given, gets each signal's kind (`SIGNAL_KINDS`) added, one for each string, in
+    the same order (216 R25)."""
     signals, excluded = [], []
+    kinds = [] if kinds is None else kinds
+
+    def add(kind: str, *texts: str) -> None:
+        signals.extend(texts)
+        kinds.extend([kind] * len(texts))
+
     if pre is None:
         pre, out = _preflight(folder, worktree)
         if pre is None:
-            return [f"preflight couldn't be read: {out.strip()[-300:]}"], []
+            add("unread", f"preflight couldn't be read: {out.strip()[-300:]}")
+            return signals, []
     risk = pre.get("risk") or {}
     if risk.get("sensitive"):
-        signals.append(f"touches sensitive paths: {', '.join(risk['sensitive'][:5])}")
+        add("sensitive", f"touches sensitive paths: {', '.join(risk['sensitive'][:5])}")
     if risk.get("irreversible"):
-        signals.append(f"touches irreversible paths: {', '.join(risk['irreversible'][:5])}")
+        add("irreversible", f"touches irreversible paths: {', '.join(risk['irreversible'][:5])}")
         missing = unrecovered(risk["irreversible"], read_proposals(folder)[1])
         if missing:
             excluded.append(
@@ -577,42 +596,42 @@ def land_signals(
         else:
             excluded += [f"{why}: ship it by hand" for why in bad_bugs(undone, words)]
     if (pre.get("closes") or {}).get("closes"):
-        signals.append("came from a public issue (closes:)")
+        add("issue", "came from a public issue (closes:)")
     impact = read_impact(folder)
     if impact is None:
-        signals.append("decision.md proposes no `- IMPACT:`")
+        add("impact", "decision.md proposes no `- IMPACT:`")
     elif impact == "major":
-        signals.append("impact: major")
+        add("impact", "impact: major")
     if decision == "ESCALATE":
-        signals.append("the approver escalated")
+        add("escalated", "the approver escalated")
     ledger = factory.read_ledger(folder)
     if [d for d in ledger if d["open"]]:
-        signals.append("decisions still open or assumed in decisions.md")
+        add("open", "decisions still open or assumed in decisions.md")
     assumed = [d["id"] for d in ledger if d["open"] and d["kind"] == "default"]
     if assumed:
-        signals.append(f"assumed decisions to confirm: {', '.join(assumed)}")
+        add("assumed", f"assumed decisions to confirm: {', '.join(assumed)}")
     if settled := [d["id"] for d in ledger if d["settled"]]:
-        signals.append(f"defaults settled by the approver: {', '.join(settled)}")
-    signals += resolution_signals(worktree, folder, cfg)
+        add("settled", f"defaults settled by the approver: {', '.join(settled)}")
+    add("resolved", *resolution_signals(worktree, folder, cfg))
     if list(folder.glob("build/land-*.ask.md")):
-        signals.append(LANDING_FIXED)
+        add("fixed", LANDING_FIXED)
     if unreviewed is None:
-        signals.append(UNREVIEWED_UNKNOWN)
+        add("unreviewed", UNREVIEWED_UNKNOWN)
     elif unreviewed:
-        signals.append(f"changed since its last review: {', '.join(unreviewed)}")
+        add("unreviewed", f"changed since its last review: {', '.join(unreviewed)}")
     if not cfg["land"]["auto"]:
-        signals.append("land.auto is off on the base branch")
+        add("auto_off", "land.auto is off on the base branch")
     if n := len((pre.get("undone") or {}).get("items") or []):
-        signals.append(f"undone notes to dispose of: {n}")
+        add("undone", f"undone notes to dispose of: {n}")
     if n := len((pre.get("checks") or {}).get("checks") or []):
-        signals.append(f"acceptance checks to run: {n}")
+        add("checks", f"acceptance checks to run: {n}")
     if n := len((pre.get("cases") or {}).get("scope") or []):
-        signals.append(f"skills' cases in scope: {n}")
-        signals += _cases_signals(parts["cases"])
+        add("cases", f"skills' cases in scope: {n}", *_cases_signals(parts["cases"]))
     if n := len(parts["nits"]):
         past = sum(i["reason"] == factory.CAP_REASON for i in nit_findings(worktree, folder, cfg))
-        signals.append(
-            f"nits to file: {n}" + (f", {past} past the cap of {factory.NIT_CAP}" if past else "")
+        add(
+            "nits",
+            f"nits to file: {n}" + (f", {past} past the cap of {factory.NIT_CAP}" if past else ""),
         )
     return signals, excluded
 
@@ -715,14 +734,17 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         pre, said = _preflight(folder, worktree)
         unreviewed = _unreviewed_at_test(worktree, folder, cfg)
         base = factory._base(worktree)
+        kinds: list[str] = []
         signals, excluded = land_signals(
-            folder, worktree, r["decision"], cfg, pre or {}, unreviewed=unreviewed
+            folder, worktree, r["decision"], cfg, pre or {}, unreviewed=unreviewed, kinds=kinds
         )
         if pre is None:
             signals = [f"preflight couldn't be read: {said.strip()[-300:]}"]
+            kinds = ["unread"]
         entry = {
             "change": r["change"], "worktree": r["worktree"], "decision": r["decision"],
-            "impact": read_impact(folder), "signals": signals, "overlaps": r["overlaps"],
+            "impact": read_impact(folder), "signals": signals, "signal_kinds": kinds,
+            "overlaps": r["overlaps"],
             "intent": intent_parts(folder), **land_parts(folder, pre or {}, worktree, cfg),
             "build": bool(base) and build_due(worktree, base),
         }  # fmt: skip
@@ -1288,6 +1310,7 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
     with why."""
     folder, refusal = factory.find_change(root, ident)
     out: dict = {"change": None, "state": "refused", "refusals": [], "filed_nits": []}
+    refusal = factory.by_refusal(root, by) or refusal
     if refusal:
         return factory.emit({**out, "refusals": [refusal]}, 1)
     out["change"] = folder.name
@@ -1318,7 +1341,9 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
             return factory.emit(
                 {**out, "refusals": ["no impact to set: intent.md has no impact: line"]}, 1
             )
-        if by == "person":
+        # Autopilot's yes approved the run, so it disposes as the person's yes does: each undone
+        # note and nit as the approver proposed it (216), recorded as its own on the commit.
+        if by in ("person", "autopilot"):
             out["filed_nits"], refused = _dispose(root, folder, pre)
             if refused:
                 return factory.emit({**out, "refusals": [refused]}, 1)
@@ -1559,12 +1584,15 @@ def cmd_land_close(root: Path, ident: str) -> int:
     # the landing's signal: `land` read the rest before it committed, and its own rebase can move
     # the files `conflicts.md` names with nothing resolved.
     num = folder.name.split("-")[0]
-    if f"\n{factory.LANDED}: by=auto" in "\n" + (
-        factory._git(root, "log", "-1", "--format=%B") or ""
-    ):
+    # Autopilot's landings are held to the same rule as a batch that passed itself (216): no one
+    # read the resolution or the fix.
+    said = factory._git(root, "log", "-1", "--format=%B") or ""
+    found = re.search(rf"^{factory.LANDED}: by=(auto|autopilot)\b", said, re.M)
+    by_ = found.group(1) if found else None
+    if by_:
         cfg, _ = factory.load_config(root)
         if LANDING_RESOLVED in resolution_signals(root, folder, cfg):
-            why = f"landed by=auto, and {LANDING_RESOLVED}: no landing review has passed it"
+            why = f"landed by={by_}, and {LANDING_RESOLVED}: no landing review has passed it"
             plain = (
                 "the landing passed itself, but it resolved a conflict that no landing "
                 "review has passed: read the resolution (runs/land-resolved names the files), "
@@ -1572,7 +1600,7 @@ def cmd_land_close(root: Path, ident: str) -> int:
             )
             return _close_stopped(root, folder, why, plain)
         if list(folder.glob("build/land-*.ask.md")):
-            why = f"landed by=auto, and {LANDING_FIXED}: the gate is the person's"
+            why = f"landed by={by_}, and {LANDING_FIXED}: the gate is the person's"
             plain = (
                 "the landing passed itself, but a fix was made while it landed, which only you "
                 f"may pass: read the fix (build/land-<n>.ask.md says what was asked), then "
@@ -1958,7 +1986,7 @@ def cmd_train(
     cfg, _ = factory.load_config(main)
     if cancel:
         return _train_cancel(main)
-    if (run or not os.environ.get(TRAIN_RUN_ENV)) and train_running(main):
+    if (run or not factory.loop_marker(TRAIN_RUN_ENV)) and train_running(main):
         if begin or eject or stop or run:
             return factory.emit({"refusals": [RUN_UNDER_WAY]}, 1)
         return factory.emit({"under_way": factory.read_train(main) is not None, "running": True})
@@ -1981,13 +2009,15 @@ def cmd_train(
 def _train_begin(
     main: Path, cfg: dict, idents: list[str], by: str | None, fix: str | None = None
 ) -> int:
+    if why := factory.by_refusal(main, by):
+        return factory.emit({"refusals": [why]}, 1)
     if (state := factory.read_train(main)) is not None:
         live = ", ".join(train_live(state)) or "nothing left"
         why = (f"a train is under way ({live}): run train to resume it, or train --stop to put "
                "its changes back")  # fmt: skip
         return factory.emit({"refusals": [why]}, 1)
-    if by not in ("auto", "person"):
-        return factory.emit({"refusals": ["train --begin needs --by auto|person"]}, 1)
+    if by not in factory.BY_VALUES:
+        return factory.emit({"refusals": ["train --begin needs --by auto|person|autopilot"]}, 1)
     base = factory._base(main)
     if base is None:
         return factory.emit(
@@ -2575,7 +2605,10 @@ def _train_run(main: Path) -> int:
 
 def _run_env(main: Path) -> dict[str, str]:
     where = factory._slot_dir(main)
-    return {**os.environ, TRAIN_RUN_ENV: str(where / TRAIN_RUN_LOCK) if where else "held"}
+    # `factory.loop_env()`, so a train autopilot started passes its marker on to `land --by
+    # autopilot`; the host's commands those children run never see either (216 R2).
+    lock = str(where / TRAIN_RUN_LOCK) if where else "held"
+    return {**factory.loop_env(), TRAIN_RUN_ENV: lock}
 
 
 def _run_one(main: Path, argv: list[str], cwd: Path) -> tuple[int, dict | None, str]:

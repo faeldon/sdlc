@@ -35,6 +35,7 @@ sensitive = [
   ".github/workflows/",
   "scripts/closing.py",
   "plugins/factory/scripts/landing.py",
+  "plugins/factory/scripts/autopilot.py",
 ]
 # What setup copies into a host: a revert here never reaches a host that already ran setup.
 irreversible = ["defaults/", "templates/"]

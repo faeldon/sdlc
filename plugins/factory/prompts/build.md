@@ -20,3 +20,7 @@ The person adds: ${words}
 ## upgraded
 
 ${decision} is decided in decisions.md: ${answer}. So this change is now Tier 2, upgraded before round ${round}, and ${rel}/spec.md is its approved spec. Rewrite ${rel}/plan.md against it first, keeping what still holds of your plan so far, then build round ${round} to the spec, test first. Every other ticked line in decisions.md is settled: build on it.
+
+## autopilot
+
+This run is autopilot's, while the person is away: no one reads it before it lands. If the change can only be built by breaking a contract, a hard rule or a guard (in ${policy}, AGENTS.md or the invariant tests), say so on its own line, `- CONTRACT: <invariant>: <why>`; if it would be far simpler with one relaxed, `- RELAX: <invariant>: <why>`. Either holds the change for the person: never break or relax one yourself.

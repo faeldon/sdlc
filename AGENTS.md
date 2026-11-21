@@ -315,7 +315,28 @@ never `sdlc.lock`; a gate, build or accept record is read as a verdict only whil
 ledger in the git common dir vouches for it (`vouched()`, `RECORDS_LEDGER`), which its writer
 appends to before it writes, so a record written in a worktree is never one; its WAIT approves
 itself only when no change carries a risk signal, recorded as `Sdlc-Landed: by=auto` (never a
-bare word, which `parse_trailers` drops), never as the person's.
+bare word, which `parse_trailers` drops), never as the person's. Autopilot
+(`/sdlc-factory:autopilot`, `scripts/autopilot.py`, loaded and bound as `landing.py` is) is the
+one mode whose single WAIT approves a bounded run in which intents are opened and specs copied and
+built on unseen: its state `AUTOPILOT_STATE` is in the git common dir, its loop runs under
+`AUTOPILOT_RUN_LOCK`, each step a subprocess told by `AUTOPILOT_RUN_ENV` (which `factory.py`
+takes out of its own env as it starts, `take_markers()`, as it does `TRAIN_RUN_ENV`, so no host
+command, `sdlc.py`, git hook or agent it starts sees either; only `loop_env()` gives them back,
+to a loop's own children), and `--by autopilot`
+(`land`, `train --begin`, `answer`, `write-spec`) is refused to every process but those children
+(`autopilot_running()`), so no skill but its own names it
+(`test_only_autopilot_names_by_autopilot`): a guard against inheriting the marker by accident, not
+a boundary against a same-user process that sets it on purpose, which no check in the run can
+tell from its child.
+Its calls are always its own: `Sdlc-Landed: by=autopilot`, a third value beside `auto` and
+`person` that no reader folds into either, `→ decided by autopilot:` on the ledger
+(`DECIDED_AUTOPILOT`, never `DECIDED`), `opened_by: autopilot` on an intent; it never upgrades a
+change, runs cases, or runs a check the read-only list refuses, and it holds (`hold_causes()`) what
+touches `[autopilot] guards` (unset, the docs and `[review] irreversible` and `sensitive`) or a
+reply's `- CONTRACT:`/`- RELAX:` line, and takes a seed with an `Issue:` line only when `--seeds`
+names it, opened with its `closes:`. Its budgets, its limits
+and `enabled` are the base branch's `[autopilot]`, fixed at `--begin`; it runs `sdlc.py`'s own
+`new`, `status --json` and `config` beside `fresh`, `upgrade` and the landing.
 `verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder report
 and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its `exit:` but
 a read that shows its output, which only the script judges (`is_read()`); a reply missing it,

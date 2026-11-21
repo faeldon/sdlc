@@ -275,6 +275,14 @@ def _land_mend(c: Case, role: str) -> str:
     return c.land("land-mend", role)
 
 
+BRIEF = ".sdlc/reports/autopilot/20261121T000000Z/briefs/"
+
+
+def _autopilot(c: Case, task: str, state: dict, role: str) -> str:
+    """`task`'s prompt as `agent` sends it under autopilot: its own, then the autopilot part."""
+    return c.task(state, task, role) + "\n\n" + factory.autopilot_part(task, ".sdlc/SDLC.md")
+
+
 CASES: dict[str, Callable[[Case], str]] = {
     "spec": lambda c: c.task(_state(next="spec"), "spec", "spec-writer"),
     "spec-upgraded": lambda c: c.task(_state(next="spec", upgraded=UPGRADE), "spec", "spec-writer"),
@@ -338,6 +346,18 @@ CASES: dict[str, Callable[[Case], str]] = {
     "land-mend-arbiter": lambda c: _land_mend(c, "arbiter"),
     "land-mend-verdict": lambda c: _land_mend(c, "code"),
     "land-mend-evidence": lambda c: _land_mend(c, "behaviour"),
+    # 216 R20: under autopilot alone, the spec-writer, builder and approver are asked for the
+    # contracts they'd break or relax; and autopilot's own two agents, the planner and the
+    # intent-writer, each told its brief.
+    "spec-autopilot": lambda c: _autopilot(c, "spec", _state(next="spec"), "spec-writer"),
+    "build-autopilot": lambda c: _autopilot(c, "build", _state(), "builder"),
+    "approve-autopilot": lambda c: _autopilot(
+        c, "approve", _reviewed(2, next="approve"), "approver"
+    ),  # fmt: skip
+    "autopilot-wave": lambda c: factory.autopilot_prompt("wave", BRIEF + "wave.md", None, "x"),
+    "autopilot-intent": lambda c: factory.autopilot_prompt(
+        "intent", BRIEF + "intent-2026-11-21-3.md", "2026-11-21-3", ".sdlc/templates/intent.md"
+    ),
 }
 
 
@@ -398,6 +418,9 @@ PROSE = (
     "Weigh each open default",
     "These have no options yet",
     "Change folder: ",
+    "You are autopilot's planner",
+    "You are autopilot's intent-writer",
+    "never break or relax one yourself",
 )
 
 

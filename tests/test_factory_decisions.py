@@ -265,10 +265,10 @@ def test_a_ledger_without_alternatives_reads_as_before(tmp_path) -> None:
     assert factory.read_ledger(folder) == [
         {"id": "D1", "source": "builder round 1", "kind": "default", "text": "Page at 50.",
          "decided": False, "open": True, "answer": None, "superseded_by": None,
-         "settled": None, "options": [], "why": None, "current": True},
+         "settled": None, "options": [], "why": None, "current": True, "decided_by": None},
         {"id": "D2", "source": "code round 1", "kind": "blocking", "text": "Keep 30 days?",
          "decided": True, "open": False, "answer": "30 days", "superseded_by": None,
-         "settled": None, "options": [], "why": None, "current": True},
+         "settled": None, "options": [], "why": None, "current": True, "decided_by": "person"},
     ]  # fmt: skip
 
 

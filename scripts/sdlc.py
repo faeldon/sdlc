@@ -166,6 +166,8 @@ IMPACTS = ("major", "minor", "patch", "none")
 # finding or a nit included). The line names a class, never a host; a change without it is
 # unknown, never `self`.
 ORIGINS = ("host", "self")
+# Who opened a change without a person's `/sdlc:intent`: the factory's autopilot (216).
+OPENED_BY = ("autopilot",)
 
 # Three digits at least: a local id is padded to three, a GitHub issue number may run longer.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
@@ -1063,6 +1065,12 @@ def load_change(
         rec["errors"].append(f"origin: must be one of {'|'.join(ORIGINS)}, got {origin[0]!r}")
     elif origin:
         rec["origin"] = origin[0]
+    # Who opened it with no person's yes: `autopilot` alone (216 R12), which the factory's autopilot
+    # stamps by line; any other value is an error, never read as the person's.
+    opened_by = frontmatter_list(text, "opened_by") or []
+    if opened_by and opened_by != list(OPENED_BY):
+        rec["errors"].append(f"opened_by: must be {'|'.join(OPENED_BY)}, got {opened_by!r}")
+    rec["opened_by"] = opened_by[0] if opened_by == list(OPENED_BY) else None
     # The bugs a change fixes, by id, each an open `[bug]` in its own checkout's register until
     # ship removes it with the fix.
     rec["fixes"] = frontmatter_list(text, "fixes") or []
@@ -7270,7 +7278,7 @@ def next_up(home: Path, cfg: dict, open_changes: list[dict], today: date) -> dic
 
     def seed(rule: str, label: str, e: dict) -> dict:
         return {"rule": rule, "label": label, "title": e["title"], "id": e["id"],
-                "kind": entry_kind(e), "theme": entry_theme(e),
+                "kind": entry_kind(e), "theme": entry_theme(e), "issues": entry_issues(e),
                 "age_days": _age_days({"created": e["date"]}, today),
                 "command": f"/sdlc:intent {e['id'] or e['title']}"}  # fmt: skip
 
@@ -10643,6 +10651,9 @@ def _change_lines(rec: dict, a: dict) -> list[str]:
     gate = rec.get("gate")
     if gate and gate["current"]:
         undone += "  · gate green" if gate["verdict"] == "PASS" else "  · gate red"
+    if rec.get("opened_by"):
+        # Opened with no person's yes (216): autopilot's, and said so wherever it is listed.
+        undone += f"  · opened by {rec['opened_by']}"
     lines = [f"    {rec['id']}  T{tier} {stage:<8} {age:>4}  {rec['slug']:<28} {have}{undone}"]
     indent = " " * 30
     if rec["title"]:
@@ -10817,9 +10828,16 @@ def print_status(a: dict) -> None:
     "status",
     "what's open, at what stage (the default)",
     arg("--all", action="store_true", help="every candidate in Next up, grouped by theme"),
+    arg("--json", action="store_true", help="Next up's ranked items as JSON, for the factory"),
 )
 def cli_status(root: Path, home: Path, args) -> int:
     a = analyze(root)
+    if getattr(args, "json", False):
+        # The factory's autopilot reads its candidates here (216 R10): `next_up()`'s items, in
+        # rank order, each with its `id`, `group`, `rule`, `label`, `kind` and `theme`. Read-only.
+        found = next_up(home, load_config(home)[0], a["open"], date.fromisoformat(a["today"]))
+        print(json.dumps({"next_up": {"items": found["items"], "warnings": found["warnings"]}}))
+        return 0
     a["ready"] = ready_to_close(root) + held_by_rebase(home)
     # Unconfigured, status shows only a count, so the intents behind it aren't read.
     cfg = load_config(home)[0]
