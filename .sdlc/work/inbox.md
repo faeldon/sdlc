@@ -535,31 +535,11 @@ Cost: S
 Value: low
 Raised by: 209-upstream-bugs (contract)
 
-## [2026-11-21-21] [nit] `_SCP_RE` only matches a dotted host, so `git@localhost:x/y` is not cut, and no test names that boundary
-
-Raised by the test review of 209-upstream-bugs, round 2: tests/test_upstream.py:417: `_SCP_RE` only matches a dotted host, so `git@localhost:x/y` is not cut, and no test names that boundary
-
-Theme: robustness
-Paths: tests/test_upstream.py
-Cost: S
-Value: low
-Raised by: 209-upstream-bugs (correctness)
-
 ## [2026-11-21-22] [idea] Pin CI actions to commit SHAs
 
 Left undone by 211-ci-token-read, carried forward when it landed: pre-existing: .github/workflows/check.yml:23: `actions/checkout@v4` and `astral-sh/setup-uv@v6` are pinned by moveable tag, not by commit SHA. Pin each to a full SHA with the version in a comment, and let Dependabot or Renovate bump them.
 See .sdlc/work/211-ci-token-read/notes.md in its commit.
 Raised 2026-11-21.
-
-## [2026-11-21-23] [nit] the comment's claim that setup-uv's cache uses the runner's own cache token is an unverified claim about a third-party action.
-
-Raised by the code review of 211-ci-token-read, round 1: .github/workflows/check.yml:14: the comment's claim that setup-uv's cache uses the runner's own cache token is an unverified claim about a third-party action. The rest of the comment is checkable from the file.
-
-Theme: docs
-Paths: .github/workflows/check.yml
-Cost: S
-Value: low
-Raised by: 211-ci-token-read (correctness)
 
 ## [2026-11-21-24] [idea] Let ugrep's `-O EXT` pass the read-only grep check while BSD's `-O` stays refused
 
@@ -596,32 +576,6 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 212-landing-gaps (correctness)
-
-## [2026-11-21-28] [bug] CI on main has been red since 2026-11-17, and the local gate can't see it
-
-Every push to main since `Close 091-hand-gate-record` (9b21760, 2026-11-17) has failed CI; the
-last green run is `Close 092-retro-outcome-coverage` (5cb3b26). `./check.sh` passes locally on
-macOS each time, so no gate, build or landing has stopped on it. CI should pass on both jobs, and
-211's landing look ("both jobs pass") relied on it.
-
-On 209's push (d2c14ac), 6 tests fail:
-- Windows, portable job:
-  - test_hand_gate.py::test_the_build_hash_moves_on_a_rebase_onto_a_moved_base (the first to
-    fail, on 9b21760)
-  - test_factory_agent.py::test_the_builder_s_evidence_is_mended_once_a_round
-  - test_sdlc.py::test_check_leaves_out_the_template_plan_during_a_live_upgraded_build and
-    test_a_live_first_build_hides_no_other_problem: UnicodeDecodeError 'utf-8' … byte 0x97, so
-    a text read or subprocess without encoding="utf-8" (0x97 is an em dash in cp1252)
-  - test_upstream.py::test_upstream_repo_comes_from_the_manifest: depends on `gh auth`, which
-    the runner lacks
-- Linux: test_factory_ui.py::test_a_server_that_answered_and_closed_first_has_not_lost_its_port
-  ("port … answered, but the dev server had exited 1"), likely timing-dependent.
-
-How to see it: `gh run list --branch main`, then `gh run view <id> --log-failed`.
-
-Severity: high
-Paths: tests/test_hand_gate.py, tests/test_factory_agent.py, tests/test_sdlc.py, tests/test_upstream.py, tests/test_factory_ui.py, .github/workflows/check.yml
-Theme: tests
 
 ## [2026-11-21-29] [idea] Add `update` to AGENTS.md's Skills invariant list of WAIT skills
 
@@ -751,3 +705,55 @@ How to see it: `factory.py verdicts <NNN> --head <sha>` on a round whose evidenc
 Severity: high
 Paths: plugins/factory/agents/builder.md, plugins/factory/agents/reviewer-behaviour.md, plugins/factory/scripts/factory.py
 Theme: factory
+
+## [2026-11-21-36] [idea] Show a red CI on the base branch in the landing's look and in status
+
+Left undone by 214-ci-green, carried forward when it landed: Say when CI on the base branch is red, in a landing's look or in `status`, so the local gate isn't the only word (the intent's third open question; a seed of its own).
+See .sdlc/work/214-ci-green/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-37] [idea] Scan the helpers portable tests call for unencoded reads and writes
+
+Left undone by 214-ci-green, carried forward when it landed: 275 `read_text`/`write_text` calls in non-portable tests and helpers name no encoding. They don't run on Windows today; a test moved into `portable` gets caught by the new check, but a helper it calls doesn't.
+See .sdlc/work/214-ci-green/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-38] [nit] `_hand_digests` runs `git hash-object` once per call and ignores its stderr.
+
+Raised by the code review of 214-ci-green, round 1: scripts/sdlc.py:3076: `_hand_digests` runs `git hash-object` once per call and ignores its stderr. If it fails, the fallback silently hashes raw bytes, so a git failure could make a record read stale only on the next run. That is safe, but a one-line comment saying so would help.
+
+Theme: docs
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 214-ci-green (correctness)
+
+## [2026-11-21-39] [nit] `_hand_digests` is now a 15-line copy of `sdlc.py`'s, kept the same by hand.
+
+Raised by the security review of 214-ci-green, round 1: plugins/factory/scripts/factory.py:3073: `_hand_digests` is now a 15-line copy of `sdlc.py`'s, kept the same by hand. Pin the two bodies equal in `tests/test_hand_gate.py`, as the repo's other copies are pinned, so a fix to one can't skip the other
+
+Theme: tests
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: med
+Raised by: 214-ci-green (contract)
+
+## [2026-11-21-40] [nit] `_lost()`'s new `and not _only_time_wait(port)` branch is proved only by the existing socket test, which exercises it on Linux only.
+
+Raised by the test review of 214-ci-green, round 1: tests/test_factory_ui.py:474: `_lost()`'s new `and not _only_time_wait(port)` branch is proved only by the existing socket test, which exercises it on Linux only. No test combines a refused bind with a stubbed table; the container run is the only proof.
+
+Theme: tests
+Paths: tests/test_factory_ui.py
+Cost: S
+Value: low
+Raised by: 214-ci-green (correctness)
+
+## [2026-11-21-41] [nit] the `_hand_digests()` fallback is untested.
+
+Raised by the test review of 214-ci-green, round 1: tests/test_hand_gate.py:145: the `_hand_digests()` fallback is untested. It hashes a path holding a newline with sha256, and covers a failed `hash-object`.
+
+Theme: tests
+Paths: tests/test_hand_gate.py
+Cost: S
+Value: low
+Raised by: 214-ci-green (correctness)
