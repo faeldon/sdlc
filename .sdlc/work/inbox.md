@@ -503,23 +503,6 @@ Cost: S
 Value: low
 Raised by: 206-update-skill (correctness)
 
-## [2026-11-21-12] [bug] The setup nudge never reaches the person and never clears
-
-The setup nudge never reaches the person and never clears. It is only a line in sdlc.py status's
-output (■ Setup), so a person who doesn't run /sdlc:status never sees it, and a skill that runs
-status doesn't pass it on. And after a release that changes no defaults, /sdlc:setup stops at
-complete without recording the new version, so status keeps saying "set up with 1.10.0, the plugin
-is 1.11.0 → /sdlc:setup" forever. The nudge should clear when drift finds nothing, and reach the
-person, for example through the startup hook's line.
-
-How to see it: in a repo set up under an older version whose defaults the new release didn't
-change, run `sdlc.py status` (it shows the ■ Setup line), then `/sdlc:setup` (readiness says
-complete, drift finds nothing, setup writes nothing), then `sdlc.py status` again: the same line.
-
-Severity: med
-Paths: scripts/sdlc.py, skills/setup/SKILL.md
-Theme: setup
-
 ## [2026-11-21-13] [nit] R3 says a listed path under this repo's `.claude/worktrees/` is skipped and counted as `own`.
 
 Raised by the test review of 208-retro-reads-hosts, round 1: tests/test_retro_hosts.py:329: R3 says a listed path under this repo's `.claude/worktrees/` is skipped and counted as `own`. Only the main checkout is listed in the fixtures, so the worktree case is never exercised. Add a worktree path to `_listed`.
@@ -549,3 +532,23 @@ Paths: tests/test_retro_hosts.py
 Cost: S
 Value: low
 Raised by: 208-retro-reads-hosts (correctness)
+
+## [2026-11-21-16] [nit] the reflowed *Setup* paragraph leaves a short line, "same change.
+
+Raised by the code review of 213-setup-nudge, round 1: AGENTS.md:218: the reflowed *Setup* paragraph leaves a short line, "same change. `git.attribution` has no default on", that could be rewrapped.
+
+Theme: style
+Paths: AGENTS.md
+Cost: S
+Value: low
+Raised by: 213-setup-nudge (correctness)
+
+## [2026-11-21-17] [nit] the R5 test never forces a `ValueError`, so half of the `except (OSError, ValueError)` is unpinned; a second mock that raises `UnicodeDecodeError` would close it
+
+Raised by the test review of 213-setup-nudge, round 1: tests/test_setup_lifecycle.py:735: the R5 test never forces a `ValueError`, so half of the `except (OSError, ValueError)` is unpinned; a second mock that raises `UnicodeDecodeError` would close it
+
+Theme: tests
+Paths: tests/test_setup_lifecycle.py
+Cost: S
+Value: low
+Raised by: 213-setup-nudge (correctness)
