@@ -17,6 +17,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py record *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py reset *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py update *)'
 disable-model-invocation: true
 ---
 
@@ -34,7 +35,8 @@ ship its own setup, because it needs the setup first.
 cd "$(git rev-parse --show-toplevel)" && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py readiness && \
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py config && \
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py drift && \
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py update --installed
 ```
 
 `readiness` lists each item with `ok`, `missing`, `warn` or `n/a`, and says `complete` when
@@ -43,11 +45,18 @@ or `report`. `commands.build` and `commands.scan` left unset, listed in `unset`,
 tracked locally (`archive.target` `none`) are answers, not gaps. It also gives the commands the
 repo's own task files suggest (`candidates`), the permission rules it proposes, and the
 plugin's default docs to draft from (`defaults`). `config` gives every path and setting as
-resolved now; `drift` what the plugin changed under the docs setup copied.
+resolved now; `drift` what the plugin changed under the docs setup copied. `readiness`'s
+`uncommitted` names the paths setup owns that have uncommitted changes. `update --installed` says
+whether this session runs an older copy than is installed here.
+
+**With `restart_first` true, say `restart first: this session runs <running>, <installed> is
+installed` and stop.** A refresh drafted now would be the old version's: restart Claude Code, then
+rerun `/sdlc:setup`. `null` can't tell, and doesn't stop setup.
 
 **With `complete` true and no argument, say the repo is set up, list `unset` as the commands a
 repo usually sets, and stop.** Nothing to write is a finished setup, and nothing below
-applies.
+applies, but for one line: with `uncommitted` not empty, end with Step 6's refresh commit for those
+paths.
 
 **Otherwise** (not `complete`, or the argument `product`, `project` or `reset`), `Read`
 `${CLAUDE_PLUGIN_ROOT}/skills/setup/drafts.md` now. `drafts.md` holds what `drift`'s lists mean,
@@ -109,8 +118,12 @@ run, naming exactly the paths written, `.sdlc/setup.json` among them:
 git add <the paths> && git commit -m "Set the repo up for the sdlc plugin"
 ```
 
-After a refresh or a reset, report what was taken, what was left in `report` and why, and the same
-commit with `-m "Refresh the sdlc setup for <plugin version>"`.
+After a refresh or a reset, report what was taken, what was left in `report` and why, and the
+commit for every path in `uncommitted` as `readiness` now gives it:
+
+```
+git add <uncommitted> && git commit -m "Refresh the sdlc setup for <plugin version>"
+```
 
 Then the next step: `/sdlc:intent` for the first change.
 

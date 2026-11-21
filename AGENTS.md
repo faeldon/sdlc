@@ -222,6 +222,19 @@ purpose: unset is a question setup asks. `readiness`'s `complete` lets a rerun r
 `status` is never a problem: `vet --strict` refuses. REFERENCE.md, *After an update*;
 `cmd_record()`, `cmd_readiness()`.
 
+**Updates: `cmd_update()` and the one hook.** The plugin's only hook, `hooks/hooks.json`, runs
+`sdlc.py update --hook` at a session's `startup` (`test_sdlc_loads_nothing_from_plugins` pins it
+as the one). It only advises: one line or nothing, exit 0 always, never an update. The check
+(`check_update()`) is one `git ls-remote` on the running manifest's `repository` and one
+`claude plugin list --json` (`plugin_installs()`, its one reader), at most once a day: the answer
+is cached in `sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache is the one write
+made with no WAIT outside the five above, since it is state like the main lock, not an artifact,
+and it dirties no checkout. `status` reads only the cache (`update_nudge()`); a copy read in place
+(`in_place()`, its root has `.git`) is never checked or told. `update` writes and reaches the
+network, so it is not in `READ_ONLY`. `/sdlc:update` runs the `claude plugin` steps the script
+lists behind its WAIT, and setup stops on `update --installed`'s `restart_first`.
+REFERENCE.md, *After an update*.
+
 **Ship.** Context docs are checked at ship, not close: `sdlc.py context` lists them, and ship
 shows an edit with its findings and commits it with the change; close has no `Edit`. Ship reads a
 change through one read-only `preflight` call and asks the question `preflight --question` words

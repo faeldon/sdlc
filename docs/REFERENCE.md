@@ -316,6 +316,40 @@ The docs setup copies from the plugin's defaults are yours once copied, so updat
 never touches them. Rerun `/sdlc:setup` after `claude plugin update`: it shows what the new version
 changed under them, and drafts the changes you haven't made yourself, behind its one approval.
 
+**Taking a release** is five steps, which `sdlc.py update` prints for this repo and
+`/sdlc:update` runs the first of, behind one approval, from the main checkout:
+
+1. `claude plugin marketplace update sdlc`, so the marketplace's copy knows the release;
+2. `claude plugin update sdlc@sdlc --scope <scope>`, once for each install that applies to this
+   repo and is older than the release (user scope, and this repo's project and local scope), then
+   `claude plugin update sdlc-factory@sdlc --scope <scope>` for each of the factory's;
+3. restart Claude Code: every running session keeps the copy it started with;
+4. `/sdlc:setup`, which refreshes what the release changed under your docs;
+5. commit what setup names: its report ends with
+   `git add <uncommitted> && git commit -m "Refresh the sdlc setup for <plugin version>"`, from
+   `readiness`'s `uncommitted` (the paths setup owns with uncommitted changes).
+
+**How a release is noticed.** The plugin ships one hook, `hooks/hooks.json`: at a session's
+`startup` it runs `sdlc.py update --hook`, which prints one line when a newer release is out,
+`sdlc 1.11.0 is out (this session runs 1.10.0): /sdlc:update`, or, when this session is current
+but an install here isn't, `sdlc 1.11.0 is out (sdlc-factory 1.10.0 at project scope): /sdlc:update`.
+`sdlc.py status` repeats the line, read from the day's check alone. The check is one
+`git ls-remote --tags --refs` on the running manifest's `repository` (the newest `vX.Y.Z` tag) and
+one `claude plugin list --json`, at most once a day: the answer is cached in `sdlc-update.json` in
+the repo's git common dir, shared by its worktrees and in no checkout. The hook never updates,
+never blocks a session and exits 0 every time; it prints nothing offline (a failed check is cached
+too, and retried the next day), without `claude` on PATH, outside a git repo, when the install here
+is read from a folder, or when the plugin itself is a clone read in place, which is never told to
+update and never checked. Other repos' project and local installs are listed in `update`'s
+`elsewhere`, never updated from here. `update` is not in the read-only allowlist: it writes the
+cache and reaches the network.
+
+**Setup refuses a stale session.** Its Step 0 runs `sdlc.py update --installed`, which compares
+the running copy with the sdlc install that applies here at the most specific scope (`local`,
+then `project`, then `user`), without the network. When the installed one is newer, setup says
+`restart first: this session runs <running>, <installed> is installed` and drafts nothing. When it
+can't tell (`restart_first: null`), setup goes on.
+
 **`.sdlc/setup.json`** is setup's record, written by `sdlc.py record` each time setup writes, and
 committed with the rest. It holds the plugin version, the config keys that version knew, a hash
 of each block of each default behind one of your docs (`process`, `review`, `health`, `product`,

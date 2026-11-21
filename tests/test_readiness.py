@@ -381,3 +381,29 @@ def test_anything_drift_finds_is_not_complete(
 
     monkeypatch.setattr(sdlc, "drift", drift)
     assert _readiness(root, capsys)["complete"] is False
+
+
+def test_readiness_lists_the_uncommitted_paths_setup_owns(tmp_path: Path, capsys) -> None:
+    """206 R12: a refresh left uncommitted is named, so setup's report can give its commit; a
+    clean repo lists none, a path setup doesn't own is never listed, and `complete` is unmoved."""
+    root = _repo(tmp_path)
+    (root / ".sdlc").mkdir()
+    (root / ".claude").mkdir()
+    (root / ".sdlc" / "config.toml").write_text("[commands]\n", encoding="utf-8")
+    (root / ".sdlc" / "REVIEW.md").write_text("# Review\n", encoding="utf-8")
+    manifest = {"version": "1.5.0", "docs": {"review": {"path": ".sdlc/REVIEW.md"}},
+                "created": [".sdlc/config.toml"]}  # fmt: skip
+    (root / ".sdlc" / "setup.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "set up")
+    clean = _readiness(root, capsys)
+    assert clean["uncommitted"] == []
+    (root / ".sdlc" / "setup.json").write_text(json.dumps(manifest | {"version": "1.11.0"}))
+    (root / ".claude" / "settings.json").write_text('{"permissions": {}}\n', encoding="utf-8")
+    (root / "README.md").write_text("edited\n", encoding="utf-8")
+    out = _readiness(root, capsys)
+    assert out["uncommitted"] == [".claude/settings.json", ".sdlc/setup.json"]
+    assert out["complete"] == clean["complete"]
+    (root / ".sdlc" / "REVIEW.md").write_text("# Review\n\nmore\n", encoding="utf-8")
+    assert ".sdlc/REVIEW.md" in _readiness(root, capsys)["uncommitted"]

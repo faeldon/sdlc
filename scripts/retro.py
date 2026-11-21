@@ -2708,6 +2708,7 @@ SKILL_RUNS = {
     "sdlc:status": "outside",
     "sdlc:triage": "outside",
     "sdlc:uninstall": "outside",
+    "sdlc:update": "outside",
     "sdlc-factory:build": "supervised",
     "sdlc-factory:decide": "outside",
     "sdlc-factory:eval": "outside",

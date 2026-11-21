@@ -26,6 +26,7 @@ plan.
 | `/sdlc:publish` | after release, or when status says Unpushed: push `main` (and the tag), then run your publish command |
 | `/sdlc:retro` | after a few releases: look back across them and set the direction |
 | `/sdlc:uninstall` | when a repo stops using the plugin: remove what setup wrote, once nothing is open |
+| `/sdlc:update` | when a session says a release is out: this repo's update steps, run behind one yes |
 
 Every skill that writes shows you exactly what it will write and asks a literal yes/no question
 first. Nothing is pushed without one of those yeses: in a GitHub repo, close's and release's
@@ -195,17 +196,32 @@ Each is off, or at a sensible default, until you turn it on. `docs/REFERENCE.md`
 ## Updating
 
 An install is a copy pinned to the version in the plugin's manifest, so it changes only when a
-release bumps that version:
+release bumps that version. When one is out, a new session says so once, in one line, and
+`/sdlc:status` repeats it:
+
+```
+sdlc 1.11.0 is out (this session runs 1.10.0): /sdlc:update
+```
+
+The check is a SessionStart hook the plugin ships. It only advises: it updates nothing, reaches
+the network at most once a day (a `git ls-remote` on the plugin's repository, cached in the repo's
+git common dir), and prints nothing when it can't tell. `/sdlc:update` prints this repo's exact
+steps and, behind one approval, runs the `claude plugin` ones from the main checkout:
 
 ```bash
 claude plugin marketplace update sdlc
-claude plugin update sdlc@sdlc     # "already at the latest version" until the version moves
+claude plugin update sdlc@sdlc --scope user              # one per install that applies here,
+claude plugin update sdlc@sdlc --scope project           # each at the scope it was made at
+claude plugin update sdlc-factory@sdlc --scope project   # and the factory, where it's installed
 ```
 
-Then run `/sdlc:setup` in each repo that uses it. The docs it copied are yours, so an update
-never changes them; setup shows what the new defaults changed, drafts the blocks you never edited,
-and lists apart anything the plugin would now misread. `/sdlc:setup reset <doc>` puts one back to
-the default. See [After an update](docs/REFERENCE.md#after-an-update-refresh-reset-uninstall).
+Then **restart Claude Code**: the running session keeps the copy it started with. Then run
+`/sdlc:setup`, which refuses (`restart first`) until the restart. The docs it copied are yours,
+so an update never changes them; setup shows what the new defaults changed, drafts the blocks you
+never edited, and lists apart anything the plugin would now misread. Last, commit what setup
+names: its report ends with the `git add … && git commit -m "Refresh the sdlc setup for …"` line
+for the files it wrote. `/sdlc:setup reset <doc>` puts one back to the default. See
+[After an update](docs/REFERENCE.md#after-an-update-refresh-reset-uninstall).
 
 A repo set up before 1.4.0 keeps its changes in the old `work/` at its root, which 1.5.0 no
 longer reads. Move `work/` to `.sdlc/work/` once by hand, in a commit of its own

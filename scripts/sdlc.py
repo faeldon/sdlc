@@ -134,8 +134,8 @@ HELP_ORDER = (
     "status", "new", "vet", "ship", "next", "undone", "bugs", "inbox-commit", "intake",
     "closes", "preflight", "mark-triaged", "needs-info", "next-entry", "nits", "groups", "checks",
     "findings", "accept", "gate", "cases", "run-cases", "drop", "upgrade", "base", "resolve",
-    "close", "sync", "lookup", "config", "readiness", "drift", "record", "reset", "uninstall",
-    "context", "unreleased", "release", "publish", "retro", "retro-commit", "board",
+    "close", "sync", "lookup", "config", "readiness", "drift", "record", "reset", "update",
+    "uninstall", "context", "unreleased", "release", "publish", "retro", "retro-commit", "board",
 )  # fmt: skip
 
 
@@ -8640,6 +8640,19 @@ def detect_candidates(root: Path) -> dict[str, list[dict]]:
     return out
 
 
+def setup_uncommitted(root: Path) -> list[str]:
+    """The paths setup owns that `git status` lists in `root`: the config, its record, the shared
+    settings, `.gitignore`, each doc the record names and each file it created. Never read into
+    `complete`: a refresh left uncommitted is set up, and only its commit is still to make."""
+    manifest = read_manifest(root)[0] or {}
+    docs = manifest.get("docs") if isinstance(manifest.get("docs"), dict) else {}
+    created = manifest.get("created") if isinstance(manifest.get("created"), list) else []
+    owned = {f"{HOST_DIR}/config.toml", MANIFEST, SETTINGS, ".gitignore", *created}
+    owned |= {d["path"] for d in docs.values() if isinstance(d, dict) and d.get("path")}
+    owned = {Path(p).as_posix() for p in owned if isinstance(p, str)}
+    return sorted(owned & set(_dirty_paths(root)))
+
+
 # The commands a repo may leave unset by choice: `missing` all the same, but never a gap that keeps
 # setup from being complete.
 UNSET_IS_A_CHOICE = ("commands.build", "commands.scan")
@@ -8781,6 +8794,8 @@ def cmd_readiness(root: Path) -> int:
         and not (found["breaking"] or found["refresh"] or found["report"]),
         # The commands a repo usually sets, left unset, which a complete run lists.
         "unset": unset,
+        # The paths setup owns with uncommitted changes, which its report names the commit for.
+        "uncommitted": setup_uncommitted(root),
         "items": items,
         "candidates": detect_candidates(root),
         "permissions": {
@@ -9320,6 +9335,340 @@ def setup_nudge(root: Path) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- updates
+#
+# Whether a newer release is out, and what this host runs to take it. The SessionStart hook in
+# `hooks/hooks.json` runs `update --hook`, which only advises: it prints one line or nothing, never
+# updates, and exits 0 whatever happens. The check is a `git ls-remote` on the running manifest's
+# `repository` and one `claude plugin list --json`, at most once a day: the answer is cached in the
+# git common dir (`UPDATE_CACHE`), state like the main lock, never in a tree. A plugin read in place
+# from a clone (its root has `.git`) is never told to update, and is never checked.
+UPDATE_CACHE = "sdlc-update.json"
+UPDATE_EVERY = 24 * 3600  # seconds between two network checks
+UPDATE_TIMEOUT = 10  # seconds, for `git ls-remote` and for `claude plugin list`, each
+# The plugins one release carries, in the order their steps run, and the marketplace they're from.
+UPDATE_PLUGINS = ("sdlc", "sdlc-factory")
+UPDATE_MARKETPLACE = "sdlc"
+# Least specific first: the order steps run in, and the reverse of which install wins.
+SCOPE_ORDER = ("user", "project", "local")
+RELEASE_TAG_RE = re.compile(r"^refs/tags/v?(\d+\.\d+\.\d+)$")
+IN_PLACE_WHY = (
+    "the plugin is read in place from a clone: its version is whatever the checkout holds"
+)
+
+
+def release_source() -> str | None:
+    """The running manifest's `repository`, where releases are tagged; None when it names none."""
+    try:
+        path = PLUGIN_DIR / ".claude-plugin" / "plugin.json"
+        repo = json.loads(path.read_text(encoding="utf-8")).get("repository")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if isinstance(repo, dict):
+        repo = repo.get("url")
+    return repo if isinstance(repo, str) and repo else None
+
+
+def in_place() -> bool:
+    """Whether the running copy is a checkout (a clone registered as a marketplace from its path,
+    or a `--plugin-dir` worktree) rather than Claude Code's cached copy, which has no `.git`."""
+    return (PLUGIN_DIR / ".git").exists()
+
+
+def latest_release(source: str | None) -> tuple[str | None, str | None]:
+    """(the newest `v?X.Y.Z` tag at `source`, why there is none). One `git ls-remote`, which never
+    prompts for credentials and gives up after `UPDATE_TIMEOUT`."""
+    if not source:
+        return None, "the plugin's manifest names no repository"
+    try:
+        out = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", source],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=UPDATE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"git ls-remote failed: {e}"
+    if out.returncode:
+        said = (out.stderr.strip().splitlines() or [""])[-1]
+        return None, f"git ls-remote exited {out.returncode}" + (f": {said}" if said else "")
+    tags = [m[1] for ln in out.stdout.splitlines() if (m := RELEASE_TAG_RE.match(ln.split()[-1]))]
+    if not tags:
+        return None, f"no X.Y.Z tag at {source}"
+    return max(tags, key=_semver), None
+
+
+def _scope_rank(scope: str | None) -> int:
+    return SCOPE_ORDER.index(scope) if scope in SCOPE_ORDER else len(SCOPE_ORDER)
+
+
+def parse_installs(rows, home: Path) -> list[dict]:
+    """The `sdlc@sdlc` and `sdlc-factory@sdlc` rows of `claude plugin list --json`, as
+    `{plugin, scope, version, project, local_source, applies}`, sdlc first, then by scope. One
+    applies here when its scope is `user`, or `project`/`local` with a project path that is this
+    repo's main checkout, both resolved and compared `as_posix()`. `local_source`: read from a
+    folder (`readFromFolder`), whose version a release says nothing about."""
+    here = home.resolve().as_posix()
+    found = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        plugin, _, market = str(row.get("id", "")).partition("@")
+        if market != UPDATE_MARKETPLACE or plugin not in UPDATE_PLUGINS:
+            continue
+        scope, project = row.get("scope"), row.get("projectPath")
+        project = (
+            Path(project).resolve().as_posix() if isinstance(project, str) and project else None
+        )
+        found.append({
+            "plugin": plugin,
+            "scope": scope,
+            "version": row.get("version"),
+            "project": project,
+            "local_source": bool(row.get("readFromFolder")),
+            "applies": scope == "user" or (scope in ("project", "local") and project == here),
+        })  # fmt: skip
+    return sorted(found, key=lambda i: (UPDATE_PLUGINS.index(i["plugin"]), _scope_rank(i["scope"])))
+
+
+def plugin_installs(home: Path) -> tuple[list[dict], str | None]:
+    """(every sdlc and sdlc-factory install `claude plugin list` reports, why it couldn't read
+    them): the one reader of it. `claude` is found with `shutil.which`, so Windows finds
+    `claude.cmd`; any failure is `[]` and a reason, never a traceback."""
+    claude = shutil.which("claude")
+    if not claude:
+        return [], "no claude on PATH"
+    try:
+        out = subprocess.run(
+            [claude, "plugin", "list", "--json"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=home,
+            timeout=UPDATE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return [], f"claude plugin list failed: {e}"
+    if out.returncode:
+        return [], f"claude plugin list exited {out.returncode}"
+    try:
+        rows = json.loads(out.stdout)
+    except ValueError:
+        return [], "claude plugin list --json printed no JSON"
+    if not isinstance(rows, list):
+        return [], "claude plugin list --json printed no list"
+    return parse_installs(rows, home), None
+
+
+def most_specific(installs: list[dict], plugin: str) -> dict | None:
+    """The install of `plugin` that applies here at the most specific scope (local, then project,
+    then user), the newest if two share it; None when none applies."""
+    here = [i for i in installs if i["applies"] and i["plugin"] == plugin]
+    if not here:
+        return None
+
+    def rank(i: dict) -> tuple:
+        version = i["version"] if SEMVER_RE.match(i["version"] or "") else "0.0.0"
+        return (_scope_rank(i["scope"]) if i["scope"] in SCOPE_ORDER else -1, _semver(version))
+
+    return max(here, key=rank)
+
+
+def _stale(installs: list[dict], latest: str | None) -> list[dict]:
+    """The installs that apply here and are older than `latest`, one per plugin and scope, in
+    the order their updates run. One read from a folder is never stale."""
+    seen: dict[tuple, dict] = {}
+    for i in installs:
+        if i["applies"] and not i["local_source"] and _older(i["version"], latest):
+            seen.setdefault((i["plugin"], i["scope"]), i)
+    return list(seen.values())
+
+
+def update_line(running: str | None, data: dict) -> str | None:
+    """The one line the hook and `status` print from a check's `data`, or None: a newer release
+    than the running copy, else the installs here older than it. None whenever it can't tell: no
+    release found, no installs read, or sdlc here read from a folder."""
+    latest = data.get("latest")
+    installs = data.get("installs") or []
+    if not latest or data.get("installs_reason"):
+        return None
+    top = most_specific(installs, "sdlc")
+    if top is None or top["local_source"]:
+        return None
+    if _older(running, latest):
+        return f"sdlc {latest} is out (this session runs {running}): /sdlc:update"
+    stale = _stale(installs, latest)
+    if not stale:
+        return None
+    named = ", ".join(f"{i['plugin']} {i['version']} at {i['scope']} scope" for i in stale)
+    return f"sdlc {latest} is out ({named}): /sdlc:update"
+
+
+def _update_cache_path(root: Path) -> Path | None:
+    where = _ledger_dir(root)
+    return where / UPDATE_CACHE if where else None
+
+
+def read_update_cache(root: Path) -> dict | None:
+    """The day's check, from the git common dir; None when there is none, it won't read, it is
+    older than `UPDATE_EVERY` (or dated ahead of now), or it checked another repository."""
+    path = _update_cache_path(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path else None
+        checked = datetime.fromisoformat(data["checked"]).timestamp()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+    age = datetime.now(UTC).timestamp() - checked
+    if not 0 <= age < UPDATE_EVERY or data.get("source") != release_source():
+        return None
+    return data
+
+
+def check_update(root: Path, home: Path, fresh: bool) -> dict:
+    """The check: the day's cache unless `fresh`, else one `git ls-remote` and one
+    `claude plugin list`, written to the cache (a failure cached as `latest: null` with its
+    reason, so it is retried tomorrow, not at every session). Writes nothing outside a repo."""
+    if not fresh and (cached := read_update_cache(root)) is not None:
+        return cached
+    source = release_source()
+    latest, why = latest_release(source)
+    installs, installs_why = plugin_installs(home)
+    data = {
+        "checked": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        "source": source,
+        "latest": latest,
+        "reason": why,
+        "installs": installs,
+        "installs_reason": installs_why,
+    }
+    path = _update_cache_path(root)
+    if path is not None:
+        with suppress(OSError):
+            tmp = path.with_name(f"{UPDATE_CACHE}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+            os.replace(tmp, path)
+    return data
+
+
+def update_nudge(root: Path) -> str | None:
+    """Status's update line, from the day's cache alone: it runs nothing, and says nothing when
+    there is no fresh check or the plugin is read in place."""
+    if in_place():
+        return None
+    data = read_update_cache(root)
+    return update_line(plugin_version(), data) if data else None
+
+
+def installed_check(home: Path) -> dict:
+    """Whether this session runs an older copy than is installed here: `restart_first` true when
+    the sdlc install that applies at the most specific scope is newer than the running copy, None
+    with a reason when it can't tell. Runs `claude plugin list`; no network, no cache."""
+    out = {"running": plugin_version(), "installed": None, "scope": None}
+    out |= {"restart_first": None, "reason": None}
+    if in_place():
+        return out | {"reason": IN_PLACE_WHY}
+    installs, why = plugin_installs(home)
+    if why:
+        return out | {"reason": why}
+    top = most_specific(installs, "sdlc")
+    if top is None:
+        return out | {"reason": "no sdlc install applies to this repo"}
+    out |= {"installed": top["version"], "scope": top["scope"]}
+    if top["local_source"]:
+        return out | {"reason": "the install here is read from a folder"}
+    if not (SEMVER_RE.match(out["running"] or "") and SEMVER_RE.match(top["version"] or "")):
+        return out | {"reason": "a version isn't X.Y.Z"}
+    return out | {"restart_first": _older(out["running"], top["version"])}
+
+
+def update_report(root: Path, home: Path) -> dict:
+    """`update`'s JSON: the check made now (and cached), every install found, the ones in other
+    repos (`elsewhere`), whether to restart first, and this host's steps, in the order they run.
+    No steps while everything here is current, or the plugin is read in place."""
+    running = plugin_version()
+    report = {
+        "running": running,
+        "latest": None,
+        "checked": None,
+        "in_place": in_place(),
+        "installs": [],
+        "elsewhere": [],
+        "restart_first": None,
+        "steps": [],
+        "cwd": home.as_posix(),
+        "reason": None,
+    }
+    if report["in_place"]:
+        return report | {"reason": IN_PLACE_WHY}
+    data = check_update(root, home, fresh=True)
+    installs = data["installs"]
+    report |= {"latest": data["latest"], "checked": data["checked"], "installs": installs}
+    report["reason"] = "; ".join(r for r in (data["reason"], data["installs_reason"]) if r) or None
+    here = home.resolve()
+    report["elsewhere"] = [
+        i
+        for i in installs
+        if not i["applies"]
+        and i["project"]
+        and not i["local_source"]
+        and not Path(i["project"]).is_relative_to(here)  # this repo's own worktrees
+        and _older(i["version"], data["latest"])
+    ]
+    top = most_specific(installs, "sdlc")
+    if top and not top["local_source"] and SEMVER_RE.match(running or ""):
+        report["restart_first"] = _older(running, top["version"])
+    stale = _stale(installs, data["latest"])
+    if stale:
+        report["steps"] = [
+            f"claude plugin marketplace update {UPDATE_MARKETPLACE}",
+            *(f"claude plugin update {i['plugin']}@{UPDATE_MARKETPLACE} --scope {i['scope']}"
+              for i in stale),
+            "restart Claude Code",
+            "/sdlc:setup",
+            "commit what setup names",
+        ]  # fmt: skip
+    return report
+
+
+def hook_line(root: Path, home: Path) -> str | None:
+    """The hook's line, or None: nothing checked in place or outside a repo."""
+    if in_place() or _ledger_dir(root) is None:
+        return None
+    return update_line(plugin_version(), check_update(root, home, fresh=False))
+
+
+def cmd_update(root: Path, home: Path, mode: str | None) -> int:
+    """`--hook`: the SessionStart hook's one line as `{"systemMessage": …}`, or nothing, always
+    exit 0, a broken check included. `--installed`: setup's restart check. No flag: the steps."""
+    if mode == "hook":
+        try:
+            line = hook_line(root, home)
+        except Exception:  # the hook only advises: a broken check says nothing at session start
+            return 0
+        if line:
+            print(json.dumps({"systemMessage": line}, ensure_ascii=False))
+        return 0
+    found = installed_check(home) if mode == "installed" else update_report(root, home)
+    print(json.dumps(found, indent=2, ensure_ascii=False))
+    return 0
+
+
+@command(
+    "update",
+    "whether a newer release is out, and this host's steps to take it, as JSON",
+    exclusive(
+        arg(
+            "--hook", action="store_true", help="the SessionStart hook's line, from the day's check"
+        ),
+        arg("--installed", action="store_true", help="whether to restart before setup; no network"),
+    ),
+)
+def cli_update(root: Path, home: Path, args) -> int:
+    return cmd_update(root, home, "hook" if args.hook else "installed" if args.installed else None)
+
+
 def _tracked(home: Path, rel: str) -> list[str]:
     return [p for p in (_git(home, "ls-files", "--", rel) or "").splitlines() if p]
 
@@ -9811,6 +10160,8 @@ def print_status(a: dict) -> None:
     # `vet --strict` refuses on a problem, and a plugin update mustn't fail every host's.
     if a.get("setup"):
         print(f"\n■ Setup: {a['setup']}")
+    if a.get("update"):
+        print(f"\n■ Update: {a['update']}")
     if up := a.get("unpushed"):
         print(f"\n■ Unpushed: {unpushed_line(up)}  /sdlc:publish")
     if nudge := a.get("cases_nudge"):
@@ -9924,6 +10275,7 @@ def cli_status(root: Path, home: Path, args) -> int:
     bugs = [b for b in bug_entries(home, words)[0] if b["id"] not in fixing]
     a["bugs"] = bugs_summary(bugs, words, date.fromisoformat(a["today"]))
     a["setup"] = setup_nudge(root)
+    a["update"] = update_nudge(root)
     print_status(a)
     return 0
 

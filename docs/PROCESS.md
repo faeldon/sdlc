@@ -16,7 +16,9 @@ of building, by hand or by the factory, ends at the same ship and close. `/sdlc:
 
 ```mermaid
 flowchart TD
-  setup["/sdlc:setup, once a repo<br/>calls: config, readiness, drift, record, reset, vet<br/>writes: .sdlc/config.toml, the process and review docs"]
+  update["/sdlc:update, when a session says a release is out<br/>calls: config, update<br/>runs: claude plugin update, per install"] --> wupdate["WAIT: /sdlc:update"]
+  wupdate -->|restart Claude Code| setup
+  setup["/sdlc:setup, once a repo<br/>calls: config, readiness, drift, update --installed, record, reset, vet<br/>writes: .sdlc/config.toml, the process and review docs"]
   setup --> wsetup["WAIT: /sdlc:setup"]
   uninstall["/sdlc:uninstall<br/>calls: config, uninstall<br/>removes what setup wrote"] --> wuninstall["WAIT: /sdlc:uninstall"]
   seeds["inbox.md: seeds"] --> intent

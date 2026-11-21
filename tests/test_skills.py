@@ -75,6 +75,7 @@ GATED = {
             "bug",
             "triage",
             "idea",
+            "update",
         )  # fmt: skip
     ),
     "sdlc-factory:spec",
@@ -128,6 +129,7 @@ READS_CONFIG = {
         "git.base",
     ],
     "sdlc:drop": ["archive.target", "git.base"],
+    "sdlc:update": ["factory.enabled"],
     "sdlc:uninstall": ["archive.target", "docs.policy", "docs.context"],
     "sdlc:release": [
         "release.version_files",
@@ -196,7 +198,7 @@ READS_CONFIG = {
 def test_skills_were_found() -> None:
     """A glob that matches nothing makes every test below vacuously pass."""
     names = {"intent", "spec", "ship", "close", "status", "health", "setup", "release"}
-    more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea", "dashboard"}
+    more = {"publish", "retro", "drop", "uninstall", "bug", "triage", "idea", "dashboard", "update"}
     assert {f"sdlc:{n}" for n in names | more} | {
         "sdlc-factory:spec", "sdlc-factory:build", "sdlc-factory:eval", "sdlc-factory:review",
         "sdlc-factory:land", "sdlc-factory:decide",
@@ -925,6 +927,43 @@ def test_setup_stops_when_readiness_says_complete() -> None:
     assert set(drafts) == {"1", "2", "3"}, "Steps 1 to 3 are the drafts'"
 
 
+def test_setup_refuses_a_stale_session_and_names_the_commit() -> None:
+    """206 R12: Step 0 asks whether this session runs an older copy than is installed, and stops
+    with `restart first`; the complete stop and the report give the commit for `uncommitted`."""
+    steps = _steps("setup")
+    step0 = " ".join(steps["0"].split())
+    assert "sdlc.py update --installed" in step0
+    assert "restart first: this session runs <running>, <installed> is installed" in step0
+    assert "`restart_first`" in step0 and "`uncommitted`" in step0
+    step6 = " ".join(steps["6"].split())
+    assert "`uncommitted`" in step6
+    assert (
+        'git add <uncommitted> && git commit -m "Refresh the sdlc setup for <plugin version>"'
+        in (step6)
+    )
+
+
+def test_update_runs_only_the_claude_plugin_commands_behind_its_wait() -> None:
+    """206 R11: the steps come from the script; each `claude plugin` command runs from the main
+    checkout, after the WAIT, and the skill neither commits nor pushes."""
+    text = BY_ID["sdlc:update"].read_text(encoding="utf-8")
+    steps = _steps("update")
+    assert "sdlc.py update" in steps["0"] and "sdlc.py config" in steps["0"]
+    assert "`in_place`" in steps["0"] and "`steps`" in steps["0"]
+    flat = " ".join(_wait_section("sdlc:update").split())
+    assert "`Run these claude plugin commands: <commands>? (yes / no)`" in flat
+    commands = _block_commands(text)
+    assert [c for c in commands if c.startswith("claude ")] == [
+        "claude plugin marketplace update sdlc",
+        "claude plugin update sdlc@sdlc --scope <scope>",
+        "claude plugin update sdlc-factory@sdlc --scope <scope>",
+    ]
+    assert not any(c.startswith(("git commit", "git push")) for c in commands)
+    before, after = re.split(r"(?m)^## Step \d+ — WAIT.*$", text, maxsplit=1)
+    assert not [c for c in _block_commands(before) if c.startswith("claude ")], "none before it"
+    assert "restart Claude Code" in after and "/sdlc:setup" in after
+
+
 def test_setup_s_wait_stays_in_its_skill_and_asks_as_before() -> None:
     """R6: the drafts moved, the gate didn't: same question, same place, the write after it."""
     steps = _steps("setup")
@@ -1125,6 +1164,9 @@ def _manifest(root: Path) -> dict:
     return json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
 
 
+UPDATE_HOOK = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py update --hook'
+
+
 def test_sdlc_loads_nothing_from_plugins() -> None:
     """`sdlc`'s source is the repo root, so `plugins/factory/` travels in its cached copy. It stays
     unread only while `sdlc` keeps its default scans: skills from `skills/`, and agents from
@@ -1135,7 +1177,28 @@ def test_sdlc_loads_nothing_from_plugins() -> None:
         f"{name}.md" for name in ("reviewer", "insight", *SHIP_AGENTS)
     }
     assert not (ROOT / "commands").exists()
-    assert not (ROOT / "hooks").exists()
+    # One hook, the update check's (206): advisory, at a session's start, running sdlc's script.
+    assert {p.name for p in (ROOT / "hooks").iterdir()} == {"hooks.json"}
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    assert hooks == {
+        "description": hooks.get("description"),
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": UPDATE_HOOK,
+                            "timeout": hooks["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    assert isinstance(hooks["description"], str) and hooks["description"]
+    assert 0 < hooks["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] <= 30
 
 
 def test_the_factory_depends_on_sdlc_and_shares_its_version() -> None:

@@ -1,0 +1,17 @@
+{
+  "description": "Says once, at a session's start, when a newer sdlc release is out than this repo runs. Advisory: it updates nothing, checks the network at most once a day, and prints nothing when it can't tell.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --script \"${CLAUDE_PLUGIN_ROOT}\"/scripts/sdlc.py update --hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

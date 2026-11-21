@@ -1,0 +1,91 @@
+{
+  "printed_by": "Claude Code 2.1.311, `claude plugin list --json`",
+  "note": "The rows' shape as recorded, with neutral paths: @HOME@ is the person's home, @REPO@ the host repo's main checkout, @OTHER@ another repo on the machine. Read by tests/test_update.py.",
+  "rows": [
+    {
+      "id": "sdlc@sdlc",
+      "version": "1.10.0",
+      "scope": "user",
+      "enabled": true,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc/1.10.0",
+      "installedAt": "2026-11-17T06:39:37.821Z",
+      "lastUpdated": "2026-11-17T06:39:37.821Z",
+      "projectEnabled": false
+    },
+    {
+      "id": "sdlc@sdlc",
+      "version": "1.10.0",
+      "scope": "project",
+      "enabled": true,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc/1.10.0",
+      "installedAt": "2026-11-17T06:39:37.821Z",
+      "lastUpdated": "2026-11-17T06:39:37.821Z",
+      "projectPath": "@REPO@",
+      "projectEnabled": true
+    },
+    {
+      "id": "sdlc-factory@sdlc",
+      "version": "1.10.0",
+      "scope": "project",
+      "enabled": true,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc-factory/1.10.0",
+      "installedAt": "2026-11-17T06:39:37.084Z",
+      "lastUpdated": "2026-11-17T06:39:37.084Z",
+      "projectPath": "@REPO@",
+      "projectEnabled": true
+    },
+    {
+      "id": "sdlc@sdlc",
+      "version": "1.8.0",
+      "scope": "project",
+      "enabled": false,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc/1.8.0",
+      "installedAt": "2026-11-17T03:47:48.524Z",
+      "lastUpdated": "2026-11-17T03:47:48.524Z",
+      "projectPath": "@REPO@/.claude/worktrees/012-reopen-drafts",
+      "projectEnabled": false
+    },
+    {
+      "id": "sdlc@sdlc",
+      "version": "1.9.0",
+      "scope": "project",
+      "enabled": false,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc/1.9.0",
+      "installedAt": "2026-11-12T03:47:48.524Z",
+      "lastUpdated": "2026-11-12T03:47:48.524Z",
+      "projectPath": "@OTHER@",
+      "projectEnabled": false
+    },
+    {
+      "id": "sdlc@sdlc",
+      "version": "1.9.0",
+      "scope": "local",
+      "enabled": false,
+      "installPath": "@HOME@/.claude/plugins/cache/sdlc/sdlc/1.9.0",
+      "readFromFolder": "@OTHER@/sdlc",
+      "installedAt": "2026-11-12T03:47:48.524Z",
+      "lastUpdated": "2026-11-12T03:47:48.524Z",
+      "projectPath": "@OTHER@",
+      "projectEnabled": false
+    },
+    {
+      "id": "publish@team-tools",
+      "version": "0.2.0",
+      "scope": "project",
+      "enabled": false,
+      "installPath": "@HOME@/.claude/plugins/cache/team-tools/publish/0.2.0",
+      "readFromFolder": "@OTHER@/plugins/publish",
+      "installedAt": "2026-10-23T12:43:53.938Z",
+      "lastUpdated": "2026-11-09T12:47:47.095Z",
+      "projectPath": "@REPO@",
+      "projectEnabled": false
+    },
+    {
+      "id": "notes@synced",
+      "version": "0.8.0",
+      "scope": "synced",
+      "enabled": true,
+      "installPath": "@HOME@/.claude/plugins/synced/notes"
+    }
+  ]
+}
