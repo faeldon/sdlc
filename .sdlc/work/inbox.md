@@ -389,21 +389,6 @@ Cost: S
 Value: low
 Raised by: 199-landing-records-unforgeable (correctness)
 
-## [2026-11-21-1] [idea] A host's /sdlc:bug files a bug in the plugin upstream
-
-A host's /sdlc:bug can file a bug in the plugin itself upstream, on the plugin's repo, behind a
-preview and one WAIT. The issue holds the person's own words (what happened, what they expected,
-how to see it), the failing plugin command with its exit and the refusal or error it printed (paths
-cut to repo-relative), and a diagnostic block: sdlc and sdlc-factory versions and install scope,
-Claude Code, OS and uv versions, and the names of the config keys set, never their values. It sends
-no Sdlc-* numbers, titles, branch names or file contents. It is filed through the GitHub tracker
-under the person's own gh login. Its send path, allowlist renderer, preview-then-WAIT and an opaque
-host id are meant to be reused later by an opt-in usage report, not yet filed. Found while using the
-plugin in a host.
-
-Theme: intake
-Raised 2026-11-21.
-
 ## [2026-11-21-2] [idea] Each WAIT shows its draft in the dialog's preview
 
 Every skill's WAIT shows the draft it approves inside its AskUserQuestion dialog, as the preview of
@@ -552,3 +537,43 @@ Paths: tests/test_setup_lifecycle.py
 Cost: S
 Value: low
 Raised by: 213-setup-nudge (correctness)
+
+## [2026-11-21-18] [nit] match `UPSTREAM_MARKER` only on the body's first line, as R12 describes it.
+
+Raised by the security review of 209-upstream-bugs, round 1: scripts/sdlc.py:7883: match `UPSTREAM_MARKER` only on the body's first line, as R12 describes it.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 209-upstream-bugs (contract)
+
+## [2026-11-21-19] [nit] the triage skill's `Origin: host` instruction has no text test
+
+Raised by the test review of 209-upstream-bugs, round 1: tests/test_skills.py: the triage skill's `Origin: host` instruction has no text test
+
+Theme: tests
+Paths: tests/test_skills.py
+Cost: S
+Value: low
+Raised by: 209-upstream-bugs (correctness)
+
+## [2026-11-21-20] [nit] also turn a dotless ssh-alias remote (`user@alias:path`) into `<remote>`
+
+Raised by the security review of 209-upstream-bugs, round 2: scripts/sdlc.py:9721: also turn a dotless ssh-alias remote (`user@alias:path`) into `<remote>`
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 209-upstream-bugs (contract)
+
+## [2026-11-21-21] [nit] `_SCP_RE` only matches a dotted host, so `git@localhost:x/y` is not cut, and no test names that boundary
+
+Raised by the test review of 209-upstream-bugs, round 2: tests/test_upstream.py:417: `_SCP_RE` only matches a dotted host, so `git@localhost:x/y` is not cut, and no test names that boundary
+
+Theme: robustness
+Paths: tests/test_upstream.py
+Cost: S
+Value: low
+Raised by: 209-upstream-bugs (correctness)
