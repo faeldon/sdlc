@@ -1543,11 +1543,12 @@ def _committed_step(root: Path, name: str) -> dict:
 
 
 @needs_uv
-@pytest.mark.parametrize("record", ["gate", "build"])
-def test_train_run_stops_on_a_hand_written_record(tmp_path, capsys, monkeypatch, record) -> None:
+@pytest.mark.parametrize("record, n", [("gate", 2), ("build", 2), ("gate", 1)],
+                         ids=["gate", "build", "gate-of-one"])  # fmt: skip
+def test_train_run_stops_on_a_hand_written_record(tmp_path, capsys, monkeypatch, record, n) -> None:
     """199 R5: a green `build/land-1.gate.md` (or `.build.md`) written by hand on the tip's stacked
     commit is never copied into the train's state: `train --run` stops, naming it, and closes
-    nothing."""
+    nothing. 217 R4: a train of one too."""
     build = '\nbuild = "true"\n' if record == "build" else ""
     root = _repo(tmp_path, check="true")
     if build:
@@ -1555,13 +1556,13 @@ def test_train_run_stops_on_a_hand_written_record(tmp_path, capsys, monkeypatch,
             '[commands]\ncheck = "true"' + build, encoding="utf-8"
         )
         _git(root, "commit", "-qam", "build")
-    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")]
+    trees = [_ready(root, slug, {f"{slug}.txt": f"{slug}\n"}) for slug in ("aa", "bb")[:n]]
     fake_claude(tmp_path, monkeypatch)
     _begin(root, capsys)
     want = "build" if build else "gate"
     readings = drive_train(factory, root, capsys, until=lambda o: o.get("next") == want)
-    assert readings[-1]["next"] == want and readings[-1]["change"] == trees[1].name, readings[-1]
-    tip = trees[1]
+    assert readings[-1]["next"] == want and readings[-1]["change"] == trees[-1].name, readings[-1]
+    tip = trees[-1]
     stacked = readings[-1]["changes"][tip.name]["stacked"]
     path = _folder(tip) / "build" / f"land-1.{record}.md"
     path.parent.mkdir(exist_ok=True)
@@ -2842,3 +2843,105 @@ def test_a_build_rounds_gate_never_runs_the_build(tmp_path, capsys) -> None:
     code, out = _run(capsys, factory.cmd_gate, tree, "001")
     assert (code, out["verdict"]) == (0, "PASS"), out
     assert out["to"].endswith("build/round-1.gate.md"), out
+
+
+# ---------------------------------------------------------------- a train of one is gated (217)
+
+
+def _fresh_before_begin(root: Path, tree: Path) -> None:
+    """The base moves and the change's branch is brought onto it before the train begins, as
+    `factory.py fresh` leaves it: nothing of the change committed yet, so a fast-forward."""
+    _move(root, 1)
+    _git(tree, "merge", "-q", "--ff-only", "main")
+
+
+@needs_uv
+@pytest.mark.parametrize("moved", [False, True], ids=["still", "rebased"])
+def test_a_train_of_one_is_gated_at_its_tip(tmp_path, capsys, moved) -> None:
+    """217 R1: a one-change train whose stacked commit is its pre-train commit reads `gate`
+    (prefix 1 of 1) before it ever reads `close`: never touched since its build, or brought onto
+    a base that moved before `--begin`."""
+    root = _repo(tmp_path, check="true")
+    tree = _ready(root, "aa", {"aa.txt": "aa\n"})
+    if moved:
+        _fresh_before_begin(root, tree)
+    _begin(root, capsys)
+    readings = drive_train(factory, root, capsys, until=lambda o: o["next"] in ("gate", "close"))
+    last = readings[-1]
+    assert (last["next"], last["change"]) == ("gate", tree.name), [r["next"] for r in readings]
+    assert (last["prefix"], last["of"]) == (1, 1), last
+    stacked = last["changes"][tree.name]
+    assert stacked["stacked"] == stacked["pre"], "it never moved in the train"
+
+
+FORBIDDEN = "! git ls-files | grep -qx forbidden.txt"
+
+
+@needs_uv
+def test_a_train_of_one_whose_commit_fails_the_check_is_ejected(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """217 R2: a check that reads `git ls-files` passes on the build's uncommitted tree, where the
+    change's new file is untracked, and fails once `land` commits it. `train --run` ejects the
+    change with cause `gate`, the base branch's tip unmoved and nothing closed; the change's
+    branch stays at its landing commit, the red gate file and its ejection row amended in."""
+    root = _repo(tmp_path, check=FORBIDDEN)
+    tree = _ready(root, "aa", {"forbidden.txt": "the change\n"})
+    code, out = _run(capsys, factory.cmd_gate, tree, "001")
+    assert (code, out["verdict"]) == (0, "PASS"), "the build's gate never sees an untracked file"
+    base = _git(root, "rev-parse", "main")
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done"), out["landed"]) == (0, True, []), out
+    [ejected] = out["ejected"]
+    assert (ejected["change"], ejected["cause"]) == (tree.name, "gate"), ejected
+    assert f"{tree.name}/build/land-1.gate.md" in ejected["reason"], ejected
+    assert "exit 1" in ejected["reason"], ejected
+    assert _git(root, "rev-parse", "main") == base, "the base branch never moved"
+    assert not [s for s in _first_parent(root) if s.startswith("Close ")], "nothing closed"
+    assert out["undos"] == [{"change": tree.name, "undo": None}], out["undos"]
+    assert _git(tree, "status", "--porcelain") == "", "its records are in its commit"
+    assert _git(tree, "rev-parse", "HEAD^") == base, "still its landing commit, on its old base"
+    assert "Sdlc-Landed: by=auto" in _git(tree, "log", "-1", "--format=%B")
+    rel = f".sdlc/work/{tree.name}"
+    assert _git(tree, "show", f"HEAD:{rel}/build/land-1.gate.md").startswith("GATE: FAIL")
+    rows = [json.loads(x) for x in _git(tree, "show", f"HEAD:{rel}/runs/ejections.jsonl")
+            .splitlines()]  # fmt: skip
+    assert [r["cause"] for r in rows] == ["gate"], rows
+
+
+@needs_uv
+def test_a_green_train_of_one_records_its_tip_gate(tmp_path, capsys, monkeypatch) -> None:
+    """217 R3: a one-change `train --run` on a base whose check passes ends `done` with one gate,
+    `ungated` null, and the change's own commit holds `build/land-1.gate.md` (PASS) and a
+    `TIP GATE: PASS` line in `runs/land-train.md`."""
+    root = _repo(tmp_path, check="true")
+    tree = _ready(root, "aa", {"aa.txt": "aa\n"})
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, out, err = _loop(root, capsys)
+    assert (code, out.get("done"), out["landed"]) == (0, True, [tree.name]), out
+    assert (out["gates"], out["ungated"]) == (1, None), out
+    assert f"train: gate {tree.name}" in err, err
+    own = _closes(root)[tree.name]
+    rel = f".sdlc/work/{tree.name}"
+    assert _git(root, "show", f"{own}:{rel}/build/land-1.gate.md").startswith("GATE: PASS")
+    record = _git(root, "show", f"{own}:{rel}/runs/land-train.md").splitlines()
+    assert any(ln.startswith("TIP GATE: PASS ") for ln in record), record
+
+
+@needs_uv
+def test_a_landing_with_no_check_says_it_ran_no_gate(tmp_path, capsys, monkeypatch) -> None:
+    """217 R6: on a base branch with no `[commands] check`, a one-change landing ends `done` with
+    no gate, and `ungated` says so and why; a reading says the same while it runs."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "aa", {"aa.txt": "aa\n"})
+    fake_claude(tmp_path, monkeypatch)
+    _begin(root, capsys)
+    code, reading = _run(capsys, factory.landing.cmd_train, root)
+    why = "main's .sdlc/config.toml names no [commands] check"
+    assert reading["ungated"] == why, reading
+    code, out, _ = _loop(root, capsys)
+    assert (code, out.get("done"), out["landed"]) == (0, True, [tree.name]), out
+    assert (out["gates"], out["ungated"]) == (0, why), out

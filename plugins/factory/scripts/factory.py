@@ -3437,8 +3437,9 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         return emit({"refusals": [why]}, 1)
     if land:
         n = land_round(folder)
-        # In a train, bisection may gate a change that never moved and so opened no round: its
-        # record goes where round 1's would.
+        # In a train, a change that never moved opened no round, and is gated all the same: at
+        # the tip of a train of one, or at a bisected prefix. Its record goes where round 1's
+        # would.
         if n == 0 and landing.train_names(root, folder) is not None:
             n = 1
         if n == 0:

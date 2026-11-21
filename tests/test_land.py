@@ -704,6 +704,40 @@ def test_the_landing_question_names_only_what_the_batch_holds() -> None:
     )
     assert "its assumed decisions confirmed as shown," in decided and "undone" not in decided
     assert "recover" not in decided
+    # 217 R7: on a base with no check, the question says the tip isn't gated, and why.
+    ungated = factory.landing.land_question([_entry("001-a")], "main", gated=False)
+    assert ungated == (
+        "Land 1 change in this order, 001-a, each shipped with its approver's impact, "
+        "committed, stacked in this order on main, not gated, since main names no [commands] "
+        "check (a conflict resolved by one landing agent and reviewed again), brought up to date "
+        "as often as main moves while landing, up to 3 times, and closed in order, pushed as "
+        "git.push says? (yes / yes, with a fix / leave one out / no)"
+    )
+    assert factory.landing.land_question([_entry("001-a")], "main", gated=True) == (
+        factory.landing.land_question([_entry("001-a")], "main")
+    ), "gated by default"
+
+
+@needs_uv
+@pytest.mark.parametrize("check", [None, "true"], ids=["no-check", "check"])
+def test_land_check_words_an_ungated_question(tmp_path, capsys, check) -> None:
+    """217 R7: `land-check` asks the ungated question only when the base branch names no
+    `[commands] check`, read from the base branch, never the checkout."""
+    root = _repo(tmp_path)
+    if check:
+        _config(root, f'[commands]\ncheck = "{check}"\n')
+    tree = _ready(root, "lone", "lone's one")
+    if not check:
+        # The change's own copy names a check: it never stands in for the base branch's.
+        (tree / ".sdlc").mkdir(exist_ok=True)
+        (tree / ".sdlc" / "config.toml").write_text('[commands]\ncheck = "true"\n', "utf-8")
+    code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
+    assert code == 0 and batch["question"], batch
+    if check:
+        assert "gated once at the tip" in batch["question"], batch["question"]
+    else:
+        assert "not gated, since main names no [commands] check" in batch["question"]
+        assert "gated once at the tip" not in batch["question"]
 
 
 INTENT = """---

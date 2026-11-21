@@ -633,7 +633,9 @@ def _cases_signals(cases: dict) -> list[str]:
     return out
 
 
-def land_question(batch: list[dict], base: str, moves: int | None = None) -> str:
+def land_question(
+    batch: list[dict], base: str, moves: int | None = None, gated: bool = True
+) -> str:
     """The batch's question, worded here so the skill never words its own: a clause for the checks
     (run as shown, and again as stacked), the cases, the base branch's build at the tip (a change
     whose `build` is true, `build_due()`), for failed or skipped cases approved as shown, for the
@@ -643,7 +645,8 @@ def land_question(batch: list[dict], base: str, moves: int | None = None) -> str
     tip, a red tip bisected and the change at fault left out, a conflict resolved by one landing
     agent and reviewed again, closed in order); the most times it follows `base` moving
     (`land.moves`, the default's when none is given); and its four answers, `yes, with a fix`
-    among them."""
+    among them. Without `gated` (a base branch naming no `[commands] check`), it says the tip is
+    not gated, and why, in place of the gate's clause (217 R7)."""
     if moves is None:
         moves = factory.DEFAULTS["land"]["moves"]
     n = len(batch)
@@ -676,11 +679,17 @@ def land_question(batch: list[dict], base: str, moves: int | None = None) -> str
         parts.append("its agents' nits filed as shown")
     if any(c["recover"] for c in batch):
         parts.append("with how to recover shown")
+    resolved = "a conflict resolved by one landing agent and reviewed again"
+    gate = (
+        "gated once at the tip (a red tip bisected, the change at fault left out with why and "
+        f"the rest landed; {resolved})"
+        if gated
+        else f"not gated, since {base} names no [commands] check ({resolved})"
+    )
     return (
         f"Land {n} change{'s' if n != 1 else ''} in this order, {names}, {', '.join(parts)}, "
-        f"committed, stacked in this order on {base}, gated once at the tip (a red tip bisected, "
-        "the change at fault left out with why and the rest landed; a conflict resolved by one "
-        f"landing agent and reviewed again), brought up to date as often as {base} moves while "
+        f"committed, stacked in this order on {base}, {gate}, "
+        f"brought up to date as often as {base} moves while "
         f"landing, up to {moves} times, and closed in order, pushed as git.push says? "
         "(yes / yes, with a fix / leave one out / no)"
     )
@@ -724,8 +733,10 @@ def cmd_land_check(root: Path, idents: list[str]) -> int:
         else:
             batch.append(entry)
     clear = bool(batch) and not any(c["signals"] for c in batch)
-    base = factory._base(root) or "the base branch"
-    question = land_question(batch, base, cfg["land"]["moves"]) if batch else None
+    trunk = factory._base(root)
+    base = trunk or "the base branch"
+    gated = bool(trunk) and factory._base_check(root, trunk) is not None
+    question = land_question(batch, base, cfg["land"]["moves"], gated) if batch else None
     return factory.emit({
         "batch": batch, "excluded": left_out, "over_limit": over, "clear": clear,
         "question": question, "shown": land_shown(batch) if batch else None,
@@ -1286,7 +1297,7 @@ def cmd_land(root: Path, ident: str, by: str) -> int:
         return factory.emit({**out, "refusals": [ready_["refusal"]]}, 1)
     meta, impact, pre, unreviewed = (ready_[k] for k in ("meta", "impact", "pre", "unreviewed"))
     # Before anything is committed, every gate, build and accept record in the folder is one the
-    # script wrote (199): a train of one that never moved lands on its round's gate alone.
+    # script wrote (199); the train then gates the commit made here, a train of one included.
     landing_ = meta.get("stage") == "test" or _commit_failed(root, folder)
     if landing_ and (forged := forged_records(root, folder)):
         why = (f"{', '.join(forged)} isn't a record the script wrote: remove it and run its gate "
@@ -2060,7 +2071,7 @@ def _train_reading(main: Path, cfg: dict, state: dict) -> int:
         "ejected": [{"change": e["change"], "reason": e["reason"],
                      "cause": e.get("cause") or "refusal"} for e in state["ejections"]],
         "moves": state["moves"], "limit": cfg["land"]["moves"], "gates": len(state["gates"]),
-        "problems": [],
+        "ungated": _ungated(main, base), "problems": [],
     }  # fmt: skip
 
     def done(step: str, name: str | None = None, **more) -> int:
@@ -2189,6 +2200,14 @@ def _train_waits(state: dict, trees: dict[str, Path], name: str) -> None:
         factory._record_land(tree, folder, "wait", waits=f"{verb} {live[i - 1]}")
 
 
+def _ungated(main: Path, base: str) -> str | None:
+    """Why the train gates nothing, or None while the base branch names a `[commands] check`
+    (217 R6): read from the base branch each time, never stored in the train's state."""
+    if factory._base_check(main, base) is not None:
+        return None
+    return f"{base}'s .sdlc/config.toml names no [commands] check"
+
+
 def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> dict | None:
     """The gate's step, or None when the tip is green or no gate is due: `gate` at the tip (no
     attempt on the stack as it stands), `gate` at a bisected prefix, `eject` of the change at
@@ -2201,9 +2220,8 @@ def _train_gate(main: Path, cfg: dict, state: dict, trees: dict[str, Path]) -> d
         return None
     live = train_live(state)
     m = len(live)
-    tip = state["changes"][live[-1]]
-    if m == 1 and tip.get("stacked") == tip.get("pre"):
-        return None  # a train of one that never moved: gated as its build was
+    # A train of one is gated too, even one that never moved (217): its build's gate ran on the
+    # uncommitted tree, perhaps on an older base, never on the commit that lands.
     if forged := _read_gates(main, state, trees):
         return {"next": "stop", "reason": _forged_reason(forged)}
     verdicts: dict[int, dict] = {}
@@ -2671,19 +2689,22 @@ def _clearance_now(main: Path, reading: dict) -> dict:
 
 def _run_end(main: Path, reading: dict, undos: list[dict], stopped: dict | None = None) -> int:
     """The loop's exit JSON: the train as it now stands (`landed`, `live`, `moves`, `gates`,
-    `ejected` with each one's `reason` and `cause`), the undo of each ejection it made, and `done`
-    or `stopped`. A stop that names a change is recorded in its `runs/land-step.md` (R2), with
-    its reason and the way on, unless the command that failed recorded its own."""
+    `ungated`, `ejected` with each one's `reason` and `cause`), the undo of each ejection it
+    made, and `done` or `stopped`. A stop that names a change is recorded in its
+    `runs/land-step.md` (R2), with its reason and the way on, unless the command that failed
+    recorded its own."""
     state = factory.read_train(main)
     if state is not None:
         summary = {
             "landed": [n for n in state["order"] if state["changes"][n].get("landed")],
             "live": train_live(state), "moves": state["moves"], "gates": len(state["gates"]),
+            "ungated": _ungated(main, state["base"]),
             "ejected": [{"change": e["change"], "reason": e["reason"],
                          "cause": e.get("cause") or "refusal"} for e in state["ejections"]],
         }  # fmt: skip
     else:
-        summary = {k: reading.get(k) for k in ("landed", "live", "moves", "gates", "ejected")}
+        keys = ("landed", "live", "moves", "gates", "ungated", "ejected")
+        summary = {k: reading.get(k) for k in keys}
     out = {**summary, "undos": undos}
     if stopped is None:
         return factory.emit({**out, "done": True})

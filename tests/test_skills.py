@@ -1779,6 +1779,16 @@ def test_land_runs_the_train_unattended() -> None:
             assert word in text, (doc.name, word)
 
 
+def test_land_reports_an_ungated_landing() -> None:
+    """217 R8: Step 3 names the loop's `ungated` key, and Step 4 reports it, in the script's
+    words, beside how many times the tip was gated."""
+    land = frontmatter.load(BY_ID["sdlc-factory:land"]).content
+    step3 = " ".join(land.split("## Step 3")[1].split("## Step 4")[0].split())
+    step4 = " ".join(land.split("## Step 4")[1].split("## Out of scope")[0].split())
+    assert "`gates`, `ungated`" in step3, "the loop's JSON keys"
+    assert "`ungated`" in step4 and "how many times the tip was gated" in step4, step4
+
+
 def test_the_build_session_brings_the_persons_decisions_to_them() -> None:
     """Agents can't talk to the person; the build session can. A blocking decision stops the loop
     (`next: decide`) and is asked, never answered by the session itself; ship and the approver read

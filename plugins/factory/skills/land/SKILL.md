@@ -221,7 +221,8 @@ commands, and only one loop runs at a time (the run lock). The steps:
   run's depth, and **a change in a batch that passed itself closes only once that review
   passes**.
 - **`gate`**: `gate <NNN> --land`, the base branch's `[commands] check`, once at the stack's tip,
-  before any reviewer reads any change, recorded in `.sdlc/work/NNN-slug/build/land-<n>.gate.md`.
+  a train of one included, on the commit that lands, before any reviewer reads any change,
+  recorded in `.sdlc/work/NNN-slug/build/land-<n>.gate.md`.
   A red tip is bisected by prefix, at most ⌈log₂ n⌉ more gates, until the change at fault is
   found.
 - **`build`**: `gate <NNN> --land --build`, the base branch's `[commands] build`, once at the
@@ -275,8 +276,9 @@ the yes, and the read-only list or the approver didn't clear it: the reason says
 command that refuses or an agent session that fails, a cancel, or the same step named twice with
 nothing changed.
 
-**When the harness says the loop has exited**, read its JSON: `landed`, `live`, `moves`, `gates`,
-`ejected` (each with its `reason` and `cause`), the `undos` of the ejections it made (one
+**When the harness says the loop has exited**, read its JSON: `landed`, `live`, `moves`,
+`gates`, `ungated` (why no gate ran, when the base branch names no `[commands] check`; null
+otherwise), `ejected` (each with its `reason` and `cause`), the `undos` of the ejections it made (one
 whose record couldn't be written with its `problems`: say each), and either
 `done: true` (go to Step 4) or `stopped`, with its `next`, `change`, `cause`, `reason` and
 `way_on`, each worded by the script. Report a stop as it words it: the change, why, and the way
@@ -314,7 +316,7 @@ Then `train --run` with `run_in_background`, as above.
 ## Step 4 — Report and stop
 
 Say whether the WAIT approved itself or the person approved it, how many times the tip was gated
-and the base branch moved. Then each change: landed (its `Close` commit and where it was
+and the base branch moved. When `ungated` is set, say that no gate ran and why, in its words. Then each change: landed (its `Close` commit and where it was
 archived), ejected (why, in the script's words; whether the loop made it on a gate fault, its
 `cause` `gate`, with its undo, or the person resumed past it; and what the person does next:
 `/sdlc-factory:land NNN` once fixed, or `/sdlc:ship NNN` from its worktree), put back by a stop,
