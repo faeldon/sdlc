@@ -769,3 +769,26 @@ autopilot's queue orders parked changes against new ones.
 
 Theme: factory
 Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/run_state.py, plugins/factory/skills/build/SKILL.md, plugins/factory/skills/autopilot/, docs/REFERENCE.md
+
+## [2026-11-21-46] [bug] `ask` reads a reviewer's assumed default as built, and says ship
+
+`factory.py ask NNN --answered <ids>` says `next: ship` whenever every answer is
+`the assumed default, confirmed` (`cmd_ask()`, `KEPT_ANSWER`). But a reviewer's
+`- DECISION:` line also carries a default ("Assuming yes"), and a reviewer
+doesn't build. Confirming a reviewer's default is a choice of something the build
+may not do, so `ship` sends a change to the landing without it. It should say
+`rebuild` (or name the lines) when a confirmed default was raised by a role that
+doesn't edit (any reviewer, the approver), unless a later builder report says it
+built it.
+
+How to see it: on 216-autopilot, the security reviewer raised D8 ("Should the
+default `[autopilot] guards` also include `[review] sensitive`? Assuming yes")
+and D9 (seeds with an `Issue:` line only when named in `--seeds`), and D10
+(document the marker's limit). None was built. `/sdlc-factory:decide 216`
+recorded all three as the assumed default, confirmed, and
+`ask 216 --answered …,D8,D9,D10` printed `next: ship`. Only the supervisor
+reading the code caught it, and the change was sent back with `/sdlc-factory:build`.
+
+Severity: high
+Paths: plugins/factory/scripts/factory.py
+Theme: factory
