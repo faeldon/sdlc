@@ -8,6 +8,8 @@ on a change branch with its folder, as `/sdlc:intent` leaves one, so nothing her
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -554,6 +556,70 @@ def test_ready_with_an_uncarried_default_is_mended(tmp_path, capsys, case) -> No
     why = {"unlined": "no `- CONFIRM:`", "escalated": "ESCALATED",
            "sensitive": "src/secret/key.py", "closes": "closes: [12]"}[case]  # fmt: skip
     assert "D1" in problem and why in problem, problem
+
+
+def _closes_rows(root: Path) -> list[dict]:
+    """The records ledger's `closes` rows."""
+    ledger = factory._slot_dir(root) / factory.RECORDS_LEDGER
+    lines = ledger.read_text(encoding="utf-8").splitlines() if ledger.is_file() else []
+    return [row for row in map(json.loads, lines) if "closes" in row]
+
+
+def _closing(root: Path, value: str | None) -> Path:
+    """Change 008's folder, its intent's `closes:` set to `value`, or taken out with None."""
+    intent = root / ".sdlc" / "work" / NAME / "intent.md"
+    text = re.sub(r"^closes:.*\n", "", intent.read_text(encoding="utf-8"), flags=re.M)
+    if value is not None:
+        text = text.replace("idea:", f"closes: {value}\nidea:")
+    intent.write_text(text, encoding="utf-8")
+    return intent.parent
+
+
+def test_closes_recorded_at_start_outlives_an_edit(tmp_path, capsys) -> None:
+    """219: `start` records the intent's `closes:` in the ledger once, and what the change closes
+    is the union of that and the working copy: a build that drops it still can't carry a
+    default with CONFIRM, nor land without the `issue` signal; one that adds an issue adds it."""
+    root = _change(tmp_path)
+    folder = _closing(root, "[12]")
+    assert _run(capsys, factory.cmd_start, root, "008", "build")[0] == 0
+    assert _closes_rows(root) == [{"change": NAME, "closes": "[12]"}]
+    assert _run(capsys, factory.cmd_start, root, "008", "build")[0] == 0
+    assert len(_closes_rows(root)) == 1, "once, not once a start"
+    _closing(root, None)
+    assert factory.intent_closes(folder) == "[12]"
+    assert "the change closes an issue (closes: [12])" in factory.no_confirm_why(
+        [], factory.intent_closes(folder)
+    )
+    cfg = factory.load_config(root)[0]
+    kinds: list[str] = []
+    signals, _ = factory.landing.land_signals(folder, root, "READY", cfg, pre={}, kinds=kinds)
+    assert "came from a public issue (closes:)" in signals and "issue" in kinds, signals
+    _closing(root, "[12, 15]")
+    assert factory.intent_closes(folder) == "[12, 15]", "the working copy's text, as today"
+    _closing(root, "[15]")
+    assert factory.intent_closes(folder) == "[12, 15]", "a build adds an issue, never drops one"
+
+
+def test_a_change_closing_nothing_records_nothing(tmp_path, capsys) -> None:
+    """219: no `closes:`, no ledger line, and nothing closed, as before."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    assert _run(capsys, factory.cmd_start, root, "008", "build")[0] == 0
+    assert _closes_rows(root) == [] and factory.intent_closes(folder) is None
+    cfg = factory.load_config(root)[0]
+    signals, _ = factory.landing.land_signals(folder, root, "READY", cfg, pre={})
+    assert "came from a public issue (closes:)" not in signals, signals
+
+
+def test_an_agent_run_records_closes_without_start(tmp_path, capsys, claude) -> None:
+    """219: autopilot never runs `start`, so an agent's run records `closes:` before it runs."""
+    root = _change(tmp_path)
+    folder = _closing(root, "[12]")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    assert _closes_rows(root) == [{"change": NAME, "closes": "[12]"}]
+    _closing(root, None)
+    assert factory.intent_closes(folder) == "[12]"
 
 
 def test_a_confirmed_default_on_a_plain_change_is_done(tmp_path, capsys) -> None:

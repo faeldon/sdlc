@@ -104,6 +104,7 @@ class Case:
         mp.setattr(factory, "load_config", lambda root: ({}, []))
         mp.setattr(factory, "named_nits", lambda root, folder, text=None: ["2026-11-03-2"])
         mp.setattr(factory, "read_ledger", lambda folder: self.ledger)
+        mp.setattr(factory, "recorded_closes", lambda folder: [])
         mp.setattr(factory, "preamble", lambda path: self.preamble)
         mp.setattr(factory.landing, "train_names", self._train_names)
         mp.setattr(factory, "deleted_sides", lambda root: [])

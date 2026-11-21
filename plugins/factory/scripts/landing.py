@@ -595,7 +595,8 @@ def land_signals(
             excluded.append(f"sdlc.py bugs couldn't be read: {said.strip()[-300:]}")
         else:
             excluded += [f"{why}: ship it by hand" for why in bad_bugs(undone, words)]
-    if (pre.get("closes") or {}).get("closes"):
+    # Preflight reads the branch's own intent; the ledger's record of it can't be edited out (219).
+    if (pre.get("closes") or {}).get("closes") or factory.intent_closes(folder):
         add("issue", "came from a public issue (closes:)")
     impact = read_impact(folder)
     if impact is None:

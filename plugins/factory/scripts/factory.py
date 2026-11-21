@@ -1236,6 +1236,12 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         out["question"] = build_question(out, check, _sensitive(root, base))
         spec = _upgraded_spec(root, folder) if out["upgraded"] else None
         out["preview"] = build_preview(out, check, spec)
+    if not out["refusals"]:
+        # What the change closes, fixed before any agent can edit its intent (219).
+        try:
+            record_closes(root, folder)
+        except OSError as e:
+            out["refusals"].append(f"couldn't record the intent's closes: in the ledger: {e}")
     return emit(out, 1 if out["refusals"] else 0)
 
 
@@ -2053,13 +2059,35 @@ def look_current(folder: Path, source: str, text: str) -> bool:
     return any(r["kind"] == "look" and r["text"] == text for r in escalation_reasons(folder))
 
 
-def intent_closes(folder: Path) -> str | None:
-    """The issues change `folder`'s `intent.md` says it closes (`closes:`), as text, never through
-    YAML; None when the key is absent or empty (`[]`)."""
+def _working_closes(folder: Path) -> str | None:
+    """The issues change `folder`'s `intent.md` says it closes (`closes:`) as it stands, as text,
+    never through YAML; None when the key is absent or empty (`[]`)."""
     path = folder / "intent.md"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     value = frontmatter(text).get("closes", "").strip()
     return None if value in ("", "[]") else value
+
+
+def _closes_items(value: str | None) -> list[str]:
+    """A `closes:` value's issues, as text: `[12, 15]` or `12, 15` gives `["12", "15"]`."""
+    inner = (value or "").strip().removeprefix("[").removesuffix("]")
+    return [item.strip() for item in inner.split(",") if item.strip()]
+
+
+def intent_closes(folder: Path) -> str | None:
+    """The issues change `folder` closes: the union of what the records ledger recorded of its
+    intent's `closes:` (`recorded_closes()`) and the working copy's, so a build can add an issue
+    and never drop one. The working copy's text when it holds every recorded issue (as before
+    219), else the union as `[a, b]`, recorded issues first; None when neither names one."""
+    value = _working_closes(folder)
+    working = _closes_items(value)
+    items: list[str] = []
+    for item in [i for r in recorded_closes(folder) for i in _closes_items(r)] + working:
+        if item not in items:
+            items.append(item)
+    if set(items) == set(working):
+        return value
+    return f"[{', '.join(items)}]"
 
 
 def no_confirm_why(sensitive: list[str], closes: str | None) -> list[str]:
@@ -3080,13 +3108,17 @@ def _ledger_line(change: str, record: str, text: str) -> str:
 
 
 def _vouch(root: Path, folder: Path, path: Path, text: str) -> None:
-    """Append the ledger's line for `text`, about to be written to `path` in change `folder`,
-    under an exclusive lock on `RECORDS_LOCK`, waited for up to `RECORDS_LOCK_WAIT` seconds.
+    """Append the ledger's line for `text`, about to be written to `path` in change `folder`.
     Raises OSError when it can't, so the caller writes no record the ledger doesn't hold."""
+    _append_ledger(root, _ledger_line(folder.name, path.relative_to(folder).as_posix(), text))
+
+
+def _append_ledger(root: Path, line: str) -> None:
+    """Append `line` to the records ledger under an exclusive lock on `RECORDS_LOCK`, waited for
+    up to `RECORDS_LOCK_WAIT` seconds. Raises OSError when it can't."""
     where = _slot_dir(root)
     if where is None:
         raise OSError("no git common dir to keep the records ledger in")
-    line = _ledger_line(folder.name, path.relative_to(folder).as_posix(), text)
     fd = os.open(where / RECORDS_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         start = time.monotonic()
@@ -3123,6 +3155,45 @@ def vouched(root: Path, folder: Path, path: Path) -> bool:
         except ValueError:
             continue
     return False
+
+
+# The ledger's other row: what a change's intent said it closes (`closes:`, as text) when a run
+# started on it, `{"change", "closes"}`. With no `record` or `sha256` it never vouches for a
+# record. Appended by `record_closes()` before any agent runs and never rewritten, so a build
+# that edits its own intent can add an issue to what the change closes, never drop one (219).
+# The factory's alone: core never reads it.
+
+
+def _closes_line(change: str, value: str) -> str:
+    """The ledger's line recording that change folder `change`'s intent closes `value`."""
+    return json.dumps({"change": change, "closes": value}) + "\n"
+
+
+def recorded_closes(folder: Path) -> list[str]:
+    """Every `closes:` value the ledger recorded for change `folder`, oldest first; [] without a
+    ledger. A line that won't parse is skipped."""
+    where = _slot_dir(folder)
+    try:
+        lines = (where / RECORDS_LEDGER).read_text(encoding="utf-8").splitlines() if where else []
+    except (OSError, UnicodeDecodeError):
+        return []
+    found = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("change") == folder.name and "closes" in row:
+            found.append(str(row["closes"]))
+    return found
+
+
+def record_closes(root: Path, folder: Path) -> None:
+    """Record change `folder`'s intent's `closes:` as it stands, unless it has none or the ledger
+    already holds that value. Raises OSError when the ledger can't be appended to."""
+    value = _working_closes(folder)
+    if value is not None and value not in recorded_closes(folder):
+        _append_ledger(root, _closes_line(folder.name, value))
 
 
 def _unvouched_refusal(root: Path, folder: Path, path: Path) -> str | None:
@@ -5023,6 +5094,11 @@ def cmd_agent(
     # Once nothing is left to refuse it, the landing's step this session takes.
     if task in LAND_TASK_STEP:
         _record_land(root, folder, LAND_TASK_STEP[task])
+    # Autopilot never runs `start`, so the first agent of a run records `closes:` (219).
+    try:
+        record_closes(root, folder)
+    except OSError as e:
+        return emit({"refusals": [f"couldn't record the intent's closes: in the ledger: {e}"]}, 1)
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     model = model_for(role, cfg, tier, state["depth"])

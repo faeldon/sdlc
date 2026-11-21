@@ -190,7 +190,10 @@ spec.
   hash to `sdlc-factory-records.jsonl` in the git common dir, beside the train's state. A record
   no line vouches for is never read as a verdict: `land` refuses the change, a landing round stops
   on it, the train stops before copying from it, a hand gate clears nothing, and `gate` and `accept`
-  refuse to add to it (remove it and run them again). The ledger protects against an agent's Edit
+  refuse to add to it (remove it and run them again). It also records the intent's `closes:` when
+  a run starts, before any agent runs, and what a change closes is that record and the intent's
+  `closes:` together: a build can add an issue to it, never drop one, so it can't lift the bar on
+  carrying a default or the landing's `issue` signal. The ledger protects against an agent's Edit
   and Write tools, which work in the change's worktree; it does not protect against a shell
   command that can reach the git common dir, which could append to the ledger itself.
 - **One gate at a time, by default.** Gates and `check` runs from every worktree share
