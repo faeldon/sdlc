@@ -43,6 +43,24 @@ COLOURS = {
 COMMENT_RE = re.compile(r"^<!-- sdlc:[^:]+:(\S+) -->$")
 # The lines `_closing()` and `archive()` write on a Close commit, read back by `closed_by()`.
 CLOSING_RE = re.compile(r"^Closes #(\d+)", re.M)
+# A workflow run's conclusions that make CI red: a clear failure, and a workflow that failed to
+# start. A cancelled, neutral or skipped run, or one awaiting approval, is not one. Core's copy is
+# `CI_FAILED`, pinned by `tests/test_base_ci.py`.
+CI_RED = ("failure", "timed_out", "startup_failure")
+CI_FIELDS = "databaseId,workflowName,status,conclusion,url,headSha"
+CI_LIMIT = 50
+
+
+def ci_state(runs: list[dict]) -> tuple[str, str | None]:
+    """(state, why) for a commit's workflow runs: `red` when a completed run concluded in
+    `CI_RED`, else `pending` while one hasn't completed, else `green`; `unknown`, with why, when
+    there are none. Pure, so it is tested on every platform."""
+    if not runs:
+        return "unknown", "no workflow run on this commit"
+    done = [r for r in runs if r.get("status") == "completed"]
+    if any(r.get("conclusion") in CI_RED for r in done):
+        return "red", None
+    return ("pending" if len(done) < len(runs) else "green"), None
 
 
 def _url(made: subprocess.CompletedProcess) -> str:
@@ -64,9 +82,16 @@ class Tracker:
 
     # ------------------------------------------------------------ plumbing
 
-    def _gh(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    def _gh(
+        self, *args: str, stdin: str | None = None, timeout: float | None = None
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["gh", *args], cwd=self.home, capture_output=True, encoding="utf-8", input=stdin
+            ["gh", *args],
+            cwd=self.home,
+            capture_output=True,
+            encoding="utf-8",
+            input=stdin,
+            timeout=timeout,
         )
 
     def unavailable(self) -> str | None:
@@ -80,6 +105,41 @@ class Tracker:
         if "github.com" not in (remotes.stdout if remotes.returncode == 0 else ""):
             return "no remote on github.com"
         return None
+
+    def ci(self, branch: str, sha: str, timeout: float) -> dict:
+        """CI on commit `sha` of `branch`: `{"state", "runs", "why"}`, each run `{name, status,
+        conclusion, url}`, by one `gh run list` given `timeout` seconds. Reads the network. A gh
+        that fails, hangs or prints no list is `unknown`, never red."""
+
+        def unknown(why: str) -> dict:
+            return {"state": "unknown", "runs": [], "why": why}
+
+        try:
+            out = self._gh(
+                "run", "list", "--commit", sha, "--branch", branch,
+                "--json", CI_FIELDS, "--limit", str(CI_LIMIT), timeout=timeout,
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            return unknown(f"gh run list timed out after {timeout:g}s")
+        except OSError as e:
+            return unknown(f"gh run list failed: {e}")
+        if out.returncode:
+            said = (out.stderr.strip().splitlines() or [""])[-1]
+            return unknown(f"gh run list exited {out.returncode}" + (f": {said}" if said else ""))
+        try:
+            rows = json.loads(out.stdout)
+        except ValueError:
+            rows = None
+        if not isinstance(rows, list):
+            return unknown("gh run list --json printed no list")
+        runs = [
+            {k: r.get(f) for k, f in (("name", "workflowName"), ("status", "status"),
+                                      ("conclusion", "conclusion"), ("url", "url"))}
+            for r in rows
+            if isinstance(r, dict) and r.get("headSha") == sha
+        ]  # fmt: skip
+        state, why = ci_state(runs)
+        return {"state": state, "runs": runs, "why": why}
 
     def readiness(self) -> list[tuple[str, str, str]]:
         authed = subprocess.run(["gh", "auth", "token"], capture_output=True).returncode == 0

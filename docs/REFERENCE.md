@@ -920,6 +920,17 @@ nothing needs `gh`. Only Tier 1 and 2 changes reach one: Tier 0 has no folder an
 - **`command`**: the repo's own command (`archive.command`) archives the folder at close. It has no
   live view.
 
+**CI on the base branch.** With `github`, CI on the base branch's tip, the commit its
+remote-tracking ref (`<release.remote>/<git.base>`) names, is read through the tracker: one
+`gh run list` for that commit's workflow runs. When a run on it concluded `failure`, `timed_out`
+or `startup_failure`, `/sdlc:status` names it under Problems, `origin/main: CI is red at <sha>
+(<workflows>): <run's link>`; ship's question adds `on a base whose CI is red at <sha> (<link>)`;
+and the factory's landing makes it a signal, so its gate never passes itself. Green, still
+running, cancelled, or a CI it couldn't read says nothing, and `vet` never reads it. The reading
+is cached in `sdlc-ci.json` in the git common dir, in no checkout: `status` reads again at most
+every ten minutes for the same tip, ship and a landing every minute, and the call is given ten
+seconds. With `command`, `none`, no tracking ref, or no workflows, nothing new is shown.
+
 Whatever `archive.target` says, `/sdlc:bug` in a host can file a bug in the plugin itself on the
 plugin's repo, the `repository` in the running plugin's manifest, through the GitHub tracker
 (`sdlc.py upstream`), under your own `gh` login. Nothing is sent unasked: the skill writes your

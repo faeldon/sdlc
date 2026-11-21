@@ -229,7 +229,15 @@ valid. `sdlc.py` loads it by path and calls `make(home, cfg)`, which returns an 
   "error"}` or `{"nothing": why}`. Never create anything;
 - `archive(change)`: the final mirror at close, read back: `(where, None)` or `(None, why)`;
 - `lookup(field)`: the values it has for `milestone`, `project` or `assignees`, as
-  `(values, None)` or `(None, why)`. Read-only.
+  `(values, None)` or `(None, why)`. Read-only;
+- `ci(branch, sha, timeout)`, optional: CI on commit `sha` of `branch`, reading the network within
+  `timeout` seconds, as `{"state", "runs", "why"}`. `state` is `red` (a completed run concluded
+  `failure`, `timed_out` or `startup_failure`, core's `CI_FAILED`), `pending` (none red, one not
+  completed), `green` (all completed, none red) or `unknown` (no runs, or it couldn't read them,
+  always with a `why`); never `red` for what it couldn't read. Each run is `{name, status,
+  conclusion, url}`. `base_ci()` calls it, for `status`, ship's `preflight` and its question, and
+  caches the reading in `sdlc-ci.json` in the git common dir (`CI_CACHE`). A tracker without it
+  reads no CI, and nothing new is shown.
 
 A tracker that reads the issues people file has `intake()`. The commands that read or mark issues
 go through `_intake_tracker()`, which refuses a tracker without it: `intake` (`intake()`,

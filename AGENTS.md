@@ -240,9 +240,11 @@ as the one). It only advises: one line or nothing, exit 0 always, never an updat
 the release's, else setup's (`setup_nudge()`). The check (`check_update()`) is one
 `git ls-remote` on the running manifest's `repository` and one `claude plugin list --json`
 (`plugin_installs()`, its one reader), at most once a day: the answer is cached in
-`sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache is the one write made with
-no WAIT outside the six above, since it is state like the main lock, not an artifact, and it
-dirties no checkout. `status` reads only the cache (`update_nudge()`); a copy read in place
+`sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache and the base branch's CI
+reading, `sdlc-ci.json` (`CI_CACHE`, `base_ci()`, which `status` and `preflight` write), are the
+two writes made with no WAIT outside the six above, since each is state like the main lock, not
+an artifact, and dirties no checkout. `status` reads only the update cache (`update_nudge()`),
+and reaches the tracker for CI at most once in `CI_EVERY` per tip; a copy read in place
 (`in_place()`, its root has `.git`) is never checked or told. `update` writes and reaches the
 network, so it is not in `READ_ONLY`. `/sdlc:update` runs the `claude plugin` steps the script
 lists behind its WAIT, and setup stops on `update --installed`'s `restart_first`.

@@ -3421,3 +3421,43 @@ def test_nothing_rewrites_decision_md(tmp_path, capsys) -> None:
         assert (folder / "decision.md").read_bytes() == shown, name
     card = {c["change"]: c for c in sdlc._load_board().state(root)["changes"]}[tree.name]
     assert card["decision"] == "ESCALATE" and "acknowledge D1" in card["needs"], card
+
+
+def _ci(state: str) -> dict:
+    red = state == "red"
+    return {"state": state, "branch": "main", "sha": "abcdef1234567890", "runs": [],
+            "failed": ["check"] if red else [], "url": "https://ci/1" if red else None,
+            "why": None if red else "no CI"}  # fmt: skip
+
+
+def test_a_red_base_is_a_signal(tmp_path, capsys, monkeypatch) -> None:
+    """R9: CI red on the base's tip is a signal on the change, so the batch isn't `clear` and the
+    gate is the person's."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "plain", "plain's one")
+    folder = tree / ".sdlc" / "work" / tree.name
+    cfg = factory.load_config(tree)[0]
+    pre, _ = factory.landing._preflight(folder, tree)
+    signals, _ = factory.landing.land_signals(folder, tree, "READY", cfg, pre | {"ci": _ci("red")})
+    assert "CI on main is red at abcdef1: https://ci/1" in signals, signals
+    _, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
+    assert batch["clear"] is True, "the same batch, its base not red"
+    real = factory.landing._preflight
+    monkeypatch.setattr(
+        factory.landing, "_preflight", lambda f, w: ((real(f, w)[0] or {}) | {"ci": _ci("red")}, "")
+    )
+    _, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
+    assert batch["clear"] is False, batch
+
+
+def test_an_unknown_base_is_no_signal(tmp_path) -> None:
+    root = _repo(tmp_path)
+    tree = _ready(root, "plain", "plain's one")
+    folder = tree / ".sdlc" / "work" / tree.name
+    cfg = factory.load_config(tree)[0]
+    pre, _ = factory.landing._preflight(folder, tree)
+    for state in ("unknown", "pending", "green"):
+        signals, _ = factory.landing.land_signals(
+            folder, tree, "READY", cfg, pre | {"ci": _ci(state)}
+        )
+        assert not any("CI on" in s for s in signals), (state, signals)

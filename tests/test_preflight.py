@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -753,3 +754,27 @@ def test_preflight_preview_and_question_are_refused_together(change, capsys) -> 
     root, _ = change
     code, out, err = _preview(root, capsys, "--preview", "--question")
     assert (code, out) == (1, "") and "--question and --preview" in err
+
+
+def test_preflight_reports_ci_and_never_refuses_on_it(change, capsys, gh) -> None:
+    """R7: the base's CI is a part of its own, read through the tracker with `CI_FRESH`; a red one
+    is never a problem and never changes the exit code."""
+    root, _ = change
+    _, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
+    assert out["ci"]["state"] == "unknown" and out["ci"]["why"], "no tracker, no tracking ref"
+    (root / ".sdlc" / "config.toml").write_text(
+        '[archive]\ntarget = "github"\n[git]\npush = []\n', encoding="utf-8"
+    )
+    _git(root, "remote", "add", "origin", "https://github.com/o/r.git")
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    sha = _git(root, "rev-parse", "main")
+    state = Path(os.environ["FAKE_GH_STATE"])
+    runs = [{"workflowName": "check", "status": "completed", "conclusion": "failure",
+             "url": "https://ci/1", "headSha": sha}]  # fmt: skip
+    state.write_text(json.dumps({"issues": [], "calls": [], "runs": runs}), encoding="utf-8")
+    code, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
+    assert out["ci"] == {"state": "red", "branch": "main", "sha": sha,
+                         "runs": [{"name": "check", "status": "completed",
+                                   "conclusion": "failure", "url": "https://ci/1"}],
+                         "failed": ["check"], "url": "https://ci/1", "why": None}  # fmt: skip
+    assert code == 0 and out["problems"] == [], "red CI never refuses"

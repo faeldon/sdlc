@@ -8081,7 +8081,9 @@ def cmd_preflight(root: Path, ident: str) -> int:
     items, the nits its diff touches, the issues it would close, its acceptance checks, the
     findings an earlier run of its review left, the sensitive and irreversible paths it touches,
     and the context docs its diff could have made wrong, each part as its own command gives it,
-    then `branches`, the files beside ship's skill that these call for. Writes nothing, so it is
+    then `branches`, the files beside ship's skill that these call for, and `ci`, CI on the base
+    branch's tip (`base_ci()`, with `CI_FRESH`, so a landing's preflights share one call), which
+    never adds a problem. Writes no artifact, only the CI cache in the git common dir, so it is
     allowed without a prompt. Exits 1 when a part reports problems, after printing every part."""
     path = _one_change(root, ident)
     if path is None:
@@ -8089,7 +8091,8 @@ def cmd_preflight(root: Path, ident: str) -> int:
     home = main_root(root)
     rec = load_change(path, home)
     checkout = checkout_of(path)
-    trunk = load_config(home)[0]["git"]["base"]
+    cfg = load_config(home)[0]
+    trunk = cfg["git"]["base"]
     parts = {
         "undone": _undone_report(root, path),
         "nits": _nits_report(root, path, None),
@@ -8103,6 +8106,7 @@ def cmd_preflight(root: Path, ident: str) -> int:
     parts["passes"] = _passes_report(root, path, parts["risk"])
     parts["branches"] = ship_branches(parts, path)
     problems = [f"{name}: no merge base with {trunk!r}" for name, p in parts.items() if p is None]
+    parts["ci"] = base_ci(home, cfg, CI_FRESH)  # after the problems: a red base never refuses
     for name in ("nits", "checks", "findings"):
         problems += [f"{name}: {p}" for p in (parts[name] or {}).get("problems") or []]
     out = {"change": path.name, "tier": rec["tier"], "stage": rec["stage"],
@@ -8187,12 +8191,14 @@ def ship_question(
     cases: dict | None = None,
     conflicts: list[str] | None = None,
     passes: dict | None = None,
+    ci: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Ship's WAIT question for change `folder` (`.sdlc/work/NNN-slug`), as (question, None), or
     (None, why) when the issues named don't partition its `closes:` line: ship asks about every
     one, so the question never leaves one out. It opens with ship's recommendation from
     `findings` (`_question_head()`). A question that commits has each clause only when its fact
-    is: the sensitive paths the diff touches, the files a conflict with the base was resolved in
+    is: the sensitive paths the diff touches, a red CI on the base's tip (`ci`, `base_ci()`'s
+    reading), the files a conflict with the base was resolved in
     (`conflicts`, from the change's conflicts.md), a fresh review that didn't run (`fresh`, from
     findings.md's note), skill evals that didn't run (`cases`, from the same note), ship's passes
     that ran and those skipped (`passes`, each applying pass's note line, `_passes_said()`), how to
@@ -8218,6 +8224,10 @@ def ship_question(
         more = len(sensitive) - len(shown)
         names = [*shown, f"{more} more"] if more else shown
         clauses.append(f"touching sensitive path{'s' if len(sensitive) > 1 else ''} {_and(names)}")
+    if ci and ci["state"] == "red":
+        clauses.append(
+            f"on a base whose {_ci_red_at(ci)}" + (f" ({ci['url']})" if ci["url"] else "")
+        )
     if conflicts:
         shown = conflicts[:RISK_SHOWN]
         more = len(conflicts) - len(shown)
@@ -8253,8 +8263,9 @@ def ship_question(
 def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
                       closing: list[int], split: list[int], bugs: bool = False) -> int:  # fmt: skip
     """Print ship's WAIT question for a change, from what its Step 4 decided, its findings.md, and
-    what its diff touches, which the script reads itself so the skill can't leave a sensitive path
-    or a recommended fix out. Writes nothing."""
+    what its diff touches and CI on the base's tip (`base_ci()`), which the script reads itself so
+    the skill can't leave a sensitive path, a red base or a recommended fix out. Writes no
+    artifact, only the CI cache."""
     path = _one_change(root, ident)
     if path is None:
         return 1
@@ -8271,7 +8282,7 @@ def cmd_ship_question(root: Path, ident: str, context: bool, nits: bool,
         f"{rel}/{path.name}", load_change(path, home).get("closes") or [],
         cfg["archive"]["target"], context, nits, closing, split, f"{rel}/inbox.md", bugs,
         risk["sensitive"], bool(risk["irreversible"]), found["fresh"], found["entries"],
-        found["cases"], conflicts_resolved(path), passes,
+        found["cases"], conflicts_resolved(path), passes, base_ci(home, cfg, CI_FRESH),
     )  # fmt: skip
     if question is None:
         print(f"⚠  {path.name}: {why}. Not asking.", file=sys.stderr)
@@ -8699,6 +8710,8 @@ def _task_names(root: Path) -> list[tuple[str, str]]:
 # before the path stands in for wherever the plugin is installed, which differs per machine and
 # changes when it updates; a plugin can't ship permission rules of its own. Nothing that writes
 # is here: new, ship and close keep asking, and so does accept, which runs a change's own checks.
+# A state cache in the git common dir, in no checkout, is not a write here: `status` and
+# `preflight` keep the base's CI reading in `CI_CACHE`.
 READ_ONLY = (
     "status", "vet", "config", "next", "undone", "checks", "context", "readiness", "unreleased",
     "drift", "next-entry", "bugs", "intake", "closes", "preflight", "nits", "findings", "groups",
@@ -9828,6 +9841,119 @@ def cli_update(root: Path, home: Path, args) -> int:
     return cmd_update(root, home, "hook" if args.hook else "installed" if args.installed else None)
 
 
+# ---------------------------------------------------------------- CI on the base branch
+#
+# Whether CI on the base branch's tip is red, read through the tracker's optional `ci()`, never by
+# core calling a service. The tip is the remote-tracking ref (`refs/remotes/<release.remote>/
+# <git.base>`), the commit CI ran on. `status` names a red one under Problems (`ci_problem()`),
+# ship's question says it, and the factory's landing makes it a signal. Each reading is cached in
+# the git common dir (`CI_CACHE`), state like the update cache, never in a tree, keyed by the
+# tip's branch and sha: `status` reaches the network at most once in `CI_EVERY` per tip, a landing
+# once in `CI_FRESH`. A CI the tracker can't read is `unknown`, never red.
+CI_CACHE = "sdlc-ci.json"
+CI_EVERY = 600  # seconds a reading serves `status`
+CI_FRESH = 60  # seconds a reading serves ship's preflight and question, one landing's worth
+CI_TIMEOUT = 10  # seconds the tracker's call is given
+CI_STATES = ("red", "green", "pending", "unknown")
+# A run's conclusions that make it a failure, as the tracker interface words them: a copy of the
+# GitHub tracker's `CI_RED`, pinned by `tests/test_base_ci.py`.
+CI_FAILED = ("failure", "timed_out", "startup_failure")
+
+
+def _ci_cache_path(root: Path) -> Path | None:
+    where = _ledger_dir(root)
+    return where / CI_CACHE if where else None
+
+
+def _read_ci_cache(root: Path, branch: str, sha: str, max_age: float) -> dict | None:
+    """The cached reading of `branch` at `sha`, or None when there is none, it won't read, it is
+    of another branch or commit, or it is `max_age` seconds old or more (or dated ahead of now)."""
+    path = _ci_cache_path(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path else None
+        checked = datetime.fromisoformat(data["checked"]).timestamp()
+        reading = data["reading"]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+    age = datetime.now(UTC).timestamp() - checked
+    if not 0 <= age < max_age or (data.get("branch"), data.get("sha")) != (branch, sha):
+        return None
+    return reading if isinstance(reading, dict) else None
+
+
+def _write_ci_cache(root: Path, branch: str, sha: str, reading: dict) -> None:
+    path = _ci_cache_path(root)
+    if path is None:
+        return
+    checked = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    data = {"branch": branch, "sha": sha, "checked": checked, "reading": reading}
+    with suppress(OSError):
+        tmp = path.with_name(f"{CI_CACHE}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+        os.replace(tmp, path)
+
+
+def base_ci(home: Path, cfg: dict, max_age: float) -> dict:
+    """CI on the base branch's tip: `{"state", "branch", "sha", "runs", "failed", "url", "why"}`,
+    `failed` the red runs' names and `url` the first one's. A reading under `max_age` seconds old
+    for the same tip comes from `CI_CACHE`; else the tracker's `ci()` is called, given
+    `CI_TIMEOUT`, and its reading cached. `unknown`, with why, and nothing called, without a base
+    branch, its tracking ref, a tracker, a tracker that reads CI, or one that can run here. A
+    tracker that raises is `unknown` too, and nothing is cached for it."""
+    trunk, remote = cfg["git"]["base"], cfg["release"]["remote"]
+    out = {"state": "unknown", "branch": trunk, "sha": None, "runs": [], "failed": [],
+           "url": None, "why": None}  # fmt: skip
+    if not trunk:
+        return out | {"why": "no git.base"}
+    sha = _git(home, "rev-parse", "-q", "--verify", f"refs/remotes/{remote}/{trunk}^{{commit}}")
+    if not sha:
+        return out | {"why": f"no {remote}/{trunk} tracking ref"}
+    out["sha"] = sha
+    target = cfg["archive"]["target"]
+    if target == "none":
+        return out | {"why": "archive.target is none"}
+    t = tracker(home, cfg)
+    read = getattr(t, "ci", None)
+    if read is None:
+        return out | {"why": f"the {target} tracker reads no CI"}
+    reading = _read_ci_cache(home, trunk, sha, max_age)
+    if reading is None:
+        if why := t.unavailable():
+            return out | {"why": why}
+        try:
+            reading = read(trunk, sha, CI_TIMEOUT)
+        except Exception as e:  # a tracker's bug is unknown CI, never a crash in status
+            return out | {"why": f"the tracker's ci() raised {type(e).__name__}: {e}"}
+        if not isinstance(reading, dict) or reading.get("state") not in CI_STATES:
+            return out | {"why": "the tracker's ci() gave no reading"}
+        _write_ci_cache(home, trunk, sha, reading)
+    runs = [r for r in reading.get("runs") or [] if isinstance(r, dict)]
+    failed = (
+        [r for r in runs if r.get("conclusion") in CI_FAILED] if reading["state"] == "red" else []
+    )
+    return out | {
+        "state": reading["state"],
+        "runs": runs,
+        "failed": [str(r.get("name") or "a workflow") for r in failed],
+        "url": next((r["url"] for r in failed if r.get("url")), None),
+        "why": reading.get("why"),
+    }
+
+
+def _ci_red_at(reading: dict) -> str:
+    return f"CI is red at {(reading['sha'] or '')[:7]}"
+
+
+def ci_problem(reading: dict, remote: str) -> dict | None:
+    """Status's Problems entry for a red `base_ci()` reading, or None for any other state."""
+    if reading["state"] != "red":
+        return None
+    detail = _ci_red_at(reading)
+    detail += f" ({', '.join(reading['failed'])})" if reading["failed"] else ""
+    detail += f": {reading['url']}" if reading["url"] else ""
+    return {"dir": f"{remote}/{reading['branch']}", "detail": detail}
+
+
 # A bug in the plugin, filed from a host on the plugin's own repo, the one its running manifest's
 # `repository` names (`sdlc.py upstream`). The body is built from an allowlist alone: the sections
 # `UPSTREAM_FIELDS` names, each cut of the host's specifics (`_cut_host()`), and the diagnostics,
@@ -10867,6 +10993,9 @@ def cli_status(root: Path, home: Path, args) -> int:
     # none to name.
     if not a["trunk"]:
         a["problems"].append({"dir": "git.base", "detail": trunk_refusal(home, None)})
+    # And a red CI on its tip, read through the tracker at most once in `CI_EVERY`.
+    if ci := ci_problem(base_ci(home, cfg, CI_EVERY), cfg["release"]["remote"]):
+        a["problems"].append(ci)
     # Here, not in `analyze()`: a stale base is a nudge, and `vet --strict` refuses on any problem.
     for rec in a["open"] + a["ready"]:
         rec["behind"] = behind_trunk(home, f"{rec['id']}-{rec['slug']}", a["trunk"])

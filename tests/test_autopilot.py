@@ -272,7 +272,9 @@ def test_every_signal_has_a_kind(tmp_path, capsys, monkeypatch) -> None:
     (folder / "build" / "land-1.ask.md").write_text("Rename it.\n", encoding="utf-8")
     pre = {"risk": {"sensitive": ["src/a.py"], "irreversible": ["db/1.sql"]},
            "closes": {"closes": "12"}, "undone": {"items": [{"text": "x"}]},
-           "checks": {"checks": [{"name": "c"}]}, "cases": {"scope": ["skills/x"]}}  # fmt: skip
+           "checks": {"checks": [{"name": "c"}]}, "cases": {"scope": ["skills/x"]},
+           "ci": {"state": "red", "branch": "main", "sha": "abcdef1234567890",
+                  "url": "https://ci/1"}}  # fmt: skip
     kinds: list[str] = []
     signals, _ = L.land_signals(
         folder, root, "ESCALATE", {"land": {"auto": False}}, pre, unreviewed=None, kinds=kinds

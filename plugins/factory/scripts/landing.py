@@ -540,8 +540,9 @@ UNREVIEWED_UNKNOWN = "no snapshot of its last review"
 # change-risk budget weighs (`[autopilot.risk]`), counted by the script, never judged by a model.
 # `unread` is a preflight that couldn't be read, so nothing else is known.
 SIGNAL_KINDS = (
-    "sensitive", "irreversible", "issue", "impact", "escalated", "open", "assumed", "settled",
-    "resolved", "fixed", "unreviewed", "auto_off", "undone", "checks", "cases", "nits", "unread",
+    "sensitive", "irreversible", "issue", "ci", "impact", "escalated", "open", "assumed",
+    "settled", "resolved", "fixed", "unreviewed", "auto_off", "undone", "checks", "cases", "nits",
+    "unread",
 )  # fmt: skip
 
 
@@ -557,7 +558,8 @@ def land_signals(
     """Why change `folder` needs the person at the batch's gate (`signals`), and why it can't land
     in a batch at all, only by hand (`excluded`): what `sdlc.py preflight` reads of its risk, its
     notes, its checks, its skills' cases and its issues, and what the run left in its folder,
-    a resolved conflict no reviewer has seen among it (`resolution_signals()`). The exclusions
+    a resolved conflict no reviewer has seen among it (`resolution_signals()`), and a red CI on
+    the base branch's tip (preflight's `ci`). The exclusions
     are an irreversible path the approver proposed no way back for, and a bug it proposed that
     `bad_bugs()` refuses. A nit to file is a signal, so no agent's nit is filed without the
     person's yes. `unreviewed` is
@@ -598,6 +600,10 @@ def land_signals(
     # Preflight reads the branch's own intent; the ledger's record of it can't be edited out (219).
     if (pre.get("closes") or {}).get("closes") or factory.intent_closes(folder):
         add("issue", "came from a public issue (closes:)")
+    ci = pre.get("ci") or {}
+    if ci.get("state") == "red":
+        said = f"CI on {ci.get('branch')} is red at {(ci.get('sha') or '')[:7]}"
+        add("ci", said + (f": {ci['url']}" if ci.get("url") else ""))
     impact = read_impact(folder)
     if impact is None:
         add("impact", "decision.md proposes no `- IMPACT:`")

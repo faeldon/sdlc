@@ -84,6 +84,15 @@ if flag and args[:2] == ["issue", "edit"] and flag in args:
     done(1)
 if args[0] == "label":
     done()
+if args[:2] == ["run", "list"]:
+    # The workflow runs the state holds, as `gh run list --json` gives them; the tracker keeps
+    # only the tip's own. FAKE_GH_SLEEP hangs first, as a slow network does.
+    import time
+    time.sleep(float(os.environ.get("FAKE_GH_SLEEP") or 0))
+    if fail == "run":
+        print("boom", file=sys.stderr)
+        done(1)
+    done(out=st["runs"] if isinstance(st.get("runs"), str) else json.dumps(st.get("runs", [])))
 if args[:2] == ["auth", "token"]:
     done(1 if os.environ.get("FAKE_GH_NOAUTH") else 0, out="token")
 if args[:2] == ["api", "user"]:
@@ -202,6 +211,7 @@ def gh(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("FAKE_GH_START", raising=False)
     monkeypatch.delenv("FAKE_GH_DEFAULT", raising=False)
     monkeypatch.delenv("FAKE_GH_NOAUTH", raising=False)
+    monkeypatch.delenv("FAKE_GH_SLEEP", raising=False)
     return lambda: json.loads(state.read_text()) if state.exists() else {"issues": [], "calls": []}
 
 
