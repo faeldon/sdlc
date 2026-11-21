@@ -674,10 +674,20 @@ stops for good on one kind of escalation: a change that can only be built by bre
 a hard rule or a guard, or one the supervisor judges far simpler if a contract were relaxed. That
 change stays under Needs you, unlanded, and nothing that depends on it is built.
 
-It stops when no compelling seed is left, when its budget or hours run out, or when the person
-turns it off (between steps, as `train --cancel` does), and either way writes a summary: how long
-it ran and what it cost, what landed (features, bugs fixed), what is mid-build and where, every
-escalation and decision it made, and the risks the person should weigh.
+It keeps two risk budgets, each counted by the script from signals it already detects, never
+judged by a model, their weights and limits in the base branch's `.sdlc/factory.toml`: review debt,
+the person's unreviewed calls it made, weighted by kind (a look taken as seen least, an escalated
+default, a scope call or a policy wording most); and change risk, each landed change's signals as
+`land-check` counts them (sensitive or irreversible paths, `impact: major`, a conflict resolved or
+a fix made while landing, failed or spoiled cases, unreviewed paths, mends, red gates), weighed
+more for a pushed change than a local one, and for one stacked on another autopilot change. When
+either budget is reached it starts nothing new, leaves what is in flight at `stage: test`
+unlanded, and writes its summary, which leads with each budget, what spent it and on which change.
+
+It stops when no compelling seed is left, when its dollar cap, its hours or a risk budget run out,
+or when the person turns it off (between steps, as `train --cancel` does), and either way writes a
+summary: how long it ran and what it cost, what landed (features, bugs fixed), what is mid-build
+and where, every escalation and decision it made, and the risks the person should weigh.
 
 Open questions: whether the commands the harness asks before today (`accept`, `cases`) are allowed
 for the run, or skipped; whether it pushes and syncs issues, or lands locally until the person reads
