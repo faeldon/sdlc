@@ -369,19 +369,6 @@ Cost: S
 Value: low
 Raised by: 199-landing-records-unforgeable (correctness)
 
-## [2026-11-21-2] [idea] Each WAIT shows its draft in the dialog's preview
-
-Every skill's WAIT shows the draft it approves inside its AskUserQuestion dialog, as the preview of
-its yes option: the seed or bug entry, the intent, the spec's requirements, the commit message and
-files, whatever that yes writes. A long draft shows its approving part and names the file holding
-the rest. Today the draft is shown only as message text before the dialog, so a draft that never
-reached the screen, or scrolled off it, is approved unseen. That happened on 2026-11-21, when seed
-2026-11-21-1 was committed without the person ever seeing its text.
-test_every_wait_asks_in_a_dialog would also check that each WAIT names what its preview holds.
-
-Theme: approvals
-Raised 2026-11-21.
-
 ## [2026-11-21-3] [nit] the register paragraph now has a line well over 100 characters, because "Each line's command is `/sdlc:intent <id>`." was glued onto the end of the new clause.
 
 Raised by the code review of 207-change-origin, round 1: docs/REFERENCE.md:508: the register paragraph now has a line well over 100 characters, because "Each line's command is `/sdlc:intent <id>`." was glued onto the end of the new clause. Rewrap it
@@ -635,3 +622,29 @@ How to see it: `gh run list --branch main`, then `gh run view <id> --log-failed`
 Severity: high
 Paths: tests/test_hand_gate.py, tests/test_factory_agent.py, tests/test_sdlc.py, tests/test_upstream.py, tests/test_factory_ui.py, .github/workflows/check.yml
 Theme: tests
+
+## [2026-11-21-29] [idea] Add `update` to AGENTS.md's Skills invariant list of WAIT skills
+
+Left undone by 210-wait-previews, carried forward when it landed: AGENTS.md's *Skills* invariant lists the skills that write and owe a WAIT, but leaves out `update`, which `tests/test_skills.py`'s `GATED` includes. Found while building 210; left as it was, since naming it is a separate edit to the list.
+See .sdlc/work/210-wait-previews/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-30] [nit] R7 says `--preview` takes the same clause flags as `--question`.
+
+Raised by the code review of 210-wait-previews, round 1: scripts/sdlc.py:8308: R7 says `--preview` takes the same clause flags as `--question`. They parse, but `cmd_ship_preview` ignores them without saying so. Refuse them with `--preview`, as the code already refuses clause flags without `--question`, or say in the help text that they are ignored.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 210-wait-previews (correctness)
+
+## [2026-11-21-31] [nit] the `PREVIEW_NAMES` words are checked with substring `in`, so a key word like `path` or `tag` matches any text that contains it
+
+Raised by the test review of 210-wait-previews, round 1: tests/test_skills.py:263: the `PREVIEW_NAMES` words are checked with substring `in`, so a key word like `path` or `tag` matches any text that contains it
+
+Theme: tests
+Paths: tests/test_skills.py
+Cost: S
+Value: low
+Raised by: 210-wait-previews (correctness)
