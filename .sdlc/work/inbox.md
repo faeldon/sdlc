@@ -713,3 +713,19 @@ After: 2026-11-21-32
 Theme: factory
 Priority: low
 Raised 2026-11-21.
+
+## [2026-11-21-34] [idea] The board shows an autopilot run while it runs
+
+While `/sdlc-factory:autopilot` runs, the board says so at a glance: a red border across the top of
+the page, and a band under it with the run's state, read from autopilot's run state in the git
+common dir, opened read-only as the board opens the train's run lock today, never created and
+never written. The band shows how long it has run and how long it has left, its dollar cost
+against its cap, each risk budget (review debt and change risk) as spent against its limit, the
+wave under way, and the changes it has opened, building, landed and parked under Needs you. Each
+autopilot call waiting for the person's review is counted and links to the escalations file.
+Once the run stops, the border goes and the band says how it ended (seeds exhausted, a budget or
+the hours reached, turned off) and where its summary is. Cards autopilot opened carry a small mark,
+so they read apart from changes the person started by hand.
+After: 2026-11-21-32
+Theme: board
+Raised 2026-11-21.
