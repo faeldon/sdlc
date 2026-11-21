@@ -502,3 +502,20 @@ Paths: tests/test_update.py
 Cost: S
 Value: low
 Raised by: 206-update-skill (correctness)
+
+## [2026-11-21-12] [bug] The setup nudge never reaches the person and never clears
+
+The setup nudge never reaches the person and never clears. It is only a line in sdlc.py status's
+output (■ Setup), so a person who doesn't run /sdlc:status never sees it, and a skill that runs
+status doesn't pass it on. And after a release that changes no defaults, /sdlc:setup stops at
+complete without recording the new version, so status keeps saying "set up with 1.10.0, the plugin
+is 1.11.0 → /sdlc:setup" forever. The nudge should clear when drift finds nothing, and reach the
+person, for example through the startup hook's line.
+
+How to see it: in a repo set up under an older version whose defaults the new release didn't
+change, run `sdlc.py status` (it shows the ■ Setup line), then `/sdlc:setup` (readiness says
+complete, drift finds nothing, setup writes nothing), then `sdlc.py status` again: the same line.
+
+Severity: med
+Paths: scripts/sdlc.py, skills/setup/SKILL.md
+Theme: setup
