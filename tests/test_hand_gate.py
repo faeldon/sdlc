@@ -142,6 +142,24 @@ def test_the_build_hash_moves_on_a_rebase_onto_a_moved_base(repo) -> None:
     assert sdlc.hand_build(repo, "main") != first
 
 
+@pytest.mark.portable
+def test_the_build_hash_survives_a_crlf_checkout(repo) -> None:
+    """214: with `core.autocrlf` on, as Git for Windows sets it, checking the branch out again
+    rewrites the work with CRLF. The bytes moved but the build didn't, so neither does its hash:
+    it is over each path as git stores it, never the bytes on disk."""
+    _git(repo, "config", "core.autocrlf", "true")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "built")
+    first = sdlc.hand_build(repo, "main")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "checkout", "-q", NAME)
+    assert (repo / "src" / "app.py").read_bytes() == b"x = 2\r\n", "the checkout wrote CRLF"
+    assert sdlc.hand_build(repo, "main") == first
+    assert factory.hand_build(repo, "main") == first
+    _write(repo / "src" / "app.py", "x = 3\n")
+    assert sdlc.hand_build(repo, "main") != first, "a real edit still moves it"
+
+
 # ---------------------------------------------------------------- the command (R1–R5, R13, R14)
 
 

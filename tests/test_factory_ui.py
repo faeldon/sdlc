@@ -471,6 +471,38 @@ def test_a_server_that_answered_and_closed_first_has_not_lost_its_port() -> None
     assert lost is False, why
 
 
+PROC_HEAD = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt\n"
+
+
+@pytest.mark.portable
+def test_only_time_wait_reads_the_proc_tables(tmp_path) -> None:
+    """214: on Linux a TIME_WAIT left by a server that set no `SO_REUSEADDR` refuses a bind even
+    from a socket that sets it, so a refused bind is held only while `/proc/net/tcp` or `tcp6`
+    lists the port in a state other than TIME_WAIT (`06`); with no entry, the bind's word stands."""
+    v4, v6 = tmp_path / "tcp", tmp_path / "tcp6"
+    v4.write_text(
+        PROC_HEAD
+        + "   0: 0100007F:1F90 0100007F:D431 06 00000000:00000000 03:00000010 00000000\n"
+        + "   1: 0100007F:D431 0100007F:1F90 06 00000000:00000000 03:00000010 00000000\n"
+        + "   2: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    v6.write_text(
+        PROC_HEAD
+        + "   0: 00000000000000000000000001000000:0BB8 00000000000000000000000000000000:0000 0A"
+        + " 00000000:00000000 00:00000000 00000000\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    tables = (v4, v6)
+    assert factory._only_time_wait(0x1F90, tables) is True, "TIME_WAIT alone holds 8080"
+    assert factory._only_time_wait(0x0050, tables) is False, "a listener holds 80"
+    assert factory._only_time_wait(0x0BB8, tables) is False, "an IPv6 listener holds 3000"
+    assert factory._only_time_wait(0x1234, tables) is False, "no entry: the bind's word"
+    assert factory._only_time_wait(0x1F90, (tmp_path / "none",)) is False, "no table, not Linux"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows binds a held port with SO_REUSEADDR")
 def test_a_port_a_wildcard_listener_holds_is_lost() -> None:
     """111 ship F1: a server holding its port on every address (`0.0.0.0`) holds it for

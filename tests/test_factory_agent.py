@@ -653,19 +653,29 @@ def test_a_build_mend_is_refused_when_verdicts_names_none(tmp_path, capsys, clau
 
 
 @pytest.mark.portable
-def test_the_builder_s_evidence_is_mended_once_a_round(tmp_path, capsys, claude, monkeypatch):
-    """The same marker holds the evidence mend to once: a second report without it stops."""
+def test_the_builder_s_evidence_is_mended_once_a_round(tmp_path, capsys, monkeypatch):
+    """The same marker holds the evidence mend to once: a second report without it stops. The
+    session is a stand-in for `_claude()`, never the `claude` fixture, whose shebang script
+    Windows can't run (214)."""
     root = _change(tmp_path)
     _report(root, 1, "Built it. The gate passed.\n")
     (root / ".sdlc" / "work" / NAME / "runs").mkdir()
-    (root / ".sdlc" / "work" / NAME / "runs" / "builder.sessions").write_text("s-b\n")
-    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "Built it again, no evidence.")
+    (root / ".sdlc" / "work" / NAME / "runs" / "builder.sessions").write_text(
+        "s-b\n", encoding="utf-8"
+    )
+    calls = []
+    monkeypatch.setattr(
+        factory,
+        "_claude",
+        lambda argv, cwd: calls.append(argv) or (0, ["Built again."], None, None),
+    )
     assert _verdicts(root, capsys)["mend"] == ["builder"]
     code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
     assert code == 0, out
     assert _verdicts(root, capsys)["way"] == "rerun"
     code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
     assert code == 1 and "mended once" in out["refusals"][0]
+    assert len(calls) == 1 and calls[0][-2:] == ["--resume", "s-b"]
 
 
 def test_an_agent_out_of_turn_or_failing_files_nothing(tmp_path, capsys, claude, monkeypatch):

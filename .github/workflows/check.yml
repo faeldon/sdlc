@@ -11,8 +11,8 @@ on:
     branches: ['**']
   workflow_dispatch:
 
-# The token reads and nothing more: every step checks out, installs or runs tests, none pushes,
-# uploads or comments, and setup-uv's cache goes through the runner's own cache token, not this one.
+# The token reads and nothing more: every step checks out, installs or runs tests, and none
+# pushes, uploads or comments.
 permissions:
   contents: read
 

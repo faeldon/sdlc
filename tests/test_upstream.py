@@ -82,6 +82,24 @@ def _input(root: Path, **sections: str) -> Path:
     return path
 
 
+def _logged_in(monkeypatch, login: str = "me") -> None:
+    """`gh` installed and logged in as `login`, whatever the machine has: a stand-in for the
+    GitHub tracker's `gh` calls rather than the `gh` fixture, whose shebang script Windows can't
+    run, so the runner's own `gh`, logged in or not, would answer (214)."""
+    github = sdlc._tracker_module("github")
+    which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd, *a, **k: "gh" if cmd == "gh" else which(cmd, *a, **k)
+    )
+
+    def gh(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+        answers = {("auth", "token"): "gho_x\n", ("api", "user", "--jq", ".login"): f"{login}\n"}
+        out = answers.get(args)
+        return subprocess.CompletedProcess(["gh", *args], 0 if out else 1, out or "", "")
+
+    monkeypatch.setattr(github.Tracker, "_gh", gh)
+
+
 BUG = {
     "Title": "close refuses a clean branch",
     "What_happens": "close says the branch carries another change.",
@@ -97,7 +115,8 @@ BUG = {
 
 
 @pytest.mark.portable
-def test_upstream_repo_comes_from_the_manifest(tmp_path: Path, plugin: Path, gh) -> None:
+def test_upstream_repo_comes_from_the_manifest(tmp_path: Path, plugin: Path, monkeypatch) -> None:
+    _logged_in(monkeypatch)
     root = _repo(tmp_path)
     _git(root, "remote", "add", "origin", "https://github.com/hostowner/hostrepo.git")
     info = sdlc.upstream_info(root)
@@ -424,6 +443,8 @@ def test_upstream_cut_places_a_path_after_a_colon_and_an_scp_remote(tmp_path: Pa
         "cloned <remote>",
         True,
     )
+    # Nit 2026-11-21-21: a host with no dot is a host too.
+    assert sdlc._cut_host("cloned git@localhost:x/y", specifics) == ("cloned <remote>", True)
     assert sdlc._cut_host("see https://example.test/a/b", specifics) == ("see <url>", True)
     assert sdlc._cut_host("run /sdlc:close now", specifics) == ("run /sdlc:close now", True)
     assert sdlc._cut_host(r"at C:\Users\someone\x.py", specifics) == ("at <path>", True)

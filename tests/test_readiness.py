@@ -88,12 +88,14 @@ def test_candidates_come_from_the_repos_own_task_files(tmp_path: Path, capsys) -
     (root / "Makefile").write_text(
         ".PHONY: check\ncheck: lint\n\ttrue\nintegration:\n\ttrue\nVAR := 1\n", encoding="utf-8"
     )
-    (root / "package.json").write_text('{"scripts": {"test": "jest", "start": "node ."}}')
-    (root / "pnpm-lock.yaml").write_text("")
+    (root / "package.json").write_text(
+        '{"scripts": {"test": "jest", "start": "node ."}}', encoding="utf-8"
+    )
+    (root / "pnpm-lock.yaml").write_text("", encoding="utf-8")
     (root / "justfile").write_text("scan target='x':\n    echo\n", encoding="utf-8")
     (root / "mise.toml").write_text('[tasks.bootstrap]\nrun = "true"\n', encoding="utf-8")
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
-    (root / "uv.lock").write_text("")
+    (root / "uv.lock").write_text("", encoding="utf-8")
     (root / "scripts").mkdir()
     (root / "scripts" / "ci.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     got = {k: {c["command"] for c in v} for k, v in _readiness(root, capsys)["candidates"].items()}

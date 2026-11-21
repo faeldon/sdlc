@@ -249,6 +249,88 @@ def test_a_write_mode_open_without_newline_is_caught() -> None:
     assert _unlf_writes(source) == [1, 2, 3, 8]
 
 
+def _portable_tests(tree: ast.Module) -> list[ast.FunctionDef]:
+    """The test functions in `tree` that CI's Windows job runs: each marked `portable` itself, or
+    every one when the module's `pytestmark` names it."""
+    marked = any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in node.targets)
+        and "portable" in ast.unparse(node.value)
+        for node in tree.body
+    )
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name.startswith("test_")
+        and (marked or any("portable" in ast.unparse(d) for d in node.decorator_list))
+    ]
+
+
+def _is_os_open(call: ast.Call) -> bool:
+    """`os.open`, which takes flags and opens no text."""
+    func = call.func
+    return (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    )
+
+
+def _unencoded(source: str) -> list[int]:
+    """The lines where a portable test reads or writes text with no encoding named: a `read_text`
+    (its encoding the first argument), a `write_text` (its second) or an `open` in a text mode,
+    never `os.open`. Only a test's own body: a helper it calls is the helper's to get right."""
+    bad = []
+    for fn in _portable_tests(ast.parse(source)):
+        for c in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+            name = c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, "id", "")
+            if "encoding" in _keywords(c):
+                continue
+            if name == "read_text" and not c.args or name == "write_text" and len(c.args) < 2:
+                bad.append(c.lineno)
+            elif name == "open" and not _is_os_open(c):
+                positional = c.args[1:2] if isinstance(c.func, ast.Name) else c.args[:1]
+                given = [k.value for k in c.keywords if k.arg == "mode"] or positional
+                mode = given[0].value if given and isinstance(given[0], ast.Constant) else "r"
+                if isinstance(mode, str) and "b" not in mode:
+                    bad.append(c.lineno)
+    return sorted(bad)
+
+
+TESTS = sorted((REPO / "tests").glob("*.py"))
+
+
+@pytest.mark.parametrize("test_file", TESTS, ids=lambda p: p.name)
+def test_every_portable_test_names_its_encoding(test_file: Path) -> None:
+    """214: a portable test runs on Windows, where text with no `encoding=` is cp1252: a template's
+    `—` copied that way is the byte 0x97, which the script's UTF-8 read then refuses."""
+    bad = _unencoded(test_file.read_text(encoding="utf-8"))
+    assert bad == [], f"{test_file.name}: text read or written with no encoding at {bad}"
+
+
+def test_an_unencoded_read_in_a_portable_test_is_caught() -> None:
+    """214: the check sees each shape, in a test marked portable alone."""
+    source = (
+        "@pytest.mark.portable\n"
+        "def test_a(p):\n"
+        "    p.write_text(q.read_text())\n"
+        '    p.write_text("x", encoding="utf-8")\n'
+        '    p.write_text("x", "utf-8")\n'
+        '    q.read_text("utf-8")\n'
+        "    open(p)\n"
+        '    p.open("w")\n'
+        '    open(p, "rb")\n'
+        "    os.open(p, os.O_RDWR)\n"
+        "def test_b(p):\n"
+        "    p.read_text()\n"
+    )
+    assert _unencoded(source) == [3, 3, 7, 8]
+    assert _unencoded("pytestmark = pytest.mark.portable\ndef test_c(p):\n    p.read_text()\n") == [
+        3
+    ]
+
+
 def test_no_script_imports_a_one_platform_module_at_the_top() -> None:
     """R1: `fcntl` and `msvcrt` exist on one platform each, so only a branch may import them."""
     for script in SCRIPTS:

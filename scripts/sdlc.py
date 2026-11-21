@@ -3074,11 +3074,23 @@ def _hand_paths(checkout: Path, trunk: str) -> tuple[str | None, list[str]]:
 
 
 def _hand_digests(checkout: Path, paths: list[str]) -> dict[str, str]:
-    """Each path as the sha256 of its bytes, or `deleted`."""
-    found = {}
-    for p in paths:
-        file = checkout / p
-        found[p] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+    """Each path as git would store it, its blob id after the checkout's filters (`hash-object`),
+    so a checkout that rewrites line endings (`core.autocrlf`) moves nothing; else `deleted`. A
+    path that can't go on a line of `--stdin-paths`, or a `hash-object` that fails, is the sha256
+    of its bytes."""
+    found = {p: "deleted" for p in paths if not (checkout / p).is_file()}
+    present = [p for p in paths if p not in found]
+    listed = [p for p in present if "\n" not in p and "\r" not in p]
+    out = subprocess.run(
+        ["git", "-C", str(checkout), "hash-object", "--stdin-paths"],
+        input="".join(f"{p}\n" for p in listed), capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    ids = out.stdout.split() if out.returncode == 0 else []
+    if len(ids) == len(listed):
+        found |= dict(zip(listed, ids, strict=True))
+    for p in present:
+        if p not in found:
+            found[p] = hashlib.sha256((checkout / p).read_bytes()).hexdigest()
     return found
 
 
@@ -9829,8 +9841,8 @@ _PATH_RE = re.compile(
     r"|(?P<rel>(?<![\w./\\$}<>@-])[\w.-]+(?:[/\\][\w.-]+)+[/\\]?)"
 )
 # An scp-style remote, `user@host:path`, which names a host and a repo whether or not it is one
-# of this repo's remotes.
-_SCP_RE = re.compile(r"(?<![\w.-])[\w.-]+@[\w-]+(?:\.[\w-]+)+:[^\s'\"`<>(),;]*")
+# of this repo's remotes; the host dotted or not (`git@localhost:x/y`).
+_SCP_RE = re.compile(r"(?<![\w.-])[\w.-]+@[\w-]+(?:\.[\w-]+)*:[^\s'\"`<>(),;]*")
 # An `@name` in prose, which GitHub would turn into a notification; an email's `@` follows a word.
 _MENTION_RE = re.compile(r"(?<![\w`])@[A-Za-z0-9](?:[\w-]*[A-Za-z0-9])?")
 _TRAILER_RE = re.compile(r"\b(Sdlc-[A-Za-z-]+):[^\n]*")

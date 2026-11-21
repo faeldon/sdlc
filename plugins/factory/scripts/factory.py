@@ -3071,10 +3071,19 @@ def _hand_paths(checkout: Path, base: str) -> tuple[str | None, list[str]]:
 
 
 def _hand_digests(checkout: Path, paths: list[str]) -> dict[str, str]:
-    found = {}
-    for p in paths:
-        file = checkout / p
-        found[p] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else "deleted"
+    found = {p: "deleted" for p in paths if not (checkout / p).is_file()}
+    present = [p for p in paths if p not in found]
+    listed = [p for p in present if "\n" not in p and "\r" not in p]
+    out = subprocess.run(
+        ["git", "-C", str(checkout), "hash-object", "--stdin-paths"],
+        input="".join(f"{p}\n" for p in listed), capture_output=True, encoding="utf-8",
+    )  # fmt: skip
+    ids = out.stdout.split() if out.returncode == 0 else []
+    if len(ids) == len(listed):
+        found |= dict(zip(listed, ids, strict=True))
+    for p in present:
+        if p not in found:
+            found[p] = hashlib.sha256((checkout / p).read_bytes()).hexdigest()
     return found
 
 
@@ -5838,11 +5847,12 @@ def _fixture_copy(root: Path, where: Path, fixture: str | None) -> tuple[str, st
 
 def _binds(host: str, port: int) -> bool:
     """Whether `host`:`port` binds now, the socket closed straight after: a port that won't is held
-    by another process. `SO_REUSEADDR` lets a port whose last connection is in TIME_WAIT bind, as
-    a server restarting on it would, while one another socket holds, listening or bound, still
-    won't; on Windows it would let a held port bind too, and TIME_WAIT never blocks a bind there.
-    The wildcard address is probed too: on macOS a port a server holds on `0.0.0.0` still lets
-    `host` bind beside it."""
+    by another process, or on Linux by a TIME_WAIT alone (`_only_time_wait()`). `SO_REUSEADDR`
+    lets a port whose last connection is in TIME_WAIT bind, as a server restarting on it would,
+    while one another socket holds, listening or bound, still won't; on Linux only when the server
+    that left the TIME_WAIT set it too. On Windows it would let a held port bind too, and TIME_WAIT
+    never blocks a bind there. The wildcard address is probed too: on macOS a port a server holds
+    on `0.0.0.0` still lets `host` bind beside it."""
     for address in dict.fromkeys((host, "0.0.0.0")):
         try:
             with socket.socket() as s:
@@ -5854,11 +5864,36 @@ def _binds(host: str, port: int) -> bool:
     return True
 
 
+# Linux's tables of TCP sockets, which name a socket that is a process's (listening or connected)
+# and one left in TIME_WAIT, which no process holds.
+PROC_TCP = (Path("/proc/net/tcp"), Path("/proc/net/tcp6"))
+TIME_WAIT = "06"
+
+
+def _only_time_wait(port: int, tables: tuple[Path, ...] = PROC_TCP) -> bool:
+    """Whether the sockets the tables list on local `port` are all in TIME_WAIT, and there is one:
+    a port no process holds, which Linux still won't bind. False with no table (not Linux) or no
+    entry, so the bind's word stands; a socket bound but not listening is in no table, and is
+    read as held."""
+    states = []
+    for table in tables:
+        try:
+            lines = table.read_text(encoding="utf-8").splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) > 3 and fields[1].rpartition(":")[2].upper() == f"{port:04X}":
+                states.append(fields[3])
+    return bool(states) and all(s == TIME_WAIT for s in states)
+
+
 def _lost(host: str, port: int) -> bool:
     """Whether a server that has exited lost `port` to another process, so a new one is worth
-    trying: only when the port won't bind (`_binds()`). One that binds means the server failed on
-    its own. The one place a serve's end is judged, whichever way it ended."""
-    return not _binds(host, port)
+    trying: only when the port won't bind (`_binds()`) and something besides a TIME_WAIT holds it
+    (`_only_time_wait()`). One that binds means the server failed on its own. The one place a
+    serve's end is judged, whichever way it ended."""
+    return not _binds(host, port) and not _only_time_wait(port)
 
 
 def _up(proc: subprocess.Popen, host: str, port: int, timeout: float) -> tuple[str | None, bool]:

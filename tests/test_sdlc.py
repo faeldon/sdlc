@@ -343,7 +343,9 @@ def test_check_leaves_out_the_template_plan_during_a_live_upgraded_build(tmp_pat
     no problem, and nothing else is hidden."""
     d = _upgraded_build(tmp_path)
     assert PLAN_PROBLEM not in _details(tmp_path)
-    (d / "spec.md").write_text((REPO / "templates" / "spec.md").read_text(encoding="utf-8"))
+    (d / "spec.md").write_text(
+        (REPO / "templates" / "spec.md").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     details = _details(tmp_path)
     assert PLAN_PROBLEM not in details
     assert "spec.md is still the template at stage: build" in details
@@ -377,7 +379,9 @@ def test_the_template_plan_shows_once_the_upgraded_build_is_not_live(tmp_path, c
 def test_a_live_first_build_hides_no_other_problem(tmp_path) -> None:
     """105 R10: only the plan's problem is left out: an unfilled spec or intent still shows."""
     d = _first_build(tmp_path)
-    (d / "spec.md").write_text((REPO / "templates" / "spec.md").read_text(encoding="utf-8"))
+    (d / "spec.md").write_text(
+        (REPO / "templates" / "spec.md").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (d / "intent.md").write_text(
         _fm(tier=2, stage="build") + "\n<a prompt>\n<another prompt>\n", encoding="utf-8"
     )

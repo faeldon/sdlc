@@ -734,8 +734,9 @@ name `<user>` inside any such path (pytest's `<tmp>/pytest-of-<user>/…`), neve
 on exit 0, in time, with every path
 the build covers as it was. `Build:` is a hash of where the branch left the base branch and the
 content of every path it changed since (committed, uncommitted or untracked, outside `.sdlc/work/`),
-so committing the same work keeps a record current, and any other edit, or a rebase onto a moved
-base, makes it stale. It prints a JSON summary and exits 0 on PASS, 1 otherwise, and refuses a
+as git would store it, so committing the same work, or a checkout that only rewrites line endings
+(`core.autocrlf`), keeps a record current, and any other edit, or a rebase onto a moved base, makes
+it stale. It prints a JSON summary and exits 0 on PASS, 1 otherwise, and refuses a
 factory run still building (its folder holds `runs/`, at `design` or `build`; `factory.py gate`
 gates it), a checkout not on the change's branch, and a base branch with no check. A factory run at
 `stage: test` it gates like any change: its record is no round's, never counted as the factory's
