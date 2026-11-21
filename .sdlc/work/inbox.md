@@ -648,3 +648,41 @@ Paths: tests/test_skills.py
 Cost: S
 Value: low
 Raised by: 210-wait-previews (correctness)
+
+## [2026-11-21-32] [idea] Autopilot level 1: the factory runs from seed to landing without a person
+
+`/sdlc-factory:autopilot` runs the whole loop while the person is away or asleep: it picks
+compelling seeds from the register (bugs by severity, `Priority: high`, the product doc's outcomes
+and milestones), groups them into waves that won't overlap, opens their intents, builds each as
+soon as what it depends on has landed, and lands what is ready in batches, waiting for a
+nearly-ready change when landing them together saves runs and cases.
+
+It runs as a background loop on the landing train's model, not in the person's session. The
+skill asks one WAIT, which bounds the run (which seeds or themes, a dollar cap, hours, the level),
+then starts `factory.py autopilot --run` in the background. The script is the scheduler: the queue,
+the waves, dependencies, the budget, the off switch, and the run's state in the git common dir, so
+a stopped or compacted session loses nothing and a rerun resumes it. Each judgment goes to a fresh
+agent session with no Write, its reply filed by the script as a reviewer's is: which wave is next,
+an intent's draft, and the answer to an escalation. The person's session only starts it and reads
+the summary, and may be closed in between.
+
+No WAIT stops it: an escalated default is taken as the default and a look as seen, recorded as
+autopilot's call (`by=autopilot`, `→ decided by autopilot:`), never as the person's, and each call
+goes, with its context, into an escalations file for the person to review. A call the person
+disagrees with is fixed forward, by reverting the change or by a new seed, never mid-build. It
+stops for good on one kind of escalation: a change that can only be built by breaking a contract,
+a hard rule or a guard, or one the supervisor judges far simpler if a contract were relaxed. That
+change stays under Needs you, unlanded, and nothing that depends on it is built.
+
+It stops when no compelling seed is left, when its budget or hours run out, or when the person
+turns it off (between steps, as `train --cancel` does), and either way writes a summary: how long
+it ran and what it cost, what landed (features, bugs fixed), what is mid-build and where, every
+escalation and decision it made, and the risks the person should weigh.
+
+Open questions: whether the commands the harness asks before today (`accept`, `cases`) are allowed
+for the run, or skipped; whether it pushes and syncs issues, or lands locally until the person reads
+the summary; a script-drawn line for "breaks a contract" (AGENTS.md, the invariant tests, a
+*Contracts touched* line); an intent opened by `new` with no person's yes; green CI as a
+precondition (2026-11-21-28).
+Theme: factory
+Raised 2026-11-21.
