@@ -243,8 +243,9 @@ spec.
   against the spec and decided like any, its round limit counted from P. Nothing is moved by
   hand. A change is upgraded once and never back, and `fresh` holds an upgraded run where it is.
 - **Shown, not said.** Every builder report and every behaviour check ends with `## Evidence`:
-  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. Only a read that
-  shows its output may leave its exit off, and the script alone judges a read (`is_read()`): a
+  each command run as `$ <command>`, the tail of its output, and `exit: <n>`. Each agent is asked
+  for the exit after every command, reads included; a reply that left one off is still read when
+  the command is a read that shows its output, and the script alone judges a read (`is_read()`): a
   short allowlist of programs that change nothing, each stage of a pipeline among them, writing
   nowhere. A test run, a gate or a script always owes its exit. A verdict or decision that
   follows prose is read where it stands (`opening()`). A reply without its evidence, or holding

@@ -1585,7 +1585,7 @@ def test_what_runs_the_change_shows_its_evidence_and_never_runs_checks() -> None
     assert "**Never run\nthem yourself**" in behaviour or "**Never run them yourself**" in behaviour
     assert "End with `## Evidence`" in behaviour and "[commands] check" in behaviour
     for prompt in (builder, behaviour):
-        assert "a read that shows its output" in " ".join(prompt.split()), "123 R8"
+        assert "every command, reads included" in " ".join(prompt.split()), "215, after 123 R8"
     assert "- PREEXISTING:" in behaviour and "never raise a settled point again" in behaviour
     build = frontmatter.load(BY_ID["sdlc-factory:build"]).content
     stop = " ".join(build.split("**`stop`**")[1].split("3. **Hand it back.**")[0].split())

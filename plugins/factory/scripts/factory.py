@@ -312,8 +312,9 @@ UPGRADE_ANSWER_RE = re.compile(r"^upgrade to tier 2\b", re.I)
 # of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
 EVIDENCE = "## Evidence"
 EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
-# The one judge of a read, a command the script can tell changes nothing (`is_read()`): a read
-# that shows its output owes no `exit:`, since its output is its result. A closed allowlist, each
+# The one judge of a read, a command the script can tell changes nothing (`is_read()`): a reply
+# that leaves a read's `exit:` off is still read when it shows its output, which is its result,
+# though every agent is asked for every exit (215). A closed allowlist, each
 # program under its own condition; anything else, or anything it can't see into, is not a read.
 READS = frozenset(
     {"cat", "head", "tail", "grep", "egrep", "fgrep", "ls", "wc", "cmp", "diff", "nl", "cut"}
@@ -5326,6 +5327,11 @@ def cmd_accept(root: Path, ident: str) -> int:
         why = f"sdlc.py accept: {said.strip()[-500:]}"
         return emit({"change": folder.name, "refusals": [why]}, 1)
     verdict = "PASS" if code == 0 and found.get("passed") else "FAIL"
+    # Checked again after the checks ran, before the earlier record is read, as `cmd_gate()` does:
+    # one rewritten meanwhile would be vouched along with this attempt.
+    if why := _unvouched_refusal(root, folder, path):
+        why = why.replace("nothing was run", "this attempt was not recorded")
+        return emit({"change": folder.name, "refusals": [why]}, 1)
     attempt = len((read_gate_file(path) or {"attempts": []})["attempts"]) + 1
     lines = []
     for check in found.get("checks") or []:

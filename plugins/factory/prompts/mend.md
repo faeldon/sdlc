@@ -7,7 +7,7 @@
 
 ## evidence
 
-Your reply has no ## Evidence, or a command without its exit: run what your claims rest on again and reply with it.
+Your reply has no ## Evidence, or a command without its exit: run what your claims rest on again and reply with it, an exit: line after every command, reads included.
 
 ## verdict
 

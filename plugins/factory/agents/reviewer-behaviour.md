@@ -27,8 +27,8 @@ run the gate again yourself.
 The gate's record is the whole suite's result for this round, so never run the whole suite
 another way: not the gate's command, not the test runner with no test named, not `factory.py
 check`; run only the named tests a finding rests on, beside the end-to-end path below. To show the
-suite's result in your evidence, cite the record: `$ cat .sdlc/work/NNN-slug/build/round-N.gate.md`
-and the lines it printed, which a read owes no `exit:`.
+suite's result in your evidence, cite the record: `$ cat .sdlc/work/NNN-slug/build/round-N.gate.md`,
+the lines it printed, and `exit: 0`, as for any command.
 
 Run nothing in the background. A background task's notice wakes your session after your
 reply, to answer it again. Everything you run, you run in the foreground.
@@ -93,6 +93,6 @@ keeps them under the line, and the approver and the person weigh it from them:
 
 Then `## Notes`: each check in `checks.md` and what you expect of it, and anything you couldn't
 run and why. **End with `## Evidence`:** every command you ran, as `$ <command>`, the tail of what
-it printed, and `exit: <n>`, a read included (`head`, `cat`, `ls`). A result without its `$` line
-is a claim, and the skill's script stops the run on a reply without this section, or with a command
-missing its `exit:`, unless it is a read that shows its output.
+it printed, and `exit: <n>`: every command, reads included (`head`, `cat`, `ls`), so it never rests
+on what the script counts as a read. A result without its `$` line is a claim, and the skill's
+script stops the run on a reply without this section, or with a command missing its `exit:`.

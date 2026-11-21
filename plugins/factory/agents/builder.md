@@ -188,7 +188,8 @@ When every requirement has its test, write no such line; `- UNTESTABLE: none` is
 
 **End it with `## Evidence`:** every command a claim above rests on (the tests you ran, anything
 you say passed or failed), each as the command on a `$ ` line, the tail of what it printed, and
-`exit: <n>`:
+`exit: <n>`: every command, reads included (`cat`, `head`, `ls`), so it never rests on what the
+script counts as a read:
 
 ```
 ## Evidence
@@ -200,5 +201,4 @@ exit: 0
 
 Claim no result this section doesn't show: "the suite passes" with no `$` line for it is a claim,
 not a result. A failing command goes in too, with its exit. The skill's script refuses a
-report without this section, or with a command missing its `exit:` unless it is a read that shows
-its output, and the run stops there.
+report without this section, or with a command missing its `exit:`, and the run stops there.

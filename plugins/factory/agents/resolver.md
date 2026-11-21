@@ -55,7 +55,8 @@ you combined them; and anything you couldn't keep, with which spec it leaves sho
 you noticed and left alone.
 
 **End it with `## Evidence`:** every command a claim above rests on, each as the command on a
-`$ ` line, the tail of what it printed, and `exit: <n>`:
+`$ ` line, the tail of what it printed, and `exit: <n>`: every command, reads included (`cat`,
+`head`, `ls`), so it never rests on what the script counts as a read:
 
 ```
 ## Evidence
@@ -66,4 +67,4 @@ exit: 0
 ```
 
 Claim no result this section doesn't show. The script refuses a reply without this section, or
-with a command missing its `exit:` unless it is a read that shows its output.
+with a command missing its `exit:`.

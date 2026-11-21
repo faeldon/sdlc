@@ -1334,6 +1334,31 @@ def test_accept_vouches_for_its_record_and_refuses_one_it_didnt_write(tmp_path, 
     assert not marker.exists() and record.read_text(encoding="utf-8") == forged
 
 
+@needs_uv
+def test_a_record_forged_while_accept_ran_is_never_appended_to(tmp_path, capsys) -> None:
+    """215, nit 2026-11-20-61: the earlier record is checked again after the checks ran, before it
+    is read, as the gate's is: one rewritten while they ran is refused, left as it is, and gets no
+    line in the ledger."""
+    root = _repo(tmp_path)
+    tree = _ready(root, "rewritten", "rewritten's one")
+    folder = _folder(tree)
+    (folder / "checks.md").write_text(CHECKS, encoding="utf-8")
+    assert _run(capsys, factory.cmd_accept, tree, "001")[0] == 0
+    record = folder / "build" / "land-accept.md"
+    rows = _ledger_rows(tree)
+    forged = "ACCEPT: PASS\n\n## Attempt 1\n\nVerdict: PASS\nBuild: abc\n"
+    source = tmp_path / "forged.md"
+    source.write_text(forged, encoding="utf-8", newline="\n")
+    (folder / "checks.md").write_text(CHECKS.replace("true", f"cp {source} {record}"), "utf-8")
+    code, out = _run(capsys, factory.cmd_accept, tree, "001")
+    assert (
+        code == 1 and "build/land-accept.md isn't a record the script wrote" in (out["refusals"][0])
+    ), out
+    assert "this attempt was not recorded" in out["refusals"][0]
+    assert record.read_text(encoding="utf-8") == forged, "never appended to"
+    assert _ledger_rows(tree) == rows, "nothing vouched"
+
+
 def _forge(path: Path, head: str, build: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

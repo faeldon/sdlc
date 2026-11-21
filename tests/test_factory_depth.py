@@ -403,6 +403,48 @@ def test_evidence_citing_the_gate_record_is_a_read() -> None:
     ]
 
 
+FACTORY = ROOT / "plugins" / "factory"
+# The wordings that told an agent a read may leave its `exit:` off (bug 2026-11-21-35).
+EXEMPTIONS = ("owes no `exit:`", "owe no `exit:`", "unless it is a read", "needs no `exit:`")
+
+
+@pytest.mark.portable
+def test_no_agent_prompt_lets_a_read_leave_its_exit_off() -> None:
+    """215: every agent whose reply ends with `## Evidence` is asked for `exit:` after every
+    command, reads included, so `is_read()` never decides whether a reply is read; no prompt, the
+    mend's included, says a read may leave it off, and the gate record's citation shows its exit."""
+    prompts = sorted((FACTORY / "agents").glob("*.md")) + [FACTORY / "prompts" / "mend.md"]
+    owing = []
+    for path in prompts:
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        for said in EXEMPTIONS:
+            assert said not in text, f"{path.name} says {said!r}"
+        if "with `## Evidence`" in text:
+            owing.append(path.name)
+            assert "every command, reads included" in text, path.name
+    assert owing == ["builder.md", "resolver.md", "reviewer-behaviour.md"], owing
+    behaviour = " ".join((FACTORY / "agents" / "reviewer-behaviour.md").read_text("utf-8").split())
+    assert "round-N.gate.md`, the lines it printed, and `exit: 0`" in behaviour
+    mend = (FACTORY / "prompts" / "mend.md").read_text(encoding="utf-8")
+    assert "every command, reads included" in mend
+
+
+@pytest.mark.portable
+def test_todays_stopped_commands_with_their_exits_read_clean() -> None:
+    """215: the three commands that stopped runs on 2026-11-21 for a missing `exit:` read clean
+    with one, and each is still flagged without it: the script's rule didn't loosen."""
+    stopped = (
+        "cat .sdlc/work/008-reopen-drafts/build/round-1.gate.md (head)",
+        "gh run view 123 --log-failed | grep FAILED",
+        "uv run --quiet --script <path-to-clone>/scripts/sdlc.py vet",
+    )
+    for command in stopped:
+        with_exit = f"## Evidence\n\n$ {command}\nsome output\nexit: 0\n"
+        assert factory.read_evidence(with_exit, "r") == [], command
+        without = f"## Evidence\n\n$ {command}\nsome output\n"
+        assert factory.read_evidence(without, "r") == [f"r: `{command}` has no `exit:` line"]
+
+
 def test_a_builders_read_needs_no_exit(tmp_path, capsys) -> None:
     """123 R6: the builder's report goes through the same parser: its gate shows its exit, a read
     after it shows only its output, and the run goes on to review."""
