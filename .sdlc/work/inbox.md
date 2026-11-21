@@ -686,3 +686,14 @@ the summary; a script-drawn line for "breaks a contract" (AGENTS.md, the invaria
 precondition (2026-11-21-28).
 Theme: factory
 Raised 2026-11-21.
+
+## [2026-11-21-33] [idea] Autopilot levels 2–4: releases, retrospectives, direction
+
+Beyond building (level 1): level 2 plans and cuts releases and files new seeds from what the
+retrospective finds; level 3 runs the retrospectives themselves; level 4 proposes direction from
+strategy, which only the person holds today. Hypothetical for now: context for how level 1's run
+record, budget and summary should be built so later levels can reuse them.
+After: 2026-11-21-32
+Theme: factory
+Priority: low
+Raised 2026-11-21.
