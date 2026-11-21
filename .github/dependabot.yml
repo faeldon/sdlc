@@ -1,0 +1,8 @@
+# Proposes a bump when an action CI runs has a new release: the workflows pin each action to a
+# commit SHA (`tests/test_ci.py`), which would otherwise never move.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

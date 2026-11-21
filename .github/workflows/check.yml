@@ -12,7 +12,8 @@ on:
   workflow_dispatch:
 
 # The token reads and nothing more: every step checks out, installs or runs tests, and none
-# pushes, uploads or comments.
+# pushes, uploads or comments. Each action is pinned to the commit its release tag named, never to
+# the tag, which can be moved to other code (`tests/test_ci.py`); Dependabot proposes the bumps.
 permissions:
   contents: read
 
@@ -20,8 +21,8 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: git config --global user.name ci && git config --global user.email ci@example.com
       - run: uv run --group dev ruff check .
       - run: uv run --group dev ruff format --check .
@@ -35,7 +36,7 @@ jobs:
         # Git for Windows' bash, which Claude Code runs the skills in there.
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: git config --global user.name ci && git config --global user.email ci@example.com
       - run: uv run --group dev pytest -q -m portable
