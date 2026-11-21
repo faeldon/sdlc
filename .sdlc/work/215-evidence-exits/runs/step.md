@@ -1,6 +1,0 @@
-STEP: done
-ROUND:
-LIMIT: 2
-REVIEWERS: code, behaviour
-SINCE: 2026-11-21T11:43:53Z
-DEPTH: light

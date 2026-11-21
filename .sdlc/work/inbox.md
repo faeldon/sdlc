@@ -349,16 +349,6 @@ Cost: S
 Value: med
 Raised by: 199-landing-records-unforgeable (contract)
 
-## [2026-11-20-61] [nit] check again that `earlier` is vouched when it's read after the run, not only before the slot wait
-
-Raised by the security review of 199-landing-records-unforgeable, round 1: plugins/factory/scripts/factory.py:3358: check again that `earlier` is vouched when it's read after the run, not only before the slot wait
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: med
-Raised by: 199-landing-records-unforgeable (contract)
-
 ## [2026-11-20-62] [nit] the writer test runs 400 locked appends across two processes, which may be slow on a loaded machine; a smaller count would still prove whole lines
 
 Raised by the test review of 199-landing-records-unforgeable, round 1: tests/test_records_ledger.py:152: the writer test runs 400 locked appends across two processes, which may be slow on a loaded machine; a smaller count would still prove whole lines
@@ -684,28 +674,6 @@ After: 2026-11-21-32
 Theme: board
 Raised 2026-11-21.
 
-## [2026-11-21-35] [bug] Agents leave `exit:` off commands the script doesn't count as reads, and a run stops on it
-
-Three factory runs on 2026-11-21 stopped on a missing `exit:` in `## Evidence` and had to be
-mended: 212's and 210's behaviour checks (`cat .sdlc/work/NNN-slug/build/round-1.gate.md (head)`)
-and 214's builder (`gh run view <id> --log-failed | grep FAILED`, `uv run … sdlc.py vet`). Each
-costs a mend run, and a second miss in the round stops the change for the person.
-
-The agents' prompts say a read "owes no `exit:`" but never say what a read is. `is_read()` in
-`plugins/factory/scripts/factory.py` accepts only a closed allowlist of programs in every stage
-of a pipe, with no annotation after the command, so `gh`, `uv run` and a trailing `(head)` all make
-a command a non-read. `agents/reviewer-behaviour.md` invites it by telling the reviewer to cite the
-gate record with `$ cat …gate.md`, "which a read owes no `exit:`". The prompts should either
-ask for `exit:` on every command, reads included (the simplest, since a read's exit costs one
-line), or name the programs `is_read()` accepts; and the `cat` citation should show its `exit:`.
-
-How to see it: `factory.py verdicts <NNN> --head <sha>` on a round whose evidence has
-`$ cat <file> (head)` with no `exit:` line names it under `problems`, with `mend` set.
-
-Severity: high
-Paths: plugins/factory/agents/builder.md, plugins/factory/agents/reviewer-behaviour.md, plugins/factory/scripts/factory.py
-Theme: factory
-
 ## [2026-11-21-36] [idea] Show a red CI on the base branch in the landing's look and in status
 
 Left undone by 214-ci-green, carried forward when it landed: Say when CI on the base branch is red, in a landing's look or in `status`, so the local gate isn't the only word (the intent's third open question; a seed of its own).
@@ -757,3 +725,9 @@ Paths: tests/test_hand_gate.py
 Cost: S
 Value: low
 Raised by: 214-ci-green (correctness)
+
+## [2026-11-21-42] [idea] Record an intent's `closes:` in the records ledger at `start`
+
+Left undone by 215-evidence-exits, carried forward when it landed: Record the intent's `closes:` at `start` in the records ledger, and have `intent_closes()` read the union of it and the working copy (nit 2026-11-20-47, done right).
+See .sdlc/work/215-evidence-exits/notes.md in its commit.
+Raised 2026-11-21.
