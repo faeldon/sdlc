@@ -1771,6 +1771,21 @@ def test_train_run_stops_at_a_refusal(tmp_path, capsys, monkeypatch) -> None:
 
 
 @needs_uv
+def test_a_train_names_a_readiness_refusal_as_its_cause(tmp_path, capsys) -> None:
+    """212: a change the landing can no longer take when the train reads it (its decision gone,
+    so `_land_readiness()` refuses it) is named for ejection with cause `refusal`, which the loop
+    leaves to the person, never `review` or `gate`, which it doesn't."""
+    root = _repo(tmp_path, "true")
+    tree = _ready(root, "lone", {"lone.txt": "lone\n"})
+    _begin(root, capsys, "person")
+    (_folder(tree) / "decision.md").unlink()
+    code, reading = _run(capsys, factory.landing.cmd_train, root)
+    assert (reading["next"], reading["change"]) == ("eject", tree.name), reading
+    assert reading["cause"] == "refusal" and "isn't ready" in reading["reason"], reading
+    assert "Sdlc-Landed" not in _git(tree, "log", "-1", "--format=%B"), "nothing committed"
+
+
+@needs_uv
 def test_train_run_stops_at_a_refused_push(tmp_path, capsys, monkeypatch) -> None:
     """147 R4: a close whose push is refused has landed the change, and stops the loop with
     close's own words."""
@@ -2318,6 +2333,10 @@ READ_ONLY_PASSES = [
     "git log --format=%H -1",
     "grep -r --directories=skip keep src",
     "grep -r --de keep src",
+    "grep -r -d recurse keep src",
+    "grep -r --directories=recurse keep src",
+    "grep -r --no-dereference keep src",
+    "grep --no-config -q keep README.md",
     "test -f README.md\ngrep -q one README.md",
 ]
 
@@ -2358,6 +2377,22 @@ READ_ONLY_REFUSALS = [
     ("grep --der keep .", "--der"),
     ("grep -n --dereference keep .", "--dereference"),
     ("grep --dereference-recursive=x keep .", "--dereference-recursive=x"),
+    # 212: ugrep's own ways to follow a link, and GNU's prefixes of them.
+    ("grep -r --dereference-files keep .", "--dereference-files"),
+    ("grep -r --dereference-fil keep .", "--dereference-fil"),
+    ("grep -r --dereference-files=x keep .", "--dereference-files=x"),
+    ("grep --directories=dereference-recurse keep .", "--directories=dereference-recurse"),
+    ("grep -ddereference-recurse keep .", "-ddereference-recurse"),
+    ("grep -d dereference-recurse keep .", "dereference-recurse"),
+    ("grep -rd dereference-recurse keep .", "dereference-recurse"),
+    # 212: ugrep's options that run a program, write a file or read options from one.
+    ("grep --filter='txt:touch ran' -q keep README.md", "--filter"),
+    ("grep --pager=less keep README.md", "--pager"),
+    ("grep --view=vi keep README.md", "--view"),
+    ("grep --save-config keep README.md", "--save-config"),
+    ("grep --config keep README.md", "--config"),
+    ("grep --config=.ugrep keep README.md", "--config=.ugrep"),
+    ("grep ---my.cfg keep README.md", "---my.cfg"),
     ("cat 'unclosed", "quote"),
     ("cat README.md &&", "empty"),
 ]

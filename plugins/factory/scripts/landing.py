@@ -811,14 +811,21 @@ READ_ONLY_PROGRAMS = frozenset({"grep", "cat", "head", "tail", "wc", "test", "["
                                 "git"})  # fmt: skip
 READ_ONLY_GIT = frozenset({"log", "show", "diff"})
 READ_ONLY_GIT_REFUSED = ("--output", "--ext-diff", "--textconv")
-# grep's flags that follow a symlink while recursing (GNU `-R`, BSD `-S` and `-O`), which the path
-# rule can't see: a link inside the checkout read through to a file outside it.
+# grep's flags that follow a symlink while recursing (GNU `-R`, BSD `-S` and `-O`, ugrep `-R` and
+# `-S`), which the path rule can't see: a link inside the checkout read through to a file outside.
 GREP_FOLLOWS = frozenset("RSO")
 # GNU grep takes any unambiguous prefix of a long option, so every name with three or more
-# characters after its `--` (`GREP_FOLLOWS_MIN`) that begins this one is refused (`--der` on),
-# with `=value` or not.
-GREP_FOLLOWS_LONG = "--dereference-recursive"
+# characters after its `--` (`GREP_FOLLOWS_MIN`) that begins one of these is refused (`--der` on,
+# ugrep's own `--dereference` among them), with `=value` or not.
+GREP_FOLLOWS_LONG = ("--dereference-recursive", "--dereference-files")
 GREP_FOLLOWS_MIN = 3
+# ugrep's `-d`/`--directories` action that follows links: refused wherever a word holds it, as
+# the option's value or the word after `-d`, a pattern of that text included.
+GREP_FOLLOWS_ACTION = "dereference-recurse"
+# ugrep's options that run a program (`--filter`, `--pager`, `--view`), write a file
+# (`--save-config`) or read options from one, which may sit outside the checkout (`--config`,
+# `---FILE`). ugrep takes no prefix of a long option, and GNU and BSD grep have none of these.
+GREP_REFUSED_LONG = frozenset({"--filter", "--pager", "--view", "--save-config", "--config"})
 # Outside single quotes: a redirect, a substitution, an escape, a subshell or group.
 READ_ONLY_REFUSED = frozenset(">`$\\(){}<")
 GLOBS = frozenset("*?[")
@@ -876,8 +883,9 @@ def read_only_command(text: str, checkout: Path) -> str | None:
     (185 R5), or None when it is: every simple command in it (`_simple_commands()`) starts with
     one of `READ_ONLY_PROGRAMS`, named bare, with no `VAR=value` before it; `git` takes one of
     `READ_ONLY_GIT` as its very next word and none of `READ_ONLY_GIT_REFUSED`; `grep` none of the
-    flags that follow symlinks as it recurses (`GREP_FOLLOWS`, and any prefix of
-    `GREP_FOLLOWS_LONG` grep would take for it); and no word, nor an option's value (after `=`, or
+    flags that follow symlinks as it recurses (`GREP_FOLLOWS`, any prefix of one of
+    `GREP_FOLLOWS_LONG` grep would take for it, and `GREP_FOLLOWS_ACTION`) and none of ugrep's
+    `GREP_REFUSED_LONG`, nor `---FILE`; and no word, nor an option's value (after `=`, or
     glued to a short option), is absolute, starts `~`, has a `..` component, or names an existing
     path that resolves outside `checkout`. That last rule sees only the paths the words name: a
     symlink out met by a program walking the tree itself is refused only by the grep flags above,
@@ -905,11 +913,16 @@ def read_only_command(text: str, checkout: Path) -> str | None:
                 return f"`{word}` makes git write a file or run a program"
             short = word.startswith("-") and not word.startswith("--")
             name = word.partition("=")[0] if word.startswith("--") else ""
+            prefix = len(name) - 2 >= GREP_FOLLOWS_MIN
             if program == "grep" and (
-                (len(name) - 2 >= GREP_FOLLOWS_MIN and GREP_FOLLOWS_LONG.startswith(name))
+                (prefix and any(long.startswith(name) for long in GREP_FOLLOWS_LONG))
                 or (short and GREP_FOLLOWS & set(word[1:]))
+                or (word.startswith("-") and GREP_FOLLOWS_ACTION in word)
+                or word == GREP_FOLLOWS_ACTION
             ):
                 return f"`{word}` makes grep follow symlinks, which can lead out of the checkout"
+            if program == "grep" and (name in GREP_REFUSED_LONG or word.startswith("---")):
+                return f"`{word}` makes ugrep run a program, write a file or read options from one"
             values = [word]
             if word.startswith("-"):
                 values = [word.partition("=")[2]] if "=" in word else []
