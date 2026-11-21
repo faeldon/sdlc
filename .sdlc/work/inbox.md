@@ -684,6 +684,12 @@ more for a pushed change than a local one, and for one stacked on another autopi
 either budget is reached it starts nothing new, leaves what is in flight at `stage: test`
 unlanded, and writes its summary, which leads with each budget, what spent it and on which change.
 
+Autopilot loosens no other WAIT: by hand and in the factory, every skill still asks its own, and
+`land.auto` stays the only self-approving step outside a run. The script commands its loop calls
+accept `--by autopilot` only while its run lock is held, and refuse it otherwise; no skill but
+autopilot's names it (a test pins this), and it adds no `allowed-tools` rule that lets another
+skill's writing command run unasked. `by=person`, `by=auto` and `by=autopilot` stay three values.
+
 It stops when no compelling seed is left, when its dollar cap, its hours or a risk budget run out,
 or when the person turns it off (between steps, as `train --cancel` does), and either way writes a
 summary: how long it ran and what it cost, what landed (features, bugs fixed), what is mid-build
