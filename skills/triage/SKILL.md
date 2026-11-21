@@ -146,7 +146,12 @@ Paths: <path>, <path>
 Issue: #52
 Theme: <theme, unless the person dropped it>
 Priority: <high or low, only when the person said so>
+Origin: <host, only for an issue intake flags `from_host`>
 ```
+
+An issue `intake` flags `from_host` was filed upstream by `/sdlc:bug` in a host: the entry filed
+from it carries `Origin: host`, so an intent taking it proposes `origin: host`. Its body holds only
+what that skill's allowlist sends, and names no host.
 
 Propose a new entry's `Theme:` as `/sdlc:idea` and `/sdlc:bug` do, from the words the register's
 entries already use, and add `Priority:` only when the person says so. A related issue never

@@ -9,7 +9,8 @@ commit says `Closes #N`, so GitHub closes the issue when that commit reaches the
 Where the default branch isn't the base branch close lands on (`change["base"]`), close closes it
 itself.
 
-Loaded by path from `sdlc.py` (`tracker()`), only when `archive.target = "github"`. It never
+Loaded by path from `sdlc.py` (`tracker()`), only when `archive.target = "github"`, and by
+`upstream_tracker()`, whatever the target, to file a bug on the plugin's own repo. It never
 imports `sdlc.py` and never reads `work/` or `.sdlc/`: what it needs crosses as a `change` dict.
 Only the stdlib and the script's PEP 723 dependencies are available here.
 """
@@ -332,6 +333,71 @@ class Tracker:
                     "comments": [c.get("body") or "" for c in i.get("comments") or []],
                 }
         return out
+
+    # ------------------------------------------------------------ upstream
+    #
+    # A bug in the plugin, filed on the plugin's own repo (`sdlc.py upstream`), whatever
+    # `archive.target` says. Core renders the title and body and keeps the record; these take
+    # every value as an argument and set nothing GitHub drops for someone without push access to
+    # the repo: no label, assignee or milestone.
+
+    UPSTREAM_REPO_RE = re.compile(r"^https://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
+
+    @classmethod
+    def repo_of(cls, url: str | None) -> str | None:
+        """`owner/name` from a manifest's `repository`, or None when it isn't a repo on GitHub."""
+        m = cls.UPSTREAM_REPO_RE.match(url or "")
+        return f"{m[1]}/{m[2]}" if m else None
+
+    @staticmethod
+    def new_issue_url(repo: str) -> str:
+        return f"https://github.com/{repo}/issues/new"
+
+    def upstream_unavailable(self) -> str | None:
+        """Why no issue can be filed from here, or None: `gh` installed and logged in. Reads no
+        network; unlike `unavailable()`, the host's own remotes have no bearing."""
+        if not shutil.which("gh"):
+            return "gh isn't installed"
+        if self._gh("auth", "token").returncode != 0:
+            return "run `gh auth login`"
+        return None
+
+    def login(self) -> str | None:
+        """The login `gh` files as, or None when it can't be read."""
+        out = self._gh("api", "user", "--jq", ".login")
+        name = out.stdout.strip() if out.returncode == 0 else ""
+        return name or None
+
+    def find_issue(self, repo: str, marker: str) -> tuple[dict | None, str | None]:
+        """(the login's own issue on `repo` whose body holds `marker`, None), (None, None) with
+        none, or (None, why) when they can't be listed: whether a stopped send made one."""
+        out = self._gh(
+            "issue", "list", "--repo", repo, "--author", "@me", "--state", "all",
+            "--json", "number,url,body", "--limit", "200",
+        )  # fmt: skip
+        if out.returncode != 0:
+            return None, out.stderr.strip() or "gh issue list failed"
+        try:
+            items = json.loads(out.stdout or "[]")
+        except json.JSONDecodeError:
+            return None, "gh issue list didn't parse"
+        for i in items:
+            if marker in (i.get("body") or ""):
+                return {"number": i.get("number"), "url": i.get("url")}, None
+        return None, None
+
+    def file_issue(self, repo: str, title: str, body: str) -> tuple[int | None, str, str | None]:
+        """File the issue on `repo` under `gh`'s login: (its number, URL, None), or
+        (None, URL or "", why)."""
+        made = self._gh(
+            "issue", "create", "--repo", repo, "--title", title, "--body-file", "-", stdin=body
+        )
+        url = _url(made)
+        try:
+            return int(url.rstrip("/").rsplit("/", 1)[1]), url, None
+        except (IndexError, ValueError):
+            why = made.stderr.strip() or made.stdout.strip() or f"gh exited {made.returncode}"
+            return None, url, f"gh issue create failed: {why}"
 
     def titles(self, numbers: list[int]) -> list[dict]:
         """Each issue's number, title, state and URL, or its `error` when it can't be read."""

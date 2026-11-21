@@ -517,6 +517,10 @@ after one approval records each issue once, in one of three ways:
   verdict=… ref=…` trailer, on an empty `Triage #N` commit when nothing else changed, and retro
   counts them under `bugs.triaged`.
 
+An issue that opens with `<!-- sdlc:host-bug:` was filed by `/sdlc:bug` in another repo (see
+*Trackers*): `intake` flags it `from_host`, and the entry triage files from it carries
+`Origin: host`.
+
 An issue too thin to judge gets its author asked, by `sdlc.py needs-info`, and the `needs-info`
 label; `intake` leaves it out until the author comments. Then `sdlc.py mark-triaged`, from the
 main checkout, tells each open issue the repo records where it stands: one comment each, the
@@ -873,6 +877,24 @@ nothing needs `gh`. Only Tier 1 and 2 changes reach one: Tier 0 has no folder an
   process doc's words) and `sdlc-request.yml`, which are the repo's once written.
 - **`command`**: the repo's own command (`archive.command`) archives the folder at close. It has no
   live view.
+
+Whatever `archive.target` says, `/sdlc:bug` in a host can file a bug in the plugin itself on the
+plugin's repo, the `repository` in the running plugin's manifest, through the GitHub tracker
+(`sdlc.py upstream`), under your own `gh` login. Nothing is sent unasked: the skill writes your
+words to `sdlc-upstream-input.md` in the git common dir, `upstream --render` builds the issue
+from an allowlist (the title, what happens, what should happen, how to see it, the failing
+command, its exit and its last 40 lines of output, then the sdlc and sdlc-factory versions and
+scopes, the Claude Code, OS and `uv` versions, and the names of the config keys you set, never
+their values), and the exact body is shown before one WAIT that says the issue is public. Every
+path outside the plugin's own layout, and every name the plugin can see that would identify the
+repo (its folder, remotes, branches, changes, entries, git user, config values), is cut to a
+placeholder, and a field that still names it is left out, saying so. The issue sets no label,
+assignee or milestone, which GitHub drops for anyone without push access, and opens with
+`<!-- sdlc:host-bug:<key> -->`. `upstream --send --key <key>` files only the body shown under that
+key, and records it in `sdlc-upstream.json` in the git common dir, so a rerun never files it
+twice; its number is never one of the repo's own issue records. Without `gh` or a login it files
+nothing, and the skill shows the body to paste on the repo's new-issue page. In the plugin's own
+repo, a bug is filed in the register as any other.
 - **`none`**: nothing is mirrored, and the folder still goes: history has it.
 
 ## The project doc

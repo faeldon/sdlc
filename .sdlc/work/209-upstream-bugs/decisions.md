@@ -1,0 +1,23 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Keep file contents out of the body only by dropping sections that aren't allowed and by showing the body before the yes, since the cutter can't recognise them inside the output? Going ahead with that unless told otherwise. → decided: the assumed default, confirmed
+  - OPTION: allowlist plus preview — no scanning of tracked files; contents pasted into the output can still be sent
+  - OPTION: also leave out output lines that match the host's tracked files' lines — catches more; slow on a big repo, and leaves out common lines
+  - WHY: R4's sentinel test can't place unknown contents, and the WAIT shows exactly what leaves
+- [x] D2 (builder round 1, default): List only the config keys the plugin knows, and count the rest without naming them ("and N not the plugin's")? Going ahead with that unless told otherwise. → decided: the assumed default, confirmed
+  - OPTION: known keys named, others counted — nothing the host invented leaves it; the plugin can't see which unknown key
+  - OPTION: every key named — matches R5's wording; a key the host made up could name something
+  - WHY: the intent's "allowlist, not a scrubber" constraint
+- [x] D3 (builder round 1, default): Don't cut names every host has (the default base branch, `master`, `origin`, and config values equal to the plugin's defaults), and keep relative paths that exist in the plugin's own copy, such as `scripts/sdlc.py`? Going ahead with that unless told otherwise. → decided: the assumed default, confirmed
+  - OPTION: exempt common names and the plugin's paths — readable bodies; these say nothing about the host
+  - OPTION: cut every config value and every relative path — closer to R6's letter; "the main checkout" reads "the <config> checkout"
+  - WHY: they identify no host, and cutting them makes the plugin's own messages unreadable
+- [x] D4 (builder round 1, default): Word AGENTS.md's tracker rule as "loaded only when `archive.target` names it, or, the GitHub one alone, by `upstream`", and count the input file as a sixth write before a WAIT? Going ahead with that wording unless told otherwise. → decided: the assumed default, confirmed
+  - OPTION: the edits as written — they say what the code now does
+  - OPTION: other wording of your choice — the spec left the policy to you
+  - WHY: the spec's *Contracts touched* names both as the person's call, and R15 asks for the edits
+- [x] D5 (security round 1, default): Leave `upstream --send` under the skill's one `Bash(... sdlc.py upstream *)` rule, so nothing but the skill's WAIT stops the model from filing a public issue? Assuming yes. → decided: the assumed default, confirmed
+  - OPTION: keep the one rule — same as `close`'s and `release`'s pushes, which also rely on the WAIT; the skill only runs when the person types `/sdlc:bug`; the key only proves a render happened, not that the person saw it
+  - OPTION: grant only `upstream` and `upstream --render`, so Claude Code asks again before `--send` — a second check against prompt injection from session output the skill reads; it needs `test_skills.py`'s "every command has a rule" check to allow an unlisted command, and it asks twice
+  - WHY: it matches how the plugin already guards its other outward writes, and the WAIT shows the exact body
+- [x] R1 (person, fix): fix 2 security mediums

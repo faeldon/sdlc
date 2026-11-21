@@ -19,7 +19,7 @@ plan.
 | `/sdlc:close` | after ship: land it on `main` and tidy away its worktree and branch |
 | `/sdlc:drop` | for a change that won't ship: record why, and keep what it cost |
 | `/sdlc:idea` | when you think of something for later: file it in the inbox, or edit or retire one |
-| `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one |
+| `/sdlc:bug` | when something shipped is broken: file it with a severity, or retire or retag one; in another repo, a bug in the plugin itself goes to the plugin's issues, after you see exactly what is sent |
 | `/sdlc:triage` | when people have filed GitHub issues: check each, then file, attach or close it |
 | `/sdlc:health` | now and then: run the repo's scans and route every finding |
 | `/sdlc:release` | when `/sdlc:status` says Release due: the version they add up to, committed and tagged |

@@ -420,13 +420,11 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
     An unknown key is a warning rather than ignored: `buld = ...` would otherwise leave a host
     believing it had configured a slow gate that never runs."""
     cfg = {section: dict(keys) for section, keys in CONFIG_KEYS.items()}
-    path = root / HOST_DIR / "config.toml"
-    if not path.is_file():
+    data, error = _config_data(root)
+    if error:
+        return _resolve_docs(root, cfg, set()), [error], False
+    if data is None:
         return _resolve_docs(root, cfg, set()), [], True
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as e:
-        return _resolve_docs(root, cfg, set()), [f"{HOST_DIR}/config.toml won't parse: {e}"], False
     warnings = _apply_config(cfg, data)
     if cfg["archive"]["target"] not in ARCHIVE_TARGETS:
         warnings.append(f"archive.target must be one of {'|'.join(ARCHIVE_TARGETS)}")
@@ -434,6 +432,18 @@ def load_config(root: Path) -> tuple[dict, list[str], bool]:
         warnings.append("commands.close_cleanup_runs is on with no close_cleanup: nothing runs")
     docs = data.get("docs")
     return _resolve_docs(root, cfg, set(docs) if isinstance(docs, dict) else set()), warnings, True
+
+
+def _config_data(root: Path) -> tuple[dict | None, str | None]:
+    """The host's `.sdlc/config.toml` as parsed, None with no file, or why it won't parse: the
+    one read of the file, which `load_config()` resolves and the upstream diagnostics name."""
+    path = root / HOST_DIR / "config.toml"
+    if not path.is_file():
+        return None, None
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8")), None
+    except tomllib.TOMLDecodeError as e:
+        return None, f"{HOST_DIR}/config.toml won't parse: {e}"
 
 
 def _apply_config(cfg: dict, data: dict) -> list[str]:
@@ -5404,15 +5414,20 @@ def tracker(home: Path, cfg: dict):
     target = cfg["archive"]["target"]
     if target == "none" or target not in ARCHIVE_TARGETS:
         return None
-    mod = _TRACKERS.get(target)
+    return _tracker_module(target).make(home, cfg)
+
+
+def _tracker_module(name: str):
+    """`scripts/trackers/<name>.py`, loaded by path once."""
+    mod = _TRACKERS.get(name)
     if mod is None:
         spec = importlib.util.spec_from_file_location(
-            f"sdlc_tracker_{target}", TRACKER_DIR / f"{target}.py"
+            f"sdlc_tracker_{name}", TRACKER_DIR / f"{name}.py"
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        _TRACKERS[target] = mod
-    return mod.make(home, cfg)
+        _TRACKERS[name] = mod
+    return mod
 
 
 def archive_unavailable(home: Path, cfg: dict) -> str | None:
@@ -7835,10 +7850,10 @@ def recorded_issues(home: Path, committed_only: bool = False) -> dict[int, dict]
 def cmd_intake(root: Path) -> int:
     """What /sdlc:triage reads, as JSON: the open issues no change claims and triage hasn't
     labelled, each with `filed` naming the record the repo already holds for it (so a rerun only
-    labels it) or null; the `dangling` ones, labelled `triaged` with no record, each saying
-    whether an unpushed commit closes it (`waits_on_push`, null with `dangling_unread` when
-    those commits can't be read); the severities;
-    and the open changes an issue could go to. Writes nothing."""
+    labels it) or null, and `from_host` when a host's `/sdlc:bug` filed it (`UPSTREAM_MARKER`);
+    the `dangling` ones, labelled `triaged` with no record, each saying whether an unpushed
+    commit closes it (`waits_on_push`, null with `dangling_unread` when those commits can't be
+    read); the severities; and the open changes an issue could go to. Writes nothing."""
     home = main_root(root)
     cfg = load_config(home)[0]
     out: dict = {"unavailable": None, "issues": [], "more": False, "dangling": []}
@@ -7873,6 +7888,8 @@ def cmd_intake(root: Path) -> int:
             **i,
             "filed": (records.get(i["number"]) or {}).get("filed"),
             "uncommitted": i["number"] in records and i["number"] not in committed,
+            # Filed upstream by a host's `/sdlc:bug`: triage writes `Origin: host` on its entry.
+            "from_host": UPSTREAM_MARKER in (i.get("body") or ""),
         }
         for i in issues
     ]
@@ -9699,6 +9716,487 @@ def cmd_update(root: Path, home: Path, mode: str | None) -> int:
 )
 def cli_update(root: Path, home: Path, args) -> int:
     return cmd_update(root, home, "hook" if args.hook else "installed" if args.installed else None)
+
+
+# A bug in the plugin, filed from a host on the plugin's own repo, the one its running manifest's
+# `repository` names (`sdlc.py upstream`). The body is built from an allowlist alone: the sections
+# `UPSTREAM_FIELDS` names, each cut of the host's specifics (`_cut_host()`), and the diagnostics,
+# versions and key names, laid out by `upstream_body()`, never a template a host could override.
+# The person sees the exact body before `/sdlc:bug`'s WAIT; `--send` files it only under the key
+# that body was shown with. The skill writes the person's words to `UPSTREAM_INPUT`, and the
+# record of what was filed is `UPSTREAM_RECORD`, both in the git common dir, state like the main
+# lock, so neither dirties a checkout. An upstream number is never one of the host's own issue
+# records (`recorded_issues()`): it is about an issue on another repo.
+UPSTREAM_INPUT = "sdlc-upstream-input.md"
+UPSTREAM_RECORD = "sdlc-upstream.json"
+# The input's sections the body may hold, in the order the person tells them.
+UPSTREAM_FIELDS = (
+    "Title", "What happens", "What should happen", "How to see it", "Command", "Exit", "Output",
+)  # fmt: skip
+# The body's first line opens with this, and `intake` flags an issue holding it `from_host`.
+UPSTREAM_MARKER = "<!-- sdlc:host-bug:"
+UPSTREAM_TAIL = 40  # lines of a command's output the body keeps, the last ones
+LEFT_OUT_NOTE = "*Left out: it named the host.*"
+# Names every host has, which say nothing about this one: skipped as a branch or a config value,
+# never as the host's own folder, remote, owner or user.
+UPSTREAM_COMMON = {DEFAULT_TRUNK, "master", "origin", "head", "none", "github", "local", "command"}
+UPSTREAM_GENERIC = ("<branch>", "<config>")  # the placeholders `UPSTREAM_COMMON` is skipped for
+# A name shorter than this is cut, and checked for, as a whole word alone: inside a longer word it
+# is a coincidence, not the host. Shorter still (one character) is never cut.
+UPSTREAM_SHORT = 3
+_URL_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"`<>)]+")
+# One pass over a text's paths, left to right: the plugin's root as a skill writes it, kept; an
+# absolute path (POSIX, `~/`, or a Windows drive); a relative path of two parts or more. Either
+# may follow a `:` (`host:/home/x`, `a:b/c`): URLs are held before this pass runs.
+_PATH_RE = re.compile(
+    r"(?P<root>\$\{CLAUDE_PLUGIN_ROOT\}\"?(?:/[^\s'\"`<>()]*)?)"
+    r"|(?P<abs>(?<![\w./\\$}<>@-])(?:[A-Za-z]:[/\\]|~[/\\]|/)[^\s'\"`<>(),;]*)"
+    r"|(?P<rel>(?<![\w./\\$}<>@-])[\w.-]+(?:[/\\][\w.-]+)+[/\\]?)"
+)
+# An scp-style remote, `user@host:path`, which names a host and a repo whether or not it is one
+# of this repo's remotes.
+_SCP_RE = re.compile(r"(?<![\w.-])[\w.-]+@[\w-]+(?:\.[\w-]+)+:[^\s'\"`<>(),;]*")
+# An `@name` in prose, which GitHub would turn into a notification; an email's `@` follows a word.
+_MENTION_RE = re.compile(r"(?<![\w`])@[A-Za-z0-9](?:[\w-]*[A-Za-z0-9])?")
+_TRAILER_RE = re.compile(r"\b(Sdlc-[A-Za-z-]+):[^\n]*")
+_SHA_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")
+_ISSUE_REF_RE = re.compile(r"(?<![\w&])#\d+\b")
+_REMOTE_RE = re.compile(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
+
+
+def upstream_tracker(home: Path):
+    """The GitHub tracker, by path, whatever `archive.target` says: the plugin's repo is on
+    GitHub however the host archives its own changes."""
+    return _tracker_module("github").make(home, load_config(home)[0])
+
+
+def _upstream_path(root: Path, name: str) -> Path | None:
+    where = _ledger_dir(root)
+    return where / name if where else None
+
+
+def upstream_info(root: Path) -> dict:
+    """`upstream`'s JSON: whether a bug can be filed upstream from here, why not, whether this is
+    the plugin's own repo, the repo (from the manifest alone), the `gh` login, the input file the
+    skill writes, and the repo's new-issue page, for a bug pasted by hand."""
+    home = main_root(root)
+    found = _upstream_path(root, UPSTREAM_INPUT)
+    out = {"available": False, "why": None, "own_repo": _own_repo(home), "repo": None}
+    out |= {"login": None, "input": found.as_posix() if found else None, "new_issue_url": None}
+    github = upstream_tracker(home)
+    out["repo"] = github.repo_of(release_source())
+    if out["repo"]:
+        out["new_issue_url"] = github.new_issue_url(out["repo"])
+    if out["own_repo"]:
+        return out | {"why": "this is the plugin's own repo: file the bug here, with /sdlc:bug"}
+    if not out["repo"]:
+        return out | {"why": "the plugin's manifest names no repository on GitHub"}
+    if found is None:
+        return out | {"why": "not in a git repo"}
+    if why := github.upstream_unavailable():
+        return out | {"why": why}
+    out["login"] = github.login()
+    if not out["login"]:
+        return out | {"why": "couldn't read the gh login: run `gh auth status`"}
+    return out | {"available": True}
+
+
+def parse_upstream_input(text: str) -> tuple[dict[str, str], list[str]]:
+    """The input's `## ` sections `UPSTREAM_FIELDS` names, by name, and the names of the rest,
+    which the body never holds. Text before the first heading is one of the rest."""
+    fields: dict[str, str] = {}
+    left: list[str] = []
+    parts = re.split(r"(?m)^## +(.+?)\s*$", text)
+    if parts[0].strip():
+        left.append("(text before the first heading)")
+    for name, body in zip(parts[1::2], parts[2::2], strict=True):
+        if name in UPSTREAM_FIELDS and name not in fields:
+            fields[name] = body.strip("\n").rstrip()
+        else:
+            left.append(name)
+    return fields, left
+
+
+def host_specifics(root: Path) -> dict:
+    """What would name this host, for `_cut_host()`: its checkouts' paths (`roots`), the plugin's
+    (`plugin`), and each name with the placeholder it becomes (`names`): the main checkout's
+    folder name, the change folders' names, slugs and titles, the register's ids and titles, the
+    branches, each remote's URL, owner and name, git's user and email, and the string values the
+    host's config sets that aren't the plugin's defaults."""
+    home = main_root(root)
+    names: dict[str, str] = {}
+
+    def add(text: object, placeholder: str) -> None:
+        text = str(text or "").strip()
+        common = placeholder in UPSTREAM_GENERIC and text.casefold() in UPSTREAM_COMMON
+        if len(text) >= 2 and not common:
+            names.setdefault(text, placeholder)
+
+    add(home.name, "<repo>")
+    for path in change_dirs(home):
+        add(path.name, "<change>")
+        if m := DIR_RE.match(path.name):
+            add(m[2], "<slug>")
+        title = load_change(path, home).get("title") or ""
+        add(re.sub(r"^\d{3,}\s*[—-]\s*", "", title), "<change title>")
+    for e in inbox_entries(home):
+        add(e.get("id"), "<entry>")
+        add(e.get("title"), "<entry title>")
+    for line in (_git(home, "for-each-ref", "--format=%(refname:short)", "refs/heads") or "").split(
+        "\n"
+    ):
+        add(line, "<branch>")
+    for line in (_git(home, "config", "--get-regexp", r"^remote\..*\.url$") or "").splitlines():
+        url = line.split(" ", 1)[-1]
+        add(url, "<remote>")
+        if m := _REMOTE_RE.search(url):
+            add(m[1], "<owner>")
+            add(m[2], "<repo>")
+    add(_git(home, "config", "user.name"), "<user>")
+    add(_git(home, "config", "user.email"), "<email>")
+    data, _ = _config_data(home)
+    for section, values in (data or {}).items():
+        for key, value in (values if isinstance(values, dict) else {}).items():
+            default = CONFIG_KEYS.get(section, {}).get(key)
+            for v in value if isinstance(value, list) else [value]:
+                if (
+                    isinstance(v, str)
+                    and v != default
+                    and not (isinstance(default, list) and v in default)
+                ):
+                    add(v, "<config>")
+    roots = {root, home, *(p for p, _ in worktrees(home))}
+    plugin = {PLUGIN_DIR, PLUGIN_DIR.resolve()}
+    every = {p.as_posix() for p in roots} | {p.resolve().as_posix() for p in roots}
+    return {
+        "roots": sorted(every, key=len, reverse=True),
+        "plugin": sorted({p.as_posix() for p in plugin}, key=len, reverse=True),
+        "names": dict(sorted(names.items(), key=lambda kv: -len(kv[0]))),
+    }
+
+
+def _layout(rel: str, names: dict[str, str]) -> str:
+    """A repo-relative path, kept only under the plugin's own layout (`.sdlc/`,
+    `.claude/worktrees/`) with each change folder shown as `<change>`, else `<path>`."""
+    parts = rel.replace("\\", "/").split("/")
+    if parts[0] == HOST_DIR or parts[:2] == [".claude", "worktrees"]:
+        return "/".join(
+            "<change>" if DIR_RE.match(p) or names.get(p) == "<change>" else p for p in parts
+        )
+    return "<path>"
+
+
+def _cut_path(found: str, specifics: dict) -> tuple[str, str]:
+    """One path `_PATH_RE` found, placed by where it points: (its placeholder, the rest kept
+    after it), or (`""`, `found`) when it isn't a path, a skill's `/sdlc:close` say."""
+    trail = re.search(r"[.,:;]+$", found)
+    end = trail.group(0) if trail else ""
+    path = found[: len(found) - len(end)].replace("\\", "/")
+    if path.startswith("~/"):
+        path = Path.home().as_posix() + path[1:]
+    if not re.match(r"[A-Za-z]:/", path) and len([p for p in path.split("/") if p]) < 2:
+        return "", found
+    low = path.casefold()
+    for base in specifics["plugin"]:
+        if low == base.casefold() or low.startswith(base.casefold() + "/"):
+            return "${CLAUDE_PLUGIN_ROOT}", path[len(base) :] + end
+    for base in specifics["roots"]:
+        if low == base.casefold():
+            return "<repo>", end
+        if low.startswith(base.casefold() + "/"):
+            return "<repo>/" + _layout(path[len(base) + 1 :], specifics["names"]), end
+    return "<path>", end
+
+
+# A placeholder while `_cut_host()` runs: a private-use character no host's text holds, so no
+# later pass matches inside one, and the final check reads around it.
+_HELD = "\ue000"
+
+
+def _cut_host(text: str, specifics: dict) -> tuple[str, bool]:
+    """`text` with the host's specifics cut, and whether it is safe to send: URLs become `<url>`,
+    paths are placed (`_cut_path()`, `_layout()`), `Sdlc-*` values, commit SHAs and `#N` refs
+    their placeholders, then each of `specifics`' names, longest first. Unsafe when a name or a
+    checkout's path is still there after that, inside a longer word say: the field is then left
+    out, never sent."""
+    names = specifics["names"]
+    held: list[str] = []
+
+    def hold(placeholder: str) -> str:
+        held.append(placeholder)
+        return f"{_HELD}{chr(0xE100 + len(held) - 1)}"
+
+    def path(m: re.Match) -> str:
+        if m["root"]:
+            return hold(m["root"])
+        if m["abs"]:
+            placed, rest = _cut_path(m["abs"], specifics)
+            return hold(placed) + rest if placed else rest
+        rel = m["rel"]
+        posix = rel.replace("\\", "/").rstrip("/")
+        if ".." not in posix.split("/") and (PLUGIN_DIR / posix).exists():
+            return hold(rel)
+        return hold(_layout(rel, names))
+
+    out = _URL_RE.sub(lambda m: hold("<url>"), text)
+    out = _SCP_RE.sub(lambda m: hold("<remote>"), out)
+    out = _PATH_RE.sub(path, out)
+    out = _TRAILER_RE.sub(lambda m: f"{m[1]}: {hold('<trailer>')}", out)
+    for name, placeholder in names.items():
+        out = re.sub(
+            rf"(?<![\w-]){re.escape(name)}(?![\w-])",
+            lambda m, p=placeholder: hold(p),
+            out,
+            flags=re.I,
+        )
+    out = _SHA_RE.sub(lambda m: hold("<sha>"), out)
+    out = _ISSUE_REF_RE.sub(lambda m: hold("#<n>"), out)
+    rest = re.sub(f"{_HELD}.", " ", out).casefold()
+    safe = not any(n.casefold() in rest for n in specifics["roots"]) and not any(
+        n.casefold() in rest
+        if len(n) >= UPSTREAM_SHORT
+        else re.search(rf"(?<![a-z0-9]){re.escape(n.casefold())}(?![a-z0-9])", rest)
+        for n in names
+    )
+    return re.sub(f"{_HELD}(.)", lambda m: held[ord(m[1]) - 0xE100], out), safe
+
+
+def _tool_version(name: str) -> str:
+    """The first version-looking word `<name> --version` prints, or `unknown`."""
+    found = shutil.which(name)
+    if not found:
+        return "unknown"
+    try:
+        out = subprocess.run(
+            [found, "--version"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=UPDATE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    m = re.search(r"\d+\.\d+(?:\.\d+)?", out.stdout or "")
+    return m.group(0) if m and out.returncode == 0 else "unknown"
+
+
+def upstream_diagnostics(root: Path) -> list[str]:
+    """The body's diagnostics, as its lines: sdlc's version and scope, sdlc-factory's, Claude
+    Code's, the OS, `uv`'s, and the names of the keys the host's config sets, never their
+    values. A key the plugin doesn't know is counted, not named. Anything unread is `unknown`."""
+    import platform
+
+    home = main_root(root)
+    installs, why = plugin_installs(home)
+
+    def scope(plugin: str) -> tuple[str | None, str]:
+        top = None if why else most_specific(installs, plugin)
+        if top is None:
+            return None, "unknown" if why else "not installed"
+        return top["version"], f"{top['scope']} scope"
+
+    sdlc_version, sdlc_scope = scope("sdlc")
+    where = "read in place" if in_place() else sdlc_scope
+    if where == "not installed":
+        where = "unknown scope"
+    factory_version, factory_scope = scope("sdlc-factory")
+    factory = f"{factory_version} ({factory_scope})" if factory_version else factory_scope
+    data, _ = _config_data(home)
+    known, other = [], 0
+    for section, values in (data or {}).items():
+        for key in values if isinstance(values, dict) else {"": None}:
+            if section in CONFIG_KEYS and key in CONFIG_KEYS[section]:
+                known.append(f"{section}.{key}")
+            else:
+                other += 1
+    keys = ", ".join(sorted(known)) or "none"
+    if other:
+        keys += f" (and {other} not the plugin's)"
+    return [
+        f"- sdlc: {plugin_version() or sdlc_version or 'unknown'} ({where})",
+        f"- sdlc-factory: {factory}",
+        f"- Claude Code: {_tool_version('claude')}",
+        f"- OS: {platform.system() or 'unknown'} {platform.release()}".rstrip(),
+        f"- uv: {_tool_version('uv')}",
+        f"- Config keys set: {keys}",
+    ]
+
+
+def _fence(text: str) -> str:
+    """A code fence longer than any run of backticks in `text`."""
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
+
+
+def upstream_body(root: Path, fields: dict[str, str]) -> tuple[str, str, list[str]]:
+    """(title, body without its marker line, the fields left out because they named the host),
+    from the allowlisted `fields` alone. A field the person left empty is omitted, heading and
+    all; one still naming the host after the cut is left out, saying so. The output keeps its
+    last `UPSTREAM_TAIL` lines, fewer when the body would be over `ISSUE_LIMIT`."""
+    specifics = host_specifics(root)
+    left: list[str] = []
+
+    def cut(name: str, text: str) -> str | None:
+        text = text.strip("\n").rstrip()
+        if not text.strip():
+            return None
+        text, safe = _cut_host(text, specifics)
+        if safe:
+            return text
+        left.append(f"{name}: it named the host")
+        return LEFT_OUT_NOTE
+
+    said = {n: cut(n, fields.get(n) or "") for n in UPSTREAM_FIELDS if n != "Output"}
+    # The prose is the only text outside a code block, where GitHub would notify an `@name`.
+    for name in ("What happens", "What should happen", "How to see it", "Exit"):
+        if said[name] not in (None, LEFT_OUT_NOTE):
+            said[name] = _MENTION_RE.sub(lambda m: f"`{m[0]}`", said[name])
+    lines = (fields.get("Output") or "").strip("\n").rstrip().splitlines()
+    diagnostics = "\n".join(upstream_diagnostics(root))
+
+    def block(text: str) -> str:
+        fence = _fence(text)
+        return text if text == LEFT_OUT_NOTE else f"{fence}text\n{text}\n{fence}"
+
+    def render(output: str | None, kept: int) -> str:
+        parts = ["Filed from a host by `/sdlc:bug`, from the fields it allows and nothing else."]
+        for name in ("What happens", "What should happen", "How to see it"):
+            if said[name] is not None:
+                parts.append(f"### {name}\n\n{said[name]}")
+        command = []
+        if said["Command"] is not None:
+            command.append(block(said["Command"]))
+        if said["Exit"] is not None:
+            command.append(f"Exit: {said['Exit']}")
+        if output is not None:
+            command.append(block(output))
+            if kept < len(lines):
+                command.append(f"*Kept the last {kept} lines of {len(lines)}.*")
+        if command:
+            parts.append("### The command\n\n" + "\n\n".join(command))
+        parts.append(f"### Diagnostics\n\n{diagnostics}")
+        return "\n\n".join(parts) + "\n"
+
+    tail = min(UPSTREAM_TAIL, len(lines))
+    while True:
+        kept = lines[-tail:] if tail else []
+        output, safe = _cut_host("\n".join(kept), specifics) if kept else ("", True)
+        output = None if not output.strip() else output if safe else LEFT_OUT_NOTE
+        body = render(output, len(kept))
+        if len(body) <= ISSUE_LIMIT or tail <= 1:
+            break
+        tail //= 2
+    if output == LEFT_OUT_NOTE:
+        left.append("Output: it named the host")
+    title = said["Title"] if said["Title"] not in (None, LEFT_OUT_NOTE) else None
+    return f"sdlc: {' '.join((title or 'a bug filed from a host').split())}", body, left
+
+
+def _upstream_record(root: Path) -> dict:
+    path = _upstream_path(root, UPSTREAM_RECORD)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path else {}
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_upstream_record(root: Path, record: dict) -> None:
+    path = _upstream_path(root, UPSTREAM_RECORD)
+    tmp = path.with_name(f"{UPSTREAM_RECORD}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
+    os.replace(tmp, path)
+
+
+def upstream_render(root: Path) -> dict:
+    """`upstream --render`'s JSON: the title and body built from the input file, the key they
+    are filed under (a hash of both, the marker aside), the input's sections and fields left out,
+    and `already`, the issue a send filed under that key; or `refusals`."""
+    path = _upstream_path(root, UPSTREAM_INPUT)
+    try:
+        text = path.read_text(encoding="utf-8") if path else ""
+    except (OSError, UnicodeDecodeError):
+        text = ""
+    if not text.strip():
+        where = path.as_posix() if path else "the git common dir"
+        return {"refusals": [f"no bug to render: write it to {where} first"]}
+    fields, dropped = parse_upstream_input(text)
+    title, body, cut_out = upstream_body(root, fields)
+    key = hashlib.sha256(f"{title}\n{body}".encode()).hexdigest()[:12]
+    had = _upstream_record(root).get(key) or {}
+    already = {"number": had.get("number"), "url": had.get("url")}
+    return {
+        "title": title,
+        "body": f"{UPSTREAM_MARKER}{key} -->\n{body}",
+        "key": key,
+        "left_out": dropped + cut_out,
+        "already": already if had.get("state") == "filed" else None,
+    }
+
+
+def upstream_send(root: Path, key: str) -> tuple[dict, int]:
+    """`upstream --send`: file the body `upstream --render` showed under `key`, once. Refuses a
+    key the input no longer renders to. Files nothing, exit 0, where `upstream_info()` says it
+    can't. Under the main lock, records `sending` before `gh` runs and `filed` after, so a rerun
+    prints the issue a send already filed, and one after a stopped send looks for its marker
+    among the login's own issues before it files."""
+    shown = upstream_render(root)
+    if "refusals" in shown:
+        return shown, 1
+    if shown["key"] != key:
+        why = f"the bug renders as {shown['key']}, not {key}: render it again and show it first"
+        return {"refusals": [why]}, 1
+    info = upstream_info(root)
+    if not info["available"]:
+        return {"filed": None, "why": info["why"], "new_issue_url": info["new_issue_url"]}, 0
+    repo, home = info["repo"], main_root(root)
+    github = upstream_tracker(home)
+    with closing._main_lock(home):
+        record = _upstream_record(root)
+        had = record.get(key) or {}
+        if had.get("state") == "filed":
+            return {"filed": had.get("number"), "url": had.get("url"), "already": True}, 0
+        found = None
+        if had.get("state") == "sending":
+            found, why = github.find_issue(had.get("repo") or repo, f"{UPSTREAM_MARKER}{key} -->")
+            if why:
+                return {"refusals": [f"couldn't tell whether a stopped send filed it: {why}"]}, 1
+        if found:
+            number, url = found["number"], found["url"]
+        else:
+            record[key] = {"repo": repo, "state": "sending"}
+            _write_upstream_record(root, record)
+            number, url, why = github.file_issue(repo, shown["title"], shown["body"])
+            if why:
+                return {"refusals": [why]}, 1
+        record[key] = {"repo": repo, "state": "filed", "number": number, "url": url}
+        _write_upstream_record(root, record)
+    with suppress(OSError):
+        _upstream_path(root, UPSTREAM_INPUT).unlink()
+    return {"filed": number, "url": url, "already": False}, 0
+
+
+@command(
+    "upstream",
+    "file a bug in the plugin on its own repo, as JSON: --render shows it, --send files it",
+    exclusive(
+        arg("--render", action="store_true", help="the title and body, built from the input file"),
+        arg("--send", action="store_true", help="file the body --render showed under --key"),
+    ),
+    arg("--key", help="the key --render printed with the body the person saw"),
+)
+def cli_upstream(root: Path, home: Path, args) -> int:
+    if args.send and not args.key:
+        return _refused("--send files only the body --render showed: pass its --key")
+    if args.send:
+        out, code = upstream_send(root, args.key)
+    elif args.render:
+        out = upstream_render(root)
+        code = 1 if "refusals" in out else 0
+    else:
+        out, code = upstream_info(root), 0
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return code
 
 
 def _tracked(home: Path, rel: str) -> list[str]:

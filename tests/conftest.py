@@ -84,6 +84,10 @@ if flag and args[:2] == ["issue", "edit"] and flag in args:
     done(1)
 if args[0] == "label":
     done()
+if args[:2] == ["auth", "token"]:
+    done(1 if os.environ.get("FAKE_GH_NOAUTH") else 0, out="token")
+if args[:2] == ["api", "user"]:
+    done(out=os.environ.get("FAKE_GH_USER", "me"))
 if args[0] == "api":
     # Lists from the state, as the `--jq` the tracker passes would leave them.
     for kind in ("milestones", "assignees"):
@@ -108,7 +112,8 @@ if args[:2] == ["issue", "list"]:
     keys = ["number", "title", "url", "state"]
     if "--json" in args:
         keys = args[args.index("--json") + 1].split(",")
-    found = [i for i in st["issues"] if "--state" not in args or i["state"] == "OPEN"]
+    every_state = "--state" not in args or args[args.index("--state") + 1] == "all"
+    found = [i for i in st["issues"] if every_state or i["state"] == "OPEN"]
     for name in every("--label"):
         found = [i for i in found if name in [lb["name"] for lb in i["labels"]]]
     if "--limit" in args:
@@ -196,6 +201,7 @@ def gh(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("FAKE_GH_FAIL_FLAG", raising=False)
     monkeypatch.delenv("FAKE_GH_START", raising=False)
     monkeypatch.delenv("FAKE_GH_DEFAULT", raising=False)
+    monkeypatch.delenv("FAKE_GH_NOAUTH", raising=False)
     return lambda: json.loads(state.read_text()) if state.exists() else {"issues": [], "calls": []}
 
 

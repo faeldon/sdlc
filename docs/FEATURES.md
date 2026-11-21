@@ -79,6 +79,7 @@ graph LR
 - **`/sdlc:status`**: reports the open changes, what each needs, and the one next action. Read-only. Specified: `skills/status/SKILL.md`. Depends on: `change`.
 - **`/sdlc:idea`**: files, edits or retires an idea in the register, committed alone on the base branch. Specified: `skills/idea/SKILL.md`. Depends on: `seed`, `inbox.md`.
 - **`/sdlc:bug`**: files, retags or retires a bug in the register, with its severity and the change that introduced it. Specified: `skills/bug/SKILL.md`. Depends on: `seed`, `inbox.md`.
+- **`upstream bug`**: a bug in the plugin met in a host, filed by `/sdlc:bug` as a public issue on the plugin's repo (`sdlc.py upstream`), from an allowlist with the host's specifics cut, after the exact body is shown, and once; `/sdlc:triage` reads it as from a host. Specified: `skills/bug/SKILL.md`. Depends on: `/sdlc:bug`, `/sdlc:triage`, `origin:`.
 - **`/sdlc:triage`**: reads the issues people filed and proposes a verdict for each: an idea, a bug, an open change's `closes:`, or closed. Specified: `skills/triage/SKILL.md`. Depends on: `seed`, `Sdlc-Triaged`.
 - **`/sdlc:health`**: runs the repo's scans and tiers each finding: report, fix inline, or write an intent. Specified: `skills/health/SKILL.md`. Depends on: `/sdlc:intent`.
 - **`/sdlc:release`**: proposes a version from the closed changes' impacts, bumps, writes the notes and tags. Specified: `skills/release/SKILL.md`. Depends on: `impact`, `landed`.

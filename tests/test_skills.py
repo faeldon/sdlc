@@ -834,6 +834,38 @@ def test_bug_files_by_the_script_and_never_writes_introduced_by_unasked() -> Non
     assert "names no host" in flat
 
 
+def test_bug_asks_which_kind_before_filing_upstream() -> None:
+    """209 R3: in a host, the person says whether the bug is the host's or the plugin's; the
+    skill may propose the plugin, never decide, and a host bug files as it always has. The
+    plugin's own repo is never asked."""
+    flat = " ".join((ROOT / "skills" / "bug" / "SKILL.md").read_text(encoding="utf-8").split())
+    run = 'uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py upstream'
+    assert run in flat
+    step = flat[flat.index("## Step 1") : flat.index("**Where it came in.**")]
+    assert "in the host's own work, or in the plugin" in step
+    assert "`own_repo` is true" in step and "never ask" in step
+    assert "may propose the plugin" in step and "never decide alone" in step
+    assert "A bug in the host's own work goes on as below, unchanged" in step
+
+
+def test_bug_shows_the_upstream_body_before_its_wait() -> None:
+    """209 R8: the body is rendered and shown, in the message and the dialog's preview, before
+    the one WAIT asks whether to file it publicly, and sent only after a chosen yes."""
+    text = (ROOT / "skills" / "bug" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    question = (
+        "`File this bug publicly on <owner/name> as <login>? Anyone can read it. "
+        "(yes / edit it / no)`"
+    )
+    render, send = "sdlc.py upstream --render", "sdlc.py upstream --send --key <key>"
+    shown = "in the message and in the dialog's `preview`"
+    wait = flat.index("WAIT for explicit approval")
+    assert flat.index(render) < flat.index(shown) < wait < flat.index(question)
+    assert flat.index(question) < flat.index(send)
+    assert sum(1 for ln in text.splitlines() if ln.startswith("#") and "WAIT" in ln) == 1
+    assert "`new_issue_url`" in flat and "paste" in flat
+
+
 def test_idea_files_by_the_script_from_any_checkout() -> None:
     """An idea's id comes from `next-entry` and its commit from `inbox-commit`, which takes the
     entry's id from a change's worktree; it retires only with an idea's reasons, and names no

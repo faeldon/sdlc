@@ -1,0 +1,11 @@
+{"step": "checks", "round": null, "seconds": 6.0, "since": "2026-11-21T08:56:38Z"}
+{"step": "ship", "round": null, "seconds": 1.0, "since": "2026-11-21T08:56:44Z"}
+{"step": "stack", "round": 1, "seconds": 1.0, "since": "2026-11-21T08:56:45Z"}
+{"step": "resolve", "round": 1, "seconds": 17.0, "since": "2026-11-21T08:56:46Z"}
+{"step": "fix", "round": 1, "seconds": 289.0, "since": "2026-11-21T08:57:03Z"}
+{"step": "gate", "round": 1, "seconds": 203.0, "since": "2026-11-21T09:01:52Z"}
+{"step": "recheck", "round": 1, "seconds": 0.0, "since": "2026-11-21T09:05:15Z"}
+{"step": "recheck", "round": 1, "seconds": 0.0, "since": "2026-11-21T09:05:15Z"}
+{"step": "recheck", "round": 1, "seconds": 0.0, "since": "2026-11-21T09:05:15Z"}
+{"step": "recheck", "round": 1, "seconds": 0.0, "since": "2026-11-21T09:05:15Z"}
+{"step": "review", "round": 1, "seconds": 59.0, "since": "2026-11-21T09:05:15Z"}

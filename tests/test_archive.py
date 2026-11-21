@@ -1849,6 +1849,20 @@ def test_intake_lists_only_what_no_one_has_recorded(tmp_path, gh, capsys) -> Non
     assert [d["number"] for d in out["dangling"]] == [50], "triaged with no record"
 
 
+def test_intake_flags_an_issue_from_a_host(tmp_path, gh, capsys) -> None:
+    """209 R12: an issue a host's `/sdlc:bug` filed upstream opens with its marker, and intake says
+    so, for triage to write `Origin: host` on the entry it files from it."""
+    root = _repo(tmp_path)
+    _filed(gh, 52)
+    _filed(gh, 53)
+    state = gh()
+    state["issues"][1]["body"] = "<!-- sdlc:host-bug:0123456789ab -->\nFiled from a host."
+    Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps(state), encoding="utf-8")
+    code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
+    assert code == 0, out
+    assert [(i["number"], i["from_host"]) for i in out["issues"]] == [(52, False), (53, True)]
+
+
 def test_intake_never_says_nothing_waits_when_it_can_t_read_the_unpushed_commits(
     tmp_path, gh, capsys, monkeypatch
 ) -> None:

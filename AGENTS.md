@@ -104,21 +104,26 @@ lock in the git common dir that every worktree shares, never in a tree, and `new
 `next_id()`, REFERENCE.md *Numbering*). IDs are at least three digits: match them with
 `names_change()`, never by prefix or `[:3]`.
 
-**Trackers: `tracker()`.** Each is `scripts/trackers/<name>.py`, loaded only when
-`archive.target` names it. Core renders the issue (`render_issue()`) and hands the tracker a dict;
-a tracker never reads `.sdlc/` (the change folder included), and core never calls `gh`. `sync`
-mirrors an open change and never creates an issue. The interface: CONTRIBUTING.md, *Writing a
-tracker*; what a host sees: REFERENCE.md, *Trackers* and *The project doc*.
+**Trackers: `tracker()`.** Each is `scripts/trackers/<name>.py`, loaded only when `archive.target`
+names it, or, the GitHub one alone, by `upstream` (`upstream_tracker()`), to file a host's bug in
+the plugin on the plugin's repo, the running manifest's `repository`. Core renders the issue
+(`render_issue()`) and hands the tracker a dict; a tracker never reads `.sdlc/` (the change folder
+included), and core never calls `gh`. `sync` mirrors an open change and never creates an issue. The
+interface: CONTRIBUTING.md, *Writing a tracker*; what a host sees: REFERENCE.md, *Trackers* and *The
+project doc*.
 
-**Writes before a WAIT.** Five, each a named exception to confirm-before-writing: ship's `base`
-and `resolve`, which move only the change's own branch and print the undo; the factory's
-`fresh`, which is those two, run through `sdlc.py` by its build and spec skills before the
-spec-writer drafts, and leaves the worktree as it found it on a conflict; ship's `findings.md`,
-which decides nothing; and the factory's `cases` (and `cases --skip`), which writes the same
-`Skill evals:` line of it before `land`'s WAIT, so the yes approves a failed case it has seen
-(`cmd_cases()`). Never a stash (the stack is shared across worktrees), and never a merge of
-`main` into the branch, which close would put on `main`'s first-parent line, where
-`closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
+**Writes before a WAIT.** Six, each a named exception to confirm-before-writing: ship's `base` and
+`resolve`, which move only the change's own branch and print the undo; the factory's `fresh`, which
+is those two, run through `sdlc.py` by its build and spec skills before the spec-writer drafts, and
+leaves the worktree as it found it on a conflict; ship's `findings.md`, which decides nothing; the
+factory's `cases` (and `cases --skip`), which writes the same `Skill evals:` line of it before
+`land`'s WAIT, so the yes approves a failed case it has seen (`cmd_cases()`); and `/sdlc:bug`'s
+input file for a bug in the plugin, `UPSTREAM_INPUT` in the git common dir, which `upstream
+--render` turns into the exact body the WAIT shows, and which decides nothing and dirties no
+checkout. Its record, `UPSTREAM_RECORD`, is written only after the yes, and an upstream number never
+enters the host's issue records (`upstream_send()`). Never a stash (the stack is shared across
+worktrees), and never a merge of `main` into the branch, which close would put on `main`'s
+first-parent line, where `closed_changes()` walks. `cmd_base()`, `cmd_resolve()`.
 
 **Closing: `cmd_close()`,** in `scripts/closing.py` with `_main_lock()` and `_push()`. Every
 git step is one git refuses when something would be lost, and a rerun resumes where a failed
@@ -236,7 +241,7 @@ the release's, else setup's (`setup_nudge()`). The check (`check_update()`) is o
 `git ls-remote` on the running manifest's `repository` and one `claude plugin list --json`
 (`plugin_installs()`, its one reader), at most once a day: the answer is cached in
 `sdlc-update.json` in the git common dir (`UPDATE_CACHE`). That cache is the one write made with
-no WAIT outside the five above, since it is state like the main lock, not an artifact, and it
+no WAIT outside the six above, since it is state like the main lock, not an artifact, and it
 dirties no checkout. `status` reads only the cache (`update_nudge()`); a copy read in place
 (`in_place()`, its root has `.git`) is never checked or told. `update` writes and reaches the
 network, so it is not in `READ_ONLY`. `/sdlc:update` runs the `claude plugin` steps the script
