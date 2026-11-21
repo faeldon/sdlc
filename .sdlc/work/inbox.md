@@ -732,39 +732,12 @@ Left undone by 215-evidence-exits, carried forward when it landed: Record the in
 See .sdlc/work/215-evidence-exits/notes.md in its commit.
 Raised 2026-11-21.
 
-## [2026-11-21-43] [bug] A train of one skips the tip gate, so a change whose commit fails the base's check lands and pushes red
+## [2026-11-21-44] [nit] the `# fmt: skip` on the parametrize decorator exists only to keep the table on one line; a plain `ids=` list would format normally
 
-`_train_gate()` (plugins/factory/scripts/landing.py) returns no gate for a one-change train whose
-stacked commit equals its pre-train commit, on the reasoning that it was "gated as its build was".
-That's false in two ways, and the train then closes and pushes without the base branch's
-`[commands] check` ever running on the commit that lands:
+Raised by the test review of 217-train-gates-every-tip, round 1: tests/test_train.py:1546: the `# fmt: skip` on the parametrize decorator exists only to keep the table on one line; a plain `ids=` list would format normally
 
-- **The build's gate ran on the uncommitted tree, not the commit.** Untracked files are invisible
-  to any check that reads `git ls-files`. On a host, 2026-11-21, a change added a test file that
-  stayed untracked through every round. The host's check that scans `git ls-files` for a
-  forbidden pattern never saw it, so the round-1 gate and the builder's own `factory.py check`
-  passed. Once the `commit` step tracked it, the check failed on main (one test red). The train
-  had gone `commit` → `close` with `"gates": 0`, and close pushed. Main was red on origin until a
-  hand fix.
-- **The base can have moved between the build's gate and the landing.** The same change's
-  round-1 gate ran on an older base. Before the landing, `factory.py fresh` rebased it onto a
-  newer one, merging another change's edits to a shared file (`state: resolved`), so `pre` was
-  taken after the move and `stacked == pre` still held. land-check showed the signal "changed
-  since its last review", and the commit carries `unreviewed=1`, but no gate ran on the merged
-  tree either. Another one-change landing took the same commit → close path (`"gates": 0`) the
-  same day, harmlessly that time.
-
-The land skill says the gate runs "once at the stack's tip, before any reviewer reads any
-change", and its question says "gated once at the tip". The yes approves a gate that never runs.
-
-Repro: a one-change train whose change adds a new file that the base's check reads only once
-it's tracked (any `git ls-files` scan), not moved since `train --begin`: `train --run` prints
-`commit`, `close`, then `"gates": 0`, and main fails `[commands] check`.
-
-Fix direction: drop the train-of-one shortcut, or keep it only when the gate's recorded tree
-equals the committed tree (tracked files included) on the same base commit; and say in the
-landing's report when no gate ran, and why.
-
-Severity: high
-Paths: plugins/factory/scripts/landing.py
-Raised 2026-11-21, from two one-change landings on a host.
+Theme: style
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 217-train-gates-every-tip (correctness)
