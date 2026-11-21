@@ -1998,3 +1998,12 @@ def test_runtime_trailer_round_trips() -> None:
     assert metrics.runtime_trailer([], [], None) is None
     assert metrics.runtime_trailer([], ["", "  "], "") is None
     assert "runtime_trailer(" in metrics.__doc__ and "runtime{" in metrics.__doc__
+
+
+def test_parse_trailers_reads_origin_as_text() -> None:
+    """`Sdlc-Origin: host` is one word with no `=`, which would read as a name with no fields."""
+    body = "Close 001-a\n\nSdlc-Base: abc1234\nSdlc-Origin: host\n"
+    out = metrics.parse_trailers(body)
+    assert out["origin"] == "host" and out["base"] == "abc1234"
+    assert metrics.parse_trailers("Sdlc-Origin: self")["origin"] == "self"
+    assert "origin" not in metrics.parse_trailers("Sdlc-Base: abc1234")

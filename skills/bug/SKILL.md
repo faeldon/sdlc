@@ -116,7 +116,11 @@ Paths: <path>, <path>
 Introduced by: <NNN-slug, only as confirmed>
 Theme: <theme, unless the person dropped it>
 Priority: <high or low, only when the person said so>
+Origin: <host, only when the person's account says it was found in another repo>
 ```
+
+The `Origin: host` line says the bug was found using the plugin in another repo, never which
+one; an intent fixing it proposes it as its `origin:`. A bug found here gets no line.
 
 For a retirement, the entry and its reason; for a retag, the heading and lines as they become.
 From a report, take every id in one call, `next-entry --count <n>` with `<n>` the bugs picked, and

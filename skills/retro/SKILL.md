@@ -59,6 +59,9 @@ What `retro` gives:
   found by blame with no declared link (`files`, `lines`): questions for this retrospective, an
   undeclared fix or a planned follow-up, never counted as rework.
 - `open`, `ideas` (open ideas' count, oldest), `tiers`, `impacts`, and `releases` since `since`.
+- `origins`: the window's closed changes by where their findings came from, each list their
+  names: `host` (found using what this repo makes in another repo), `self` (found working on this
+  one) and `unknown` (no `origin:` line, never read as `self`), with `n` the changes closed.
 - `process`: the report's figures, aggregates only. `window` (closed by tier, dropped, and how
   many were `measured`), `cycle` (per tier, median and longest `elapsed`, median `agent` and days
   open), `throughput` (closed per week by tier, by way of building in `ways` and by work class in
@@ -338,7 +341,14 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    A `vanished` seed is worth saying out loud: it left `inbox.md` with no change behind it and
    no `Retire` (a `dropped` one was retired on purpose). Weigh `experience` (its `last`) beside the
    figures: a low rating, or its line, is a hint from one person about where the process got in
-   the way, worth checking against the figures, never a finding on its own. Then,
+   the way, worth checking against the figures, never a finding on its own.
+
+   Read `origins.host` as evidence from use in another repo: set it against each goal, milestone
+   or bet the direction and product docs say waits on such evidence, citing how many changes came
+   from a host, of `n`, with `unknown` beside it, since a change with no line could be either.
+   When every change in the window is `unknown`, say nothing about origins.
+
+   Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each goal ends with the outcomes it answers to, `(O1, O3)`. Each
    milestone says what is true when it's done and has one `Groups:` line naming its changes and

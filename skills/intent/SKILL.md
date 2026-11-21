@@ -127,6 +127,14 @@ question about either. The retrospective counts these as the human's decision, s
 where each came from, Step 4's question names them, and `edit a section` is how the human changes
 them; nothing is written before the yes.
 
+**Where it came from**, always. Propose the `origin:` line yourself: `origin: host` when the
+finding came from using what this repo makes in another repo, `origin: self` when it came from
+working on this one, a retrospective, a review finding or a nit included. Take it from the seed's
+or bug's `Origin:` line first (an `Origin: host` on any entry the change takes makes it `host`),
+then from what the human said; when nothing points at another repo, propose `self`, marked
+`inferred`. The line names a class, never which repo. Ask no question about it: Step 3 shows where
+it came from, Step 4's question names it, and `edit a section` is how the human changes it.
+
 Push back once if the problem statement is a solution in disguise ("add a cache" is a solution;
 "the report page takes forty seconds to load" is a problem). Then take their answer. If the process
 doc names push-backs of its own for Stage 1, make those too.
@@ -175,7 +183,9 @@ Show the issue fields chosen in Step 1 above it, as the frontmatter lines they b
 line with where it came from and each outcome's `name` in a comment after it:
 `serves: [O1]  # proposed from 2026-10-01-2: O1 (Unaided setup)`, `# proposed from your account:
 …` or `# inferred: …`. The comment is for the reader of the draft; the line written in Step 5 is
-`serves: [O1]` alone.
+`serves: [O1]` alone. Show the proposed `origin:` line the same way,
+`origin: host  # proposed from 2026-11-20-3`, `# proposed from your account` or `# inferred`;
+the line written is `origin: host` alone.
 Show the `reworks:` line too when Step 1 named an earlier change, and the `idea:` line when the
 change takes several seeds, `idea: [2026-10-24-4, 2026-11-12-2]`. When the seed or bug the change takes on has an `Issue:` line, show a `closes:` line with every
 number on it, bare: `Issue: #12, #15` becomes `closes: [12, 15]`. Those are the issues people
@@ -199,11 +209,13 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/sdlc.py next
 
 Ask literally, with that number as NNN:
 
-> `Create this as <tier> change NNN-<slug> (NNN if still free when created), serving <O1 (Unaided setup)>, in a new worktree and branch NNN-<slug> off <git.base>? (yes / change the tier / edit a section)`
+> `Create this as <tier> change NNN-<slug> (NNN if still free when created), serving <O1 (Unaided setup)>, <origin clause>, in a new worktree and branch NNN-<slug> off <git.base>? (yes / change the tier / edit a section)`
 
 The `serving` clause names every outcome Step 1 proposed, each with its `name`, or reads
 `serving no outcome` for `none`, so the yes visibly covers them; it keeps its place in each form
-below, and is left out without a product doc.
+below, and is left out without a product doc. The origin clause follows it, `found in a host` for
+`origin: host` or `found here` for `self`, so the yes covers the origin too; it keeps its place in
+each form below, the factory's and the batch's included.
 
 With `ids_from: github`, say what else a yes does, since it is visible to everyone with access to
 the repo: `…NNN-<slug> (NNN if still free when created), serving …, opening its GitHub issue
@@ -229,7 +241,7 @@ same things: the change, its worktree and its issue. `yes, for the factory` star
 
 For a batch, ask instead, every change in `order` named with its tier and what it serves:
 
-> `Create these <n> changes in this order, each in a new worktree and branch off <git.base>, <slug> (Tier <t>, serving <O1 (name)>), …? (yes / leave one out / edit one / no)`
+> `Create these <n> changes in this order, each in a new worktree and branch off <git.base>, <slug> (Tier <t>, serving <O1 (name)>, <origin clause>), …? (yes / leave one out / edit one / no)`
 
 With `ids_from: github`, `, each opening its GitHub issue with its title and intent` follows
 `<git.base>`. The yes approves every change it names and nothing else; `leave one out` and `edit
@@ -277,8 +289,8 @@ the fallback.
 
 Then `Edit` the scaffolded `intent.md` at the folder path `new` printed, inside the worktree, to
 replace the template body with the approved draft. Keep the frontmatter the tool stamped, and add
-the approved issue fields' lines, the `serves:` line and any `reworks:` line under `depends_on:`,
-exactly as shown in Step 3.
+the approved issue fields' lines, the `serves:` line, the `origin:` line and any `reworks:` line
+under `depends_on:`, exactly as shown in Step 3.
 
 If the change came from a `.sdlc/work/inbox.md` seed: set `idea:` in the frontmatter to that entry's
 id, written bare (`idea: 2026-10-01-2` for `## [2026-10-01-2] [idea] Keep drafts`), or, from

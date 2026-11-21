@@ -112,8 +112,12 @@ Show the entry exactly as it will be appended:
 After: <id, only when it follows another seed>
 Theme: <theme, unless the person dropped it>
 Priority: <high or low, only when the person said so>
+Origin: <host, only when the person's account says it was found in another repo>
 Raised <today's date>.
 ```
+
+The `Origin: host` line says the idea was found using the plugin in another repo, never which
+one; an intent taking the seed proposes it as its `origin:`. An idea found here gets no line.
 
 For an edit, the entry as it becomes; for a retirement, the entry and its reason. For `--themes`,
 one table, a row per entry, which the person may change, drop or merge any row of:

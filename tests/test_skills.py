@@ -2074,3 +2074,40 @@ def test_the_retro_insights_file_spawns_its_agent() -> None:
     steps = _steps("retro")
     assert "with the report at <report> and its <Q> insights" in steps["5"]
     assert "insights.md" in steps["4"] and ".sdlc/retros/<today>.insights.md" in steps["6"]
+
+
+# ---------------------------------------------------------------- origin (207)
+
+
+def test_retro_skill_reads_origins() -> None:
+    """R9: Step 0 names `origins`, and the passage that reads it names no goal or bet of this
+    repo's own direction doc: a host reads its own `host` changes against its own docs."""
+    steps = _steps("retro")
+    assert "`origins`" in steps["0"]
+    direction = steps["2"].split("5. **Direction.**")[1]
+    reading = direction.split("Read `origins.host`")[1].split("Then,")[0]
+    assert "`unknown`" in reading and "say nothing about origins" in reading
+    assert not re.search(r"\bG\d+\b", reading), reading
+
+
+def test_intent_proposes_an_origin() -> None:
+    """R10: Step 1 proposes `origin:` from a seed's `Origin:` line or the account, Step 3 shows
+    where it came from, Step 4's question names it in every form, Step 5 writes it."""
+    steps = _steps("intent")
+    assert "`origin:`" in steps["1"] and "`Origin:`" in steps["1"] and "inferred" in steps["1"]
+    assert "origin: host # proposed from" in steps["3"]
+    for clause in ("found in a host", "found here"):
+        assert clause in steps["4"], clause
+    single = steps["4"].split("Ask literally")[1].split("`?")[0]
+    assert "<origin clause>" in single
+    batch = steps["4"].split("For a batch, ask instead")[1].split("`?")[0]
+    assert "<origin clause>" in batch
+    assert "`origin:` line" in steps["5"]
+
+
+def test_idea_and_bug_offer_an_origin_line() -> None:
+    """R11: each entry shape holds `Origin: host`, only when the account says so, never `self`."""
+    for skill in ("idea", "bug"):
+        step = _steps(skill)["3"]
+        assert "Origin: host" in step, skill
+        assert "Origin: self" not in _skill_text(ROOT / "skills" / skill / "SKILL.md"), skill

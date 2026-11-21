@@ -555,6 +555,21 @@ def fix_trailers(main: Path, branch: str) -> list[str]:
         return []
 
 
+def origin_trailer(main: Path, branch: str) -> list[str]:
+    """An `Sdlc-Origin:` line for where the change's finding came from, its intent's `origin:`
+    on the branch; none for no line or a word outside `ORIGINS`, never one guessed. Never raises:
+    an origin that can't be read is unknown."""
+    try:
+        rel = sdlc.work_rel(main)
+        intent = sdlc._git(main, "show", f"{branch}:{rel}/{branch}/intent.md") or ""
+        origin = sdlc.frontmatter_list(intent, "origin") or []
+        if len(origin) == 1 and origin[0] in sdlc.ORIGINS:
+            return [f"Sdlc-Origin: {origin[0]}"]
+        return []
+    except Exception:
+        return []
+
+
 def _drop_commit(main: Path, branch: str, trunk: str) -> str | None:
     """The `Drop <branch>` commit on the base's first-parent line whose second parent is the
     branch's tip: a rerun's sign that `record` is done. None when there is none."""
@@ -1131,7 +1146,8 @@ def _step_remove_folder(c: _Close) -> str | None:
         c.report["fixes"] = fixes
     at = sdlc._git(c.main, "rev-parse", "--verify", "-q", c.start)
     based = [f"{sdlc.BASE_KEY}: {at}"] if at else []
-    return _close_commit(c.main, c.branch, c.sha, where, c.captured + based + fixes, closes)
+    trailers = c.captured + based + fixes + origin_trailer(c.main, c.branch)
+    return _close_commit(c.main, c.branch, c.sha, where, trailers, closes)
 
 
 def _step_tell_issues(c: _Close) -> None:

@@ -31,8 +31,8 @@ register entry describes isn't a batch's: it goes through a run of its own, with
 
 No interview: each group's entries and words are its answers, as a brief's are. Draft each
 Problem from its entries' own prose and its words, quoted rather than rephrased. A question only
-the person can answer goes in that intent's Open questions. Propose each group's `serves:` line as
-a single run does, from its entries first.
+the person can answer goes in that intent's Open questions. Propose each group's `serves:` and `origin:` lines
+as a single run does, from its entries first.
 
 ## Step 2
 
@@ -42,7 +42,7 @@ Tier 2 leaves it for its spec to weigh. List no other nits; the batch took what 
 ## Step 3
 
 Draft every intent in full, as a single run drafts one, and show them in `order`, a section a
-change: its slug and tier, its `serves:`, `idea:`, `fixes:` (each bug), `closes:` (each entry's
+change: its slug and tier, its `serves:`, `origin:`, `idea:`, `fixes:` (each bug), `closes:` (each entry's
 `Issue:` numbers) and `depends_on:` lines, then its body. A `depends_on:` line shows the group it
 waits on by slug, `depends_on: [landing-fixes]`, until Step 5 has its number. Leave out a group
 `created` holds with `drafted` true, and say it was made by an earlier run; one with `drafted`

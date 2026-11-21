@@ -135,6 +135,11 @@ A change `/sdlc-factory:land` landed may say on its `Sdlc-Landed` how many paths
 last review (`unreviewed=<n>`, or `unknown` with no snapshot to compare). `landed_unreviewed()`
 carries it to `Sdlc-Totals` as `unreviewed=`, beside `auto=`; a change without it has none.
 
+Where a change's finding came from goes on a line of its own, `Sdlc-Origin: <host|self>`, read
+back as `origin`, its text. Close writes it on `Close` commits only, from the intent's `origin:`
+line, and only for one of the two words. A `Close` commit without it was closed before origins
+were recorded, or its intent named none: unknown, never `self`.
+
 Read stops as upper bounds and token spans as lower: a harness entry of a shape not named above
 still looks like something the person typed.
 """
@@ -1793,7 +1798,7 @@ def parse_trailers(body: str | None) -> dict | None:
             continue
         found = True
         key, rest = m.group(1).lower(), m.group(2).strip()
-        if key in ("mode", "coverage", "base"):
+        if key in ("mode", "coverage", "base", "origin"):
             out[key] = rest
             continue
         words = rest.split()

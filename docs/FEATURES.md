@@ -60,6 +60,7 @@ graph LR
 - **`finding`**: one thing a review raised about a change, ranked important, nit or pre-existing, with its evidence and what was done about it. Specified: `templates/findings.md`. Depends on: `findings.md`.
 - **`nit`**: a finding approved unfixed, kept in the register with its cost and value, so later changes pay it down. Specified: `guide/process.md`. Depends on: `finding`, `seed`.
 - **`impact`**: what a change does to someone holding the previous release, settled at ship; a release takes the highest. Specified: `guide/process.md`. Depends on: `change`.
+- **`origin:`**: where a change's finding came from, on its intent: `host`, found using the plugin in another repo, or `self`, found working on this one; never which repo, and unknown with no line. Specified: `scripts/sdlc.py`. Depends on: `intent.md`, `seed`.
 - **`landed`**: committed on the base branch: a change's own commit, then its `Close` commit. Specified: `docs/REFERENCE.md`. Depends on: `change`, `Sdlc-Landed`.
 - **`retro`**: the outermost loop: a look across every change and release since the last retrospective, ending in one `Retrospective` commit. Specified: `guide/process.md`. Depends on: `change`, `direction`.
 - **`direction`**: the doc of goals, milestones and the next major release that the retro keeps. Specified: `templates/direction.md`. Depends on: `outcome`.
@@ -186,6 +187,7 @@ graph LR
 - **`Sdlc-Findings`**: ship's findings by rank and disposition, on the change's own commit. Specified: `scripts/sdlc.py`. Depends on: `findings.md`.
 - **`Sdlc-Landed`**: who gave a factory landing its approval, the person or the WAIT itself (`by=auto`, which keeps its name). Specified: `plugins/factory/README.md`. Depends on: `/sdlc-factory:land`.
 - **`Sdlc-Fixes`**: each bug a change's `fixes:` names, with its severity, when it was reported and the change that introduced it. Specified: `scripts/closing.py`. Depends on: `seed`.
+- **`Sdlc-Origin`**: where the change's finding came from, `host` or `self`, from its intent's `origin:`; none when it named none. Specified: `scripts/closing.py`. Depends on: `origin:`.
 - **`Sdlc-Retired`**: a bug retired from the register without a fix, with its severity and the reason. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:bug`.
 - **`Sdlc-Triaged`**: an issue's triage verdict, on the register commit that recorded it. Specified: `scripts/sdlc.py`. Depends on: `/sdlc:triage`.
 
@@ -197,6 +199,7 @@ graph LR
 - **`footprint`**: what setup left in a host: the files it created, the keys set, and the lines under `.sdlc/`. Specified: `docs/REFERENCE.md`. Depends on: `/sdlc:setup`.
 - **`growth`**: the surface's size at each release, in the plugin's own repo. Specified: `docs/REFERENCE.md`. Depends on: `surface`.
 - **`rework`**: what a later change declares it reworks of an earlier one. Specified: `docs/REFERENCE.md`. Depends on: `change`.
+- **`origins`**: the window's closed changes by their `origin:`, `host`, `self` or `unknown`, the host-found ones read as evidence from another repo. Specified: `scripts/retro.py`. Depends on: `origin:`.
 - **`lead time`**: how long changes took from opened to close, by part. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Lead`.
 - **`stops`**: the window's stops against the gates its changes owed. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Totals`.
 - **`prose`**: each skill's size, what every session that runs it reads. Specified: `scripts/retro.py`. Depends on: `/sdlc:retro`.

@@ -82,12 +82,17 @@ def _open(root: Path, slug: str = "thing") -> Path:
     return next((root / ".claude" / "worktrees").glob(f"*-{slug}/.sdlc/work/*-{slug}"))
 
 
-def _shipped(root: Path, slug: str = "thing", extra: dict[str, str] | None = None) -> str:
+def _shipped(
+    root: Path, slug: str = "thing", extra: dict[str, str] | None = None, origin: str = ""
+) -> str:
     """A change opened, written, shipped and committed in its worktree, as close finds it; its
-    name. Its folder on main, once landed, is `root / ".sdlc" / "work" / name`."""
+    name. Its folder on main, once landed, is `root / ".sdlc" / "work" / name`. `origin` is its
+    intent's `origin:` line."""
     folder = _open(root, slug)
     intent = folder / "intent.md"
     intent.write_text(intent.read_text().replace("impact:\n", "impact: none\n", 1))
+    if origin:
+        _with_origin(root, slug, origin)
     for name, text in (extra or {}).items():
         (folder / name).write_text(text, encoding="utf-8")
     assert sdlc.cmd_ship(root, folder.name.split("-")[0]) == 0
@@ -1054,6 +1059,61 @@ def test_a_dropped_change_records_no_fixes(tmp_path, gh, capsys) -> None:
     assert "fixes: [2026-10-01-1]" in intent, "the drop carried the line it must not record"
     body = _git(root, "log", "-1", "--format=%B", "main")
     assert body.startswith("Drop ") and "Sdlc-Fixes:" not in body
+
+
+def _with_origin(root: Path, slug: str, origin: str) -> None:
+    """The change's intent, in its worktree, given an `origin:` line before it ships."""
+    intent = next((root / ".claude" / "worktrees").glob(f"*-{slug}/.sdlc/work/*-{slug}/intent.md"))
+    text = intent.read_text()
+    intent.write_text(text.replace("depends_on:", f"origin: {origin}\ndepends_on:", 1))
+
+
+def test_close_writes_an_origin_trailer(tmp_path, gh, capsys) -> None:
+    """The intent's `origin: host` is on the `Close` commit as `Sdlc-Origin: host`, inside the
+    trailer block git reads."""
+    root = _repo(tmp_path)
+    _shipped(root, origin="host")
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    message = _git(root, "log", "-1", "--format=%B", "main")
+    assert message.startswith("Close ") and "Sdlc-Origin: host" in message
+    parsed = _git(root, "interpret-trailers", "--parse", input=message).splitlines()
+    assert "Sdlc-Origin: host" in parsed
+    assert sdlc.metrics.parse_trailers(message)["origin"] == "host"
+
+
+def test_a_change_without_origin_closes_without_the_trailer(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    _shipped(root)
+    assert _close(root, capsys, "001")[0] == 0
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert body.startswith("Close ") and "Sdlc-Origin" not in body
+
+
+def test_an_invalid_origin_closes_without_the_trailer(tmp_path, gh) -> None:
+    """A word outside the two is never written into history, nor "corrected"."""
+    root = _repo(tmp_path)
+    folder = _open(root, "thing")
+    _with_origin(root, "thing", "elsewhere")
+    tree = sdlc.checkout_of(folder)
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "wip")
+    assert sdlc.closing.origin_trailer(root, folder.name) == []
+    assert sdlc.closing.origin_trailer(root, "no-such-branch") == []
+
+
+def test_a_dropped_change_carries_no_origin_trailer(tmp_path, gh, capsys) -> None:
+    root = _repo(tmp_path)
+    folder = _open(root, "thing")
+    _with_origin(root, "thing", "host")
+    intent = folder / "intent.md"
+    text = intent.read_text().replace("stage: plan\n", "stage: build\n", 1)
+    intent.write_text(text + "\n## Dropped\n\nThe drafts it reopens are gone.\n")
+    assert sdlc.cmd_drop(sdlc.checkout_of(folder), None) == 0
+    code, out = _close(root, capsys, "001")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B", "main")
+    assert body.startswith("Drop ") and "Sdlc-Origin" not in body
 
 
 def _parents(root: Path, ref: str) -> list[str]:
@@ -2636,11 +2696,12 @@ CLOSE_OUTPUT = ROOT / "tests" / "fixtures" / "close-output.json"
 
 
 def _normal(text: str, tmp_path: Path) -> str:
-    """`text` with what differs run to run replaced: temp paths, shas, and the clock's numbers in
-    `Sdlc-Totals` and `Sdlc-Lead`."""
+    """`text` with what differs run to run replaced: temp paths, shas, the plugin's version, which
+    every release moves, and the clock's numbers in `Sdlc-Totals` and `Sdlc-Lead`."""
     for path in sorted({str(tmp_path.resolve()), str(tmp_path)}, key=len, reverse=True):
         text = text.replace(path, "<tmp>")
     text = re.sub(r"\b[0-9a-f]{7,40}\b", "<sha>", text)
+    text = re.sub(r"\bplugin=\d+\.\d+\.\d+\b", "plugin=<version>", text)
     return re.sub(
         r"(Sdlc-(?:Totals|Lead): )([^\"\n]*)",
         lambda m: m[1] + re.sub(r"\d+(\.\d+)?", "N", m[2]),

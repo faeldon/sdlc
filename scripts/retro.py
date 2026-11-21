@@ -3611,6 +3611,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "report": report_rel(today),
         "tiers": dict(Counter(str(c["tier"]) for c in changes)),
         "impacts": dict(Counter(c["impact"] or "unset" for c in changes)),
+        "origins": _origins(changes),
         "releases": sdlc._release_tags(home, cfg, since),
         "unmeasured": UNMEASURED,
         "autonomy": f["autonomy"],
@@ -3629,6 +3630,17 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "experience": {"last": f["experience_last"]},
         **f["value"],
     }
+
+
+def _origins(changes: list[dict]) -> dict:
+    """The window's closed changes by where their findings came from, each list their names:
+    `unknown` for every change with no valid `origin:` line, never folded into `self`."""
+    out: dict = {"host": [], "self": [], "unknown": []}
+    for rec in changes:
+        out[rec.get("origin") if rec.get("origin") in sdlc.ORIGINS else "unknown"].append(
+            rec["name"]
+        )
+    return {**out, "n": len(changes)}
 
 
 def _change_rows(home: Path, rec: dict) -> tuple[str | None, list]:

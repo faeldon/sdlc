@@ -3178,3 +3178,66 @@ def test_check_is_no_longer_a_command(tmp_path: Path, capsys, monkeypatch) -> No
     assert stop.value.code == 2
     assert "invalid choice: 'check'" in capsys.readouterr().err
     assert "check" not in sdlc.HELP_ORDER and "vet" in sdlc.HELP_ORDER
+
+
+# ---------------------------------------------------------------- origin
+
+
+def test_origin_values_are_host_and_self() -> None:
+    """Two words, one list: found using the plugin in another repo, or found working on this one,
+    a retrospective, a review finding or a nit included."""
+    assert sdlc.ORIGINS == ("host", "self")
+
+
+def test_vet_strict_passes_a_change_with_no_origin(tmp_path: Path, capsys, monkeypatch) -> None:
+    """Older changes and hosts that never set the line keep working: a missing `origin:` is
+    unknown, never a problem."""
+    root = _repo(tmp_path)
+    monkeypatch.chdir(root)
+    d = _change(root, "001-x", _fm())
+    rec = sdlc.load_change(d, root)
+    assert rec["origin"] is None and rec["errors"] == []
+    monkeypatch.setattr(sys, "argv", ["sdlc.py", "vet", "--strict"])
+    capsys.readouterr()
+    assert sdlc.main() == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("line", ["elsewhere", "[host, self]"])
+def test_an_origin_outside_host_and_self_is_an_error(tmp_path: Path, line: str) -> None:
+    d = _change(tmp_path, "001-x", _fm(origin=line))
+    errors = sdlc.load_change(d, tmp_path)["errors"]
+    assert any(e.startswith("origin:") for e in errors), errors
+    for good in sdlc.ORIGINS:
+        ok = _change(tmp_path, f"00{2 + sdlc.ORIGINS.index(good)}-{good}", _fm(origin=good))
+        rec = sdlc.load_change(ok, tmp_path)
+        assert rec["origin"] == good and rec["errors"] == []
+
+
+def test_a_closed_change_without_origin_reads_none() -> None:
+    """`closed_changes()` builds each record with `_change_record()`: the line's word when it is
+    one of the two, None otherwise, never `self` guessed for a change that named none."""
+
+    def rec(origin: str | None) -> dict:
+        text = INTENT.replace("tier: 2\n", "tier: 2\nimpact: patch\n", 1)
+        if origin is not None:
+            text = text.replace("idea:\n", f"idea:\norigin: {origin}\n", 1)
+        return sdlc._change_record("007-reopen-drafts", text, "abc1234", True)
+
+    assert rec("host")["origin"] == "host"
+    assert rec("self")["origin"] == "self"
+    assert rec(None)["origin"] is None
+    assert rec("elsewhere")["origin"] is None
+    assert rec("")["origin"] is None
+    assert (
+        sdlc._change_record("007-reopen-drafts", None, "abc1234", True, read=False)["origin"]
+        is None
+    )
+
+
+def test_an_entry_reads_its_origin_line() -> None:
+    text = (
+        "## [2026-11-20-3] [idea] Reopen saved drafts\n\nA draft once saved can be reopened.\n"
+        "Origin: host\nTheme: drafts\n"
+    )
+    [entry] = sdlc.parse_entries(text)
+    assert entry["fields"]["Origin"] == "host"

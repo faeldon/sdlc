@@ -161,6 +161,11 @@ SPEC_REQUIRED_FROM = ["design", "build", "test", "ship", "shipped"]
 # host repo's process doc says what each means; `ship` refuses without one, so every change reaching
 # a release has said it while the diff was in front of someone.
 IMPACTS = ("major", "minor", "patch", "none")
+# Where a change's finding came from, on its intent's `origin:` line: `host`, found using what this
+# repo makes in another repo, or `self`, found working on this one (a retrospective, a review
+# finding or a nit included). The line names a class, never a host; a change without it is
+# unknown, never `self`.
+ORIGINS = ("host", "self")
 
 # Three digits at least: a local id is padded to three, a GitHub issue number may run longer.
 DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
@@ -187,10 +192,11 @@ OLD_HEADING_RE = re.compile(r"^##\s*\[\d{4}-\d{2}-\d{2}(?:-\d+)?\]\s*\[[^\]]+\]\
 # milestone's `Groups:` line has them, and status holds it back while one is still open; `Issue:`
 # names the tracker issues it was filed from, `#12, #15`, the first the others' parent; `Theme:`
 # groups any entry with others and `Priority:` ranks an idea or a bug; the rest are a bug's or a
-# nit's own.
+# nit's own. `Origin: host` marks a seed or bug found using the plugin in another repo, which an
+# intent taking it proposes as its `origin:`.
 BODY_KEYS = (
     "After", "Severity", "Paths", "Introduced by", "Theme", "Cost", "Value", "Raised by", "Issue",
-    "Priority",
+    "Priority", "Origin",
 )  # fmt: skip
 BODY_RE = re.compile(rf"^({'|'.join(BODY_KEYS)}):\s*(.+)$")
 # A reference to an entry, on an `idea:`, `fixes:`, `After:` or `Groups:` line, is its id, written
@@ -954,6 +960,7 @@ def load_change(
         "reworks": [],
         "fields": {},
         "serves": None,
+        "origin": None,
         "fixes": [],
         "closes": [],
         "errors": [],
@@ -1038,6 +1045,14 @@ def load_change(
         product = product_doc(checkout, load_config(checkout)[0])
     rec["serves"] = frontmatter_list(text, "serves")
     rec["errors"] += serves_errors(rec["serves"], product, rec["stage"])
+    # Where its finding came from: one of `ORIGINS`, or unknown with no line.
+    origin = frontmatter_list(text, "origin") or []
+    if len(origin) > 1:
+        rec["errors"].append(f"origin: one value, got {len(origin)}")
+    elif origin and origin[0] not in ORIGINS:
+        rec["errors"].append(f"origin: must be one of {'|'.join(ORIGINS)}, got {origin[0]!r}")
+    elif origin:
+        rec["origin"] = origin[0]
     # The bugs a change fixes, by id, each an open `[bug]` in its own checkout's register until
     # ship removes it with the fix.
     rec["fixes"] = frontmatter_list(text, "fixes") or []
@@ -5858,7 +5873,7 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec: dict = {"id": m.group(1), "slug": m.group(2), "name": name, "title": "", "tier": None}
     rec.update(impact="", created="", idea="", problem="", sha=sha, closed=closed, problems=[])
     rec["ideas"] = []
-    rec.update(serves=None, moves=[], reworks=[], fixes=[])
+    rec.update(serves=None, moves=[], reworks=[], fixes=[], origin=None)
     if not read:
         return rec
     try:
@@ -5875,6 +5890,9 @@ def _change_record(name: str, text: str | None, sha: str, closed: bool, read: bo
     rec["idea"] = (rec["ideas"] or [""])[0]
     rec["reworks"] = reworks(text or "")
     rec["fixes"] = frontmatter_list(text or "", "fixes") or []
+    # Never inferred: only a valid line says where the finding came from.
+    origin = frontmatter_list(text or "", "origin") or []
+    rec["origin"] = origin[0] if len(origin) == 1 and origin[0] in ORIGINS else None
     for line in (post.content or "").splitlines():
         if line.startswith("# "):
             rec["title"] = TITLE_ID_RE.sub("", line[2:].strip())

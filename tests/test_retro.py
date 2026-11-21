@@ -242,8 +242,8 @@ def test_it_reports_every_key_and_writes_nothing(tmp_path: Path, capsys) -> None
     out = json.loads(capsys.readouterr().out)
     assert set(out) >= {
         "since", "changes", "dropped", "dropped_at_counts", "problems", "rework",
-        "rework_questions", "open", "ideas", "tiers", "impacts", "releases", "unmeasured", "prose",
-        "architecture", "tests",
+        "rework_questions", "open", "ideas", "tiers", "impacts", "origins", "releases",
+        "unmeasured", "prose", "architecture", "tests",
     }  # fmt: skip
     assert _state(root) == before
 
@@ -5398,3 +5398,40 @@ def test_reference_and_step_0_name_the_aim_keys() -> None:
     for key in ("`work_mix`", "`time_to_users`", "`follow_through`"):
         assert key in retros, key
         assert key in step0, key
+
+
+# ---------------------------------------------------------------- origins
+
+
+def _from(name: str, origin: str | None) -> str:
+    nid, slug = name.split("-", 1)
+    text = INTENT.format(
+        id=nid, slug=slug, tier=1, impact="patch", created="2026-10-01", title=slug
+    )
+    return text if origin is None else text.replace("idea:\n", f"idea:\norigin: {origin}\n", 1)
+
+
+def test_retro_counts_changes_by_origin(tmp_path: Path) -> None:
+    """A window's closed changes by where their findings came from; one with no line is unknown,
+    never `self`, and a change before the window, or dropped, isn't counted."""
+    root = _repo(tmp_path)
+    _close(root, "001-before", intent=_from("001-before", "host"), closed="2026-10-01")
+    _record(root, "2026-10-01")
+    _close(root, "002-a", intent=_from("002-a", "host"), closed="2026-10-05")
+    _close(root, "003-b", intent=_from("003-b", "self"), closed="2026-10-06")
+    _close(root, "004-c", intent=_from("004-c", None), closed="2026-10-07")
+    _drop(root, "005-d", dropped="2026-10-08")
+    out = _retro(root)
+    assert [d["name"] for d in out["dropped"]] == ["005-d"]
+    assert out["origins"] == {
+        "host": ["002-a"], "self": ["003-b"], "unknown": ["004-c"], "n": 3
+    }  # fmt: skip
+
+
+def test_a_window_before_origins_reads_as_all_unknown(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _close(root, "001-a")
+    _close(root, "002-b")
+    assert _retro(root)["origins"] == {
+        "host": [], "self": [], "unknown": ["001-a", "002-b"], "n": 2
+    }  # fmt: skip

@@ -446,6 +446,14 @@ names it on a `fixes: [<id>]` line in its intent (`/sdlc:intent <id>` writes it)
 it out while the change is open, `sdlc.py ship` deletes it with the fix, and `/sdlc:close` writes
 an `Sdlc-Fixes:` trailer for it on the `Close` commit.
 
+**Where a change came from.** An intent may say on an `origin:` line where its finding came
+from: `origin: host`, found using what the repo makes in another repo, or `origin: self`, found
+working on this one, a retrospective, a review finding or a nit included. The line names a class,
+never which repo. `/sdlc:intent` proposes it, from an entry's `Origin: host` line first, and names
+it in its question; `check` reports any other word, or more than one, and a missing line is
+unknown, never a problem and never read as `self`. `/sdlc:close` writes it as an `Sdlc-Origin:`
+trailer, and `sdlc.py retro` counts the window's changes by it (`origins`).
+
 **Issues people file.** With `archive.target = "github"`, anyone can file an issue, and
 `/sdlc:triage` reads the open ones that carry neither `sdlc` (a change's own) nor `triaged` nor
 `landed`, through `sdlc.py intake`. It checks each against the code and the closed changes, and
@@ -497,8 +505,9 @@ intents in history name seeds by them; `check` reports an id used twice. Two opt
 `.sdlc/work/inbox.md` feed it: `[bug]` in place of `[idea]` marks something already broken, and an
 `After: <id>, <id>` line in a seed's body makes it wait while any seed it names is still in the
 register and not being built. An idea or a bug may also carry a `Theme:` line, as every nit
-does, and a `Priority: high|med|low` line (`check` reports any other word, and a `Priority:` on a
-nit, whose `Cost:` and `Value:` rank it). Each line's command is `/sdlc:intent <id>`. A seed
+does, a `Priority: high|med|low` line (`check` reports any other word, and a `Priority:` on a
+nit, whose `Cost:` and `Value:` rank it), and an `Origin: host` line when it was found using the
+plugin in another repo, never naming which; `/sdlc:intent` proposes it as the change's `origin:`. Each line's command is `/sdlc:intent <id>`. A seed
 being built is never listed: one an open change names on its `idea:` or `fixes:` line, which is
 all intent writes for it (the register is never edited on the change's branch, so an inbox commit
 on the base branch never conflicts with it), or one carrying the `[building]` tag older versions
@@ -1001,7 +1010,11 @@ rework (each change that fixed an earlier one, as declared on its intent's `rewo
 or by a fixed bug's `Introduced by:`, with `rework_questions` beside it: lines an earlier change
 wrote that a later one replaced, found by blame and asked about, never counted), open changes and
 seeds, release tags, the size of each skill, and what each change cost, from its `Close` commit's
-trailers. Its `bugs` are the bugs reported, fixed and retired in the window, by severity and
+trailers. Its `origins` count the window's closed changes by their intent's `origin:` line, each a
+list of names: `host`, `self`, and `unknown` for a change with no line (every change closed before
+the line existed), with `n` the changes closed; the skill reads the `host` ones as evidence from
+use in another repo, and says nothing of origins when every change is `unknown`. Its `bugs` are
+the bugs reported, fixed and retired in the window, by severity and
 reason, the issues triage closed without a change by verdict (`triaged`), the days from report
 to fix, the open ones by age, and the escapes: each introducing change with its tier, its `way`
 of building (`unknown` when history doesn't hold it), its bugs
@@ -1555,6 +1568,11 @@ and the entry as the branch last held it (a line from before `paths=` reads as p
 reported=<date> reason=<word>` on its `Retire` commit. A dropped change fixes nothing. An issue
 triage closed gets `Sdlc-Triaged: #<N> verdict=<word> ref=<what it rests on>` on its `Triage` or
 `File` commit, its reason as a `Why #<N>:` line in the body.
+
+Where a change's finding came from is recorded as `Sdlc-Origin: host` or `Sdlc-Origin: self`, from
+its intent's `origin:` line, on `Close` commits only. A change whose intent has no line, or a word
+other than those two, gets none, and a `Close` commit without it is unknown, never `self`; a
+dropped change has none.
 
 Close also records the change's lead time and where it went, on one line: `Sdlc-Lead: lead=<m>
 queued=<m> agents=<m> idle=<m> ready_wait=<m> landing=<m> source=<runs|transcripts|git>`, in
