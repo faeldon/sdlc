@@ -741,3 +741,31 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 217-train-gates-every-tip (correctness)
+
+## [2026-11-21-45] [idea] A change can be parked on a host resource, with a deadline, instead of stopping or asking
+
+Autopilot (216) runs changes unattended, but a host step can need a resource another change holds:
+a shared deployment, a database object, an environment one change at a time may use. Today the
+factory has two answers, a blocking decision (the person is asked) or a stop, and neither suits a
+wait that resolves itself in minutes. Nothing either says how long a change may wait.
+
+- **A host step can answer busy:** a host command the factory runs (or a builder runs through the
+  host's own task) exits with a documented code meaning "waiting on a host resource", with who
+  holds it and until when. The factory then **parks** the change, neither stopping nor asking.
+- **Parked is a derived state, like every other:** `runs/parked.md` holds the resource, since and
+  the deadline; `verdicts` reads it as `next: parked`, then the step it interrupted once the host
+  says free, or `stop` (way: ask the person, naming the holder) once the deadline passes. A crash
+  or restart reads the same state from the files, as now. The board and `/sdlc:status` show it as
+  `stopped.md` is shown.
+- **No resource model in the plugin:** which resources exist, how they're locked (a file, a lease in
+  a database), and what conflicts with what stay the host's. The plugin learns only "busy, until".
+- **A transition table** in the docs and tests: every state the factory can be in (stage, and the
+  step `verdicts` names), what moves it on, and the timeout of each waiting state (`decide`, a gate
+  slot, `parked`), so nothing in it can wait forever.
+
+Open: the exit code and the payload a host returns; where the deadline comes from (the host's
+answer, a factory default, a config key); whether a parked change gives up its gate slot; how
+autopilot's queue orders parked changes against new ones.
+
+Theme: factory
+Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/run_state.py, plugins/factory/skills/build/SKILL.md, plugins/factory/skills/autopilot/, docs/REFERENCE.md
