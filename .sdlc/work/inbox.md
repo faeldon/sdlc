@@ -160,13 +160,6 @@ Cost: M
 Value: med
 Raised by: 186-gate-reliability (correctness)
 
-## [2026-11-20-7] [idea] Read-only list refuses ugrep's symlink-following long options (`--dereference-files` and its prefixes)
-
-Left undone by 193-ledger-and-landing-fixes, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:795: the grep refusals cover GNU grep and BSD grep only. If a host's `grep` on `PATH` is ugrep, `grep -r --dereference-files keep .` is allowed and follows links to files outside the checkout. This change didn't add or touch that gap, but it is in the same function. Fix: refuse `--dereference-files` and its prefixes too, or check every word against a list of such long options.
-See .sdlc/work/193-ledger-and-landing-fixes/notes.md in its commit.
-Raised 2026-11-20.
-Theme: landing
-
 ## [2026-11-20-11] [idea] Show a spec step and its elapsed time on a Designing card
 
 Left undone by 195-designing-while-specified, carried forward when it landed: The board's step track (`_progress()`) shows nothing for a first spec draft, which records no `runs/step.md`; a card under Designing could show a `spec` step with its elapsed time.
@@ -267,12 +260,6 @@ Raised by: 205-release-cadence (correctness)
 ## [2026-11-20-50] [idea] The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping.
 
 Left undone by 200-tests-pruned-again, carried forward when it landed: The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping. Caching what doesn't change within one reading would speed both.
-See .sdlc/work/200-tests-pruned-again/notes.md in its commit.
-Raised 2026-11-20.
-
-## [2026-11-20-51] [idea] No test fails when the train's readiness refusal (`_land_readiness()`'s `refusal`, in `cmd_train`) is ejected under another cause: mutating its `"refusal"` to `"review"` passed every train and landing test.
-
-Left undone by 200-tests-pruned-again, carried forward when it landed: No test fails when the train's readiness refusal (`_land_readiness()`'s `refusal`, in `cmd_train`) is ejected under another cause: mutating its `"refusal"` to `"review"` passed every train and landing test. The removed `test_every_ejection_names_its_cause` never reached that path either: its stray file is the `failed` path, which `test_train_run_stops_at_a_refusal` covers.
 See .sdlc/work/200-tests-pruned-again/notes.md in its commit.
 Raised 2026-11-20.
 
@@ -586,3 +573,39 @@ Paths: .github/workflows/check.yml
 Cost: S
 Value: low
 Raised by: 211-ci-token-read (correctness)
+
+## [2026-11-21-24] [idea] Let ugrep's `-O EXT` pass the read-only grep check while BSD's `-O` stays refused
+
+Left undone by 212-landing-gaps, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:816: `GREP_FOLLOWS` refuses `-O` (BSD's follow-links flag) for every grep, so ugrep's harmless `-O EXT` (search by file extension) is refused too. This is overly strict, not a hole.
+See .sdlc/work/212-landing-gaps/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-25] [nit] the `--filter`, `--pager` and `--view` refusals match the exact name only, not `--filter-magic-label`.
+
+Raised by the code review of 212-landing-gaps, round 1: plugins/factory/scripts/landing.py:921: the `--filter`, `--pager` and `--view` refusals match the exact name only, not `--filter-magic-label`. That is harmless and ugrep takes no prefixes, but a comment saying so would help.
+
+Theme: docs
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 212-landing-gaps (correctness)
+
+## [2026-11-21-26] [nit] a GNU or BSD grep refusal of `--config` or `---…` says "makes ugrep …", which may confuse a person reading it on a host without ugrep.
+
+Raised by the security review of 212-landing-gaps, round 1: plugins/factory/scripts/landing.py:925: a GNU or BSD grep refusal of `--config` or `---…` says "makes ugrep …", which may confuse a person reading it on a host without ugrep. "makes grep (ugrep) …" would be clearer
+
+Theme: docs
+Paths: plugins/factory/scripts/landing.py
+Cost: S
+Value: low
+Raised by: 212-landing-gaps (contract)
+
+## [2026-11-21-27] [nit] no case checks a bare `-d dereference-recurse` word that is really a grep pattern, which D2 accepts refusing.
+
+Raised by the test review of 212-landing-gaps, round 1: tests/test_train.py:2340: no case checks a bare `-d dereference-recurse` word that is really a grep pattern, which D2 accepts refusing. A pin would document the trade-off.
+
+Theme: tests
+Paths: tests/test_train.py
+Cost: S
+Value: low
+Raised by: 212-landing-gaps (correctness)
