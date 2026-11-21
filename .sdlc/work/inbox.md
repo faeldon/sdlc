@@ -593,60 +593,6 @@ Cost: S
 Value: low
 Raised by: 210-wait-previews (correctness)
 
-## [2026-11-21-32] [idea] Autopilot level 1: the factory runs from seed to landing without a person
-
-`/sdlc-factory:autopilot` runs the whole loop while the person is away or asleep: it picks
-compelling seeds from the register (bugs by severity, `Priority: high`, the product doc's outcomes
-and milestones), groups them into waves that won't overlap, opens their intents, builds each as
-soon as what it depends on has landed, and lands what is ready in batches, waiting for a
-nearly-ready change when landing them together saves runs and cases.
-
-It runs as a background loop on the landing train's model, not in the person's session. The
-skill asks one WAIT, which bounds the run (which seeds or themes, a dollar cap, hours, the level),
-then starts `factory.py autopilot --run` in the background. The script is the scheduler: the queue,
-the waves, dependencies, the budget, the off switch, and the run's state in the git common dir, so
-a stopped or compacted session loses nothing and a rerun resumes it. Each judgment goes to a fresh
-agent session with no Write, its reply filed by the script as a reviewer's is: which wave is next,
-an intent's draft, and the answer to an escalation. The person's session only starts it and reads
-the summary, and may be closed in between.
-
-No WAIT stops it: an escalated default is taken as the default and a look as seen, recorded as
-autopilot's call (`by=autopilot`, `→ decided by autopilot:`), never as the person's, and each call
-goes, with its context, into an escalations file for the person to review. A call the person
-disagrees with is fixed forward, by reverting the change or by a new seed, never mid-build. It
-stops for good on one kind of escalation: a change that can only be built by breaking a contract,
-a hard rule or a guard, or one the supervisor judges far simpler if a contract were relaxed. That
-change stays under Needs you, unlanded, and nothing that depends on it is built.
-
-It keeps two risk budgets, each counted by the script from signals it already detects, never
-judged by a model, their weights and limits in the base branch's `.sdlc/factory.toml`: review debt,
-the person's unreviewed calls it made, weighted by kind (a look taken as seen least, an escalated
-default, a scope call or a policy wording most); and change risk, each landed change's signals as
-`land-check` counts them (sensitive or irreversible paths, `impact: major`, a conflict resolved or
-a fix made while landing, failed or spoiled cases, unreviewed paths, mends, red gates), weighed
-more for a pushed change than a local one, and for one stacked on another autopilot change. When
-either budget is reached it starts nothing new, leaves what is in flight at `stage: test`
-unlanded, and writes its summary, which leads with each budget, what spent it and on which change.
-
-Autopilot loosens no other WAIT: by hand and in the factory, every skill still asks its own, and
-`land.auto` stays the only self-approving step outside a run. The script commands its loop calls
-accept `--by autopilot` only while its run lock is held, and refuse it otherwise; no skill but
-autopilot's names it (a test pins this), and it adds no `allowed-tools` rule that lets another
-skill's writing command run unasked. `by=person`, `by=auto` and `by=autopilot` stay three values.
-
-It stops when no compelling seed is left, when its dollar cap, its hours or a risk budget run out,
-or when the person turns it off (between steps, as `train --cancel` does), and either way writes a
-summary: how long it ran and what it cost, what landed (features, bugs fixed), what is mid-build
-and where, every escalation and decision it made, and the risks the person should weigh.
-
-Open questions: whether the commands the harness asks before today (`accept`, `cases`) are allowed
-for the run, or skipped; whether it pushes and syncs issues, or lands locally until the person reads
-the summary; a script-drawn line for "breaks a contract" (AGENTS.md, the invariant tests, a
-*Contracts touched* line); an intent opened by `new` with no person's yes; green CI as a
-precondition (2026-11-21-28).
-Theme: factory
-Raised 2026-11-21.
-
 ## [2026-11-21-33] [idea] Autopilot levels 2–4: releases, retrospectives, direction
 
 Beyond building (level 1): level 2 plans and cuts releases and files new seeds from what the
@@ -792,3 +738,77 @@ reading the code caught it, and the change was sent back with `/sdlc-factory:bui
 Severity: high
 Paths: plugins/factory/scripts/factory.py
 Theme: factory
+
+## [2026-11-21-47] [idea] Let autopilot take `next_up`'s cheap-nits lines
+
+Left undone by 216-autopilot, carried forward when it landed: `next_up`'s cheap-nits lines (`rule: nits`) carry no seed id, so autopilot never takes them, though `READY_RULES` lists them.
+See .sdlc/work/216-autopilot/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-48] [idea] Test the whole autopilot loop's subprocesses with a stand-in `claude`
+
+Left undone by 216-autopilot, carried forward when it landed: `test_autopilot_end_to_end` drives the loop in process with `run_step` stood in for, as the train's tests do. Since round 1, `test_a_real_step_passes_by_autopilot_and_an_agents_env_never_does` runs a real `run_step` child under the lock, but no test runs the whole loop's subprocesses with a stand-in `claude`.
+See .sdlc/work/216-autopilot/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-49] [idea] Retro overturn rate for autopilot's calls
+
+Left undone by 216-autopilot, carried forward when it landed: The retrospective's overturn rate for autopilot's calls (the spec's question 6) is left for a later seed, as the intent's resolution says.
+See .sdlc/work/216-autopilot/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-50] [idea] Stop `_claude()` passing `TRAIN_RUN_ENV` to editing agent sessions. I did not file it as a bug: the Bugs severity words (`high`, `med`, `low`) describe wrong output or lost work, and none fits a guard weakness, so I carry it as a seed.
+
+Left undone by 216-autopilot, carried forward when it landed: pre-existing: plugins/factory/scripts/factory.py:4292: `_claude()` passes `TRAIN_RUN_ENV` on to the agent sessions a `train --run` starts (`train-resolve`, `land-fix`, which edit). So an agent's own `factory.py train …` passes the `train_running()` check at landing.py:1978, which is meant for the loop's own children.
+See .sdlc/work/216-autopilot/notes.md in its commit.
+Raised 2026-11-21.
+
+## [2026-11-21-51] [nit] `cmd_answer` reads and rewrites `decisions.md` with no lock.
+
+Raised by the code review of 216-autopilot, round 1: plugins/factory/scripts/factory.py:2417: `cmd_answer` reads and rewrites `decisions.md` with no lock. This is safe only because one step runs per change at a time. A comment saying so would help.
+
+Theme: docs
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 216-autopilot (correctness)
+
+## [2026-11-21-52] [nit] many `# fmt: skip` pragmas keep dense literals unformatted
+
+Raised by the test review of 216-autopilot, round 1: tests/test_autopilot.py:263: many `# fmt: skip` pragmas keep dense literals unformatted
+
+Theme: style
+Paths: tests/test_autopilot.py
+Cost: S
+Value: low
+Raised by: 216-autopilot (correctness)
+
+## [2026-11-21-53] [nit] the "agent is refused" half of the real-step test calls `agent_env()` directly rather than going through `_claude`.
+
+Raised by the test review of 216-autopilot, round 2: tests/test_autopilot.py:1139: the "agent is refused" half of the real-step test calls `agent_env()` directly rather than going through `_claude`. The stubbed test above covers `_claude`, so the two together close the gap.
+
+Theme: tests
+Paths: tests/test_autopilot.py
+Cost: S
+Value: low
+Raised by: 216-autopilot (correctness)
+
+## [2026-11-21-54] [nit] no test that a host's `[commands] check`, run by a `gate` step under the loop, lacks `AUTOPILOT_RUN_ENV`/`TRAIN_RUN_ENV`; `take_markers()` is untested
+
+Raised by the security review of 216-autopilot, round 3: tests/test_autopilot.py:1140: no test that a host's `[commands] check`, run by a `gate` step under the loop, lacks `AUTOPILOT_RUN_ENV`/`TRAIN_RUN_ENV`; `take_markers()` is untested
+
+Theme: tests
+Paths: tests/test_autopilot.py
+Cost: S
+Value: med
+Raised by: 216-autopilot (contract)
+
+## [2026-11-21-55] [nit] R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`.
+
+Raised by the code review of 216-autopilot, round 4: `.sdlc/work/216-autopilot/spec.md`: R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`. The spec should be brought in line with the ledger
+
+Theme: docs
+Paths: .sdlc/work/216-autopilot/spec.md
+Cost: S
+Value: low
+Raised by: 216-autopilot (correctness)
