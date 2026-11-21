@@ -403,3 +403,16 @@ plugin in a host.
 
 Theme: intake
 Raised 2026-11-21.
+
+## [2026-11-21-2] [idea] Each WAIT shows its draft in the dialog's preview
+
+Every skill's WAIT shows the draft it approves inside its AskUserQuestion dialog, as the preview of
+its yes option: the seed or bug entry, the intent, the spec's requirements, the commit message and
+files, whatever that yes writes. A long draft shows its approving part and names the file holding
+the rest. Today the draft is shown only as message text before the dialog, so a draft that never
+reached the screen, or scrolled off it, is approved unseen. That happened on 2026-11-21, when seed
+2026-11-21-1 was committed without the person ever seeing its text.
+test_every_wait_asks_in_a_dialog would also check that each WAIT names what its preview holds.
+
+Theme: approvals
+Raised 2026-11-21.
