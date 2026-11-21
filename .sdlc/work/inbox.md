@@ -609,3 +609,29 @@ Paths: tests/test_train.py
 Cost: S
 Value: low
 Raised by: 212-landing-gaps (correctness)
+
+## [2026-11-21-28] [bug] CI on main has been red since 2026-11-17, and the local gate can't see it
+
+Every push to main since `Close 091-hand-gate-record` (9b21760, 2026-11-17) has failed CI; the
+last green run is `Close 092-retro-outcome-coverage` (5cb3b26). `./check.sh` passes locally on
+macOS each time, so no gate, build or landing has stopped on it. CI should pass on both jobs, and
+211's landing look ("both jobs pass") relied on it.
+
+On 209's push (d2c14ac), 6 tests fail:
+- Windows, portable job:
+  - test_hand_gate.py::test_the_build_hash_moves_on_a_rebase_onto_a_moved_base (the first to
+    fail, on 9b21760)
+  - test_factory_agent.py::test_the_builder_s_evidence_is_mended_once_a_round
+  - test_sdlc.py::test_check_leaves_out_the_template_plan_during_a_live_upgraded_build and
+    test_a_live_first_build_hides_no_other_problem: UnicodeDecodeError 'utf-8' … byte 0x97, so
+    a text read or subprocess without encoding="utf-8" (0x97 is an em dash in cp1252)
+  - test_upstream.py::test_upstream_repo_comes_from_the_manifest: depends on `gh auth`, which
+    the runner lacks
+- Linux: test_factory_ui.py::test_a_server_that_answered_and_closed_first_has_not_lost_its_port
+  ("port … answered, but the dev server had exited 1"), likely timing-dependent.
+
+How to see it: `gh run list --branch main`, then `gh run view <id> --log-failed`.
+
+Severity: high
+Paths: tests/test_hand_gate.py, tests/test_factory_agent.py, tests/test_sdlc.py, tests/test_upstream.py, tests/test_factory_ui.py, .github/workflows/check.yml
+Theme: tests
