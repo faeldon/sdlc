@@ -515,12 +515,6 @@ Cost: S
 Value: low
 Raised by: 209-upstream-bugs (contract)
 
-## [2026-11-21-22] [idea] Pin CI actions to commit SHAs
-
-Left undone by 211-ci-token-read, carried forward when it landed: pre-existing: .github/workflows/check.yml:23: `actions/checkout@v4` and `astral-sh/setup-uv@v6` are pinned by moveable tag, not by commit SHA. Pin each to a full SHA with the version in a comment, and let Dependabot or Renovate bump them.
-See .sdlc/work/211-ci-token-read/notes.md in its commit.
-Raised 2026-11-21.
-
 ## [2026-11-21-24] [idea] Let ugrep's `-O EXT` pass the read-only grep check while BSD's `-O` stays refused
 
 Left undone by 212-landing-gaps, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:816: `GREP_FOLLOWS` refuses `-O` (BSD's follow-links flag) for every grep, so ugrep's harmless `-O EXT` (search by file extension) is refused too. This is overly strict, not a hole.
@@ -816,3 +810,53 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 219-closes-at-start (contract)
+
+## [2026-11-22-6] [nit] `USES` only matches `uses:` at the start of a line or after `- `, so a quoted value (`uses: "a/b@v4"`) would slip through unchecked
+
+Raised by the code review of 221-ci-pinned-shas, round 1: tests/test_ci.py:15: `USES` only matches `uses:` at the start of a line or after `- `, so a quoted value (`uses: "a/b@v4"`) would slip through unchecked
+
+Theme: robustness
+Paths: tests/test_ci.py
+Cost: S
+Value: low
+Raised by: 221-ci-pinned-shas (correctness)
+
+## [2026-11-22-7] [nit] the workflow glob misses `.github/workflows/*.yaml`, which GitHub also runs, so an unpinned action there would pass the test; glob both extensions
+
+Raised by the security review of 221-ci-pinned-shas, round 1: tests/test_ci.py:52: the workflow glob misses `.github/workflows/*.yaml`, which GitHub also runs, so an unpinned action there would pass the test; glob both extensions
+
+Theme: robustness
+Paths: tests/test_ci.py
+Cost: S
+Value: med
+Raised by: 221-ci-pinned-shas (contract)
+
+## [2026-11-22-8] [nit] `VERSION` demands a `v` plus digits, so a comment like `# release-2` would be refused; that is stricter than the outcome's wording but matches the plan
+
+Raised by the test review of 221-ci-pinned-shas, round 1: tests/test_ci.py:16: `VERSION` demands a `v` plus digits, so a comment like `# release-2` would be refused; that is stricter than the outcome's wording but matches the plan
+
+Theme: tests
+Paths: tests/test_ci.py
+Cost: S
+Value: low
+Raised by: 221-ci-pinned-shas (correctness)
+
+## [2026-11-22-9] [nit] `USES` still misses a quoted `uses: "a/b@v4"`
+
+Raised by the code review of 221-ci-pinned-shas, round 2: tests/test_ci.py:15: `USES` still misses a quoted `uses: "a/b@v4"`
+
+Theme: robustness
+Paths: tests/test_ci.py
+Cost: S
+Value: low
+Raised by: 221-ci-pinned-shas (correctness)
+
+## [2026-11-22-10] [nit] `VERSION` demands `v` plus digits, so a comment like `# release-2` is refused; this is stricter than the outcome's wording but matches the plan
+
+Raised by the test review of 221-ci-pinned-shas, round 2: tests/test_ci.py:16: `VERSION` demands `v` plus digits, so a comment like `# release-2` is refused; this is stricter than the outcome's wording but matches the plan
+
+Theme: tests
+Paths: tests/test_ci.py
+Cost: S
+Value: low
+Raised by: 221-ci-pinned-shas (correctness)
