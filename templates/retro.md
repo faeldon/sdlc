@@ -6,9 +6,10 @@
 > and the Trust band. Then the insights: each synthesis question answered from its pillar's
 > figures, as approved at the retrospective's question. Then the experience: how working with the
 > process felt, the person's rating from 1 to 4 and their line, given at that question. Each
-> pillar's figures follow in a section of its own. `sdlc.py retro-commit` writes it and commits it
-> with the retrospective; `sdlc.py retro` gives the same figures, and the next retrospective reads
-> back the scorecard's table, the experience's and the indicators'.
+> pillar's figures follow in a section of its own, then the hosts: the counts from other repos
+> using this process, read only where the process itself is built. `sdlc.py retro-commit` writes
+> it and commits it with the retrospective; `sdlc.py retro` gives the same figures, and the next
+> retrospective reads back the scorecard's table, the experience's and the indicators'.
 
 ## Window
 
@@ -53,3 +54,7 @@
 ## Simplicity
 
 {{simplicity}}
+
+## Hosts
+
+{{hosts}}

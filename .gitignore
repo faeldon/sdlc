@@ -4,3 +4,4 @@ __pycache__/
 .ruff_cache/
 .claude/worktrees/
 .sdlc/terms.local
+.sdlc/hosts.local

@@ -1383,7 +1383,14 @@ many changes ran at once and what that did to them, the *By way of building* tab
 pipeline's gates and landing), *Quality* (escapes, who found what, rework, and the pipeline's red
 gates, depth and unreviewed landings), the host's *Indicators*, *Autonomy*, *Cost*, *Spend* and
 *Simplicity* (the workarounds; in the plugin's own repo, its surface's share, retire candidates,
-footprint and growth too, never in a host's).
+footprint and growth too, never in a host's), and last `## Hosts`, which in your repo is one line
+saying other repos are read only in the plugin's own repo. An override of `templates/retro.md`
+without `{{hosts}}` renders as before.
+
+`sdlc.py retro`'s `hosts` is `{"state": "unmeasured", "why": "read only in the plugin's own repo"}`
+in every repo but the plugin's own, which reads no other repo. There, with a host list (below),
+it holds the counts from the listed repos' history, apart from every other figure; with no list it
+is `unmeasured`, `why` `no host list`.
 
 `sdlc.py retro`'s `scorecard` is that table: `rows`, each with its `pillar` (Speed, Quality,
 Autonomy, Cost, Simplicity), `role` (`headline` or `guardrail`), `figure`, `unit`, `value`, `n`,
@@ -1410,7 +1417,8 @@ report and the JSON come from one function, so they never disagree.
 `guide/insights.md`, Value, Speed, Quality, Autonomy, Cost, Simplicity and Tradeoffs, and any your
 `docs.insights` adds. `sdlc.py retro --insights` prints each question (`title`, `pillar`,
 `question`) with its `data`: only the figures of `retro`'s output that pillar is given, its
-scorecard rows (every row for Tradeoffs), `process.window` and `process.underneath`, and
+scorecard rows (every row for Tradeoffs), `process.window`, `process.underneath` and
+`hosts.read` (with `hosts.state`, or `hosts.why` when unmeasured), and
 `problems`, your question doc's. It writes nothing and runs no host command: the figures are
 counted with `retro.evidence`, `retro.indicators` and `retro.test_times` emptied, and no bundle
 holds their output. `/sdlc:retro` gives each question to its own `sdlc:insight` agent at once

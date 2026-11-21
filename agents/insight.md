@@ -39,6 +39,11 @@ figures the bundle doesn't hold. A question the figures can't answer is answered
 - **A null is not a zero.** A null value with a `missing_because` or `note` says why it is null:
   quote the reason, never read it as none.
 - **A small `n` is anecdote.** Under five changes on either side, a trend is `unknown` for a reason.
+- **`hosts` is other repos, never this one.** Every bundle holds `hosts.read` (with `state`, or
+  `why` when unmeasured) and some hold a slice of `hosts`: the counts from the host repos on the
+  machine that ran the retrospective, a sample of one person's repos. Cite `hosts.read.read` as
+  its `n`, set it beside this repo's figure rather than adding the two, and never name a host.
+  With `state` `unmeasured`, say nothing of other repos.
 - **Nothing to act on this window is a valid answer.** Say it with `none: <why>` rather than
   inventing a recommendation.
 

@@ -62,6 +62,13 @@ What `retro` gives:
 - `origins`: the window's closed changes by where their findings came from, each list their
   names: `host` (found using what this repo makes in another repo), `self` (found working on this
   one) and `unknown` (no `origin:` line, never read as `self`), with `n` the changes closed.
+- `hosts`: in the plugin's own repo alone, the counts from the other repos on this machine its
+  gitignored host list names, apart from every other figure; `state` `unmeasured`, with its `why`,
+  everywhere else and with no list. `read` (hosts `listed`, `read`, `unreadable` by reason,
+  `unlisted`, the installed repos the list doesn't name, and the `note`), `window` and `all`
+  (closed and dropped, `by_way`, `tiers`, `dropped_at`, `escapes`, `prompts`, `metrics`), `busiest`
+  (the host with most closes, its medians by way), `versions` (and how many are `behind`) and
+  `surface` (the plugin's names the hosts use). Never a host's name or path.
 - `process`: the report's figures, aggregates only. `window` (closed by tier, dropped, and how
   many were `measured`), `cycle` (per tier, median and longest `elapsed`, median `agent` and days
   open), `throughput` (closed per week by tier, by way of building in `ways` and by work class in
@@ -348,6 +355,14 @@ Each finding is one line: what it is, the evidence from Step 0 or 1, and its dis
    from a host, of `n`, with `unknown` beside it, since a change with no line could be either.
    When every change in the window is `unknown`, say nothing about origins.
 
+   Read `hosts` the same way, as evidence from other repos: with `state` `read`, a goal or
+   milestone that waits on another repo's use (a pilot of the factory, say) is judged from
+   `hosts.all.by_way.factory`, with `hosts.read.read` as its `n` and the note that it is one
+   machine's sample; "no host change was factory-built (n 3 hosts)" is shown, not asserted. Set
+   `hosts.busiest` beside this repo's `by_way` where the cost of building by hand is in question.
+   In your own words, and never naming a host: no figure here names one, and nothing you write may.
+   With `state` `unmeasured`, say nothing about hosts.
+
    Then,
    given the above and the product pass first of all, propose up to three open goals and the milestones that reach them, new ones
    numbered from `next_ids`. Each goal ends with the outcomes it answers to, `(O1, O3)`. Each
@@ -495,7 +510,9 @@ proposed intent titles with `run /sdlc:intent to open it`. Name each
 retire candidate with `/sdlc:idea <id>`, for the person to retire, or not, one at a time. With no product doc, end with: `No product doc,
 so no product pass: run /sdlc:setup product to add one.` When `tests.times.state` isn't `ok`, end
 with: `No test times, so the pruning pass rests on history alone: set retro.test_times to run it
-on run times too.` Then stop.
+on run times too.` When `hosts.read.unlisted` is above 0, end with: `<n> installed repo(s) not
+in your host list: run sdlc.py hosts in a terminal to see them and add or exclude each.` Then
+stop.
 
 ## Out of scope
 
@@ -504,6 +521,7 @@ on run times too.` Then stop.
 - Editing the product doc's users, problem, measures or bets: only its outcome lines.
 - Quoting evidence output into the direction doc, the product doc or `.sdlc/work/inbox.md`: findings
   are written in this skill's own words, and a line of evidence goes in only when the human
-  approves that line at the WAIT. Evidence can hold what a host's users did.
+  approves that line at the WAIT. Evidence can hold what a host's users did. The same holds for
+  `hosts`: its figures are cited in this skill's words, never a host named.
 - Editing or deleting a test: the pruning pass is a seed, and pruning is a later change.
 - Opening intents, cutting releases, pushing anything.

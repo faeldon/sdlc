@@ -152,6 +152,17 @@ hand too, since a reporter can't and triage doesn't: `bug`, plus
 change's work was lost or one number given twice. `.sdlc/evidence.py` counts them per release
 window for `/sdlc:retro`, which scores O1 and O2 in `.sdlc/PRODUCT.md` from them.
 
+The repos on your machine that use the plugin are evidence too. List them in `.sdlc/hosts.local`
+in the main checkout, gitignored as `.sdlc/terms.local` is: one absolute path a line (`~`
+expanded), blank and `#` lines ignored, and `!<path>` to leave a repo out for good. `sdlc.py
+retro` then reads each listed repo's history by git reads alone (never a host command, a fetch or
+a write) into its `hosts` block and the report's `## Hosts`: counts and the plugin's own names,
+never a host's name, path, title or prose, and never pooled with this repo's figures. With no list
+it reads none, and says `unmeasured`. `sdlc.py hosts` prints each listed repo's state and path,
+and each repo with sdlc installed at project or local scope that the list doesn't name, with the
+line to append to read it and the `!` line to leave it out; it writes nothing, and only you run
+it, since its paths must stay out of anything committed.
+
 ## Design philosophy
 
 **Mechanism vs. judgment.** `scripts/sdlc.py` does the mechanical half (numbering, worktrees,

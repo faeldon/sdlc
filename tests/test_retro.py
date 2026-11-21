@@ -4655,6 +4655,7 @@ SECTIONS = [
     "Cost",
     "Spend",
     "Simplicity",
+    "Hosts",
 ]
 
 

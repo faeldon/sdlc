@@ -201,6 +201,7 @@ graph LR
 - **`footprint`**: what setup left in a host: the files it created, the keys set, and the lines under `.sdlc/`. Specified: `docs/REFERENCE.md`. Depends on: `/sdlc:setup`.
 - **`growth`**: the surface's size at each release, in the plugin's own repo. Specified: `docs/REFERENCE.md`. Depends on: `surface`.
 - **`rework`**: what a later change declares it reworks of an earlier one. Specified: `docs/REFERENCE.md`. Depends on: `change`.
+- **`hosts`**: the counts from the host repos listed in the plugin's own repo's gitignored `.sdlc/hosts.local` (changes closed and dropped, by way and tier, stops and time, escapes, version lag, the plugin's names they use), never a host's name or path and never pooled with this repo's; `unmeasured` with no list and in every other repo; `sdlc.py hosts` shows the paths, to the terminal alone. Specified: `scripts/retro.py`. Depends on: `retro`, `Sdlc-Mode`, `Sdlc-Totals`.
 - **`origins`**: the window's closed changes by their `origin:`, `host`, `self` or `unknown`, the host-found ones read as evidence from another repo. Specified: `scripts/retro.py`. Depends on: `origin:`.
 - **`lead time`**: how long changes took from opened to close, by part. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Lead`.
 - **`stops`**: the window's stops against the gates its changes owed. Specified: `docs/REFERENCE.md`. Depends on: `Sdlc-Totals`.

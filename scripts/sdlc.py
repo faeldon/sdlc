@@ -5958,22 +5958,22 @@ def dropped_changes(home: Path, since: str | None, trunk: str | None) -> list[di
     """Every change dropped on the base branch `trunk` after `since` (all of it when None), oldest
     first: each `Drop NNN-slug` commit on the base's first-parent line names one, and its second
     parent, the branch's tip, holds the intent with `dropped_at:` and the reason. Never counted by
-    a release, which reads only `Close` commits. Each record adds `drop_sha`, `drop_date` and
-    `days_open`."""
+    a release, which reads only `Close` commits. Each record adds `drop_sha`, `drop_date`,
+    `drop_at` (its commit time) and `days_open`."""
     if not trunk:
         return []
     span = f"{since}..{trunk}" if since else trunk
-    fmt = "--format=%h%x00%P%x00%cs%x00%s"
+    fmt = "--format=%h%x00%P%x00%cs%x00%cI%x00%s"
     log = _git(home, "log", "--first-parent", "--reverse", fmt, span) or ""
     found = []
     for line in log.splitlines():
-        drop_sha, parents, drop_date, subject = (line.split("\x00") + ["", "", ""])[:4]
+        drop_sha, parents, drop_date, drop_at, subject = (line.split("\x00") + [""] * 4)[:5]
         name = subject[len(DROP_PREFIX) :].strip() if subject.startswith(DROP_PREFIX) else ""
         tip = parents.split()[1:2]
         if DIR_RE.match(name) and tip:
             text = _git(home, "show", f"{drop_sha}^2:{work_rel(home)}/{name}/intent.md")
             rec = _change_record(name, text, tip[0][:7], closed=False)
-            rec.update(drop_sha=drop_sha, drop_date=drop_date)
+            rec.update(drop_sha=drop_sha, drop_date=drop_date, drop_at=drop_at)
             rec["days_open"] = _days_between(rec["created"], drop_date)
             # What close measured before it recorded the drop, as on a `Close` commit.
             rec["metrics"] = metrics.parse_trailers(
@@ -6786,6 +6786,15 @@ def cli_close(root: Path, home: Path, args) -> int:
 )
 def cli_retro(root: Path, home: Path, args) -> int:
     return retro.cmd_retro(root, args.metrics, args.report, args.insights)
+
+
+@command(
+    "hosts",
+    "the host repos the retrospective reads, from the plugin's own repo's host list, with their "
+    "paths, and the installed repos the list doesn't name; writes nothing",
+)
+def cli_hosts(root: Path, home: Path, args) -> int:
+    return retro.cmd_hosts(root)
 
 
 @command(

@@ -162,8 +162,12 @@ not in `READ_ONLY`. Rework across changes is only what a change declares (`_rewo
 matches are questions, never counted. Its `surface` is built from the code (`COMMANDS`,
 `CONFIG_KEYS`, the skill folders), never a list kept by hand, and an item no record could show is
 `unmeasured`, never `unused`; `docs/FEATURES.md` and `docs/PROCESS.md` are the maps of it,
-checked against the code by `tests/test_feature_map.py`. `scripts/retro.py`'s docstring;
-REFERENCE.md, *Retrospectives* and *The product doc*.
+checked against the code by `tests/test_feature_map.py`. In the plugin's own repo alone, with a
+gitignored `.sdlc/hosts.local`, it also reads the listed host repos' history, by git reads alone,
+into `hosts` (`hosts_figures()`): counts and fixed words only, never a host's name or path, and
+never pooled with this repo's figures; `sdlc.py hosts` alone prints paths, to the terminal, and is
+in neither `READ_ONLY` nor `ALLOW_RULES`. `scripts/retro.py`'s docstring; REFERENCE.md,
+*Retrospectives* and *The product doc*.
 
 **The board: `scripts/board.py`.** It writes nothing, `stage:` included, serves `127.0.0.1`
 alone, and is in neither `READ_ONLY` nor `ALLOW_RULES`: no model starts a server unasked. A change

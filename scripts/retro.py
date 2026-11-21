@@ -7,6 +7,14 @@ test's stand-in on the loaded `sdlc` module reaches it. Unlike `metrics.py` and 
 is not pure, and it is never run on its own: `sdlc.py retro` and `sdlc.py retro-commit` are its
 commands. The tests call this file's own names as `sdlc.retro.<name>`.
 
+In the plugin's own repo alone, with a host list (`.sdlc/hosts.local`, gitignored), it also reads
+the host repos the list names, by git reads alone (`hosts_figures()`). Every figure from them is a
+number, a bool, null or a word of a fixed vocabulary (`_vocabulary()`: the plugin's own skill,
+command, key and template names, its stages and tiers, and the section's own words); each host
+record is reduced to that before anything sums it (`_host_safe()`), and a string outside it is
+dropped as a last guard (`_scrub()`), so no host's name, path, title or prose reaches a figure,
+an insight bundle or a report. Only `sdlc.py hosts` prints paths, to the terminal.
+
 `sdlc` is unbound while this file loads, so a default argument here can't read it. What `status`
 and release call on every run (`retro_due()`, `next_up()`, the doc readers, the history walks)
 stays in `sdlc.py`.
@@ -2284,7 +2292,8 @@ def render_report(
     `insights` is `insight_answers()`'s, and with none `{{insights}}` says they weren't answered.
     `experience` is the person's rating answer (`_draft_experience()`'s), rendered into
     `{{experience}}` against `figures["experience_last"]` (`_experience_text()`); with none it
-    says no rating was given.
+    says no rating was given. `hosts` is `hosts_figures()`'s, rendered into `{{hosts}}`
+    (`_hosts_text()`), one line outside the plugin's own repo.
 
     A template with `{{scorecard}}` (184) gets the scorecard there instead (`_scorecard_text()`,
     `scorecard` being `scorecard()`'s), `{{window}}` is the window's sentence alone, and each
@@ -2329,6 +2338,7 @@ def render_report(
         "indicators": _indicators_text(indicators),
         "insights": _insights_text(insights),
         "experience": _experience_text(experience, figures.get("experience_last")),
+        "hosts": _hosts_text(figures.get("hosts")),
     }  # fmt: skip
     scored = "{{scorecard}}" in template
     if not scored:
@@ -2663,6 +2673,7 @@ def report_figures(home: Path, cfg: dict, today: date, *, surface: bool) -> dict
         "pipeline": pipeline, "workarounds": workarounds,
         "spend": _spend(home, cfg, changes, diffs), "surface": shown, "scorecard": card,
         "experience_last": last["experience"],
+        "hosts": hosts_figures(home, since),
         "problems": [*unread, *unnamed, *unknown],
     }  # fmt: skip
 
@@ -3629,6 +3640,7 @@ def retro(home: Path, cfg: dict, today: date | None = None) -> dict:
         "simplicity": {"workarounds": f["workarounds"]},
         "scorecard": f["scorecard"],
         "experience": {"last": f["experience_last"]},
+        "hosts": f["hosts"],
         **f["value"],
     }
 
@@ -4187,6 +4199,454 @@ def _review_at(home: Path, name: str, sha: str, counts: dict | None) -> dict:
     }
 
 
+# ---------------------------------------------------------------- the hosts (208)
+
+# The person's list of host repos to read, in the main checkout, gitignored like `terms.local`.
+HOSTS_FILE = ".sdlc/hosts.local"
+OWN_ONLY_WHY = "read only in the plugin's own repo"
+NO_LIST_WHY = "no host list"
+# The one line a report outside the plugin's own repo gets for `{{hosts}}`.
+HOSTS_ELSEWHERE = "Other repos are read only in the plugin's own repo."
+HOST_NOTE = (
+    "The host repos on one machine: a sample of one person's, never pooled with this repo's "
+    "figures."
+)
+# Why a listed host couldn't be read, each a fixed word (R5).
+UNREADABLE = ("missing", "not-a-repo", "no-base", "failed")
+# What a host holds that no figure here reads, and what would measure it.
+HOSTS_UNMEASURED = [
+    {
+        "signal": "friction in a host's sessions outside a change (refusals, prompts, errors)",
+        "needs": "a count read from those sessions' transcripts, which this retro never reads",
+    },
+]
+TIERS = ("0", "1", "2")
+# The `Sdlc-Totals` and `Sdlc-Stage` fields a host's records keep: numbers alone.
+HOST_NUMBERS = (*COMPARED, "target", "allowance", "gate", "extra", "harness", "command")
+
+
+def host_list(text: str) -> tuple[list[Path], list[Path]]:
+    """The listed host paths and the `!`-excluded ones in a host list's `text` (R3), each `~`
+    expanded and resolved, in order: one path a line, blank and `#` lines ignored. Pure but for
+    resolving."""
+    paths: list[Path] = []
+    excluded: list[Path] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        into = excluded if line.startswith("!") else paths
+        into.append(Path(line.removeprefix("!").strip()).expanduser().resolve())
+    return paths, excluded
+
+
+def _git_dir(path: Path) -> bool:
+    return sdlc._git(path, "rev-parse", "--git-dir") is not None
+
+
+def read_host(path: Path) -> dict | str:
+    """One host's records, or the word for why it can't be read (R4, R5): its closed and dropped
+    changes on its base branch, its `setup.json` version, the config keys it sets and the files
+    under `.sdlc/templates/`, all at the base branch. Git reads alone (`log`, `show`, `rev-parse`,
+    `symbolic-ref`): no host command, hook, fetch or write. Any failure while reading is
+    `failed`, never raised."""
+    if not path.is_dir():
+        return "missing"
+    try:
+        if not _git_dir(path):
+            return "not-a-repo"
+        checkout = sdlc.main_root(path)
+        trunk = sdlc.load_config(checkout)[0]["git"]["base"]
+        if not trunk or sdlc._git(checkout, "rev-parse", "--verify", "-q", trunk) is None:
+            return "no-base"
+        try:
+            setup = json.loads(
+                sdlc._git(checkout, "show", f"{trunk}:{sdlc.HOST_DIR}/setup.json") or ""
+            )
+        except ValueError:
+            setup = {}
+        listing = sdlc._git(checkout, "show", f"{trunk}:{sdlc.HOST_DIR}/templates/") or ""
+        return {
+            "checkout": checkout,
+            "closed": sdlc.closed_changes(checkout, None, trunk),
+            "dropped": sdlc.dropped_changes(checkout, None, trunk),
+            "version": setup.get("version") if isinstance(setup, dict) else None,
+            "keys": _keys_set(checkout, trunk) or set(),
+            # `git show <tree>` prints `tree <ref>`, a blank line, then one name a line.
+            "templates": {n for n in listing.splitlines()[2:] if n and not n.endswith("/")},
+        }
+    except Exception:
+        return "failed"
+
+
+def _vocabulary(home: Path) -> dict[str, set[str]]:
+    """The fixed words a host figure may hold (R7), by kind: the plugin's own names, from the code
+    as it is now, and the words this section uses."""
+    items = _inventory(home)
+    names = {
+        kind: {i["name"] for i in items if i["kind"] == kind}
+        for kind in ("skill", "command", "key")
+    }
+    names["template"] = {p.name for p in sdlc.TEMPLATE_DIR.glob("*.md")}
+    names["stage"] = set(sdlc.metrics.STAGES)
+    names["reached"] = set(sdlc.REACHED)
+    names["words"] = {
+        *TIERS, "unknown", *WAYS, *UNREADABLE, "read", "unmeasured", OWN_ONLY_WHY, NO_LIST_WHY,
+        HOST_NOTE, *(u[k] for u in HOSTS_UNMEASURED for k in ("signal", "needs")),
+    }  # fmt: skip
+    return names
+
+
+def _numbers(fields: object) -> dict:
+    """A trailer's fields kept to the numbers `HOST_NUMBERS` names."""
+    if not isinstance(fields, dict):
+        return {}
+    return {
+        k: v for k, v in fields.items()
+        if k in HOST_NUMBERS and isinstance(v, int | float) and not isinstance(v, bool)
+    }  # fmt: skip
+
+
+def _host_safe(rec: dict, vocab: dict[str, set[str]]) -> dict:
+    """One host change reduced to the vocabulary before anything sums it (R7): its tier, way,
+    when it closed or stopped, its escape counts, and its numbers. Names, titles, prompts' and
+    roles' names, `Sdlc-Origin`, `Sdlc-Base`, reasons and problems never pass."""
+    tier = str(rec.get("tier"))
+    m = rec.get("metrics") or None
+    safe: dict = {
+        "tier": tier if tier in TIERS else "unknown",
+        "close_at": rec.get("close_at"),
+        "drop_at": rec.get("drop_at"),
+        "dropped_at": (rec.get("dropped_at") if rec.get("dropped_at") in vocab["reached"]
+                       else "unknown"),
+        "reworks": len(rec.get("reworks") or []),
+        "metrics": None,
+    }  # fmt: skip
+    if m:
+        coverage = str(m.get("coverage") or "")
+        safe["metrics"] = {
+            "mode": m.get("mode") if m.get("mode") in ("factory", "manual") else None,
+            "totals": _numbers(m.get("totals")),
+            "stages": {
+                s: _numbers(f) for s, f in (m.get("stages") or {}).items() if s in vocab["stage"]
+            },
+            "roles": {},
+            "coverage": "none: unmeasured" if coverage.startswith("none:") else None,
+            "fixes": len(m.get("fixes") or {}),
+            "skills": {
+                n: {"runs": f.get("runs")} for n, f in (m.get("skills") or {}).items()
+                if n in vocab["skill"] and isinstance(f, dict)
+            },
+            "tools": {
+                n: {"calls": f.get("calls")} for n, f in (m.get("tools") or {}).items()
+                if (hit := TOOL_CALL_RE.match(n)) and f"{hit[1]}:{hit[2]}" in vocab["command"]
+                and isinstance(f, dict)
+            },
+        }  # fmt: skip
+        if not safe["metrics"]["totals"]:
+            safe["metrics"]["totals"] = None
+    return safe
+
+
+def _scrub(value: object, words: set[str]) -> tuple[object, int]:
+    """`value` with every string leaf outside `words` dropped, and how many were: the last guard
+    under R7, after the filter that should leave none (`_host_safe()`). Pure."""
+    if isinstance(value, dict):
+        out, n = {}, 0
+        for k, v in value.items():
+            if isinstance(v, str) and v not in words:
+                n += 1
+                continue
+            out[k], m = _scrub(v, words)
+            n += m
+        return out, n
+    if isinstance(value, list):
+        kept, n = [], 0
+        for v in value:
+            if isinstance(v, str) and v not in words:
+                n += 1
+                continue
+            got, m = _scrub(v, words)
+            kept.append(got)
+            n += m
+        return kept, n
+    return value, 0
+
+
+def _pool(closed: list[dict], dropped: list[dict], read: int) -> dict:
+    """The counts over safe records (`_host_safe()`'s): every figure None when no host was read,
+    since `n` is 0; honest zeros when hosts were read and hold none."""
+    keys = ("closed", "dropped", "by_way", "tiers", "dropped_at", "escapes", "prompts", "metrics",
+            "drop_share")  # fmt: skip
+    if not read:
+        return dict.fromkeys(keys)
+    summary = metrics_summary(closed)
+    groups = {
+        k: {g: v[g] for g in ("changes", "median", "target", "stages")}
+        for k, v in summary["groups"].items()
+    }
+    prompts = [((c["metrics"] or {}).get("totals") or {}).get("prompts") for c in closed]
+    n = len(closed) + len(dropped)
+    return {
+        "closed": len(closed),
+        "dropped": len(dropped),
+        "by_way": {w: sum(1 for c in closed if _way(c) == w) for w in WAYS},
+        "tiers": dict(sorted(Counter(c["tier"] for c in closed).items())),
+        "dropped_at": dict(sorted(Counter(d["dropped_at"] for d in dropped).items())),
+        "escapes": {
+            "fixes": sum((c["metrics"] or {}).get("fixes") or 0 for c in closed),
+            "reworks": sum(c["reworks"] for c in closed),
+        },
+        "prompts": sum(p for p in prompts if isinstance(p, int)),
+        "metrics": {
+            "captured": summary["captured"],
+            "uncaptured": summary["uncaptured"],
+            "coverage": summary["coverage"],
+            "groups": groups,
+        },  # fmt: skip
+        "drop_share": _share(len(dropped), n),
+    }
+
+
+def _by_way_medians(closed: list[dict]) -> dict:
+    """Per way, how many changes carry their totals, and their median stops and elapsed."""
+    out = {}
+    for w in WAYS:
+        totals = [c["metrics"]["totals"] for c in closed if _way(c) == w and c["metrics"]
+                  and c["metrics"]["totals"]]  # fmt: skip
+        out[w] = {
+            "n": len(totals),
+            **{k: _median([t.get(k) for t in totals if isinstance(t.get(k), int | float)])
+               for k in ("stops", "elapsed")},
+        }  # fmt: skip
+    return out
+
+
+def _host_surface(hosts: list[dict]) -> dict:
+    """The plugin's skills by the hosts running them and their runs, its commands by calls, its
+    config keys and templates by the hosts that set or override them, from safe records alone."""
+    skills: dict[str, dict] = {}
+    commands: Counter = Counter()
+    keys: Counter = Counter()
+    templates: Counter = Counter()
+    for h in hosts:
+        ran: set[str] = set()
+        for c in h["closed"]:
+            m = c["metrics"] or {}
+            for name, f in m.get("skills", {}).items():
+                row = skills.setdefault(name, {"hosts": 0, "runs": 0})
+                row["runs"] += f["runs"] if isinstance(f["runs"], int) else 0
+                ran.add(name)
+            for name, f in m.get("tools", {}).items():
+                hit = TOOL_CALL_RE.match(name)
+                commands[f"{hit[1]}:{hit[2]}"] += f["calls"] if isinstance(f["calls"], int) else 0
+        for name in ran:
+            skills[name]["hosts"] += 1
+        keys.update(h["keys"])
+        templates.update(h["templates"])
+    return {
+        "skills": dict(sorted(skills.items())),
+        "commands": dict(sorted(commands.items())),
+        "keys": dict(sorted(keys.items())),
+        "templates": dict(sorted(templates.items())),
+    }
+
+
+def _when(text: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(text) if text else None
+    except ValueError:
+        return None
+
+
+def _own_path(path: Path, main: Path) -> bool:
+    """Whether `path` is this repo's main checkout or under its worktrees."""
+    p, m = path.resolve().as_posix(), main.resolve().as_posix()
+    return p == m or p.startswith(f"{m}/.claude/worktrees/")
+
+
+def _discover(home: Path, known: set[str]) -> tuple[list[str] | None, str]:
+    """The `sdlc` installs at project or local scope `claude plugin list` shows that are neither
+    this repo, nor one of its worktrees, nor in `known` (the listed and excluded paths, and the
+    listed hosts' main checkouts, as posix): each path once, and `read`; or (None, `unmeasured`)
+    when the list couldn't be read, its reason never kept (it can hold a path) (R9)."""
+    installs, why = sdlc.plugin_installs(home)
+    if why:
+        return None, "unmeasured"
+    found = {
+        i["project"] for i in installs
+        if i["plugin"] == "sdlc" and i["scope"] in ("project", "local") and i["project"]
+    }  # fmt: skip
+    return sorted(p for p in found if p not in known and not _own_path(Path(p), home)), "read"
+
+
+def _read_hosts(home: Path) -> dict | None:
+    """The host list read and each host's state, for `hosts_figures()` and `cmd_hosts()`; None
+    when there is no list. Each row is `(path, state, records)`, `state` one of `read`, `own`,
+    `repeated` or an `UNREADABLE` word."""
+    path = home / HOSTS_FILE
+    if not path.is_file():
+        return None
+    paths, excluded = host_list(path.read_text(encoding="utf-8"))
+    rows: list[tuple[Path, str, dict | None]] = []
+    mains: set[str] = set()
+    for p in paths:
+        if _own_path(p, home):
+            rows.append((p, "own", None))
+            continue
+        got = read_host(p)
+        if isinstance(got, str):
+            rows.append((p, got, None))
+            continue
+        checkout = got["checkout"].resolve().as_posix()
+        if _own_path(got["checkout"], home):
+            rows.append((p, "own", None))
+        elif checkout in mains:
+            rows.append((p, "repeated", None))
+        else:
+            mains.add(checkout)
+            rows.append((p, "read", got))
+    known = {p.as_posix() for p in (*paths, *excluded)} | mains
+    unlisted, discovery = _discover(home, known)
+    return {"rows": rows, "excluded": excluded, "unlisted": unlisted, "discovery": discovery}
+
+
+def hosts_figures(home: Path, since: dict | None) -> dict:
+    """The `hosts` block (R6): what the listed host repos' records add up to, as counts and fixed
+    words alone, apart from this repo's figures. `unmeasured` outside the plugin's own repo and
+    with no list, having run nothing. `window` is what closed or stopped after this repo's last
+    retrospective (`since`), by its commit time. Read-only: git reads in each host."""
+    if not sdlc._own_repo(home):
+        return {"state": "unmeasured", "why": OWN_ONLY_WHY}
+    listed = _read_hosts(home)
+    if listed is None:
+        return {"state": "unmeasured", "why": NO_LIST_WHY}
+    vocab = _vocabulary(home)
+    states = Counter(state for _, state, _ in listed["rows"])
+    hosts = []
+    for _, state, got in listed["rows"]:
+        if state == "read":
+            hosts.append({
+                "closed": [_host_safe(c, vocab) for c in got["closed"]],
+                "dropped": [_host_safe(d, vocab) for d in got["dropped"]],
+                "version": (got["version"] if sdlc.SEMVER_RE.match(str(got["version"] or ""))
+                            else "unknown"),
+                "keys": got["keys"] & vocab["key"],
+                "templates": got["templates"] & vocab["template"],
+            })  # fmt: skip
+    edge = _when(sdlc._git(home, "show", "-s", "--format=%cI", since["sha"])) if since else None
+
+    def after(at: str | None) -> bool:
+        when = _when(at)
+        return edge is None or (when is not None and when > edge)
+
+    closed = [c for h in hosts for c in h["closed"]]
+    dropped = [d for h in hosts for d in h["dropped"]]
+    window = _pool([c for c in closed if after(c["close_at"])],
+                   [d for d in dropped if after(d["drop_at"])], len(hosts))  # fmt: skip
+    busiest = max(hosts, key=lambda h: len(h["closed"]), default=None)
+    current = sdlc.plugin_version() or ""
+
+    def behind(v: str) -> bool:
+        return bool(sdlc.SEMVER_RE.match(v) and sdlc.SEMVER_RE.match(current)
+                    and sdlc._semver(v)[:2] < sdlc._semver(current)[:2])  # fmt: skip
+
+    figures = {
+        "state": "read",
+        "read": {
+            "listed": len(listed["rows"]),
+            "read": len(hosts),
+            "own": states["own"],
+            "repeated": states["repeated"],
+            "excluded": len(listed["excluded"]),
+            "unreadable": {w: states[w] for w in UNREADABLE if states[w]},
+            "unlisted": None if listed["unlisted"] is None else len(listed["unlisted"]),
+            "discovery": listed["discovery"],
+            "note": HOST_NOTE,
+            "unmeasured": HOSTS_UNMEASURED,
+            "dropped_names": 0,
+        },
+        "window": window,
+        "all": _pool(closed, dropped, len(hosts)),
+        "busiest": None
+        if busiest is None
+        else {
+            "closed": len(busiest["closed"]),
+            "by_way": _by_way_medians(busiest["closed"]),
+        },  # fmt: skip
+        "versions": {
+            "hosts": dict(sorted(Counter(h["version"] for h in hosts).items())),
+            "behind": sum(1 for h in hosts if behind(h["version"])),
+        },
+        "surface": _host_surface(hosts),
+    }
+    words = set().union(*vocab.values())
+    figures, dropped_names = _scrub(figures, words)
+    figures["read"]["dropped_names"] = dropped_names
+    return figures
+
+
+def _hosts_text(hosts: dict | None) -> str:
+    """`{{hosts}}` (R11): in the plugin's own repo, how many hosts were read of how many listed,
+    the unreadable and the unlisted, the note, and the tables; outside it, one line."""
+    if not hosts or hosts.get("why") == OWN_ONLY_WHY:
+        return HOSTS_ELSEWHERE
+    if hosts["state"] != "read":
+        return f"Not measured: {hosts['why']} ({HOSTS_FILE})."
+    r = hosts["read"]
+    unread = sum(r["unreadable"].values())
+    unlisted = "not known" if r["unlisted"] is None else str(r["unlisted"])
+    parts = [
+        f"{r['read']} host repos read of {r['listed']} listed; {unread} couldn't be read; "
+        f"{unlisted} installed repos not in the host list. {HOST_NOTE}"
+    ]
+    if not r["read"]:
+        return parts[0]
+    w, a = hosts["window"], hosts["all"]
+    parts.append(_table(
+        ["Way", "Closed in the window", "Closed, all time"],
+        [[WAY_NAMES[k], w["by_way"][k], a["by_way"][k]] for k in WAYS],
+    ) + f"\n\nDropped: {w['dropped']} in the window, {a['dropped']} all time.")  # fmt: skip
+    rows = [
+        [k, g["changes"], g["median"]["stops"], _hm(g["median"]["elapsed"])]
+        for k, g in a["metrics"]["groups"].items()
+    ]
+    if rows:
+        parts.append("All time, by tier and way:\n\n" + _table(
+            ["Tier and way", "Changes", "Median stops", "Median elapsed"], rows))  # fmt: skip
+    parts.append(f"Factory-built changes, all time: {a['by_way']['factory']}.")
+    v = hosts["versions"]
+    parts.append(_table(["Version", "Hosts"], [[k, n] for k, n in v["hosts"].items()])
+                 + f"\n\n{v['behind']} behind this plugin's minor version.")  # fmt: skip
+    return "\n\n".join(parts)
+
+
+def cmd_hosts(root: Path) -> int:
+    """`sdlc.py hosts` (R10): each listed host's path and state, and each installed repo the list
+    doesn't name, with the two lines to append, `<path>` to read it or `!<path>` to exclude it for
+    good. Paths go to the terminal alone, never into a figure or a report. Writes nothing."""
+    home = sdlc.main_root(root)
+    if not sdlc._own_repo(home):
+        print(f"Hosts are {OWN_ONLY_WHY}; nothing is read here.")
+        return 0
+    listed = _read_hosts(home)
+    if listed is None:
+        print(f"No host list: write one path a line to {(home / HOSTS_FILE).as_posix()} (it may "
+              "start empty) and rerun to see the installed repos it doesn't name.")  # fmt: skip
+        return 0
+    print(f"Host list: {(home / HOSTS_FILE).as_posix()}")
+    for path, state, _ in listed["rows"]:
+        print(f"{state}: {path.as_posix()}")
+    for path in listed["excluded"]:
+        print(f"excluded: {path.as_posix()}")
+    if listed["unlisted"] is None:
+        print("unlisted: not known (claude plugin list couldn't be read)")
+    for path in listed["unlisted"] or []:
+        print(f"unlisted: {path}\n  to read it, append:\n    {path}\n"
+              f"  to exclude it for good, append:\n    !{path}")  # fmt: skip
+    return 0
+
+
 # ---------------------------------------------------------------- the insights (189)
 
 # The pillars the synthesis questions are asked on, in the guide's order (`guide/insights.md`).
@@ -4199,25 +4659,36 @@ INSIGHT_KINDS = ("seed", "intent", "dropped", "none")
 # The paths in `retro()`'s output each pillar's question is given, and nothing else (189 R3): every
 # bundle also gets its pillar's scorecard rows (Tradeoffs all of them), `process.window` and
 # `process.underneath`. None names `product.evidence`, `architecture.host` or `tests`: a host
-# command's output never reaches an agent (R4). `surface` is the plugin's own repo's alone.
+# command's output never reaches an agent (R4). `surface` is the plugin's own repo's alone. Every
+# bundle also gets `hosts.state`, `hosts.why` and `hosts.read` (`INSIGHT_EVERY`), and its pillar's
+# slice of the other repos' counts (208 R13).
 INSIGHT_DATA: dict[str, tuple[str, ...]] = {
-    "Value": ("work_mix", "time_to_users", "follow_through", "direction.milestones"),
+    "Value": (
+        "work_mix", "time_to_users", "follow_through", "direction.milestones", "hosts.all",
+        "hosts.versions",
+    ),
     "Speed": (
         "process.cycle", "process.lead", "process.throughput", "process.time", "process.wip",
         "process.capacity", "by_way", "pipeline.gates", "pipeline.landing",
+        "hosts.window.by_way", "hosts.window.metrics", "hosts.busiest",
     ),
     "Quality": (
         "process.escapes", "process.rework", "process.review_sources", "rework_questions", "bugs",
         "pipeline.red_gate", "pipeline.depth", "pipeline.unreviewed", "architecture", "nits",
+        "hosts.window.escapes", "hosts.window.dropped_at",
     ),
-    "Autonomy": ("autonomy", "process.response", "metrics.extra", "metrics.prompts"),
+    "Autonomy": (
+        "autonomy", "process.response", "metrics.extra", "metrics.prompts", "hosts.window.prompts",
+    ),
     "Cost": (
         "cost", "spend", "metrics.groups", "metrics.captured", "metrics.uncaptured",
-        "metrics.coverage", "metrics.missing_because",
+        "metrics.coverage", "metrics.missing_because", "hosts.window.metrics",
     ),
-    "Simplicity": ("simplicity.workarounds", "surface", "prose"),
-    "Tradeoffs": ("work_mix", "time_to_users", "follow_through"),
+    "Simplicity": ("simplicity.workarounds", "surface", "prose", "hosts.surface"),
+    "Tradeoffs": ("work_mix", "time_to_users", "follow_through", "hosts.all"),
 }  # fmt: skip
+# The paths every bundle carries, whatever its pillar.
+INSIGHT_EVERY = ("process.window", "process.underneath", "hosts.state", "hosts.why", "hosts.read")
 # Under a path a bundle names, what it never carries: the host's indicator rows.
 INSIGHT_LEFT_OUT = ("architecture.host",)
 # The host commands `retro --insights` empties before it counts, so none of them runs (R4).
@@ -4302,13 +4773,13 @@ def _put(into: dict, path: str, value: object) -> None:
 def insight_bundles(out: dict, questions: list[dict], own: bool) -> list[dict]:
     """Each question with its `data`: the paths of `retro()`'s (lean) output `INSIGHT_DATA` names
     for its pillar, less `INSIGHT_LEFT_OUT`, its pillar's scorecard rows (every row for
-    Tradeoffs), and `process.window` and `process.underneath`. `surface` only when `own`, the
+    Tradeoffs), and `INSIGHT_EVERY`'s paths. `surface` only when `own`, the
     plugin's own repo. Pure."""
     rows = (out.get("scorecard") or {}).get("rows") or []
     bundles = []
     for q in questions:
         data: dict = {}
-        for path in ("process.window", "process.underneath", *INSIGHT_DATA[q["pillar"]]):
+        for path in (*INSIGHT_EVERY, *INSIGHT_DATA[q["pillar"]]):
             found, value = _pick(out, path)
             if not found or (path == "surface" and not own):
                 continue
@@ -4422,7 +4893,8 @@ def cmd_retro(
     """The retrospective's counts as JSON, each change's measured numbers only with `metrics`
     (their medians are always there), or with `report` the report `retro-commit` would write, as
     Markdown, or with `insights` each synthesis question and its figures (`retro_insights()`).
-    Writes nothing, and reads nothing outside the repo."""
+    Writes nothing. It reads nothing outside the repo but, in the plugin's own repo with a host
+    list, the listed host repos' history, by git reads alone (`hosts_figures()`)."""
     home = sdlc.main_root(root)
     cfg, _, parsed = sdlc.load_config(home)
     if report:
