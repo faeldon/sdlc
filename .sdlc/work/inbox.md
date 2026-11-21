@@ -227,16 +227,6 @@ Cost: S
 Value: low
 Raised by: 202-defaults-to-landing (correctness)
 
-## [2026-11-20-47] [nit] `intent_closes()` reads `closes:` from the branch's own intent.md while the sensitive bar is read from the base branch; read it from the fork point so a build can't widen what it may carry
-
-Raised by the security review of 202-defaults-to-landing, round 1: plugins/factory/scripts/factory.py:1973: `intent_closes()` reads `closes:` from the branch's own intent.md while the sensitive bar is read from the base branch; read it from the fork point so a build can't widen what it may carry
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 202-defaults-to-landing (contract)
-
 ## [2026-11-20-48] [nit] the "closes" case writes `closes: [12]` by string-replacing `idea:` in `intent.md`.
 
 Raised by the test review of 202-defaults-to-landing, round 1: tests/test_factory_decisions.py:523: the "closes" case writes `closes: [12]` by string-replacing `idea:` in `intent.md`. If the fixture's frontmatter changes, the case could pass without exercising the `closes:` rule, though the assertion on `closes: [12]` in the problem text would still catch that.
@@ -672,12 +662,6 @@ Cost: S
 Value: low
 Raised by: 214-ci-green (correctness)
 
-## [2026-11-21-42] [idea] Record an intent's `closes:` in the records ledger at `start`
-
-Left undone by 215-evidence-exits, carried forward when it landed: Record the intent's `closes:` at `start` in the records ledger, and have `intent_closes()` read the union of it and the working copy (nit 2026-11-20-47, done right).
-See .sdlc/work/215-evidence-exits/notes.md in its commit.
-Raised 2026-11-21.
-
 ## [2026-11-21-44] [nit] the `# fmt: skip` on the parametrize decorator exists only to keep the table on one line; a plain `ids=` list would format normally
 
 Raised by the test review of 217-train-gates-every-tip, round 1: tests/test_train.py:1546: the `# fmt: skip` on the parametrize decorator exists only to keep the table on one line; a plain `ids=` list would format normally
@@ -812,3 +796,23 @@ Paths: .sdlc/work/216-autopilot/spec.md
 Cost: S
 Value: low
 Raised by: 216-autopilot (correctness)
+
+## [2026-11-22-1] [nit] `recorded_closes()` reads the whole ledger on every call, and `record_closes()` calls it on every agent run.
+
+Raised by the code review of 219-closes-at-start, round 1: plugins/factory/scripts/factory.py:3181: `recorded_closes()` reads the whole ledger on every call, and `record_closes()` calls it on every agent run. The ledger is small, so the cost is negligible.
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 219-closes-at-start (correctness)
+
+## [2026-11-22-2] [nit] in `cmd_agent`, `_record_land()` runs before `record_closes()`, so if the ledger append fails, the landing step is recorded for an agent that is then refused.
+
+Raised by the security review of 219-closes-at-start, round 1: plugins/factory/scripts/factory.py:5095: in `cmd_agent`, `_record_land()` runs before `record_closes()`, so if the ledger append fails, the landing step is recorded for an agent that is then refused. Recording `closes:` first would make the refusal leave nothing behind.
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 219-closes-at-start (contract)
