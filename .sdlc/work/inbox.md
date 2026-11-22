@@ -342,6 +342,7 @@ Raised by: 207-change-origin (correctness)
 ## [2026-11-21-7] [idea] Manually verify the update hook and /sdlc:update in a scratch repo
 
 Left undone by 206-update-skill, carried forward when it landed: Manual (the spec's Verification): in a scratch repo with the plugin installed from GitHub at an older version, a new session shows the one line (proves `systemMessage` reaches the person), `/sdlc:update` lists its steps, and `--scope project` acts on the folder it runs in.
+The hook first shipped in 1.12.0, so the "older version" must be 1.12.0 or later: 1.11.0 has no hook and shows nothing. The full check waits until 1.13.0 is published, with a repo still on 1.12.0. Until then, a 1.12.0 install shows setup's nudge, not the release's.
 See .sdlc/work/206-update-skill/notes.md in its commit.
 Raised 2026-11-21.
 
