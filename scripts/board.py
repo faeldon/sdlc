@@ -11,7 +11,9 @@ left through `sdlc.factory_records` (`scripts/factory_records.py`, the core's on
 its copies of `factory.py`'s parsing pinned by a test): the core never imports or runs the
 factory. A run the factory stopped (`runs/stopped.md`, at `stage: build`) needs the person, with
 the record's problems and its way on, read by `factory_records.read_stop()` as `status` reads
-it. Its card's step track is the step the
+it, but for a `mend` stop its supervisor is mending (`factory_records.mending()`,
+`sdlc.mend_running()`), which stays Building, its track at the mended role's step. Its card's step
+track is the step the
 supervisor's last reading named (`runs/step.md`), timed against the median of that step in closed
 factory runs, read from history once per base-branch tip and kept in memory. A change landing (at
 `test` or `shipped` with a `runs/land-step.md`) shows the landing's track instead, from the step
@@ -67,6 +69,9 @@ AT = {
     "approve": 5,
 }  # fmt: skip
 CAP = 0.95
+# Where a stop being mended sits on the track (233), by the role mended: a reviewer at `review`,
+# the builder at its own build (`_mend_progress()`).
+MEND_AT = {"arbiter": "arbitrate", "approver": "approve"}
 # A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test), labelled `acceptance` where the
 # record says `checks` or `recheck`, which the landing writes. The acceptance checks and the
@@ -278,6 +283,13 @@ def _entry(
             if rec["stage"] == "build"
             else None
         )
+        # The mend its supervisor started on that stop (233), which keeps it off Needs you.
+        entry["mending"] = (
+            read(sdlc.factory_records.STEP.as_posix(),
+                 lambda: sdlc.factory_records.mending(folder), None)
+            if entry["stopped"]
+            else None
+        )  # fmt: skip
         # A park the run left at `build` (222 R16): its track's gate, and past its deadline, cut
         # by the base branch's `[park] deadline` as `verdicts` cuts it (229), a need.
         entry["parked"] = (
@@ -382,6 +394,8 @@ def _progress(
     hint, from the supervisor's last reading (`runs/step.md`) and the run's files: None for a
     stopped run, a record that won't read, or a run with neither a record nor a first build under
     way (`runs/builder.sessions`, no builder report yet)."""
+    if mend := sdlc.mend_running(entry):
+        return _mend_progress(entry, mend, now)
     if entry.get("stopped") or (
         (folder / sdlc.factory_records.STOPPED).is_file() and entry["stage"] == "build"
     ):
@@ -459,6 +473,30 @@ def _progress(
         "elapsed": elapsed, "typical": typical if fraction is not None else None,
         "fraction": fraction, "samples": found["samples"] if fraction is not None else None,
         "plan": None,
+    }  # fmt: skip
+
+
+def _mend_progress(entry: dict, mend: dict, now: float) -> dict:
+    """A stopped run's track while its supervisor mends the stop (233, `sdlc.mend_running()`):
+    the step of the role mended (`MEND_AT`; the builder's at `build` in round 1, at `rework`
+    after), labelled `mending <role>`, its time running since the mend started, with no typical
+    figure, since a mend is open-ended."""
+    role = mend["role"] or "builder"
+    name = MEND_AT.get(role, "review")
+    if role == "builder":
+        name = "build" if (mend["round"] or 1) <= 1 else "rework"
+    at = TRACK.index(name)
+    steps = [
+        {"name": n, "state": "done" if i < at else "todo" if i > at else "current",
+         "label": f"mending {role}" if i == at else n}
+        for i, n in enumerate(TRACK)
+    ]  # fmt: skip
+    start = _since(mend["since"])
+    return {
+        "kind": "build", "steps": steps, "round": mend["round"], "limit": None, "step": "mend",
+        "paused": False, "stopped": False, "problems": [], "moves": None, "early": None,
+        "elapsed": max(0, round(now - start)) if start is not None else None, "typical": None,
+        "fraction": None, "samples": None, "plan": None,
     }  # fmt: skip
 
 
@@ -704,6 +742,12 @@ def next_action(entry: dict) -> str:
     if stage in CLOSED:
         return f"/sdlc:close {entry['id']}"
     if entry.get("stopped"):
+        if mend := sdlc.mend_running(entry):
+            # A stop its supervisor is mending (233): the person waits, unless its session ended.
+            return (
+                f"the factory is mending the {mend['role']}: wait for it, or "
+                f"/sdlc-factory:build {entry['id']} if its session ended"
+            )
         return entry["stopped"]["next"]
     if ids and stage == "build":
         return decide

@@ -513,6 +513,8 @@ RECORD_NAMES = {
     "NOTE_RE", "read_park", "park",
     # 229: the park's deadline cut as `verdicts` cuts it.
     "capped_park",
+    # 233: a mend under way, on the step record.
+    "ROLE_RE", "mending",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -536,7 +538,7 @@ CONSUMER_NAMES = {
     "needs_of", "column", "seen_stage", "answered", "decide_step", "touched_paths", "BY_STAGE",
     "FACTORY_STOP_NEEDS", "hand_gate", "hand_build", "cmd_gate", "GATE_TIMEOUT", "GATE_TAIL",
     "SLOT_NAME", "_try_lock", "_gate_jobs_at", "FACTORY_CONFIG", "_ui_at", "_current_shots",
-    "UI_DEFAULTS", "_park_deadline_at",
+    "UI_DEFAULTS", "_park_deadline_at", "mend_running",
 }  # fmt: skip
 
 # A name a script defines for something of its own that a record's copy shares: `sdlc.py`'s

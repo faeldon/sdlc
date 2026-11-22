@@ -5165,16 +5165,31 @@ def park_line(park: dict) -> str:
     )
 
 
+def mend_running(rec: dict) -> dict | None:
+    """The mend a stopped run is under (233): the record's `mending`
+    (`factory_records.mending()`) while its stop's way is `mend` and `now` is before the mend's
+    deadline, else None. Only files and their times decide: a `mend` the step record names was
+    written after the stop beside it, since every reading writes that record over."""
+    stop, mend, now = rec.get("stopped") or {}, rec.get("mending"), rec.get("now")
+    if stop.get("way") != "mend" or not mend or not now:
+        return None
+    # Stamps in one fixed UTC form compare as text.
+    return mend if now < mend["deadline"] else None
+
+
 def needs_of(rec: dict) -> list[str]:
     """What a change needs from the person, as short texts, from fields already read: `stage`,
-    `tier`, `problems`, `stopped`, `parked` and `now` (a park and the caller's clock, as stamps),
-    `land_stop`, `decision`, `reconsider`, `pending`, `assumed`, `ledger_lines`, `reasons`,
-    `looks`, `gate` (the hand gate's record) and `spec_filled`. The one place the rules live, so
-    the board and `status` can't disagree; it reads nothing itself, the clock included.
+    `id`, `tier`, `problems`, `stopped`, `mending` (`factory_records.mending()`), `parked` and
+    `now` (a park and the caller's clock, as stamps), `land_stop`, `decision`, `reconsider`,
+    `pending`, `assumed`, `ledger_lines`, `reasons`, `looks`, `gate` (the hand gate's record) and
+    `spec_filled`. The one place the rules live, so the board and `status` can't disagree; it
+    reads nothing itself, the clock included.
     Every problem first, at any stage; at `test` or `shipped`, the landing's stages, a stopped
     landing (`land_stop`, `factory_records.read_land_stop()`), naming the step it stopped after;
-    a closed change nothing more; at `build` a stop, or with none a park past its deadline (its
-    supervisor gone before it recorded the stop), then each blocking decision; at `test` with an
+    a closed change nothing more; at `build` a stop (nothing for a `mend` stop being mended within
+    the agent's timeout, `mend_running()`, and past it the mend left unanswered), or with none a
+    park past its deadline (its supervisor gone before it recorded the stop), then each blocking
+    decision; at `test` with an
     ESCALATE what its ledger and decision still hold (each current `look` to acknowledge, and
     `gate it green` while a `gate` reason has no current green hand gate), or, with no reason and
     no ledger line at all, or a look reason not yet filed, the escalation itself; a Tier 2 at
@@ -5187,7 +5202,16 @@ def needs_of(rec: dict) -> list[str]:
         return needs
     pending = [f"decide {d['id']}" for d in rec.get("pending") or []]
     if stage == "build":
-        if stop := rec.get("stopped"):
+        stop, mend = rec.get("stopped"), rec.get("mending")
+        if stop and mend_running(rec):
+            pass  # The supervisor is mending it: nothing of the person's yet.
+        elif stop and stop.get("way") == "mend" and mend and rec.get("now"):
+            # A mend started and left past the agent's own timeout: no session is running it.
+            needs.append(
+                f"stopped: mending the {mend['role']} since {mend['since'][11:16]} with no reply: "
+                f"rerun /sdlc-factory:build {rec.get('id')} if no session runs it"
+            )
+        elif stop:
             way = FACTORY_STOP_NEEDS.get(stop.get("way") or "")
             needs.append(f"stopped: {way or f'read {factory_records.STOPPED.as_posix()}'}")
         elif (park := rec.get("parked")) and rec.get("now") and rec["now"] >= park["deadline"]:
@@ -10957,7 +10981,12 @@ def _change_lines(rec: dict, a: dict) -> list[str]:
     if "quiet" in rec:
         ago = rec["touched_ago"]
         touched = f"touched {_ago(ago)} ago" if ago is not None else "never touched"
-        mark = "stopped, " if rec.get("stopped") else "quiet, " if rec["quiet"] else ""
+        mark = (
+            "mending, " if rec.get("mend_running")
+            else "stopped, " if rec.get("stopped")
+            else "quiet, " if rec["quiet"]
+            else ""
+        )  # fmt: skip
         undone += f"  · {mark}{touched}"
     gate = rec.get("gate")
     if gate and gate["current"]:
@@ -10969,7 +10998,10 @@ def _change_lines(rec: dict, a: dict) -> list[str]:
     indent = " " * 30
     if rec["title"]:
         lines.append(f"{indent}{rec['title']}")
-    if rec.get("stopped"):
+    if mend := rec.get("mend_running"):
+        # A stop its supervisor is mending (233): what it waits on, not the stop's way on.
+        lines.append(f"{indent}→ the factory is mending the {mend['role']}: wait for it")
+    elif rec.get("stopped"):
         for problem in rec["stopped"]["problems"]:
             lines.append(f"{indent}⚠ {_cut(problem, STATUS_WIDTH - len(indent) - 2)}")
         lines.append(f"{indent}→ {rec['stopped']['next']}")
@@ -11181,6 +11213,8 @@ def cli_status(root: Path, home: Path, args) -> int:
         rec["stopped"] = (
             factory_records.read_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
         )
+        # The mend its supervisor started on that stop (233), read as the board reads it.
+        rec["mending"] = factory_records.mending(Path(root, rec["dir"])) if rec["stopped"] else None
         # A park the run left at `build` (222 R16), shown under its line and, past its deadline,
         # a need.
         rec["parked"] = (
@@ -11209,6 +11243,7 @@ def cli_status(root: Path, home: Path, args) -> int:
         reading["in_flight"], problem = factory_records.landing(folder, rec["stage"])
         reading["problems"] += [problem] if problem else []
         rec["needs"], rec["answered"] = needs_of(reading), answered(reading)
+        rec["mend_running"] = mend_running(reading)
         # Its board column, by the one rule: how far a change built by hand has got, too.
         reading["needs"] = rec["needs"]
         reading["seen"] = seen_stage(reading, folder, home, a["trunk"])

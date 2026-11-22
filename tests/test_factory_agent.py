@@ -678,6 +678,60 @@ def test_the_builder_s_evidence_is_mended_once_a_round(tmp_path, capsys, monkeyp
     assert len(calls) == 1 and calls[0][-2:] == ["--resume", "s-b"]
 
 
+@pytest.mark.portable
+def test_a_mend_records_its_step_before_its_session_runs(tmp_path, capsys, monkeypatch):
+    """233: `agent --task mend` writes `runs/step.md` as `STEP: mend`, its round, role and start,
+    before the session runs, the last reading's limit and reviewers kept; a mend refused writes
+    nothing. `runs/stopped.md` stays `verdicts --record`'s."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _report(root, 1, "Built it. The gate passed.\n")
+    (folder / "runs").mkdir()
+    (folder / "runs" / "builder.sessions").write_text("s-b\n", encoding="utf-8")
+    last = {"next": "stop", "round": None, "limit": 3, "reviewers": ["code", "test"]}
+    text = factory.step_text(last, "2020-01-01T00:00:00Z")
+    (folder / factory.STEP).write_text(text, encoding="utf-8")
+    seen = []
+
+    def session(argv, cwd):
+        seen.append(factory.read_step((folder / factory.STEP).read_text(encoding="utf-8")))
+        return 0, ["Built again."], None, None
+
+    monkeypatch.setattr(factory, "_claude", session)
+    assert _verdicts(root, capsys)["mend"] == ["builder"]
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 0, out
+    [rec] = seen
+    assert (rec["step"], rec["round"], rec["role"]) == ("mend", 1, "builder"), rec
+    assert (rec["limit"], rec["reviewers"]) == (3, ["code", "test"])
+    assert rec["since"] and rec["since"] > "2020-01-01T00:00:00Z"
+    assert not (folder / factory.STOPPED).exists(), "the mend wrote no stop record"
+    before = (folder / factory.STEP).read_text(encoding="utf-8")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 1 and "mended once" in out["refusals"][0]
+    assert (folder / factory.STEP).read_text(encoding="utf-8") == before and len(seen) == 1
+
+
+@pytest.mark.portable
+def test_a_failed_mend_puts_the_step_record_back(tmp_path, capsys, monkeypatch):
+    """233: a mend whose session fails files nothing and leaves `runs/step.md` as the last
+    reading wrote it, so no card says `mending` while no session runs."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _report(root, 1, "Built it. The gate passed.\n")
+    (folder / "runs").mkdir()
+    (folder / "runs" / "builder.sessions").write_text("s-b\n", encoding="utf-8")
+    text = factory.step_text({"next": "stop", "round": None, "limit": 3}, "2020-01-01T00:00:00Z")
+    (folder / factory.STEP).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(factory, "_claude", lambda argv, cwd: (1, [], "the session failed", None))
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 1 and out["problem"] == "the session failed"
+    assert (folder / factory.STEP).read_text(encoding="utf-8") == text
+    (folder / factory.STEP).unlink()
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "mend", "builder", None)
+    assert code == 1 and not (folder / factory.STEP).exists()
+
+
 def test_an_agent_out_of_turn_or_failing_files_nothing(tmp_path, capsys, claude, monkeypatch):
     root = _change(tmp_path)
     code, out = _run(capsys, factory.cmd_agent, root, "008", "approve", None, None)

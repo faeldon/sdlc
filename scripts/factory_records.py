@@ -116,6 +116,8 @@ REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
 DEPTH_RE = re.compile(r"^DEPTH: (full|light)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
+# The role a `mend` step answers for, which `factory.py agent --task mend` writes as it starts.
+ROLE_RE = re.compile(r"^ROLE: ([a-z-]+)\s*$")
 AGENT_TIMEOUT = 3 * 3600
 # A change parked on a host resource (222): `runs/parked.md`, which only `factory.py gate` writes,
 # its key lines then `- NOTE:` lines. Copies of `factory.py`'s, pinned by name and over a table of
@@ -263,6 +265,25 @@ def park(folder: Path, minutes: int) -> dict | None:
         return None
     found = read_park(text)
     return capped_park(found, minutes) if found else None
+
+
+def mending(folder: Path) -> dict | None:
+    """The mend `factory.py agent --task mend` recorded in `runs/step.md` as it started (233):
+    `role`, `round`, `since` and `deadline`, the agent's own timeout past `since`, as stamps. None
+    for any other step, a record with no `SINCE:` or none at all. Only `verdicts --record` writes
+    the record over, so a mend it names is newer than the stop beside it. Never raises."""
+    try:
+        rec = read_step((folder / STEP).read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return None
+    if not rec or rec["step"] != "mend" or not rec["since"]:
+        return None
+    since = datetime.strptime(rec["since"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    deadline = datetime.fromtimestamp(since.timestamp() + AGENT_TIMEOUT, UTC)
+    return {
+        "role": rec["role"], "round": rec["round"], "since": rec["since"],
+        "deadline": deadline.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }  # fmt: skip
 
 
 def read_land_stop(folder: Path) -> dict | None:
@@ -588,7 +609,7 @@ def read_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
         "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
-        "depth": field(DEPTH_RE),
+        "depth": field(DEPTH_RE), "role": field(ROLE_RE),
     }  # fmt: skip
 
 

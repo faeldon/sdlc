@@ -1,0 +1,5 @@
+- KEPT: docs: C1: docs/REFERENCE.md:655-658: the stopped-run sentence still says `stopped` and `⚠` problem lines. A `mend` stop being mended now reads `mending, ` and `→ the factory is mending the <role>: wait for it`, with no `⚠` lines, and it stays off Needs you until the mend replies or times out. `_change_lines()` and `needs_of()` do this. REFERENCE.md says nothing of it there; the only added mention is the board's step track at about line 743.
+- KEPT: docs: C2: docs/REFERENCE.md:671-674: the list of `build` stop texts under Needs you leaves out the new `stopped: mending the <role> since HH:MM with no reply: rerun /sdlc-factory:build NNN if no session runs it`. `needs_of()` adds it for a mend left past its deadline. The diff doesn't add it to that list.
+
+## Notes
+I ran nothing. I read the diff of `scripts/sdlc.py`, `plugins/factory/README.md` and `docs/REFERENCE.md`, plus the current REFERENCE.md text around lines 650–680. A grep for "mending" in REFERENCE.md finds only the one line at 743.

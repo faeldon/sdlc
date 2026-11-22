@@ -2781,6 +2781,31 @@ def test_a_park_past_its_deadline_needs_the_person() -> None:
 
 
 @pytest.mark.portable
+def test_a_mend_under_way_needs_nobody_until_its_timeout() -> None:
+    """233: a `mend` stop whose mend has started needs nothing while the agent's timeout holds,
+    and past it says so, in words with no comma; a stop whose mend is used up (`rerun`) needs the
+    person at once, whatever the step record still says."""
+    mend = {"role": "builder", "round": 1, "since": "2026-11-22T14:02:00Z",
+            "deadline": "2026-11-22T17:02:00Z"}  # fmt: skip
+    stop = {"way": "mend", "next": "x"}
+    under_way = _rec(id="230", stopped=stop, mending=mend, now="2026-11-22T15:00:00Z")
+    assert sdlc.needs_of(under_way) == [] and sdlc.mend_running(under_way) == mend
+    assert sdlc.column(under_way | {"needs": [], "mode": "factory"}) == "building"
+    left = under_way | {"now": "2026-11-22T17:02:00Z"}
+    [need] = sdlc.needs_of(left)
+    assert need == (
+        "stopped: mending the builder since 14:02 with no reply: rerun /sdlc-factory:build 230 if "
+        "no session runs it"
+    )
+    assert "," not in need and sdlc.mend_running(left) is None
+    used_up = under_way | {"stopped": {"way": "rerun", "next": "x"}}
+    assert sdlc.needs_of(used_up) == ["stopped: fix its cause and rerun"]
+    assert sdlc.mend_running(used_up) is None
+    assert sdlc.needs_of(under_way | {"mending": None}) == ["stopped: rerun to ask an agent again"]
+    assert sdlc.needs_of(under_way | {"now": None}) == ["stopped: rerun to ask an agent again"]
+
+
+@pytest.mark.portable
 def test_a_stop_s_need_is_in_plain_words() -> None:
     """120 (2026-11-17-84): a stop's need never says the factory's own word for a way, and holds
     no comma, since `status` joins a change's needs with one."""

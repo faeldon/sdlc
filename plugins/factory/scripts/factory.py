@@ -47,7 +47,8 @@ Every command prints JSON and writes only where its name says: `decisions` to `d
 stage to `intent.md` and the scaffolds a Tier 2 owes),
 `gate` its attempt to `build/round-<N>.gate.md` (with its `Seconds:` and its slot wait, `Waited:`),
 `verdicts --record` a stop to `runs/stopped.md` (or removes it once the run is clear) and the step
-it read, with since when and its depth (`DEPTH:`), to `runs/step.md`,
+it read, with since when and its depth (`DEPTH:`), to `runs/step.md`, which `agent --task mend`
+writes as it starts (`_record_mend()`),
 `agent` the reply an agent session returned (a spec draft to `runs/spec-draft.md` and its
 questions to `runs/spec-questions.md`, never to `spec.md`), and its id and figures under `runs/`.
 The landing's commands (`land`, `land --close`, `resolve`, `gate --land`, `agent` on a landing
@@ -2722,15 +2723,16 @@ def read_step(text: str) -> dict | None:
         "since": field(SINCE_RE), "after": field(AFTER_RE),
         "stuck": [m.group(1) for m in map(STUCK_RE.match, lines) if m],
         "untestable": [m.group(1) for m in map(UNTESTABLE_RE.match, lines) if m],
-        "depth": field(DEPTH_RE),
+        "depth": field(DEPTH_RE), "role": field(ROLE_RE),
     }  # fmt: skip
 
 
 def step_text(out: dict, since: str, after: str | None = None) -> str:
     """`runs/step.md`'s text for one `verdicts` reading: the step, its round, the run's round
     limit and expected reviewers, since when, on a pause (`PAUSES`) the step it paused at, the
-    depth it reviews at (`DEPTH:`, when the reading has one), and on a run stopped early why
-    (`early_lines()`, from the reading's `stuck` and `untestable`)."""
+    depth it reviews at (`DEPTH:`, when the reading has one), on a `mend` the role it mends
+    (`ROLE:`), and on a run stopped early why (`early_lines()`, from the reading's `stuck` and
+    `untestable`)."""
     rnd = "" if out.get("round") is None else str(out["round"])
     lines = [
         f"STEP: {out['next']}", f"ROUND: {rnd}", f"LIMIT: {out.get('limit') or ''}",
@@ -2740,6 +2742,8 @@ def step_text(out: dict, since: str, after: str | None = None) -> str:
         lines.append(f"AFTER: {after}")
     if out.get("depth") in ("full", "light"):
         lines.append(f"DEPTH: {out['depth']}")
+    if out.get("role"):
+        lines.append(f"ROLE: {out['role']}")
     lines += early_lines(out.get("stuck") or [], out.get("untestable") or [])
     return "\n".join(line.rstrip() for line in lines) + "\n"
 
@@ -2759,6 +2763,36 @@ def _record_step(folder: Path, out: dict) -> None:
         after = old["after"] if old["step"] in PAUSES else old["step"]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(step_text(out, since, after), encoding="utf-8", newline="\n")
+
+
+def _record_mend(folder: Path, rnd: int, role: str) -> str | None:
+    """Write `runs/step.md` as a `mend` of `role` for round `rnd`, since now, as `agent --task
+    mend` starts its session, so the board and `status` show the stop being mended rather than
+    waiting on the person (233), and return the record's text before, or None without one, for a
+    failed session to put back (`_unrecord_mend()`). The last reading's limit, reviewers and depth
+    are kept; the next `verdicts --record` writes the record over, and `runs/stopped.md` stays
+    its own."""
+    path = folder / STEP
+    try:
+        before = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        before = None
+    old = read_step(before or "") or {}
+    out = {"next": "mend", "round": rnd, "limit": old.get("limit"), "role": role,
+           "reviewers": old.get("reviewers") or [], "depth": old.get("depth")}  # fmt: skip
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(step_text(out, _utc_now()), encoding="utf-8", newline="\n")
+    return before
+
+
+def _unrecord_mend(folder: Path, before: str | None) -> None:
+    """Put `runs/step.md` back as it was before a mend whose session failed, so no card says
+    `mending` while no session runs."""
+    path = folder / STEP
+    if before is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(before, encoding="utf-8", newline="\n")
 
 
 def read_land_step(text: str) -> dict | None:
@@ -4536,8 +4570,9 @@ STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship|parked)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 # The step the supervisor's last reading named, and since when: written on every reading by
-# `verdicts --record`, read by the board (with its own copies of these, pinned by a test), never by
-# the loop. `SINCE:` holds while `STEP:` and `ROUND:` do; `AFTER:` is the step a pause held.
+# `verdicts --record`, and as a `mend` by `agent --task mend` (`_record_mend()`), read by the
+# board (with its own copies of these, pinned by a test), never by the loop. `SINCE:` holds while
+# `STEP:` and `ROUND:` do; `AFTER:` is the step a pause held.
 STEP = Path("runs") / "step.md"
 STEP_RE = re.compile(r"^STEP: ([a-z]+)\s*$")
 # A run stopped early (`early_stop()`): each `- STUCK:` line a change kept two rounds running;
@@ -4551,6 +4586,8 @@ REVIEWERS_RE = re.compile(r"^REVIEWERS: ?(.*?)\s*$")
 DEPTH_RE = re.compile(r"^DEPTH: (full|light)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
+# The role a `mend` step answers for (`_record_mend()`), written only on that step.
+ROLE_RE = re.compile(r"^ROLE: ([a-z-]+)\s*$")
 # The step a landing is at, and since when: written by each landing command as it starts the step
 # (`_record_land()`), read by the board (with its own copies, pinned by a test), never by the
 # landing. `ROUND:` is the landing round, `MOVES:` the base branch's moves followed so far,
@@ -5696,6 +5733,8 @@ def cmd_agent(
     # Once nothing is left to refuse it, the landing's step this session takes.
     if task in LAND_TASK_STEP:
         _record_land(root, folder, LAND_TASK_STEP[task])
+    elif task == "mend":
+        step_before = _record_mend(folder, mend_round(state, role), role)
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     model = model_for(role, cfg, tier, state["depth"])
@@ -5722,6 +5761,8 @@ def cmd_agent(
     out = {"change": folder.name, "task": task, "role": role, "model": model, "session": session}
     out.update(to=target.relative_to(root).as_posix() if target else None, exit=code)
     if problem:
+        if task == "mend":
+            _unrecord_mend(folder, step_before)
         return emit({**out, "problem": problem}, 1)
     target.parent.mkdir(parents=True, exist_ok=True)
     # The last reply that holds the role's answer, else the last: a background task's notice

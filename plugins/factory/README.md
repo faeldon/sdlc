@@ -311,7 +311,7 @@ in `/sdlc:status`.
 | `spec` | `plan` or `design` | your yes to the upgraded change's spec | you |
 | `parked` | `build` | its retry, when the gate runs again; its deadline, a `stop` | `[park] deadline` (60 minutes, at most a day) |
 | `done` | `build`, then `test` | nothing: the run hands the change back | terminal |
-| `stop` | `build` | you: fix the cause and rerun, or ship it by hand | you |
+| `stop` | `build` | you: fix the cause and rerun, or ship it by hand; a `mend` stop, the run's own `agent --task mend`, shown as `mending` and kept off Needs you until it replies | you; a mend, `AGENT_TIMEOUT` |
 
 ## Decisions that are yours
 
@@ -444,7 +444,8 @@ round.
                                 the first reading that finds the cause gone
   runs/step.md                  the step the supervisor's last reading named, for the board's
                                 track, the depth it reviews at (DEPTH: full or light), and
-                                - STUCK: and - UNTESTABLE: lines when the run stopped early
+                                - STUCK: and - UNTESTABLE: lines when the run stopped early;
+                                STEP: mend and its ROLE: while agent --task mend runs
 ```
 
 **What a run cost, while it runs.** Every agent run's result reports its cost and tokens, and

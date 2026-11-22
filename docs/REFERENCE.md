@@ -655,7 +655,10 @@ newest file its worktree has changed. One untouched for a day is `quiet`, and `/
 recommends finishing an open change only once it is: one touched since has a session on it. A
 factory run its supervisor stopped (`runs/stopped.md`, at `stage: build`) reads `stopped` in place
 of `quiet`, with each problem on a `⚠` line and the step that moves it on, ship it by hand or rerun
-`/sdlc-factory:build NNN`, on a `→` line under its title. A factory run parked on a host resource
+`/sdlc-factory:build NNN`, on a `→` line under its title. A `mend` stop its supervisor is
+mending (`agent --task mend` has recorded it in `runs/step.md`) reads `mending` instead, with no
+`⚠` lines and `→ the factory is mending the <role>: wait for it`, and stays off Needs you until the
+mend replies or runs past the agent's 3-hour timeout. A factory run parked on a host resource
 (`runs/parked.md`, the factory's `[park]`, above) stays under Building with a `⏸ parked on
 <resource>, held by <holder>;` line and, under it, its next retry and its deadline.
 
@@ -670,8 +673,9 @@ line, and under it a `needs you:` line saying what it waits for, or `nothing` wh
 texts are the board's (below), read by the same rules: `fix:` and
 each problem, at any stage; at `build`, a stop's way on in plain words (`stopped: fix its cause and
 rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's commit`, or `stopped:
-read runs/stopped.md` for a record that won't read, and `stopped: free what it waits on and rerun`
-for a park past its deadline), `parked past its deadline: free <resource>` for a park past its
+read runs/stopped.md` for a record that won't read, `stopped: free what it waits on and rerun`
+for a park past its deadline, and `stopped: mending the <role> since HH:MM with no reply: rerun
+/sdlc-factory:build NNN if no session runs it` for a mend past the agent's timeout), `parked past its deadline: free <resource>` for a park past its
 deadline that no stop has recorded yet, and `decide D<n>` for each unticked blocking decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
 approach` (its `decision.md` holds that section), `acknowledge D<n>` for each `look` the approver
 escalated for (`- ESCALATED: look: <what to look at> — <why>`, filed in the ledger as
@@ -739,7 +743,9 @@ touched, and the command to run next; a change the factory ran on (its folder ho
 each round's verdicts, the arbiter's answers, its decisions and what its agents cost, each build
 round labelled `B<n>` (a landing's `L<n>`), and a step
 track of the round under way (build, gate, reviews *n/m*, arbitrate, rework, approve) read from the
-`runs/step.md` its supervisor's `verdicts --record` writes; a run that stopped early reads
+`runs/step.md` its supervisor's `verdicts --record` writes (and `agent --task mend` as it starts:
+a stop being mended stays under Building, its step `mending <role>`, until its reply, or Needs
+you past the agent's 3-hour timeout); a run that stopped early reads
 `approve (stuck)` or `(untestable)` there, each reason a line on the card. The current step shows how long it has
 run against the median time that step took at that tier in the last 20 closed factory changes, a
 bar labelled an estimate that never fills past 95%, or its elapsed time alone with fewer than 3 of

@@ -479,7 +479,9 @@ function card(c) {
   ].filter(Boolean).map((t) => h("span", {}, t));
   const flags = [];
   for (const p of c.problems || []) flags.push(h("div", { class: "flag" }, p));
-  for (const p of (c.stopped && c.stopped.problems) || []) flags.push(h("div", { class: "flag" }, `stopped: ${p}`));
+  // A stop its supervisor is mending (233) flags what is being mended, not a stop.
+  const mending = c.progress && c.progress.step === "mend";
+  for (const p of (c.stopped && c.stopped.problems) || []) flags.push(h("div", { class: "flag" }, `${mending ? "mending" : "stopped"}: ${p}`));
   // A signal flags the card only at the stage it belongs to, as its column does (board.py).
   for (const d of c.stage === "build" ? c.pending || [] : []) flags.push(h("div", { class: "flag" }, `${d.id} waits on you: ${d.text}`));
   if (c.stage === "test" && c.decision === "ESCALATE" && !c.answered) flags.push(h("div", { class: "flag" }, "the approver escalated it to you"));

@@ -14,9 +14,11 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC, datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -943,7 +945,7 @@ def test_a_garbled_step_record_is_a_problem(repo) -> None:
 def test_the_step_record_is_a_pinned_copy() -> None:
     """R7: the board's copies are `factory.py`'s, and its writer reads back through the board."""
     for name in ("STEP_RE", "ROUND_RE", "LIMIT_RE", "REVIEWERS_RE", "SINCE_RE", "AFTER_RE",
-                 "SECONDS_RE", "STUCK_RE", "UNTESTABLE_RE"):  # fmt: skip
+                 "SECONDS_RE", "STUCK_RE", "UNTESTABLE_RE", "ROLE_RE"):  # fmt: skip
         assert getattr(sdlc.factory_records, name).pattern == getattr(factory, name).pattern, name
     assert (
         sdlc.factory_records.STEP == factory.STEP
@@ -954,6 +956,7 @@ def test_the_step_record_is_a_pinned_copy() -> None:
     for out in (
         {"next": "review", "round": 2, "limit": 3, "reviewers": [*FULL, "ui"], "depth": "full"},
         {"next": "decide", "round": None, "limit": 2, "reviewers": ["code"], "depth": "light"},
+        {"next": "mend", "round": 1, "limit": 3, "reviewers": FULL, "role": "builder"},
         {
             "next": "approve",
             "round": 2,
@@ -964,12 +967,32 @@ def test_the_step_record_is_a_pinned_copy() -> None:
         },
     ):
         text = factory.step_text(out, "2026-11-17T10:00:00Z", "rework")
+        assert factory.read_step(text)["role"] == out.get("role")
         assert sdlc.factory_records.read_step(text) == factory.read_step(text)
         assert sdlc.factory_records.read_step(text)["reviewers"] == out["reviewers"]
         assert sdlc.factory_records.read_step(text)["depth"] == out.get("depth")
     assert sdlc.factory_records.read_step(text)["stuck"] == ["code: a"], (
         "the early stop's reason reads back"
     )
+
+
+@pytest.mark.portable
+def test_a_mend_step_reads_with_its_deadline(tmp_path) -> None:
+    """233: `mending()` reads the mend `agent --task mend` recorded, its deadline the agent's own
+    timeout past its start; any other step, a record without a start, or none, is no mend."""
+    path = tmp_path / factory.STEP
+    out = {"next": "mend", "round": 2, "limit": 3, "reviewers": FULL, "role": "code"}
+    _write(path, factory.step_text(out, "2026-11-22T14:02:00Z"))
+    assert sdlc.factory_records.mending(tmp_path) == {
+        "role": "code", "round": 2, "since": "2026-11-22T14:02:00Z",
+        "deadline": "2026-11-22T17:02:00Z",
+    }  # fmt: skip
+    _write(path, factory.step_text({**out, "next": "stop"}, "2026-11-22T14:02:00Z"))
+    assert sdlc.factory_records.mending(tmp_path) is None
+    _write(path, "STEP: mend\nROLE: code\n")
+    assert sdlc.factory_records.mending(tmp_path) is None
+    path.unlink()
+    assert sdlc.factory_records.mending(tmp_path) is None
 
 
 def _row(role: str, seconds: float | None) -> tuple[str, dict]:
@@ -1823,9 +1846,9 @@ def test_status_records_only_gain_keys(repo, monkeypatch, capsys) -> None:
     _needs_folders(repo)
     before = {r["dir"]: set(r) for r in sdlc.analyze(repo)["open"]}
     _, a = _status(repo, monkeypatch, capsys)
-    dispatch = {"behind", "touched_ago", "quiet", "stopped", "parked", "gate"}
+    dispatch = {"behind", "touched_ago", "quiet", "stopped", "mending", "parked", "gate"}
     for rec in a["open"]:
-        gained = {"needs", "answered", "column"}
+        gained = {"needs", "answered", "column", "mend_running"}
         assert set(rec) == before[rec["dir"]] | dispatch | gained, rec["dir"]
         assert isinstance(rec["needs"], list) and isinstance(rec["answered"], bool)
 
@@ -3414,3 +3437,57 @@ def test_status_shows_a_parked_change_under_building(repo, monkeypatch, capsys) 
     out, _ = _status(repo, monkeypatch, capsys)
     assert "016" in "\n".join(_sections(out)["Needs you"])
     assert "016" not in "\n".join(_sections(out)["Building"])
+
+
+def _mending_run(root: Path, way: str, ago: int) -> Path:
+    """A run stopped for a `mend` (or `way`) whose builder mend started `ago` seconds ago, its
+    records as `verdicts --record` and `agent --task mend` write them."""
+    folder = _stopped_run(root)
+    _write(folder / factory.STOPPED, factory.stop_text(folder.name, way, ["no ## Evidence"]))
+    since = datetime.fromtimestamp(time.time() - ago, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = {"next": "mend", "round": 1, "limit": 3, "reviewers": FULL, "role": "builder"}
+    _write(folder / factory.STEP, factory.step_text(out, since))
+    return folder
+
+
+@pytest.mark.portable
+def test_a_card_being_mended_is_building_with_a_mending_step(repo) -> None:
+    """233: a `mend` stop whose mend started is Building, its track at the builder's step marked
+    `mending builder`, its time running with no typical figure; once its mend is used up (`rerun`)
+    or past the agent's timeout unanswered, Needs you, saying which."""
+    _mending_run(repo, "mend", 60)
+    card = _cards(repo)["013-draft-escapes"]
+    assert card["column"] == "building" and card["needs"] == [], card["needs"]
+    steps = card["progress"]["steps"]
+    assert steps[0] == {"name": "build", "state": "current", "label": "mending builder"}
+    assert [s["state"] for s in steps[1:]] == ["todo"] * (len(board.TRACK) - 1)
+    assert card["progress"]["elapsed"] >= 60 and card["progress"]["typical"] is None
+    assert card["next"].startswith("the factory is mending the builder: wait for it"), card["next"]
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    assert 'c.progress.step === "mend"' in page and '`${mending ? "mending" : "stopped"}' in page
+    _mending_run(repo, "rerun", 60)
+    card = _cards(repo)["013-draft-escapes"]
+    assert card["column"] == "needs-you" and card["progress"] is None
+    assert card["needs"] == ["stopped: fix its cause and rerun"]
+    _mending_run(repo, "mend", sdlc.factory_records.AGENT_TIMEOUT + 60)
+    card = _cards(repo)["013-draft-escapes"]
+    assert card["column"] == "needs-you" and card["progress"] is None
+    [need] = card["needs"]
+    assert need.startswith("stopped: mending the builder since ") and need.endswith(
+        "with no reply: rerun /sdlc-factory:build 013 if no session runs it"
+    ), need
+
+
+def test_status_lists_a_change_being_mended_under_building(repo, monkeypatch, capsys) -> None:
+    """233: `status` reads the mend as the board does: under Building, saying it is mending,
+    while the mend runs, and under Needs you once it is left past the agent's timeout."""
+    _mending_run(repo, "mend", 60)
+    out, _ = _status(repo, monkeypatch, capsys)
+    building = "\n".join(_sections(out).get("Building", []))
+    assert "013" in building and "mending, " in building, out
+    assert "→ the factory is mending the builder: wait for it" in building, building
+    assert "013" not in "\n".join(_sections(out).get("Needs you", []))
+    _mending_run(repo, "mend", sdlc.factory_records.AGENT_TIMEOUT + 60)
+    out, _ = _status(repo, monkeypatch, capsys)
+    assert "013" in "\n".join(_sections(out)["Needs you"]), out
+    assert "013" not in "\n".join(_sections(out).get("Building", []))
