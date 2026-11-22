@@ -541,12 +541,6 @@ Cost: S
 Value: low
 Raised by: 212-landing-gaps (correctness)
 
-## [2026-11-21-29] [idea] Add `update` to AGENTS.md's Skills invariant list of WAIT skills
-
-Left undone by 210-wait-previews, carried forward when it landed: AGENTS.md's *Skills* invariant lists the skills that write and owe a WAIT, but leaves out `update`, which `tests/test_skills.py`'s `GATED` includes. Found while building 210; left as it was, since naming it is a separate edit to the list.
-See .sdlc/work/210-wait-previews/notes.md in its commit.
-Raised 2026-11-21.
-
 ## [2026-11-21-30] [nit] R7 says `--preview` takes the same clause flags as `--question`.
 
 Raised by the code review of 210-wait-previews, round 1: scripts/sdlc.py:8308: R7 says `--preview` takes the same clause flags as `--question`. They parse, but `cmd_ship_preview` ignores them without saying so. Refuse them with `--preview`, as the code already refuses clause flags without `--question`, or say in the help text that they are ignored.
@@ -758,56 +752,6 @@ Cost: S
 Value: low
 Raised by: 218-ask-reviewer-defaults (correctness)
 
-## [2026-11-22-13] [nit] `needs_of()` compares `now` with the park's own `DEADLINE`, not the deadline cut to the base branch's `[park] deadline` that `verdicts` uses.
-
-Raised by the code review of 222-parked-changes, round 1: scripts/sdlc.py:5164: `needs_of()` compares `now` with the park's own `DEADLINE`, not the deadline cut to the base branch's `[park] deadline` that `verdicts` uses. A forged record with a far deadline would show no need on the board, while `verdicts` would already stop it. R16 only asks for a need when a supervisor died, so this is cosmetic. Cap it with `capped_park()` in the callers, or accept it.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 222-parked-changes (correctness)
-
-## [2026-11-22-14] [nit] `park --clear` checks only expiry, not `vouched`.
-
-Raised by the code review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:4034: `park --clear` checks only expiry, not `vouched`. `verdicts` reports an unvouched but parseable record as "remove it, then rerun", while `--clear` refuses until the deadline passes. A person has to `rm` it, which the message already says for a record that won't read. Make `--clear` also remove an unvouched record, or say so in its refusal.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 222-parked-changes (correctness)
-
-## [2026-11-22-15] [nit] `busy_of()`'s `clean()` keeps control characters (ESC and the like), which reach `status` in the terminal; strip C0/C1 before marking
-
-Raised by the security review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:331: `busy_of()`'s `clean()` keeps control characters (ESC and the like), which reach `status` in the terminal; strip C0/C1 before marking
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: med
-Raised by: 222-parked-changes (contract)
-
-## [2026-11-22-16] [nit] `[park] exit = 1` is accepted, which makes every ordinary red check a park; warn on 1, or document 75 as the only sensible code
-
-Raised by the security review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:119: `[park] exit = 1` is accepted, which makes every ordinary red check a park; warn on 1, or document 75 as the only sensible code
-
-Theme: docs
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 222-parked-changes (contract)
-
-## [2026-11-22-17] [nit] the slot-wait test only asserts that "didn't run" appears on stderr, which proves little about the `check` message; assert the "slot" wording too
-
-Raised by the test review of 222-parked-changes, round 1: tests/test_factory_park.py:358: the slot-wait test only asserts that "didn't run" appears on stderr, which proves little about the `check` message; assert the "slot" wording too
-
-Theme: tests
-Paths: tests/test_factory_park.py
-Cost: S
-Value: low
-Raised by: 222-parked-changes (correctness)
-
 ## [2026-11-22-3] [nit] `_write_ci_cache` formats `checked` by hand with `+00:00`.
 
 Raised by the code review of 220-base-ci-red, round 1: scripts/sdlc.py:9860: `_write_ci_cache` formats `checked` by hand with `+00:00`. The update cache probably has a similar helper, and sharing it would remove the duplicate.
@@ -914,3 +858,29 @@ Paths: .sdlc/DIRECTION.md
 Cost: S
 Value: low
 Raised by: 226-scorecard-framework-only (correctness)
+
+## [2026-11-22-21] [idea] Strip control characters in read_park() on the reader side
+
+Left undone by 229-park-hardening, carried forward when it landed: `factory_records.read_park()` (and `factory.py`'s) take `RESOURCE:` and `HOLDER:` as written, so a hand-edited `runs/parked.md` with an ESC in it still reaches `status` and the board: `busy_of()` now cleans what the gate writes, but a reader-side strip would cover a forged record too. Out of 229's scope (the busy answer only).
+See .sdlc/work/229-park-hardening/notes.md in its commit.
+Raised 2026-11-22.
+
+## [2026-11-22-22] [nit] the line "holder is `unknown`, and an `UNTIL` that won't read is noted and ignored.
+
+Raised by the code review of 229-park-hardening, round 1: docs/REFERENCE.md:249: the line "holder is `unknown`, and an `UNTIL` that won't read is noted and ignored. The factory then parks the change: its gate records no" is now well past the wrap used in the rest of the paragraph. Rewrap it.
+
+Theme: docs
+Paths: docs/REFERENCE.md
+Cost: S
+Value: low
+Raised by: 229-park-hardening (correctness)
+
+## [2026-11-22-23] [nit] `_park_deadline_at()` runs a `git show` for each build-stage change inside the status loop.
+
+Raised by the code review of 229-park-hardening, round 1: scripts/sdlc.py:11036: `_park_deadline_at()` runs a `git show` for each build-stage change inside the status loop. Read it once before the loop, as `_gate_jobs_at()` is.
+
+Theme: refactor
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 229-park-hardening (correctness)
