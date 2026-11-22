@@ -316,8 +316,10 @@ UPGRADED_FILE_RE = re.compile(r"^round-(\d+)\.upgraded\.md$")
 UPGRADE_ANSWER_RE = re.compile(r"^upgrade to tier 2\b", re.I)
 # What a builder report and a behaviour check end with: each command run (`$ <command>`), the tail
 # of its output, and `exit: <n>`. A result claimed without one is a stop, never taken on trust.
+# A note may follow the code after a space (`exit: 2 (hook refusal)`), since agents annotate by
+# habit; an `exit:` with no code (`exit: nonzero`, `exit: not run`) is still no exit (232).
 EVIDENCE = "## Evidence"
-EXIT_RE = re.compile(r"^\s*exit:\s*\d+\s*$")
+EXIT_RE = re.compile(r"^\s*exit:\s*\d+(?:\s.*)?$")
 # The one judge of a read, a command the script can tell changes nothing (`is_read()`): a reply
 # that leaves a read's `exit:` off is still read when it shows its output, which is its result,
 # though every agent is asked for every exit (215). A closed allowlist, each

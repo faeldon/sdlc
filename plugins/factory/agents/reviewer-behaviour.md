@@ -94,5 +94,8 @@ keeps them under the line, and the approver and the person weigh it from them:
 Then `## Notes`: each check in `checks.md` and what you expect of it, and anything you couldn't
 run and why. **End with `## Evidence`:** every command you ran, as `$ <command>`, the tail of what
 it printed, and `exit: <n>`: every command, reads included (`head`, `cat`, `ls`), so it never rests
-on what the script counts as a read. A result without its `$` line is a claim, and the skill's
-script stops the run on a reply without this section, or with a command missing its `exit:`.
+on what the script counts as a read. A command that ran records its real code: end it
+`; echo "exit: $?"` and copy the number, never a word (`exit: nonzero` is no exit). A command a
+hook refused never ran, so it is no `$ ` line: list it under `## Notes`, as one you couldn't run,
+with the hook's message. A result without its `$` line is a claim, and the skill's script stops
+the run on a reply without this section, or with a command missing its `exit:`.

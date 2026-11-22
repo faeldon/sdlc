@@ -206,5 +206,8 @@ exit: 0
 ```
 
 Claim no result this section doesn't show: "the suite passes" with no `$` line for it is a claim,
-not a result. A failing command goes in too, with its exit. The skill's script refuses a
-report without this section, or with a command missing its `exit:`, and the run stops there.
+not a result. A failing command goes in too, with its exit. A command that ran records its real
+code: end it `; echo "exit: $?"` and copy the number, never a word (`exit: nonzero` is no exit).
+A command a hook refused never ran, so it is no `$ ` line: say so in the report above, with the
+hook's message. The skill's script refuses a report without this section, or with a command
+missing its `exit:`, and the run stops there.

@@ -1,0 +1,4 @@
+9d2bff334c22c673e10f9c22c27c29849935098156a55bafed61db456cb40fe9  plugins/factory/agents/builder.md
+837a865b4308b913885b17a583867e9b389ed1f88cc860710159b1c8e85d2daa  plugins/factory/agents/reviewer-behaviour.md
+aa8414127d209e3a710bc2bbb9e98e83ea9c44ac44d7ca95a51d30de402813b3  plugins/factory/scripts/factory.py
+b50b23e991968196d2770eb3889da5041fd97881a9c405d8e3029c3f6118d8cc  tests/test_factory_depth.py

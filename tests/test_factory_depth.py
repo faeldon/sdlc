@@ -483,6 +483,32 @@ def test_the_behaviour_check_owes_evidence_too(tmp_path, capsys) -> None:
     assert any("reviews/round-1/behaviour.md" in p for p in out["problems"]), out["problems"]
 
 
+@pytest.mark.parametrize(
+    "exit_line, missing",
+    [
+        ("exit: 2 (hook refusal; the command did not run)", False),
+        ("exit: 0 # ok", False),
+        ("exit: 1", False),
+        ("exit: nonzero (task failed)", True),
+        ("exit: not run (blocked by the guard hook)", True),
+        ("exit: 2x", True),
+    ],
+)
+def test_an_exit_with_a_note_after_its_code_is_an_exit(
+    tmp_path, capsys, exit_line: str, missing: bool
+) -> None:
+    """232: a behaviour check's `exit:` with a note after its code is read; one with no code
+    still names the missing exit, since the code is what the evidence proves."""
+    root = _change(tmp_path)
+    _round(root, 1)
+    reply = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "behaviour.md"
+    reply.write_text(f"VERDICT: PASS\n\n## Evidence\n\n$ ./check.sh\n{exit_line}\n")
+    out = _verdicts(root, capsys)
+    named = [p for p in out["problems"] if "`./check.sh` has no `exit:`" in p]
+    assert bool(named) is missing, out["problems"]
+    assert (out["next"] == "stop") is missing, out
+
+
 def test_a_host_s_own_reviewers_are_kept_and_behaviour_is_one_it_can_name(tmp_path) -> None:
     (tmp_path / ".sdlc").mkdir()
     config = tmp_path / ".sdlc" / "factory.toml"
