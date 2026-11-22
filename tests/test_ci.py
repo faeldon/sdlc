@@ -13,6 +13,7 @@ pytestmark = pytest.mark.portable
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+)(.*)$")
+QUOTED = re.compile(r"^([\"'])(.*)\1$")
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
 VERSION = re.compile(r"^\s+#\s*v\d+(\.\d+)*\s*$")
 
@@ -24,14 +25,21 @@ def workflow_files(folder: Path) -> list[Path]:
 
 def unpinned(text: str) -> list[str]:
     """Each `uses:` line in a workflow's `text` that names no full commit SHA, or no trailing
-    `# v<version>` comment saying which release that commit is. A local action (`./...`) runs
-    the repo's own code, so it is never one."""
+    `# v<version>` comment saying which release that commit is. A value in one matching pair of
+    `"` or `'` is read as its unquoted text, as YAML reads it. The comment must be `# v<digits>`,
+    the form Dependabot keeps it in when it bumps the pin: a looser one would be left as it was,
+    and drift from the SHA. A local action (`./...`) runs the repo's own code, so it is never
+    one."""
     found = []
     for line in text.splitlines():
         match = USES.match(line)
-        if not match or match.group(1).startswith("./"):
+        if not match:
             continue
-        if not PINNED.match(match.group(1)) or not VERSION.match(match.group(2)):
+        quoted = QUOTED.match(match.group(1))
+        value = quoted.group(2) if quoted else match.group(1)
+        if value.startswith("./"):
+            continue
+        if not PINNED.match(value) or not VERSION.match(match.group(2)):
             found.append(line.strip())
     return found
 
@@ -45,6 +53,11 @@ def test_the_check_refuses_a_tag_or_branch_pin() -> None:
         "  - uses: actions/checkout@11d5960\n"
         f"  - uses: actions/checkout@{sha}\n"
         f"  - uses: actions/checkout@{sha} # v4.4.0\n"
+        f'  - uses: "actions/checkout@{sha}" # v4.4.0\n'
+        f"  - uses: 'actions/checkout@{sha}' # v4.4.0\n"
+        '  - uses: "actions/checkout@v4"\n'
+        "  - uses: 'actions/checkout@main'\n"
+        f"  - uses: \"actions/checkout@{sha}' # v4.4.0\n"
         "  - uses: ./.github/actions/local\n"
     )
     assert unpinned(text) == [
@@ -52,6 +65,9 @@ def test_the_check_refuses_a_tag_or_branch_pin() -> None:
         "- uses: actions/checkout@main",
         "- uses: actions/checkout@11d5960",
         f"- uses: actions/checkout@{sha}",
+        '- uses: "actions/checkout@v4"',
+        "- uses: 'actions/checkout@main'",
+        f"- uses: \"actions/checkout@{sha}' # v4.4.0",
     ]
 
 
