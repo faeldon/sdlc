@@ -726,16 +726,6 @@ Cost: S
 Value: low
 Raised by: 225-ci-pin-test-quotes (correctness)
 
-## [2026-11-22-19] [idea] Autopilot plans the seeds it takes, not only picks them
-
-Autopilot plans the seeds it takes: groups them by the risk they lower for the next goal, checks
-each against the code before drafting (dropping ones already fixed or wrong), tiers and orders them
-by shared files, says what waits and why, and flags a backlog growing faster than it drains — as
-the supervisor planned 1.12 on 2026-11-22. It works within autopilot as it is today (level 1), and
-comes before 2026-11-21-33's levels 2–4, which are to be split into a seed per level.
-Theme: factory
-Raised 2026-11-22.
-
 ## [2026-11-22-24] [bug] An `exit:` line with words after its number, or for a command a hook refused, stops a run
 
 A behaviour check on 2026-11-22 stopped its run twice on `## Evidence` lines that did carry an
@@ -881,3 +871,33 @@ Paths: tests/test_factory_loop.py
 Cost: S
 Value: low
 Raised by: 230-nit-flow (correctness)
+
+## [2026-11-22-32] [nit] say to single-quote a goal given in the person's own words, so `$`, backticks and `"` in it stay literal
+
+Raised by the security review of 231-autopilot-goals, round 1: plugins/factory/skills/autopilot/SKILL.md:101: say to single-quote a goal given in the person's own words, so `$`, backticks and `"` in it stay literal
+
+Theme: robustness
+Paths: plugins/factory/skills/autopilot/SKILL.md
+Cost: S
+Value: med
+Raised by: 231-autopilot-goals (contract)
+
+## [2026-11-22-33] [nit] the "empty reason" case rewrites the WAITS line to a bare reason; no case gives a WAVE or LEAVE line an empty reason, which R8 also names
+
+Raised by the test review of 231-autopilot-goals, round 1: tests/test_autopilot.py:1735: the "empty reason" case rewrites the WAITS line to a bare reason; no case gives a WAVE or LEAVE line an empty reason, which R8 also names
+
+Theme: tests
+Paths: tests/test_autopilot.py
+Cost: S
+Value: low
+Raised by: 231-autopilot-goals (correctness)
+
+## [2026-11-22-34] [nit] no case puts a `LEAVE` heading-less before any group to show LEAVE is allowed anywhere.
+
+Raised by the test review of 231-autopilot-goals, round 1: tests/test_autopilot.py:1696: no case puts a `LEAVE` heading-less before any group to show LEAVE is allowed anywhere. Only the group-less WAVE case exists.
+
+Theme: tests
+Paths: tests/test_autopilot.py
+Cost: S
+Value: low
+Raised by: 231-autopilot-goals (correctness)
