@@ -113,16 +113,6 @@ See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
 Theme: tests
 
-## [2026-11-19-25] [nit] R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s.
-
-Raised by the test review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s. Reword R14 to 120 s so the spec matches the code.
-
-Theme: docs
-Paths: .sdlc/work/171-factory-run-state/spec.md
-Cost: S
-Value: med
-Raised by: 171-factory-run-state (correctness)
-
 ## [2026-11-19-27] [idea] Rewrap the remaining factory agents' prose lines past 100 columns
 
 Left undone by 173-style-paydown, carried forward when it landed: The other factory agents (`approver.md`, `builder.md`, `resolver.md`, `reviewer-behaviour.md`, `reviewer-security.md`, `reviewer-test.md`, `reviewer-ui.md`, `spec-writer.md`, `verifier.md`) keep prose lines past 100 columns; no entry named them, so they stayed out of this change.
