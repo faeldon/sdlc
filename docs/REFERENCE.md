@@ -226,10 +226,13 @@ on for itself or lengthen its own wait:
 
 ```toml
 [park]
-exit = 75          # the check's exit code meaning "busy": unset, no code is busy (75 is EX_TEMPFAIL)
+exit = 75          # the check's exit code meaning "busy": unset, no code is busy; use 75 (EX_TEMPFAIL)
 deadline = 60      # minutes a change may wait, from its first busy answer (1-1440)
 retry = 5          # minutes to the next try when the check says no time (1-1440)
 ```
+
+`exit` is 2 to 255: 0 is a pass and 1 any red check, which would make every failure a wait, so
+either is warned of and nothing parks.
 
 A check that exits with exactly `exit` may print, anywhere in its output and each optional, the
 last of each counting:
@@ -240,9 +243,9 @@ SDLC-BUSY-HOLDER: 219-other-change
 SDLC-BUSY-UNTIL: 2026-11-21T15:30:00Z     (a UTC time, or whole minutes from now: 10)
 ```
 
-Each value is made one line, written with this machine's paths and your scan's shapes as
-placeholders, and cut to 200 characters; a missing resource or holder is `unknown`, and an `UNTIL`
-that won't read is noted and ignored. The factory then parks the change: its gate records no
+Each value is made one line with its control characters dropped, written with this machine's
+paths and your scan's shapes as placeholders, and cut to 200 characters; a missing resource or
+holder is `unknown`, and an `UNTIL` that won't read is noted and ignored. The factory then parks the change: its gate records no
 attempt, the next try is at `UNTIL` (never past the deadline, which `UNTIL` never moves), and past
 the deadline the run stops for you, naming the resource and its holder. A landing gate answered
 busy stops the train, never ejecting a change. `factory.py check` returns the code unchanged with a

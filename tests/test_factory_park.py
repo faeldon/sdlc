@@ -126,6 +126,29 @@ def test_park_config_out_of_range_warns(tmp_path) -> None:
     assert sum("park." in w for w in warnings) == 3, warnings
 
 
+@pytest.mark.parametrize("code", [0, 1])
+def test_park_exit_of_0_or_1_is_refused(tmp_path, code) -> None:
+    """229: exit 0 is a pass and 1 every ordinary red check, so neither may mean busy: each warns,
+    naming 75, and nothing parks."""
+    root = _change(tmp_path)
+    _on_main(root, f"[park]\nexit = {code}\n")
+    cfg, warnings = factory.load_config(root)
+    assert cfg["park"]["exit"] is None
+    assert any("park.exit" in w and "2 to 255" in w and "75" in w for w in warnings), warnings
+
+
+def test_busy_payload_drops_control_characters() -> None:
+    """229: a busy line is a host command's output, shown in a terminal: C0 and C1 control
+    characters (ESC, BEL, DEL, CSI) are dropped before it is stored or shown."""
+    cfg = {"park": {"exit": 75, "deadline": 60, "retry": 5}}
+    output = (
+        "SDLC-BUSY-RESOURCE: \x1b[31mstaging\x1b[0m db\x07\nSDLC-BUSY-HOLDER: a\x7fb\x9bc\x00d\tz\n"
+    )
+    busy = factory.busy_of(75, output, cfg)
+    assert busy["resource"] == "[31mstaging[0m db", busy
+    assert busy["holder"] == "abcd z", busy
+
+
 # ---------------------------------------------------------------- the record (R2, R4, R5)
 
 
@@ -384,7 +407,8 @@ def test_a_gate_past_the_slot_wait_parks_and_a_check_exits_1(tmp_path, capfd, mo
         assert not _gate_file(root).exists() and _parked(root).is_file()
         capfd.readouterr()
         assert factory.cmd_check(root, "008") == 1
-        assert "didn't run" in capfd.readouterr().err
+        err = capfd.readouterr().err
+        assert "no gate slot came free" in err and "didn't run" in err, err
 
 
 def test_check_passes_busy_through_and_writes_nothing(tmp_path, capfd) -> None:
@@ -457,6 +481,21 @@ def test_park_clear_refuses_a_live_park(tmp_path, capsys, monkeypatch) -> None:
     assert code == 0 and out["cleared"] and not _parked(root).exists(), out
     code, out = _run(capsys, factory.cmd_park, root, "008", False, True)
     assert code == 0 and not out["cleared"], out
+
+
+def test_park_clear_removes_an_unvouched_record(tmp_path, capsys, monkeypatch) -> None:
+    """229: a record the ledger never vouched for is no park, so `--clear` removes it before its
+    deadline rather than refusing with no way out but an `rm`."""
+    root = _busy_change(tmp_path)
+    _at(monkeypatch, T0)
+    _gate(root, capsys)
+    path = _parked(root)
+    path.write_text(path.read_text(encoding="utf-8").replace("ATTEMPTS: 1", "ATTEMPTS: 9"),
+                    encoding="utf-8")  # fmt: skip
+    _at(monkeypatch, T0 + timedelta(minutes=1))
+    code, out = _run(capsys, factory.cmd_park, root, "008", False, True)
+    assert code == 0 and out["cleared"] and not path.exists(), out
+    assert out["parked"]["vouched"] is False
 
 
 def test_start_reports_the_park(tmp_path, capsys, monkeypatch) -> None:

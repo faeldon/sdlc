@@ -278,10 +278,12 @@ def _entry(
             if rec["stage"] == "build"
             else None
         )
-        # A park the run left at `build` (222 R16): its track's gate, and past its deadline a need.
+        # A park the run left at `build` (222 R16): its track's gate, and past its deadline, cut
+        # by the base branch's `[park] deadline` as `verdicts` cuts it (229), a need.
         entry["parked"] = (
             read(sdlc.factory_records.PARKED.as_posix(),
-                 lambda: sdlc.factory_records.park(folder), None)
+                 lambda: sdlc.factory_records.park(folder, sdlc._park_deadline_at(home, trunk)),
+                 None)
             if rec["stage"] == "build"
             else None
         )  # fmt: skip

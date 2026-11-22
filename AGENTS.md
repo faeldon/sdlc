@@ -363,7 +363,7 @@ Changing a skill or the script usually means satisfying these, so know them befo
 
 - **Skills** (`tests/test_skills.py`): `name` in frontmatter equals the directory name; the
   description is >80 chars and says when *not* to use it; `disable-model-invocation: true` and
-  `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`,
+  `allowed-tools` are set. Skills that write (`intent`, `spec`, `ship`, `close`, `drop`, `update`,
   `setup`, `release`, `publish`, `retro`, `uninstall`, `bug`, `triage`, `idea`, and the factory's
   `spec`, `build`, `eval`, `review`, `land` and `decide`) have exactly one heading containing
   `WAIT`, in `SKILL.md`, which asks its literal question in an `AskUserQuestion` dialog (2–4

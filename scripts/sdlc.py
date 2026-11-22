@@ -3156,6 +3156,28 @@ def _gate_jobs_at(home: Path, trunk: str) -> int:
     return jobs
 
 
+# The minutes a park may last, as `factory.py`'s `_park()` takes `[park] deadline`: its default and
+# its bounds, pinned to it by `tests/test_hand_gate.py`.
+PARK_DEADLINE_DEFAULT = 60
+PARK_MINUTES = (1, 1440)
+
+
+def _park_deadline_at(home: Path, trunk: str) -> int:
+    """`[park] deadline` as the base branch's `factory.toml` holds it, never the checkout's, so
+    `status` and the board cut a park's deadline where `verdicts` does (229). Anything the
+    factory would refuse, a missing file or one that won't parse is `PARK_DEADLINE_DEFAULT`."""
+    text = _git(home, "show", f"refs/heads/{trunk}:{FACTORY_CONFIG.as_posix()}") or ""
+    try:
+        table = tomllib.loads(text).get("park", {})
+    except tomllib.TOMLDecodeError:
+        return PARK_DEADLINE_DEFAULT
+    value = table.get("deadline") if isinstance(table, dict) else None
+    low, high = PARK_MINUTES
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        return PARK_DEADLINE_DEFAULT
+    return value
+
+
 # The base branch's `[ui]`, as far as ship's UI review reads it: whether it is complete and the
 # pages, widths and paths its screenshots cover. Copies of `factory.py`'s (`DEFAULTS["ui"]`'s
 # keys here, `_ui_table()`'s checks of them, `ui_complete()`, `_page_name()`), pinned to it by
@@ -11011,7 +11033,9 @@ def cli_status(root: Path, home: Path, args) -> int:
         # A park the run left at `build` (222 R16), shown under its line and, past its deadline,
         # a need.
         rec["parked"] = (
-            factory_records.park(Path(root, rec["dir"])) if rec["stage"] == "build" else None
+            factory_records.park(Path(root, rec["dir"]), _park_deadline_at(home, a["trunk"]))
+            if rec["stage"] == "build"
+            else None
         )
         # A gate run by hand (`gate`) says whether the build as it stands is green; a factory
         # run's gate is its own while it builds, and at `test` the hand gate clears a `gate` reason.

@@ -3341,19 +3341,24 @@ def test_an_old_gate_record_shows_the_badge_alone(repo) -> None:
 # ---------------------------------------------------------------- a parked change (222)
 
 
-def _parked_at(root: Path, deadline: str) -> Path:
+# A park that began 30 minutes before the far deadline the tests give it, so the default 60-minute
+# cap leaves that deadline as it is.
+PARK_SINCE = "2998-12-31T23:30:00Z"
+
+
+def _parked_at(root: Path, deadline: str, since: str = PARK_SINCE) -> Path:
     """A factory run its supervisor last read as `parked`, its park written by `factory.py`'s own
     writer, `deadline` its deadline."""
     folder = _run_at(root, "parked")
     fields = {"step": "gate", "round": 1, "resource": "staging db", "holder": "219-other",
-              "since": "2020-01-01T00:00:00Z", "retry": "2020-01-01T00:05:00Z",
+              "since": since, "retry": "2998-12-31T23:35:00Z",
               "deadline": deadline, "attempts": 2}  # fmt: skip
     _write(folder / factory.PARKED, factory.park_text(fields, []))
     return folder
 
 
 PARK_LINE = (
-    "parked on staging db, held by 219-other; retry 2020-01-01T00:05:00Z, deadline {deadline}"
+    "parked on staging db, held by 219-other; retry 2998-12-31T23:35:00Z, deadline {deadline}"
 )
 
 
@@ -3379,6 +3384,20 @@ def test_a_parked_card_sits_at_the_gate_and_moves_to_needs_you_past_its_deadline
     assert "parked past its deadline: free staging db" in card["needs"], card["needs"]
 
 
+@pytest.mark.portable
+def test_a_park_past_the_base_branchs_deadline_needs_you(repo, monkeypatch, capsys) -> None:
+    """229: the board and `status` read a park's deadline cut to `SINCE` plus the base branch's
+    `[park] deadline`, as `verdicts` does, so a record whose own deadline is far off still needs
+    you once the cut one has passed."""
+    _parked_at(repo, "2999-01-01T00:00:00Z", since="2020-01-01T00:00:00Z")
+    card = _cards(repo)["016-draft-tags"]
+    assert card["parked"]["deadline"] == "2020-01-01T01:00:00Z", card["parked"]
+    assert card["column"] == "needs-you", card
+    assert "parked past its deadline: free staging db" in card["needs"], card["needs"]
+    out, _ = _status(repo, monkeypatch, capsys)
+    assert "016" in "\n".join(_sections(out)["Needs you"]), out
+
+
 def test_status_shows_a_parked_change_under_building(repo, monkeypatch, capsys) -> None:
     """222 R16: `status` lists a parked change under Building with its park's line, and one past
     its deadline under Needs you, as the board does."""
@@ -3389,7 +3408,7 @@ def test_status_shows_a_parked_change_under_building(repo, monkeypatch, capsys) 
     held, _, when = PARK_LINE.format(deadline=later).partition("; ")
     assert "016" in building and f"⏸ {held};\n" in building and f"  {when}\n" in building, building
     folder = repo / ".sdlc" / "work" / "016-draft-tags"
-    park = sdlc.factory_records.park(folder)
+    park = sdlc.factory_records.park(folder, 60)
     _write(folder / factory.PARKED, factory.park_text({**park, "deadline": "2020-01-01T01:00:00Z"},
                                                       []))  # fmt: skip
     out, _ = _status(repo, monkeypatch, capsys)

@@ -619,6 +619,23 @@ def test_the_hand_gate_reads_gate_jobs_as_the_factory_does(repo) -> None:
     assert seen == [1, 3, 1, 1, 1, 1, 1, 1, 1]
 
 
+def test_the_park_deadline_is_read_as_the_factory_does(repo) -> None:
+    """229: `[park] deadline` from the base branch, never the checkout, a value the factory
+    refuses giving 60, so `needs_of()` cuts a park where `verdicts` does."""
+    seen = []
+    for text in [None, "[park]\ndeadline = 10\n", "[park]\ndeadline = 0\n",
+                 "[park]\ndeadline = 1441\n", '[park]\ndeadline = "5"\n',
+                 "[park]\ndeadline = true\n", "[park]\nexit = 75\n", "park = 3\n",
+                 "[park\n"]:  # fmt: skip
+        (repo / ".sdlc" / "factory.toml").unlink(missing_ok=True)
+        _on_main(repo, text)
+        _write(repo / ".sdlc" / "factory.toml", "[park]\ndeadline = 900\n")
+        ours = sdlc._park_deadline_at(repo, "main")
+        assert ours == factory._park(repo)[0]["deadline"], text
+        seen.append(ours)
+    assert seen == [60, 10, 60, 60, 60, 60, 60, 60, 60]
+
+
 def test_a_hand_gate_gives_up_after_its_wait_and_records_nothing(
     repo, capsys, monkeypatch, tmp_path
 ) -> None:

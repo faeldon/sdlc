@@ -480,7 +480,8 @@ gate_jobs = 1                              # the most gates running at once acro
 [park]                                     # a host resource the check waits on, read from the
                                            # base branch
 # exit = 75                                # the check's exit code meaning busy: unset, nothing
-                                           # parks; 75 is EX_TEMPFAIL
+                                           # parks; 75 (EX_TEMPFAIL) is the one to use; 2-255,
+                                           # since 0 is a pass and 1 any red check
 deadline = 60                              # minutes a park may last, from its first busy
                                            # answer (1-1440); past it, the run stops for you
 retry = 5                                  # minutes to the next try when the host gives no

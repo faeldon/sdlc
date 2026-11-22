@@ -729,8 +729,9 @@ PARK_MINUTES = (1, 1440)
 
 def _park(root: Path) -> tuple[dict, list[str]]:
     """`[park]` as the base branch holds it (222 R1, R4): a change can neither turn busy on for
-    itself nor give its own park a longer deadline. `exit` is a code from 1 to 255, unset by
-    default; `deadline` and `retry` whole minutes in `PARK_MINUTES`, each bad value a warning
+    itself nor give its own park a longer deadline. `exit` is a code from 2 to 255, unset by
+    default: 0 is a pass and 1 every ordinary red check, which would make each one a wait (229);
+    `deadline` and `retry` whole minutes in `PARK_MINUTES`, each bad value a warning
     that leaves its default."""
     table = _base_factory(root).get("park", {})
     out, warnings = dict(DEFAULTS["park"]), []
@@ -739,12 +740,15 @@ def _park(root: Path) -> tuple[dict, list[str]]:
     low, high = PARK_MINUTES
     for key, value in table.items():
         whole = isinstance(value, int) and not isinstance(value, bool)
-        if key == "exit" and whole and 1 <= value <= 255:
+        if key == "exit" and whole and 2 <= value <= 255:
             out["exit"] = value
         elif key in ("deadline", "retry") and whole and low <= value <= high:
             out[key] = value
         elif key == "exit":
-            warnings.append("park.exit must be a whole number from 1 to 255, so nothing parks")
+            warnings.append(
+                "park.exit must be a whole number from 2 to 255 (75, EX_TEMPFAIL, is the one to "
+                "use; 0 is a pass and 1 any red check), so nothing parks"
+            )
         elif key in ("deadline", "retry"):
             warnings.append(
                 f"park.{key} must be whole minutes from {low} to {high}, so "
@@ -3735,6 +3739,8 @@ NOTE_RE = re.compile(r"^- NOTE: (.+?)\s*$")
 # time or whole minutes from now, and sets only the next retry, never the deadline.
 BUSY_RE = re.compile(r"^SDLC-BUSY-(RESOURCE|HOLDER|UNTIL):[ \t]*(.*?)[ \t\r]*$", re.M)
 BUSY_CUT = 200
+# What a busy line drops once its whitespace is folded: every C0 and C1 control character.
+CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 UNTIL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 STAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # What a slot wait past `SLOT_WAIT` parks on, with or without `[park] exit` (R12).
@@ -3762,16 +3768,17 @@ def _stamp_of(when: datetime) -> str:
 def busy_of(code: int | None, output: str, cfg: dict, root: Path | None = None) -> dict | None:
     """The host's busy answer (R1, R3): None unless the base branch's `[park] exit` is set and
     the command exited with exactly it; else its `resource`, `holder` (each `unknown` when not
-    given) and `until` (None when not given), each the last line of its kind, made to one line,
-    marked (`_placeholders()` given `root`, which ends in `_defused()`; else `_defused()`) and cut
-    to `BUSY_CUT` characters: marked first, so a cut never leaves half a path unmarked."""
+    given) and `until` (None when not given), each the last line of its kind, made to one line
+    with every C0 and C1 control character dropped (it reaches a terminal, 229), marked
+    (`_placeholders()` given `root`, which ends in `_defused()`; else `_defused()`) and cut to
+    `BUSY_CUT` characters: marked first, so a cut never leaves half a path unmarked."""
     want = (cfg.get("park") or {}).get("exit")
     if want is None or code != want:
         return None
     found = {m.group(1).lower(): m.group(2) for m in BUSY_RE.finditer(output or "")}
 
     def clean(value: str) -> str:
-        value = " ".join(value.split())
+        value = CONTROL_RE.sub("", " ".join(value.split()))
         return (_placeholders(value, root) if root else _defused(value))[:BUSY_CUT]
 
     out = {key: clean(found.get(key, "")) for key in ("resource", "holder", "until")}
@@ -4106,7 +4113,7 @@ def cmd_park(root: Path, ident: str, wait: bool = False, clear: bool = False) ->
     from now, so a record can't hold it longer) or the record is gone, whichever comes first;
     writes nothing, and prints the reading `verdicts` gives then. `--clear` removes a park past
     its deadline, after a rerun's yes, and refuses one that isn't: a park clears itself at its
-    next attempt."""
+    next attempt. A record the ledger never vouched for is no park, so it goes whatever it says."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -4120,7 +4127,7 @@ def cmd_park(root: Path, ident: str, wait: bool = False, clear: bool = False) ->
         if park is None:
             why = f"{PARKED.as_posix()} won't read: remove it by hand, then rerun"
             return emit({**out, "refusals": [why]}, 1)
-        if not park["expired"]:
+        if park["vouched"] and not park["expired"]:
             why = (f"parked on {park['resource']} until {park['deadline']}: it clears itself at "
                    "its next attempt, or once past its deadline")  # fmt: skip
             return emit({**out, "parked": park, "refusals": [why]}, 1)

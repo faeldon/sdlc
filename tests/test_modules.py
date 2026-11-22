@@ -511,6 +511,8 @@ RECORD_NAMES = {
     # 222: a change parked on a host resource.
     "PARKED", "PARKED_RE", "RESOURCE_RE", "HOLDER_RE", "RETRY_RE", "DEADLINE_RE", "ATTEMPTS_RE",
     "NOTE_RE", "read_park", "park",
+    # 229: the park's deadline cut as `verdicts` cuts it.
+    "capped_park",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -534,7 +536,7 @@ CONSUMER_NAMES = {
     "needs_of", "column", "seen_stage", "answered", "decide_step", "touched_paths", "BY_STAGE",
     "FACTORY_STOP_NEEDS", "hand_gate", "hand_build", "cmd_gate", "GATE_TIMEOUT", "GATE_TAIL",
     "SLOT_NAME", "_try_lock", "_gate_jobs_at", "FACTORY_CONFIG", "_ui_at", "_current_shots",
-    "UI_DEFAULTS",
+    "UI_DEFAULTS", "_park_deadline_at",
 }  # fmt: skip
 
 # A name a script defines for something of its own that a record's copy shares: `sdlc.py`'s
@@ -775,6 +777,22 @@ def test_park_records_read_back_what_the_factory_writes() -> None:
               "since": "2026-11-21T15:00:00Z", "retry": "2026-11-21T15:05:00Z",
               "deadline": "2026-11-21T16:00:00Z", "attempts": 4}  # fmt: skip
     assert records.read_park(factory.park_text(fields, ["n"])) == {**fields, "notes": ["n"]}
+
+
+@pytest.mark.parametrize("minutes", [1, 30, 60, 1440])
+def test_both_park_caps_cut_a_record_alike(minutes) -> None:
+    """229: core's `capped_park()` cuts a park's deadline and retry as `factory.py`'s does, given
+    the base branch's `[park] deadline`."""
+    records = _load("factory_records_cap", RECORDS_PY)
+    factory = _load("factory_cap_theirs", FACTORY_PY)
+    for text in PARK_RECORDS:
+        park = records.read_park(text)
+        if park is None:
+            continue
+        for deadline in ("2026-11-21T15:10:00Z", "2026-11-21T16:00:00Z", "2999-01-01T00:00:00Z"):
+            given = {**park, "deadline": deadline}
+            ours = records.capped_park(given, minutes)
+            assert ours == factory.capped_park(given, {"park": {"deadline": minutes}}), given
 
 
 @pytest.mark.parametrize("text", GATE_RECORDS)

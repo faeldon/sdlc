@@ -35,7 +35,7 @@ import json
 import re
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------- the run's records
@@ -234,15 +234,35 @@ def read_park(text: str) -> dict | None:
     return out
 
 
-def park(folder: Path) -> dict | None:
-    """The park a factory run left in `folder` (`read_park()`), for `status` and the board, or
-    None without one or for one that won't read: the run's own `verdicts` reads that as a stop,
-    which `runs/stopped.md` then shows. Never raises."""
+STAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def capped_park(park: dict, minutes: int) -> dict:
+    """`park` with its deadline cut to `SINCE` plus `minutes`, the base branch's `[park]
+    deadline`, and its retry to that deadline (229). A copy of `factory.py`'s `capped_park()`,
+    which takes the config the minutes come from, pinned to it."""
+
+    def when(stamp: str) -> datetime:
+        return datetime.strptime(stamp, STAMP_FORMAT).replace(tzinfo=UTC)
+
+    cap = when(park["since"]) + timedelta(minutes=minutes)
+    deadline = min(when(park["deadline"]), cap)
+    retry = min(when(park["retry"]), deadline)
+    return {**park, "deadline": deadline.strftime(STAMP_FORMAT),
+            "retry": retry.strftime(STAMP_FORMAT)}  # fmt: skip
+
+
+def park(folder: Path, minutes: int) -> dict | None:
+    """The park a factory run left in `folder` (`read_park()`), its deadline cut by the base
+    branch's `[park] deadline`, `minutes` (`capped_park()`), as `verdicts` reads it, for `status`
+    and the board; None without one or for one that won't read: the run's own `verdicts` reads
+    that as a stop, which `runs/stopped.md` then shows. Never raises."""
     try:
         text = (folder / PARKED).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    return read_park(text)
+    found = read_park(text)
+    return capped_park(found, minutes) if found else None
 
 
 def read_land_stop(folder: Path) -> dict | None:
