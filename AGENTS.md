@@ -337,11 +337,15 @@ reply's `- CONTRACT:`/`- RELAX:` line, and takes a seed with an `Issue:` line on
 names it, opened with its `closes:`. Its budgets, its limits
 and `enabled` are the base branch's `[autopilot]`, fixed at `--begin`; it runs `sdlc.py`'s own
 `new`, `status --json` and `config` beside `fresh`, `upgrade` and the landing.
-`verdicts` decides from the rounds alone and reads no state file but `runs/mended`. A builder report
-and a behaviour check end with `## Evidence` (`read_evidence()`), every command with its `exit:` but
-a read that shows its output, which only the script judges (`is_read()`); a reply missing it,
-holding verdict or decision lines that disagree, none of them first (`opening()`, `preamble()`,
-`decision_preamble()`), a READY decision that leaves an open default it may not carry to the
+`verdicts` decides from the rounds alone and reads no state file but `runs/mended` and the vouched
+`runs/parked.md`, and the clock only for a park (`now`, which its caller may give): a host's check
+exiting the base branch's `[park] exit` parks the change on the resource it names until a retry,
+with a deadline from the base branch alone, past which it stops; `STEPS` and the factory README's
+table bound every step. A builder report and a behaviour check end with `## Evidence`
+(`read_evidence()`), every command with its `exit:` but a read that shows its output, which only the
+script judges (`is_read()`); a reply missing it, holding verdict or decision lines that disagree,
+none of them first (`opening()`, `preamble()`, `decision_preamble()`), a READY decision that leaves
+an open default it may not carry to the
 landing (`uncarried()`), or a `verified.md` the script can't read, is the one stop a run mends, once
 a round for each role, a landing round counting as its own (`agent --task mend` or
 `--task land-mend`, recorded in `runs/mended`). No agent but the builder runs `checks.md`

@@ -201,8 +201,23 @@ spec.
   `gate_jobs` slots (1 unless the base branch's `factory.toml` says more), so parallel runs'
   checks don't fight over every core. A gate that waits prints `NNN-slug: waiting for a gate slot (1
   of 1 in use)`, and its wait is not in its `Seconds:`: each attempt records it apart, as
-  `Waited:`, for the retrospective's gate figures. A gate run by hand (`sdlc.py gate`) shares
-  the same slots, waiting at most 30 minutes for one.
+  `Waited:`, for the retrospective's gate figures. A gate waits at most `SLOT_WAIT` (an hour) for
+  a slot: past it, it parks the change on `gate slot` (below), and a `check` exits 1. A gate run
+  by hand (`sdlc.py gate`) shares the same slots, waiting at most 30 minutes for one.
+- **Parked on a host resource, with a deadline.** A host whose check needs something one change
+  at a time may use (a shared deployment, a database object) can say so: set `[park] exit` on the
+  base branch, and have the check exit with that code, printing any of `SDLC-BUSY-RESOURCE:`,
+  `SDLC-BUSY-HOLDER:` and `SDLC-BUSY-UNTIL:` (a UTC time, `YYYY-MM-DDTHH:MM:SSZ`, or whole
+  minutes). The gate then records no attempt and **parks** the change in `runs/parked.md`: what is
+  held, by whom, since when, the next retry (the host's `UNTIL`, else `[park] retry` minutes on)
+  and the deadline, `[park] deadline` minutes after the first busy answer, which no later answer
+  moves. `verdicts` names `parked` until the retry, `gate` from it, and a `stop` whose way is
+  `parked` from the deadline, naming the holder; the supervisor waits with `factory.py park NNN
+  --wait` in the background, and autopilot waits in the loop, the change keeping its place. A run
+  that isn't busy ends the park, and a busy answer from a check that changed the tree is a red
+  attempt (`Tree: changed`), never a park. A busy landing gate writes nothing and stops the train
+  with the holder named, never ejecting. Which resources exist and how they are locked stay the host's:
+  the plugin learns only "busy, until". A host that never sets `[park] exit` sees no change.
 - **Agents leave the whole suite to the gate.** The builder runs each slice's tests by name, and
   the reviewers read the gate's record rather than run the suite again. A full run an agent still
   wants goes through `factory.py check NNN`, which its prompt names: the base branch's `[commands]
@@ -270,6 +285,29 @@ spec.
   reads the tests against the spec's numbered requirements, each only when the full depth runs it:
   a Tier 1's light rounds run the code and behaviour reviewers. The tier picks the reviewers,
   never the depth.
+
+### The loop's states
+
+Every step `verdicts` can name (`STEPS` in `factory.py`), the stage the change is at, what moves it
+on, and what bounds the wait, so no state waits forever. An agent step is bounded by
+`AGENT_TIMEOUT` (3 hours a session); a state that waits on you shows in Needs you on the board and
+in `/sdlc:status`.
+
+| Step | Stage | What moves it on | Bound |
+| --- | --- | --- | --- |
+| `build` | `build` | the builder's report, `build/round-<N>.md` | `AGENT_TIMEOUT` |
+| `gate` | `build` | the gate's attempt, green, red, or a busy answer that parks it | `GATE_TIMEOUT` (30 minutes) plus `SLOT_WAIT` (an hour) |
+| `fix` | `build` | the builder's fix, gated again; a third red gate in a round is a `stop` | `AGENT_TIMEOUT`, twice a round |
+| `review` | `build` | every reviewer's reply for the round | `AGENT_TIMEOUT`, the reviewers together |
+| `arbitrate` | `build` | the arbiter's `verified.md` | `AGENT_TIMEOUT` |
+| `rework` | `build` | the builder's report for the next round | `AGENT_TIMEOUT`, and the round limit |
+| `approve` | `build` | the approver's `decision.md` | `AGENT_TIMEOUT` |
+| `decide` | `build` | your answer to a blocking decision, in `decisions.md` | you |
+| `upgrade` | `build` | `factory.py upgrade`, run on your `upgrade to Tier 2` answer | you |
+| `spec` | `plan` or `design` | your yes to the upgraded change's spec | you |
+| `parked` | `build` | its retry, when the gate runs again; its deadline, a `stop` | `[park] deadline` (60 minutes, at most a day) |
+| `done` | `build`, then `test` | nothing: the run hands the change back | terminal |
+| `stop` | `build` | you: fix the cause and rerun, or ship it by hand | you |
 
 ## Decisions that are yours
 
@@ -356,6 +394,9 @@ server, so a round's two start together.
   build/round-<N>.gate.md       opens GATE: PASS or GATE: FAIL, then each attempt of the gate;
                                 read only while the records ledger vouches for it, as every
                                 landing gate, build and accept record is
+  runs/parked.md                PARKED: gate, then what is held, by whom, since, the retry, the
+                                deadline and the attempts: a busy host's park, vouched as a gate
+                                record is, removed by the next attempt that isn't busy
   reviews/round-<N>/<role>.md   each opens VERDICT: PASS or VERDICT: CHANGES, then - CHANGE: lines
   reviews/round-<N>/verified.md - KEPT: and - DROPPED: lines, one per change asked for, by its id
   decisions.md                  the ledger of the calls that are yours, each one's options under it
@@ -436,6 +477,15 @@ mode = "auto"                              # the permission mode agent sessions 
 gate_jobs = 1                              # the most gates running at once across every
                                            # worktree, read from the base branch
 
+[park]                                     # a host resource the check waits on, read from the
+                                           # base branch
+# exit = 75                                # the check's exit code meaning busy: unset, nothing
+                                           # parks; 75 is EX_TEMPFAIL
+deadline = 60                              # minutes a park may last, from its first busy
+                                           # answer (1-1440); past it, the run stops for you
+retry = 5                                  # minutes to the next try when the host gives no
+                                           # SDLC-BUSY-UNTIL (1-1440)
+
 [models]                                   # override a role's model (else the rule above),
                                            # read from the base branch
 # code = "haiku"
@@ -485,8 +535,9 @@ timeout = 60                               # seconds the server gets to answer
 # fixture = "fixtures/demo"                # data in the checkout serve is given, as {fixture}
 ```
 
-`mode`, `gate_jobs`, `[models]`, `[land]`, `[autopilot]` and `[ui]` are read from the base branch's copy of the
-file, never a change's own, so a change can't widen what its agents may do unasked, pick its own
+`mode`, `gate_jobs`, `[park]`, `[models]`, `[land]`, `[autopilot]` and `[ui]` are read from the base branch's copy of the
+file, never a change's own, so a change can't widen what its agents may do unasked, give its own
+park a longer deadline, pick its own
 agents' models, or choose the command a UI review starts, and a setting committed on the base
 branch reaches every open change at once, its worktree made before it or not. `serve`, `shoot` and
 `paths` must all be set for a UI review; the screenshot command is yours, so any tool that writes a
@@ -601,8 +652,9 @@ so the next change to these defaults can be decided from a window of runs.
 `scripts/factory.py` does what isn't left to a model: which change a session is in and whether its
 stage allows the step, where `HEAD` was, what verdict each review holds, the arbiter's
 answers, the ledger, the depth the diff calls for, and which step the loop takes next (`build`,
-`gate`, `fix`, `review`, `arbitrate`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `done` or
-`stop`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
+`gate`, `fix`, `review`, `arbitrate`, `rework`, `decide`, `upgrade`, `spec`, `approve`, `parked`,
+`done` or `stop`, each a row of *The loop's states*); a busy host's park, waited out (`park --wait`)
+or cleared past its deadline (`park --clear`); a Tier 1 change upgraded to Tier 2 on your answer (`upgrade`, through `sdlc`'s own
 `upgrade`); the gate itself, the base branch's check run on each build and recorded attempt by
 attempt (`gate`), its `[commands] build` once at a landing train's tip (`gate --land --build`, into
 `build/land-<n>.build.md`), and an agent's full run of the check that records nothing (`check`),

@@ -419,13 +419,15 @@ def test_the_stop_record_says_why_and_reads_as_before(tmp_path) -> None:
     fields `status` and the card read are the short `NEXT:` and the problems, as before."""
     for way in factory.WAYS:
         text = factory.stop_text("013-draft-escapes", way, ["it broke"])
-        why = factory.WAYS_WHY[way].format(id="013")
+        # The words `stop_text()` fills a way with when it has no park to name.
+        words = {"id": "013", "resource": "the resource", "holder": "unknown"}
+        why = factory.WAYS_WHY[way].format(**words)
         assert why in text.splitlines(), way
         for regex in (factory.STOPPED_RE, factory.NEXT_RE, factory.PROBLEM_RE):
             assert not regex.match(why), (way, regex.pattern)
         _write(tmp_path / factory.STOPPED, text)
         assert sdlc.factory_records.read_stop(tmp_path) == {
-            "way": way, "next": factory.WAYS[way].format(id="013"), "problems": ["it broke"]
+            "way": way, "next": factory.WAYS[way].format(**words), "problems": ["it broke"]
         }  # fmt: skip
 
 
@@ -1821,7 +1823,7 @@ def test_status_records_only_gain_keys(repo, monkeypatch, capsys) -> None:
     _needs_folders(repo)
     before = {r["dir"]: set(r) for r in sdlc.analyze(repo)["open"]}
     _, a = _status(repo, monkeypatch, capsys)
-    dispatch = {"behind", "touched_ago", "quiet", "stopped", "gate"}
+    dispatch = {"behind", "touched_ago", "quiet", "stopped", "parked", "gate"}
     for rec in a["open"]:
         gained = {"needs", "answered", "column"}
         assert set(rec) == before[rec["dir"]] | dispatch | gained, rec["dir"]
@@ -3334,3 +3336,62 @@ def test_an_old_gate_record_shows_the_badge_alone(repo) -> None:
     _write(folder / "build" / "gate.md", "GATE: PASS\n\n## Attempt 1\n\nVerdict: PASS\nExit: 0\n")
     gate = _cards(repo)["012-draft-pins"]["gate"]
     assert (gate["command"], gate["summary"]) == (None, None)
+
+
+# ---------------------------------------------------------------- a parked change (222)
+
+
+def _parked_at(root: Path, deadline: str) -> Path:
+    """A factory run its supervisor last read as `parked`, its park written by `factory.py`'s own
+    writer, `deadline` its deadline."""
+    folder = _run_at(root, "parked")
+    fields = {"step": "gate", "round": 1, "resource": "staging db", "holder": "219-other",
+              "since": "2020-01-01T00:00:00Z", "retry": "2020-01-01T00:05:00Z",
+              "deadline": deadline, "attempts": 2}  # fmt: skip
+    _write(folder / factory.PARKED, factory.park_text(fields, []))
+    return folder
+
+
+PARK_LINE = (
+    "parked on staging db, held by 219-other; retry 2020-01-01T00:05:00Z, deadline {deadline}"
+)
+
+
+@pytest.mark.portable
+def test_a_parked_card_sits_at_the_gate_and_moves_to_needs_you_past_its_deadline(repo) -> None:
+    """222 R16: a park within its deadline is Building, its track at the gate saying what is held,
+    by whom, and until when; past its deadline with no stop recorded, Needs you."""
+    later = "2999-01-01T00:00:00Z"
+    _parked_at(repo, later)
+    card = _cards(repo)["016-draft-tags"]
+    assert card["column"] == "building", card
+    gate = card["progress"]["steps"][board.TRACK.index("gate")]
+    assert gate == {"name": "gate", "state": "parked", "label": PARK_LINE.format(deadline=later)}
+    assert card["parked"]["holder"] == "219-other"
+    page = (ROOT / "scripts" / "board.html").read_text(encoding="utf-8")
+    words = re.search(r"const STEP_WORDS = \{(.*?)\};", page).group(1)
+    assert re.search(r'\bparked: "[^"]+"', words), words
+    past = "2020-01-01T01:00:00Z"
+    _write(repo / ".sdlc" / "work" / "016-draft-tags" / factory.PARKED,
+           factory.park_text({**card["parked"], "deadline": past}, []))  # fmt: skip
+    card = _cards(repo)["016-draft-tags"]
+    assert card["column"] == "needs-you"
+    assert "parked past its deadline: free staging db" in card["needs"], card["needs"]
+
+
+def test_status_shows_a_parked_change_under_building(repo, monkeypatch, capsys) -> None:
+    """222 R16: `status` lists a parked change under Building with its park's line, and one past
+    its deadline under Needs you, as the board does."""
+    later = "2999-01-01T00:00:00Z"
+    _parked_at(repo, later)
+    out, _ = _status(repo, monkeypatch, capsys)
+    building = "\n".join(_sections(out)["Building"])
+    held, _, when = PARK_LINE.format(deadline=later).partition("; ")
+    assert "016" in building and f"⏸ {held};\n" in building and f"  {when}\n" in building, building
+    folder = repo / ".sdlc" / "work" / "016-draft-tags"
+    park = sdlc.factory_records.park(folder)
+    _write(folder / factory.PARKED, factory.park_text({**park, "deadline": "2020-01-01T01:00:00Z"},
+                                                      []))  # fmt: skip
+    out, _ = _status(repo, monkeypatch, capsys)
+    assert "016" in "\n".join(_sections(out)["Needs you"])
+    assert "016" not in "\n".join(_sections(out)["Building"])

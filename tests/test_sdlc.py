@@ -2766,10 +2766,25 @@ def test_a_stop_needs_its_way_on() -> None:
 
 
 @pytest.mark.portable
+def test_a_park_past_its_deadline_needs_the_person() -> None:
+    """222 R16: a park past its deadline with no stop recorded (a supervisor that died) needs the
+    resource freed; one within it needs nothing; a stop recorded says its own way on."""
+    park = {"resource": "staging db", "holder": "219-other", "retry": "2026-11-21T15:05:00Z",
+            "deadline": "2026-11-21T16:00:00Z"}  # fmt: skip
+    assert sdlc.needs_of(_rec(parked=park, now="2026-11-21T15:30:00Z")) == []
+    assert sdlc.needs_of(_rec(parked=park, now="2026-11-21T16:00:00Z")) == [
+        "parked past its deadline: free staging db"
+    ]
+    stopped = _rec(parked=park, now="2026-11-21T17:00:00Z", stopped={"way": "parked"})
+    assert sdlc.needs_of(stopped) == ["stopped: free what it waits on and rerun"]
+    assert sdlc.needs_of(_rec(stage="test", parked=park, now="2026-11-21T17:00:00Z")) == []
+
+
+@pytest.mark.portable
 def test_a_stop_s_need_is_in_plain_words() -> None:
     """120 (2026-11-17-84): a stop's need never says the factory's own word for a way, and holds
     no comma, since `status` joins a change's needs with one."""
-    for way in ("rerun", "mend", "ship"):
+    for way in ("rerun", "mend", "ship", "parked"):
         [need] = sdlc.needs_of(_rec(stopped={"way": way, "next": "x"}))
         assert need.startswith("stopped: ") and "," not in need, need
         assert "mend" not in need, need

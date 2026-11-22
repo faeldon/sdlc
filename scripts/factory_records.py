@@ -99,7 +99,7 @@ REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
 GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
 # A stopped run's record, which `factory.py verdicts --record` writes and removes.
 STOPPED = Path("runs") / "stopped.md"
-STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
+STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship|parked)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 # The step a run's last `verdicts --record` read, and the longest an agent session can run: what
@@ -117,6 +117,17 @@ DEPTH_RE = re.compile(r"^DEPTH: (full|light)\s*$")
 SINCE_RE = re.compile(r"^SINCE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
 AFTER_RE = re.compile(r"^AFTER: ([a-z]+)\s*$")
 AGENT_TIMEOUT = 3 * 3600
+# A change parked on a host resource (222): `runs/parked.md`, which only `factory.py gate` writes,
+# its key lines then `- NOTE:` lines. Copies of `factory.py`'s, pinned by name and over a table of
+# cases (`tests/test_modules.py`): `status` and the board show it, and never vouch for it.
+PARKED = Path("runs") / "parked.md"
+PARKED_RE = re.compile(r"^PARKED: (gate)\s*$")
+RESOURCE_RE = re.compile(r"^RESOURCE: (.+?)\s*$")
+HOLDER_RE = re.compile(r"^HOLDER: (.+?)\s*$")
+RETRY_RE = re.compile(r"^RETRY: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+DEADLINE_RE = re.compile(r"^DEADLINE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+ATTEMPTS_RE = re.compile(r"^ATTEMPTS: (\d+)\s*$")
+NOTE_RE = re.compile(r"^- NOTE: (.+?)\s*$")
 # The steps that pause a run for the person, each recorded with `AFTER:`, the step it paused at.
 PAUSES = ("decide", "upgrade", "spec")
 # A run upgraded to Tier 2 part way: `build/round-<P>.upgraded.md`, round P the upgraded run's
@@ -180,9 +191,9 @@ def no_verdict(n: int, role: str, kind: str = "round") -> str:
 
 def read_stop(folder: Path) -> dict | None:
     """The stop a factory run recorded in its folder's `runs/stopped.md`: its way on (`ship`,
-    `mend` or `rerun`), the sentence saying it, and its problems as the factory worded them. None
-    without a record. Never raises: a record that won't read is a stop whose one problem says so,
-    since what it stands for is still a run waiting on the person."""
+    `mend`, `rerun` or `parked`), the sentence saying it, and its problems as the factory worded
+    them. None without a record. Never raises: a record that won't read is a stop whose one
+    problem says so, since what it stands for is still a run waiting on the person."""
     path = folder / STOPPED
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -198,6 +209,40 @@ def read_stop(folder: Path) -> dict | None:
         return {"way": None, "next": f"read {STOPPED.as_posix()}", "problems": [why]}
     found = [m.group(1) for m in map(PROBLEM_RE.match, lines) if m]
     return {"way": way.group(1), "next": nxt[0], "problems": found}
+
+
+def read_park(text: str) -> dict | None:
+    """`runs/parked.md`'s fields, or None when it doesn't open with `PARKED:` or lacks any key
+    line: `step`, `round`, `resource`, `holder`, `since`, `retry`, `deadline` (stamps, as text),
+    `attempts` and its `notes`. A copy of `factory.py`'s `read_park()`, pinned to it."""
+    lines = text.splitlines()
+    step = PARKED_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    keys = {"round": ROUND_RE, "resource": RESOURCE_RE, "holder": HOLDER_RE, "since": SINCE_RE,
+            "retry": RETRY_RE, "deadline": DEADLINE_RE, "attempts": ATTEMPTS_RE}  # fmt: skip
+    out = {key: field(regex) for key, regex in keys.items()}
+    if not all(out.values()):
+        return None
+    out.update(step=step.group(1), round=int(out["round"]), attempts=int(out["attempts"]))
+    out["notes"] = [m.group(1) for m in map(NOTE_RE.match, lines) if m]
+    return out
+
+
+def park(folder: Path) -> dict | None:
+    """The park a factory run left in `folder` (`read_park()`), for `status` and the board, or
+    None without one or for one that won't read: the run's own `verdicts` reads that as a stop,
+    which `runs/stopped.md` then shows. Never raises."""
+    try:
+        text = (folder / PARKED).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    return read_park(text)
 
 
 def read_land_stop(folder: Path) -> dict | None:

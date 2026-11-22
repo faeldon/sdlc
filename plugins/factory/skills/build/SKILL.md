@@ -16,6 +16,7 @@ allowed-tools:
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py carry *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py snapshot *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate *)'
+  - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py park *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py write-spec *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py stage *)'
   - 'Bash(uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart *)'
@@ -115,7 +116,10 @@ build is gated). `start` also gives `head`, the commit
 the run starts from, `spec`, true for a Tier 2 at `stage: plan`, whose spec the spec-writer drafts
 before the gate, and every refusal: no worktree for the change, or a stage this can't start from
 (Tier 2 needs `stage: plan` or `design`; Tier 1, `stage: plan`). A run that stopped part way left
-the change at `stage: build`, and starts again from where its files say.
+the change at `stage: build`, and starts again from where its files say. `start` also gives
+`parked`: the park a host's busy answer left (`runs/parked.md`: its `resource`, `holder`, `retry`
+and `deadline`, the deadline cut to the base branch's `[park] deadline`), with `expired`, whether
+the deadline has passed; null with none. It writes nothing.
 
 **An escalated change can go back to the factory.** At `stage: test` with a `decision.md` that
 opens `DECISION: ESCALATE`, `start` gives a `restart` object instead of a refusal: `archive`, the
@@ -292,7 +296,16 @@ command line, only their id.
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py restart <NNN> --words <R1>
 ```
 
-Then go to step 2: `verdicts` names `build` at round `<R>`. Every `factory.py agent` call below runs with
+Then go to step 2: `verdicts` names `build` at round `<R>`. **On a rerun whose `start` gave a
+`parked` with `expired` true,** clear that park after the yes and before the first `verdicts`, so
+the build is gated again rather than stopped again on the old deadline:
+
+```bash
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py park <NNN> --clear
+```
+
+It refuses a park still within its deadline; a refusal is reported, and the run goes on to step 2,
+which reads the park as it stands. Every `factory.py agent` call below runs with
 `run_in_background`; when it exits, read its JSON (`to`, the file it wrote, or `problem`) and take
 the next step for that change. A `problem` is a stop, reported for that change alone.
 
@@ -343,6 +356,21 @@ the next step for that change. A `problem` is a stop, reported for that change a
      ```bash
      uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py gate <NNN>
      ```
+
+     A gate the host answered busy (the base branch's `[park] exit`), or that waited longer than
+     its bound for a slot, prints `verdict` `BUSY` and records no attempt: it parks the change
+     instead, and the next `verdicts` names `parked`.
+   - **`parked`**: the host's check said a resource it needs is held (`parked`: the `resource`,
+     its `holder`, the next `retry` and the `deadline`, which the host's answer never moves).
+     Start no agent and run no gate: wait for the retry, with `run_in_background`, then go back
+     to step 2.
+
+     ```bash
+     uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py park <NNN> --wait
+     ```
+
+     It returns at the retry, at the deadline, or as soon as the park is gone, writing nothing.
+     Past the deadline, `verdicts` names a `stop` whose `way` is `parked`.
 
    - **`fix`**: the gate is red on the round's build. The builder is told `The gate failed on
      round <round>: read .sdlc/work/NNN-slug/build/round-<round>.gate.md, fix what it shows, then
@@ -458,9 +486,13 @@ the next step for that change. A `problem` is a stop, reported for that change a
      A second reply that still needs a mend is a stop like any other: `agent` records each mend
      in `runs/mended`, `verdicts` then names that stop `rerun`, and a second mend is refused.
 
+     **A stop whose `way` is `parked`** is a park past its deadline: report it, naming the
+     resource and its holder, and leave it. The person frees the resource and reruns
+     `/sdlc-factory:build NNN`, which clears the expired park after its yes.
+
      The reading that stopped wrote `runs/stopped.md`: its problems word for word, and the way on
      (`way`: `ship` after a commit, `mend` for a missing `## Evidence` or an answer not in its
-     shape, `rerun` otherwise) with its
+     shape, `parked` for a park past its deadline, `rerun` otherwise) with its
      sentence, which the board and `/sdlc:status` show the person. Name that sentence in your
      report. Never write, edit or delete `runs/stopped.md` yourself: only a reading that finds the
      cause gone removes it, when the person reruns `/sdlc-factory:build NNN`.

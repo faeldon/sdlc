@@ -114,7 +114,7 @@ import tomllib
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from string import Template
 from typing import BinaryIO
@@ -184,9 +184,9 @@ def _parser(description: str, required: bool) -> argparse.ArgumentParser:
 
 HELP_ORDER = (
     "config", "start", "fresh", "verdicts", "decisions", "ask", "carry", "defuse", "snapshot",
-    "gate", "check", "shots", "write-spec", "stage", "restart", "upgrade", "agent", "sdlc-path",
-    "land-check", "land", "resolve", "train", "land-verdicts", "accept", "cases", "land-fix",
-    "ready", "escapes", "report-dir", "score", "slice", "answer", "autopilot",
+    "gate", "check", "park", "shots", "write-spec", "stage", "restart", "upgrade", "agent",
+    "sdlc-path", "land-check", "land", "resolve", "train", "land-verdicts", "accept", "cases",
+    "land-fix", "ready", "escapes", "report-dir", "score", "slice", "answer", "autopilot",
 )  # fmt: skip
 
 
@@ -227,6 +227,10 @@ DEFAULTS: dict = {
     # The most `factory.py gate` runs at once across every worktree of the repo: one by default,
     # so parallel runs' gates never fight each other for every core.
     "gate_jobs": 1,
+    # A host resource the check waits on (222), the base branch's alone (`_park()`): the exit code
+    # meaning "busy", opt-in with no default; how many minutes a park may last; and how many
+    # minutes to wait before asking again when the host names no `SDLC-BUSY-UNTIL`.
+    "park": {"exit": None, "deadline": 60, "retry": 5},
 }  # fmt: skip
 MAX_ROUNDS = 5
 # The permission modes `claude -p` takes, for the agent sessions the supervisor starts: none of
@@ -354,6 +358,9 @@ RUNS_THE_CHANGE = ("behaviour",)
 # `## Attempt <k>` section each. A red gate sends the builder back at most `GATE_FIXES` times a
 # round; one more red is a stop. A fix never counts as a round, which stays a reviewed one.
 GATE_TIMEOUT = 30 * 60
+# The longest a gate or `check` waits for a slot before giving up (222 R12): a gate past it parks
+# on the slot, a check exits 1. Two gates' worth, so a wait behind one full gate never parks.
+SLOT_WAIT = 2 * GATE_TIMEOUT
 GATE_FIXES = 2
 GATE_TAIL = 80
 # What the recorded output says in place of the main checkout's root, the home directory, the temp
@@ -592,6 +599,8 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
     warnings += ui_warnings
     cfg["gate_jobs"], jobs_warnings = _gate_jobs(root)
     warnings += jobs_warnings
+    cfg["park"], park_warnings = _park(root)
+    warnings += park_warnings
     base_models = _base_factory(root).get("models", {})
     cfg["models"], models_warnings = _models(base_models)
     warnings += models_warnings
@@ -624,6 +633,11 @@ def load_config(root: Path) -> tuple[dict, list[str]]:
         warnings.append(
             f"gate_jobs is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
             f"{data.get('gate_jobs')!r} applies once it lands"
+        )
+    if "park" in data and data.get("park") != _base_factory(root).get("park"):
+        warnings.append(
+            f"park is read from the base branch's {CONFIG_FILE.as_posix()}: this checkout's "
+            "[park] applies once it lands"
         )
     if "ui" in data and _ui_table(data.get("ui"))[0] != cfg["ui"]:
         warnings.append(
@@ -707,6 +721,38 @@ def _gate_jobs(root: Path) -> tuple[int, list[str]]:
             f"gate_jobs must be a whole number of 1 or more, so {DEFAULTS['gate_jobs']} runs"
         ]
     return jobs, []
+
+
+# The minutes `[park] deadline` and `retry` may be: at least one, and at most a day.
+PARK_MINUTES = (1, 1440)
+
+
+def _park(root: Path) -> tuple[dict, list[str]]:
+    """`[park]` as the base branch holds it (222 R1, R4): a change can neither turn busy on for
+    itself nor give its own park a longer deadline. `exit` is a code from 1 to 255, unset by
+    default; `deadline` and `retry` whole minutes in `PARK_MINUTES`, each bad value a warning
+    that leaves its default."""
+    table = _base_factory(root).get("park", {})
+    out, warnings = dict(DEFAULTS["park"]), []
+    if not isinstance(table, dict):
+        return out, ["park must be a table of exit, deadline and retry"]
+    low, high = PARK_MINUTES
+    for key, value in table.items():
+        whole = isinstance(value, int) and not isinstance(value, bool)
+        if key == "exit" and whole and 1 <= value <= 255:
+            out["exit"] = value
+        elif key in ("deadline", "retry") and whole and low <= value <= high:
+            out[key] = value
+        elif key == "exit":
+            warnings.append("park.exit must be a whole number from 1 to 255, so nothing parks")
+        elif key in ("deadline", "retry"):
+            warnings.append(
+                f"park.{key} must be whole minutes from {low} to {high}, so "
+                f"{DEFAULTS['park'][key]} runs"
+            )
+        else:
+            warnings.append(f"unknown key park.{key}")
+    return out, warnings
 
 
 def _ui(root: Path) -> tuple[dict, list[str]]:
@@ -1212,6 +1258,9 @@ def cmd_start(root: Path, ident: str, purpose: str) -> int:
         level: {role: model_for(role, cfg, tier, level) for role in ROLES}
         for level in ("light", "full")
     }
+    # A park the run left (222 R11): reported, with whether it is past its deadline, so the skill
+    # clears an expired one after the yes; written by nothing here.
+    out["parked"] = park_now(root, folder, cfg, _clock()) if purpose == "build" else None
     if purpose == "build" and stage == "test" and tier in (1, 2):
         # An escalated change, sent back: reported here, written only by `restart`, after the yes.
         restart, why = restart_state(folder)
@@ -2509,13 +2558,18 @@ def stop_text(
     problems: list[str],
     stuck: list[str] | tuple = (),
     untestable: list[str] | tuple = (),
+    park: dict | None = None,
 ) -> str:
     """`runs/stopped.md`'s text: the way on, its short sentence, the longer one (`WAYS_WHY`), each
     problem on a line of its own, and under them the reasons the run had stopped early, if it had
-    (`early_lines()`), so the record says the whole of where the run stands."""
+    (`early_lines()`), so the record says the whole of where the run stands. A `parked` stop's
+    sentences name the park's resource and holder."""
     ident = change.split("-", 1)[0]
-    lines = [f"STOPPED: {way}", f"NEXT: {WAYS[way].format(id=ident)}", ""]
-    lines += [WAYS_WHY[way].format(id=ident), ""]
+    park = park or {}
+    words = {"id": ident, "resource": park.get("resource") or "the resource",
+             "holder": park.get("holder") or "unknown"}  # fmt: skip
+    lines = [f"STOPPED: {way}", f"NEXT: {WAYS[way].format(**words)}", ""]
+    lines += [WAYS_WHY[way].format(**words), ""]
     lines += [f"- PROBLEM: {' '.join(p.split())}" for p in problems]
     lines += early_lines(stuck, untestable)
     return "\n".join(lines) + "\n"
@@ -2704,11 +2758,16 @@ def _record_land(
 STOPPED = Path("runs") / "stopped.md"
 
 
-def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False) -> int:
+def cmd_verdicts(
+    root: Path, ident: str, head: str | None, record: bool = False, now: datetime | None = None
+) -> int:
     """The review rounds and the decision so far, and the step the loop takes next:
 
     - `build`: no builder report yet: run the builder (`build/round-1.md`).
     - `gate`: run `gate` on `round`'s build, which no attempt has judged as it stands now.
+    - `parked`: the host answered `round`'s gate busy (`runs/parked.md`, `parked`): wait until its
+      `retry` (`park --wait`), then read again; past its `deadline` the park is a `stop` whose
+      way is `parked`.
     - `fix`: the gate is red on `round`'s build: resume the builder with
       `build/round-<round>.gate.md`; its report is added to `build/round-<round>.md`. A red gate
       more than `GATE_FIXES` times in a round is a `stop`.
@@ -2737,15 +2796,17 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     A stop names its `way` on (`WAYS`): `ship` when `HEAD` moved, `mend` when every problem is a
     missing `## Evidence`, verdict lines that disagree in the last round (`preamble()`), the
     arbiter's unread answers in the last round, or decision lines that disagree
-    (`decision_preamble()`), with the roles to mend in `mend`, `rerun` otherwise. A role is mended
+    (`decision_preamble()`), with the roles to mend in `mend`, `parked` when the one problem is a
+    park past its deadline, `rerun` otherwise. A role is mended
     once a round: one `runs/mended` names for that round no longer counts as mendable.
 
     Run `decisions` first: this reads the ledger as it stands, and writes nothing, but with
     `--record`, which only the supervisor passes and only with `--head`: then a stop is written to
     `runs/stopped.md` (`stop_text()`) for the board and status, from this same reading, and any
     other step removes it; and every reading is written to `runs/step.md` (`step_text()`) for the
-    board's step track, its `SINCE:` kept while the step and round hold. Nothing in the loop reads
-    either back.
+    board's step track, its `SINCE:` kept while the step and round hold; and a stale park
+    (another round's, or one whose gate has run since) is removed. Nothing in the loop reads
+    either record back. `now` is the clock a park is read against, the real one by default.
 
     Beside the step: the run's `depth` (`depth()`), `reworked` (the paths the round to review
     changed since the last, from the snapshots), `settled` (what earlier rounds answered, never
@@ -2758,17 +2819,20 @@ def cmd_verdicts(root: Path, ident: str, head: str | None, record: bool = False)
     if record and not head:
         why = "--record needs --head: without it a stop for HEAD moving would be removed"
         return emit({"refusals": [why]}, 1)
-    out, refusal = run_state.loop_state(root, ident, head)
+    out, refusal = run_state.loop_state(root, ident, head, now)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
     if record:
         folder, _ = find_change(root, ident)
         path = folder / STOPPED
+        if out["park_stale"]:
+            (folder / PARKED).unlink(missing_ok=True)
         if out["next"] == "stop":
             path.parent.mkdir(parents=True, exist_ok=True)
             text = stop_text(
-                folder.name, out["way"], out["problems"], out["stuck"], out["untestable"]
-            )
+                folder.name, out["way"], out["problems"], out["stuck"], out["untestable"],
+                out["parked"],
+            )  # fmt: skip
             path.write_text(text, encoding="utf-8", newline="\n")
         else:
             path.unlink(missing_ok=True)
@@ -3126,6 +3190,7 @@ RECORD_GLOBS = (
     "build/land-*.build.md",
     "build/land-accept.md",
     "build/gate.md",
+    "runs/parked.md",
 )
 
 
@@ -3596,11 +3661,21 @@ def by_refusal(root: Path, by: str | None) -> str | None:
     return BY_AUTOPILOT_REFUSED if by == "autopilot" and not autopilot_running(root) else None
 
 
+class SlotWaitExpired(Exception):
+    """`gate_slot()` waited `SLOT_WAIT` seconds with every slot held: `waited`, the seconds."""
+
+    def __init__(self, waited: float) -> None:
+        super().__init__(f"no gate slot came free in {waited:g}s")
+        self.waited = waited
+
+
 @contextmanager
 def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, float]]:
     """Hold one of `jobs` gate slots for the `with` block, waiting until one is free, and yield
-    which (`k`) and how many seconds the wait took (0.0 for none). A wait says so once, on stderr.
-    Outside a git repo there are no slots: `(None, 0.0)`, and the gate runs unlimited."""
+    which (`k`) and how many seconds the wait took (0.0 for none). A wait says so once, on stderr,
+    and lasts at most `SLOT_WAIT` seconds: past it, `SlotWaitExpired` is raised as the block is
+    entered, holding nothing. Outside a git repo there are no slots: `(None, 0.0)`, and the gate
+    runs unlimited."""
     where = _slot_dir(root)
     if where is None:
         yield None, 0.0
@@ -3617,6 +3692,8 @@ def gate_slot(root: Path, jobs: int, change: str) -> Iterator[tuple[int | None, 
                     print(f"{change}: waiting for a gate slot ({jobs} of {jobs} in use)",
                           file=sys.stderr, flush=True)  # fmt: skip
                     said = True
+                if time.monotonic() - start >= SLOT_WAIT:
+                    raise SlotWaitExpired(round(time.monotonic() - start, 1))
                 time.sleep(SLOT_POLL)
         waited = round(time.monotonic() - start, 1) if said else 0.0
         try:
@@ -3641,11 +3718,179 @@ def _run_check(root: Path, command: str, capture: bool) -> subprocess.CompletedP
     return subprocess.run(_sh(command), cwd=root, stdin=subprocess.DEVNULL, timeout=GATE_TIMEOUT)
 
 
+# A change parked on a host resource (222): `runs/parked.md`, written only by `gate` (vouched
+# first, as a gate record is), on a build round's busy answer or a slot wait past `SLOT_WAIT`, and
+# removed by the next attempt that isn't busy, by `verdicts --record` once it is stale, and by
+# `park --clear` once past its deadline. Key lines, then `- NOTE:` lines, as `runs/stopped.md`;
+# `sdlc`'s `factory_records.py` keeps copies of these and of `read_park()`, pinned by tests.
+PARKED = Path("runs") / "parked.md"
+PARKED_RE = re.compile(r"^PARKED: (gate)\s*$")
+RESOURCE_RE = re.compile(r"^RESOURCE: (.+?)\s*$")
+HOLDER_RE = re.compile(r"^HOLDER: (.+?)\s*$")
+RETRY_RE = re.compile(r"^RETRY: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+DEADLINE_RE = re.compile(r"^DEADLINE: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s*$")
+ATTEMPTS_RE = re.compile(r"^ATTEMPTS: (\d+)\s*$")
+NOTE_RE = re.compile(r"^- NOTE: (.+?)\s*$")
+# What a busy host prints (R3), each line optional, the last of each counting: `UNTIL` is a UTC
+# time or whole minutes from now, and sets only the next retry, never the deadline.
+BUSY_RE = re.compile(r"^SDLC-BUSY-(RESOURCE|HOLDER|UNTIL):[ \t]*(.*?)[ \t\r]*$", re.M)
+BUSY_CUT = 200
+UNTIL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+STAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+# What a slot wait past `SLOT_WAIT` parks on, with or without `[park] exit` (R12).
+SLOT_BUSY = {"resource": "gate slot", "holder": "another gate", "until": None}
+
+
+def _clock() -> datetime:
+    """Now, to the second, in UTC: the one clock a park reads, which the tests stand in for."""
+    return datetime.now(UTC).replace(microsecond=0)
+
+
+def _pause(seconds: float) -> None:
+    """Sleep `seconds`: `park --wait`'s one pause, which the tests stand in for."""
+    time.sleep(max(0.0, seconds))
+
+
+def _stamp_time(stamp: str) -> datetime:
+    return datetime.strptime(stamp, STAMP_FORMAT).replace(tzinfo=UTC)
+
+
+def _stamp_of(when: datetime) -> str:
+    return when.strftime(STAMP_FORMAT)
+
+
+def busy_of(code: int | None, output: str, cfg: dict, root: Path | None = None) -> dict | None:
+    """The host's busy answer (R1, R3): None unless the base branch's `[park] exit` is set and
+    the command exited with exactly it; else its `resource`, `holder` (each `unknown` when not
+    given) and `until` (None when not given), each the last line of its kind, made to one line,
+    marked (`_placeholders()` given `root`, which ends in `_defused()`; else `_defused()`) and cut
+    to `BUSY_CUT` characters: marked first, so a cut never leaves half a path unmarked."""
+    want = (cfg.get("park") or {}).get("exit")
+    if want is None or code != want:
+        return None
+    found = {m.group(1).lower(): m.group(2) for m in BUSY_RE.finditer(output or "")}
+
+    def clean(value: str) -> str:
+        value = " ".join(value.split())
+        return (_placeholders(value, root) if root else _defused(value))[:BUSY_CUT]
+
+    out = {key: clean(found.get(key, "")) for key in ("resource", "holder", "until")}
+    out["resource"] = out["resource"] or "unknown"
+    out["holder"] = out["holder"] or "unknown"
+    out["until"] = out["until"] or None
+    return out
+
+
+def _until(text: str | None, now: datetime) -> datetime | None:
+    """A host's `UNTIL` as a time: a UTC stamp, or whole minutes from `now`; None for anything
+    else."""
+    if not text:
+        return None
+    if UNTIL_RE.match(text):
+        return _stamp_time(text)
+    if text.isdigit() and len(text) <= 6:
+        return now + timedelta(minutes=int(text))
+    return None
+
+
+def park_fields(
+    old: dict | None, busy: dict, cfg: dict, now: datetime, step: str, rnd: int
+) -> tuple[dict, list[str]]:
+    """The park a busy answer leaves (R4), and its notes: the first for a (step, round) starts
+    now and ends `[park] deadline` minutes on; a later one (`old`, the same step and round) keeps
+    both, its deadline cut to the base branch's, and counts the attempt. `RETRY` is the host's
+    `UNTIL`, or `[park] retry` minutes on, never under a minute from now nor past the deadline."""
+    park = cfg["park"]
+    same = bool(old) and old["step"] == step and old["round"] == rnd
+    since = _stamp_time(old["since"]) if same else now
+    cap = since + timedelta(minutes=park["deadline"])
+    deadline = min(_stamp_time(old["deadline"]), cap) if same else cap
+    notes = []
+    until = _until(busy.get("until"), now)
+    if busy.get("until") and until is None:
+        notes.append(
+            f"SDLC-BUSY-UNTIL {busy['until']!r} didn't read as a UTC time or whole minutes, so "
+            f"the retry is [park] retry's {park['retry']} minutes"
+        )
+    retry = until or now + timedelta(minutes=park["retry"])
+    retry = min(max(retry, now + timedelta(minutes=1)), deadline)
+    fields = {
+        "step": step, "round": rnd, "resource": busy["resource"], "holder": busy["holder"],
+        "since": _stamp_of(since), "retry": _stamp_of(retry), "deadline": _stamp_of(deadline),
+        "attempts": old["attempts"] + 1 if same else 1,
+    }  # fmt: skip
+    return fields, notes
+
+
+def park_text(fields: dict, notes: list[str]) -> str:
+    """`runs/parked.md`'s text: its key lines in order, then a `- NOTE:` line each."""
+    lines = [
+        f"PARKED: {fields['step']}", f"ROUND: {fields['round']}",
+        f"RESOURCE: {fields['resource']}", f"HOLDER: {fields['holder']}",
+        f"SINCE: {fields['since']}", f"RETRY: {fields['retry']}",
+        f"DEADLINE: {fields['deadline']}", f"ATTEMPTS: {fields['attempts']}",
+    ]  # fmt: skip
+    lines += [""] + [f"- NOTE: {' '.join(n.split())}" for n in notes] if notes else []
+    return "\n".join(lines) + "\n"
+
+
+def read_park(text: str) -> dict | None:
+    """`runs/parked.md`'s fields, or None when it doesn't open with `PARKED:` or lacks any key
+    line: `step`, `round`, `resource`, `holder`, `since`, `retry`, `deadline` (stamps, as text),
+    `attempts` and its `notes`."""
+    lines = text.splitlines()
+    step = PARKED_RE.match(lines[0]) if lines else None
+    if not step:
+        return None
+
+    def field(regex: re.Pattern) -> str | None:
+        found = [m.group(1) for m in map(regex.match, lines) if m]
+        return found[0] if found else None
+
+    keys = {"round": ROUND_RE, "resource": RESOURCE_RE, "holder": HOLDER_RE, "since": SINCE_RE,
+            "retry": RETRY_RE, "deadline": DEADLINE_RE, "attempts": ATTEMPTS_RE}  # fmt: skip
+    out = {key: field(regex) for key, regex in keys.items()}
+    if not all(out.values()):
+        return None
+    out.update(step=step.group(1), round=int(out["round"]), attempts=int(out["attempts"]))
+    out["notes"] = [m.group(1) for m in map(NOTE_RE.match, lines) if m]
+    return out
+
+
+def capped_park(park: dict, cfg: dict) -> dict:
+    """`park` with its deadline cut to `SINCE` plus the base branch's `[park] deadline`, whatever
+    the file says (R8), and its retry to that deadline."""
+    cap = _stamp_time(park["since"]) + timedelta(minutes=cfg["park"]["deadline"])
+    deadline = min(_stamp_time(park["deadline"]), cap)
+    retry = min(_stamp_time(park["retry"]), deadline)
+    return {**park, "deadline": _stamp_of(deadline), "retry": _stamp_of(retry)}
+
+
+def park_now(root: Path, folder: Path, cfg: dict, now: datetime) -> dict | None:
+    """The change's park as it stands, for `start` and `park`: its fields with the deadline cut
+    to the base branch's (`capped_park()`), whether it is `expired` at `now`, and whether the
+    records ledger `vouched` for it; None without a record or for one that won't read."""
+    path = folder / PARKED
+    try:
+        park = read_park(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+    if park is None:
+        return None
+    park = capped_park(park, cfg)
+    park["expired"] = now >= _stamp_time(park["deadline"])
+    park["vouched"] = vouched(root, folder, path)
+    return park
+
+
 def cmd_check(root: Path, ident: str) -> int:
     """Run the base branch's `[commands] check` in the change's worktree, as `gate` does, holding
     one of the same `gate_jobs` slots while it runs, its output straight through and its exit code
     the command's: an agent's full run of the suite, waiting its turn with the gates. Writes
-    nothing and proves nothing to the script: the gate's record stays the one proof of a build."""
+    nothing and proves nothing to the script: the gate's record stays the one proof of a build.
+    With the base branch's `[park] exit` set, the output is caught and printed once the command
+    ends, so a busy answer's lines can be read: its code is returned unchanged, with one
+    `busy:` line on stderr (222 R14). A wait for a slot past `SLOT_WAIT` exits 1 (R12)."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -3656,16 +3901,31 @@ def cmd_check(root: Path, ident: str) -> int:
     if command is None:
         why = "the base branch's .sdlc/config.toml has no [commands] check"
         return emit({"refusals": [why]}, 1)
-    jobs = load_config(root)[0]["gate_jobs"]
-    with gate_slot(root, jobs, folder.name):
+    cfg = load_config(root)[0]
+    catch = cfg["park"]["exit"] is not None
+    try:
+        with gate_slot(root, cfg["gate_jobs"], folder.name):
+            sys.stdout.flush()
+            try:
+                done = _run_check(root, command, capture=catch)
+            except subprocess.TimeoutExpired:
+                print(f"{folder.name}: timed out after {GATE_TIMEOUT}s", file=sys.stderr,
+                      flush=True)  # fmt: skip
+                return 1
+            except OSError as e:
+                print(f"{folder.name}: didn't run: {e}", file=sys.stderr, flush=True)
+                return 1
+    except SlotWaitExpired as e:
+        print(f"{folder.name}: {e}, so the check didn't run", file=sys.stderr, flush=True)
+        return 1
+    if catch:
+        sys.stdout.write(done.stdout or "")
         sys.stdout.flush()
-        try:
-            return _run_check(root, command, capture=False).returncode
-        except subprocess.TimeoutExpired:
-            print(f"{folder.name}: timed out after {GATE_TIMEOUT}s", file=sys.stderr, flush=True)
-        except OSError as e:
-            print(f"{folder.name}: didn't run: {e}", file=sys.stderr, flush=True)
-    return 1
+        sys.stderr.write(done.stderr or "")
+        busy = busy_of(done.returncode, (done.stdout or "") + (done.stderr or ""), cfg, root)
+        if busy:
+            print(f"{folder.name}: {busy_line(busy)}", file=sys.stderr, flush=True)
+    return done.returncode
 
 
 @command(
@@ -3675,6 +3935,40 @@ def cmd_check(root: Path, ident: str) -> int:
 )
 def cli_check(root: Path, args) -> int:
     return cmd_check(root, args.id)
+
+
+def busy_line(busy: dict) -> str:
+    """One line for a busy answer: what is held, by whom, and until when the host said."""
+    return f"busy: {busy['resource']} held by {busy['holder']} until {busy['until'] or 'unknown'}"
+
+
+def _gate_busy(root: Path, folder: Path, n: int, busy: dict, cfg: dict, land: bool) -> int:
+    """A gate the host answered busy with the tree as it found it, or that waited past
+    `SLOT_WAIT` for a slot: no attempt is written. A landing's gate gives a `problem` naming what
+    is held, which stops a train rather than ejecting (R13); a build round's parks the change in
+    `runs/parked.md`, vouched before it is written, keeping the deadline of a park already on
+    this round (R2, R4). Exit 1 always."""
+    out = {"change": folder.name, "round": n, "verdict": "BUSY", "busy": busy}
+    if land:
+        out["problem"] = f"the landing's gate was answered {busy_line(busy)}: run it again then"
+        return emit(out, 1)
+    path = folder / PARKED
+    old = None
+    if path.is_file() and vouched(root, folder, path):
+        old = read_park(path.read_text(encoding="utf-8"))
+    fields, notes = park_fields(old, busy, cfg, _clock(), "gate", n)
+    text = park_text(fields, notes)
+    try:
+        _vouch(root, folder, path, text)
+    except OSError as e:
+        why = f"couldn't vouch for {PARKED.as_posix()}, so wrote nothing: {e}"
+        return emit({**out, "refusals": [why]}, 1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print(f"{folder.name}: {busy_line(busy)}: parked until {fields['retry']}, deadline "
+          f"{fields['deadline']}", file=sys.stderr, flush=True)  # fmt: skip
+    out.update(parked=fields | {"notes": notes}, to=path.relative_to(root).as_posix())
+    return emit(out, 1)
 
 
 def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) -> int:
@@ -3721,25 +4015,36 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         path, built = gate_path(folder, n), build_hash(folder, n)
         if why := _unvouched_refusal(root, folder, path):
             return emit({"change": folder.name, "refusals": [why]}, 1)
-    jobs = load_config(root)[0]["gate_jobs"]
-    with gate_slot(root, jobs, folder.name) as (slot, waited):
-        before = _tree_hashes(root, base)
-        start = time.monotonic()
-        try:
-            done = _run_check(root, command, capture=True)
-            code, output = done.returncode, done.stdout + done.stderr
-            exit_text = str(code)
-        except subprocess.TimeoutExpired as e:
-            # A timeout's partial output is bytes even in text mode.
-            partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for o in
-                       (e.stdout, e.stderr)]  # fmt: skip
-            code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
-            exit_text = "timeout"
-        except OSError as e:
-            code, output, exit_text = None, f"didn't run: {e}", "didn't run"
-        seconds = round(time.monotonic() - start, 1)
-        after = _tree_hashes(root, base)
+    cfg = load_config(root)[0]
+    try:
+        with gate_slot(root, cfg["gate_jobs"], folder.name) as (slot, waited):
+            before = _tree_hashes(root, base)
+            start = time.monotonic()
+            try:
+                done = _run_check(root, command, capture=True)
+                code, output = done.returncode, done.stdout + done.stderr
+                exit_text = str(code)
+            except subprocess.TimeoutExpired as e:
+                # A timeout's partial output is bytes even in text mode.
+                partial = [o.decode("utf-8", "replace") if isinstance(o, bytes) else o or "" for
+                           o in (e.stdout, e.stderr)]  # fmt: skip
+                code, output = None, "".join(partial) + f"\ntimed out after {GATE_TIMEOUT}s"
+                exit_text = "timeout"
+            except OSError as e:
+                code, output, exit_text = None, f"didn't run: {e}", "didn't run"
+            seconds = round(time.monotonic() - start, 1)
+            after = _tree_hashes(root, base)
+    except SlotWaitExpired:
+        # The check never ran, so it changed nothing.
+        before = after = {}
+        busy = dict(SLOT_BUSY)
+    else:
+        busy = busy_of(code, output, cfg, root)
     changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+    # Busy only with the tree as the check found it: a check that edited the change and answered
+    # busy is a failed attempt, or the next attempt's snapshot would take the edit in unseen.
+    if busy and not changed:
+        return _gate_busy(root, folder, n, busy, cfg, land)
     verdict = "PASS" if code == 0 and not changed else "FAIL"
     # Checked again after the slot wait and the run, before the earlier record is read: one
     # rewritten by hand meanwhile would be vouched along with this attempt.
@@ -3771,6 +4076,9 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
         why = f"couldn't vouch for {path.relative_to(folder).as_posix()}, so wrote nothing: {e}"
         return emit({"change": folder.name, "refusals": [why]}, 1)
     path.write_text(text, encoding="utf-8", newline="\n")
+    if not land:
+        # An attempt that wasn't busy ends a build round's park (R5).
+        (folder / PARKED).unlink(missing_ok=True)
     out = {"change": folder.name, "round": n, "attempt": attempt, "verdict": verdict}
     out.update(exit=exit_text, seconds=seconds, waited=waited, slot=slot, tree=tree)
     out["to"] = path.relative_to(root).as_posix()
@@ -3786,6 +4094,66 @@ def cmd_gate(root: Path, ident: str, land: bool = False, build: bool = False) ->
 )
 def cli_gate(root: Path, args) -> int:
     return cmd_gate(root, args.id, args.land, args.build)
+
+
+# How often `park --wait` reads the record again, in seconds.
+PARK_POLL = 5
+
+
+def cmd_park(root: Path, ident: str, wait: bool = False, clear: bool = False) -> int:
+    """A parked change's two moves (222 R10). `--wait` reads `runs/parked.md` every `PARK_POLL`
+    seconds until its `RETRY`, its deadline (cut to the base branch's, and to that many minutes
+    from now, so a record can't hold it longer) or the record is gone, whichever comes first;
+    writes nothing, and prints the reading `verdicts` gives then. `--clear` removes a park past
+    its deadline, after a rerun's yes, and refuses one that isn't: a park clears itself at its
+    next attempt."""
+    folder, refusal = find_change(root, ident)
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    cfg = load_config(root)[0]
+    path = folder / PARKED
+    if clear:
+        out = {"change": folder.name, "cleared": False}
+        if not path.is_file():
+            return emit(out)
+        park = park_now(root, folder, cfg, _clock())
+        if park is None:
+            why = f"{PARKED.as_posix()} won't read: remove it by hand, then rerun"
+            return emit({**out, "refusals": [why]}, 1)
+        if not park["expired"]:
+            why = (f"parked on {park['resource']} until {park['deadline']}: it clears itself at "
+                   "its next attempt, or once past its deadline")  # fmt: skip
+            return emit({**out, "parked": park, "refusals": [why]}, 1)
+        path.unlink()
+        return emit({**out, "cleared": True, "parked": park})
+    bound = _clock() + timedelta(minutes=cfg["park"]["deadline"])
+    while True:
+        now = _clock()
+        park = park_now(root, folder, cfg, now)
+        if park is None or not park["vouched"]:
+            break
+        until = min(_stamp_time(park["retry"]), _stamp_time(park["deadline"]), bound)
+        if now >= until:
+            break
+        _pause(min(PARK_POLL, (until - now).total_seconds()))
+    out, refusal = run_state.loop_state(root, ident, None, _clock())
+    if refusal:
+        return emit({"refusals": [refusal]}, 1)
+    return emit(out)
+
+
+@command(
+    "park",
+    "wait out a parked change's retry, or clear a park past its deadline",
+    arg("id"),
+    exclusive(
+        arg("--wait", action="store_true", help="until its retry or deadline; writes nothing"),
+        arg("--clear", action="store_true", help=f"remove an expired {PARKED.as_posix()}"),
+        required=True,
+    ),
+)
+def cli_park(root: Path, args) -> int:
+    return cmd_park(root, args.id, args.wait, args.clear)
 
 
 def set_stage(text: str, stage: str, today: str) -> tuple[str, list[str]]:
@@ -4013,7 +4381,7 @@ TRAIN_GATE_RE = re.compile(r"^GATE: (\d+) (PASS|FAIL) ([0-9a-f]+) (\S+)\s*$")
 LAND_ACCEPT = Path("build") / "land-accept.md"
 # A stopped run's record, written and removed only by `verdicts --record`, read by the board and
 # `sdlc.py status` (each with its own copies of these, pinned by tests), never by the loop.
-STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship)\s*$")
+STOPPED_RE = re.compile(r"^STOPPED: (mend|rerun|ship|parked)\s*$")
 NEXT_RE = re.compile(r"^NEXT: (.+?)\s*$")
 PROBLEM_RE = re.compile(r"^- PROBLEM: (.+?)\s*$")
 # The step the supervisor's last reading named, and since when: written on every reading by
@@ -4072,6 +4440,7 @@ WAYS = {
     "ship": "read the commit, then /sdlc:ship {id}",
     "mend": "rerun /sdlc-factory:build {id}, or /sdlc:ship {id}",
     "rerun": "fix its cause, then /sdlc-factory:build {id}, or /sdlc:ship {id}",
+    "parked": "free {resource} (held by {holder}), then /sdlc-factory:build {id}",
 }
 # The longer sentence under it, in the record's body, which the board's drawer shows. No reader
 # parses it: it matches none of `STOPPED_RE`, `NEXT_RE` or `PROBLEM_RE`.
@@ -4087,7 +4456,19 @@ WAYS_WHY = {
         "Fix the cause the problems below name, then rerun /sdlc-factory:build {id}, or ship it by"
         " hand with /sdlc:ship {id}."
     ),
+    "parked": (
+        "The host's check kept answering busy until the park's deadline: {resource} is held by"
+        " {holder}. Free it, or wait for its holder to, then rerun /sdlc-factory:build {id}, which"
+        " clears the expired park after its yes and gates the build again."
+    ),
 }
+# Every step `verdicts` can name (222 R17), each a row of the factory README's *The loop's states*
+# table with what moves it on and what bounds it: `tests/test_factory_park.py` reads every value
+# `run_state.py` gives `out["next"]` and holds it to this list and the table.
+STEPS = (
+    "build", "gate", "fix", "review", "arbitrate", "rework", "approve", "decide", "upgrade",
+    "spec", "parked", "done", "stop",
+)  # fmt: skip
 # The run's own token counts, as `runs/costs.jsonl` names them, from the result's `usage`.
 USAGE_FIELDS = {
     "in": "input_tokens", "out": "output_tokens",

@@ -323,6 +323,33 @@ def test_land_verdict_stops_on_a_hand_written_record(tmp_path, capsys, record) -
 
 
 @needs_uv
+def test_a_busy_landing_gate_is_a_problem_never_an_eject(tmp_path, capsys) -> None:
+    """222 R13: a landing gate the host answers busy writes no attempt and no park, and gives a
+    `problem` naming what is held, which `train --run` stops on; with no red attempt, the landing
+    still names its gate, never a stop for a red one, and a train never ejects for it."""
+    root = _repo(tmp_path)
+    busy = 'echo "SDLC-BUSY-RESOURCE: staging db"; echo "SDLC-BUSY-HOLDER: 219-other"; exit 75'
+    _config(root, f"[commands]\ncheck = {json.dumps(busy)}\n")
+    (root / ".sdlc" / "factory.toml").write_text("[park]\nexit = 75\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "park")
+    tree = _ready(root, "held", "held's one")
+    (root / "elsewhere.txt").write_text("moved on\n", encoding="utf-8")
+    _git(root, "add", "elsewhere.txt")
+    _git(root, "commit", "-q", "-m", "main moves on")
+    out = _stack(root, tree, capsys)
+    assert (out["state"], out["round"]) == ("stacked", 1), out
+    code, out = _run(capsys, factory.cmd_gate, tree, "001", True)
+    assert code == 1 and out["verdict"] == "BUSY", out
+    assert "staging db held by 219-other until unknown" in out["problem"], out
+    folder = _folder(tree)
+    assert not factory.land_gate_path(folder, 1).exists()
+    assert not (folder / factory.PARKED).exists()
+    code, out = _run(capsys, factory.landing.cmd_land_verdicts, tree, "001")
+    assert out["next"] == "gate", out
+
+
+@needs_uv
 def test_a_refused_step_lands_nothing_of_that_change(tmp_path, capsys) -> None:
     """A change the approver proposed no impact for can't be shipped by land: it is refused before
     anything is written, and its folder and worktree stay as they were."""

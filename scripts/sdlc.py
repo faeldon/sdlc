@@ -5123,17 +5123,29 @@ FACTORY_STOP_NEEDS = {
     "ship": "review an agent's commit",
     "mend": "rerun to ask an agent again",
     "rerun": "fix its cause and rerun",
+    "parked": "free what it waits on and rerun",
 }
+
+
+def park_line(park: dict) -> str:
+    """A parked run's one line (222 R16), the same on the board's card and in `status`: what is
+    held, by whom, the next retry and the deadline."""
+    return (
+        f"parked on {park['resource']}, held by {park['holder']}; retry {park['retry']}, "
+        f"deadline {park['deadline']}"
+    )
 
 
 def needs_of(rec: dict) -> list[str]:
     """What a change needs from the person, as short texts, from fields already read: `stage`,
-    `tier`, `problems`, `stopped`, `land_stop`, `decision`, `reconsider`, `pending`, `assumed`,
-    `ledger_lines`, `reasons`, `looks`, `gate` (the hand gate's record) and `spec_filled`. The
-    one place the rules live, so the board and `status` can't disagree; it reads nothing itself.
+    `tier`, `problems`, `stopped`, `parked` and `now` (a park and the caller's clock, as stamps),
+    `land_stop`, `decision`, `reconsider`, `pending`, `assumed`, `ledger_lines`, `reasons`,
+    `looks`, `gate` (the hand gate's record) and `spec_filled`. The one place the rules live, so
+    the board and `status` can't disagree; it reads nothing itself, the clock included.
     Every problem first, at any stage; at `test` or `shipped`, the landing's stages, a stopped
     landing (`land_stop`, `factory_records.read_land_stop()`), naming the step it stopped after;
-    a closed change nothing more; at `build` a stop, then each blocking decision; at `test` with an
+    a closed change nothing more; at `build` a stop, or with none a park past its deadline (its
+    supervisor gone before it recorded the stop), then each blocking decision; at `test` with an
     ESCALATE what its ledger and decision still hold (each current `look` to acknowledge, and
     `gate it green` while a `gate` reason has no current green hand gate), or, with no reason and
     no ledger line at all, or a look reason not yet filed, the escalation itself; a Tier 2 at
@@ -5149,6 +5161,9 @@ def needs_of(rec: dict) -> list[str]:
         if stop := rec.get("stopped"):
             way = FACTORY_STOP_NEEDS.get(stop.get("way") or "")
             needs.append(f"stopped: {way or f'read {factory_records.STOPPED.as_posix()}'}")
+        elif (park := rec.get("parked")) and rec.get("now") and rec["now"] >= park["deadline"]:
+            # Stamps in one fixed UTC form compare as text.
+            needs.append(f"parked past its deadline: free {park['resource']}")
         needs += pending
     elif stage == "test" and rec.get("decision") == "ESCALATE":
         needs += pending
@@ -10662,6 +10677,11 @@ def _change_lines(rec: dict, a: dict) -> list[str]:
         for problem in rec["stopped"]["problems"]:
             lines.append(f"{indent}⚠ {_cut(problem, STATUS_WIDTH - len(indent) - 2)}")
         lines.append(f"{indent}→ {rec['stopped']['next']}")
+    elif rec.get("parked"):
+        # The park's line in two, at its `; `, since its stamps alone fill most of a line.
+        held, _, when = park_line(rec["parked"]).partition("; ")
+        lines.append(f"{indent}⏸ {_cut(held + ';', STATUS_WIDTH - len(indent) - 2)}")
+        lines.append(f"{indent}  {when}")
     return lines
 
 
@@ -10859,6 +10879,11 @@ def cli_status(root: Path, home: Path, args) -> int:
         rec["stopped"] = (
             factory_records.read_stop(Path(root, rec["dir"])) if rec["stage"] == "build" else None
         )
+        # A park the run left at `build` (222 R16), shown under its line and, past its deadline,
+        # a need.
+        rec["parked"] = (
+            factory_records.park(Path(root, rec["dir"])) if rec["stage"] == "build" else None
+        )
         # A gate run by hand (`gate`) says whether the build as it stands is green; a factory
         # run's gate is its own while it builds, and at `test` the hand gate clears a `gate` reason.
         folder = Path(root, rec["dir"])
@@ -10874,6 +10899,7 @@ def cli_status(root: Path, home: Path, args) -> int:
             "land_stop": factory_records.read_land_stop(folder) if rec["stage"] == "test" else None,
             "mode": "factory" if (folder / "runs").is_dir() else "manual",
             "change": f"{rec['id']}-{rec['slug']}",
+            "now": datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }  # fmt: skip
         # A landing in flight, and a record that won't read, as the board reads them.
         reading["in_flight"], problem = factory_records.landing(folder, rec["stage"])

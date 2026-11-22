@@ -1,0 +1,22 @@
+# Decisions
+
+- [x] D1 (builder round 1, default): Keep the `AGENTS.md` edit to the `verdicts` sentence (it now also reads the vouched `runs/parked.md`, and the clock for a park), worded as the approved spec's *Contracts touched* says. Going ahead with it unless told otherwise. → decided: the assumed default, confirmed
+  - OPTION: keep it — the map matches the code; the rule's intent (vouched, deadline from the base branch, clock injected) is said beside it
+  - OPTION: revert the sentence — the map would say `verdicts` reads no park, which the code now does
+  - WHY: the spec flags this sentence as a policy edit for your yes, and approving the spec looked like that yes
+- [x] D2 (builder round 1, default): Should `factory.py check` catch the output only when `[park] exit` is set, printing it once the command ends? Going ahead with that. → settled by the approver: the spec leaves the catching to the plan, and R1 requires that a host without `[park] exit` sees no change. Catching only when the key is set is the one option that meets R1 and still lets the payload be read.
+  - OPTION: catch only with `[park] exit` set — the payload can be read; a host without the key sees no change
+  - OPTION: never catch — output streams as now, but `busy:` always reads `unknown held by unknown`
+  - OPTION: tee the output — it streams and is read, but needs threads around the one place a host's command runs
+  - WHY: the spec leaves this to the plan, and R1 says a host without the key sees no change
+- [x] D3 (builder round 1, default): Should `status` print the park's line in two, split at its `; `? Going ahead with two lines. → decided: the assumed default, confirmed
+  - OPTION: two lines — the full retry and deadline stay visible at `status`'s width
+  - OPTION: one line, cut — matches R16's wording, but `_cut()` drops the deadline
+  - WHY: the deadline is the part the person needs to see
+- [x] D4 (builder round 1, default): Should the `parked` stop's next step offer no `/sdlc:ship` alternative, unlike the other ways? Going ahead with none. → settled by the approver: R9 fixes the form of the `parked` stop's next step, and the build follows it exactly with no `/sdlc:ship` alternative. Shipping by hand would meet the same busy check.
+  - OPTION: none — matches R9's wording exactly
+  - OPTION: add `, or /sdlc:ship {id}` — consistent with the other ways, but shipping by hand meets the same busy check
+  - WHY: R9 fixes the line's form
+- [x] D5 (approver round 1, look): `plugins/factory/scripts/factory.py: cmd_gate()` / `_gate_busy()` — a Critical or High security finding (the park path hides tree changes) is still open and needs a fix, unless the person accepts it. → decided: seen
+- [x] D6 (approver round 1, look): `REFERENCE.md` and README prose on parked changes — R18 can't be tested, so a person must read the wording. → decided: seen
+- [x] R1 (person, restart): fix the busy-gate tree check and split R18

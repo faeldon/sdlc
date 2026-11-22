@@ -135,7 +135,7 @@ def test_the_maps_cite_no_change_and_hold_no_html(path: Path) -> None:
 
 # Each term the vocabulary defines once, saying what it means now and what it never means.
 VOCABULARY = ("gate", "slow gate", "approval", "WAIT", "acceptance checks", "vet", "arbiter",
-              "verification", "validation")  # fmt: skip
+              "verification", "validation", "parked")  # fmt: skip
 
 
 def test_every_vocabulary_term_has_an_entry() -> None:

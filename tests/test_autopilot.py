@@ -1309,3 +1309,74 @@ def test_the_changes_own_code_never_runs_as_a_loops_child(tmp_path, monkeypatch)
         assert "PATH=" in text, path.name
         assert factory.AUTOPILOT_RUN_ENV not in text, path.name
         assert factory.landing.TRAIN_RUN_ENV not in text, path.name
+
+
+# ---------------------------------------------------------------- a parked change (222)
+
+
+class ParkClock:
+    """A stand-in clock for the loop, moving only when it pauses, and each pause's length."""
+
+    def __init__(self, monkeypatch) -> None:
+        from datetime import UTC, datetime
+
+        self.when = datetime.now(UTC).replace(microsecond=0)
+        self.pauses: list[float] = []
+        monkeypatch.setattr(ap, "_now", lambda: self.when)
+        monkeypatch.setattr(ap, "_pause", self.pause)
+
+    def pause(self, seconds: float) -> None:
+        from datetime import timedelta
+
+        self.pauses.append(seconds)
+        self.when += timedelta(seconds=seconds)
+
+    def at(self, minutes: float) -> str:
+        from datetime import timedelta
+
+        return (self.when + timedelta(minutes=minutes)).strftime(ap.TIME_FORMAT)
+
+
+def test_autopilot_waits_out_a_park_and_holds_past_its_deadline(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """222 R15: a parked reading runs no command and keeps `retry` and `deadline` on the change;
+    the loop neither ends nor reads again before the retry, sleeping in slices of at most 30 s,
+    then gates and lands it. Past the deadline, the stop holds it with the holder named."""
+    clock = ParkClock(monkeypatch)
+    retry, deadline = clock.at(5), clock.at(60)
+    park = {"resource": "staging db", "holder": "219-other", "since": clock.at(0),
+            "retry": retry, "deadline": deadline, "attempts": 1}  # fmt: skip
+    root, steps = _one_change(
+        tmp_path, capsys, monkeypatch,
+        ["build", {"next": "parked", "parked": park}, "gate", "review", "approve", "done"],
+    )  # fmt: skip
+    reads, kept = [], []
+    steps.hooks["verdicts"] = lambda argv, cwd: reads.append(clock.when.strftime(ap.TIME_FORMAT))
+
+    def gated(argv, cwd):
+        kept.append({k: v for k, v in ap.read_state(root)["changes"].items()})
+
+    steps.hooks["gate"] = gated
+    code, out = _loop(root, capsys)
+    assert code == 0, out
+    name, mine, _ = _only(root)
+    assert mine["place"] == "landed", mine
+    assert len([r for r in reads if r < retry]) == 2, ("build, then parked: no more", reads)
+    assert reads[2] >= retry, reads
+    assert clock.pauses and max(clock.pauses) <= ap.PARK_SLICE, clock.pauses
+    assert kept and kept[0][name]["retry"] == retry and kept[0][name]["deadline"] == deadline
+    assert "retry" not in mine, "a reading that isn't parked clears it"
+
+    clock2 = ParkClock(monkeypatch)
+    soon = {**park, "retry": clock2.at(1), "deadline": clock2.at(2)}
+    problem = "parked past its deadline: staging db is still held by 219-other after 3 attempts"
+    root2, steps2 = _one_change(
+        tmp_path / "two", capsys, monkeypatch,
+        ["build", {"next": "parked", "parked": soon},
+         {"next": "stop", "way": "parked", "problems": [problem]}],
+    )  # fmt: skip
+    _loop(root2, capsys)
+    _, mine2, _ = _only(root2)
+    assert mine2["place"] == "held" and "219-other" in mine2["why"], mine2
+    assert not steps2.ran("train", "--run") and not steps2.ran("gate")

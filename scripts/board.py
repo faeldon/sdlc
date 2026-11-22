@@ -57,12 +57,15 @@ CLOSED = ("shipped", "dropped")
 GITHUB_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 # A factory card's step track: the six positions of a round, and where each step the record names
-# sits on it (`fix` is the gate, fixing; a step from before the verifier became the arbiter is
-# read as its name now, `factory_records.RENAMED`). A pause (`factory_records.PAUSES`,
-# `factory.py`'s) keeps the position it paused at; `done` is past them all. An estimate never
-# fills its bar past `CAP` while the step runs.
+# sits on it (`fix` is the gate, fixing; `parked` the gate, waiting on a host resource; a step
+# from before the verifier became the arbiter is read as its name now, `factory_records.RENAMED`).
+# A pause (`factory_records.PAUSES`, `factory.py`'s) keeps the position it paused at; `done` is
+# past them all. An estimate never fills its bar past `CAP` while the step runs.
 TRACK = ("build", "gate", "review", "arbitrate", "rework", "approve")
-AT = {"build": 0, "gate": 1, "fix": 1, "review": 2, "arbitrate": 3, "rework": 4, "approve": 5}
+AT = {
+    "build": 0, "gate": 1, "fix": 1, "parked": 1, "review": 2, "arbitrate": 3, "rework": 4,
+    "approve": 5,
+}  # fmt: skip
 CAP = 0.95
 # A landing's track, from `runs/land-step.md`: its seven positions, and where each step the record
 # names sits (`factory.py`'s `LAND_STEPS`, pinned by a test), labelled `acceptance` where the
@@ -275,6 +278,14 @@ def _entry(
             if rec["stage"] == "build"
             else None
         )
+        # A park the run left at `build` (222 R16): its track's gate, and past its deadline a need.
+        entry["parked"] = (
+            read(sdlc.factory_records.PARKED.as_posix(),
+                 lambda: sdlc.factory_records.park(folder), None)
+            if rec["stage"] == "build"
+            else None
+        )  # fmt: skip
+        entry["now"] = datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         entry["progress"] = read(
             sdlc.factory_records.STEP.as_posix(),
             lambda: _progress(entry, folder, problems, history, now),
@@ -423,6 +434,9 @@ def _progress(
         label = name
         if name == "gate" and step == "fix":
             label = "fixing"
+        if name == "gate" and step == "parked":
+            state = "parked"
+            label = sdlc.park_line(entry["parked"]) if entry.get("parked") else "parked"
         if name == "review" and rnd and rec["reviewers"]:
             label = f"reviews {sdlc.factory_records.reviewed(folder, rnd)}/{len(rec['reviewers'])}"
         if name == "approve" and kinds:

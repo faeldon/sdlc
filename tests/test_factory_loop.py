@@ -55,6 +55,7 @@ def test_config_defaults_and_its_warnings(tmp_path: Path) -> None:
         "land": {"auto": True, "batch": 5, "moves": 3},
         "ui": factory.DEFAULTS["ui"],
         "gate_jobs": 1,
+        "park": {"exit": None, "deadline": 60, "retry": 5},
     }
     assert warnings == []
     (tmp_path / ".sdlc").mkdir(exist_ok=True)
@@ -339,13 +340,16 @@ def test_each_way_on_fits_two_lines_at_phone_width() -> None:
     """120 (2026-11-17-82): a stop's `NEXT:` is the command and a few words, two lines at most of
     a 390px card's 12px monospace, and still names the command that moves the run on; the longer
     sentence is `WAYS_WHY`'s, in the record's body."""
-    assert set(factory.WAYS) == set(factory.WAYS_WHY) == {"ship", "mend", "rerun"}
+    assert set(factory.WAYS) == set(factory.WAYS_WHY) == {"ship", "mend", "rerun", "parked"}
+    # A `parked` stop names what is held and by whom (222 R9), here a short resource and holder.
+    words = {"id": "008", "resource": "staging db", "holder": "219-other"}
     for way, text in factory.WAYS.items():
-        line = text.format(id="008")
+        line = text.format(**words)
         assert len(line) <= 90, (way, len(line))
-        assert "/sdlc:ship 008" in line, way
+        # A park's way on is freeing what it waits on: shipping by hand would gate it busy again.
+        assert way == "parked" or "/sdlc:ship 008" in line, way
         assert way == "ship" or "/sdlc-factory:build 008" in line, way
-        assert len(line) < len(factory.WAYS_WHY[way].format(id="008")), way
+        assert len(line) < len(factory.WAYS_WHY[way].format(**words)), way
         # Round 1's ux: the person reads both, so neither says the factory's word for asking again.
         assert "mend" not in line and "mend" not in factory.WAYS_WHY[way], way
 

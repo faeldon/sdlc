@@ -68,6 +68,7 @@ graph LR
 - **`drift`**: what a newer plugin changed in a doc setup copied, told apart from what the host changed, so setup can propose a refresh. Specified: `docs/REFERENCE.md`. Depends on: `/sdlc:setup`.
 - **`worktree`**: the checkout a change is worked in, at `.claude/worktrees/NNN-slug`, so the main checkout stays clean. Specified: `guide/process.md`. Depends on: `change`.
 - **`factory`**: the optional `sdlc-factory` plugin, which builds and reviews a change with agents in rounds and lands a batch as a train. Specified: `plugins/factory/README.md`. Depends on: `change`, `gate`.
+- **`parked`**: a factory change waiting on a host resource its check said is held (the base branch's `[park] exit`), with what is held, by whom, its next retry and a deadline the host can't move; past the deadline it stops for the person. Never a red gate, and never a decision to answer. Specified: `plugins/factory/README.md`. Depends on: `factory`, `gate`.
 
 ## Skills
 

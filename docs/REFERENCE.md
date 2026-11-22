@@ -217,6 +217,41 @@ says. A missing file, one that won't parse, or no file naming the factory reads 
 nothing to find it. A factory loaded with `claude --plugin-dir` writes no settings, so it isn't
 found, and intent asks its question as it does without one.
 
+### A host resource the check waits on: the factory's `[park]`
+
+A host whose `[commands] check` needs something only one change at a time may use (a shared
+deployment, a database object, an environment) can tell the factory to wait for it rather than
+fail. It is opt-in, set in the base branch's `.sdlc/factory.toml` alone, so a change can't turn it
+on for itself or lengthen its own wait:
+
+```toml
+[park]
+exit = 75          # the check's exit code meaning "busy": unset, no code is busy (75 is EX_TEMPFAIL)
+deadline = 60      # minutes a change may wait, from its first busy answer (1-1440)
+retry = 5          # minutes to the next try when the check says no time (1-1440)
+```
+
+A check that exits with exactly `exit` may print, anywhere in its output and each optional, the
+last of each counting:
+
+```
+SDLC-BUSY-RESOURCE: staging database
+SDLC-BUSY-HOLDER: 219-other-change
+SDLC-BUSY-UNTIL: 2026-11-21T15:30:00Z     (a UTC time, or whole minutes from now: 10)
+```
+
+Each value is made one line, written with this machine's paths and your scan's shapes as
+placeholders, and cut to 200 characters; a missing resource or holder is `unknown`, and an `UNTIL`
+that won't read is noted and ignored. The factory then parks the change: its gate records no
+attempt, the next try is at `UNTIL` (never past the deadline, which `UNTIL` never moves), and past
+the deadline the run stops for you, naming the resource and its holder. A landing gate answered
+busy stops the train, never ejecting a change. `factory.py check` returns the code unchanged with a
+`busy:` line on stderr. The plugin keeps no model of your resources: which exist, how they are
+locked and what conflicts with what stay your check's to know, and the plugin learns only "busy,
+until". With `exit` unset, a check that exits 75 is a red gate like any other, and so is a busy
+answer from a check that changed the change's files: a gate parks only a tree the check left as
+it found it.
+
 ## The docs
 
 The process's own docs live in `.sdlc/`, beside its config, so `docs/` is left to your project.
@@ -599,7 +634,9 @@ newest file its worktree has changed. One untouched for a day is `quiet`, and `/
 recommends finishing an open change only once it is: one touched since has a session on it. A
 factory run its supervisor stopped (`runs/stopped.md`, at `stage: build`) reads `stopped` in place
 of `quiet`, with each problem on a `⚠` line and the step that moves it on, ship it by hand or rerun
-`/sdlc-factory:build NNN`, on a `→` line under its title.
+`/sdlc-factory:build NNN`, on a `→` line under its title. A factory run parked on a host resource
+(`runs/parked.md`, the factory's `[park]`, above) stays under Building with a `⏸ parked on
+<resource>, held by <holder>;` line and, under it, its next retry and its deadline.
 
 `status` groups the open changes by the board's columns (below), in its order, by the same rule
 (`column()` in `sdlc.py`, which the board calls): `■ Planned`, `■ Designing`, `■ Building`, `■ Ready`
@@ -612,8 +649,9 @@ line, and under it a `needs you:` line saying what it waits for, or `nothing` wh
 texts are the board's (below), read by the same rules: `fix:` and
 each problem, at any stage; at `build`, a stop's way on in plain words (`stopped: fix its cause and
 rerun`, `stopped: rerun to ask an agent again`, `stopped: review an agent's commit`, or `stopped:
-read runs/stopped.md` for a record that won't read) and `decide D<n>` for each unticked blocking
-decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
+read runs/stopped.md` for a record that won't read, and `stopped: free what it waits on and rerun`
+for a park past its deadline), `parked past its deadline: free <resource>` for a park past its
+deadline that no stop has recorded yet, and `decide D<n>` for each unticked blocking decision; for an ESCALATE at `test`, `decide D<n>`, `confirm N defaults`, `reconsider the
 approach` (its `decision.md` holds that section), `acknowledge D<n>` for each `look` the approver
 escalated for (`- ESCALATED: look: <what to look at> — <why>`, filed in the ledger as
 `(approver round <R>, look)`, its decide question quoting the target before ` — `),

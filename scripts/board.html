@@ -101,6 +101,7 @@ main.board {
 .step.done { background: var(--pass-bg); color: var(--pass); }
 .step.current { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .step.paused { border-color: var(--stop); border-style: dashed; color: var(--stop); }
+.step.parked { border-style: dashed; }
 .step.stopped { background: var(--stop-bg); border-color: var(--stop); color: var(--stop); font-weight: 600; }
 .step.todo { background: var(--chip); color: var(--muted); }
 .bar { height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
@@ -432,7 +433,7 @@ function dur(seconds) {
 // A landing's track is the same row, labelled with its landing round, the base branch's moves it
 // has followed out of its bound, and on a stop the problems that stopped it.
 // A step's state is said in its text, never by colour alone.
-const STEP_WORDS = { done: "✓ ", current: "now: ", paused: "waiting on you: ", stopped: "stopped: ", todo: "" };
+const STEP_WORDS = { done: "✓ ", current: "now: ", paused: "waiting on you: ", parked: "⏸ ", stopped: "stopped: ", todo: "" };
 
 function progressRow(p) {
   const land = p.kind === "land";

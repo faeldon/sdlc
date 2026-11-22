@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
@@ -79,8 +80,9 @@ PLACES = ("waiting", "spec", "start", "building", "ready", "landed", "held")
 
 # The commands the loop runs for each step `verdicts` names, and no others (R14), as `RUN_STEPS`
 # is the train's: `{role}` each role the reading names, started together; `{round}` the round the
-# builder's report went to. `decide`, `done` and `stop` are the loop's own reading, and the
-# landing's commands are `TRAIN_COMMANDS`.
+# builder's report went to. `decide`, `done`, `stop` and `parked` (222: a host resource held,
+# waited out by the loop itself, running nothing) are the loop's own reading, and the landing's
+# commands are `TRAIN_COMMANDS`.
 AUTOPILOT_STEPS = {
     "read": (("decisions", "{num}"), ("verdicts", "{num}", "--head", "{head}", "--record")),
     "spec": (
@@ -272,6 +274,24 @@ def _main(root: Path) -> Path:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# The longest the loop sleeps at once while only parked changes are left (222 R15), so a cancel or
+# a spent budget is read within it.
+PARK_SLICE = 30
+
+
+def _pause(seconds: float) -> None:
+    """The loop's one sleep, while it waits out a park: the tests stand in for it."""
+    time.sleep(max(0.0, seconds))
+
+
+def _retry_in(mine: dict) -> float | None:
+    """Seconds until a parked change's next retry, None for a change not parked or past it."""
+    if not mine.get("retry") or mine["place"] != "building":
+        return None
+    left = datetime.strptime(mine["retry"], TIME_FORMAT).replace(tzinfo=UTC) - _now()
+    return left.total_seconds() if left.total_seconds() > 0 else None
 
 
 def _stamp(when: datetime | None = None) -> str:
@@ -485,7 +505,10 @@ def build_step(main: Path, name: str, mine: dict, tree: Path, num: str) -> dict:
         return {"results": read, "hold": f"verdicts couldn't be read: {read[-1]['said'][-200:]}"}
     nxt, rnd = reading["next"], reading.get("round")
     out: dict = {"results": list(read), "reading": {k: reading.get(k) for k in (
-        "next", "round", "limit", "built", "decision", "way", "problems")}}  # fmt: skip
+        "next", "round", "limit", "built", "decision", "way", "problems", "parked")}}  # fmt: skip
+    if nxt == "parked":
+        # A host resource is held (222 R15): no command runs; the loop waits out the retry.
+        return {**out, "parked": reading.get("parked") or {}}
     if nxt == "stop" and reading.get("way") == "mend":
         out["results"] += run_all(
             main, commands("mend", num=num, roles=reading.get("mend")), tree, together=True
@@ -982,12 +1005,23 @@ def apply_change(main: Path, state: dict, name: str, got: dict) -> None:
     if reading:
         key = [reading.get("next"), reading.get("round"), reading.get("built"),
                reading.get("decision")]  # fmt: skip
-        if reading.get("next") not in ("decide", "done") and key == mine.get("last"):
+        if reading.get("next") not in ("decide", "done", "parked") and key == mine.get("last"):
             got = {**got, "hold": f"verdicts named {reading['next']} twice with nothing changed"}
         mine["last"] = key
         if near({"reading": reading}):
             mine.setdefault("near_since", _stamp())
         mine["reading"] = reading
+        # A park's retry and deadline, kept on the change while its reading names one (R15).
+        park = got.get("parked") if reading.get("next") == "parked" else None
+        if park:
+            if park.get("retry") != mine.get("retry"):
+                note(main, state, name, f"parked on {park.get('resource')}, held by "
+                     f"{park.get('holder')}: retry {park.get('retry')}, deadline "
+                     f"{park.get('deadline')}")  # fmt: skip
+            mine.update(retry=park.get("retry"), deadline=park.get("deadline"))
+        else:
+            mine.pop("retry", None)
+            mine.pop("deadline", None)
     failed = next((w for r in got.get("results") or [] if (w := _failed(r))), None)
     tree = Path(mine["worktree"])
     folder = tree / factory.work_rel(tree) / name
@@ -1052,6 +1086,8 @@ def starts(main: Path, state: dict, running: dict, items: list[dict]) -> list[tu
             mine["why"] = None if ok else f"waits on {waits}"
             if ok:
                 mine["place"] = "spec" if mine["tier"] == 2 else "start"
+        if _retry_in(mine) is not None:
+            continue  # parked until its retry: it keeps its place in flight (R15)
         if mine["place"] in ("spec", "start", "building") and not hard:
             found.append((name, lambda n=name, m=dict(mine): change_step(main, n, m)))
             busy += 1
@@ -1078,7 +1114,11 @@ def cancelled(main: Path) -> bool:
 def run_loop(main: Path) -> int:
     """The loop (R13–R17, R27): read the cancel file and the budgets, start what may start, at
     most `parallel` changes at once, each step in a worker; apply each as it ends, writing the
-    state after every one; end when nothing runs and nothing may start, writing the summary."""
+    state after every one; end when nothing runs and nothing may start, writing the summary. A
+    parked change (222 R15) is waited out, never an end: with nothing else running, the loop
+    sleeps until its retry in slices of at most `PARK_SLICE` seconds, reading the cancel file
+    and the budgets after each, and ends only once a cancel or a spent hour or dollar cap stops
+    every change step."""
     state = read_state(main)
     where = factory._slot_dir(main)
     if where:
@@ -1114,9 +1154,15 @@ def run_loop(main: Path) -> int:
                 for key, fn in starts(main, state, running, items):
                     running[key] = pool.submit(fn)
                 write_state(main, state)
-            if not running:
+            retries = [r for m in state["changes"].values() if (r := _retry_in(m)) is not None]
+            parked = bool(retries) and not state["cancel"] and not hard_stops(main, state)
+            if not running and not parked:
                 return end_run(main, state)
-            wait(list(running.values()), return_when=FIRST_COMPLETED)
+            slice_s = min([PARK_SLICE, *retries]) if parked else None
+            if not running:
+                _pause(slice_s)
+                continue
+            wait(list(running.values()), timeout=slice_s, return_when=FIRST_COMPLETED)
 
 
 def end_reason(state: dict) -> str:

@@ -508,6 +508,9 @@ RECORD_NAMES = {
     "read_gate_attempts", "resolved_files", "pipeline_counts", "specifying",
     # 180: the overrides retro reads, and core's reader of a fix asked at landing.
     "ejections", "land_asks", "LAND_ASK_RE",
+    # 222: a change parked on a host resource.
+    "PARKED", "PARKED_RE", "RESOURCE_RE", "HOLDER_RE", "RETRY_RE", "DEADLINE_RE", "ATTEMPTS_RE",
+    "NOTE_RE", "read_park", "park",
 }  # fmt: skip
 
 # R3: the names the copies had before, in `sdlc.py`, `closing.py` and `board.py`.
@@ -542,7 +545,7 @@ UNRELATED = {("sdlc.py", "MOVES_RE")}
 RECORD_FILES = (
     "decision.md", "decisions.md", "stopped.md", "step.md", "verified.md", "costs.jsonl",
     "land-times.jsonl", "gate.md", "round-", ".sessions", "ejections.jsonl", "land-train.md",
-    "land-accept.md", ".ask.md",
+    "land-accept.md", ".ask.md", "parked.md",
 )  # fmt: skip
 
 
@@ -740,6 +743,38 @@ GATE_RECORDS = [
     "Last 80 lines of its output:\n\n    (no output)\n\n## Attempt 2\n\nVerdict: PASS\n"
     "Command: make check\nExit: 0\n\nLast 80 lines of its output:\n\n    12 passed\n",
 ]
+
+
+# Park records as `factory.py gate` writes them, and ones neither reader may take: no key line, a
+# round that isn't a number, a note, and a step it doesn't park on.
+PARK_RECORDS = [
+    "PARKED: gate\nROUND: 1\nRESOURCE: staging db\nHOLDER: 219-other\n"
+    "SINCE: 2026-11-21T15:00:00Z\nRETRY: 2026-11-21T15:05:00Z\nDEADLINE: 2026-11-21T16:00:00Z\n"
+    "ATTEMPTS: 2\n\n- NOTE: SDLC-BUSY-UNTIL 'soon' didn't read\n",
+    "PARKED: gate\nROUND: \nRESOURCE: x\nHOLDER: y\nSINCE: 2026-11-21T15:00:00Z\n"
+    "RETRY: 2026-11-21T15:05:00Z\nDEADLINE: 2026-11-21T16:00:00Z\nATTEMPTS: 1\n",
+    "PARKED: review\nROUND: 1\n",
+    "PARKED: gate\nROUND: 1\nRESOURCE: x\n",
+    "",
+]
+
+
+@pytest.mark.parametrize("text", PARK_RECORDS)
+def test_both_park_readers_read_a_record_alike(text) -> None:
+    """222 R16: core's `read_park()` is a copy of `factory.py`'s, reading every record alike."""
+    records = _load("factory_records_park", RECORDS_PY)
+    factory = _load("factory_park_theirs", FACTORY_PY)
+    assert records.read_park(text) == factory.read_park(text)
+
+
+def test_park_records_read_back_what_the_factory_writes() -> None:
+    """222 R16: what `park_text()` writes, core's reader reads back field for field."""
+    records = _load("factory_records_park_back", RECORDS_PY)
+    factory = _load("factory_park_back", FACTORY_PY)
+    fields = {"step": "gate", "round": 3, "resource": "db", "holder": "h",
+              "since": "2026-11-21T15:00:00Z", "retry": "2026-11-21T15:05:00Z",
+              "deadline": "2026-11-21T16:00:00Z", "attempts": 4}  # fmt: skip
+    assert records.read_park(factory.park_text(fields, ["n"])) == {**fields, "notes": ["n"]}
 
 
 @pytest.mark.parametrize("text", GATE_RECORDS)

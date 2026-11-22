@@ -6,9 +6,10 @@ what earlier rounds settled (`settled()`), the untouched changes (`_untouched()`
 rework is handed (`cheap_nits()`), what a rework changed (`reworked()`), whether the approver's
 reply disagrees with itself (`decision_preamble()`), the open defaults a READY may not carry to
 the landing (`uncarried()`) and the gate as it stands (`_gate_state()`,
-`read_gate()`). It decides from the rounds alone, reading no state file but
-`runs/mended`; it writes nothing, and runs no process but the `git` calls `factory._git` makes for
-it: never `claude`, never a host's command.
+`read_gate()`) and the park in front of it (`_park_state()`). It decides from the rounds alone,
+reading no state file but `runs/mended` and the vouched `runs/parked.md`, and the clock only for a
+park, as `now`, which its caller may give (222 R7); it writes nothing, and runs no process but the
+`git` calls `factory._git` makes for it: never `claude`, never a host's command.
 
 The line between here and `factory.py` is a rule `tests/test_modules.py` holds: a function lives
 here when it is `loop_state` or only code here calls it; anything `factory.py` or `landing.py`
@@ -27,6 +28,7 @@ file loads, so nothing evaluated at load may read it.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 factory = None  # factory.py's own names, bound by factory.py right after it loads this file
@@ -108,9 +110,13 @@ def uncarried(
     return found
 
 
-def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | None]:
+def loop_state(
+    root: Path, ident: str, head: str | None, now: datetime | None = None
+) -> tuple[dict, str | None]:
     """What `verdicts` prints, or why not: one reading of the loop, so the step `verdicts` names
-    and the prompt `agent` sends for it are made from the same state."""
+    and the prompt `agent` sends for it are made from the same state. `now` is the clock a park
+    is read against (`factory._clock()` when not given)."""
+    now = now or factory._clock()
     cfg, warnings = factory.load_config(root)
     folder, refusal = factory.find_change(root, ident)
     if refusal:
@@ -129,9 +135,9 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
     exhausted = exhausted or bool(stuck or untestable)
     decision, problem = factory.read_decision(folder, exhausted)
     problems += [problem] if problem else []
-    now = factory._git(root, "rev-parse", "--short", "HEAD")
-    moved = bool(head) and now is not None and not now.startswith(head) and not head.startswith(now)
-    out: dict = {"change": folder.name, "rounds": rounds, "decision": decision, "head": now}
+    tip = factory._git(root, "rev-parse", "--short", "HEAD")
+    moved = bool(head) and tip is not None and not tip.startswith(head) and not head.startswith(tip)
+    out: dict = {"change": folder.name, "rounds": rounds, "decision": decision, "head": tip}
     out.update(head_moved=moved, problems=problems, warnings=warnings, round=None, missing=[])
     out["mend"] = []
     out.update(exhausted=False, stuck=stuck, untestable=untestable)
@@ -155,6 +161,12 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         problems.append(
             f"the gate failed {gate['fails']} times in round {built}: exit {gate['exit']}"
         )
+    # A park stands only in front of a gate still to run on this round's build (222 R6, R8).
+    waiting = bool(unreviewed and gate and gate["current"] is None)
+    park, park_why, out["park_stale"] = _park_state(root, folder, cfg, built, waiting, now)
+    out["parked"] = park
+    parks = {park_why} if park and park_why else set()
+    problems += [park_why] if park_why else []
     out["reworked"] = reworked(folder, built) if built else None
     out["settled"] = settled(rounds, last["round"] if last else 0)
     asked = [
@@ -210,12 +222,17 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         del mendable[role]
     every = {p for found in mendable.values() for p in found}
     if moved:
-        problems.append(f"HEAD moved from {head} to {now}: no agent may commit")
+        problems.append(f"HEAD moved from {head} to {tip}: no agent may commit")
     if last and last["round"] > built:
         problems.append(f"reviews/round-{last['round']}/ has no build/round-{last['round']}.md")
     if problems:
         out["next"] = "stop"
-        out["way"] = "ship" if moved else "mend" if set(problems) <= every else "rerun"
+        out["way"] = (
+            "ship" if moved
+            else "mend" if set(problems) <= every
+            else "parked" if set(problems) <= parks
+            else "rerun"
+        )  # fmt: skip
         if out["way"] == "mend":
             out["mend"] = [role for role, found in mendable.items() if found]
     elif out["pending"]:
@@ -236,7 +253,9 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         out["next"], out["round"] = "build", upgrade["round"]
     elif built == 0:
         out["next"], out["round"] = "build", 1
-    elif unreviewed and gate and gate["current"] is None:
+    elif waiting and park and now < factory._stamp_time(park["retry"]):
+        out["next"], out["round"] = "parked", built
+    elif waiting:
         out["next"], out["round"] = "gate", built
     elif unreviewed and gate and gate["current"] == "FAIL":
         out["next"], out["round"] = "fix", built
@@ -263,6 +282,39 @@ def loop_state(root: Path, ident: str, head: str | None) -> tuple[dict, str | No
         kept_before = (prev["verified"] or {}).get("kept")
         out["handed"] = [{"role": a, "text": b} for a, b in cheap_nits(prev)] if kept_before else []
     return out, None
+
+
+def park_problem(park: dict) -> str:
+    """The problem a park past its deadline is, naming what it waited on and who held it."""
+    return (
+        f"parked past its deadline {park['deadline']}: {park['resource']} is still held by "
+        f"{park['holder']} after {park['attempts']} attempts"
+    )
+
+
+def _park_state(
+    root: Path, folder: Path, cfg: dict, built: int, waiting: bool, now: datetime
+) -> tuple[dict | None, str | None, bool]:
+    """The park in front of round `built`'s gate (222 R6, R8), as `(park, problem, stale)`: no
+    record is `(None, None, False)`; one that won't read, or that the records ledger doesn't vouch
+    for, a problem and never a wait; one for another round, or with no gate still to run on this
+    build (`waiting`), stale, passed over; else the park, its deadline cut to the base branch's
+    (`factory.capped_park()`) and `expired` once `now` reaches it, when it is a problem too."""
+    path = folder / factory.PARKED
+    if not path.is_file():
+        return None, None, False
+    rel = factory.PARKED.as_posix()
+    try:
+        park = factory.read_park(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        park = None
+    if park is None or not factory.vouched(root, folder, path):
+        return None, f"{rel} isn't a park record the script wrote: remove it, then rerun", False
+    if park["round"] != built or not waiting:
+        return None, None, True
+    park = factory.capped_park(park, cfg)
+    park["expired"] = now >= factory._stamp_time(park["deadline"])
+    return park, park_problem(park) if park["expired"] else None, False
 
 
 def early_stop(folder: Path, rounds: list[dict], first: int) -> tuple[list[str], list[str]]:
