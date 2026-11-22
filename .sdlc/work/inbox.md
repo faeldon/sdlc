@@ -884,3 +884,16 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 229-park-hardening (correctness)
+
+## [2026-11-22-26] [idea] Gate slots go by priority, landings first, then by who waited longest
+
+Gate slots go by priority, then by who waited longest: a waiting gate leaves a ticket (change,
+level, pid, since) beside the slot locks; levels are land (every train-tip gate, always first),
+urgent (only the person sets it, via a factory.py command writing the git common dir, never a tree
+file an agent could edit) and normal (build rounds); a normal ticket waiting past a set time counts
+as urgent so landings can't starve builds; a dead pid's ticket is ignored; nothing pre-empts a
+running gate; gate says its place in line. Today `gate_slot()` hands a freed slot to whichever
+poller wins, so on 2026-11-22 a train's tip gate queued behind five builds' round gates (one waited
+28 minutes) while the base branch moved under it.
+Theme: factory
+Raised 2026-11-22.
