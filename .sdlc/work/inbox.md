@@ -897,3 +897,20 @@ How to see it: `factory.py verdicts <NNN> --head <sha>` on a round whose behavio
 Severity: high
 Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md, plugins/factory/agents/builder.md
 Theme: factory
+
+## [2026-11-22-25] [bug] A mend stop shows as "Needs you" while the supervisor is already mending it
+
+The board and status show a mend stop as "Needs you" while the supervisor is already mending it:
+verdicts --record writes runs/stopped.md (way: mend), needs_of() turns it into "stopped: rerun to
+ask an agent again", and the card stays there until the next reading after the mend replies.
+Should show as a "mending" step like the landing track, and reach Needs you only once the mend is
+used up or has run past a timeout.
+
+How to see it: a factory run whose builder report has an `exit:` the script can't read (seen on
+230-nit-flow, 2026-11-22). `verdicts <NNN> --head <sha> --record` names `stop` with way `mend`;
+while `agent <NNN> --task mend` runs, `/sdlc:status` lists the change under Needs you and the
+board shows its card there.
+
+Severity: low
+Paths: scripts/sdlc.py, scripts/board.py, plugins/factory/scripts/factory.py
+Theme: board
