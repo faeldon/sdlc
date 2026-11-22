@@ -726,36 +726,6 @@ Cost: S
 Value: low
 Raised by: 225-ci-pin-test-quotes (correctness)
 
-## [2026-11-22-24] [bug] An `exit:` line with words after its number, or for a command a hook refused, stops a run
-
-A behaviour check on 2026-11-22 stopped its run twice on `## Evidence` lines that did carry an
-`exit:`, so the mend 215 (2026-11-21-35) made routine could not save it. The first reply wrote
-`exit: nonzero (task failed)` for a command whose code it didn't capture, and
-`exit: not run (blocked by the guard hook)` for a command the host's PreToolUse hook refused. The
-mended reply gave the refused command a number but kept a note after it,
-`exit: 2 (hook refusal; the command did not run)`, and `verdicts` read that as missing too. One
-mend a role is allowed, so the change stopped for the person with a passing, honest review in hand.
-
-Two gaps:
-- **The parser:** `EXIT_RE` in `plugins/factory/scripts/factory.py` is `^\s*exit:\s*\d+\s*$`, so any
-  note after the number fails it, though agents annotate by habit.
-- **The prompts:** `agents/reviewer-behaviour.md` and `agents/builder.md` say every command carries
-  `exit: <n>`, but not what to do with one a hook refuses, which never ran and has no code. A
-  host with a strict guard puts human-only commands in a spec's end-to-end path by design, so
-  its behaviour checks meet this on every such change.
-
-A fix: `EXIT_RE` accepts trailing text after the digits (`exit: 2 (…)`); the prompts say a
-command refused by a hook isn't a `$ ` line but goes under the reply's *Not run* with the hook's
-message, and that every command that ran captures its real code (`; echo "exit: $?"`), never a
-word like `nonzero`. Optionally `exit: blocked` for a refused command, read as no result.
-
-How to see it: `factory.py verdicts <NNN> --head <sha>` on a round whose behaviour evidence has
-`$ <cmd>` then `exit: 2 (note)` names it under `problems`, and once mended, the way is `rerun`.
-
-Severity: high
-Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md, plugins/factory/agents/builder.md
-Theme: factory
-
 ## [2026-11-22-25] [bug] A mend stop shows as "Needs you" while the supervisor is already mending it
 
 The board and status show a mend stop as "Needs you" while the supervisor is already mending it:
@@ -901,3 +871,19 @@ Paths: tests/test_autopilot.py
 Cost: S
 Value: low
 Raised by: 231-autopilot-goals (correctness)
+
+## [2026-11-22-35] [idea] Widen `EVIDENCE_EXIT_RE` in sdlc.py to accept a note after the exit code
+
+Left undone by 232-exit-notes, carried forward when it landed: `scripts/sdlc.py`'s `EVIDENCE_EXIT_RE` (`^exit:\s*(-?\d+)\s*$`), which reads ship's own behaviour check in `findings.md`, is as strict as `EXIT_RE` was: an `exit: 2 (note)` there is not read as evidence. Out of this change's scope (the factory's reading); widen it the same way in a change of its own if ship's check meets it.
+See .sdlc/work/232-exit-notes/notes.md in its commit.
+Raised 2026-11-22.
+
+## [2026-11-22-36] [nit] the resolver's *Evidence* paragraph has the same `exit: <n>` wording and no hook-refusal sentence, so it will meet the same stop
+
+Raised by the code review of 232-exit-notes, round 1: plugins/factory/agents/resolver.md:58: the resolver's *Evidence* paragraph has the same `exit: <n>` wording and no hook-refusal sentence, so it will meet the same stop
+
+Theme: docs
+Paths: plugins/factory/agents/resolver.md
+Cost: S
+Value: med
+Raised by: 232-exit-notes (correctness)
