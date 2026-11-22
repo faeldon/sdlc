@@ -748,56 +748,6 @@ Cost: S
 Value: low
 Raised by: 219-closes-at-start (contract)
 
-## [2026-11-22-6] [nit] `USES` only matches `uses:` at the start of a line or after `- `, so a quoted value (`uses: "a/b@v4"`) would slip through unchecked
-
-Raised by the code review of 221-ci-pinned-shas, round 1: tests/test_ci.py:15: `USES` only matches `uses:` at the start of a line or after `- `, so a quoted value (`uses: "a/b@v4"`) would slip through unchecked
-
-Theme: robustness
-Paths: tests/test_ci.py
-Cost: S
-Value: low
-Raised by: 221-ci-pinned-shas (correctness)
-
-## [2026-11-22-7] [nit] the workflow glob misses `.github/workflows/*.yaml`, which GitHub also runs, so an unpinned action there would pass the test; glob both extensions
-
-Raised by the security review of 221-ci-pinned-shas, round 1: tests/test_ci.py:52: the workflow glob misses `.github/workflows/*.yaml`, which GitHub also runs, so an unpinned action there would pass the test; glob both extensions
-
-Theme: robustness
-Paths: tests/test_ci.py
-Cost: S
-Value: med
-Raised by: 221-ci-pinned-shas (contract)
-
-## [2026-11-22-8] [nit] `VERSION` demands a `v` plus digits, so a comment like `# release-2` would be refused; that is stricter than the outcome's wording but matches the plan
-
-Raised by the test review of 221-ci-pinned-shas, round 1: tests/test_ci.py:16: `VERSION` demands a `v` plus digits, so a comment like `# release-2` would be refused; that is stricter than the outcome's wording but matches the plan
-
-Theme: tests
-Paths: tests/test_ci.py
-Cost: S
-Value: low
-Raised by: 221-ci-pinned-shas (correctness)
-
-## [2026-11-22-9] [nit] `USES` still misses a quoted `uses: "a/b@v4"`
-
-Raised by the code review of 221-ci-pinned-shas, round 2: tests/test_ci.py:15: `USES` still misses a quoted `uses: "a/b@v4"`
-
-Theme: robustness
-Paths: tests/test_ci.py
-Cost: S
-Value: low
-Raised by: 221-ci-pinned-shas (correctness)
-
-## [2026-11-22-10] [nit] `VERSION` demands `v` plus digits, so a comment like `# release-2` is refused; this is stricter than the outcome's wording but matches the plan
-
-Raised by the test review of 221-ci-pinned-shas, round 2: tests/test_ci.py:16: `VERSION` demands `v` plus digits, so a comment like `# release-2` is refused; this is stricter than the outcome's wording but matches the plan
-
-Theme: tests
-Paths: tests/test_ci.py
-Cost: S
-Value: low
-Raised by: 221-ci-pinned-shas (correctness)
-
 ## [2026-11-22-11] [nit] `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
 
 Raised by the security review of 218-ask-reviewer-defaults, round 2: plugins/factory/scripts/factory.py:2296: `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
@@ -897,3 +847,13 @@ Paths: tests/test_base_ci.py
 Cost: S
 Value: low
 Raised by: 220-base-ci-red (correctness)
+
+## [2026-11-22-18] [nit] `QUOTED` is a module-level regex used only in `unpinned()`.
+
+Raised by the code review of 225-ci-pin-test-quotes, round 1: tests/test_ci.py:20: `QUOTED` is a module-level regex used only in `unpinned()`. That matches the file's own `USES`, `PINNED` and `VERSION` pattern, so there is nothing to change.
+
+Theme: style
+Paths: tests/test_ci.py
+Cost: S
+Value: low
+Raised by: 225-ci-pin-test-quotes (correctness)
