@@ -1,0 +1,10 @@
+{"step": "checks", "round": null, "seconds": 11.0, "since": "2026-11-22T02:12:38Z"}
+{"step": "ship", "round": null, "seconds": 7.0, "since": "2026-11-22T02:12:49Z"}
+{"step": "stack", "round": 1, "seconds": 3674.0, "since": "2026-11-22T02:12:56Z"}
+{"step": "recheck", "round": 1, "seconds": 3.0, "since": "2026-11-22T03:14:10Z"}
+{"step": "review", "round": 1, "seconds": 82.0, "since": "2026-11-22T03:14:13Z"}
+{"step": "close", "round": 1, "seconds": 1.0, "since": "2026-11-22T03:15:35Z"}
+{"step": "stack", "round": 1, "seconds": 2.0, "since": "2026-11-22T03:15:36Z"}
+{"step": "stack", "round": 2, "seconds": 515.0, "since": "2026-11-22T03:15:38Z"}
+{"step": "recheck", "round": 2, "seconds": 4.0, "since": "2026-11-22T03:24:13Z"}
+{"step": "review", "round": 2, "seconds": 87.0, "since": "2026-11-22T03:24:17Z"}

@@ -80,13 +80,6 @@ read in place instead, so for its owner a change is live in the next session as 
 `/sdlc:close` fast-forwards `main`. `claude plugin list` shows `Read from:` when that holds, and
 without it the owner is running a cached copy too. Ship stops before the push.
 
-### The release loop → `/sdlc:release`, then `/sdlc:publish`
-
-Here a release follows the waves (`docs/RETRO-SCORECARD.md`, *Waves*), not Release due: once each
-wave has landed, and before the next retrospective. Changes in a wave lean on each other, so
-releasing between them hands users half of a wave. Releasing before the retrospective gives it a
-release its users have had time to report on, so its `time_to_users` has something to measure.
-
 ### Stage 6 — Maintain → `/sdlc:health`
 
 #### What the scans watch
