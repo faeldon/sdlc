@@ -456,8 +456,12 @@ FINDINGS_HEAD = """\
 # and a nit's `Reason:` says no one weighed it.
 FINDING_HEAD_RE = re.compile(r"^## F(\d+)\.")
 NIT_REASON = "raised by an agent; not weighed or filed"
-# What a weighed nit's `Reason:` says when it isn't filed as one (`agent_findings()`).
-HANDED_REASON = "weighed S med: handed to the builder's rework, and not raised again"
+# What a weighed nit's `Reason:` says when it isn't filed as one (`agent_findings()`): a later
+# round of its review didn't raise it again, or raised it again reworded (`REPEAT_REASON`, filled
+# with that round), or its value is below the factory's filing bar.
+FIXED_REASON = "not raised again by a later round of its review"
+REPEAT_REASON = "raised again, reworded, by round {round} of its review, which it is filed from"
+LOW_REASON = "weighed low value: below the factory's filing bar"
 HIGH_REASON = "weighed high value: never a nit; carried to notes.md"
 IDEA_REASON = "weighed L cost: an idea, not a nit; carried to notes.md"
 NIT_CAP = 5
@@ -2872,7 +2876,8 @@ def cmd_carry(root: Path, ident: str) -> int:
     nit weighed `high` or `L` (`agent_findings()`'s `note`), as an unticked `- [ ]` line in
     notes.md, so `/sdlc:ship` must give each a disposition. Once only: a line already there,
     ticked or not, isn't added again. Then the record: every agent finding of every complete
-    round, in `findings.md` beside notes.md (`write_findings()`)."""
+    round, in `findings.md` beside notes.md (`write_findings()`), each nit left unfiled with its
+    `Reason:` (`agent_findings()`)."""
     cfg, _ = load_config(root)
     folder, refusal = find_change(root, ident)
     if refusal:
@@ -2917,16 +2922,6 @@ def cli_carry(root: Path, args) -> int:
     return cmd_carry(root, args.id)
 
 
-def reworked_round(rounds: list[dict], n: int) -> bool:
-    """Whether round `n`'s rework ran, read from the rounds alone: its arbiter kept a change, and
-    round `n + 1` was built, but not as a restart's or an upgrade's first round, which starts
-    fresh. Its cheap nits (`cheap_nits()`) were handed to the builder then."""
-    this = next((r for r in rounds if r["round"] == n), None)
-    after = next((r for r in rounds if r["round"] == n + 1), None)
-    kept = this and (this["verified"] or {}).get("kept")
-    return bool(kept and after and not after.get("start"))
-
-
 def agent_findings(rounds: list[dict]) -> list[dict]:
     """Every distinct `(role, text)` the complete `rounds` raised, as the record's findings, in
     round order (the build's rounds, then the landing's), then `REVIEWERS` order, then each file's
@@ -2940,12 +2935,15 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
     A nit is keyed by its text without its weights, which the latest complete build round that
     raised it gives, and disposed of by them, never by a model: without weights it is `minor`;
     `high` value is never a nit but an `important` finding, and `L` cost an idea, each `recorded`
-    and `note`d for notes.md; `S` with `med` is `fixed` when a rework was handed it
-    (`reworked_round()`) and a later complete build round of its role doesn't raise it again;
-    every other is `recorded`, to file as a `[nit]` entry (`file`), but one naming no path, and
-    any past the first `NIT_CAP`, `minor`. Only the build's rounds are weighed, so what the
-    landing filed is what the record says: a nit only a landing round raised, after the filing,
-    is `minor`."""
+    and `note`d for notes.md. Any other is filed from its role's last round only (230 R1, R2):
+    one a later complete build round of its role (a restart's or an upgrade's first round
+    included) doesn't raise again word for word is never filed, whatever its weights, but `minor`
+    with `REPEAT_REASON` when a nit of that later round names the same path, since it is that one
+    reworded, and `fixed` with `FIXED_REASON` when none does; the path only labels it. Of the
+    rest, `low` value is `minor` (`LOW_REASON`), and every other is `recorded`, to file as a
+    `[nit]` entry (`file`), but one naming no path, and any past the first `NIT_CAP`, `minor`.
+    Only the build's rounds are weighed, so what the landing filed is what the record says: a nit
+    only a landing round raised, after the filing, is `minor`."""
     done = [r for r in rounds if r["complete"]]
 
     def kept_of(r: dict) -> list[tuple[str, str]]:
@@ -3008,8 +3006,17 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
             item.update(rank="important", disposition="recorded", reason=HIGH_REASON, note=True)
         elif nit["cost"] == "L":
             item.update(disposition="recorded", reason=IDEA_REASON, note=True)
-        elif (nit["cost"], nit["value"]) == ("S", "med") and reworked_round(built, last) and later:
-            item.update(disposition="fixed", reason=HANDED_REASON)
+        elif later:
+            path = _nit_path(role, text)
+            again = [r["round"] for r in later
+                     for n in r["reviews"][role].get("nits") or []
+                     if path and _nit_path(role, n["text"]) == path]  # fmt: skip
+            if again:
+                item.update(disposition="minor", reason=REPEAT_REASON.format(round=again[-1]))
+            else:
+                item.update(disposition="fixed", reason=FIXED_REASON)
+        elif nit["value"] == "low":
+            item.update(disposition="minor", reason=LOW_REASON)
         else:
             pass_, said = finding_pass(role, text)
             m = LEAD_RE.match(said)
@@ -3026,6 +3033,32 @@ def agent_findings(rounds: list[dict]) -> list[dict]:
                     "value": nit["value"], "pass": pass_, "role": role, "round": item["round"],
                 }  # fmt: skip
     return list(found.values())
+
+
+def earlier_nits(
+    rounds: list[dict], rnd: int, role: str, handed: list[str]
+) -> tuple[int | None, list[str]]:
+    """The nits `role` raised in its latest complete build round before `rnd` (a restart's or an
+    upgrade's earlier run included), as that round and each nit's text with its weights put back,
+    for the review of `rnd` to raise again any still true (230 R4); but the ones `handed` already
+    names. Read from the rounds alone."""
+    before = [r for r in rounds
+              if r["round"] < rnd and r.get("complete") and r.get("kind", "round") == "round"
+              and role in r["reviews"]]  # fmt: skip
+    if not before:
+        return None, []
+    nits = [
+        n["text"] + (f" {{{n['theme']} {n['cost']} {n['value']}}}" if n["cost"] else "")
+        for n in before[-1]["reviews"][role].get("nits") or []
+        if n["text"] not in handed
+    ]
+    return before[-1]["round"], nits
+
+
+def _nit_path(role: str, text: str) -> str | None:
+    """The path a nit's text leads with (`LEAD_RE`), its pass taken off first; None without one."""
+    m = LEAD_RE.match(finding_pass(role, text)[1])
+    return m.group(1) if m else None
 
 
 def finding_section(n: int, item: dict) -> str:
@@ -4552,7 +4585,7 @@ PROMPT_PARTS: dict[str, dict[str, frozenset[str]]] = {
                   "upgraded": "decision answer round rel", "autopilot": "policy"},
         "fix": {"main": "round rel"},
         "review": {"main": "round", "upgraded": "decision", "reworked": "reworked kept settled",
-                   "raise-again": "", "handed": "handed"},
+                   "raise-again": "", "handed": "handed", "earlier": "before nits"},
         "arbitrate": {"main": "round", "counts": "untouched repeats settled"},
         "rework": {"main": "round rel verified", "handed": ""},
         "approve": {"main": "", "upgraded": "round decision", "stuck": "round before stuck",
@@ -5106,6 +5139,9 @@ def _task_prompt(
         handed = [h["text"] for h in state.get("handed") or [] if h["role"] == role]
         if handed:
             prompt += " " + prompt_part("review", "handed", handed="; ".join(handed))
+        before, nits = earlier_nits(state["rounds"], rnd, role, handed)
+        if nits:
+            prompt += " " + prompt_part("review", "earlier", before=before, nits="; ".join(nits))
         return prompt, reviews_dir / f"{role}.md", False
     if task == "arbitrate":
         current = next(r for r in state["rounds"] if r["round"] == rnd)

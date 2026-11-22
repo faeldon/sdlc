@@ -1116,6 +1116,26 @@ def test_a_nit_named_but_not_taken_in_stays(tmp_path, capsys) -> None:
 def test_the_nits_taken_in_line_is_read_in_its_forms(tmp_path) -> None:
     """181 R2: the marker as a plain line, a list item, a bold lead, in any case, and a wrapped
     continuation; ids matched whole; a marker under `## Problem` retires nothing."""
+    _taken_in_forms(tmp_path, factory.named_nits)
+
+
+def test_core_reads_nits_taken_in_as_the_factory_does(tmp_path) -> None:
+    """230 R9: core's copy of the factory's `Nits taken in:` reader, which `inbox-commit` asks
+    before it retires a nit, reads every one of the factory's cases as the factory does."""
+    ids = [e["id"] for e in sdlc.parse_entries(REGISTER)]
+
+    def both(root: Path, folder: Path) -> list[str]:
+        theirs, ours = factory.named_nits(root, folder), sdlc.nits_taken_in(folder, ids)
+        assert ours == theirs
+        return ours
+
+    _taken_in_forms(tmp_path, both)
+    for name in ("NIT_SECTIONS", "TAKEN_RE", "LIST_ITEM_RE"):
+        assert getattr(sdlc, name) == getattr(factory, name), name
+
+
+def _taken_in_forms(tmp_path: Path, read) -> None:
+    """The cases of the `Nits taken in:` line, read by `read(root, folder)`."""
     (tmp_path / ".sdlc" / "work").mkdir(parents=True)
     (tmp_path / ".sdlc" / "work" / "inbox.md").write_text(REGISTER, encoding="utf-8")
     folder = tmp_path / ".sdlc" / "work" / "001-tidy"
@@ -1124,7 +1144,7 @@ def test_the_nits_taken_in_line_is_read_in_its_forms(tmp_path) -> None:
 
     def named(approach: str, problem: str = "") -> list[str]:
         intent.write_text(f"## Problem\n\n{problem}\n\n## Approach\n\n{approach}\n")
-        return factory.named_nits(tmp_path, folder)
+        return read(tmp_path, folder)
 
     assert named("Nits taken in: 2026-11-17-11") == ["2026-11-17-11"]
     assert named("- Nits taken in: 2026-11-17-2") == ["2026-11-17-2"]
@@ -1911,12 +1931,12 @@ def test_a_landing_files_each_approved_bug_once(tmp_path, capsys) -> None:
 
 # ---------------------------------------------------------------- the agents' nits (129)
 
-TERSE = "README.md:1: terse wording. Say what it is {docs S low}"
+TERSE = "README.md:1: terse wording. Say what it is {docs S med}"
 TERSE_FILED = {
     "title": "terse wording.", "text": "README.md:1: terse wording. Say what it is",
-    "theme": "docs", "paths": ["README.md"], "cost": "S", "value": "low",
+    "theme": "docs", "paths": ["README.md"], "cost": "S", "value": "med",
     "pass": "correctness", "role": "code", "round": 1,
-    "shown": "[nit] terse wording. (docs, S, low; README.md)",
+    "shown": "[nit] terse wording. (docs, S, med; README.md)",
 }  # fmt: skip
 
 
@@ -1933,7 +1953,7 @@ def test_land_check_shows_the_nits_it_would_file(tmp_path, capsys) -> None:
     root = _repo(tmp_path)
     tree = _ready(root, "noted", "noted's one")
     folder = _folder(tree)
-    _nit(folder, "code", TERSE, "the names are long {style M low}")
+    _nit(folder, "code", TERSE, "the names are long {style M med}")
     _nit(folder, "test", "README.md:3: a third line {tests L med}")
     code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
     [entry] = batch["batch"]
@@ -1974,7 +1994,7 @@ def test_nits_to_file_keep_the_gate_the_persons(tmp_path, capsys) -> None:
     tree = _ready(root, "noted", "noted's one")
     folder = _folder(tree)
     assert _run(capsys, factory.landing.cmd_land_check, root, [])[1]["clear"] is True
-    _nit(folder, "code", *(f"README.md:{i}: wording {i} {{docs M low}}" for i in range(1, 8)))
+    _nit(folder, "code", *(f"README.md:{i}: wording {i} {{docs M med}}" for i in range(1, 8)))
     code, batch = _run(capsys, factory.landing.cmd_land_check, root, [])
     assert batch["clear"] is False
     assert batch["batch"][0]["signals"] == ["nits to file: 5, 2 past the cap of 5"]
@@ -2004,7 +2024,7 @@ def test_a_landing_files_the_nits_sdlc_reads(tmp_path, capsys) -> None:
     [nit] = nits
     assert out["filed_nits"] == [nit["id"]]
     assert (nit["title"], nit["theme"], nit["paths"], nit["cost"], nit["value"]) == (
-        "terse wording.", "docs", ["README.md"], "S", "low",
+        "terse wording.", "docs", ["README.md"], "S", "med",
     )  # fmt: skip
     assert (nit["by"], nit["pass"]) == (tree.name, "correctness")
     assert nit["text"].startswith(
@@ -2024,7 +2044,7 @@ def test_a_landing_rerun_files_each_nit_once(tmp_path) -> None:
     root = _repo(tmp_path)
     tree = _ready(root, "noted", "noted's one")
     folder = _folder(tree)
-    _nit(folder, "code", TERSE, "README.md:2: terse wording. Another one {docs M low}")
+    _nit(folder, "code", TERSE, "README.md:2: terse wording. Another one {docs M med}")
     pre, _ = factory.landing._preflight(folder, tree)
     filed, refused = factory.landing._dispose(tree, folder, pre)
     assert refused is None and len(filed) == 2

@@ -1,0 +1,1 @@
+Change folder: .sdlc/work/008-reopen-drafts. Worktree: <root>. Review round 2. Nits handed to the builder last round: src/c.py:3: a clearer name; raise again, word for word with its weights, any the rework didn't make. Nits you raised in round 1: src/d.py:4: split it {refactor M med}; src/e.py:5: unweighed; raise again, word for word with its weights, any that are still true.

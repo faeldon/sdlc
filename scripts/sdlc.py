@@ -7499,12 +7499,13 @@ def retro_due(home: Path, cfg: dict) -> dict:
     return {"due": bool(why), "why": why, "releases": [t["tag"] for t in in_range]}
 
 
-# Why an entry left the register without a change, by its kind. A fixed bug or a built idea
-# leaves through the ship that did it, and a nit only through ship.
+# Why an entry left the register without a change, by its kind. A fixed bug, a built idea or a
+# nit a change takes in leaves through the ship that did it; a nit retires here as a duplicate,
+# as `stale` (the code it names has moved on) or as `wontfix` (true, but not worth doing).
 RETIRE_REASONS = {
     "idea": ("duplicate", "superseded", "declined"),
     "bug": ("duplicate", "not-a-bug", "wontfix", "cant-reproduce"),
-    "nit": (),
+    "nit": ("duplicate", "stale", "wontfix"),
 }
 INBOX_SUBJECTS = ("File", "Retire", "Update")
 # The part of a register commit's subject naming the issues triage closed (`_inbox_commit()`).
@@ -7566,7 +7567,8 @@ def cmd_inbox_commit(
     on the base branch in the main checkout, its subject `File <id>`, `Retire <id>` or `Update
     <id>` for each entry added, removed or changed. A removed entry needs `--reason <id>=<word>`,
     one of its kind's RETIRE_REASONS: a bug's goes on an `Sdlc-Retired:` trailer, any other's on a
-    `Reason <id>:` body line; a nit, or an entry being built, is never removed here. Each
+    `Reason <id>:` body line; an entry being built, or a nit an open change takes in
+    (`_nit_claims()`), is never removed here. Each
     `--triaged` verdict adds an `Sdlc-Triaged:` trailer, and `Triage #N` to the subject; with
     nothing else to record, the commit is empty.
 
@@ -7630,6 +7632,70 @@ def _open_claims(home: Path) -> list[tuple[str, str]]:
         if rec["stage"] == "dropped":
             continue
         claims += [(r, p.name) for r in [*ideas_of(rec), *rec["fixes"]] if r]
+    return claims
+
+
+# Where a change names the nits it takes in, as `/sdlc:intent` and `/sdlc:spec` write them: a
+# `Nits taken in:` line (`TAKEN_RE`) in one of these sections. Copies of `factory.py`'s reader
+# (`NIT_SECTIONS`, `TAKEN_RE`, `LIST_ITEM_RE`, `taken_lines()`, its `_section()` as
+# `_nit_section()`), read by `inbox-commit` before it retires a nit; `tests/test_land.py` pins them.
+NIT_SECTIONS = (("intent.md", "## Approach"), ("spec.md", "## Requirements"))
+TAKEN_RE = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?nits taken in:(?:\*\*)?(.*)$", re.IGNORECASE)
+# An indented line that starts a list item of its own: never a `Nits taken in:` line's wrap.
+LIST_ITEM_RE = re.compile(r"^\s+(?:[-*+]|\d+\.)\s")
+
+
+def taken_lines(text: str) -> str:
+    """The text of `text`'s `Nits taken in:` lines after the colon, each with the lines that
+    continue it (indented, up to the next blank or unindented line, or an indented one that
+    starts a list item, `LIST_ITEM_RE`: a sub-bullet naming a nit to say it's left out)."""
+    found, inside = [], False
+    for line in text.splitlines():
+        if m := TAKEN_RE.match(line):
+            found.append(m.group(1))
+            inside = True
+        elif inside and line[:1].isspace() and line.strip() and not LIST_ITEM_RE.match(line):
+            found.append(line)
+        else:
+            inside = False
+    return "\n".join(found)
+
+
+def _nit_section(text: str, heading: str) -> str:
+    """The lines under `heading` in `text`, up to the next `## ` heading; empty when it has none."""
+    found, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line.rstrip() == heading
+        elif inside:
+            found.append(line)
+    return "\n".join(found)
+
+
+def nits_taken_in(folder: Path, ids: list[str]) -> list[str]:
+    """Those of `ids` the change in `folder` takes in, by id on a `Nits taken in:` line
+    (`taken_lines()`) in `NIT_SECTIONS`, in `ids`' order, each matched whole, so `2026-11-17-1` is
+    never named by `2026-11-17-11`: never an id in prose. As `factory.named_nits()` reads it."""
+    named = "\n".join(
+        taken_lines(_nit_section((folder / f).read_text(encoding="utf-8"), heading))
+        for f, heading in NIT_SECTIONS if (folder / f).is_file()
+    )  # fmt: skip
+    return [i for i in ids if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", named)]
+
+
+def _nit_claims(home: Path, ids: list[str]) -> dict[str, str]:
+    """Each of the nits `ids` an open change takes in, to the first such change's folder name: by
+    id on a `Nits taken in:` line (`nits_taken_in()`), or on a `Retire <id>:` line of its
+    `entries.md` (`held_entries()`). A dropped change claims nothing."""
+    claims: dict[str, str] = {}
+    for p in change_dirs(home):
+        if load_change(p, home)["stage"] == "dropped":
+            continue
+        held = p / ENTRIES
+        text = held.read_text(encoding="utf-8") if held.is_file() else ""
+        retiring = [i for i, _ in held_entries(text)["retire"] if i in ids]
+        for i in [*nits_taken_in(p, ids), *retiring]:
+            claims.setdefault(i, p.name)
     return claims
 
 
@@ -7718,6 +7784,8 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
         elif _as_written(after[k]) != _as_written(before[k]):
             actions["Update"].append(k)
     claims: list[tuple[str, str]] | None = None
+    gone_nits = [k for k, e in before.items() if k not in after and entry_kind(e) == "nit"]
+    nit_claims = _nit_claims(home, gone_nits) if gone_nits else {}
     for k, e in before.items():
         if k in after:
             continue
@@ -7727,9 +7795,9 @@ def _inbox_commit(root: Path, home: Path, state: dict, report: dict) -> int:
         if claims is None:
             claims = _open_claims(home)
         by = _claimed_by(e, claims)
-        if kind == "nit":
-            refusals.append(f"{k} is a nit: ship retires nits, with the change that fixes one")
-        elif by or is_building(e):
+        if kind == "nit" and k in nit_claims:
+            refusals.append(f"{k} is taken in by {nit_claims[k]}: its change retires it at ship")
+        elif kind != "nit" and (by or is_building(e)):
             refusals.append(
                 f"{k} is being built{f' by {by}' if by else ''}: its change removes it at ship, "
                 "or /sdlc:drop says why not"

@@ -341,8 +341,8 @@ def _idea(entry_id: str, title: str, tag: str = "idea") -> str:
 
 
 def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> None:
-    """An idea retires as duplicate, superseded or declined, a bug by its own four, and a nit or
-    an entry being built never here."""
+    """An idea retires as duplicate, superseded or declined, a bug by its own four, a nit as
+    duplicate, stale or wontfix (230 R7), and an entry being built never here."""
     root = _repo(
         tmp_path,
         _bug("2026-10-01-1", "One"),
@@ -356,7 +356,7 @@ def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> Non
     )
     assert code == 1 and out["refusals"] == [
         "--reason 2026-10-02-1=wontfix: an idea's reason is one of duplicate|superseded|declined",
-        "2026-10-03-1 is a nit: ship retires nits, with the change that fixes one",
+        "--reason 2026-10-03-1=declined: a nit's reason is one of duplicate|stale|wontfix",
         "2026-10-04-1 is being built: its change removes it at ship, or /sdlc:drop says why not",
     ]
     _inbox(
@@ -376,6 +376,50 @@ def test_inbox_commit_retires_by_the_entry_s_kind(tmp_path: Path, capsys) -> Non
         "--reason 2026-10-01-1=superseded: a bug's reason is one of "
         "duplicate|not-a-bug|wontfix|cant-reproduce"
     ]
+    _inbox(root, _bug("2026-10-01-1", "One"), _idea("2026-10-04-1", "Four", "building"))
+    code, out = _commit(root, capsys, "2026-10-03-1=stale")
+    assert code == 0, out
+    body = _git(root, "log", "-1", "--format=%B")
+    assert body.startswith("Retire 2026-10-03-1")
+    assert "Reason 2026-10-03-1: stale" in body and "Sdlc-Retired:" not in body
+    assert sdlc.RETIRE_REASONS["nit"] == ("duplicate", "stale", "wontfix")
+
+
+def _taking(root: Path, name: str, approach: str, stage: str = "build", held: str = "") -> None:
+    """Open change `name` (`NNN-slug`) at `stage`, its intent's Approach `approach`, and its
+    `entries.md` `held` when given, committed."""
+    n, slug = name.split("-", 1)
+    folder = root / ".sdlc" / "work" / name
+    folder.mkdir()
+    intent = FIXING.format(fixes="").replace("001", n).replace("keep-drafts", slug)
+    intent = intent.replace("stage: build", f"stage: {stage}")
+    (folder / "intent.md").write_text(f"{intent}\n## Approach\n\n{approach}\n", encoding="utf-8")
+    if held:
+        (folder / "entries.md").write_text(held, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"open {name}")
+
+
+def test_inbox_commit_never_retires_a_nit_an_open_change_takes_in(tmp_path: Path, capsys) -> None:
+    """230 R8: a nit an open change names on a `Nits taken in:` line, or holds a `Retire` line
+    for in its entries.md, is refused, naming the change; one named in prose, or by a dropped
+    change, is retired."""
+    nits = [_idea(f"2026-10-0{i}-1", f"Nit {i}", "nit") for i in range(1, 5)]
+    root = _repo(tmp_path, *nits)
+    _taking(root, "001-keep-drafts", "Nits taken in: 2026-10-01-1\n\n2026-10-03-1, in prose.")
+    _taking(root, "002-trim-logs", "Nothing.", held="Retire 2026-10-02-1: fixed by it\n")
+    _taking(root, "003-gone", "Nits taken in: 2026-10-04-1", stage="dropped")
+    _inbox(root)
+    reasons = [f"2026-10-0{i}-1=stale" for i in range(1, 5)]
+    code, out = _commit(root, capsys, *reasons)
+    assert code == 1 and out["refusals"] == [
+        "2026-10-01-1 is taken in by 001-keep-drafts: its change retires it at ship",
+        "2026-10-02-1 is taken in by 002-trim-logs: its change retires it at ship",
+    ]
+    _inbox(root, nits[0], nits[1])
+    code, out = _commit(root, capsys, *reasons[2:])
+    assert code == 0, out
+    assert _git(root, "log", "-1", "--format=%s") == "Retire 2026-10-03-1, 2026-10-04-1"
 
 
 def test_inbox_commit_never_retires_what_an_open_change_builds_or_fixes(

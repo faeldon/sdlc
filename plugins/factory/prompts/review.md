@@ -24,3 +24,7 @@ Raise again, word for word, any change kept last round that the rework didn't ma
 ## handed
 
 Nits handed to the builder last round: ${handed}; raise again, word for word with its weights, any the rework didn't make.
+
+## earlier
+
+Nits you raised in round ${before}: ${nits}; raise again, word for word with its weights, any that are still true.

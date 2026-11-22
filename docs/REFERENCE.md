@@ -514,8 +514,11 @@ the main checkout, as `File <id>`, `Retire <id>` or `Update <id>`, a retired bug
 its reasons `duplicate`, `superseded` or `declined`, written as a `Reason <id>:` line. Both run
 from any checkout: from a change's worktree, `inbox-commit <id>` files the entry it names into
 the main checkout's register, which must be clean and on the base branch, so it never waits on
-the change's branch, and the worktree gets it when it next comes up to date. A nit, or an
-entry an open change builds or fixes (its `idea:` or `fixes:` line), is never retired this way.
+the change's branch, and the worktree gets it when it next comes up to date. `/sdlc:idea` also
+retires a nit, as `duplicate`, `stale` or `wontfix`, written as a `Reason <id>:` line, but never
+one an open change takes in (by id on its `Nits taken in:` line, or on a `Retire` line of its
+`entries.md`), which its change retires at ship. An entry an open change builds or fixes (its
+`idea:` or `fixes:` line) is never retired this way.
 `sdlc.py bugs` lists them (`--touching <path>…` to narrow), and `--introduced <path>…` names the
 closed change that last touched each path, a candidate for `Introduced by:` and never written
 without a person's word. `check` reports a bug with no id, a severity outside the words, or an

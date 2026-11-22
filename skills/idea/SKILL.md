@@ -1,6 +1,6 @@
 ---
 name: idea
-description: File an idea in .sdlc/work/inbox.md, or edit or retire one — takes the idea in the person's own words, checks the register for one that already covers it, drafts the entry with an id from next-entry (and an After line when it follows another seed), and after one approval commits the inbox alone on the base branch as "File <id>", "Update <id>" or "Retire <id>". Use from any checkout, a change's worktree included, when someone has an idea for later; `--themes`, from the main checkout, proposes a Theme line for every idea and bug lacking one, when status says many do. Not for something already broken (/sdlc:bug files it), not for building the idea (/sdlc:intent <id> opens the change), and never for editing code.
+description: File an idea in .sdlc/work/inbox.md, or edit or retire one, or retire a nit — takes the idea in the person's own words, checks the register for one that already covers it, drafts the entry with an id from next-entry (and an After line when it follows another seed), and after one approval commits the inbox alone on the base branch as "File <id>", "Update <id>" or "Retire <id>". Use from any checkout, a change's worktree included, when someone has an idea for later; `--themes`, from the main checkout, proposes a Theme line for every idea and bug lacking one, when status says many do. Not for something already broken (/sdlc:bug files it), not for building the idea (/sdlc:intent <id> opens the change), and never for editing code.
 argument-hint: "[the idea, an entry's id to edit or retire, or --themes]"
 allowed-tools:
   - AskUserQuestion
@@ -72,8 +72,12 @@ When the argument is an entry's id, or the human wants one changed or gone:
 - **Retire** an idea nobody will build: the reason is one of `duplicate`, `superseded` or
   `declined`, said with a line on why. An idea an open change builds (its `idea:` line names it,
   or, in an older register, the `[building]` tag) is never retired here: its change removes it at
-  ship, or `/sdlc:drop` says why not. A `[bug]` is `/sdlc:bug`'s to retire, and a `[nit]` is
-  ship's.
+  ship, or `/sdlc:drop` says why not. A `[bug]` is `/sdlc:bug`'s to retire.
+- **Retire** a `[nit]` no change will take in: the reason is one of `duplicate` (another entry
+  says it), `stale` (the code it names has moved on) or `wontfix` (true, but not worth doing),
+  said with a line on why. A nit an open change takes in (by id on its `Nits taken in:` line, or
+  on a `Retire` line of its `entries.md`) is that change's to retire at ship: the script refuses
+  it, naming the change.
 
 **Themes for what has none**, when the argument is `--themes` (status says `N ideas and bugs have
 no theme`). Only from the main checkout: when `work.dir` is inside `.claude/worktrees/`, say that
@@ -184,5 +188,6 @@ built now, or nothing, and `/sdlc:status` puts it forward.
 ## Out of scope
 
 - Building the idea, or opening the change that does: that's `/sdlc:intent <id>`.
-- Bugs: `/sdlc:bug` files them. Nits: ship writes those.
+- Bugs: `/sdlc:bug` files them. Nits: ship and the factory's landing file those; this skill
+  only retires one.
 - Pushing. Only `/sdlc:publish`, and close and release when `git.push` names them, push.

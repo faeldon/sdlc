@@ -235,8 +235,12 @@ spec.
   reviewers list their nits as `- NIT:` lines under `## Notes`, never verified, each weighed
   `{<theme> <cost> <value>}` by the process doc's rubric. The script disposes of each by its
   weights: an `S` with `med` value goes to the builder with a rework that runs anyway (never one
-  of its own), any other `S` or `M` is filed at landing, at most five a change, an `L` or a
-  `high` value is carried to `notes.md`, and an unweighed nit is only recorded.
+  of its own), an `L` or a `high` value is carried to `notes.md`, and an unweighed nit is only
+  recorded. Each reviewer back for a later round is named the nits it raised before, to raise
+  again word for word any still true, and a role's nits are filed from its last round only: one
+  a later round of its review doesn't raise again is taken as fixed (or as reworded, when a later
+  nit names its path), whatever its weights. Of what is left, an `S` or `M` of `med` value is
+  filed at landing, five a change at most, and one of `low` value is only recorded.
 - **At the cap, step back.** When the rounds run out with changes still kept, the approver must
   ESCALATE and say, under `## Reconsider the approach`, what kept coming back.
 - **Stop early when a round can't help.** A run goes to the approver with rounds still left when

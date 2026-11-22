@@ -952,6 +952,20 @@ def test_idea_files_by_the_script_from_any_checkout() -> None:
         assert "Run it from any checkout" in body, skill
 
 
+def test_idea_retires_a_nit() -> None:
+    """230 R10: `/sdlc:idea` retires a `[nit]` with each of its reasons, leaves a nit an open
+    change takes in to the script to refuse, and no longer calls nits ship's alone."""
+    text = (ROOT / "skills" / "idea" / "SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    retire = flat[flat.index("## Step 2") : flat.index("**Themes for what has none**")]
+    assert "`[nit]`" in retire
+    for word in sdlc.RETIRE_REASONS["nit"]:
+        assert f"`{word}`" in retire, word
+    assert "takes in" in retire and "refuses" in retire
+    assert "a `[nit]` is ship's" not in flat
+    assert "Nits: ship writes those." not in flat
+
+
 def test_idea_themes_leave_out_what_status_lists_as_being_built() -> None:
     """116: an open change's `idea:` or `fixes:` line is all that marks a seed taken, so the themes
     pass reads status's being-built list, the open changes as status reads them, rather than the

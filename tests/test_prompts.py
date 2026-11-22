@@ -183,6 +183,21 @@ def _review_reworked(c: Case, kept: bool) -> str:
     return c.task(state, "review", "code")
 
 
+def _review_earlier(c: Case) -> str:
+    """230 R4: the code reviewer of round 2 is named the nits it raised in round 1, weighed, but
+    the one handed to the builder, which the handed part names."""
+    nits = [
+        {"text": "src/c.py:3: a clearer name", "theme": "key", "cost": "S", "value": "high"},
+        {"text": "src/d.py:4: split it", "theme": "refactor", "cost": "M", "value": "med"},
+        {"text": "src/e.py:5: unweighed", "theme": None, "cost": None, "value": None},
+    ]
+    reviews = {**REVIEWS, "code": {**REVIEWS["code"], "nits": nits}}
+    rounds = [{"round": 1, "reviews": reviews, "verified": KEPT, "complete": True}]
+    handed = [{"role": "code", "text": "src/c.py:3: a clearer name"}]
+    state = _state(next="review", round=2, rounds=rounds, missing=["code"], handed=handed)
+    return c.task(state, "review", "code")
+
+
 def _approve(c: Case, **over) -> str:
     return c.task(_reviewed(2, next="approve", **over), "approve", "approver")
 
@@ -305,6 +320,7 @@ CASES: dict[str, Callable[[Case], str]] = {
     "review-handed": lambda c: c.task(
         _state(next="review", round=2, missing=["code"], handed=HANDED), "review", "code"
     ),
+    "review-earlier": _review_earlier,
     "arbitrate": lambda c: c.task(
         _reviewed(1, next="arbitrate", untouched=["src/z.py"], repeats=["code: x"]),
         "arbitrate",
@@ -403,6 +419,7 @@ PROSE = (
     "Build it: plan.md first",
     "fix what it shows, then report",
     "Raise again, word for word",
+    "any that are still true",
     "Untouched: ",
     "propose its disposition at landing",
     "is decided in decisions.md",
