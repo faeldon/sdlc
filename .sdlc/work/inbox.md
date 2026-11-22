@@ -650,27 +650,11 @@ Left undone by 216-autopilot, carried forward when it landed: `next_up`'s cheap-
 See .sdlc/work/216-autopilot/notes.md in its commit.
 Raised 2026-11-21.
 
-## [2026-11-21-48] [idea] Test the whole autopilot loop's subprocesses with a stand-in `claude`
-
-Left undone by 216-autopilot, carried forward when it landed: `test_autopilot_end_to_end` drives the loop in process with `run_step` stood in for, as the train's tests do. Since round 1, `test_a_real_step_passes_by_autopilot_and_an_agents_env_never_does` runs a real `run_step` child under the lock, but no test runs the whole loop's subprocesses with a stand-in `claude`.
-See .sdlc/work/216-autopilot/notes.md in its commit.
-Raised 2026-11-21.
-
 ## [2026-11-21-49] [idea] Retro overturn rate for autopilot's calls
 
 Left undone by 216-autopilot, carried forward when it landed: The retrospective's overturn rate for autopilot's calls (the spec's question 6) is left for a later seed, as the intent's resolution says.
 See .sdlc/work/216-autopilot/notes.md in its commit.
 Raised 2026-11-21.
-
-## [2026-11-21-51] [nit] `cmd_answer` reads and rewrites `decisions.md` with no lock.
-
-Raised by the code review of 216-autopilot, round 1: plugins/factory/scripts/factory.py:2417: `cmd_answer` reads and rewrites `decisions.md` with no lock. This is safe only because one step runs per change at a time. A comment saying so would help.
-
-Theme: docs
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 216-autopilot (correctness)
 
 ## [2026-11-21-52] [nit] many `# fmt: skip` pragmas keep dense literals unformatted
 
@@ -682,26 +666,6 @@ Cost: S
 Value: low
 Raised by: 216-autopilot (correctness)
 
-## [2026-11-21-53] [nit] the "agent is refused" half of the real-step test calls `agent_env()` directly rather than going through `_claude`.
-
-Raised by the test review of 216-autopilot, round 2: tests/test_autopilot.py:1139: the "agent is refused" half of the real-step test calls `agent_env()` directly rather than going through `_claude`. The stubbed test above covers `_claude`, so the two together close the gap.
-
-Theme: tests
-Paths: tests/test_autopilot.py
-Cost: S
-Value: low
-Raised by: 216-autopilot (correctness)
-
-## [2026-11-21-54] [nit] no test that a host's `[commands] check`, run by a `gate` step under the loop, lacks `AUTOPILOT_RUN_ENV`/`TRAIN_RUN_ENV`; `take_markers()` is untested
-
-Raised by the security review of 216-autopilot, round 3: tests/test_autopilot.py:1140: no test that a host's `[commands] check`, run by a `gate` step under the loop, lacks `AUTOPILOT_RUN_ENV`/`TRAIN_RUN_ENV`; `take_markers()` is untested
-
-Theme: tests
-Paths: tests/test_autopilot.py
-Cost: S
-Value: med
-Raised by: 216-autopilot (contract)
-
 ## [2026-11-21-55] [nit] R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`.
 
 Raised by the code review of 216-autopilot, round 4: `.sdlc/work/216-autopilot/spec.md`: R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`. The spec should be brought in line with the ledger
@@ -711,36 +675,6 @@ Paths: .sdlc/work/216-autopilot/spec.md
 Cost: S
 Value: low
 Raised by: 216-autopilot (correctness)
-
-## [2026-11-22-1] [nit] `recorded_closes()` reads the whole ledger on every call, and `record_closes()` calls it on every agent run.
-
-Raised by the code review of 219-closes-at-start, round 1: plugins/factory/scripts/factory.py:3181: `recorded_closes()` reads the whole ledger on every call, and `record_closes()` calls it on every agent run. The ledger is small, so the cost is negligible.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 219-closes-at-start (correctness)
-
-## [2026-11-22-2] [nit] in `cmd_agent`, `_record_land()` runs before `record_closes()`, so if the ledger append fails, the landing step is recorded for an agent that is then refused.
-
-Raised by the security review of 219-closes-at-start, round 1: plugins/factory/scripts/factory.py:5095: in `cmd_agent`, `_record_land()` runs before `record_closes()`, so if the ledger append fails, the landing step is recorded for an agent that is then refused. Recording `closes:` first would make the refusal leave nothing behind.
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 219-closes-at-start (contract)
-
-## [2026-11-22-11] [nit] `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
-
-Raised by the security review of 218-ask-reviewer-defaults, round 2: plugins/factory/scripts/factory.py:2296: `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
-
-Theme: robustness
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: low
-Raised by: 218-ask-reviewer-defaults (contract)
 
 ## [2026-11-22-12] [nit] the `cmd_ask()` docstring wraps short, leaving a line that ends at "while a".
 
@@ -897,3 +831,23 @@ poller wins, so on 2026-11-22 a train's tip gate queued behind five builds' roun
 28 minutes) while the base branch moved under it.
 Theme: factory
 Raised 2026-11-22.
+
+## [2026-11-22-27] [nit] the reflowed sentence leaves one line well past the 100-column wrap the rest of the paragraph keeps ("outside a code fence), which answering would land unbuilt; a `verdicts` stop; one `land-check` excludes or the train").
+
+Raised by the code review of 228-autopilot-readiness, round 1: plugins/factory/README.md:606: the reflowed sentence leaves one line well past the 100-column wrap the rest of the paragraph keeps ("outside a code fence), which answering would land unbuilt; a `verdicts` stop; one `land-check` excludes or the train"). Re-wrap it.
+
+Theme: docs
+Paths: plugins/factory/README.md
+Cost: S
+Value: low
+Raised by: 228-autopilot-readiness (correctness)
+
+## [2026-11-22-28] [nit] the end-to-end test names its assertions on `"→ decided by autopilot: keep it"`.
+
+Raised by the code review of 228-autopilot-readiness, round 1: tests/test_autopilot.py:1576: the end-to-end test names its assertions on `"→ decided by autopilot: keep it"`. That text depends on the stand-in builder's blocking line, so a change to `BUILDER_RAISES` would break it at a distance. Reference a shared constant instead.
+
+Theme: tests
+Paths: tests/test_autopilot.py
+Cost: S
+Value: low
+Raised by: 228-autopilot-readiness (correctness)
