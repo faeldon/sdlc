@@ -237,16 +237,6 @@ Cost: S
 Value: low
 Raised by: 202-defaults-to-landing (correctness)
 
-## [2026-11-20-49] [nit] the new block names no number of changes or days.
-
-Raised by the code review of 205-release-cadence, round 1: .sdlc/SDLC.md:83: the new block names no number of changes or days. The "once each wave has landed" rule is fine, but a person may wonder what to do if a wave stalls past the 14-day mark. One clause would settle it.
-
-Theme: docs
-Paths: .sdlc/SDLC.md
-Cost: S
-Value: low
-Raised by: 205-release-cadence (correctness)
-
 ## [2026-11-20-50] [idea] The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping.
 
 Left undone by 200-tests-pruned-again, carried forward when it landed: The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping. Caching what doesn't change within one reading would speed both.
@@ -914,3 +904,13 @@ board shows its card there.
 Severity: low
 Paths: scripts/sdlc.py, scripts/board.py, plugins/factory/scripts/factory.py
 Theme: board
+
+## [2026-11-22-20] [nit] says "the scorecard work (waves 0–5)", which is now only history, since the waves section is gone from the scorecard.
+
+Raised by the code review of 226-scorecard-framework-only, round 1: .sdlc/DIRECTION.md:167: says "the scorecard work (waves 0–5)", which is now only history, since the waves section is gone from the scorecard. It is harmless, but "waves" no longer has a referent in the docs.
+
+Theme: docs
+Paths: .sdlc/DIRECTION.md
+Cost: S
+Value: low
+Raised by: 226-scorecard-framework-only (correctness)
