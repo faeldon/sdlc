@@ -678,12 +678,6 @@ Left undone by 216-autopilot, carried forward when it landed: The retrospective'
 See .sdlc/work/216-autopilot/notes.md in its commit.
 Raised 2026-11-21.
 
-## [2026-11-21-50] [idea] Stop `_claude()` passing `TRAIN_RUN_ENV` to editing agent sessions. I did not file it as a bug: the Bugs severity words (`high`, `med`, `low`) describe wrong output or lost work, and none fits a guard weakness, so I carry it as a seed.
-
-Left undone by 216-autopilot, carried forward when it landed: pre-existing: plugins/factory/scripts/factory.py:4292: `_claude()` passes `TRAIN_RUN_ENV` on to the agent sessions a `train --run` starts (`train-resolve`, `land-fix`, which edit). So an agent's own `factory.py train …` passes the `train_running()` check at landing.py:1978, which is meant for the loop's own children.
-See .sdlc/work/216-autopilot/notes.md in its commit.
-Raised 2026-11-21.
-
 ## [2026-11-21-51] [nit] `cmd_answer` reads and rewrites `decisions.md` with no lock.
 
 Raised by the code review of 216-autopilot, round 1: plugins/factory/scripts/factory.py:2417: `cmd_answer` reads and rewrites `decisions.md` with no lock. This is safe only because one step runs per change at a time. A comment saying so would help.
