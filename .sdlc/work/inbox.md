@@ -666,34 +666,6 @@ Cost: S
 Value: low
 Raised by: 217-train-gates-every-tip (correctness)
 
-## [2026-11-21-45] [idea] A change can be parked on a host resource, with a deadline, instead of stopping or asking
-
-Autopilot (216) runs changes unattended, but a host step can need a resource another change holds:
-a shared deployment, a database object, an environment one change at a time may use. Today the
-factory has two answers, a blocking decision (the person is asked) or a stop, and neither suits a
-wait that resolves itself in minutes. Nothing either says how long a change may wait.
-
-- **A host step can answer busy:** a host command the factory runs (or a builder runs through the
-  host's own task) exits with a documented code meaning "waiting on a host resource", with who
-  holds it and until when. The factory then **parks** the change, neither stopping nor asking.
-- **Parked is a derived state, like every other:** `runs/parked.md` holds the resource, since and
-  the deadline; `verdicts` reads it as `next: parked`, then the step it interrupted once the host
-  says free, or `stop` (way: ask the person, naming the holder) once the deadline passes. A crash
-  or restart reads the same state from the files, as now. The board and `/sdlc:status` show it as
-  `stopped.md` is shown.
-- **No resource model in the plugin:** which resources exist, how they're locked (a file, a lease in
-  a database), and what conflicts with what stay the host's. The plugin learns only "busy, until".
-- **A transition table** in the docs and tests: every state the factory can be in (stage, and the
-  step `verdicts` names), what moves it on, and the timeout of each waiting state (`decide`, a gate
-  slot, `parked`), so nothing in it can wait forever.
-
-Open: the exit code and the payload a host returns; where the deadline comes from (the host's
-answer, a factory default, a config key); whether a parked change gives up its gate slot; how
-autopilot's queue orders parked changes against new ones.
-
-Theme: factory
-Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/run_state.py, plugins/factory/skills/build/SKILL.md, plugins/factory/skills/autopilot/, docs/REFERENCE.md
-
 ## [2026-11-21-47] [idea] Let autopilot take `next_up`'s cheap-nits lines
 
 Left undone by 216-autopilot, carried forward when it landed: `next_up`'s cheap-nits lines (`rule: nits`) carry no seed id, so autopilot never takes them, though `READY_RULES` lists them.
@@ -857,3 +829,53 @@ Paths: plugins/factory/scripts/factory.py
 Cost: S
 Value: low
 Raised by: 218-ask-reviewer-defaults (correctness)
+
+## [2026-11-22-13] [nit] `needs_of()` compares `now` with the park's own `DEADLINE`, not the deadline cut to the base branch's `[park] deadline` that `verdicts` uses.
+
+Raised by the code review of 222-parked-changes, round 1: scripts/sdlc.py:5164: `needs_of()` compares `now` with the park's own `DEADLINE`, not the deadline cut to the base branch's `[park] deadline` that `verdicts` uses. A forged record with a far deadline would show no need on the board, while `verdicts` would already stop it. R16 only asks for a need when a supervisor died, so this is cosmetic. Cap it with `capped_park()` in the callers, or accept it.
+
+Theme: robustness
+Paths: scripts/sdlc.py
+Cost: S
+Value: low
+Raised by: 222-parked-changes (correctness)
+
+## [2026-11-22-14] [nit] `park --clear` checks only expiry, not `vouched`.
+
+Raised by the code review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:4034: `park --clear` checks only expiry, not `vouched`. `verdicts` reports an unvouched but parseable record as "remove it, then rerun", while `--clear` refuses until the deadline passes. A person has to `rm` it, which the message already says for a record that won't read. Make `--clear` also remove an unvouched record, or say so in its refusal.
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 222-parked-changes (correctness)
+
+## [2026-11-22-15] [nit] `busy_of()`'s `clean()` keeps control characters (ESC and the like), which reach `status` in the terminal; strip C0/C1 before marking
+
+Raised by the security review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:331: `busy_of()`'s `clean()` keeps control characters (ESC and the like), which reach `status` in the terminal; strip C0/C1 before marking
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: med
+Raised by: 222-parked-changes (contract)
+
+## [2026-11-22-16] [nit] `[park] exit = 1` is accepted, which makes every ordinary red check a park; warn on 1, or document 75 as the only sensible code
+
+Raised by the security review of 222-parked-changes, round 1: plugins/factory/scripts/factory.py:119: `[park] exit = 1` is accepted, which makes every ordinary red check a park; warn on 1, or document 75 as the only sensible code
+
+Theme: docs
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 222-parked-changes (contract)
+
+## [2026-11-22-17] [nit] the slot-wait test only asserts that "didn't run" appears on stderr, which proves little about the `check` message; assert the "slot" wording too
+
+Raised by the test review of 222-parked-changes, round 1: tests/test_factory_park.py:358: the slot-wait test only asserts that "didn't run" appears on stderr, which proves little about the `check` message; assert the "slot" wording too
+
+Theme: tests
+Paths: tests/test_factory_park.py
+Cost: S
+Value: low
+Raised by: 222-parked-changes (correctness)
