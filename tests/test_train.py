@@ -39,6 +39,9 @@ def _load(name: str, path: Path):
 
 sdlc = _load("sdlc_for_train", ROOT / "scripts" / "sdlc.py")
 factory = _load("factory_train", ROOT / "plugins" / "factory" / "scripts" / "factory.py")
+# The reviewers a round of these changes expects: the full depth, and the docs reviewer, which a
+# diff touching README.md, a path outside tests/, calls in (227).
+REVIEWED = [*factory.DEFAULTS["reviewers"], "docs"]
 
 INBOX = ".sdlc/work/inbox.md"
 REGISTER = "# Inbox\n\n> The register.\n\n## [2026-10-01-1] [idea] Keep drafts\n\nThe first.\n"
@@ -358,7 +361,7 @@ def _ready(
         "".join(f"{digest}  {p}\n" for p, digest in hashes.items()), encoding="utf-8"
     )
     (folder / "reviews" / "round-1").mkdir(parents=True)
-    for role in factory.DEFAULTS["reviewers"]:
+    for role in REVIEWED:
         (folder / "reviews" / "round-1" / f"{role}.md").write_text(verdict(factory, role), "utf-8")
     return tree
 
@@ -836,9 +839,9 @@ def test_a_train_resolution_is_reviewed_before_it_closes(tmp_path, capsys) -> No
         factory, root, capsys, resolve=_resolving, until=lambda o: o.get("next") == "review"
     )
     last = readings[-1]
-    assert last["change"] == trees[1].name and set(last["verdict"]["missing"]) == set(
-        factory.DEFAULTS["reviewers"]
-    ), last
+    assert last["change"] == trees[1].name and set(last["verdict"]["missing"]) == set(REVIEWED), (
+        last
+    )
     steps = [(r["next"], r.get("change")) for r in readings]
     assert ("resolve", trees[1].name) in steps and ("gate", trees[1].name) in steps
     assert steps.index(("gate", trees[1].name)) < steps.index(("review", trees[1].name))
@@ -1942,7 +1945,7 @@ def test_train_run_makes_the_stored_fix_once(tmp_path, capsys, monkeypatch) -> N
     rel = f".sdlc/work/{trees[0].name}"
     assert _git(root, "show", f"{own[trees[0].name]}:{rel}/build/land-1.ask.md") == "say it louder"
     reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
-    assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
+    assert reviewed >= {f"reviewer-{r}" for r in REVIEWED}, reviewed
     assert sum(ln.startswith(f"train: gate {trees[1].name}") for ln in err.splitlines()) == 1
 
 
@@ -1987,7 +1990,7 @@ def test_a_train_fix_already_made_goes_on_to_the_gate(tmp_path, capsys, monkeypa
     assert "gate" in kinds and kinds.index("gate") < rest.index(f"review {one}"), steps
     assert "stopped" not in kinds, steps
     reviewed = {c["agent"] for c in calls() if c["change"] == trees[0].name}
-    assert reviewed >= {f"reviewer-{r}" for r in factory.DEFAULTS["reviewers"]}, reviewed
+    assert reviewed >= {f"reviewer-{r}" for r in REVIEWED}, reviewed
     assert _git(root, "show", f"{_closes(root)[trees[0].name]}:aa.txt") == "aa"
 
 
@@ -2038,14 +2041,14 @@ def test_train_run_starts_a_rounds_reviewers_together(tmp_path, capsys, monkeypa
     second = trees[1].name
     resolved = {"README.md": "first's one, and second's\ntwo\nthree\n"}
     plan = {f"{second}:resolver": {"write": resolved}}
-    for role in factory.DEFAULTS["reviewers"]:
+    for role in REVIEWED:
         plan[f"{second}:reviewer-{role}"] = {"sleep": 1}
     calls = fake_claude(tmp_path, monkeypatch, plan)
     _begin(root, capsys)
     code, out, _ = _loop(root, capsys)
     assert (code, out.get("done")) == (0, True), out
     reviews = [c for c in calls() if c["change"] == second and c["agent"].startswith("reviewer-")]
-    assert len(reviews) == len(factory.DEFAULTS["reviewers"]), reviews
+    assert len(reviews) == len(REVIEWED), reviews
     assert max(c["start"] for c in reviews) < min(c["end"] for c in reviews), "together"
     assert (root / "README.md").read_text(encoding="utf-8").startswith("first's one, and second's")
 

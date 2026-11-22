@@ -138,6 +138,15 @@ VOCABULARY = ("gate", "slow gate", "approval", "WAIT", "acceptance checks", "vet
               "verification", "validation", "parked")  # fmt: skip
 
 
+def test_every_ship_pass_and_the_docs_list_have_an_entry() -> None:
+    """227 R12.4: each of ship's passes (`PASS_NAMES`) has its `ship-<name>` entry, and the docs
+    review's list key `docs.reviewed` one too."""
+    entries = _entries()
+    assert [n for n in sdlc.PASS_NAMES if f"ship-{n}" not in entries] == []
+    assert "`sdlc:docs`" in entries["ship-docs"]
+    assert "docs.reviewed" in entries and "reviewed" in sdlc.CONFIG_KEYS["docs"]
+
+
 def test_every_vocabulary_term_has_an_entry() -> None:
     """187 R6: each term has its entry, and `gate` no longer says it is a person's approval."""
     entries = _entries()

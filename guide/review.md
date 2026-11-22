@@ -31,8 +31,9 @@ gap is seen rather than assumed closed. Both ways record what they found in the 
   Pass: contract.
 - **cost**: reuse, nothing speculative, waste. Ship: the cost pass. Factory: `reviewer-code`.
   Pass: cost.
-- **context**: the docs a session reads for its context still tell the truth. Ship: the context
-  pass. Factory: `reviewer-code`'s context pass. Pass: context.
+- **context**: the docs a session reads for its context, and the further docs the repo has
+  reviewed, still tell the truth. Ship: the context pass, with `sdlc:docs` for what is now false
+  when the diff calls it in. Factory: `reviewer-docs`, when the diff calls it in. Pass: context.
 - **end-to-end**: the spec's path run through, as a user would. Ship: the behaviour check on a
   Tier 2 change with a spec, each command behind the person's prompt. Factory:
   `reviewer-behaviour`. Pass: correctness.

@@ -188,7 +188,7 @@ def test_preflight_names_the_branches_that_apply(change, capsys) -> None:
     its file first."""
     root, folder = change
     _, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
-    assert out["branches"] == ["undone.md", "closes.md"]
+    assert out["branches"] == ["undone.md", "closes.md", "docs.md"], "scripts/ is outside tests/"
     (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
     _, out = _json(capsys, lambda: sdlc.cmd_preflight(root, "001"))
     assert out["branches"] == ["factory.md", "undone.md", "closes.md"]
@@ -778,3 +778,61 @@ def test_preflight_reports_ci_and_never_refuses_on_it(change, capsys, gh) -> Non
                                    "conclusion": "failure", "url": "https://ci/1"}],
                          "failed": ["check"], "url": "https://ci/1", "why": None}  # fmt: skip
     assert code == 0 and out["problems"] == [], "red CI never refuses"
+
+
+# ---------------------------------------------------------------- the docs pass (227)
+
+
+def _only(tmp_path: Path, path: str, docs: dict[str, str] | None = None) -> Path:
+    """A repo on change 001's branch whose diff touches `path` alone, with `docs` on the base
+    branch."""
+    root = tmp_path / "only"
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / "README.md").write_text("a repo\n", encoding="utf-8")
+    for rel, text in (docs or {}).items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    _git(root, "checkout", "-q", "-b", "001-reopen-drafts")
+    folder = root / ".sdlc" / "work" / "001-reopen-drafts"
+    folder.mkdir()
+    (folder / "intent.md").write_text(INTENT, encoding="utf-8")
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text("x = 1\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "work")
+    return root
+
+
+def test_preflight_passes_docs_on_a_path_outside_tests(tmp_path, capsys) -> None:
+    """R9: a diff touching `src/a.py` gets the docs pass and its side file."""
+    out = _passes_of(capsys, _only(tmp_path, "src/a.py"))
+    assert out["passes"]["docs"] == {"applies": True, "why": None}
+    assert "docs.md" in out["branches"]
+
+
+def test_preflight_skips_docs_on_a_test_no_doc_names(tmp_path, capsys) -> None:
+    """R9: `tests/test_a.py` alone, which no doc names and no CLAUDE.md sits above, doesn't."""
+    out = _passes_of(capsys, _only(tmp_path, "tests/test_a.py"))
+    assert out["passes"]["docs"]["applies"] is False and "docs.md" not in out["branches"]
+    assert "no doc" in out["passes"]["docs"]["why"]
+
+
+def test_preflight_passes_docs_on_a_test_a_doc_names(tmp_path, capsys) -> None:
+    """R9 (b), over the base branch's list: a reviewed doc naming the test calls it in."""
+    docs = {
+        ".sdlc/config.toml": '[docs]\nreviewed = ["site/"]\n',
+        "site/a.md": "Run tests/test_a.py first.\n",
+    }
+    out = _passes_of(capsys, _only(tmp_path, "tests/test_a.py", docs))
+    assert out["passes"]["docs"]["applies"] is True
+
+
+def test_preflight_names_no_docs_pass_on_a_factory_run(tmp_path, capsys) -> None:
+    root = _only(tmp_path, "src/a.py")
+    folder = root / ".sdlc" / "work" / "001-reopen-drafts"
+    (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
+    out = _passes_of(capsys, root)
+    assert out["passes"]["docs"]["applies"] is False and "docs.md" not in out["branches"]

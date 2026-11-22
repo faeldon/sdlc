@@ -93,9 +93,10 @@ def test_light_is_a_table_checked_like_the_top_level(tmp_path: Path) -> None:
 
 def test_max_runs_is_shown_before_the_cost_is_approved() -> None:
     """At the full depth, whatever the diff turns out to need: the builder, the approver, and each
-    round's reviewers, arbiter, builder resume and the builder's two fixes of a red gate."""
+    round's reviewers, the docs reviewer, arbiter, builder resume and the builder's two fixes of
+    a red gate."""
     cfg = {"reviewers": ["code", "security", "test"], "rounds": 3, "models": {}}
-    assert factory.max_runs(cfg) == 2 + 3 * (3 + 2 + 2)
+    assert factory.max_runs(cfg) == 2 + 3 * (3 + 1 + 2 + 2)
 
 
 # ---------------------------------------------------------------- start
@@ -120,7 +121,7 @@ def test_start_checks_the_tier_and_stage(tmp_path, capsys, tier, stage, purpose,
     assert (code == 0) is ok and (not out["refusals"]) is ok, out["refusals"]
     assert out["head"] == _git(root, "rev-parse", "--short", "HEAD")
     if ok:
-        assert out["change"] == NAME and out["max_runs"] == 26, "2 + 3 rounds × (4 + 2 + 2)"
+        assert out["change"] == NAME and out["max_runs"] == 29, "2 + 3 rounds × (4 + 1 + 2 + 2)"
 
 
 @pytest.mark.parametrize("purpose", ["build", "spec"])
@@ -1376,12 +1377,14 @@ def test_what_earlier_rounds_answered_is_settled_and_a_repeat_is_named(tmp_path,
     _review(root, 1, "security", "VERDICT: PASS")
     _review(root, 1, "test", "VERDICT: PASS")
     _review(root, 1, "behaviour", "VERDICT: PASS")
+    _review(root, 1, "docs", "VERDICT: PASS")
     _verified(root, 1, kept=["code: src/a.py:1: rename a"], dropped=["code: src/a.py:1: add a doc"])
     _build_report(root, 2)
     _review(root, 2, "code", "VERDICT: CHANGES", "src/a.py:1: add a doc", "README.md:1: old")
     _review(root, 2, "security", "VERDICT: PASS")
     _review(root, 2, "test", "VERDICT: PASS")
     _review(root, 2, "behaviour", "VERDICT: PASS")
+    _review(root, 2, "docs", "VERDICT: PASS")
     out = _verdicts(root, capsys)
     assert out["next"] == "arbitrate"
     assert out["settled"] == ["code: src/a.py:1: add a doc", "code: src/a.py:1: rename a"]

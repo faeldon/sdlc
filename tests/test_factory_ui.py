@@ -41,9 +41,9 @@ def test_without_a_complete_ui_table_no_ui_review_runs(tmp_path, capsys) -> None
     _touch(root, "web/page.html")
     _build_report(root, 1)
     out = _verdicts(root, capsys)
-    assert out["missing"] == FULL, "no shoot command: the run is today's"
+    assert out["missing"] == [*FULL, "docs"], "no shoot command: no UI review"
     cfg = factory.load_config(root)[0]
-    assert not factory.ui_complete(cfg["ui"]) and factory.max_runs(cfg) == 26
+    assert not factory.ui_complete(cfg["ui"]) and factory.max_runs(cfg) == 29
 
 
 def test_the_ui_reviewers_join_on_a_ui_path_at_either_depth(tmp_path, capsys) -> None:
@@ -53,20 +53,22 @@ def test_the_ui_reviewers_join_on_a_ui_path_at_either_depth(tmp_path, capsys) ->
     _build_report(root, 1)
     out = _verdicts(root, capsys)
     light = ["code", "behaviour"]
-    assert (out["depth"], out["missing"]) == ("light", light), "no UI path, no UI review"
+    assert (out["depth"], out["missing"]) == ("light", [*light, "docs"]), "no UI path, no UI review"
     _touch(root, "web/page.html")
     out = _verdicts(root, capsys)
-    assert (out["depth"], out["missing"]) == ("light", [*light, "ui", "ux"])
-    for role in (*light, "ui", "ux"):
+    every = [*light, "ui", "ux", "docs"]
+    assert (out["depth"], out["missing"]) == ("light", every)
+    for role in every:
         _review(root, 1, role, "VERDICT: CHANGES", f"web/page.html:1: {role} fix")
-    _verified(root, 1, kept=[f"{r}: web/page.html:1: {r} fix" for r in (*light, "ui", "ux")])
+    _verified(root, 1, kept=[f"{r}: web/page.html:1: {r} fix" for r in every])
     (root / "web" / "page.html").unlink()
     _build_report(root, 2)
     out = _verdicts(root, capsys)
     assert out["depth"] == "light", "UI reviews never make a run full"
-    assert out["missing"] == [*light, "ui", "ux"], "a run that looked at the page keeps looking"
-    # Each round: four reviewers, the two UI ones, the arbiter, the rework and two gate fixes.
-    assert factory.max_runs(factory.load_config(root)[0]) == 2 + 3 * (4 + 2 + 2 + 2)
+    assert out["missing"] == every, "a run that looked at the page keeps looking"
+    # Each round: four reviewers, the two UI ones, the docs one, the arbiter, the rework and two
+    # gate fixes.
+    assert factory.max_runs(factory.load_config(root)[0]) == 2 + 3 * (4 + 2 + 1 + 2 + 2)
 
 
 def test_ui_reviewers_are_never_chosen_and_the_table_is_the_base_branch_s(tmp_path) -> None:

@@ -353,12 +353,13 @@ They're gathered into the change's ledger, `.sdlc/work/NNN-slug/decisions.md`, e
 |---|---|---|
 | `spec-writer` | drafts `spec.md`, filed in `runs/` for you to approve, copied after your yes | no |
 | `builder` | writes `plan.md` and the code, test first, in slices; reworks | yes |
-| `reviewer-code` | correctness against the spec, contract, readability, cost, and whether the context docs still tell the truth | no |
+| `reviewer-code` | correctness against the spec, contract, readability, cost | no |
 | `reviewer-security` | trust boundaries, injection, authz, secrets, dependencies | no |
 | `reviewer-test` | every requirement proven by a test that can fail; reads `checks.md`, never runs it | no |
 | `reviewer-behaviour` | runs the spec's end-to-end path on a gated build; reads `checks.md`, never runs it | no |
 | `reviewer-ui` | how the change looks: theme fit, spacing, contrast, overflow at phone width, from screenshots | no |
 | `reviewer-ux` | how it works for a person: the task, empty, loading and error states, labels, reach | no |
+| `reviewer-docs` | whether the docs still tell the truth after the diff, on sonnet; joins on its own when the diff could make a doc false | no |
 | `arbiter` | keeps or drops each requested change, checked against the code | no |
 | `resolver` | resolves a landing train's conflicted files, keeping every change's intent | only those files |
 | `approver` | READY or ESCALATE, for the person at ship | no |
@@ -388,6 +389,14 @@ review, with what the commands printed, so neither judges a page it couldn't see
 under `.sdlc/reports/shots/<change>/round-<N>/<role>/` with a `shots.json` of what ran, a folder
 that ignores itself, so none is committed. Each reviewer has its own folder, fixture copy and
 server, so a round's two start together.
+
+**The docs reviewer** joins on its own too, at either depth, whatever `reviewers` and `[light]
+reviewers` say, so a host whose list names `code` alone still has its docs read: in a round whose
+diff touches a doc the base branch's `[docs] context` or `[docs] reviewed` lists, a path one of
+them names, a path with a `CLAUDE.md` or `AGENTS.md` above it, or any path outside `tests/`, and
+in every round after one that ran it. Its prompt names the docs and their lines that name a path
+the diff deletes or renames. It never makes a run's depth full, and `max_runs` counts it in every
+round.
 
 ## What it leaves in the change's folder
 

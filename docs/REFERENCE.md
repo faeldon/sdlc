@@ -44,6 +44,7 @@ read_before_design = ["docs/conventions.md"]
 explore = "/db:explore"                     # a skill or command for looking at the system itself
 health = ".sdlc/HEALTH.md"                  # the default: each scan finding's meaning and response tier; off while absent
 context = ["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"]  # the default: what gives a session its context
+reviewed = ["site/"]                        # unset by default: further docs the docs review reads
 direction = ".sdlc/DIRECTION.md"            # the default: goals and milestones, rewritten by /sdlc:retro
 project = ".sdlc/PROJECT.md"                # the default: which issue fields to fill; off while absent
 product = ".sdlc/PRODUCT.md"                # the default: users and outcomes every intent serves; off while absent
@@ -151,9 +152,14 @@ ships alike.
   has every page at every width, and is newer than every changed path under `[ui] paths`. With
   none, `why` says which failed, and both reviews are skipped with it. Ship never takes a
   screenshot.
+- **`docs`**: the diff touches a doc `docs.context` or `docs.reviewed` lists on the base branch, a
+  path one of them names, a path with a `CLAUDE.md` or `AGENTS.md` above it, or any path outside
+  `tests/`. The `sdlc:docs` agent reads the docs for what the diff made false, marked
+  `By: ship-docs`.
 
 Each pass that applies says in `findings.md`'s note that it ran, or was skipped and why; `sdlc.py
-ship` refuses a note that says neither, and the question names each.
+ship` refuses a note that says neither, and the question names each. The docs pass, which applies
+to nearly every diff, is asked of a `findings.md` that exists, never of a change with none.
 
 ### The base branch: `[git] base`
 
@@ -319,6 +325,15 @@ quickly? And is that already said in another context doc or a docstring? Then it
 pointer there, not the line again. A proposed edit is shown with the findings, approved with the
 commit, and lands in it. `sdlc.py context` does the listing, and flags their lines naming a path
 the diff deletes or renames.
+
+**`docs.reviewed`** lists further docs the docs review reads for what a diff made false, beside
+`docs.context`: a user guide, or a documentation site's source folder. An entry ending in `/`
+names every file under it; any other is a glob. Unset, the docs review reads `docs.context`
+alone. Both lists are read from the base branch's config, never the checkout's, so a change can't
+take its own docs out of review. The docs review is `sdlc:docs` at `/sdlc:ship` and the factory's
+`reviewer-docs`, and it runs on a diff that touches a listed doc, a path one of them names, a path
+with a `CLAUDE.md` or `AGENTS.md` above it, or any path outside `tests/`. With it running, ship's
+own context pass leaves "does it now say something false?" to it.
 
 ## Templates: `.sdlc/templates/`
 

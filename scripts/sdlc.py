@@ -63,7 +63,7 @@ from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext, suppress
 from datetime import UTC, date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import frontmatter
 import yaml
@@ -264,6 +264,9 @@ CONFIG_KEYS: dict[str, dict[str, object]] = {
         # What gives a session its context, which /sdlc:ship checks every diff against. A
         # CLAUDE.md or AGENTS.md above a changed path joins these on its own (`context`).
         "context": ["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"],
+        # Further docs the docs review reads for what a diff made false (a folder when it ends in
+        # `/`, else a glob), read from the base branch, beside `context`: a docs site's source.
+        "reviewed": [],
         "explore": None,  # a skill or command for looking at the system itself
         # What each scan finding means and its default response tier, which /sdlc:health
         # routes by. Off while the file doesn't exist.
@@ -1309,18 +1312,20 @@ SECURITY_RE = re.compile(r"^>?\s*Security review:\s*(ran|skipped)\b,?\s*(.*)$")
 BEHAVIOUR_RE = re.compile(r"^>?\s*Behaviour check:\s*(ran|skipped)\b,?\s*(.*)$")
 UI_RE = re.compile(r"^>?\s*UI review:\s*(ran|skipped)\b,?\s*(.*)$")
 UX_RE = re.compile(r"^>?\s*UX review:\s*(ran|skipped)\b,?\s*(.*)$")
-PASS_LINES = {"security": SECURITY_RE, "behaviour": BEHAVIOUR_RE, "ui": UI_RE, "ux": UX_RE}
+DOCS_RE = re.compile(r"^>?\s*Docs review:\s*(ran|skipped)\b,?\s*(.*)$")
+PASS_LINES = {"security": SECURITY_RE, "behaviour": BEHAVIOUR_RE, "ui": UI_RE, "ux": UX_RE,
+              "docs": DOCS_RE}  # fmt: skip
 # The behaviour check's evidence, the file's last section: each `$ <command>` line, the tail of
 # its output, then `exit: <n>`. Read as evidence, never as a finding.
 EVIDENCE_HEADING = "## Evidence"
 EVIDENCE_EXIT_RE = re.compile(r"^exit:\s*(-?\d+)\s*$")
 # Who raised a finding, when it wasn't ship's own passes: `By: fresh`, the fresh-context reviewer
 # a deep diff gets (`agents/reviewer.md`); one of ship's own further passes (`SHIP_PASSES`: its
-# security, ui and ux agents, and the behaviour check it runs itself), prefixed so it never
+# security, docs, ui and ux agents, and the behaviour check it runs itself), prefixed so it never
 # reads as the factory role of the same word; or a factory reviewer, whose findings `factory.py
 # carry` writes. `AGENT_ROLES` is a copy of `factory.py`'s `REVIEWERS`, pinned by a test.
-SHIP_PASSES = ("ship-security", "ship-behaviour", "ship-ui", "ship-ux")
-AGENT_ROLES = ("code", "security", "test", "behaviour", "ui", "ux")
+SHIP_PASSES = ("ship-security", "ship-behaviour", "ship-ui", "ship-ux", "ship-docs")
+AGENT_ROLES = ("code", "security", "test", "behaviour", "ui", "ux", "docs")
 FINDING_BY = ("fresh", *SHIP_PASSES, *AGENT_ROLES)
 
 
@@ -4199,10 +4204,12 @@ def cmd_ship(
         )
         return 1
     # Nor does any of ship's passes that applies: run again, since the diff may have moved since
-    # preflight.
+    # preflight. The docs pass applies to nearly every diff, so its line is asked only of a
+    # findings.md ship wrote, never of a change with none, which predates the file.
     passes = _passes_report(root, path, risk)
     unsaid = [PASS_SAID[line] for name, line in PASS_OF if passes[name]["applies"]
-              and found["passes"][line] is None]  # fmt: skip
+              and found["passes"][line] is None
+              and (line != "docs" or found["exists"])]  # fmt: skip
     if unsaid:
         lines = _and([f"`{s}: ran`, or `{s}: skipped, <why>`" for s in unsaid])
         print(
@@ -8073,10 +8080,53 @@ def cli_intake(root: Path, home: Path, args) -> int:
 
 # Ship's own passes beyond its four, which a hand-built change gets as the factory's reviewers
 # would review it: each `preflight`'s `passes` part says applies, from the diff, the change's
-# tier and spec, and the base branch's `[ui]`, never the skill. A factory run (a `decision.md`)
-# gets none: its own reviewers ran. `ui` is the UI and the UX review, which share one set of
-# screenshots.
-PASS_NAMES = ("security", "behaviour", "ui")
+# tier and spec, and the base branch's `[ui]` and `[docs]`, never the skill. A factory run (a
+# `decision.md`) gets none: its own reviewers ran. `ui` is the UI and the UX review, which share
+# one set of screenshots.
+PASS_NAMES = ("security", "behaviour", "ui", "docs")
+
+
+def _docs_list_at(home: Path, trunk: str | None) -> list[str]:
+    """`[docs] context` and `[docs] reviewed` as the base branch's `.sdlc/config.toml` holds them,
+    never the checkout's, so a change can't take its own docs out of the docs review: each
+    unset, or not a list of text, is its `CONFIG_KEYS` default. `factory.py`'s `_docs_at()` reads
+    the same two."""
+    text = _git(home, "show", f"refs/heads/{trunk}:{HOST_DIR}/config.toml") if trunk else ""
+    try:
+        table = tomllib.loads(text or "").get("docs", {})
+    except tomllib.TOMLDecodeError:
+        table = {}
+    table = table if isinstance(table, dict) else {}
+    out = []
+    for key in ("context", "reviewed"):
+        value = table.get(key)
+        texts = isinstance(value, list) and all(isinstance(v, str) for v in value)
+        out += list(value) if texts else list(CONFIG_KEYS["docs"][key])
+    return out
+
+
+def _docs_applies(checkout: Path, listed: list[str], changed: list[str]) -> str | None:
+    """Why the docs review doesn't apply to a diff touching `changed` (the change folder left
+    out), or None when it does: (a) a changed path is a listed doc, (b) a listed doc names a
+    changed path or its file name, (c) a `CLAUDE.md` or `AGENTS.md` sits above one, or (e) one
+    lies outside `tests/`. `factory.py`'s `docs_review()` is the same rule, with (d), an earlier
+    round's, which ship has none of."""
+    if risk_paths(changed, listed):
+        return None
+    files = _git(checkout, "ls-files", "--cached", "--others", "--exclude-standard") or ""
+    docs = [p for p in risk_paths(files.splitlines(), listed) if (checkout / p).is_file()]
+    names = {p for c in changed for p in (c, PurePosixPath(c).name)}
+    for doc in docs:
+        text = (checkout / doc).read_text(encoding="utf-8", errors="replace")
+        if any(n in text for n in names):
+            return None
+    for c in changed:
+        for parent in PurePosixPath(c).parents:
+            if any((checkout / parent / n).is_file() for n in ("CLAUDE.md", "AGENTS.md")):
+                return None
+    if any(not c.startswith("tests/") for c in changed):
+        return None
+    return "the diff touches only tests/, and no doc names a path it changed"
 
 
 def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
@@ -8124,13 +8174,20 @@ def _passes_report(root: Path, path: Path, risk: dict | None) -> dict:
             ident = path.name.split("-", 1)[0]
             why = f"{why}: take them with factory.py shots {ident} --round 1 --role ui"
         out["ui"] = {"applies": True, "why": why, "shots": shots}
+    if found is None:
+        out["docs"] = no(f"no merge base with {trunk!r}")
+    else:
+        own = [p for p in changed if not p.startswith(work_rel(home) + "/")]
+        why = _docs_applies(checkout_of(path), _docs_list_at(home, trunk), own)
+        out["docs"] = no(why) if why else dict(yes)
     return out
 
 
 # Each pass's note lines (`PASS_LINES`), and how ship's refusal and question name each.
-PASS_OF = (("security", "security"), ("behaviour", "behaviour"), ("ui", "ui"), ("ui", "ux"))
+PASS_OF = (("security", "security"), ("behaviour", "behaviour"), ("ui", "ui"), ("ui", "ux"),
+           ("docs", "docs"))  # fmt: skip
 PASS_SAID = {"security": "Security review", "behaviour": "Behaviour check", "ui": "UI review",
-             "ux": "UX review"}  # fmt: skip
+             "ux": "UX review", "docs": "Docs review"}  # fmt: skip
 
 
 def _passes_said(passes: dict, said: dict) -> dict:
@@ -8144,7 +8201,8 @@ def _passes_clauses(passes: dict) -> list[str]:
     """Ship's question's clauses for its passes: the ones that ran in one, `after the security
     review, the behaviour check and the UI and UX reviews`, then each skip with why."""
     ran = [line for line in PASS_SAID if (passes.get(line) or {}).get("ran")]
-    names = {"security": "the security review", "behaviour": "the behaviour check"}
+    names = {"security": "the security review", "behaviour": "the behaviour check",
+             "docs": "the docs review"}  # fmt: skip
     shown = [names[line] for line in ran if line in names]
     pages = [line.upper() for line in ("ui", "ux") if line in ran]
     if pages:
@@ -8174,6 +8232,7 @@ SHIP_BRANCHES = {
     "security.md": lambda parts, path: _pass_applies(parts, "security"),
     "behaviour.md": lambda parts, path: _pass_applies(parts, "behaviour"),
     "ui.md": lambda parts, path: _pass_applies(parts, "ui"),
+    "docs.md": lambda parts, path: _pass_applies(parts, "docs"),
     "cases.md": lambda parts, path: bool(
         parts["cases"].get("available") and parts["cases"].get("scope")
     ),

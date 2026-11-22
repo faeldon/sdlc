@@ -90,7 +90,7 @@ def test_the_gate_runs_the_base_branchs_check_and_records_each_attempt(
         "PASS",
     ]
     out = _verdicts(root, capsys)
-    assert (out["next"], out["round"], out["missing"]) == ("review", 1, FULL)
+    assert (out["next"], out["round"], out["missing"]) == ("review", 1, [*FULL, "docs"])
 
 
 def test_every_gate_attempt_records_its_slot_wait(tmp_path, capsys) -> None:

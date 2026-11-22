@@ -261,8 +261,8 @@ and `sdlc.py` only reads it (`findings_entries()`); `fix` never reaches a commit
 sensitive` and `irreversible` are matched by the script (`risk_paths()`), never judged by a skill,
 and read from the base branch's config, so a change can't lighten its own review; risk never
 changes a tier. The fresh review is `agents/reviewer.md` (`sdlc:reviewer`). The further passes
-`preflight`'s `passes` part names (`_passes_report()`, never on a factory run) are three more core
-agents, `sdlc:security`, `sdlc:ui` and `sdlc:ux`, and the behaviour check, which is ship's own
+`preflight`'s `passes` part names (`_passes_report()`, never on a factory run) are four more core
+agents, `sdlc:security`, `sdlc:docs`, `sdlc:ui` and `sdlc:ux`, and the behaviour check, ship's own
 session running each command behind the person's prompt. Every core agent has `Read`, `Grep` and
 `Glob` and nothing that writes. Acceptance checks (`acceptance()`)
 run only through `accept`, and are never rerun by a later change. REFERENCE.md, *`.sdlc/work/` and

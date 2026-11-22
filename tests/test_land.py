@@ -30,6 +30,9 @@ def _load(name: str, path: Path):
 
 factory = _load("factory_landing", ROOT / "plugins" / "factory" / "scripts" / "factory.py")
 sdlc = _load("sdlc_for_landing", ROOT / "scripts" / "sdlc.py")
+# The reviewers a round of these changes expects: the full depth, and the docs reviewer, which a
+# diff touching README.md, a path outside tests/, calls in (227).
+REVIEWED = [*factory.DEFAULTS["reviewers"], "docs"]
 
 needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, as the skills do")
 # A landing fix's builder report that the fix was already made, with its evidence and no edit:
@@ -173,7 +176,7 @@ def _ready(
             "".join(f"{digest}  {p}\n" for p, digest in hashes.items()), encoding="utf-8"
         )
         (folder / "reviews" / "round-1").mkdir(parents=True)
-        for role in factory.DEFAULTS["reviewers"]:
+        for role in REVIEWED:
             (folder / "reviews" / "round-1" / f"{role}.md").write_text(
                 _verdict(role), encoding="utf-8"
             )
@@ -229,11 +232,11 @@ def test_a_batch_lands_in_order_and_a_conflict_is_resolved_reviewed_and_closed(
 
     code, out = _run(capsys, factory.landing.cmd_train, root)
     assert (out["next"], out["change"]) == ("review", second.name), "no gate: the base names none"
-    assert set(out["verdict"]["missing"]) == set(factory.DEFAULTS["reviewers"])
+    assert set(out["verdict"]["missing"]) == set(REVIEWED)
     code, out = _run(capsys, factory.landing.cmd_land_close, second, "002")
     assert code == 1 and "no landing review has passed it" in out["refusals"][0], out
     reviews = folder / "reviews" / "land-1"
-    for role in factory.DEFAULTS["reviewers"]:
+    for role in REVIEWED:
         evidence = "\n\n## Evidence\n$ true\nexit: 0\n" if role == "behaviour" else "\n"
         (reviews / f"{role}.md").write_text(f"VERDICT: PASS{evidence}", encoding="utf-8")
     code, out = _run(capsys, factory.landing.cmd_land_verdicts, second, "002")

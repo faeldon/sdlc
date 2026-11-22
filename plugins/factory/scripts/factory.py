@@ -197,14 +197,18 @@ DIR_RE = re.compile(r"^(\d{3,})-([a-z0-9][a-z0-9-]*)$")
 CONFLICT_MARKER_RE = re.compile(r"^(?:<{7} |={7}$|>{7} )", re.M)
 # Every role a model can be set for, and the reviewers a repo can choose among.
 ROLES = (
-    "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "arbiter",
-    "approver", "resolver",
+    "spec-writer", "builder", "code", "security", "test", "behaviour", "ui", "ux", "docs",
+    "arbiter", "approver", "resolver",
 )  # fmt: skip
-REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
+REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux", "docs")
 # The reviewers that look at the page a change shows, from `factory.py shots`: never chosen in
 # `reviewers`, they join a round once the base branch's `[ui]` is complete and the diff touches its
 # `paths`, at either depth, and never make a run's depth full.
 UI_REVIEWERS = ("ui", "ux")
+# The reviewers never chosen in `reviewers`, each joining a round on its own at either depth and
+# never making a run's depth full: the UI ones (`ui_review()`), and the docs reviewer
+# (`docs_review()`), on a diff that could make a doc false.
+JOINING = (*UI_REVIEWERS, "docs")
 # `reviewers` and `rounds` are the full depth; `light` the one a diff touching no path in the
 # base branch's `[review] sensitive` gets, once a host lists any.
 DEFAULTS: dict = {
@@ -246,7 +250,7 @@ FIXED_MODELS = {
     "spec-writer": "opus", "builder": "opus", "security": "opus", "arbiter": "sonnet",
     "approver": "opus", "resolver": "sonnet",
 }  # fmt: skip
-SCALED = ("code", "test", "behaviour", "ui", "ux")
+SCALED = ("code", "test", "behaviour", "ui", "ux", "docs")
 # The stages a factory step moves a change between. `shipped` stays `sdlc ship`'s alone.
 STAGES = ("plan", "design", "build", "test")
 # What each step may start from. A build left at `stage: build` by a run that stopped resumes; a
@@ -283,7 +287,7 @@ NIT_VALUES = ("med", "low")
 # correctness), and an unknown tag stays in the text.
 PASSES = ("correctness", "contract", "cost", "context")
 PASS_TAG_RE = re.compile(r"^\[([a-z]+)\]\s*(.*)$")
-ROLE_PASS = {"security": "contract"}
+ROLE_PASS = {"security": "contract", "docs": "context"}
 # The arbiter's answer to each `CHANGE:` of a round, in `reviews/round-<N>/verified.md`: kept for
 # the builder, or dropped with why (after the last ` — `).
 VERIFIED = "verified.md"
@@ -843,11 +847,13 @@ def _depth_keys(data: dict, into: dict, prefix: str, warnings: list[str]) -> boo
     if not isinstance(reviewers, list) or not all(isinstance(r, str) for r in reviewers):
         warnings.append(f"{prefix}reviewers must be a list of names")
     else:
-        chosen = [r for r in REVIEWERS if r not in UI_REVIEWERS]
+        chosen = [r for r in REVIEWERS if r not in JOINING]
         unknown = [r for r in reviewers if r not in chosen]
         warnings += [
             f"{r!r} joins on its own when [ui] is set, never in {prefix}reviewers"
             if r in UI_REVIEWERS
+            else f"{r!r} joins on its own, never in {prefix}reviewers"
+            if r in JOINING
             else f"unknown reviewer {r!r} in {prefix}reviewers: one of {', '.join(chosen)}"
             if prefix
             else f"unknown reviewer {r!r}: one of {', '.join(chosen)}"
@@ -932,10 +938,10 @@ def max_runs(cfg: dict) -> int:
     """The most agent runs one build can take, at the full depth: the builder, the approver, and
     each round's reviewers, arbiter, builder resume and the builder's fixes of a red gate. An
     upper bound to show before a person approves the cost, whatever depth the diff turns out to
-    need. With `[ui]` complete, the UI reviewers are counted in every round, since any round's
-    diff can touch its paths."""
+    need. The docs reviewer is counted in every round, and with `[ui]` complete the UI reviewers
+    too, since any round's diff can call them in."""
     ui = len(UI_REVIEWERS) if ui_complete(cfg.get("ui", {})) else 0
-    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + ui + 2 + GATE_FIXES)
+    return 2 + cfg["rounds"] * (len(cfg["reviewers"]) + ui + 1 + 2 + GATE_FIXES)
 
 
 # The base branch's review lists, read here because the factory's cached copy has no `sdlc.py`.
@@ -967,6 +973,91 @@ def _review_list(root: Path, base: str, key: str) -> list[str]:
     review = data.get("review")
     listed = review.get(key) if isinstance(review, dict) else None
     return [p for p in listed if isinstance(p, str)] if isinstance(listed, list) else []
+
+
+# `[docs] context`'s default, a copy of `sdlc.py`'s `CONFIG_KEYS`, pinned by a test: what a host
+# that sets no `[docs]` has its docs reviewer read.
+CONTEXT_DEFAULT = ("CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md")
+
+
+def _docs_at(root: Path, base: str) -> tuple[list[str], list[str]]:
+    """`[docs] context` (else `CONTEXT_DEFAULT`) and `[docs] reviewed` (else none) as the base
+    branch holds them, never this checkout's: a change can't take its own docs out of review."""
+    try:
+        data = tomllib.loads(_git(root, "show", f"{base}:{SDLC_CONFIG.as_posix()}") or "")
+    except tomllib.TOMLDecodeError:
+        data = {}
+    table = data.get("docs")
+    table = table if isinstance(table, dict) else {}
+
+    def texts(key: str, default: list[str]) -> list[str]:
+        value = table.get(key)
+        if isinstance(value, list) and all(isinstance(v, str) for v in value):
+            return list(value)
+        return default
+
+    return texts("context", list(CONTEXT_DEFAULT)), texts("reviewed", [])
+
+
+def reviewed_docs(root: Path, base: str) -> list[str]:
+    """The files the docs reviewer reads, sorted: every file in the checkout, tracked or not, that
+    the base branch's `[docs]` lists (`_docs_at()`), each entry read as `risk_paths()` reads one,
+    a folder when it ends in `/`, else a glob."""
+    context, reviewed = _docs_at(root, base)
+    tracked = _git(root, "ls-files", "--cached", "--others", "--exclude-standard") or ""
+    files = [p for p in dict.fromkeys(tracked.splitlines()) if p and (root / p).is_file()]
+    return sorted(risk_paths(files, [*context, *reviewed]))
+
+
+def docs_review(docs: list[str], rounds: list[dict], changed: list[str], root: Path) -> bool:
+    """Whether the docs reviewer joins, from files and paths alone, the first that holds: (a) a
+    changed path is a reviewed doc (`docs`); (b) one of `docs` names a changed path, or its file
+    name; (c) a `CLAUDE.md` or `AGENTS.md` sits above a changed path; (d) an earlier round ran
+    it; (e) a changed path lies outside `tests/`. `changed` leaves out the change folder
+    (`_changed_paths()`), so a diff touching it alone never calls the reviewer in."""
+    if set(changed) & set(docs):
+        return True
+    names = {p for c in changed for p in (c, PurePosixPath(c).name)}
+    for doc in docs:
+        text = (root / doc).read_text(encoding="utf-8", errors="replace")
+        if any(n in text for n in names):
+            return True
+    for c in changed:
+        for parent in PurePosixPath(c).parents:
+            if any((root / parent / n).is_file() for n in ("CLAUDE.md", "AGENTS.md")):
+                return True
+    if any("docs" in r["reviews"] for r in rounds):
+        return True
+    return any(not c.startswith("tests/") for c in changed)
+
+
+def docs_stale(root: Path, base: str, docs: list[str]) -> list[str]:
+    """Each line of `docs` naming a path the diff deletes or renames, as `<doc>:<line> names
+    <path>, deleted` or `…, renamed to <path>`: `sdlc.py context`'s `stale`, worked out here from
+    the same `--name-status -M` reading, since this script never imports that one."""
+    fork = _git(root, "merge-base", base, "HEAD")
+    rows = (_git(root, "diff", "--name-status", "-M", fork) or "") if fork else ""
+    gone = []
+    for row in rows.splitlines():
+        cols = row.split("\t")
+        if cols[0][:1] == "D" and len(cols) == 2:
+            gone.append((cols[1], "deleted"))
+        elif cols[0][:1] == "R" and len(cols) == 3:
+            gone.append((cols[1], f"renamed to {cols[2]}"))
+    out = []
+    for doc in docs:
+        path = root / doc
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+        for n, line in enumerate(text.splitlines(), start=1):
+            out += [f"{doc}:{n} names {p}, {how}" for p, how in gone if p in line]
+    return out
+
+
+def docs_prompt(root: Path, base: str) -> str:
+    """What the docs reviewer's prompt adds: the docs it reads and their stale lines."""
+    docs = reviewed_docs(root, base)
+    stale = docs_stale(root, base, docs)
+    return f" Docs: {', '.join(docs) or 'none'}. Stale lines: {'; '.join(stale) or 'none'}."
 
 
 def _sensitive(root: Path, base: str) -> list[str]:
@@ -1040,7 +1131,7 @@ def depth(
     light = {"reviewers": light_reviewers(cfg, tier), "rounds": cfg["light"]["rounds"]}
     beyond = any(
         place(r["round"]) > light["rounds"]
-        or set(r["reviews"]) - set(light["reviewers"]) - set(UI_REVIEWERS)
+        or set(r["reviews"]) - set(light["reviewers"]) - set(JOINING)
         for r in rounds
     )
     if not listed:
@@ -1509,7 +1600,8 @@ def ui_review(cfg: dict, rounds: list[dict], changed: list[str]) -> bool:
 
 def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], list[str], dict]:
     """The rounds, their problems and the run's depth, each round's `complete` judged against the
-    reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`), and
+    reviewers that depth expects, the UI reviewers among them when they join (`ui_review()`) and
+    the docs reviewer when it does (`docs_review()`), and
     its `start` whether a restart or the upgrade starts a run there; and the newest restart
     (`restart`, or None) and the upgrade (`upgrade`, or None), whose round starts the run, the
     newer of the two."""
@@ -1527,6 +1619,11 @@ def _rounds_at_depth(root: Path, folder: Path, cfg: dict) -> tuple[list[dict], l
     run["ui"] = ui_review(cfg, rounds, run["changed"])
     if run["ui"]:
         run["reviewers"] += [r for r in UI_REVIEWERS if r not in run["reviewers"]]
+    base = _base(root)
+    docs = reviewed_docs(root, base) if base else []
+    run["docs"] = docs_review(docs, rounds, run["changed"], root)
+    if run["docs"] and "docs" not in run["reviewers"]:
+        run["reviewers"].append("docs")
     for r in rounds:
         r["complete"] = set(run["reviewers"]) <= set(r["reviews"])
     return rounds, problems, run
@@ -5560,6 +5657,9 @@ def cmd_agent(
             f" Screenshots: {', '.join(p.as_posix() for p in paths)}. "
             f"Changed: {', '.join(changed) or 'nothing'}."
         )
+    # The docs reviewer reads the base branch's list, and the lines the diff left stale.
+    if role == "docs" and task in ("review", "land-review") and (base := _base(root)):
+        prompt += docs_prompt(root, base)
     sessions = folder / "runs" / f"{agent_name(role)}.sessions"
     resumed = (role == "builder" and task in RESUMES) or bool(
         task == "spec" and (revise or recheck)

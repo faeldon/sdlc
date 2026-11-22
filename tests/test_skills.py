@@ -1348,6 +1348,8 @@ AGENT_TOOLS = {
     # They judge the screenshots `factory.py shots` took: nothing to run, so no Bash at all.
     "reviewer-ui": {"Read", "Grep", "Glob"},
     "reviewer-ux": {"Read", "Grep", "Glob"},
+    # 227: it reads the docs and greps the code; never edits a doc.
+    "reviewer-docs": {"Read", "Grep", "Glob", "Bash"},
     # It runs tests to settle a claim, like the reviewers; no Write or Edit, like every judge.
     "arbiter": {"Read", "Grep", "Glob", "Bash"},
     "approver": {"Read", "Grep", "Glob"},
@@ -1418,7 +1420,7 @@ def test_adapted_agents_keep_the_notice(plugin: Path, adapted: set[str]) -> None
 
 
 # Ship's own pass agents (143), and the `By:` each returns.
-SHIP_AGENTS = {"security": "ship-security", "ui": "ship-ui", "ux": "ship-ux"}
+SHIP_AGENTS = {"security": "ship-security", "ui": "ship-ui", "ux": "ship-ux", "docs": "ship-docs"}
 
 
 @pytest.mark.parametrize("name, by", SHIP_AGENTS.items())
@@ -2375,3 +2377,12 @@ def test_autopilot_grants_no_other_skills_writes() -> None:
                 assert not rule.match(f"{script} {word}{tail}"), (rule.pattern, word)
     tools = frontmatter.load(BY_ID["sdlc-factory:autopilot"])["allowed-tools"]
     assert not {"Write", "Edit", "Agent"} & set(tools), tools
+
+
+def test_ship_s_context_pass_leaves_false_docs_to_the_docs_review() -> None:
+    """227 R10: Step 3 names `docs.md`, and pass 4 hands its first question to `sdlc:docs` when
+    the side file is named."""
+    text = (ROOT / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+    step3 = " ".join(text.split("## Step 3")[1].split("\n## ")[0].split())
+    assert "the docs review in `docs.md`" in step3
+    assert "its `sdlc:docs` reviewer answers the first" in step3

@@ -94,7 +94,7 @@ NO_DECISION = (
     "only answer it gives)"
 )
 # The reviewers a round's replies come from, in `costs.jsonl`'s `role`.
-REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux")
+REVIEWERS = ("code", "security", "test", "behaviour", "ui", "ux", "docs")
 # A red attempt of the factory's script gate, in `build/round-<N>.gate.md`.
 GATE_FAIL_RE = re.compile(r"^Verdict: FAIL\s*$")
 # A stopped run's record, which `factory.py verdicts --record` writes and removes.

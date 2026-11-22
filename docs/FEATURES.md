@@ -135,11 +135,13 @@ graph LR
 - **`correctness`**: does the change do what its intent or spec's requirements said. Specified: `guide/review.md`. Depends on: `finding`.
 - **`contract`**: does it stay inside the invariants the policy doc names. Specified: `guide/review.md`. Depends on: `finding`.
 - **`cost`**: could it be simpler, reuse more, or cost less to run. Specified: `guide/review.md`. Depends on: `finding`.
-- **`context`**: do the docs that give a session its context still say what the code does. Specified: `docs/REFERENCE.md`. Depends on: `finding`.
+- **`context`**: do the docs that give a session its context, and the others the repo has reviewed, still say what the code does. Specified: `docs/REFERENCE.md`. Depends on: `finding`.
 - **`ship-security`**: ship's security agent, on a diff that reaches a risky path. Specified: `agents/security.md`. Depends on: `finding`.
 - **`ship-behaviour`**: ship's own run of the change's behaviour, each command behind the person's prompt. Specified: `skills/ship/SKILL.md`. Depends on: `finding`.
 - **`ship-ui`**: ship's UI agent, on a diff with screens. Specified: `agents/ui.md`. Depends on: `finding`.
 - **`ship-ux`**: ship's UX agent, on the same diffs. Specified: `agents/ux.md`. Depends on: `finding`.
+- **`ship-docs`**: ship's docs agent, `sdlc:docs`, on a diff that could make a doc false, which takes "does it now say something false?" from the context pass. Specified: `agents/docs.md`. Depends on: `context`, `docs.reviewed`.
+- **`docs.reviewed`**: the further docs, beside `docs.context`, that the docs review reads, from the base branch's config: a folder when it ends in `/`, else a glob. Specified: `docs/REFERENCE.md`. Depends on: `context`.
 
 ## The board
 

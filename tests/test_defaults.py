@@ -425,6 +425,14 @@ def _dimensions() -> list[tuple[str, str]]:
     return out
 
 
+def test_the_context_dimension_names_the_docs_reviewers() -> None:
+    """227 R12.1: the docs reviewer covers it in a factory run, and `sdlc:docs` at ship; the code
+    reviewer's context pass is gone."""
+    text = dict(_dimensions())["context"]
+    assert "Factory: `reviewer-docs`, when the diff calls it in" in text, text
+    assert "`sdlc:docs`" in text and "`reviewer-code`" not in text, text
+
+
 def test_every_review_dimension_names_both_ways() -> None:
     """Each dimension says who covers it in a ship and in a factory run, a pass its findings carry
     is one core counts, and every factory reviewer it names exists."""

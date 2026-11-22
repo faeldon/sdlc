@@ -109,7 +109,7 @@ Keep its output in view; the steps below read its parts by name, and run none of
   Step 1 runs; `available: false` everywhere else, and then nothing below mentions them.
 - **`branches`**: the files beside this skill this change calls for: `factory.md` (a change built
   by agents, with a `decision.md`), `undone.md`, `closes.md`, `recover.md`, `fresh.md`, then
-  `security.md`, `behaviour.md` and `ui.md` as `passes` applies, `cases.md`, `conflict.md`.
+  `security.md`, `behaviour.md`, `ui.md` and `docs.md` as `passes` applies, `cases.md`, `conflict.md`.
 
 Empty is the usual answer for the first three, and for `branches`. A non-empty `problems` names the
 part that has one; a problem in `checks` stops Step 1, and one in `nits` is said in Step 4.
@@ -199,7 +199,8 @@ guide stands alone, which is worth saying. Do not skim the diff; read it.
    diff. This pass is the skill's, not the review's, so it runs whatever review the repo has.
    `preflight`'s **`context`** part from Step 0 lists the docs to weigh (`docs.context` from `config`, plus any `CLAUDE.md` above a changed
    path, each with why) and `stale`: their lines naming a path this diff deletes or renames. Read
-   each listed doc, then ask of it:
+   each listed doc, then ask of it (when `branches` names `docs.md`, its `sdlc:docs` reviewer
+   answers the first, and this pass asks only the other two):
 
    - Does it now say something false? Every `stale` line is a yes until shown otherwise.
    - Does the diff add something a future session needs and couldn't find quickly in the code: a
@@ -225,9 +226,10 @@ it Important. One that costs a design call (L) is an idea for `.sdlc/work/inbox.
 is cheap and worth it (S and med) is the one to recommend fixing now, as `fix` below. The rest are
 proposed as `[nit]` entries in `.sdlc/work/inbox.md`.
 
-**On a deep diff, a fresh-context review too,** in `fresh.md`, which `branches` names then, and
-the security review in `security.md`; the spec's path run end to end in `behaviour.md`; the UI and
-UX reviews in `ui.md`; and **the skills' cases' line in the note,** in `cases.md`, each when named.
+**On a deep diff, a fresh-context review too,** in `fresh.md`, which `branches` names then, and the
+security review in `security.md`; the spec's path run end to end in `behaviour.md`; the UI and UX
+reviews in `ui.md`; the docs review in `docs.md`; and **the skills' cases' line in the note,** in
+`cases.md`, each when named.
 
 **Then write the findings down,** as `.sdlc/work/NNN-slug/findings.md`, from `templates["findings.md"]`
 in `config`: one `## F<n>. [<rank>] [<pass>] <title>` section a finding (`important`, `nit` or

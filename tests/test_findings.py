@@ -118,7 +118,7 @@ def test_no_file_is_no_findings_and_no_problem(tmp_path: Path) -> None:
     found = sdlc.findings_entries(tmp_path)
     assert found == {"path": "findings.md", "exists": False, "entries": [], "open": [],
                      "fix": [], "fresh": None, "cases": None,
-                     "passes": dict.fromkeys(("security", "behaviour", "ui", "ux")),
+                     "passes": dict.fromkeys(("security", "behaviour", "ui", "ux", "docs")),
                      "evidence": [], "problems": []}  # fmt: skip
 
 
@@ -220,7 +220,7 @@ def test_the_fresh_reviewer_s_findings_are_marked_and_counted(tmp_path: Path) ->
 def test_a_by_line_naming_anyone_else_is_a_problem(tmp_path: Path) -> None:
     text = FINDINGS + FRESH.replace("By: fresh", "By: someone", 1)
     found = sdlc.findings_entries(_write(tmp_path / "c", text))
-    by = "By must be one of fresh|ship-security|ship-behaviour|ship-ui|ship-ux|code|"
+    by = "By must be one of fresh|ship-security|ship-behaviour|ship-ui|ship-ux|ship-docs|code|"
     assert any(by in p and "got 'someone'" in p for p in found["problems"])
 
 
@@ -467,7 +467,7 @@ def test_ship_refuses_a_deep_diff_whose_note_says_nothing_of_the_fresh_review(ch
     _write(folder, FINDINGS.replace("> The note.\n", "> The note.\n> Fresh review: ran\n"))
     assert sdlc.cmd_ship(root, "001") == 1, "a deep diff gets the security review too (143)"
     assert "Security review" in capsys.readouterr().err
-    note = "> The note.\n> Fresh review: ran\n> Security review: ran\n"
+    note = "> The note.\n> Fresh review: ran\n> Security review: ran\n> Docs review: ran\n"
     _write(folder, FINDINGS.replace("> The note.\n", note))
     assert sdlc.cmd_ship(root, "001") == 0
 
@@ -525,7 +525,13 @@ def test_finding_by_names_every_factory_reviewer() -> None:
     factory = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(factory)
     assert sdlc.AGENT_ROLES == factory.REVIEWERS
-    assert sdlc.SHIP_PASSES == ("ship-security", "ship-behaviour", "ship-ui", "ship-ux")
+    assert sdlc.SHIP_PASSES == (
+        "ship-security",
+        "ship-behaviour",
+        "ship-ui",
+        "ship-ux",
+        "ship-docs",
+    )
     assert ("fresh", *sdlc.SHIP_PASSES, *factory.REVIEWERS) == sdlc.FINDING_BY
     assert not set(sdlc.SHIP_PASSES) & set(factory.REVIEWERS), "never a factory role's name"
     assert factory.PASSES == sdlc.FINDING_PASSES, "the factory's copy of the passes"
@@ -682,6 +688,27 @@ def test_ship_refuses_a_security_pass_unsaid(change, capsys, monkeypatch) -> Non
 def test_ship_refuses_a_behaviour_check_unsaid(change, capsys, monkeypatch) -> None:
     note = "> Behaviour check: skipped, the spec names no path to run\n"
     _ships_only_with(change, capsys, monkeypatch, "behaviour", note, "Behaviour check")
+
+
+def test_ship_refuses_a_docs_review_unsaid(change, capsys, monkeypatch) -> None:
+    """227 R9."""
+    _ships_only_with(change, capsys, monkeypatch, "docs", "> Docs review: ran\n", "Docs review")
+
+
+def test_a_change_with_no_findings_file_ships_without_a_docs_line(change, monkeypatch) -> None:
+    """227: the docs pass applies to nearly every diff, so its line is asked of a findings.md
+    ship wrote, never of a change with none, which predates the file."""
+    root, folder = change
+    _applying(monkeypatch, "docs")
+    (folder / "findings.md").unlink(missing_ok=True)
+    assert sdlc.cmd_ship(root, "001") == 0
+
+
+def test_the_question_says_a_skipped_docs_review() -> None:
+    """227 R9."""
+    skipped = _asked({"docs": {"ran": False, "why": "no doc it could make false"}})
+    assert "without the docs review (no doc it could make false)" in skipped
+    assert _asked({"docs": {"ran": True}}).startswith("Commit this, after the docs review, and ")
 
 
 def test_ship_refuses_a_ui_review_unsaid(change, capsys, monkeypatch) -> None:

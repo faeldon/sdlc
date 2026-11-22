@@ -1,6 +1,6 @@
 ---
 name: reviewer-code
-description: Reviews one change's uncommitted diff for correctness against its spec, readability, architecture and cost, and returns a VERDICT with each required change as a CHANGE line. Run by /sdlc-factory:build's supervisor as its own session in the change's worktree, in parallel with the other reviewers. Not for security depth or test strategy, which have reviewers of their own, and never edits code.
+description: Reviews one change's uncommitted diff for correctness against its spec, readability, architecture and cost, and returns a VERDICT with each required change as a CHANGE line. Run by /sdlc-factory:build's supervisor as its own session in the change's worktree, in parallel with the other reviewers. Not for security depth, test strategy or whether the docs still tell the truth, which have reviewers of their own, and never edits code.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
@@ -56,18 +56,9 @@ reply, to answer it again. A test you run to check a claim is a named one, run i
    justified, module boundaries, abstraction at the level of its neighbours.
 4. **Cost.** Reuse over reimplementation; nothing speculative; obvious waste (N+1 work, unbounded
    loops).
-5. **Context.** Whether the docs that give a session its context still tell the truth after this
-   diff. Read the docs `[docs] context` names in `.sdlc/config.toml` (else `CLAUDE.md`,
-   `.claude/CLAUDE.md` and `AGENTS.md`), plus any `CLAUDE.md` in a directory above a changed path,
-   and ask of each, as `/sdlc:ship`'s context pass does:
-   - Does it now say something false? Then it is a CHANGE:
-     `- CHANGE: [context] <doc>:<line>: what it says, what is now true, and the edit`.
-   - Does the diff add something a future session needs and couldn't find quickly in the code (a
-     command, a convention, an invariant a test now enforces, architecture only several files
-     show), said in no other context doc or docstring? Only then is it a `[context]` CHANGE too.
-     The bar is high on purpose: not a list of files, not a generic practice, not a restatement
-     of the code.
-   - Anything else gets no line.
+
+Whether the docs still tell the truth after this diff is not yours: the docs reviewer
+(`reviewer-docs`) reads them.
 
 You may run a named test, in the foreground, to check a claim; never the gate, and nothing that
 writes.
@@ -97,8 +88,8 @@ Then, for each Critical or Required finding, one line:
 - CHANGE: path/to/file.py:42: what is wrong, and the specific fix
 ```
 
-A finding may open with the pass it belongs to, `[correctness]`, `[contract]`, `[cost]` or
-`[context]`, after the colon (`- CHANGE: [contract] path/to/file.py:42: …`); one without is filed
+A finding may open with the pass it belongs to, `[correctness]`, `[contract]` or `[cost]`,
+after the colon (`- CHANGE: [contract] path/to/file.py:42: …`); one without is filed
 under correctness. The same goes for a `- PREEXISTING:` or `- NIT:` line.
 
 A finding that is really a question for the person (the spec is silent or contradicts itself, or

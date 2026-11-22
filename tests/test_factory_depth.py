@@ -42,7 +42,7 @@ def test_with_no_sensitive_list_every_run_is_full(tmp_path, capsys) -> None:
     _touch(root, "src/a.py")
     _build_report(root, 1)
     out = _verdicts(root, capsys)
-    assert (out["depth"], out["missing"], out["limit"]) == ("full", FULL, 3)
+    assert (out["depth"], out["missing"], out["limit"]) == ("full", [*FULL, "docs"], 3)
 
 
 def test_a_diff_touching_no_sensitive_path_runs_light(tmp_path, capsys) -> None:
@@ -50,9 +50,10 @@ def test_a_diff_touching_no_sensitive_path_runs_light(tmp_path, capsys) -> None:
     _touch(root, "src/a.py")
     _build_report(root, 1)
     out = _verdicts(root, capsys)
-    assert (out["depth"], out["missing"], out["limit"]) == ("light", ["code", "behaviour"], 2)
-    _review(root, 1, "code", "VERDICT: PASS")
-    _review(root, 1, "behaviour", "VERDICT: PASS")
+    light = ["code", "behaviour", "docs"]
+    assert (out["depth"], out["missing"], out["limit"]) == ("light", light, 2)
+    for role in light:
+        _review(root, 1, role, "VERDICT: PASS")
     assert _verdicts(root, capsys)["next"] == "approve", "light's reviewers complete the round"
 
 
@@ -66,7 +67,7 @@ def test_a_sensitive_path_deepens_the_run_and_it_never_lightens(tmp_path, capsys
     _build_report(root, 2)
     out = _verdicts(root, capsys)
     assert (out["depth"], out["sensitive"]) == ("full", ["src/secret/key.py"])
-    assert out["missing"] == FULL and out["limit"] == 3
+    assert out["missing"] == [*FULL, "docs"] and out["limit"] == 3
     for role in ("code", "security", "test"):
         _review(root, 2, role, "VERDICT: PASS")
     (root / "src" / "secret" / "key.py").unlink()
@@ -140,12 +141,13 @@ def test_a_tier_2_light_round_includes_the_test_reviewer(tmp_path, capsys) -> No
     for tier, want in ((2, ["code", "test", "behaviour"]), (1, both), ("", both)):
         root = _light_round(tmp_path / f"tier-{tier or 'none'}", tier)
         out = _verdicts(root, capsys)
-        assert (out["depth"], out["missing"], out["limit"]) == ("light", want, 2), tier
+        assert (out["depth"], out["missing"], out["limit"]) == ("light", [*want, "docs"], 2), tier
         _, start = _run(capsys, factory.cmd_start, root, "008", "build")
         assert start["light"]["reviewers"] == want and start["light"]["chosen"] is False, tier
     root = tmp_path / "tier-2" / "repo"
     _review(root, 1, "code", "VERDICT: PASS")
     _review(root, 1, "behaviour", "VERDICT: PASS")
+    _review(root, 1, "docs", "VERDICT: PASS")
     out = _verdicts(root, capsys)
     assert (out["next"], out["missing"]) == ("review", ["test"]), "code alone is incomplete"
     _review(root, 1, "test", "VERDICT: PASS")
@@ -156,12 +158,12 @@ def test_a_set_light_list_is_kept_at_either_tier(tmp_path, capsys) -> None:
     """R4, R5: a host's own `[light] reviewers` is used as set, and the Tier 2 default adds
     `test` only when the full depth runs it."""
     root = _light_round(tmp_path / "set", 2, '[light]\nreviewers = ["code"]\n')
-    assert _verdicts(root, capsys)["missing"] == ["code"], "a list set by hand is kept"
+    assert _verdicts(root, capsys)["missing"] == ["code", "docs"], "a list set by hand is kept"
     cfg = factory.load_config(root)[0]
     assert cfg["light"]["chosen"] is True
     assert factory.light_reviewers(cfg, 2) == factory.light_reviewers(cfg, 1) == ["code"]
     root = _light_round(tmp_path / "no-test", 2, 'reviewers = ["code", "security"]\n')
-    assert _verdicts(root, capsys)["missing"] == ["code"], "never a reviewer the full depth lacks"
+    assert _verdicts(root, capsys)["missing"] == ["code", "docs"], "never one the full depth lacks"
 
 
 def test_a_light_round_includes_the_behaviour_reviewer(tmp_path, capsys) -> None:
@@ -172,6 +174,7 @@ def test_a_light_round_includes_the_behaviour_reviewer(tmp_path, capsys) -> None
     assert factory.light_reviewers(cfg, 1) == ["code", "behaviour"]
     assert factory.light_reviewers(cfg, 2) == ["code", "test", "behaviour"], "REVIEWERS order"
     _review(root, 1, "code", "VERDICT: PASS")
+    _review(root, 1, "docs", "VERDICT: PASS")
     out = _verdicts(root, capsys)
     assert (out["next"], out["missing"]) == ("review", ["behaviour"]), "code alone is incomplete"
     _review(root, 1, "behaviour", "VERDICT: PASS")
@@ -186,7 +189,8 @@ def test_the_behaviour_reviewer_never_deepens_a_light_run(tmp_path, capsys) -> N
     _verified(root, 1, kept=["code: src/a.py:1: code fix", "behaviour: src/a.py:1: behaviour fix"])
     _build_report(root, 2)
     out = _verdicts(root, capsys)
-    assert (out["depth"], out["missing"], out["limit"]) == ("light", ["code", "behaviour"], 2)
+    want = ["code", "behaviour", "docs"]
+    assert (out["depth"], out["missing"], out["limit"]) == ("light", want, 2)
 
 
 def test_the_test_reviewer_never_deepens_a_tier_2_light_run(tmp_path, capsys) -> None:
@@ -197,7 +201,7 @@ def test_the_test_reviewer_never_deepens_a_tier_2_light_run(tmp_path, capsys) ->
     _verified(root, 1, kept=[f"{r}: src/a.py:1: {r} fix" for r in ("code", "test", "behaviour")])
     _build_report(root, 2)
     out = _verdicts(root, capsys)
-    want = ["code", "test", "behaviour"]
+    want = ["code", "test", "behaviour", "docs"]
     assert (out["depth"], out["missing"], out["limit"]) == ("light", want, 2), out
 
 
@@ -236,8 +240,8 @@ def test_a_host_s_own_depth_and_models_are_kept(tmp_path, capsys) -> None:
             models = out["models_at"][level]
             assert (models["code"], models["behaviour"], models["test"]) == (
                 "haiku", "haiku", "opus"), (tier, level)  # fmt: skip
-        assert out["max_runs"] == 2 + 4 * (4 + 2 + 2), tier
-        assert _verdicts(root, capsys)["missing"] == ["code"], tier
+        assert out["max_runs"] == 2 + 4 * (4 + 1 + 2 + 2), tier
+        assert _verdicts(root, capsys)["missing"] == ["code", "docs"], tier
 
 
 def test_the_landing_review_judges_a_tier_2_light_run_with_its_test_reviewer(
@@ -250,7 +254,7 @@ def test_the_landing_review_judges_a_tier_2_light_run_with_its_test_reviewer(
     (folder / "runs").mkdir()
     (folder / "runs" / "land-resolved").write_text("", encoding="utf-8")
     _, out = _run(capsys, factory.landing.cmd_land_verdicts, root, "008")
-    assert out["missing"] == ["code", "test", "behaviour"], out
+    assert out["missing"] == ["code", "test", "behaviour", "docs"], out
 
 
 @pytest.mark.parametrize(
@@ -517,7 +521,7 @@ def test_a_host_s_own_reviewers_are_kept_and_behaviour_is_one_it_can_name(tmp_pa
     config.write_text('reviewers = ["behaviour"]\n', encoding="utf-8")
     cfg, warnings = factory.load_config(tmp_path)
     assert cfg["reviewers"] == ["behaviour"] and warnings == []
-    assert factory.max_runs(factory.load_config(tmp_path / "none")[0]) == 26
+    assert factory.max_runs(factory.load_config(tmp_path / "none")[0]) == 29
 
 
 @pytest.mark.parametrize(
@@ -554,7 +558,7 @@ def test_the_factorys_reading_of_case_failures_matches_sdlcs() -> None:
 
 
 TAIL = (
-    "an arbiter weighs each round's findings, the approver decides, at most 26 agent runs, agents "
+    "an arbiter weighs each round's findings, the approver decides, at most 29 agent runs, agents "
     "in auto, all left uncommitted at stage: test?"
 )
 
@@ -628,7 +632,7 @@ def test_the_build_question_sends_an_escalated_change_back(tmp_path, capsys) -> 
         f"Send {NAME} back to the factory: decision.md kept as decision-1.md, the builder rebuilds "
         "from round 4 with the approver's reasons, with no gate configured, code, security, test "
         "and behaviour review it in up to 3 more rounds, an arbiter weighs each round's findings, "
-        "the approver decides again, at most 26 agent runs, agents in auto, all left uncommitted "
+        "the approver decides again, at most 29 agent runs, agents in auto, all left uncommitted "
         "at stage: test? (yes / change the reviewers or rounds / no)"
     )
 
@@ -641,7 +645,7 @@ def test_the_build_question_carries_on_an_upgraded_run(tmp_path, capsys) -> None
         "rewrites plan.md against it and builds round 2, with no gate configured, code, security, "
         "test and behaviour review it in up to 3 more rounds (or code, test and behaviour in up "
         "to 2 rounds when the diff touches no sensitive path), an arbiter weighs each round's "
-        "findings, the approver decides, at most 26 more agent runs, agents in auto, all left "
+        "findings, the approver decides, at most 29 more agent runs, agents in auto, all left "
         "uncommitted at stage: test? (yes / revise a requirement / change the reviewers or "
         "rounds / no)"
     )
@@ -694,7 +698,7 @@ def test_start_build_previews_the_run(tmp_path, capsys) -> None:
     assert lines[0] == "Gate: ./check.sh, on each build before any reviewer (up to 2 fixes a round)"
     assert lines[1] == (
         "Rounds: full, up to 3 (code, security, test and behaviour); light, up to 2 "
-        "(code and behaviour); at most 26 agent runs"
+        "(code and behaviour); at most 29 agent runs"
     )
     for at, level in ((2, "full"), (3, "light")):
         models = out["models_at"][level]

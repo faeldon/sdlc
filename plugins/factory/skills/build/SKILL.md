@@ -97,7 +97,10 @@ whose diff touches one of those paths adds the `ui` and `ux` reviewers at either
 them in later rounds; `verdicts` lists them in `missing` like any reviewer. Before each of them
 runs, `agent` starts the declared server, screenshots each page at each width under
 `.sdlc/reports/shots/`, and stops the server; a shot that fails refuses that review, so neither
-ever judges a page it couldn't see. Without `[ui]` they never run.
+ever judges a page it couldn't see. Without `[ui]` they never run. So does `docs`, which joins on its
+own whatever the reviewer lists say, in a round whose diff could make a doc false (`docs_review()`):
+a doc the base branch's `[docs] context` or `[docs] reviewed` lists, a path one names, a path under
+a `CLAUDE.md` or `AGENTS.md`, any path outside `tests/`, or a run that already ran it.
 
 **The depth is set by the diff, after the first build.** With no `[review] sensitive` list in
 the base branch's `.sdlc/config.toml`, every run is full, as it always was. With one, a diff that
