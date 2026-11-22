@@ -857,3 +857,13 @@ Paths: tests/test_ci.py
 Cost: S
 Value: low
 Raised by: 225-ci-pin-test-quotes (correctness)
+
+## [2026-11-22-19] [idea] Autopilot plans the seeds it takes, not only picks them
+
+Autopilot plans the seeds it takes: groups them by the risk they lower for the next goal, checks
+each against the code before drafting (dropping ones already fixed or wrong), tiers and orders them
+by shared files, says what waits and why, and flags a backlog growing faster than it drains — as
+the supervisor planned 1.12 on 2026-11-22. It works within autopilot as it is today (level 1), and
+comes before 2026-11-21-33's levels 2–4, which are to be split into a seed per level.
+Theme: factory
+Raised 2026-11-22.
