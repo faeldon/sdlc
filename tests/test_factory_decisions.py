@@ -832,13 +832,26 @@ def test_ask_says_rebuild_for_a_reviewer_s_default_never_built(tmp_path, capsys)
         (2, "- BUILT: D2: the sensitive paths are guarded\n", "ship"),
         (1, "- BUILT: D2: the sensitive paths are guarded\n", "rebuild"),
         (2, "- BUILT: D1: paged at 50\n", "rebuild"),
+        (2, "```\n- BUILT: D2: quoted\n```\n", "rebuild"),
+        (2, "~~~~\n- BUILT: D2: quoted\n~~~\n~~~~\n", "rebuild"),
+        (2, "```text\n- BUILT: D2: quoted, the fence never closed\n", "rebuild"),
+        (2, "```\nquoted\n```\n- BUILT: D2: the sensitive paths are guarded\n", "ship"),
     ],
-    ids=["later-round", "same-round", "another-id"],
+    ids=[
+        "later-round",
+        "same-round",
+        "another-id",
+        "fenced",
+        "tilde-fenced",
+        "unclosed-fence",
+        "after-a-fence",
+    ],  # fmt: skip
 )
 def test_ask_says_ship_once_a_later_builder_report_built_it(tmp_path, capsys, rnd, line, then):
     """218: a `- BUILT: D<n>` line in a builder report of a round after the one that raised it
     is the build making the call; the raising round's own report, or a line naming another id,
-    isn't."""
+    isn't. 228 R8: nor is one quoted inside a code fence, a fence that never closes running to
+    the report's end; the line after a closed fence is read."""
     root = _reviewer_default(tmp_path, capsys)
     _answer(root, "D1", factory.KEPT_ANSWER)
     _answer(root, "D2", factory.KEPT_ANSWER)

@@ -604,8 +604,8 @@ the code that runs the rest of the run is never landed unseen); one any agent's 
 be built by breaking a contract (`- CONTRACT:`) or would be far simpler with one relaxed
 (`- RELAX:`), which the spec-writer, builder and approver are asked for only under autopilot; an
 approver's ESCALATE that asks to reconsider the approach or gives a `gate` reason; an open default
-a reviewer or the approver raised that no later builder round says it built (`- BUILT: D<n>`),
-which answering would land unbuilt; a `verdicts` stop; one `land-check` excludes or the train
+a reviewer or the approver raised that no later builder round says it built (`- BUILT: D<n>`,
+outside a code fence), which answering would land unbuilt; a `verdicts` stop; one `land-check` excludes or the train
 stops on; one with an acceptance check the read-only list refuses, or with skills' cases in scope,
 since neither runs unattended; and a blocking call with no recommendation, or one recommending
 `upgrade to Tier 2`.

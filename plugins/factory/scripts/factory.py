@@ -2238,7 +2238,9 @@ def cmd_decisions(root: Path, ident: str) -> int:
     settled by the approver: <reason>`, never the person's mark; one naming any other line, or an id
     named twice, marks nothing and is listed in `unsettled` with why. Each `look` reason of the
     current decision (`escalation_reasons()`) is filed once for the newest round, `(approver round
-    <R>, look)`, for the person to acknowledge. A rerun writes nothing."""
+    <R>, look)`, for the person to acknowledge. A rerun writes nothing. Like `cmd_answer()`, it
+    rewrites the ledger with no lock, safe only while no other writer of the same change's ledger
+    runs beside it, which autopilot's loop keeps (228 R5)."""
     folder, refusal = find_change(root, ident)
     if refusal:
         return emit({"refusals": [refusal]}, 1)
@@ -2377,15 +2379,15 @@ def unbuilt_defaults(folder: Path, lines: list[dict]) -> list[dict]:
     """The defaults among the ledger's `lines` the build never made (218): a line a builder raised
     is its own build, but one a reviewer or the approver raised counts as built only when a
     builder report of a later round (`build/round-<R>.md`, R past the round its `source` names)
-    holds a `- BUILT: D<n>` line for it. `cmd_ask()` passes the defaults the person kept
-    (`KEPT_ANSWER`), autopilot's `hold_causes()` the open ones it would answer. Each as its id,
-    source and question."""
+    holds a `- BUILT: D<n>` line for it, outside a code fence (`unfenced_lines()`, 228 R8).
+    `cmd_ask()` passes the defaults the person kept (`KEPT_ANSWER`), autopilot's `hold_causes()`
+    the open ones it would answer. Each as its id, source and question."""
     built: dict[str, int] = {}
     for path in sorted((folder / "build").glob("round-*.md")):
         m = re.fullmatch(r"round-(\d+)\.md", path.name)
         if not m:
             continue
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in unfenced_lines(path.read_text(encoding="utf-8")):
             if b := BUILT_RE.match(line):
                 built[b.group(1)] = max(built.get(b.group(1), 0), int(m.group(1)))
     found = []
@@ -2516,7 +2518,14 @@ def cmd_answer(root: Path, ident: str, decision: str, by: str) -> int:
     """Answer open ledger line `decision` as autopilot (216 R5, R17): ticked, with
     `DECIDED_AUTOPILOT` and `autopilot_answer()`'s answer, never `DECIDED`, the person's word.
     Refused, writing nothing, outside a live run's children (R2), for a line that isn't open, and
-    for a call `autopilot_answer()` leaves the person."""
+    for a call `autopilot_answer()` leaves the person.
+
+    It reads and rewrites `decisions.md` with no lock. That is safe only because the loop never
+    runs `answer` or `decisions` for a change while another command of that change runs: it
+    answers a change's lines one after another, and the only commands it starts together are a
+    review's roles, which never write the ledger (228 R5, pinned by
+    `test_no_ledger_writer_runs_beside_another_step_of_its_change`). Anything that starts `answer`
+    beside another writer of the same change's ledger must add a lock first."""
     if why := by_refusal(root, by) or (
         None if by == "autopilot" else "answer needs --by autopilot"
     ):
@@ -3275,7 +3284,10 @@ def _closes_line(change: str, value: str) -> str:
 
 def recorded_closes(folder: Path) -> list[str]:
     """Every `closes:` value the ledger recorded for change `folder`, oldest first; [] without a
-    ledger. A line that won't parse is skipped."""
+    ledger. A line that won't parse is skipped. It reads the whole ledger on every call, with no
+    cache: an `agent` run calls it twice (its reading's `intent_closes()` and `record_closes()`),
+    and each such run starts a whole agent session, so a cache inside one process would save one
+    read of a small file (228 R7, pinned by `test_an_agent_run_reads_the_closes_once`)."""
     where = _slot_dir(folder)
     try:
         lines = (where / RECORDS_LEDGER).read_text(encoding="utf-8").splitlines() if where else []
@@ -4669,6 +4681,28 @@ SPEC_QUESTIONS = Path("runs") / "spec-questions.md"
 FENCE_MARK_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
+def unfenced_lines(text: str) -> Iterator[str]:
+    """Each line of `text` outside a fenced code block, as `split_draft()` reads a fence: it
+    opens on three or more backticks or tildes, closes only on the same character, at least as
+    long, with nothing after it, and one that never closes runs to the end (228 R8). The fence
+    lines themselves are never yielded."""
+    fence = None
+    for line in text.splitlines():
+        m = FENCE_MARK_RE.match(line)
+        if fence:
+            if (
+                m
+                and m.group(1)[0] == fence[0]
+                and len(m.group(1)) >= len(fence)
+                and not m.group(2).strip()
+            ):
+                fence = None
+        elif m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+        else:
+            yield line
+
+
 def split_draft(reply: str) -> tuple[str | None, str, str | None]:
     """A spec-writer's reply as (preamble, draft, questions). The draft runs from the first bare
     `---` line, its frontmatter's opening, up to the last bare `---` after the frontmatter's
@@ -5511,17 +5545,19 @@ def cmd_agent(
         session, how = ids[-1], "--resume"
     else:
         session, how = str(uuid.uuid4()), "--session-id"
+    # Autopilot never runs `start`, so the first agent of a run records `closes:` (219): the last
+    # check that can refuse, so a refused agent leaves no session and no landing step (228 R6).
+    try:
+        record_closes(root, folder)
+    except OSError as e:
+        return emit({"refusals": [f"couldn't record the intent's closes: in the ledger: {e}"]}, 1)
+    if not resumed:
         sessions.parent.mkdir(parents=True, exist_ok=True)
         with sessions.open("a", encoding="utf-8", newline="\n") as f:
             f.write(session + "\n")
     # Once nothing is left to refuse it, the landing's step this session takes.
     if task in LAND_TASK_STEP:
         _record_land(root, folder, LAND_TASK_STEP[task])
-    # Autopilot never runs `start`, so the first agent of a run records `closes:` (219).
-    try:
-        record_closes(root, folder)
-    except OSError as e:
-        return emit({"refusals": [f"couldn't record the intent's closes: in the ledger: {e}"]}, 1)
     meta = frontmatter((folder / "intent.md").read_text(encoding="utf-8"))
     tier = int(meta["tier"]) if meta.get("tier", "").isdigit() else None
     model = model_for(role, cfg, tier, state["depth"])

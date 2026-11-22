@@ -2761,6 +2761,36 @@ def _builder_edits(tree: Path, captured: dict):
 
 
 @needs_uv
+def test_an_agent_refused_on_its_closes_leaves_nothing_recorded(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """228 R6: an agent refused because the intent's `closes:` can't go into the ledger writes
+    nothing first: no landing step recorded, no session added, and no `claude` started."""
+    root = _gated(tmp_path)
+    tree = _ready(root, "fixed", "fixed's one")
+    folder = tree / ".sdlc" / "work" / tree.name
+    assert _run(capsys, factory.landing.cmd_land, tree, "001", "person")[0] == 0
+    assert _run(capsys, factory.landing.cmd_land_fix, tree, "001", _asked(folder), False)[0] == 0
+    intent = folder / "intent.md"
+    intent.write_text(intent.read_text(encoding="utf-8").replace("\nid:", "\ncloses: [12]\nid:"))
+    (folder / "runs" / "builder.sessions").write_text("a-builder-session\n", encoding="utf-8")
+    step, sessions = folder / factory.LAND_STEP, folder / "runs" / "builder.sessions"
+    before = {p: p.read_bytes() if p.is_file() else None for p in (step, sessions)}
+
+    def refuse(root: Path, line: str) -> None:
+        raise OSError("the ledger is locked")
+
+    started: list = []
+    monkeypatch.setattr(factory, "_append_ledger", refuse)
+    monkeypatch.setattr(factory, "_claude", lambda argv, cwd: started.append(argv))
+    code, out = _run(capsys, factory.cmd_agent, tree, "001", "land-fix", None, None)
+    assert code == 1, out
+    assert out["refusals"][0].startswith("couldn't record the intent's closes: in the ledger:")
+    assert {p: p.read_bytes() if p.is_file() else None for p in (step, sessions)} == before
+    assert started == [], "no session started"
+
+
+@needs_uv
 def test_a_fix_asked_at_landing_is_built_gated_and_reviewed_at_depth(
     tmp_path, capsys, monkeypatch
 ) -> None:

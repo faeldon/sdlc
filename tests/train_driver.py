@@ -202,6 +202,13 @@ cwd = Path.cwd()
 plan = json.loads(Path(os.environ["TRAIN_AGENTS"]).read_text(encoding="utf-8"))
 start = time.time()
 entry = plan.get(f"{cwd.name}:{agent}") or plan.get(agent) or {}
+markers = [n for n in ("SDLC_FACTORY_AUTOPILOT_RUN", "SDLC_FACTORY_TRAIN_RUN") if n in os.environ]
+log = Path(os.environ["TRAIN_AGENTS_LOG"])
+lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+calls = [json.loads(x) for x in lines]
+again = entry.get("once") and any(c["agent"] == agent and c["change"] == cwd.name for c in calls)
+if again:
+    entry = {"reply": entry.get("then_reply")}
 for path, text in (entry.get("write") or {}).items():
     (cwd / path).parent.mkdir(parents=True, exist_ok=True)
     (cwd / path).write_text(text, encoding="utf-8")
@@ -217,7 +224,7 @@ if entry.get("run"):
     subprocess.run(entry["run"], cwd=cwd, capture_output=True)
 with open(os.environ["TRAIN_AGENTS_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps({"agent": agent, "change": cwd.name, "start": start, "end": time.time(),
-                        "prompt": argv[argv.index("-p") + 1]}) + "\\n")
+                        "prompt": argv[argv.index("-p") + 1], "markers": markers}) + "\\n")
 reply = entry.get("reply")
 if reply is None:
     if agent.startswith("reviewer-"):
@@ -238,8 +245,11 @@ def fake_claude(tmp_path: Path, monkeypatch, plan: dict | None = None):
     `<change>:<agent>` or `<agent>` (`reviewer-behaviour`, `arbiter`, `builder`) to what it
     does: `reply`, its text (a passing one by default); `write`, files to write in its worktree;
     `sleep`, seconds; `run`, a command (an argv) to run before it replies; `block`, a flag file:
-    the first call writes it and `<flag>.started`, then waits for good. Returns a reader of the
-    calls it finished, each with `agent`, `change`, `start`, `end` and `prompt`."""
+    the first call writes it and `<flag>.started`, then waits for good; `once`, the entry used
+    on the agent's first call in that worktree alone, every later call replying `then_reply` (a
+    passing one when unset) and doing nothing else. Returns a reader of the calls it finished,
+    each with `agent`, `change`, `start`, `end`, `prompt` and `markers`, the loops' markers
+    (`AUTOPILOT_RUN_ENV`, `TRAIN_RUN_ENV`) its env held, by name (228 R2)."""
     bin_dir = tmp_path / "claude-bin"
     bin_dir.mkdir(exist_ok=True)
     (bin_dir / "claude").write_text(FAKE_CLAUDE, encoding="utf-8")

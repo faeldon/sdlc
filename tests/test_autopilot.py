@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from factory_helpers import (
     needs_uv,
     sdlc,
 )
+from train_driver import fake_claude
 
 ROOT = Path(__file__).resolve().parents[1]
 ap = factory.autopilot
@@ -969,6 +971,60 @@ def test_escalations_are_answered_as_defaults_and_recorded(tmp_path, capsys, mon
     assert "decided by autopilot: D2" in (folder / "runs" / "autopilot.md").read_text("utf-8")
 
 
+class InFlight(Steps):
+    """`Steps`, also keeping which commands of each change are running, each held a moment to
+    widen the window, and every time a ledger writer (`answer`, `decisions`) ran beside another
+    command of its change."""
+
+    WRITERS = ("answer", "decisions")
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.guard, self.flight, self.overlaps = threading.Lock(), [], []
+
+    def __call__(self, main: Path, argv: list[str], cwd: Path) -> dict:
+        entry = (cwd.name, argv[0], object())
+        with self.guard:
+            beside = [e[1] for e in self.flight if e[0] == cwd.name]
+            if beside and (argv[0] in self.WRITERS or set(beside) & set(self.WRITERS)):
+                self.overlaps.append((cwd.name, argv[0], beside))
+            self.flight.append(entry)
+        try:
+            __import__("time").sleep(0.05)
+            return super().__call__(main, argv, cwd)
+        finally:
+            with self.guard:
+                self.flight.remove(entry)
+
+
+def test_no_ledger_writer_runs_beside_another_step_of_its_change(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """228 R5: `cmd_answer()` and `cmd_decisions()` rewrite `decisions.md` with no lock, safe
+    because the loop never runs either beside another command of the same change: two changes
+    built at once, one with a blocking line answered and a review of three roles started
+    together, and no ledger writer ever overlaps its own change's other steps."""
+    root = _repo(tmp_path)
+    roles = {"next": "review", "missing": ["code", "test", "security"]}
+    readings = {
+        "keep-drafts": ["build", {"next": "decide", "pending": ["D2"]}, "gate", roles,
+                        "approve", "done"],
+        "trim-logs": ["build", "gate", roles, "approve", "done"],
+    }  # fmt: skip
+    steps = InFlight(root, monkeypatch, {S1: _draft("keep-drafts"), S3: _draft("trim-logs")},
+                     [f"- WAVE: {S1}\n- WAVE: {S3}\n", "NONE\n"], readings)  # fmt: skip
+    steps.hooks["decisions"] = _writes_ledger(LEDGER_BLOCKING + LEDGER_DEFAULT)
+    _begin(root, capsys)
+    code, out = _loop(root, capsys)
+    assert code == 0, out
+    places = {n: c["place"] for n, c in ap.read_state(root)["changes"].items()}
+    assert sorted(places.values()) == ["landed", "landed"], places
+    assert len(steps.ran("answer")) >= 3, "the blocking line and the defaults were answered"
+    roles_run = [a for _, a in steps.ran("agent") if "--role" in a]
+    assert len(roles_run) == 6, "each change's three roles were started"
+    assert steps.overlaps == [], steps.overlaps
+
+
 def test_a_reviewer_s_default_a_later_build_made_lands(tmp_path, capsys, monkeypatch) -> None:
     """218: a reviewer's open default is answered and lands once a builder report of a later
     round says `- BUILT:` for it; a builder's own default needs no such line (the test above)."""
@@ -987,6 +1043,21 @@ def test_a_reviewer_s_default_a_later_build_made_lands(tmp_path, capsys, monkeyp
     assert f"D1 (security reviewer round 1, default): Guard `[review] sensitive`? Assuming " \
            f"yes. → decided by autopilot: {factory.KEPT_ANSWER}" in \
            (folder / "decisions.md").read_text(encoding="utf-8")  # fmt: skip
+
+
+def test_a_fenced_built_line_still_holds_autopilot(tmp_path) -> None:
+    """228 R8: a later builder report quoting `- BUILT: D1` inside a code fence never made the
+    reviewer's default, so `hold_causes()` still holds the change on it; the same line outside
+    the fence clears it."""
+    root = _change(tmp_path)
+    folder = root / ".sdlc" / "work" / NAME
+    _ledger(folder, LEDGER_REVIEWER.rstrip("\n"))
+    _build_report(root, 2, "```text\n- BUILT: D1: guarded\n```\n")
+    mine = {"guards": []}
+    causes = ap.hold_causes(root, root, folder, mine)
+    assert any("no build made: D1" in c for c in causes), causes
+    _build_report(root, 2, "- BUILT: D1: guarded\n")
+    assert not any("no build made" in c for c in ap.hold_causes(root, root, folder, mine))
 
 
 def test_autopilot_never_upgrades(tmp_path, capsys, monkeypatch) -> None:
@@ -1215,13 +1286,68 @@ def test_an_agent_session_never_carries_the_loops_markers(tmp_path, capsys, monk
     assert factory.landing.TRAIN_RUN_ENV not in env and env["SDLC_SOMETHING_ELSE"] == "kept"
 
 
+MARKERS = (factory.AUTOPILOT_RUN_ENV, factory.landing.TRAIN_RUN_ENV)
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("given", [True, False], ids=["both-set", "neither-set"])
+def test_take_markers_moves_both_markers_out_of_the_env(monkeypatch, given) -> None:
+    """228 R3: `take_markers()`, `main()`'s first step, moves each loop's marker out of
+    `os.environ` into `LOOP_MARKERS`, where `loop_marker()` and `loop_env()` still find it and
+    `agent_env()` never does; with neither set it changes nothing."""
+    monkeypatch.setattr(factory, "LOOP_MARKERS", {})
+    for name in MARKERS:
+        if given:
+            monkeypatch.setenv(name, f"{name}-value")
+        else:
+            monkeypatch.delenv(name, raising=False)
+    before = dict(factory.os.environ)
+    factory.take_markers()
+    assert not [n for n in MARKERS if n in factory.os.environ]
+    if not given:
+        assert factory.LOOP_MARKERS == {} and dict(factory.os.environ) == before
+        return
+    assert {n: f"{n}-value" for n in MARKERS} == factory.LOOP_MARKERS
+    for name in MARKERS:
+        assert factory.loop_marker(name) == f"{name}-value"
+        assert factory.loop_env()[name] == f"{name}-value"
+        assert name not in factory.agent_env()
+
+
+def test_an_agent_run_reads_the_closes_once(tmp_path, capsys, monkeypatch) -> None:
+    """228 R7: one `agent` run reads the ledger's `closes:` rows twice (`recorded_closes()`): once
+    for its reading (`loop_state()`'s `intent_closes()`), once to record them (`record_closes()`),
+    a small file read twice a session, which a cache would hardly save; never once a line."""
+    root = _change(tmp_path)
+    intent = root / ".sdlc" / "work" / NAME / "intent.md"
+    text = intent.read_text(encoding="utf-8")
+    intent.write_text(text.replace("\nidea:", "\ncloses: [12]\nidea:"), encoding="utf-8")
+    real, reads = factory.recorded_closes, []
+    monkeypatch.setattr(factory, "recorded_closes", lambda f: reads.append(f) or real(f))
+    monkeypatch.setattr(factory, "_claude", lambda argv, cwd: (0, ["Done.\n"], None, None))
+    monkeypatch.setattr(factory, "policy_doc", lambda root: ".sdlc/SDLC.md")
+    code, out = _run(capsys, factory.cmd_agent, root, "008", "build", None, None)
+    assert code == 0, out
+    assert len(reads) == 2, reads
+    assert factory.recorded_closes(root / ".sdlc" / "work" / NAME) == ["[12]"], "it was recorded"
+
+
 def test_a_real_step_passes_by_autopilot_and_an_agents_env_never_does(
     tmp_path, monkeypatch
 ) -> None:
     """R2 through the real subprocess path: `run_step` runs `factory.py answer --by autopilot` as a
     child under the loop's env and it is accepted while the lock is held; the same command run
-    with an agent session's env (`agent_env()`) is refused, as it is with the lock free."""
-    root = _change(tmp_path)
+    by an agent session, the stand-in `claude` `_claude()` starts (228 R4), is refused, as it is
+    with the lock free."""
+    root = _change(tmp_path / "host")
+    said = tmp_path / "agent-answer.out"
+    script = shlex.join([factory.sys.executable, str(factory.FACTORY_SCRIPT), "answer", "008", "D2",
+                         "--by", "autopilot"])  # fmt: skip
+    fake_claude(
+        tmp_path,
+        monkeypatch,
+        {"builder": {"run": ["sh", "-c", f"{script} > {shlex.quote(str(said))} 2>&1"]}},
+    )
     folder = root / ".sdlc" / "work" / NAME
     _ledger(folder, DEFAULT_LINE, DEFAULT_LINE.replace("D1", "D2").replace("50", "60"))
     argv = ["answer", "008", "D1", "--by", "autopilot"]
@@ -1233,11 +1359,12 @@ def test_a_real_step_passes_by_autopilot_and_an_agents_env_never_does(
         monkeypatch.setenv(
             factory.AUTOPILOT_RUN_ENV, str(_common(root) / factory.AUTOPILOT_RUN_LOCK)
         )
-        agent = subprocess.run(
-            [factory.sys.executable, str(factory.FACTORY_SCRIPT), *argv[:2], "D2", *argv[3:]],
-            cwd=root, env=factory.agent_env(), capture_output=True, encoding="utf-8",
-        )  # fmt: skip
-        assert agent.returncode == 1 and factory.BY_AUTOPILOT_REFUSED in agent.stdout, agent
+        code, replies, problem, _ = factory._claude(
+            ["claude", "-p", "answer D2", "--agent", "sdlc-factory:builder"], root
+        )
+        assert code == 0 and problem is None, problem
+        agent = json.loads(said.read_text(encoding="utf-8"))
+        assert factory.BY_AUTOPILOT_REFUSED in agent["refusals"], agent
         ok = ap.run_step(root, argv, root)
     assert ok["code"] == 0 and ok["out"]["answer"] == factory.KEPT_ANSWER, ok
     ledger = {d["id"]: d for d in factory.read_ledger(folder)}
@@ -1382,3 +1509,112 @@ def test_autopilot_waits_out_a_park_and_holds_past_its_deadline(
     _, mine2, _ = _only(root2)
     assert mine2["place"] == "held" and "219-other" in mine2["why"], mine2
     assert not steps2.ran("train", "--run") and not steps2.ran("gate")
+
+
+# ---------------------------------------------------------------- the whole loop, as it runs
+#
+# 228 R1, R2: `autopilot --begin` and `--run` as subprocesses of the test, nothing monkeypatched
+# in them: every step a real `factory.py` child, `sdlc.py` run through `uv`, the stand-in `claude`
+# first on PATH answering each agent, and the landing's real `ship` and `close` on a scratch host.
+
+SEED = "2026-11-22-1"
+ONE_SEED = (
+    "# Inbox\n\n> The register.\n\n"
+    f"## [{SEED}] [bug] The drafts list crashes\n\nSeverity: high\n\nIt crashes.\n"
+)
+BUILDER_RAISES = (
+    "Built it.\n\n"
+    "- DECISION: [blocking] Keep a crashed draft, or drop it? Recommend keep it.\n"
+    "  - OPTION: keep it — nothing lost; the list holds a broken entry\n"
+    "  - OPTION: drop it — a clean list; the draft is gone\n"
+    "  - WHY: the intent says nothing is lost\n\n"
+    "## Evidence\n\n$ true\nexit: 0\n"
+)
+
+
+def _whole_host(tmp_path: Path) -> tuple[Path, Path]:
+    """A scratch host on `main` with one seed, `[autopilot]` on and a check that writes its env
+    under the returned directory, outside the tree, one file a run (its shell's pid); no remote.
+    The check is plain `sh`, so the gate's record holds no interpreter's path under a home
+    directory, which the scan refuses in a change's folder."""
+    root, seen = tmp_path / "host", tmp_path / "check-envs"
+    root.mkdir()
+    seen.mkdir()
+    (root / "README.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".claude/worktrees/\n", encoding="utf-8")
+    (root / ".sdlc" / "work").mkdir(parents=True)
+    (root / ".sdlc" / "work" / "inbox.md").write_text(ONE_SEED, encoding="utf-8")
+    (root / ".sdlc" / "factory.toml").write_text(ENABLED, encoding="utf-8")
+    check = f"env > {shlex.quote(seen.as_posix())}/check-$$.env"
+    (root / ".sdlc" / "config.toml").write_text(
+        f"[commands]\ncheck = {json.dumps(check)}\n", encoding="utf-8"
+    )
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root, seen
+
+
+def _autopilot(root: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in factory.os.environ.items() if k not in ("VIRTUAL_ENV", *MARKERS)}
+    return subprocess.run(
+        [factory.sys.executable, str(factory.FACTORY_SCRIPT), "autopilot", *args],
+        cwd=root, env=env, capture_output=True, encoding="utf-8", timeout=600,
+    )  # fmt: skip
+
+
+def test_fake_claudes_marker_names_are_the_factorys() -> None:
+    """228 R2: the stand-in `claude` names the loops' markers in full, since it can't import the
+    factory; a rename of either fails here, never silently in the end-to-end test."""
+    from train_driver import FAKE_CLAUDE
+
+    assert f'("{factory.AUTOPILOT_RUN_ENV}", "{factory.landing.TRAIN_RUN_ENV}")' in FAKE_CLAUDE
+
+
+@needs_uv
+@pytest.mark.skipif(factory.os.name == "nt", reason="the stand-in claude is a shebang file")
+def test_autopilot_run_lands_a_seed_through_real_subprocesses(tmp_path, monkeypatch) -> None:
+    """228 R1: one seed, opened, built, its blocking line answered by a real `answer --by
+    autopilot`, gated, reviewed, approved and landed by `autopilot --run`, every step its own
+    child: `Close` on main, `Sdlc-Landed: by=autopilot`, `opened_by: autopilot`, and only
+    `→ decided by autopilot:` in the ledger. R2: the host's check, run by the loop's gate and the
+    train's, and every agent session, saw neither loop's marker."""
+    for name in MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    root, seen = _whole_host(tmp_path)
+    calls = fake_claude(tmp_path, monkeypatch, {
+        "autopilot-planner": {"reply": f"- WAVE: {SEED}\n", "once": True, "then_reply": "NONE\n"},
+        "intent-writer": {"reply": _draft("drafts-crash")},
+        "builder": {"once": True, "write": {"keep.txt": "kept\n"}, "reply": BUILDER_RAISES},
+        "approver": {"reply": READY_DECISION},
+    })  # fmt: skip
+    begun = _autopilot(root, "--begin", "--usd", "5", "--hours", "1")
+    assert begun.returncode == 0, begun.stdout + begun.stderr
+    ran = _autopilot(root, "--run")
+    state = ap.read_state(root)
+    changes = (state or {}).get("changes") or {}
+    assert ran.returncode == 0 and len(changes) == 1, (ran.stdout, ran.stderr[-3000:], state)
+    ((name, mine),) = changes.items()
+    record = root / ".claude" / "worktrees" / name / ".sdlc" / "work" / name / "runs"
+    held = (record / "autopilot.md").read_text("utf-8") if record.is_dir() else ""
+    assert mine["place"] == "landed", (mine, held, ran.stderr[-3000:])
+
+    line = _git(root, "log", "--first-parent", "--format=%s", "main").splitlines()
+    assert f"Close {name}" in line, line
+    bodies = _git(root, "log", "--format=%B", "main")
+    assert "Sdlc-Landed: by=autopilot" in bodies, bodies
+    last = _git(root, "log", "--format=%H", "-1", "main", "--", f".sdlc/work/{name}/intent.md")
+    intent = _git(root, "show", f"{last}^:.sdlc/work/{name}/intent.md")
+    ledger = _git(root, "show", f"{last}^:.sdlc/work/{name}/decisions.md")
+    assert re.search(r"^opened_by: autopilot$", intent, re.M), intent
+    assert "→ decided by autopilot: keep it" in ledger and " → decided: " not in ledger, ledger
+    agents = {c["agent"] for c in calls()}
+    assert {"autopilot-planner", "intent-writer", "builder", "approver"} <= agents, agents
+
+    envs = sorted(seen.iterdir())
+    assert len(envs) >= 2, "the loop's gate and the train's tip gate each ran the check"
+    for path in envs:
+        text = path.read_text(encoding="utf-8")
+        assert "PATH=" in text, path.name
+        assert not [m for m in MARKERS if f"{m}=" in text], path.name
+    assert [c for c in calls() if c["markers"]] == [], "no agent session held a marker"
