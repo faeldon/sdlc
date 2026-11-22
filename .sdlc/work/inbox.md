@@ -694,29 +694,6 @@ autopilot's queue orders parked changes against new ones.
 Theme: factory
 Paths: plugins/factory/scripts/factory.py, plugins/factory/scripts/run_state.py, plugins/factory/skills/build/SKILL.md, plugins/factory/skills/autopilot/, docs/REFERENCE.md
 
-## [2026-11-21-46] [bug] `ask` reads a reviewer's assumed default as built, and says ship
-
-`factory.py ask NNN --answered <ids>` says `next: ship` whenever every answer is
-`the assumed default, confirmed` (`cmd_ask()`, `KEPT_ANSWER`). But a reviewer's
-`- DECISION:` line also carries a default ("Assuming yes"), and a reviewer
-doesn't build. Confirming a reviewer's default is a choice of something the build
-may not do, so `ship` sends a change to the landing without it. It should say
-`rebuild` (or name the lines) when a confirmed default was raised by a role that
-doesn't edit (any reviewer, the approver), unless a later builder report says it
-built it.
-
-How to see it: on 216-autopilot, the security reviewer raised D8 ("Should the
-default `[autopilot] guards` also include `[review] sensitive`? Assuming yes")
-and D9 (seeds with an `Issue:` line only when named in `--seeds`), and D10
-(document the marker's limit). None was built. `/sdlc-factory:decide 216`
-recorded all three as the assumed default, confirmed, and
-`ask 216 --answered …,D8,D9,D10` printed `next: ship`. Only the supervisor
-reading the code caught it, and the change was sent back with `/sdlc-factory:build`.
-
-Severity: high
-Paths: plugins/factory/scripts/factory.py
-Theme: factory
-
 ## [2026-11-21-47] [idea] Let autopilot take `next_up`'s cheap-nits lines
 
 Left undone by 216-autopilot, carried forward when it landed: `next_up`'s cheap-nits lines (`rule: nits`) carry no seed id, so autopilot never takes them, though `READY_RULES` lists them.
@@ -860,3 +837,23 @@ Paths: tests/test_ci.py
 Cost: S
 Value: low
 Raised by: 221-ci-pinned-shas (correctness)
+
+## [2026-11-22-11] [nit] `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
+
+Raised by the security review of 218-ask-reviewer-defaults, round 2: plugins/factory/scripts/factory.py:2296: `BUILT_RE` matches a `- BUILT:` line anywhere in a builder report, including one quoted inside a code fence; skipping fenced blocks would stop a quoted line from counting as built
+
+Theme: robustness
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 218-ask-reviewer-defaults (contract)
+
+## [2026-11-22-12] [nit] the `cmd_ask()` docstring wraps short, leaving a line that ends at "while a".
+
+Raised by the test review of 218-ask-reviewer-defaults, round 2: `plugins/factory/scripts/factory.py:2282`: the `cmd_ask()` docstring wraps short, leaving a line that ends at "while a". Reflowing it would read better.
+
+Theme: style
+Paths: plugins/factory/scripts/factory.py
+Cost: S
+Value: low
+Raised by: 218-ask-reviewer-defaults (correctness)
