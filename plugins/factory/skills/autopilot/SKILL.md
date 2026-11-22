@@ -40,8 +40,9 @@ to Tier 2, never runs the skills' cases or an acceptance check the read-only lis
 **holds** (leaves unlanded, under Needs you, nothing that depends on it built) a change that
 touches a path in the base branch's `[autopilot] guards` (unset, its policy and review docs and
 its `[review] irreversible` and `sensitive` paths), one any agent says can only be built by
-breaking a contract or would be far simpler with one relaxed, one the approver asks to rethink, or
-one the train or `land-check` won't take. A call you disagree with is fixed forward, by a revert or
+breaking a contract or would be far simpler with one relaxed, one the approver asks to rethink,
+one with a reviewer's or the approver's default no later build made, or one the train or
+`land-check` won't take. A call you disagree with is fixed forward, by a revert or
 a new seed through `/sdlc:idea`, never mid-run.
 
 **What bounds it.** The dollar cap and the hours you give; two risk budgets the script counts, never

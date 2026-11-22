@@ -79,8 +79,9 @@ reviewing, and deciding whether to escalate.
   or what you checked). The approver files no look for a published interface you already approved
   in the spec or an answer; it names it for ship instead. After one approval it writes your
   answers into `decisions.md` (`→ decided:`), as the supervisor does, and says what's next: decide
-  again, rebuild (an answer the build doesn't follow), the hand gate (a `gate` reason not yet
-  green on the change as it stands), or ship. It reads
+  again, rebuild (an answer the build doesn't follow, or a reviewer's default you confirmed that
+  no later builder round says it built, its `- BUILT: D<n>` line), the hand gate (a `gate` reason
+  not yet green on the change as it stands), or ship. It reads
   through `factory.py ask`, which writes nothing, and starts no agent.
 - **`/sdlc-factory:land [NNN…]`**, from the main checkout: the ready
   changes as one batch, in that order, each shipped with the impact its approver proposed and
@@ -547,12 +548,15 @@ outsider's and nobody reads it before it is built. Such a seed is opened with th
 
 **What it holds**, unlanded, with nothing that depends on it built: a change touching a path in
 `guards` (unset, the policy and review docs, `[review] irreversible` and `[review] sensitive`, so
-the code that runs the rest of the run is never landed unseen); one any agent's reply says can only be built by breaking a contract (`- CONTRACT:`) or
-would be far simpler with one relaxed (`- RELAX:`), which the spec-writer, builder and approver are
-asked for only under autopilot; an approver's ESCALATE that asks to reconsider the approach or
-gives a `gate` reason; a `verdicts` stop; one `land-check` excludes or the train stops on; one with
-an acceptance check the read-only list refuses, or with skills' cases in scope, since neither runs
-unattended; and a blocking call with no recommendation, or one recommending `upgrade to Tier 2`.
+the code that runs the rest of the run is never landed unseen); one any agent's reply says can only
+be built by breaking a contract (`- CONTRACT:`) or would be far simpler with one relaxed
+(`- RELAX:`), which the spec-writer, builder and approver are asked for only under autopilot; an
+approver's ESCALATE that asks to reconsider the approach or gives a `gate` reason; an open default
+a reviewer or the approver raised that no later builder round says it built (`- BUILT: D<n>`),
+which answering would land unbuilt; a `verdicts` stop; one `land-check` excludes or the train
+stops on; one with an acceptance check the read-only list refuses, or with skills' cases in scope,
+since neither runs unattended; and a blocking call with no recommendation, or one recommending
+`upgrade to Tier 2`.
 
 **The budgets** are the script's, never a model's: review debt sums its calls' weights
 (`[autopilot.debt_weights]`), and change risk sums each landed change's signal kinds' weights

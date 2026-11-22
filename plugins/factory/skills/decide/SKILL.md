@@ -136,7 +136,10 @@ Say its `next` in the person's words, naming the change:
 
 - `decide`: some items are still open (one dismissed, or left out): `/sdlc-factory:decide NNN`
   again takes them.
-- `rebuild`: an answer isn't the default the build assumed, so the build doesn't follow it yet.
+- `rebuild`: an answer isn't the default the build assumed, so the build doesn't follow it yet;
+  or a default kept was a reviewer's or the approver's, which no builder round after it says it
+  built (`unbuilt`, each by its id, source and question): confirming it chose something the code
+  doesn't do yet. Name each `unbuilt` line, and say so.
   Run `then`: `/sdlc-factory:build NNN` sends an escalated change back for another build, told the
   answers; for a READY change, `/sdlc:ship NNN` from its worktree, where the rework is done by hand.
 - `gate`: every item is answered, and a `gate` reason isn't cleared yet. `then` names the hand

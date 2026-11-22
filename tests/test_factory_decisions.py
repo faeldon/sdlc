@@ -790,6 +790,63 @@ def test_ask_says_ship_when_every_default_is_kept(tmp_path, capsys) -> None:
     assert code == 1 and "D7 isn't a decided line" in out["refusals"][0], out
 
 
+def _reviewer_default(tmp_path: Path, capsys) -> Path:
+    """216's case: the builder's default D1 and the security reviewer's default D2, both open."""
+    root = _change(tmp_path, stage="test")
+    _build_report(root, 1, PAGING)
+    _review(root, 1, "security", "VERDICT: PASS")
+    review = root / ".sdlc" / "work" / NAME / "reviews" / "round-1" / "security.md"
+    review.write_text(
+        review.read_text() + "- DECISION: [default] Guard the sensitive paths? Assuming yes.\n"
+    )
+    _run(capsys, factory.cmd_decisions, root, "008")
+    _decision(root, "- ESCALATED: D2: a guard is the person's call\n")
+    return root
+
+
+def test_ask_says_rebuild_for_a_reviewer_s_default_never_built(tmp_path, capsys) -> None:
+    """218: a reviewer's default confirmed, with no later builder report saying it built it, is a
+    call the build never made: `rebuild`, naming it, by `build` for an ESCALATE and by ship for a
+    READY. The builder's own default confirmed still means ship."""
+    root = _reviewer_default(tmp_path, capsys)
+    _answer(root, "D1", factory.KEPT_ANSWER)
+    _answer(root, "D2", factory.KEPT_ANSWER)
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1")[1]
+    assert out["next"] == "ship" and out["unbuilt"] == [], out
+    code, out = _run(capsys, factory.cmd_ask, root, "008", "D1,D2")
+    assert code == 0 and out["next"] == "rebuild", out
+    assert out["then"] == "/sdlc-factory:build 008", out
+    assert out["unbuilt"] == [
+        {"id": "D2", "source": "security round 1", "question": "Guard the sensitive paths? "
+         "Assuming yes."}
+    ], out  # fmt: skip
+    path = root / ".sdlc" / "work" / NAME / "decision.md"
+    path.write_text(path.read_text().replace("DECISION: ESCALATE", "DECISION: READY"))
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1,D2")[1]
+    assert (out["next"], out["then"]) == ("rebuild", "/sdlc:ship 008"), out
+
+
+@pytest.mark.parametrize(
+    ("rnd", "line", "then"),
+    [
+        (2, "- BUILT: D2: the sensitive paths are guarded\n", "ship"),
+        (1, "- BUILT: D2: the sensitive paths are guarded\n", "rebuild"),
+        (2, "- BUILT: D1: paged at 50\n", "rebuild"),
+    ],
+    ids=["later-round", "same-round", "another-id"],
+)
+def test_ask_says_ship_once_a_later_builder_report_built_it(tmp_path, capsys, rnd, line, then):
+    """218: a `- BUILT: D<n>` line in a builder report of a round after the one that raised it
+    is the build making the call; the raising round's own report, or a line naming another id,
+    isn't."""
+    root = _reviewer_default(tmp_path, capsys)
+    _answer(root, "D1", factory.KEPT_ANSWER)
+    _answer(root, "D2", factory.KEPT_ANSWER)
+    _build_report(root, rnd, PAGING, line)
+    out = _run(capsys, factory.cmd_ask, root, "008", "D1,D2")[1]
+    assert out["next"] == then, out
+
+
 # ---------------------------------------------------------------- an escalated change sent back
 
 

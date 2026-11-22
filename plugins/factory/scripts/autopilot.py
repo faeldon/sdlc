@@ -565,8 +565,10 @@ def finish(main: Path, name: str, mine: dict, tree: Path, num: str) -> dict:
 def hold_causes(main: Path, tree: Path, folder: Path, mine: dict) -> list[str]:
     """Why a change with its decision in is held (R19, R21): a path in the base branch's
     `[autopilot] guards`, a `- CONTRACT:` or `- RELAX:` line in any reply of its run, an
-    ESCALATE whose approver asks to reconsider the approach or gives a `gate` reason, or an
-    acceptance check `read_only_command()` refuses. Skills' cases, and what `land-check`
+    ESCALATE whose approver asks to reconsider the approach or gives a `gate` reason, an open
+    default a reviewer or the approver raised that no later build made (`unbuilt_defaults()`,
+    218), which `finish()` would otherwise answer and land unbuilt, or an acceptance check
+    `read_only_command()` refuses. Skills' cases, and what `land-check`
     excludes, are read at landing (`land_batch()`)."""
     causes = contract_lines(folder)
     base = factory._base(tree)
@@ -579,6 +581,10 @@ def hold_causes(main: Path, tree: Path, folder: Path, mine: dict) -> list[str]:
             causes.append("the approver asks to reconsider the approach")
         if any(r["kind"] == "gate" for r in factory.escalation_reasons(folder)):
             causes.append("the approver escalated on the gate")
+    open_lines = [d for d in factory.read_ledger(folder) if d["open"]]
+    if unbuilt := factory.unbuilt_defaults(folder, open_lines):
+        ids = ", ".join(d["id"] for d in unbuilt)
+        causes.append(f"a reviewer's or the approver's default no build made: {ids}")
     checks, why = factory.landing._checks_now(folder, tree)
     if why:
         causes.append(f"its acceptance checks can't be read: {why}")

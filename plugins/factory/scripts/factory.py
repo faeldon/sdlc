@@ -411,6 +411,8 @@ LOOK_SOURCE_RE = re.compile(r"^approver round (\d+)$")
 SETTLED = " → settled by the approver: "
 # The answer `/sdlc-factory:decide` writes when the person keeps the default the build assumed.
 KEPT_ANSWER = "the assumed default, confirmed"
+# A builder report's line saying it built a default another role raised (218): `- BUILT: D8: ...`.
+BUILT_RE = re.compile(r"^\s*- BUILT:\s*(D\d+)\b")
 # How `carry` starts a `notes.md` the change doesn't have yet: a copy of `sdlc`'s
 # `templates/notes.md`, which this plugin's cached copy can't read. A test keeps the two the same.
 NOTES_HEAD = """\
@@ -2318,6 +2320,33 @@ def reply_path(source: str) -> str | None:
     return f"reviews/round-{m.group(2)}/{m.group(1)}.md"
 
 
+def unbuilt_defaults(folder: Path, lines: list[dict]) -> list[dict]:
+    """The defaults among the ledger's `lines` the build never made (218): a line a builder raised
+    is its own build, but one a reviewer or the approver raised counts as built only when a
+    builder report of a later round (`build/round-<R>.md`, R past the round its `source` names)
+    holds a `- BUILT: D<n>` line for it. `cmd_ask()` passes the defaults the person kept
+    (`KEPT_ANSWER`), autopilot's `hold_causes()` the open ones it would answer. Each as its id,
+    source and question."""
+    built: dict[str, int] = {}
+    for path in sorted((folder / "build").glob("round-*.md")):
+        m = re.fullmatch(r"round-(\d+)\.md", path.name)
+        if not m:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if b := BUILT_RE.match(line):
+                built[b.group(1)] = max(built.get(b.group(1), 0), int(m.group(1)))
+    found = []
+    for d in lines:
+        if d["kind"] != "default" or d["source"].startswith("builder"):
+            continue
+        # A source naming no round (a supervisor's) reads as round 0: any `- BUILT:` line counts.
+        raised = re.search(r"round (\d+)$", d["source"])
+        if built.get(d["id"], 0) > (int(raised.group(1)) if raised else 0):
+            continue
+        found.append({"id": d["id"], "source": d["source"], "question": d["text"]})
+    return found
+
+
 def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
     """What the person has to decide on a change at `stage: test`, for `/sdlc-factory:decide`,
     writing nothing: the approver's `decision`; `items`, every open ledger line in id order, each
@@ -2333,8 +2362,10 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
 
     With `answered`, the ids the person just answered, comma-separated (never their words), it
     also says `next`: `decide` while any line is open; `rebuild` when an answer (a look's aside)
-    isn't `KEPT_ANSWER`, so the build doesn't follow it, `then` naming how (`/sdlc-factory:build
-    NNN` for an ESCALATE, `/sdlc:ship NNN` for a READY, which `restart` refuses); `gate` while a
+    isn't `KEPT_ANSWER`, so the build doesn't follow it, or one that is kept a default the build
+    never made (`unbuilt`, `unbuilt_defaults()`, listed with any `next`), `then` naming how
+    (`/sdlc-factory:build NNN` for an ESCALATE, `/sdlc:ship NNN` for a READY, which `restart`
+    refuses); `gate` while a
     `gate` reason isn't cleared, `then` `sdlc.py gate NNN`; `ship` otherwise. An id that isn't a
     decided line is refused."""
     folder, refusal = find_change(root, ident)
@@ -2378,9 +2409,13 @@ def cmd_ask(root: Path, ident: str, answered: str | None) -> int:
             return emit({"refusals": [f"{said} isn't a decided line in decisions.md"]}, 1)
         number = folder.name.split("-", 1)[0]
         gate = out["gate"]
+        kept = [d for d in ledger if d["id"] in ids and d["answer"] == KEPT_ANSWER]
+        out["unbuilt"] = unbuilt_defaults(folder, kept)
         if items:
             out["next"] = "decide"
-        elif any(by_id[i]["kind"] != "look" and by_id[i]["answer"] != KEPT_ANSWER for i in ids):
+        elif out["unbuilt"] or any(
+            by_id[i]["kind"] != "look" and by_id[i]["answer"] != KEPT_ANSWER for i in ids
+        ):
             out["next"] = "rebuild"
             out["then"] = (
                 f"/sdlc:ship {number}" if decision == "READY" else f"/sdlc-factory:build {number}"

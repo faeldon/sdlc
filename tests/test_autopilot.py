@@ -923,6 +923,11 @@ LEDGER_BLOCKING = (
     "  - WHY: the limit\n"
 )
 
+# 216's gap (218): a reviewer's default, which no builder made unless a later report says so.
+LEDGER_REVIEWER = (
+    "- [ ] D1 (security reviewer round 1, default): Guard `[review] sensitive`? Assuming yes.\n"
+)
+
 
 def _writes_ledger(text: str):
     def hook(argv, cwd):
@@ -962,6 +967,26 @@ def test_escalations_are_answered_as_defaults_and_recorded(tmp_path, capsys, mon
     assert "decided by autopilot: D2" in (folder / "runs" / "autopilot.md").read_text("utf-8")
 
 
+def test_a_reviewer_s_default_a_later_build_made_lands(tmp_path, capsys, monkeypatch) -> None:
+    """218: a reviewer's open default is answered and lands once a builder report of a later
+    round says `- BUILT:` for it; a builder's own default needs no such line (the test above)."""
+    root, steps = _one_change(tmp_path, capsys, monkeypatch, list(HAPPY))
+    steps.hooks["decisions"] = _writes_ledger(LEDGER_REVIEWER)
+
+    def built(argv, cwd):
+        folder = cwd / ".sdlc" / "work" / cwd.name
+        (folder / "build").mkdir(exist_ok=True)
+        (folder / "build" / "round-2.md").write_text("- BUILT: D1: guarded\n", "utf-8")
+
+    steps.hooks["carry"] = built
+    _loop(root, capsys)
+    _, mine, folder = _only(root)
+    assert mine["place"] == "landed", mine
+    assert f"D1 (security reviewer round 1, default): Guard `[review] sensitive`? Assuming " \
+           f"yes. → decided by autopilot: {factory.KEPT_ANSWER}" in \
+           (folder / "decisions.md").read_text(encoding="utf-8")  # fmt: skip
+
+
 def test_autopilot_never_upgrades(tmp_path, capsys, monkeypatch) -> None:
     """R18: a blocking decision whose recommendation is `upgrade to Tier 2` is held, and a
     reading that names `upgrade` is held: `factory.py upgrade` never runs under the lock."""
@@ -992,6 +1017,7 @@ HOLDS = {
     "checks": (ENABLED, "isn't read-only"),
     "excluded": (ENABLED, "land-check excludes it"),
     "cases": (ENABLED, "skills' cases are in its scope"),
+    "unbuilt": (ENABLED, "a reviewer's or the approver's default no build made: D1"),
 }
 
 
@@ -1020,6 +1046,8 @@ def test_held_change_and_its_dependents_never_land(tmp_path, capsys, monkeypatch
             (folder / "build" / "round-1.md").write_text(
                 "Built.\n- RELAX: narrow allowed-tools: simpler with Bash\n", encoding="utf-8"
             )
+        if cause == "unbuilt":
+            (folder / "decisions.md").write_text("# Decisions\n\n" + LEDGER_REVIEWER, "utf-8")
         if cause == "guards":
             (cwd / "src").mkdir(exist_ok=True)
             (cwd / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")

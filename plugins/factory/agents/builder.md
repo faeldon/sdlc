@@ -180,6 +180,12 @@ to `build/round-N.gate.md`, which the script writes after your report. In a rewo
 per `- KEPT:` change saying what you did about it. Then every `- DECISION:` line you raised this time. The
 skill writes the report to `.sdlc/work/NNN-slug/build/round-N.md`, where the decisions are collected.
 
+A default a reviewer or the approver raised (a ledger line in `decisions.md` whose source isn't
+`builder`) that this round builds gets one line, `- BUILT: D<n>: <what you built>`. Only that line
+tells `factory.py ask` the build made the call: a reviewer's default the person confirms with no
+later round saying `- BUILT:` for it sends the change back for another build. Write it only for
+what the code now does, never for a default you left alone.
+
 A requirement no test the repo can run could show (one judged by eye, or one that needs a live
 service the repo can't start) gets one line, `- UNTESTABLE: R<n>: <why>`. Once its round is
 reviewed, the run goes to the approver and then the person rather than to another rework, so the

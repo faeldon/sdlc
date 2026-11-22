@@ -1973,6 +1973,16 @@ def test_decide_says_what_to_do_instead_when_ask_refuses() -> None:
     assert "`/sdlc:status` lists the open changes" in flat
 
 
+def test_a_reviewer_s_default_is_built_before_it_ships() -> None:
+    """218: the builder names a reviewer's default it built with `- BUILT: D<n>`, the line
+    `factory.py ask` reads, and decide's `rebuild` names the `unbuilt` lines it gives."""
+    builder = " ".join((FACTORY / "agents" / "builder.md").read_text(encoding="utf-8").split())
+    assert "`- BUILT: D<n>: <what you built>`" in builder
+    decide = " ".join(BY_ID["sdlc-factory:decide"].read_text(encoding="utf-8").split())
+    rebuild = decide.split("- `rebuild`:", 1)[1].split("- `gate`:", 1)[0]
+    assert "`unbuilt`" in rebuild and "a reviewer's or the approver's" in rebuild, rebuild
+
+
 def test_decide_never_takes_words_on_a_command_line() -> None:
     """137 R15: ids go on the command line, the person's words never do."""
     text = BY_ID["sdlc-factory:decide"].read_text(encoding="utf-8")
