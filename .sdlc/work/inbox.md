@@ -841,3 +841,12 @@ Raised 2026-11-22.
 A change the landing review kept is pointed back to the factory, not to ship by hand: its ejection reason (landing.py:3220) and the land skill's resume and report steps say "rerun /sdlc-factory:land NNN and answer yes, with a fix", offering the kept CHANGE lines from verified.md as the fix's words; "ship it by hand" stays only for what the factory can't land (excluded, a second conflict, an unvouched record). Seen on 233: a two-sentence docs gap was sent to ship by hand.
 Theme: factory
 Raised 2026-11-22.
+
+## [2026-11-22-40] [bug] Ship case's never-reads-a-branch grader fails on the docs.md read preflight names
+
+Since 227 added `docs.md` to `SHIP_BRANCHES`, `preflight`'s `branches` names `skills/ship/docs.md` whenever a change's diff touches a doc, and ship reads it as told. The ship case's change touches a doc, so the `never-reads-a-branch` grader (a Read of `skills/ship/` anything but `SKILL.md`, max 0) fails a run that did right. In cases-2026-11-22-3, runs 1 and 2 of `ship` failed on that grader alone. It should fail only a branch file `preflight` didn't name: allow the files the run's `branches` named, or make the case's change touch no doc and add a case for the docs branch.
+
+Severity: low
+Paths: evals/ship/graders/never-reads-a-branch.md, evals/ship/scaffold.sh
+Introduced by: 227-docs-reviewer
+Theme: tests
