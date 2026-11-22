@@ -113,16 +113,6 @@ See .sdlc/work/156-cases-that-tell/notes.md in its commit.
 Raised 2026-11-18.
 Theme: tests
 
-## [2026-11-19-24] [nit] R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s.
-
-Raised by the code review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says "a `time.monotonic()` deadline of 60 s", but the test and its sibling `_killed_at_its_gate` now use 120 s. Change R14 to 120 s, since startup here takes about 60 s.
-
-Theme: docs
-Paths: .sdlc/work/171-factory-run-state/spec.md
-Cost: S
-Value: med
-Raised by: 171-factory-run-state (correctness)
-
 ## [2026-11-19-25] [nit] R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s.
 
 Raised by the test review of 171-factory-run-state, round 2: .sdlc/work/171-factory-run-state/spec.md:42: R14 still says a 60 s deadline, but the test and `plan.md` now use 120 s. Reword R14 to 120 s so the spec matches the code.
