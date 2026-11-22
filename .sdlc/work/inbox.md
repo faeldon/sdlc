@@ -895,3 +895,9 @@ The board reloads board.py on each request but keeps sdlc.py loaded from when it
 Severity: med
 Paths: scripts/board.py, scripts/sdlc.py
 Theme: board
+
+## [2026-11-22-38] [idea] Gates share the machine's cores, and wait out memory pressure
+
+Gates share the machine: factory.py gate tells the check its share of the cores (SDLC_GATE_CPUS = cores ÷ gate_jobs) so this repo's check.sh runs pytest -n that many, not -n auto per gate (two gates on 18 cores ran 36 workers and exhausted swap); later, gate_slot waits while the machine is under memory pressure, saying why.
+Theme: factory
+Raised 2026-11-22.
