@@ -119,8 +119,17 @@ TRAIN_COMMANDS = {
 # What a reply says when a change could only be built by breaking a contract, a hard rule or a
 # guard (`CONTRACT`), or would be far simpler with one relaxed (`RELAX`): either holds it (R19).
 CONTRACT_RE = re.compile(r"^\s*- (CONTRACT|RELAX):\s*(.+?)\s*$", re.M)
-WAVE_RE = re.compile(r"^\s*- WAVE:\s*(\d{4}-\d{2}-\d{2}-\d+)\s*$")
-NONE_RE = re.compile(r"^\s*NONE\s*$")
+# The planner's plan (231 R8): `## <risk>` groups of `- WAVE:` and `- WAITS:` lines, and
+# `- LEAVE:` lines anywhere, each line's parts split on an em dash (or ` -- `).
+PLAN_LINE_RE = re.compile(r"^\s*- (WAVE|WAITS|LEAVE):\s*(.*?)\s*$")
+PLAN_GROUP_RE = re.compile(r"^##\s+(.+?)\s*$")
+PLAN_SEP_RE = re.compile(r"\s*—\s*|\s+--\s+")
+TIER_RE = re.compile(r"^tier\s+(\d+)$")
+LEAVE_KINDS = ("fixed", "wrong", "off-goal")
+# A word of a LEAVE's reason that may be a repo path: a backticked span, or a word with a `/` or a
+# `.` in it, a `:<line>` after it dropped.
+PATH_WORD_RE = re.compile(r"`([^`]+)`|(\S*[/.]\S*)")
+LINE_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?$")
 CREATED_RE = re.compile(r"^■ (\d{3,}-[a-z0-9][a-z0-9-]*) — tier")
 SEED_ID_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}-\d+\b")
 CHANGE_ID_RE = re.compile(r"(?<![\d-])\d{3,}(?![\d-])")
@@ -309,23 +318,28 @@ def _since(stamp: str) -> float:
 
 def status_items(main: Path) -> tuple[list[dict], str | None]:
     """`sdlc.py status --json`'s `next_up` items, through the `sdlc.py` of the factory's own
-    version, or why they can't be read."""
-    code, data, said = factory._sdlc(["status", "--json"], main)
-    if code or data is None:
-        return [], f"sdlc.py status couldn't be read: {said.strip()[-300:]}"
-    return list((data.get("next_up") or {}).get("items") or []), None
+    version, or why they can't be read (`status_read()`, without the direction)."""
+    items, _, why = status_read(main)
+    return items, why
 
 
-def candidates(items: list[dict], bounds: dict, state: dict | None = None) -> list[dict]:
+def candidates(
+    items: list[dict], bounds: dict, state: dict | None = None, goal: dict | None = None
+) -> list[dict]:
     """The `ready` group of `next_up`, in its order (R10), each a seed with an id, within the
     bounds' seeds or themes: never the `decide` group, a seed an open change already takes (which
-    `next_up` leaves out of its items), nor a seed this run opened or held. A seed whose `Issue:`
-    line names an issue, or can't be read (`issues` None), only when the bounds' seeds name it:
-    text an outsider wrote is built unseen only by the person's choice (D9)."""
+    `next_up` leaves out of its items), nor a seed this run opened, held or left. A seed whose
+    `Issue:` line names an issue, or can't be read (`issues` None), only when the bounds' seeds
+    name it: text an outsider wrote is built unseen only by the person's choice (D9). A goal's
+    `scope`, when it has one, keeps only the seeds it names: a goal narrows, never widens (231
+    R3)."""
     taken = set((state or {}).get("seeds") or {})
+    scope = (goal or {}).get("scope")
     found = []
     for item in items:
         if item.get("group") != "ready" or not item.get("id") or item["id"] in taken:
+            continue
+        if scope is not None and item["id"] not in scope:
             continue
         if bounds["seeds"] and item["id"] not in bounds["seeds"]:
             continue
@@ -335,6 +349,154 @@ def candidates(items: list[dict], bounds: dict, state: dict | None = None) -> li
             continue
         found.append(item)
     return found
+
+
+# ---------------------------------------------------------------- the goal (231)
+
+
+# A goal named by its id in the direction doc, and a register theme's form.
+GOAL_ID_RE = re.compile(r"^[GM]\d+$")
+THEME_GOAL = "theme:"
+# The outcomes a goal's text ends with, `(O1, O3)`, which its title leaves out: `serves` holds them.
+GOAL_CITES_RE = re.compile(r"\s*\(O\d+(?:\s*,\s*O\d+)*\)\s*$")
+NO_GOAL = "no goal: state one with --goal"
+NOT_OPEN = "isn't an open goal or milestone in the direction doc"
+# Where a goal came from, as the WAIT's `shown`, the brief and the summary say it.
+SOURCES = {"direction": "from the direction doc", "register": "suggested from the register",
+           "stated": "stated in the bounds"}  # fmt: skip
+
+
+def status_read(main: Path) -> tuple[list[dict], dict, str | None]:
+    """`sdlc.py status --json`'s `next_up` items and its `direction` (231 R1), through the
+    `sdlc.py` of the factory's own version, or why they can't be read."""
+    code, data, said = factory._sdlc(["status", "--json"], main)
+    empty = {"goals": [], "milestones": [], "problems": []}
+    if code or data is None:
+        return [], empty, f"sdlc.py status couldn't be read: {said.strip()[-300:]}"
+    direction = data.get("direction") if isinstance(data.get("direction"), dict) else {}
+    return (list((data.get("next_up") or {}).get("items") or []),
+            {k: list(direction.get(k) or []) for k in empty}, None)  # fmt: skip
+
+
+def _item_title(item: dict) -> str:
+    return item.get("name") or GOAL_CITES_RE.sub("", item.get("title") or "")
+
+
+def goal_scope(arg: str, direction: dict, items: list[dict]) -> list[str] | None:
+    """The seeds goal `arg` may take (R3): a milestone's `seeds`; a goal's, every seed of the
+    milestones whose `Serves:` names it, None when none does; a theme's, its ready seeds; a
+    stated goal's, None. None narrows nothing: the planner judges what serves it."""
+    if arg.startswith(THEME_GOAL):
+        theme = arg[len(THEME_GOAL) :]
+        return [
+            i["id"]
+            for i in items
+            if i.get("group") == "ready" and i.get("id") and i.get("theme") == theme
+        ]
+    if not GOAL_ID_RE.match(arg):
+        return None
+    if arg.startswith("M"):
+        m = next((m for m in direction["milestones"] if m["id"] == arg), None)
+        return list((m or {}).get("seeds") or [])
+    serving = [m for m in direction["milestones"] if arg in (m.get("serves") or [])]
+    if not serving:
+        return None
+    return list(dict.fromkeys(s for m in serving for s in m.get("seeds") or []))
+
+
+def resolve_goal(
+    arg: str | None, direction: dict, items: list[dict]
+) -> tuple[dict | None, str | None]:
+    """Goal `arg` read by its form (R2): `G<n>` or `M<n>` an open item of the direction doc
+    (`direction`), `theme:<name>` a register theme, any other text the person's own; with its
+    `source`, `arg`, `title`, `serves` and `scope`. (None, None) for no goal, (None, why) for an
+    id the doc doesn't hold open."""
+    arg = (arg or "").strip()
+    if not arg:
+        return None, None
+    if GOAL_ID_RE.match(arg):
+        found = next((i for i in [*direction["goals"], *direction["milestones"]]
+                      if i["id"] == arg), None)  # fmt: skip
+        if found is None:
+            return None, f"{arg} {NOT_OPEN}"
+        goal = {"source": "direction", "arg": arg, "title": _item_title(found),
+                "serves": list(found.get("serves") or [])}  # fmt: skip
+    elif arg.startswith(THEME_GOAL):
+        theme = arg[len(THEME_GOAL) :].strip()
+        if not theme:
+            return None, "a theme goal names its theme: theme:<name>"
+        arg = THEME_GOAL + theme
+        goal = {"source": "register", "arg": arg, "title": f"the {theme} theme", "serves": []}
+    else:
+        goal = {"source": "stated", "arg": arg, "title": arg, "serves": []}
+    return {**goal, "scope": goal_scope(arg, direction, items)}, None
+
+
+def propose_goal(
+    direction: dict, items: list[dict], bounds: dict
+) -> tuple[dict | None, list[dict]]:
+    """The goal `--preview` proposes when none is stated (R4), and up to three alternatives, each
+    with its `count` of candidates within the bounds: the first open milestone, in the doc's
+    order, with a candidate in its scope; else the theme with the most candidates (a tie to the
+    theme whose best candidate ranks highest); else none. The alternatives are the other open
+    milestones and goals with a candidate in scope, then the next themes."""
+    found = candidates(items, bounds)
+    ranked: list[dict] = []
+    for item in [*direction["milestones"], *direction["goals"]]:
+        goal, _ = resolve_goal(item["id"], direction, items)
+        if goal and (n := len(candidates(items, bounds, None, goal))):
+            ranked.append({**goal, "count": n})
+    themes: dict[str, list[int]] = {}
+    for at, item in enumerate(found):
+        if item.get("theme"):
+            themes.setdefault(item["theme"], []).append(at)
+    for theme in sorted(themes, key=lambda t: (-len(themes[t]), themes[t][0])):
+        goal, _ = resolve_goal(THEME_GOAL + theme, direction, items)
+        ranked.append({**goal, "count": len(themes[theme])})
+    pick = next((g for g in ranked if g["arg"].startswith("M")), None)
+    pick = pick or next((g for g in ranked if g["source"] == "register"), None)
+    if pick is None:
+        return None, []
+    return {k: v for k, v in pick.items() if k != "count"}, alternatives(ranked, pick["arg"])
+
+
+GOAL_NEEDED = "the bounds need a goal (--goal), the one --preview named"
+
+
+def begin_goal(main: Path, arg: str | None) -> tuple[dict | None, str | None]:
+    """The goal `--begin` fixes (R6): `arg`, the one the preview named, resolved again against
+    `status --json` as it is now, so the register moving since the yes can't swap the goal; or
+    why not. Never a goal proposed here: no goal is a refusal."""
+    if not (arg or "").strip():
+        return None, GOAL_NEEDED
+    items, direction, why = status_read(main)
+    goal, refused = resolve_goal(arg, direction, items)
+    if refused:
+        return None, refused
+    if why and goal["source"] != "stated":
+        return None, why
+    return goal, None
+
+
+def register_ids(main: Path) -> list[str]:
+    """The register's entry ids in the main checkout, in its order (R11): each `## [<id>] [tag]`
+    heading `ENTRY_RE` reads, a fenced example never one."""
+    path = main / factory.INBOX
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    ids, fenced = [], False
+    for line in lines:
+        if factory.FENCE_RE.match(line):
+            fenced = not fenced
+        elif not fenced and (m := factory.ENTRY_RE.match(line)):
+            ids.append(m.group(1))
+    return list(dict.fromkeys(ids))
+
+
+def alternatives(ranked: list[dict], chosen: str) -> list[dict]:
+    """Up to three of `ranked`'s goals, other than `chosen`, each its `arg`, `source`, `title`
+    and `count`."""
+    keys = ("arg", "source", "title", "count")
+    return [{k: g[k] for k in keys} for g in ranked if g["arg"] != chosen][:3]
 
 
 # ---------------------------------------------------------------- the budgets (R24–R27)
@@ -633,49 +795,143 @@ def contract_lines(folder: Path) -> list[str]:
 
 
 def plan_wave(main: Path, state: dict, items: list[dict], room: int) -> dict:
-    """The planner's next wave: at most `room` of the candidates, as `- WAVE: <id>` lines, or
-    `NONE`. The script refuses a wave naming a seed that isn't a candidate, or too many, and asks
-    once more with the refusal (the planner's mend); a second refusal ends the planning."""
-    found = candidates(items, state["bounds"], state)
+    """The planner's next plan (231 R8) toward the run's goal: every candidate placed, at most
+    `room` of them in its WAVE lines, which are the wave, in order. The script refuses a reply
+    `read_plan()` won't read and asks once more with the refusal (the planner's mend); a second
+    refusal ends the planning."""
+    found = candidates(items, state["bounds"], state, state.get("goal"))
     if not found:
         return {"wave": [], "why": "no candidate is left within the bounds"}
     problem, results = None, []
+    level = state["bounds"]["level"]
     for _ in range(2):
         write_brief(main, state, "wave", wave_brief(state, found, room, problem))
         result = run_step(main, commands("wave")[0], main)
         results.append(result)
         if why := _failed(result):
             return {"wave": [], "why": f"the planner failed: {why}", "results": results}
-        wave, problem = read_wave(main, result, found, room)
+        plan, problem = read_plan(main, result, found, room, level)
         if problem is None:
-            return {"wave": wave, "why": None if wave else "the planner said NONE",
-                    "results": results}  # fmt: skip
-    return {"wave": [], "why": f"the planner's wave was refused twice: {problem}",
+            wave = [w["seed"] for w in plan["wave"]]
+            why = None if wave else "the planner opened no seed: each candidate waits or was left"
+            return {"wave": wave, "plan": plan, "why": why, "results": results}
+    return {"wave": [], "why": f"the planner's plan was refused twice: {problem}",
             "results": results}  # fmt: skip
 
 
-def read_wave(
-    main: Path, result: dict, found: list[dict], room: int
-) -> tuple[list[str], str | None]:
-    """The seeds a planner's reply names, or why the script refuses them."""
+def read_plan(
+    main: Path, result: dict, found: list[dict], room: int, level: int
+) -> tuple[dict | None, str | None]:
+    """The plan a planner's reply holds (R8): its `groups`, each a `## ` heading's risk with its
+    `- WAVE: <seed> — tier <n> — <why>` and `- WAITS: <seed> — <why>` lines; its `wave` and
+    `waits`, each line with its group; and its `leave`, `- LEAVE: <seed> — fixed|wrong|off-goal
+    — <what shows it>` lines, anywhere. Or why the script refuses it: a candidate placed in no
+    line or two, a line outside a group, a WAVE with no tier or one past `level`, an empty
+    reason, a fixed or wrong LEAVE citing no path in `main`, a seed that isn't a candidate, or
+    more WAVE lines than `room`."""
     to = (result["out"] or {}).get("to")
     text = (main / to).read_text(encoding="utf-8") if to and (main / to).is_file() else ""
-    lines = text.splitlines()
-    if any(NONE_RE.match(line) for line in lines):
-        return [], None
-    wave = [m.group(1) for line in lines if (m := WAVE_RE.match(line))]
-    ids = {i["id"] for i in found}
-    if not wave:
-        return [], "the reply names no `- WAVE: <seed id>` line and isn't NONE"
-    if unknown := [w for w in wave if w not in ids]:
-        return [], f"not candidates: {', '.join(unknown)}"
-    if len(wave) > room:
-        return [], f"{len(wave)} seeds, past the room for {room}"
-    return list(dict.fromkeys(wave)), None
+    ids = [i["id"] for i in found]
+    plan: dict = {"groups": [], "wave": [], "waits": [], "leave": []}
+    problems, placed, group, fenced = [], [], None, False
+    for line in text.splitlines():
+        if factory.FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if g := PLAN_GROUP_RE.match(line):
+            group = {"risk": g.group(1), "wave": [], "waits": []}
+            plan["groups"].append(group)
+            continue
+        m = PLAN_LINE_RE.match(line)
+        if not m:
+            continue
+        tag, parts = m.group(1), PLAN_SEP_RE.split(m.group(2), maxsplit=2)
+        seed = parts[0].strip()
+        placed.append(seed)
+        if tag != "LEAVE" and group is None:
+            problems.append(f"{tag} {seed} sits outside a `## <risk>` group")
+            continue
+        if tag == "WAVE":
+            tier = TIER_RE.match(parts[1].strip()) if len(parts) > 1 else None
+            if not tier:
+                problems.append(f"WAVE {seed} has no `tier <1|2>`")
+                continue
+            if int(tier.group(1)) not in LEVELS or int(tier.group(1)) > level:
+                problems.append(f"WAVE {seed} is tier {tier.group(1)}, past the level {level}")
+                continue
+            why = parts[2].strip() if len(parts) > 2 else ""
+            row = {"seed": seed, "tier": int(tier.group(1)), "why": why, "group": group["risk"]}
+        elif tag == "WAITS":
+            why = PLAN_SEP_RE.split(m.group(2), maxsplit=1)[1:]
+            why = why[0].strip() if why else ""
+            row = {"seed": seed, "why": why, "group": group["risk"]}
+        else:
+            kind = parts[1].strip() if len(parts) > 1 else ""
+            why = parts[2].strip() if len(parts) > 2 else ""
+            if kind not in LEAVE_KINDS:
+                problems.append(f"LEAVE {seed} needs a kind: {', '.join(LEAVE_KINDS)}")
+                continue
+            if why and kind != "off-goal" and not cited_paths(main, why):
+                problems.append(f"LEAVE {seed} is {kind} but names no repo path that exists")
+                continue
+            row = {"seed": seed, "kind": kind, "why": why}
+        if not why:
+            problems.append(f"{tag} {seed} gives no reason")
+            continue
+        key = {"WAVE": "wave", "WAITS": "waits", "LEAVE": "leave"}[tag]
+        plan[key].append(row)
+        if key != "leave":
+            group[key].append(row)
+    if unknown := [p for p in dict.fromkeys(placed) if p not in ids]:
+        problems.append(f"not candidates: {', '.join(unknown)}")
+    if twice := [i for i in ids if placed.count(i) > 1]:
+        problems.append(f"placed twice: {', '.join(twice)}")
+    if nowhere := [i for i in ids if i not in placed]:
+        problems.append(f"placed in no line: {', '.join(nowhere)}")
+    if len(plan["wave"]) > room:
+        problems.append(f"{len(plan['wave'])} WAVE lines, past the room for {room}")
+    return (None, "; ".join(problems)) if problems else (plan, None)
+
+
+def cited_paths(main: Path, text: str) -> list[str]:
+    """The repo-relative paths `text` names that exist in the main checkout: never an absolute
+    one, nor one climbing out with `..`, compared as POSIX text."""
+    found = []
+    for m in PATH_WORD_RE.finditer(text):
+        # Quotes and brackets off either end, a sentence's stop off the end: `.gitignore` kept.
+        word = (m.group(1) or m.group(2)).strip("\"'()[]").rstrip(",;:.!?")
+        word = LINE_SUFFIX_RE.sub("", word)
+        rel = word.replace("\\", "/")
+        if not rel or rel.startswith("/") or re.match(r"^[A-Za-z]:", rel):
+            continue
+        if ".." in rel.split("/") or rel in (".", ""):
+            continue
+        if (main / rel).exists():
+            found.append(rel)
+    return found
+
+
+def goal_lines(goal: dict | None) -> list[str]:
+    """The goal as the brief and the summary say it, or that a run begun before goals has none."""
+    if goal is None:
+        return ["Goal: none (begun before goals)"]
+    lines = [
+        f'- Goal: {goal["arg"]} "{goal["title"]}"',
+        f"- Source: {goal['source']} ({SOURCES.get(goal['source'], goal['source'])})",
+    ]
+    if goal.get("serves"):
+        lines.append(f"- Serves: {', '.join(goal['serves'])}")
+    return lines
 
 
 def wave_brief(state: dict, found: list[dict], room: int, problem: str | None) -> str:
-    lines = ["# Brief", "", f"Room: {room}", "", "## Candidates, in rank order", ""]
+    """The planner's brief (R7): the goal and the level, then the room, the candidates (already
+    narrowed to the goal's scope), what is in flight, and a refused reply's refusal."""
+    lines = ["# Brief", "", "## Goal", "", *goal_lines(state.get("goal")), "",
+             f"Level: {state['bounds']['level']}", "", f"Room: {room}", "",
+             "## Candidates, in rank order", ""]  # fmt: skip
     lines += [f"- {i['id']} [{i.get('kind')}] {i.get('title')} ({i.get('label')}, theme "
               f"{i.get('theme') or 'none'})" for i in found]  # fmt: skip
     lines += ["", "## In flight", ""]
@@ -709,19 +965,25 @@ def seed_text(main: Path, seed: str) -> str:
 
 
 def open_seed(
-    main: Path, state: dict, seed: str, opened: dict[str, str], issues: list[int] | None = ()
-) -> dict:
+    main: Path, state: dict, seed: str, opened: dict[str, str], issues: list[int] | None = (),
+    planned: dict | None = None,
+) -> dict:  # fmt: skip
     """Open `seed` as a change (R12): the intent-writer drafts its intent, `sdlc.py new` makes its
     worktree at the tier the draft says (never above the bounds' level), and the draft is written
     as its `intent.md` with `idea:` and `opened_by: autopilot` stamped in by line. `opened` maps
     the seeds opened before it in the run to their change, so a `depends_on:` naming one reads as
     that change. `issues`, the seed's `Issue:` numbers, become its `closes:` line, as
     `/sdlc:intent` writes it, so the landing's `issue` signal and the issue's close still hold;
-    None (a line that can't be read) holds the seed before any agent runs (D9)."""
+    None (a line that can't be read) holds the seed before any agent runs (D9). `planned`, the
+    planner's WAVE line for it, goes into the brief as `Planned:` after the entry (231 R10): the
+    draft's own `tier:` still decides."""
     if issues is None:
         return {"seed": seed, "hold": "its Issue: line isn't #N, so its closes: can't be written",
                 "results": []}  # fmt: skip
-    write_brief(main, state, f"intent-{seed}", seed_text(main, seed))
+    brief = seed_text(main, seed)
+    if planned:
+        brief += f"\nPlanned: tier {planned['tier']}, {planned['group']}: {planned['why']}\n"
+    write_brief(main, state, f"intent-{seed}", brief)
     result = run_step(main, commands("intent", seed=seed)[0], main)
     if why := _failed(result):
         return {"seed": seed, "hold": f"the intent-writer failed: {why}", "results": [result]}
@@ -807,10 +1069,11 @@ def open_wave(main: Path, state: dict, items: list[dict], room: int) -> dict:
     planned = plan_wave(main, state, items, room)
     opened, done = {s: m["change"] for s, m in state["seeds"].items() if m.get("change")}, []
     issues = {i.get("id"): i.get("issues", []) for i in items}
+    lines = {w["seed"]: w for w in (planned.get("plan") or {}).get("wave") or []}
     for seed in planned["wave"]:
         if spent(main, state):
             break
-        got = open_seed(main, state, seed, opened, issues.get(seed, []))
+        got = open_seed(main, state, seed, opened, issues.get(seed, []), lines.get(seed))
         if got.get("change"):
             opened[seed] = got["change"]
             state["calls"].append(got["call"])
@@ -1037,9 +1300,17 @@ def apply_change(main: Path, state: dict, name: str, got: dict) -> None:
 
 
 def apply_wave(main: Path, state: dict, got: dict) -> None:
+    """A wave onto the state: its seeds, its plan (231 R8), and each seed the plan leaves kept in
+    `seeds` with its kind and reason, so no later wave offers it (R9). A left seed is the
+    person's: nothing here writes the register or the direction doc."""
     state["waves"].append(got["wave"])
+    if got.get("plan"):
+        state.setdefault("plans", []).append(got["plan"])
+        for left in got["plan"]["leave"]:
+            state["seeds"][left["seed"]] = {"change": None, "left": left["kind"],
+                                            "why": f"{left['kind']}: {left['why']}"}  # fmt: skip
     if not got["wave"]:
-        state["planned_out"] = got.get("why") or "the planner said NONE"
+        state["planned_out"] = got.get("why") or "the planner opened no seed"
     for opened in got.get("opened") or []:
         seed = opened["seed"]
         state["seeds"][seed] = {"change": opened.get("change"), "why": opened.get("hold")}
@@ -1178,6 +1449,8 @@ def end_run(main: Path, state: dict) -> int:
     if where:
         (where / AUTOPILOT_CANCEL).unlink(missing_ok=True)
     state["ended"] = {"at": _stamp(), "reason": end_reason(state)}
+    if isinstance(state.get("register"), dict):
+        state["register"]["end"] = register_ids(main)
     path = write_summary(main, state)
     write_state(main, state)
     return factory.emit({"state": "ended", "reason": state["ended"]["reason"],
@@ -1188,9 +1461,26 @@ def end_run(main: Path, state: dict) -> int:
 # ---------------------------------------------------------------- the summary (R22)
 
 
+def register_moved(main: Path, state: dict) -> dict | None:
+    """The register over the run (231 R11): its count at the start and at the end (now, while it
+    runs), the ids `filed` since the start and those `drained`, and whether it `grew`: more filed
+    than drained. Whoever moved it counts: a close filing a landing's held entries, the person,
+    a shipped seed leaving. None for a run begun before goals, which never counted it."""
+    reg = state.get("register")
+    if not isinstance(reg, dict):
+        return None
+    start = list(reg.get("start") or [])
+    end = list(reg["end"]) if "end" in reg else register_ids(main)
+    filed = [i for i in end if i not in start]
+    drained = [i for i in start if i not in end]
+    return {"start": len(start), "end": len(end), "filed": filed, "drained": drained,
+            "grew": len(filed) > len(drained)}  # fmt: skip
+
+
 def summary(main: Path, state: dict) -> dict:
-    """What the run did, as data: its time and cost, each change by where it stands, its calls,
-    the budgets and what spent them, and each landed change's signals."""
+    """What the run did, as data: its time and cost, its goal and plans, each change by where it
+    stands, the seeds left for the person, its calls, the budgets and what spent them, each
+    landed change's signals, and how the register moved."""
     changes = state.get("changes") or {}
     by_place = {p: [n for n, m in changes.items() if m["place"] == p] for p in PLACES}
     end = state.get("ended") or {}
@@ -1202,10 +1492,32 @@ def summary(main: Path, state: dict) -> dict:
         "in_flight": {n: m["place"] for n, m in changes.items()
                       if m["place"] not in ("landed", "held")},  # fmt: skip
         "held": {n: m.get("why") for n, m in changes.items() if m["place"] == "held"},
-        "seeds_held": {s: m["why"] for s, m in (state.get("seeds") or {}).items() if m.get("why")},
+        "seeds_held": {s: m["why"] for s, m in (state.get("seeds") or {}).items()
+                       if m.get("why") and not m.get("left")},
+        "left": {s: {"kind": m["left"], "why": m["why"].split(": ", 1)[-1]}
+                 for s, m in (state.get("seeds") or {}).items() if m.get("left")},
         "calls": len(state.get("calls") or []),
         "debt": review_debt(state), "risk": change_risk(state),
+        "goal": state.get("goal"), "plans": state.get("plans") or [],
+        "register": register_moved(main, state),
     }  # fmt: skip
+
+
+def plan_lines(plans: list[dict]) -> list[str]:
+    """Each wave's groups, the risk each lowers and what it opened, then the last plan's WAITS
+    and every seed left off the goal, each with its why."""
+    if not plans:
+        return ["- no plan was made"]
+    lines = []
+    for n, plan in enumerate(plans, 1):
+        for group in plan["groups"]:
+            opened = "; ".join(f"{w['seed']} at tier {w['tier']} ({w['why']})"
+                               for w in group["wave"]) or "opens nothing"  # fmt: skip
+            lines.append(f"- Wave {n}, {group['risk']}: {opened}")
+    lines += [f"- Waits: {w['seed']}: {w['why']}" for w in plans[-1]["waits"]]
+    lines += [f"- Off the goal: {x['seed']}: {x['why']}"
+              for plan in plans for x in plan["leave"] if x["kind"] == "off-goal"]  # fmt: skip
+    return lines
 
 
 def write_summary(main: Path, state: dict) -> Path:
@@ -1217,7 +1529,21 @@ def write_summary(main: Path, state: dict) -> Path:
              "", "## The run", "",
              f"- Started {data['started']}, ended {data['ended']}: {data['reason']}.",
              f"- Ran {data['hours']} hours and cost ${data['usd']} (API-equivalent).",
-             f"- Bounds: {json.dumps(state['bounds'])}.", "", "## Landed", ""]  # fmt: skip
+             f"- Bounds: {json.dumps(state['bounds'])}."]  # fmt: skip
+    reg = data["register"]
+    if reg is None:
+        lines.append("- The register wasn't counted: this run began before goals.")
+    else:
+        lines.append(
+            f"- The register held {reg['start']} entries at the start and {reg['end']} "
+            f"at the end: {len(reg['filed'])} filed, {len(reg['drained'])} drained, by "
+            "whoever moved it (a close filing a landing's entries, you, a shipped seed)."
+        )
+        if reg["grew"]:
+            lines.append("- The register grew faster than this run drained it.")
+    lines += ["", "## Goal", "", *goal_lines(data["goal"]), "", "## The plan", ""]
+    lines += plan_lines(data["plans"])
+    lines += ["", "## Landed", ""]
     changes = state.get("changes") or {}
     for name in data["landed"]:
         base = factory._base(main)
@@ -1235,6 +1561,18 @@ def write_summary(main: Path, state: dict) -> Path:
     lines += [f"- {n}: {w}" for n, w in data["held"].items()]
     lines += [f"- seed {s}: {w}" for s, w in data["seeds_held"].items()]
     lines += ["- nothing"] if not (data["held"] or data["seeds_held"]) else []
+    lines += ["", "## Left for you", ""]
+    mine = {s: m for s, m in data["left"].items() if m["kind"] != "off-goal"}
+    lines += [f"- seed {s}: {m['kind']}: {m['why']}" for s, m in mine.items()]
+    lines += (
+        [
+            "",
+            "The planner called these already fixed or wrong. The run retired none of "
+            "them: each is yours to check against the code it cites.",
+        ]
+        if mine
+        else ["- nothing"]
+    )
     lines += ["", "## Calls autopilot made", ""]
     for call in state.get("calls") or []:
         lines.append(f"- {call['change']} {call['id']} ({call['kind']}): {call.get('text')} → "
@@ -1260,22 +1598,59 @@ def write_summary(main: Path, state: dict) -> Path:
 # ---------------------------------------------------------------- the command
 
 
-def preview(main: Path, bounds: dict) -> dict:
-    """`--preview`'s reading (R8): the bounds, the base branch's limits, the first candidates in
-    rank order, the WAIT's question and what its preview shows. Writes nothing."""
-    cfg, warnings = autopilot_config(main)
-    items, why = status_items(main)
-    found = candidates(items, bounds)
-    land = factory.load_config(main)[0]["land"]
-    question = (
-        f"Run autopilot until ${bounds['usd']} or {bounds['hours']} hours are spent, review debt "
-        f"reaches {cfg['debt']} or change risk {cfg['risk']}, or you turn it off: it picks "
-        "seeds from the register within these bounds, opens their intents, drafts and copies "
-        "their specs unseen, builds them, answers every escalated call on its default (recorded "
-        "as autopilot's, never yours), holds what touches a guard or a contract, and lands the "
-        f"rest in batches as by=autopilot, pushed as git.push says? (yes / no)"
+def preview_question(goal: dict, bounds: dict, cfg: dict) -> str:
+    """The WAIT's question, naming the goal its yes approves with the caps (231 R5). The skill
+    quotes it with its values as `<…>` marks (`test_the_skill_quotes_the_preview_question`)."""
+    return (
+        f'Run autopilot toward {goal["arg"]} "{goal["title"]}" ({goal["source"]}) until '
+        f"${bounds['usd']} or {bounds['hours']} hours are spent, review debt "
+        f"reaches {cfg['debt']} or change risk {cfg['risk']}, or you turn it off: it plans "
+        "seeds from the register toward that goal within these bounds, opens their intents, "
+        "drafts and copies their specs unseen, builds them, answers every escalated call on its "
+        "default (recorded as autopilot's, never yours), holds what touches a guard or a "
+        "contract, and lands the rest in batches as by=autopilot, pushed as git.push says? "
+        "(yes / no)"
     )
+
+
+def preview(main: Path, bounds: dict, goal_arg: str | None = None) -> dict:
+    """`--preview`'s reading (R8): the goal, `goal_arg` resolved or one proposed (231 R4, R5), the
+    bounds, the base branch's limits, the goal's first candidates in rank order, the WAIT's
+    question and what its preview shows. Writes nothing. A `goal_arg` the doc doesn't hold open
+    is under `refusals`; with no goal, the question is None and `warnings` says so."""
+    cfg, warnings = autopilot_config(main)
+    items, direction, why = status_read(main)
+    proposed, alts = propose_goal(direction, items, bounds)
+    if (goal_arg or "").strip():
+        goal, refused = resolve_goal(goal_arg, direction, items)
+        if refused:
+            return {"refusals": [refused], "warnings": warnings + ([why] if why else [])}
+        pool = [*([{**proposed, "count": len(candidates(items, bounds, None, proposed))}]
+                  if proposed else []), *alts]  # fmt: skip
+        alts = alternatives(pool, goal["arg"])
+    else:
+        goal = proposed
+    found = candidates(items, bounds, None, goal)
+    land = factory.load_config(main)[0]["land"]
+    warnings += [f"the direction doc: {p}" for p in direction["problems"]]
+    if goal is None:
+        warnings.append(NO_GOAL)
+    elif not found:
+        warnings.append(f"the goal {goal['arg']} has no candidate within the bounds")
+    question = None if goal is None else preview_question(goal, bounds, cfg)
+    if goal is None:
+        said = ["- none: no milestone or theme has a candidate within the bounds"]
+    else:
+        serves = f", serving {', '.join(goal['serves'])}" if goal["serves"] else ""
+        said = [
+            f'- {goal["arg"]} "{goal["title"]}", {SOURCES[goal["source"]]}{serves}: '
+            f"{len(found)} candidate{'s' if len(found) != 1 else ''} within the bounds"
+        ]
     shown = [
+        "Goal:", *said,
+        *[f'- or {a["arg"]} "{a["title"]}" ({a["source"]}, {a["count"]} candidates)'
+          for a in alts],
+        "- another goal is a new --preview with --goal <it>, and this question asked again",
         "Bounds:",
         f"- seeds: {', '.join(bounds['seeds']) or 'any'}; themes: "
         f"{', '.join(bounds['themes']) or 'any'}",
@@ -1286,16 +1661,21 @@ def preview(main: Path, bounds: dict) -> dict:
         f"- change risk limit {cfg['risk']}, weights {json.dumps(cfg['risk_weights'])}",
         f"- guards: {', '.join(cfg['guards']) or 'none'}; a batch waits {cfg['wait']} minutes "
         f"for a nearly ready change; land.batch {land['batch']}",
-        "First candidates, in rank order:",
+        "First candidates toward the goal, in rank order:",
         *[f"- {i['id']} {i.get('title')} ({i.get('label')})" for i in found[:10]],
         *(["- none within the bounds"] if not found else []),
         "Every call autopilot makes is recorded as autopilot's (by=autopilot, → decided by "
         "autopilot:), never as yours, in each change's runs/autopilot.md and the run's "
         "escalations.md, with a summary at the end.",
-    ]
-    return {"bounds": bounds, "config": cfg, "candidates": found, "question": question,
-            "shown": "\n".join(shown), "warnings": warnings + ([why] if why else []),
-            "land_auto": land["auto"]}  # fmt: skip
+    ]  # fmt: skip
+    shown_goal = (
+        None
+        if goal is None
+        else {**{k: goal[k] for k in ("source", "arg", "title", "serves")}, "count": len(found)}
+    )
+    return {"goal": shown_goal, "alternatives": alts, "bounds": bounds, "config": cfg,
+            "candidates": found, "question": question, "shown": "\n".join(shown),
+            "warnings": warnings + ([why] if why else []), "land_auto": land["auto"]}  # fmt: skip
 
 
 def begin_refusals(main: Path, bounds: dict, cfg: dict) -> list[str]:
@@ -1326,24 +1706,32 @@ def begin_refusals(main: Path, bounds: dict, cfg: dict) -> list[str]:
 def cmd_autopilot(
     root: Path, mode: str, seeds: list[str] | None = None, themes: list[str] | None = None,
     usd: float | None = None, hours: float | None = None, level: int | None = None,
+    goal: str | None = None,
 ) -> int:  # fmt: skip
     """`autopilot --preview|--begin|--run|--cancel|--summary`: the one WAIT's words, the run's
     state fixed after the yes, the loop under its lock, its off switch, and what it did."""
     main = _main(root)
     if mode == "preview":
-        return factory.emit(preview(main, bounds_of(seeds, themes, usd, hours, level)))
+        out = preview(main, bounds_of(seeds, themes, usd, hours, level), goal)
+        return factory.emit(out, 1 if out.get("refusals") else 0)
     if mode == "begin":
         bounds = bounds_of(seeds, themes, usd, hours, level)
         cfg, warnings = autopilot_config(main)
-        if refusals := begin_refusals(main, bounds, cfg):
+        fixed, refused = begin_goal(main, goal)
+        refusals = begin_refusals(main, bounds, cfg) + ([refused] if refused else [])
+        if refusals:
             return factory.emit({"refusals": refusals, "warnings": warnings}, 1)
         # `[land] batch` is the base branch's, fixed here with the rest (R28).
         cfg["land_batch"] = factory.load_config(main)[0]["land"]["batch"]
         now = _now()
+        # The goal joins the bounds, fixed here once (231 R6), and the register's ids, which the
+        # summary counts against its end (R11).
         state = {"id": now.strftime(ID_FORMAT), "started": _stamp(now), "bounds": bounds,
-                 "config": cfg, "waves": [], "seeds": {}, "changes": {}, "calls": []}  # fmt: skip
+                 "config": cfg, "goal": fixed, "register": {"start": register_ids(main)},
+                 "waves": [], "plans": [], "seeds": {}, "changes": {}, "calls": []}  # fmt: skip
         write_state(main, state)
-        return factory.emit({"state": "begun", "id": state["id"], "bounds": bounds})
+        return factory.emit({"state": "begun", "id": state["id"], "bounds": bounds,
+                             "goal": fixed})  # fmt: skip
     if mode == "cancel":
         where = factory._slot_dir(main)
         with autopilot_lock(main) as held:

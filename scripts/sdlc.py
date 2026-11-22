@@ -7209,6 +7209,27 @@ def _direction_text(home: Path, cfg: dict) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def direction_open(home: Path, cfg: dict) -> dict:
+    """The direction doc's open goals and milestones, for the factory's autopilot (231 R1): each
+    one's `id`, `name`, `title` and `serves`, and a milestone's `seeds`, the register ids its
+    `Groups:` line names that are still open in the register (`ref_matches()`), in its order; and
+    the doc's `problems`. A struck item is never listed; with no doc, every list is empty."""
+    doc = direction_items(_direction_text(home, cfg))
+    entries = [e for e in inbox_entries(home) if not is_nit(e) and e.get("id")]
+    out: dict[str, list] = {"goals": [], "milestones": [], "problems": list(doc["problems"])}
+    for item in doc["items"]:
+        if item["status"] != "open":
+            continue
+        row = {k: item[k] for k in ("id", "name", "title", "serves")}
+        if item["kind"] == "milestone":
+            seeds = [e["id"] for ref in item["groups"]["seeds"] for e in entries
+                     if ref_matches(ref, e)]  # fmt: skip
+            out["milestones"].append({**row, "seeds": list(dict.fromkeys(seeds))})
+        else:
+            out["goals"].append(row)
+    return out
+
+
 # What `status` puts forward once the open changes are done, in this order, each candidate once
 # under the first rule it meets. A fixed order a person can argue with line by line, never a
 # score; the status skill weighs it against the open changes, release and retro.
@@ -11071,8 +11092,11 @@ def cli_status(root: Path, home: Path, args) -> int:
     if getattr(args, "json", False):
         # The factory's autopilot reads its candidates here (216 R10): `next_up()`'s items, in
         # rank order, each with its `id`, `group`, `rule`, `label`, `kind` and `theme`. Read-only.
-        found = next_up(home, load_config(home)[0], a["open"], date.fromisoformat(a["today"]))
-        print(json.dumps({"next_up": {"items": found["items"], "warnings": found["warnings"]}}))
+        # Beside them, the direction doc's open goals and milestones, a run's goal (231 R1).
+        cfg = load_config(home)[0]
+        found = next_up(home, cfg, a["open"], date.fromisoformat(a["today"]))
+        print(json.dumps({"next_up": {"items": found["items"], "warnings": found["warnings"]},
+                          "direction": direction_open(home, cfg)}))  # fmt: skip
         return 0
     a["ready"] = ready_to_close(root) + held_by_rebase(home)
     # Unconfigured, status shows only a count, so the intents behind it aren't read.

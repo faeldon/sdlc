@@ -1,7 +1,7 @@
 ---
 name: autopilot
-description: Start the factory's autopilot for while you're away — behind one approval of its bounds (the seeds or themes, a dollar cap, hours, the highest tier), the script picks compelling seeds from the register, opens their intents, drafts and copies their specs, builds each as soon as what it depends on has landed, answers every escalated call on its default (recorded as autopilot's, never yours), holds anything that touches a guard or a contract, and lands what is ready in batches, until a budget, the cap or the hours run out, then writes a summary to review. Use from the main checkout of a repo whose base branch turns [autopilot] on, with sdlc-factory installed, when nobody will answer the factory's questions for a while. Not for one change (/sdlc-factory:build and /sdlc-factory:land), not while you are at the keyboard to answer them, and never to loosen another skill's approval.
-argument-hint: "[the seeds or themes to take, a dollar cap, hours]"
+description: Start the factory's autopilot for while you're away — behind one approval of its goal and bounds (a goal from the direction doc, a register theme or your own, the seeds or themes, a dollar cap, hours, the highest tier), the script plans the register's seeds toward that goal, opens their intents, drafts and copies their specs, builds each as soon as what it depends on has landed, answers every escalated call on its default (recorded as autopilot's, never yours), holds anything that touches a guard or a contract, and lands what is ready in batches, until a budget, the cap or the hours run out, then writes a summary to review. Use from the main checkout of a repo whose base branch turns [autopilot] on, with sdlc-factory installed, when nobody will answer the factory's questions for a while. Not for one change (/sdlc-factory:build and /sdlc-factory:land), not while you are at the keyboard to answer them, and never to loosen another skill's approval.
+argument-hint: "[a goal, the seeds or themes to take, a dollar cap, hours]"
 allowed-tools:
   - Read
   - AskUserQuestion
@@ -19,8 +19,9 @@ disable-model-invocation: true
 Every factory change waits on its person several times: the intent's yes, the build's yes, each
 escalated call, the landing's yes. Each wait is right while the person is at the keyboard, and the
 reason a change sits idle while they aren't. Autopilot is the mode for that time. **One yes, to
-this skill's question, approves one bounded run**, and nothing else: its bounds and the base
-branch's `[autopilot]` are fixed in the run's state when it begins, and end with it. It is not a
+this skill's question, approves one bounded run toward one goal**, and nothing else: its goal, its
+bounds and the base branch's `[autopilot]` are fixed in the run's state when it begins, and end
+with it. It is not a
 standing permission, and it loosens no other skill's WAIT: `/sdlc:intent`, `/sdlc-factory:build`
 and `/sdlc-factory:land` ask as they always did.
 
@@ -28,7 +29,7 @@ and `/sdlc-factory:land` ask as they always did.
 the waves, the dependencies, the budgets and the off switch, with its state in the git common dir,
 so a closed terminal or a compacted session loses nothing and a rerun resumes it. Each judgment
 goes to a fresh agent session with no Write, whose reply the script files and checks: the planner
-picks the next wave, the intent-writer drafts a seed's intent, and the build's own agents (the
+plans the next wave toward the goal, the intent-writer drafts a seed's intent, and the build's own agents (the
 spec-writer, the builder, the reviewers, the arbiter, the approver) run as `/sdlc-factory:build`
 runs them. This session starts the run and ends its turn.
 
@@ -45,15 +46,23 @@ one with a reviewer's or the approver's default no later build made, or one the 
 `land-check` won't take. A call you disagree with is fixed forward, by a revert or
 a new seed through `/sdlc:idea`, never mid-run.
 
+**What it runs toward.** One goal, which the yes approves with the bounds: a goal or milestone the
+last retrospective set in the direction doc, a register theme the open seeds point at, or one you
+state. The goal only narrows what the run takes, never the bounds, the guards or the holds. The
+planner groups the candidates by the risk each lowers for the goal, reads the code each points at,
+leaves one already fixed or wrong for you (never retiring it), orders the rest by the files they
+share, and says what waits and why.
+
 **What bounds it.** The dollar cap and the hours you give; two risk budgets the script counts, never
 a model (review debt, its unreviewed calls weighted by kind, and change risk, each landed change's
 signals, weighed more when pushed and when stacked), their weights and limits read from the base
 branch's `.sdlc/factory.toml`; and the register running out of compelling seeds. Once a budget is
 spent nothing new starts and what is in flight is taken on to `stage: test` and left there
 unlanded; once the dollars or the hours are spent, no agent session starts at all. Then it writes
-`.sdlc/reports/autopilot/<started>/summary.md`: how long it ran and what it cost, what landed,
-what is mid-build and where, what is held and why, every call it made, each budget and what spent
-it, and the risks to weigh.
+`.sdlc/reports/autopilot/<started>/summary.md`: how long it ran and what it cost, its goal and its
+plans, what landed, what is mid-build and where, what is held and why, the seeds it left for you,
+every call it made, each budget and what spent it, the risks to weigh, and whether the register
+grew faster than the run drained it.
 
 ## Step 0 — The repo, and a run already under way (mechanical, no confirmation needed)
 
@@ -77,27 +86,35 @@ Then stop: one run at a time.
 
 ## Step 1 — The bounds (writes nothing)
 
-Ask the person, as plain text, for the run's bounds: which seeds (by id) or themes it may take (any,
-when they name none), a dollar cap and the hours it may run, both required, and the highest tier
-it may open (1 or 2, default 2). Then read the run they describe:
+Ask the person, as plain text, for the run's goal and bounds: the goal (optional: a goal or
+milestone id from the direction doc, such as `M3`, a register theme as `theme:<name>`, or a goal in
+their own words; with none, the preview proposes one), which seeds (by id) or themes it may take
+(any, when they name none), a dollar cap and the hours it may run, both required, and the highest
+tier it may open (1 or 2, default 2). Then read the run they describe:
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --preview --usd <usd> --hours <hours> --themes <theme…> --seeds <id…> --level <tier>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --preview --usd <usd> --hours <hours> --goal <goal> --themes <theme…> --seeds <id…> --level <tier>
 ```
 
-Leave out `--themes`, `--seeds` and `--level` where the person named none. `--preview` writes
-nothing. It prints `bounds`, `config` (the base branch's `[autopilot]` as the run would fix it:
+Leave out `--goal`, `--themes`, `--seeds` and `--level` where the person named none; quote a goal in
+their own words. `--preview` writes nothing. A `--goal` id the direction doc doesn't hold open is
+refused: show the refusal and ask again. It prints `goal` (its `source`, `arg`, `title`, `serves`
+and `count`, the candidates in its scope within the bounds: the one stated, or the one proposed,
+the first open milestone with a candidate, else the theme with the most), `alternatives` (up to
+three other goals, each with its count), `bounds`, `config` (the base branch's `[autopilot]` as the run would fix it:
 `enabled`, `parallel`, `wait`, `debt`, `risk`, the weights and the `guards`), `candidates` (the
 register's ready seeds within the bounds, in rank order; a seed with an `Issue:` line only when
-`--seeds` names it), `land_auto`, `warnings`, the `question`
-to ask and `shown`, what its yes approves. Show `shown` to the person as printed, and say any
-warning, naming none of a host's paths beyond what it prints.
+`--seeds` names it, narrowed to the goal), `land_auto`, `warnings`, the `question` to ask and
+`shown`, what its yes approves, which opens with the goal and the alternatives. Show `shown` to the
+person as printed, with `goal` and `alternatives`, and say any warning, naming none of a host's
+paths beyond what it prints. A `goal` of null (no goal to propose; `question` is null too) means
+asking the person for one and running `--preview` again with it: there is no question to ask yet.
 
 ## Step 2 — WAIT for explicit approval
 
 Ask `--preview`'s `question` literally, as printed; never word your own. Its form:
 
-> `Run autopilot until $<usd> or <hours> hours are spent, review debt reaches <debt> or change risk <risk>, or you turn it off: it picks seeds from the register within these bounds, opens their intents, drafts and copies their specs unseen, builds them, answers every escalated call on its default (recorded as autopilot's, never yours), holds what touches a guard or a contract, and lands the rest in batches as by=autopilot, pushed as git.push says? (yes / no)`
+> `Run autopilot toward <goal.arg> "<goal.title>" (<goal.source>) until $<usd> or <hours> hours are spent, review debt reaches <debt> or change risk <risk>, or you turn it off: it plans seeds from the register toward that goal within these bounds, opens their intents, drafts and copies their specs unseen, builds them, answers every escalated call on its default (recorded as autopilot's, never yours), holds what touches a guard or a contract, and lands the rest in batches as by=autopilot, pushed as git.push says? (yes / no)`
 
 Ask it with `AskUserQuestion`: the text before its parentheses as the question, each answer in them
 an option in that order, labelled as written, `header` the skill's name, and `autopilot --preview`'s
@@ -107,20 +124,23 @@ file holds them yet. Only a chosen `yes` (or `yes, …`), or a yes typed in Othe
 dismissed, empty, timed out or refused is a no. If the tool is unavailable or refused, ask the same
 text, answers in parentheses, right after what the preview holds, and stop.
 
-**Do nothing more until the person says yes.** Approval is for this one run, with these bounds. A
-no writes nothing. Different bounds are a new `--preview` and the question asked again.
+**Do nothing more until the person says yes.** Approval is for this one run, toward this goal,
+with these bounds. A no writes nothing. A different goal (one of the alternatives, or their own) or
+different bounds are a new `--preview` and the question asked again.
 
 ## Step 3 — Begin, and start the loop
 
-On the yes, with the same bounds the preview read:
+On the yes, with the same bounds the preview read and the goal it named, its `goal.arg` (quoted
+when it is the person's own words):
 
 ```bash
-uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --begin --usd <usd> --hours <hours> --themes <theme…> --seeds <id…> --level <tier>
+uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --begin --usd <usd> --hours <hours> --goal <goal.arg> --themes <theme…> --seeds <id…> --level <tier>
 ```
 
-`--begin` refuses, writing nothing, when the base branch's `.sdlc/factory.toml` has no
-`[autopilot]` with `enabled = true`, when `land.auto` is off there, while a `train --run` or
-another autopilot runs, or with no dollar cap or hours. **If it refuses, show its refusals and
+`--begin` resolves the goal again and fixes it with the bounds. It refuses, writing nothing, with
+no `--goal`, with a goal or milestone the direction doc no longer holds open, when the base
+branch's `.sdlc/factory.toml` has no `[autopilot]` with `enabled = true`, when `land.auto` is off
+there, while a `train --run` or another autopilot runs, or with no dollar cap or hours. **If it refuses, show its refusals and
 stop.** Otherwise it writes the run's state in the git common dir and prints the run's `id`. Then
 start the loop with `run_in_background`, and end the turn:
 
@@ -130,10 +150,11 @@ uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --r
 
 Say that autopilot is running, its bounds, that `/sdlc-factory:autopilot` again shows where it
 stands and offers to stop it, and that its summary will be at
-`.sdlc/reports/autopilot/<id>/summary.md`. When the loop exits, read its JSON (`reason`, `landed`,
-`in_flight`, `held`, `calls`, `debt`, `risk`, `usd`, `hours`, `summary`) and report it: why it
-ended, what landed, what is held and why, each budget against its limit, and where the summary
-and `escalations.md` are. Say plainly that every call in them was autopilot's, for the person to
+`.sdlc/reports/autopilot/<id>/summary.md`. When the loop exits, read its JSON (`reason`, `goal`,
+`landed`, `in_flight`, `held`, `left`, `calls`, `debt`, `risk`, `register`, `usd`, `hours`,
+`summary`) and report it: why it ended, the goal, what landed, what is held and why, each seed left
+for the person as already fixed or wrong, each budget against its limit, whether the register grew
+faster than the run drained it, and where the summary and `escalations.md` are. Say plainly that every call in them was autopilot's, for the person to
 review, and that a call they disagree with is fixed forward.
 
 ## Out of scope

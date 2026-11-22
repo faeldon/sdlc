@@ -566,10 +566,11 @@ it, whatever depth the diff turns out to need.
 
 ## Autopilot
 
-`/sdlc-factory:autopilot` is for when you're away. It asks one WAIT, which bounds the run: which
-seeds or themes it may take, a dollar cap, the hours it may run, and the highest tier it opens.
-On the yes it begins the run (`factory.py autopilot --begin`, which fixes the bounds and the base
-branch's `[autopilot]` in `sdlc-factory-autopilot.json` in the git common dir) and starts its loop
+`/sdlc-factory:autopilot` is for when you're away. It asks one WAIT, which names the run's goal and
+bounds it: which seeds or themes it may take, a dollar cap, the hours it may run, and the highest
+tier it opens. On the yes it begins the run (`factory.py autopilot --begin`, which fixes the goal,
+the bounds and the base branch's `[autopilot]` in `sdlc-factory-autopilot.json` in the git common
+dir) and starts its loop
 in the background (`autopilot --run`, under `sdlc-factory-autopilot-run.lock`). The script is the
 scheduler: a closed terminal or a compacted session loses nothing, and a rerun of `--run` resumes.
 
@@ -579,11 +580,11 @@ budgets; takes one step for each change in flight, at most `parallel` at once, e
 subprocess of `factory.py`: `verdicts`' next step, through the same commands the build skill runs
 (`AUTOPILOT_STEPS`), a change waiting at `stage: plan` until every change it `depends_on` has its
 `Close` commit, a Tier 2's spec drafted and copied (`write-spec --by autopilot`); asks the planner
-for the next wave while there is room (`agent --task wave`, its reply checked by the script) and
-the intent-writer for each seed's intent (`agent --task intent --seed`), opened by `sdlc.py new`
-with `idea:` and `opened_by: autopilot`; and lands what is ready as a train (`land-check`, `train
---begin --by autopilot`, `train --run`), waiting up to `wait` minutes for a change nearly ready
-when landing them together saves a run.
+for the next wave's plan while there is room (`agent --task wave`, its reply checked by the script)
+and the intent-writer for each seed's intent (`agent --task intent --seed`, its brief carrying the
+plan's tier and reason), opened by `sdlc.py new` with `idea:` and `opened_by: autopilot`; and
+lands what is ready as a train (`land-check`, `train --begin --by autopilot`, `train --run`),
+waiting up to `wait` minutes for a change nearly ready when landing them together saves a run.
 
 **No WAIT stops it, and none of its calls is yours.** An open default is answered as its default,
 a look as seen, a blocking call with its raiser's first option (`answer --by autopilot`), each
@@ -596,11 +597,31 @@ run holds the lock: no check inside the run can tell that one from the loop's ch
 misled builder is its own permissions and sandbox (`mode`), so set them as you would for any
 unattended run.
 
-**What it takes.** The register's ready seeds within the bounds, in `next_up`'s order; a seed
-whose `Issue:` line names a public issue only when `--seeds` names it, since its text is an
-outsider's and nobody reads it before it is built. Such a seed is opened with the `closes:` line
-`/sdlc:intent` writes, so its landing carries the `issue` signal and the issue is closed; one whose
-`Issue:` line can't be read is held before any agent runs.
+**What it runs toward.** One goal (`--goal`), from one of three sources: stated by you (any text);
+from the direction doc, a goal `G<n>` or milestone `M<n>` the last retrospective set, read through
+`sdlc.py status --json`'s `direction`; or suggested from the register, a theme the open seeds
+cluster in (`theme:<name>`). With none stated, `--preview` proposes the first open milestone with
+a candidate within the bounds, else the theme with the most, and lists up to three alternatives;
+the question and `shown` name the goal, so the yes approves it, and another goal is a new
+`--preview`. A milestone's scope is its grouped seeds, a goal's the seeds of the milestones that
+serve it, a theme's its seeds; a stated goal narrows nothing and the planner judges what serves it.
+The goal only narrows what the run takes, never the bounds, the guards or what it holds.
+
+**How it plans.** The planner is given the goal and the level, reads each candidate's entry and
+the code it points at, and returns groups, each a `## <the risk it lowers for the goal>` heading
+holding `- WAVE: <seed> — tier <n> — <why this order>` and `- WAITS: <seed> — <why>` lines, with
+`- LEAVE: <seed> — fixed|wrong|off-goal — <what shows it>` lines anywhere. The script refuses a
+plan that places a candidate nowhere or twice, a line outside a group, a tier past the level, an
+empty reason, a fixed or wrong LEAVE citing no path that exists, a seed it didn't give, or more WAVE
+lines than the room, and asks once more with the refusal. A seed left is the person's: the run
+never retires, files or edits it, and never offers it again; the register and the direction doc
+are only read.
+
+**What it takes.** The register's ready seeds within the bounds and the goal, in `next_up`'s
+order; a seed whose `Issue:` line names a public issue only when `--seeds` names it, since its
+text is an outsider's and nobody reads it before it is built. Such a seed is opened with the
+`closes:` line `/sdlc:intent` writes, so its landing carries the `issue` signal and the issue is
+closed; one whose `Issue:` line can't be read is held before any agent runs.
 
 **What it holds**, unlanded, with nothing that depends on it built: a change touching a path in
 `guards` (unset, the policy and review docs, `[review] irreversible` and `[review] sensitive`, so
@@ -621,8 +642,11 @@ Once either reaches its limit nothing new starts (no wave, no intent, no train) 
 flight is taken on to `stage: test` and left there unlanded; once the dollar cap or the hours are
 spent, no agent session starts at all. The run ends then, or when no candidate is left, or on a
 cancel, and writes `.sdlc/reports/autopilot/<started>/summary.md` beside `escalations.md`: how long
-it ran and what it cost, what landed, what is mid-build and where, what is held and why, every
-call it made, each budget and what spent it, and the risks to weigh. A call you disagree with is
+it ran and what it cost, the register's count at the start and the end with what was filed and
+drained (and "The register grew faster than this run drained it" when more was filed), its goal,
+each wave's plan and what waits, what landed, what is mid-build and where, what is held and why,
+the seeds left for you as already fixed or wrong, every call it made, each budget and what spent
+it, and the risks to weigh. A call you disagree with is
 fixed forward, by a revert or a new seed; autopilot never edits a landed change.
 
 ### Why these defaults

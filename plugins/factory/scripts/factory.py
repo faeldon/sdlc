@@ -7133,10 +7133,11 @@ autopilot = _load_autopilot()
     arg("--usd", type=float, help="the dollar cap"),
     arg("--hours", type=float, help="the hours it may run"),
     arg("--level", type=int, choices=(1, 2), help="the highest tier it opens (default 2)"),
+    arg("--goal", help="the run's goal: G<n> or M<n> of the direction doc, theme:<name>, or text"),
 )
 def cli_autopilot(root: Path, args) -> int:
     return autopilot.cmd_autopilot(
-        root, args.mode, args.seeds, args.themes, args.usd, args.hours, args.level
+        root, args.mode, args.seeds, args.themes, args.usd, args.hours, args.level, args.goal
     )
 
 
