@@ -884,3 +884,9 @@ Theme: board
 Gates share the machine: factory.py gate tells the check its share of the cores (SDLC_GATE_CPUS = cores ÷ gate_jobs) so this repo's check.sh runs pytest -n that many, not -n auto per gate (two gates on 18 cores ran 36 workers and exhausted swap); later, gate_slot waits while the machine is under memory pressure, saying why.
 Theme: factory
 Raised 2026-11-22.
+
+## [2026-11-22-39] [idea] A change the landing review kept goes back to the factory, not to ship by hand
+
+A change the landing review kept is pointed back to the factory, not to ship by hand: its ejection reason (landing.py:3220) and the land skill's resume and report steps say "rerun /sdlc-factory:land NNN and answer yes, with a fix", offering the kept CHANGE lines from verified.md as the fix's words; "ship it by hand" stays only for what the factory can't land (excluded, a second conflict, an unvouched record). Seen on 233: a two-sentence docs gap was sent to ship by hand.
+Theme: factory
+Raised 2026-11-22.
