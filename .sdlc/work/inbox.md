@@ -939,3 +939,12 @@ Raised by the retrospective of 2026-11-22.
 8 `style` nits and 6 `refactor` nits are open, both past the threshold of 5, the oldest from 2026-11-19. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
 Theme: style
 Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-52] [bug] Build's report and overview still send a factory change to /sdlc:ship, though 103 made land do what ship does
+
+Since 103 (closed 2026-11-17), `/sdlc-factory:land` does everything `/sdlc:ship` does for a factory change, an ESCALATE included as one of the signals its single question covers. But `skills/build/SKILL.md` still words the hand-off as ship's. Its overview says "ready to ship. The person ships it with `/sdlc:ship`, from that worktree", its decisions paragraph says "`/sdlc:ship` shows them all", and Step 4 has the supervisor say "NNN-slug is ready to ship". Land appears only lower down, as one of two equal options when the person asks what's ready. A supervisor following the text steers the person to ship by hand. Seen in a host on 2026-11-22: a supervisor told the person to `cd` into an escalated change's worktree and run `/sdlc:ship 123`, and the person had to ask whether land would do. Fix: build's overview, decisions paragraph and Step 4 report name `/sdlc-factory:land NNN` from the main checkout as the way on, and `/sdlc:ship` only for what land refuses: a change built by hand, or an irreversible path with no way back proposed. A test in `tests/test_skills.py` should fail if build's report names ship before land.
+
+Severity: low
+Paths: plugins/factory/skills/build/SKILL.md, tests/test_skills.py
+Introduced by: 103-landing-does-what-ship-does
+Origin: host
