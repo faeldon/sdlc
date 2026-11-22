@@ -222,6 +222,7 @@ Raised by: 202-defaults-to-landing (correctness)
 Left undone by 200-tests-pruned-again, carried forward when it landed: The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping. Caching what doesn't change within one reading would speed both.
 See .sdlc/work/200-tests-pruned-again/notes.md in its commit.
 Raised 2026-11-20.
+Theme: landing
 
 ## [2026-11-20-52] [nit] `_names()` is the one place a string-to-path match is decided, and its docstring wraps mid-sentence and is hard to read.
 
@@ -248,6 +249,7 @@ Raised by: 201-tests-and-robustness-nits (correctness)
 Left undone by 204-scorecard-reads-true, carried forward when it landed: The scan's reach could follow only calls, not every mention of a name, if the surface's key share should separate keys a command reads on every run from keys it reads on one branch.
 See .sdlc/work/204-scorecard-reads-true/notes.md in its commit.
 Raised 2026-11-20.
+Theme: retro
 
 ## [2026-11-20-57] [nit] the line `restored \`no register entry added in the window\`.
 
@@ -345,6 +347,7 @@ Left undone by 206-update-skill, carried forward when it landed: Manual (the spe
 The hook first shipped in 1.12.0, so the "older version" must be 1.12.0 or later: 1.11.0 has no hook and shows nothing. The full check waits until 1.13.0 is published, with a repo still on 1.12.0. Until then, a 1.12.0 install shows setup's nudge, not the release's.
 See .sdlc/work/206-update-skill/notes.md in its commit.
 Raised 2026-11-21.
+Theme: setup
 
 ## [2026-11-21-8] [nit] `update_line` returns None when the sdlc install here is read from a folder, so a stale `sdlc-factory` install is also never mentioned.
 
@@ -471,6 +474,7 @@ Raised by: 209-upstream-bugs (contract)
 Left undone by 212-landing-gaps, carried forward when it landed: pre-existing: plugins/factory/scripts/landing.py:816: `GREP_FOLLOWS` refuses `-O` (BSD's follow-links flag) for every grep, so ugrep's harmless `-O EXT` (search by file extension) is refused too. This is overly strict, not a hole.
 See .sdlc/work/212-landing-gaps/notes.md in its commit.
 Raised 2026-11-21.
+Theme: permissions
 
 ## [2026-11-21-25] [nit] the `--filter`, `--pager` and `--view` refusals match the exact name only, not `--filter-magic-label`.
 
@@ -554,6 +558,7 @@ Raised 2026-11-21.
 Left undone by 214-ci-green, carried forward when it landed: 275 `read_text`/`write_text` calls in non-portable tests and helpers name no encoding. They don't run on Windows today; a test moved into `portable` gets caught by the new check, but a helper it calls doesn't.
 See .sdlc/work/214-ci-green/notes.md in its commit.
 Raised 2026-11-21.
+Theme: tests
 
 ## [2026-11-21-38] [nit] `_hand_digests` runs `git hash-object` once per call and ignores its stderr.
 
@@ -610,12 +615,14 @@ Raised by: 217-train-gates-every-tip (correctness)
 Left undone by 216-autopilot, carried forward when it landed: `next_up`'s cheap-nits lines (`rule: nits`) carry no seed id, so autopilot never takes them, though `READY_RULES` lists them.
 See .sdlc/work/216-autopilot/notes.md in its commit.
 Raised 2026-11-21.
+Theme: autonomy
 
 ## [2026-11-21-49] [idea] Retro overturn rate for autopilot's calls
 
 Left undone by 216-autopilot, carried forward when it landed: The retrospective's overturn rate for autopilot's calls (the spec's question 6) is left for a later seed, as the intent's resolution says.
 See .sdlc/work/216-autopilot/notes.md in its commit.
 Raised 2026-11-21.
+Theme: autonomy
 
 ## [2026-11-21-52] [nit] many `# fmt: skip` pragmas keep dense literals unformatted
 
@@ -692,6 +699,7 @@ Raised by: 226-scorecard-framework-only (correctness)
 Left undone by 229-park-hardening, carried forward when it landed: `factory_records.read_park()` (and `factory.py`'s) take `RESOURCE:` and `HOLDER:` as written, so a hand-edited `runs/parked.md` with an ESC in it still reaches `status` and the board: `busy_of()` now cleans what the gate writes, but a reader-side strip would cover a forged record too. Out of 229's scope (the busy answer only).
 See .sdlc/work/229-park-hardening/notes.md in its commit.
 Raised 2026-11-22.
+Theme: robustness
 
 ## [2026-11-22-22] [nit] the line "holder is `unknown`, and an `UNTIL` that won't read is noted and ignored.
 
@@ -811,6 +819,7 @@ Raised by: 231-autopilot-goals (correctness)
 Left undone by 232-exit-notes, carried forward when it landed: `scripts/sdlc.py`'s `EVIDENCE_EXIT_RE` (`^exit:\s*(-?\d+)\s*$`), which reads ship's own behaviour check in `findings.md`, is as strict as `EXIT_RE` was: an `exit: 2 (note)` there is not read as evidence. Out of this change's scope (the factory's reading); widen it the same way in a change of its own if ship's check meets it.
 See .sdlc/work/232-exit-notes/notes.md in its commit.
 Raised 2026-11-22.
+Theme: robustness
 
 ## [2026-11-22-36] [nit] the resolver's *Evidence* paragraph has the same `exit: <n>` wording and no hook-refusal sentence, so it will meet the same stop
 
@@ -834,6 +843,7 @@ Theme: board
 
 Gates share the machine: factory.py gate tells the check its share of the cores (SDLC_GATE_CPUS = cores ÷ gate_jobs) so this repo's check.sh runs pytest -n that many, not -n auto per gate (two gates on 18 cores ran 36 workers and exhausted swap); later, gate_slot waits while the machine is under memory pressure, saying why.
 Theme: factory
+Priority: high
 Raised 2026-11-22.
 
 ## [2026-11-22-39] [idea] A change the landing review kept goes back to the factory, not to ship by hand
@@ -850,3 +860,82 @@ Severity: low
 Paths: evals/ship/graders/never-reads-a-branch.md, evals/ship/scaffold.sh
 Introduced by: 227-docs-reviewer
 Theme: tests
+
+## [2026-11-22-41] [idea] Retro reads a bug a change fixed as shipped, not vanished
+
+A milestone's `Groups:` line can name a `[bug]`, and the change that fixes it removes it from the register with an `Sdlc-Fixes:` trailer on its `Close` commit. `retro`'s `direction.milestones` still reads that entry as `vanished`. 2026-11-20-27 under M20 is the case: 198 fixed it (`Sdlc-Fixes: 2026-11-20-27` on 74436ab). The Value insight then recommended filing it again. A seed in `Groups:` should be `shipped` when a `Close` commit's `Sdlc-Fixes:` names it, as it is when an `idea:` line does.
+Theme: retro
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-42] [idea] Read where the factory's questions and stops come from
+
+Questions per factory change rose from 0.6 to 1.09 (n=34): 26 defaults, 11 looks and no blocking ones. The person kept 24 of 26 defaults, 6 builds stopped for nothing, and none of the 34 landings approved itself. `retro` can't yet say which stage and reason each question came from, or what triggered each spurious stop. Without that, nobody can tell whether the extra questions bought the lower escape and rework rates or just cost time. Split the question and stop counts by stage and reason, and name each spurious stop's cause.
+Theme: autonomy
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-43] [idea] A READY change doesn't wait on its acceptance checks
+
+Waiting at ready is 26% of factory lead time (n=34), the largest share a change itself can act on. The landing ran 34 acceptance steps across 16 changes. Tier 1's median lead time (298 minutes) is above Tier 2's (185). Find which checks aren't cleared before the landing's yes and why, and clear them before the change reaches ready, so a READY change doesn't wait on them. Then see whether Tier 1 still waits longer.
+Theme: factory
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-44] [idea] Review the six commands no record has used in three windows
+
+`sdlc.py groups`, `lookup` and `next-entry`, and `factory.py stage`, `start` and `write-spec`, have been on the retirement list for three windows running. Several may run only from skills outside a change's sessions, which `surface` can't see. So check each against the skills and code that call it, and retire or fold in only those nothing needs. Leave `resolve` and `fresh`, which run only on a conflict.
+Theme: refactor
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-45] [idea] Move autopilot, park and readiness code out of factory.py
+
+`factory.py` grew from 6,039 to 7,381 lines in one window, and 16 of the last 30 changes touched it. 216 (autopilot) was reopened by five later changes (218, 220, 222, 228, 231), and two of its important findings were the same fault: a child process started without an explicit `env=` (F1 in `_claude`, F9 in `_run_check`). Move the autopilot, park and readiness code into a module loaded by path, as `autopilot.py` and `landing.py` already are, behind one helper that starts every child process with an explicit env.
+Theme: refactor
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-46] [idea] Split sdlc.py where it grew back
+
+`sdlc.py` grew from 9,884 to 11,322 lines this window, undoing most of the last split, and it changed together with `docs/REFERENCE.md` in 15 of its 16 changes. Find the jobs it took on this window (among them the update check, CI on the base branch and upstream bugs) and move each that stands alone into a module loaded by path, as `closing.py` and `retro.py` are.
+After: 2026-11-22-45
+Theme: refactor
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-47] [idea] Run the security reviewer on Sonnet for one window
+
+The security reviewer is the only reviewer still on Opus: $10.92 over 26 runs, about $0.42 a run, against $0.13 to $0.16 for the Sonnet reviewers. The approver's move to Sonnet (203) caused no rise in escapes. Run the security reviewer on Sonnet for one window and compare its cost and findings per run with the Opus runs before keeping it. At this window's rates it saves about $7, around 4% of spend.
+Theme: factory
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-48] [idea] Prune the slow and drifted tests
+
+The suite takes 2,899 seconds serially (median test 0.2 s), and the gate's round median rose to 261.5 seconds. Candidates to merge, rewrite, move or delete:
+- Slow: the `test_train` tests at 28 to 35 seconds each, every one over 100× the median: `test_an_ejection_is_recorded_and_amended_in` (35 s), `test_train_run_stops_at_a_kept_change_and_resumes` (32.6 s), `test_train_run_ejects_a_gate_fault_and_lands_the_rest` (30.8 s), `test_failing_acceptance_checks_as_stacked_eject_only_that_change` (30.2 s), `test_a_train_run_killed_at_its_gate_resumes` (28.4 s), `test_unchanged_checks_run_as_stacked_without_a_stop` (28.2 s).
+- Drifted, where the code they load changed since:
+  - `tests/test_records_ledger.py` (last 199, 21 later changes);
+  - `tests/test_windows.py` (214, 14);
+  - `tests/test_retro_hosts.py` (208, 12);
+  - `tests/test_metrics.py` (216, 11);
+  - `tests/test_setup_lifecycle.py` and `tests/test_update.py` (213, 11);
+  - `tests/test_archive.py` (209, 10);
+  - `tests/test_readiness.py` and `tests/test_upstream.py` (214, 8);
+  - `tests/test_retro.py` (216, 7).
+
+Look at each again in one change, whose review decides.
+Theme: tests
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-49] [idea] Pay down the docs nits
+
+14 `docs` nits are open, past the process doc's threshold of 5, the oldest from 2026-11-19. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
+Theme: docs
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-50] [idea] Pay down the tests and robustness nits
+
+24 `tests` nits and 7 `robustness` nits are open, both past the threshold of 5, the oldest from 2026-11-20. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
+Theme: tests
+Raised by the retrospective of 2026-11-22.
+
+## [2026-11-22-51] [idea] Pay down the style and refactor nits
+
+8 `style` nits and 6 `refactor` nits are open, both past the threshold of 5, the oldest from 2026-11-19. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
+Theme: style
+Raised by the retrospective of 2026-11-22.
