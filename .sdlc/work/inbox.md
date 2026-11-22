@@ -867,3 +867,33 @@ the supervisor planned 1.12 on 2026-11-22. It works within autopilot as it is to
 comes before 2026-11-21-33's levels 2–4, which are to be split into a seed per level.
 Theme: factory
 Raised 2026-11-22.
+
+## [2026-11-22-24] [bug] An `exit:` line with words after its number, or for a command a hook refused, stops a run
+
+A behaviour check on 2026-11-22 stopped its run twice on `## Evidence` lines that did carry an
+`exit:`, so the mend 215 (2026-11-21-35) made routine could not save it. The first reply wrote
+`exit: nonzero (task failed)` for a command whose code it didn't capture, and
+`exit: not run (blocked by the guard hook)` for a command the host's PreToolUse hook refused. The
+mended reply gave the refused command a number but kept a note after it,
+`exit: 2 (hook refusal; the command did not run)`, and `verdicts` read that as missing too. One
+mend a role is allowed, so the change stopped for the person with a passing, honest review in hand.
+
+Two gaps:
+- **The parser:** `EXIT_RE` in `plugins/factory/scripts/factory.py` is `^\s*exit:\s*\d+\s*$`, so any
+  note after the number fails it, though agents annotate by habit.
+- **The prompts:** `agents/reviewer-behaviour.md` and `agents/builder.md` say every command carries
+  `exit: <n>`, but not what to do with one a hook refuses, which never ran and has no code. A
+  host with a strict guard puts human-only commands in a spec's end-to-end path by design, so
+  its behaviour checks meet this on every such change.
+
+A fix: `EXIT_RE` accepts trailing text after the digits (`exit: 2 (…)`); the prompts say a
+command refused by a hook isn't a `$ ` line but goes under the reply's *Not run* with the hook's
+message, and that every command that ran captures its real code (`; echo "exit: $?"`), never a
+word like `nonzero`. Optionally `exit: blocked` for a refused command, read as no result.
+
+How to see it: `factory.py verdicts <NNN> --head <sha>` on a round whose behaviour evidence has
+`$ <cmd>` then `exit: 2 (note)` names it under `problems`, and once mended, the way is `rerun`.
+
+Severity: high
+Paths: plugins/factory/scripts/factory.py, plugins/factory/agents/reviewer-behaviour.md, plugins/factory/agents/builder.md
+Theme: factory
