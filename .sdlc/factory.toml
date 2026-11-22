@@ -1,7 +1,10 @@
-# The factory's settings for this repo (plugins/factory/README.md). Only [ui] and [models] differ
-# from the defaults: the board `sdlc.py board` serves is this plugin's one front end, so a factory
-# change to it gets the UI and UX reviewers, judging screenshots of the board as that change built
-# it; and the approver runs on sonnet for one window (the comment above [models]).
+# The factory's settings for this repo (plugins/factory/README.md). Only gate_jobs, [ui] and
+# [models] differ from the defaults: two gates at once, since a batch of builds queued behind one
+# slot for up to half an hour; the board `sdlc.py board` serves is this plugin's one front end, so a
+# factory change to it gets the UI and UX reviewers, judging screenshots of the board as that change
+# built it; and the approver runs on sonnet for one window (the comment above [models]).
+
+gate_jobs = 2
 
 [ui]
 # The board over a scratch repo built from the fixture's copy, with a change in every state a card
