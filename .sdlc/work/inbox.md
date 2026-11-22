@@ -887,3 +887,11 @@ Paths: plugins/factory/agents/resolver.md
 Cost: S
 Value: med
 Raised by: 232-exit-notes (correctness)
+
+## [2026-11-22-37] [bug] The board keeps a stale sdlc.py after a landing, and every card errors
+
+The board reloads board.py on each request but keeps sdlc.py loaded from when it started, so after a landing changes sdlc.py every card errors (seen: '_Names' object has no attribute '_park_deadline_at') and shows under Needs you until the board is restarted. It should notice sdlc.py changed and reload it, or say it needs a restart, rather than mislabel cards. How to see it: start `sdlc.py board`, land a change that adds a name to sdlc.py which board.py calls, then reload the page.
+
+Severity: med
+Paths: scripts/board.py, scripts/sdlc.py
+Theme: board
