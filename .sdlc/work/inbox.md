@@ -233,16 +233,6 @@ Cost: S
 Value: low
 Raised by: 200-tests-pruned-again (correctness)
 
-## [2026-11-20-53] [nit] the paragraph opens "one is left", then lists several tests under "Kept", and only `test_function_heat.py` still drifts.
-
-Raised by the code review of 200-tests-pruned-again, round 1: .sdlc/work/200-tests-pruned-again/notes.md:8: the paragraph opens "one is left", then lists several tests under "Kept", and only `test_function_heat.py` still drifts. Rewording it to say that would match what follows.
-
-Theme: docs
-Paths: .sdlc/work/200-tests-pruned-again/notes.md
-Cost: S
-Value: low
-Raised by: 200-tests-pruned-again (context)
-
 ## [2026-11-20-54] [nit] `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed.
 
 Raised by the code review of 201-tests-and-robustness-nits, round 1: tests/test_suite_shape.py:12: `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed. Reading `kwonlyargs` too is a one-line fix
@@ -252,16 +242,6 @@ Paths: tests/test_suite_shape.py
 Cost: S
 Value: low
 Raised by: 201-tests-and-robustness-nits (correctness)
-
-## [2026-11-20-55] [nit] the plan promises a line naming the test that settles each of the 20 nits 191 already fixed.
-
-Raised by the code review of 201-tests-and-robustness-nits, round 1: .sdlc/work/201-tests-and-robustness-nits/notes.md: the plan promises a line naming the test that settles each of the 20 nits 191 already fixed. I only confirmed that `notes.md` exists (74 lines) and did not check that all 20 are covered
-
-Theme: docs
-Paths: .sdlc/work/201-tests-and-robustness-nits/notes.md
-Cost: S
-Value: low
-Raised by: 201-tests-and-robustness-nits (context)
 
 ## [2026-11-20-56] [idea] Surface key scan follows calls only, to separate always-read keys from branch-read keys
 
@@ -642,16 +622,6 @@ Raised by the test review of 216-autopilot, round 1: tests/test_autopilot.py:263
 
 Theme: style
 Paths: tests/test_autopilot.py
-Cost: S
-Value: low
-Raised by: 216-autopilot (correctness)
-
-## [2026-11-21-55] [nit] R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`.
-
-Raised by the code review of 216-autopilot, round 4: `.sdlc/work/216-autopilot/spec.md`: R19 still gives the default guards as the docs plus `irreversible`, but D8 added `sensitive`. The spec should be brought in line with the ledger
-
-Theme: docs
-Paths: .sdlc/work/216-autopilot/spec.md
 Cost: S
 Value: low
 Raised by: 216-autopilot (correctness)
