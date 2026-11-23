@@ -1,10 +1,18 @@
-# The factory's settings for this repo (plugins/factory/README.md). Only gate_jobs, [ui] and
-# [models] differ from the defaults: two gates at once, since a batch of builds queued behind one
-# slot for up to half an hour; the board `sdlc.py board` serves is this plugin's one front end, so a
-# factory change to it gets the UI and UX reviewers, judging screenshots of the board as that change
-# built it; and the approver runs on sonnet for one window (the comment above [models]).
+# The factory's settings for this repo (plugins/factory/README.md). Only gate_jobs, [autopilot],
+# [ui] and [models] differ from the defaults. One gate at a time: two at once filled the machine's
+# swap, the gate's round median rising from 158.5 to 261.5 seconds, so a batch queues behind one
+# slot again until M24's 2026-11-22-38 removes the wait. Autopilot is on for M25's one bounded run
+# on the nit paydown seeds, its other keys at their defaults and its guards unset; gate_jobs = 1 is
+# for that run too, which gates unattended. The board `sdlc.py board` serves is this plugin's one
+# front end, so a factory change to it gets the UI and UX reviewers, judging screenshots of the
+# board as that change built it; and the approver runs on sonnet for one window (the comment above
+# [models]).
 
-gate_jobs = 2
+gate_jobs = 1
+
+[autopilot]
+# M25, from the retrospective of 2026-11-22: one bounded run, read beside the supervised factory's.
+enabled = true
 
 [ui]
 # The board over a scratch repo built from the fixture's copy, with a change in every state a card
