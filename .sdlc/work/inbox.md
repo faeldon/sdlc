@@ -950,3 +950,18 @@ Severity: low
 Paths: plugins/factory/skills/build/SKILL.md, tests/test_skills.py
 Introduced by: 103-landing-does-what-ship-does
 Origin: host
+
+## [2026-11-23-1] [bug] Land excludes a change whose RECOVER line covers its paths with a brace list or a note after a glob
+
+`unrecovered()` (`plugins/factory/scripts/landing.py`) splits each `- RECOVER:` subject on every comma before matching it against the irreversible paths, and matches each piece as a path or a glob. A subject the approver writes in either of two natural shapes then covers nothing it names:
+
+- **A brace list:** `plugins/analyst/skills/{intent,spec,plan,build,test,status}/SKILL.md` splits into `plugins/analyst/skills/{intent`, `spec`, `plan`, … `status}/SKILL.md`, none of which matches.
+- **A glob with a note after it:** `plugins/analyst/skills/*/SKILL.md (build, intent, plan, ship, spec, status, test)` splits into `plugins/analyst/skills/*/SKILL.md (build` and single words, so the glob carries ` (build` and matches nothing.
+
+Seen in a host on 2026-11-23: two READY or answered changes (124 and 125), both reviewed at their depth with a `How to recover` for every file, were each excluded from `/sdlc-factory:land` with "decision.md proposes no How to recover for …/build/SKILL.md, …: ship it by hand", and had to go to `/sdlc:ship`. The message also lists only the first five missing paths, so it reads as if the approver skipped files it had covered.
+
+Fix: split a subject on commas outside `{…}` and `(…)`, expand a `{a,b}` brace list before matching, and drop a trailing parenthetical note from a pattern; or have the approver's instructions (`agents/approver.md`, the `- RECOVER: <path or glob>` line) forbid both shapes and require one path or plain glob per comma-separated item. Either way, a refusal should quote the `RECOVER:` subject it couldn't read, so the person sees the approver's line rather than a list of paths. Tests in the factory's landing tests should fail on both subjects above.
+
+Severity: med
+Paths: plugins/factory/scripts/landing.py, plugins/factory/agents/approver.md
+Origin: host
