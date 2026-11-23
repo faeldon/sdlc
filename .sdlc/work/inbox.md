@@ -939,6 +939,7 @@ Raised by the retrospective of 2026-11-22.
 
 8 `style` nits and 6 `refactor` nits are open, both past the threshold of 5, the oldest from 2026-11-19. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
 Theme: style
+Priority: high
 Raised by the retrospective of 2026-11-22.
 
 ## [2026-11-22-52] [bug] Build's report and overview still send a factory change to /sdlc:ship, though 103 made land do what ship does
