@@ -932,6 +932,7 @@ Raised by the retrospective of 2026-11-22.
 
 24 `tests` nits and 7 `robustness` nits are open, both past the threshold of 5, the oldest from 2026-11-20. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
 Theme: tests
+Priority: high
 Raised by the retrospective of 2026-11-22.
 
 ## [2026-11-22-51] [idea] Pay down the style and refactor nits
