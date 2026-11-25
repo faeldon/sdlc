@@ -187,36 +187,6 @@ Cost: S
 Value: low
 Raised by: 198-landing-stages-its-own-paths (correctness)
 
-## [2026-11-20-45] [nit] the `[edit]` and `[mv]` cases both stray on `.gitignore`, and nothing separately pins that a staged rename's old path is named when only the new path is owned
-
-Raised by the test review of 198-landing-stages-its-own-paths, round 1: tests/test_train.py:1158: the `[edit]` and `[mv]` cases both stray on `.gitignore`, and nothing separately pins that a staged rename's old path is named when only the new path is owned
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 198-landing-stages-its-own-paths (correctness)
-
-## [2026-11-20-46] [nit] `uncarried()` reports `named` (an id in both SETTLED and CONFIRM) only when the id is also CONFIRMed.
-
-Raised by the code review of 202-defaults-to-landing, round 1: plugins/factory/scripts/run_state.py:104: `uncarried()` reports `named` (an id in both SETTLED and CONFIRM) only when the id is also CONFIRMed. A default that is open and listed as SETTLED but not ticked, because `decisions` was skipped or refused it, reads as "no `- CONFIRM:` line". The mend text then points the approver at the wrong fix. Naming the SETTLED line in that case would be clearer.
-
-Theme: robustness
-Paths: plugins/factory/scripts/run_state.py
-Cost: S
-Value: low
-Raised by: 202-defaults-to-landing (correctness)
-
-## [2026-11-20-48] [nit] the "closes" case writes `closes: [12]` by string-replacing `idea:` in `intent.md`.
-
-Raised by the test review of 202-defaults-to-landing, round 1: tests/test_factory_decisions.py:523: the "closes" case writes `closes: [12]` by string-replacing `idea:` in `intent.md`. If the fixture's frontmatter changes, the case could pass without exercising the `closes:` rule, though the assertion on `closes: [12]` in the problem text would still catch that.
-
-Theme: tests
-Paths: tests/test_factory_decisions.py
-Cost: S
-Value: low
-Raised by: 202-defaults-to-landing (correctness)
-
 ## [2026-11-20-50] [idea] The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping.
 
 Left undone by 200-tests-pruned-again, carried forward when it landed: The train's reading runs about 1,500 git calls for a driven train of three (723 `rev-parse`, 418 `show`), which is most of each train test's time and of a real landing's bookkeeping. Caching what doesn't change within one reading would speed both.
@@ -233,16 +203,6 @@ Paths: scripts/indicators.py
 Cost: S
 Value: low
 Raised by: 200-tests-pruned-again (correctness)
-
-## [2026-11-20-54] [nit] `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed.
-
-Raised by the code review of 201-tests-and-robustness-nits, round 1: tests/test_suite_shape.py:12: `BUILT_IN` is a hand-kept list, and the check reads `node.args.args` only, so a keyword-only fixture is missed. Reading `kwonlyargs` too is a one-line fix
-
-Theme: tests
-Paths: tests/test_suite_shape.py
-Cost: S
-Value: low
-Raised by: 201-tests-and-robustness-nits (correctness)
 
 ## [2026-11-20-56] [idea] Surface key scan follows calls only, to separate always-read keys from branch-read keys
 
@@ -271,16 +231,6 @@ Cost: S
 Value: low
 Raised by: 199-landing-records-unforgeable (correctness)
 
-## [2026-11-20-59] [nit] the spec's R9 requires a test of two writers at once.
-
-Raised by the code review of 199-landing-records-unforgeable, round 1: tests/test_records_ledger.py: the spec's R9 requires a test of two writers at once. One exists (`test_two_writers_at_once_leave_whole_lines`), but it only covers `factory.py`'s writer and not core's copy under the same lock.
-
-Theme: tests
-Paths: tests/test_records_ledger.py
-Cost: S
-Value: low
-Raised by: 199-landing-records-unforgeable (correctness)
-
 ## [2026-11-20-60] [nit] "An agent editing the change's worktree can't forge one" overstates the protection when the builder and resolver have Bash.
 
 Raised by the security review of 199-landing-records-unforgeable, round 1: plugins/factory/README.md: "An agent editing the change's worktree can't forge one" overstates the protection when the builder and resolver have Bash. Say that it protects against the Edit and Write tools, not against a shell that can reach the git common dir
@@ -290,16 +240,6 @@ Paths: plugins/factory/README.md
 Cost: S
 Value: med
 Raised by: 199-landing-records-unforgeable (contract)
-
-## [2026-11-20-62] [nit] the writer test runs 400 locked appends across two processes, which may be slow on a loaded machine; a smaller count would still prove whole lines
-
-Raised by the test review of 199-landing-records-unforgeable, round 1: tests/test_records_ledger.py:152: the writer test runs 400 locked appends across two processes, which may be slow on a loaded machine; a smaller count would still prove whole lines
-
-Theme: tests
-Paths: tests/test_records_ledger.py
-Cost: S
-Value: low
-Raised by: 199-landing-records-unforgeable (correctness)
 
 ## [2026-11-21-3] [nit] the register paragraph now has a line well over 100 characters, because "Each line's command is `/sdlc:intent <id>`." was glued onto the end of the new clause.
 
@@ -321,26 +261,6 @@ Cost: S
 Value: low
 Raised by: 207-change-origin (correctness)
 
-## [2026-11-21-5] [nit] `origin_trailer()` catches every `Exception`, not just a git or read failure, so a coding error there would make origins quietly unknown on every close instead of failing a test; `fix_trailers()` does the same
-
-Raised by the security review of 207-change-origin, round 1: scripts/closing.py:558: `origin_trailer()` catches every `Exception`, not just a git or read failure, so a coding error there would make origins quietly unknown on every close instead of failing a test; `fix_trailers()` does the same
-
-Theme: robustness
-Paths: scripts/closing.py
-Cost: S
-Value: low
-Raised by: 207-change-origin (contract)
-
-## [2026-11-21-6] [nit] `test_idea_and_bug_offer_an_origin_line` only asserts that `Origin: self` is absent from the skill text.
-
-Raised by the test review of 207-change-origin, round 1: tests/test_skills.py: `test_idea_and_bug_offer_an_origin_line` only asserts that `Origin: self` is absent from the skill text. It would not catch the skills telling the person to write `self` in other words
-
-Theme: tests
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 207-change-origin (correctness)
-
 ## [2026-11-21-7] [idea] Manually verify the update hook and /sdlc:update in a scratch repo
 
 Left undone by 206-update-skill, carried forward when it landed: Manual (the spec's Verification): in a scratch repo with the plugin installed from GitHub at an older version, a new session shows the one line (proves `systemMessage` reaches the person), `/sdlc:update` lists its steps, and `--scope project` acts on the folder it runs in.
@@ -348,16 +268,6 @@ The hook first shipped in 1.12.0, so the "older version" must be 1.12.0 or later
 See .sdlc/work/206-update-skill/notes.md in its commit.
 Raised 2026-11-21.
 Theme: setup
-
-## [2026-11-21-8] [nit] `update_line` returns None when the sdlc install here is read from a folder, so a stale `sdlc-factory` install is also never mentioned.
-
-Raised by the code review of 206-update-skill, round 1: scripts/sdlc.py:9507: `update_line` returns None when the sdlc install here is read from a folder, so a stale `sdlc-factory` install is also never mentioned. This follows D2 but is broader than it needs to be. Check the factory row separately if that matters
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 206-update-skill (correctness)
 
 ## [2026-11-21-9] [nit] `update_line`'s first form ("this session runs X") also fires when the install is already updated and only the restart is missing.
 
@@ -369,56 +279,6 @@ Cost: S
 Value: low
 Raised by: 206-update-skill (correctness)
 
-## [2026-11-21-10] [nit] the fake `claude` opens its log and rows files without an encoding, unlike the `encoding="utf-8"` the repo's tests use elsewhere.
-
-Raised by the test review of 206-update-skill, round 1: tests/test_update.py:107: the fake `claude` opens its log and rows files without an encoding, unlike the `encoding="utf-8"` the repo's tests use elsewhere. It is not a portable test, so it only matters on a non-UTF-8 locale.
-
-Theme: tests
-Paths: tests/test_update.py
-Cost: S
-Value: low
-Raised by: 206-update-skill (correctness)
-
-## [2026-11-21-11] [nit] the fake `claude` opens its log and rows files without `encoding="utf-8"`.
-
-Raised by the test review of 206-update-skill, round 2: tests/test_update.py:107: the fake `claude` opens its log and rows files without `encoding="utf-8"`. It is not a portable test, so it only matters on a non-UTF-8 locale.
-
-Theme: tests
-Paths: tests/test_update.py
-Cost: S
-Value: low
-Raised by: 206-update-skill (correctness)
-
-## [2026-11-21-13] [nit] R3 says a listed path under this repo's `.claude/worktrees/` is skipped and counted as `own`.
-
-Raised by the test review of 208-retro-reads-hosts, round 1: tests/test_retro_hosts.py:329: R3 says a listed path under this repo's `.claude/worktrees/` is skipped and counted as `own`. Only the main checkout is listed in the fixtures, so the worktree case is never exercised. Add a worktree path to `_listed`.
-
-Theme: tests
-Paths: tests/test_retro_hosts.py
-Cost: S
-Value: med
-Raised by: 208-retro-reads-hosts (correctness)
-
-## [2026-11-21-14] [nit] the `!` exclusion is only shown against a path that doesn't exist, so it would pass even if an excluded host were still read.
-
-Raised by the test review of 208-retro-reads-hosts, round 1: tests/test_retro_hosts.py:325: the `!` exclusion is only shown against a path that doesn't exist, so it would pass even if an excluded host were still read. Exclude a real fixture host and assert it is absent from `read`.
-
-Theme: tests
-Paths: tests/test_retro_hosts.py
-Cost: S
-Value: med
-Raised by: 208-retro-reads-hosts (correctness)
-
-## [2026-11-21-15] [nit] R12 says no host figure enters the indicators the next retro reads back.
-
-Raised by the test review of 208-retro-reads-hosts, round 1: tests/test_retro_hosts.py:426: R12 says no host figure enters the indicators the next retro reads back. The test compares `retro`'s JSON with and without a list, but doesn't compare the report's indicators block.
-
-Theme: tests
-Paths: tests/test_retro_hosts.py
-Cost: S
-Value: low
-Raised by: 208-retro-reads-hosts (correctness)
-
 ## [2026-11-21-16] [nit] the reflowed *Setup* paragraph leaves a short line, "same change.
 
 Raised by the code review of 213-setup-nudge, round 1: AGENTS.md:218: the reflowed *Setup* paragraph leaves a short line, "same change. `git.attribution` has no default on", that could be rewrapped.
@@ -428,46 +288,6 @@ Paths: AGENTS.md
 Cost: S
 Value: low
 Raised by: 213-setup-nudge (correctness)
-
-## [2026-11-21-17] [nit] the R5 test never forces a `ValueError`, so half of the `except (OSError, ValueError)` is unpinned; a second mock that raises `UnicodeDecodeError` would close it
-
-Raised by the test review of 213-setup-nudge, round 1: tests/test_setup_lifecycle.py:735: the R5 test never forces a `ValueError`, so half of the `except (OSError, ValueError)` is unpinned; a second mock that raises `UnicodeDecodeError` would close it
-
-Theme: tests
-Paths: tests/test_setup_lifecycle.py
-Cost: S
-Value: low
-Raised by: 213-setup-nudge (correctness)
-
-## [2026-11-21-18] [nit] match `UPSTREAM_MARKER` only on the body's first line, as R12 describes it.
-
-Raised by the security review of 209-upstream-bugs, round 1: scripts/sdlc.py:7883: match `UPSTREAM_MARKER` only on the body's first line, as R12 describes it.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 209-upstream-bugs (contract)
-
-## [2026-11-21-19] [nit] the triage skill's `Origin: host` instruction has no text test
-
-Raised by the test review of 209-upstream-bugs, round 1: tests/test_skills.py: the triage skill's `Origin: host` instruction has no text test
-
-Theme: tests
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 209-upstream-bugs (correctness)
-
-## [2026-11-21-20] [nit] also turn a dotless ssh-alias remote (`user@alias:path`) into `<remote>`
-
-Raised by the security review of 209-upstream-bugs, round 2: scripts/sdlc.py:9721: also turn a dotless ssh-alias remote (`user@alias:path`) into `<remote>`
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 209-upstream-bugs (contract)
 
 ## [2026-11-21-24] [idea] Let ugrep's `-O EXT` pass the read-only grep check while BSD's `-O` stays refused
 
@@ -495,36 +315,6 @@ Paths: plugins/factory/scripts/landing.py
 Cost: S
 Value: low
 Raised by: 212-landing-gaps (contract)
-
-## [2026-11-21-27] [nit] no case checks a bare `-d dereference-recurse` word that is really a grep pattern, which D2 accepts refusing.
-
-Raised by the test review of 212-landing-gaps, round 1: tests/test_train.py:2340: no case checks a bare `-d dereference-recurse` word that is really a grep pattern, which D2 accepts refusing. A pin would document the trade-off.
-
-Theme: tests
-Paths: tests/test_train.py
-Cost: S
-Value: low
-Raised by: 212-landing-gaps (correctness)
-
-## [2026-11-21-30] [nit] R7 says `--preview` takes the same clause flags as `--question`.
-
-Raised by the code review of 210-wait-previews, round 1: scripts/sdlc.py:8308: R7 says `--preview` takes the same clause flags as `--question`. They parse, but `cmd_ship_preview` ignores them without saying so. Refuse them with `--preview`, as the code already refuses clause flags without `--question`, or say in the help text that they are ignored.
-
-Theme: robustness
-Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 210-wait-previews (correctness)
-
-## [2026-11-21-31] [nit] the `PREVIEW_NAMES` words are checked with substring `in`, so a key word like `path` or `tag` matches any text that contains it
-
-Raised by the test review of 210-wait-previews, round 1: tests/test_skills.py:263: the `PREVIEW_NAMES` words are checked with substring `in`, so a key word like `path` or `tag` matches any text that contains it
-
-Theme: tests
-Paths: tests/test_skills.py
-Cost: S
-Value: low
-Raised by: 210-wait-previews (correctness)
 
 ## [2026-11-21-33] [idea] Autopilot levels 2–4: releases, retrospectives, direction
 
@@ -566,36 +356,6 @@ Raised by the code review of 214-ci-green, round 1: scripts/sdlc.py:3076: `_hand
 
 Theme: docs
 Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 214-ci-green (correctness)
-
-## [2026-11-21-39] [nit] `_hand_digests` is now a 15-line copy of `sdlc.py`'s, kept the same by hand.
-
-Raised by the security review of 214-ci-green, round 1: plugins/factory/scripts/factory.py:3073: `_hand_digests` is now a 15-line copy of `sdlc.py`'s, kept the same by hand. Pin the two bodies equal in `tests/test_hand_gate.py`, as the repo's other copies are pinned, so a fix to one can't skip the other
-
-Theme: tests
-Paths: plugins/factory/scripts/factory.py
-Cost: S
-Value: med
-Raised by: 214-ci-green (contract)
-
-## [2026-11-21-40] [nit] `_lost()`'s new `and not _only_time_wait(port)` branch is proved only by the existing socket test, which exercises it on Linux only.
-
-Raised by the test review of 214-ci-green, round 1: tests/test_factory_ui.py:474: `_lost()`'s new `and not _only_time_wait(port)` branch is proved only by the existing socket test, which exercises it on Linux only. No test combines a refused bind with a stubbed table; the container run is the only proof.
-
-Theme: tests
-Paths: tests/test_factory_ui.py
-Cost: S
-Value: low
-Raised by: 214-ci-green (correctness)
-
-## [2026-11-21-41] [nit] the `_hand_digests()` fallback is untested.
-
-Raised by the test review of 214-ci-green, round 1: tests/test_hand_gate.py:145: the `_hand_digests()` fallback is untested. It hashes a path holding a newline with sha256, and covers a failed `hash-object`.
-
-Theme: tests
-Paths: tests/test_hand_gate.py
 Cost: S
 Value: low
 Raised by: 214-ci-green (correctness)
@@ -650,26 +410,6 @@ Raised by the code review of 220-base-ci-red, round 1: scripts/sdlc.py:9860: `_w
 
 Theme: refactor
 Paths: scripts/sdlc.py
-Cost: S
-Value: low
-Raised by: 220-base-ci-red (correctness)
-
-## [2026-11-22-4] [nit] R3 says nothing is written outside a repo, and only the missing-source cases check for a cache file.
-
-Raised by the test review of 220-base-ci-red, round 1: tests/test_base_ci.py: R3 says nothing is written outside a repo, and only the missing-source cases check for a cache file. No test calls `base_ci()` with a home that isn't a repo and asserts it writes nothing.
-
-Theme: tests
-Paths: tests/test_base_ci.py
-Cost: S
-Value: low
-Raised by: 220-base-ci-red (correctness)
-
-## [2026-11-22-5] [nit] the `os.replace` temp-file write and `newline="\n"` (R3, R11) are covered only by the existing `tests/test_windows.py` scans, not by a test of this change.
-
-Raised by the test review of 220-base-ci-red, round 1: tests/test_base_ci.py: the `os.replace` temp-file write and `newline="\n"` (R3, R11) are covered only by the existing `tests/test_windows.py` scans, not by a test of this change.
-
-Theme: tests
-Paths: tests/test_base_ci.py
 Cost: S
 Value: low
 Raised by: 220-base-ci-red (correctness)
@@ -744,16 +484,6 @@ Cost: S
 Value: low
 Raised by: 228-autopilot-readiness (correctness)
 
-## [2026-11-22-28] [nit] the end-to-end test names its assertions on `"→ decided by autopilot: keep it"`.
-
-Raised by the code review of 228-autopilot-readiness, round 1: tests/test_autopilot.py:1576: the end-to-end test names its assertions on `"→ decided by autopilot: keep it"`. That text depends on the stand-in builder's blocking line, so a change to `BUILDER_RAISES` would break it at a distance. Reference a shared constant instead.
-
-Theme: tests
-Paths: tests/test_autopilot.py
-Cost: S
-Value: low
-Raised by: 228-autopilot-readiness (correctness)
-
 ## [2026-11-22-29] [nit] `again` runs `_nit_path` over every later nit once for each earlier nit, so the work grows as nits × rounds × nits.
 
 Raised by the code review of 230-nit-flow, round 1: plugins/factory/scripts/factory.py:3013: `again` runs `_nit_path` over every later nit once for each earlier nit, so the work grows as nits × rounds × nits. The sets are tiny, so computing each later round's path set once per role would be tidier than urgent.
@@ -773,46 +503,6 @@ Paths: scripts/sdlc.py
 Cost: S
 Value: low
 Raised by: 230-nit-flow (correctness)
-
-## [2026-11-22-31] [nit] the test sets `start` on a round by hand to model a restart.
-
-Raised by the test review of 230-nit-flow, round 1: tests/test_factory_loop.py:921: the test sets `start` on a round by hand to model a restart. A restart that went through `cmd_restart` is exercised only in the R4 prompt test, not for filing.
-
-Theme: tests
-Paths: tests/test_factory_loop.py
-Cost: S
-Value: low
-Raised by: 230-nit-flow (correctness)
-
-## [2026-11-22-32] [nit] say to single-quote a goal given in the person's own words, so `$`, backticks and `"` in it stay literal
-
-Raised by the security review of 231-autopilot-goals, round 1: plugins/factory/skills/autopilot/SKILL.md:101: say to single-quote a goal given in the person's own words, so `$`, backticks and `"` in it stay literal
-
-Theme: robustness
-Paths: plugins/factory/skills/autopilot/SKILL.md
-Cost: S
-Value: med
-Raised by: 231-autopilot-goals (contract)
-
-## [2026-11-22-33] [nit] the "empty reason" case rewrites the WAITS line to a bare reason; no case gives a WAVE or LEAVE line an empty reason, which R8 also names
-
-Raised by the test review of 231-autopilot-goals, round 1: tests/test_autopilot.py:1735: the "empty reason" case rewrites the WAITS line to a bare reason; no case gives a WAVE or LEAVE line an empty reason, which R8 also names
-
-Theme: tests
-Paths: tests/test_autopilot.py
-Cost: S
-Value: low
-Raised by: 231-autopilot-goals (correctness)
-
-## [2026-11-22-34] [nit] no case puts a `LEAVE` heading-less before any group to show LEAVE is allowed anywhere.
-
-Raised by the test review of 231-autopilot-goals, round 1: tests/test_autopilot.py:1696: no case puts a `LEAVE` heading-less before any group to show LEAVE is allowed anywhere. Only the group-less WAVE case exists.
-
-Theme: tests
-Paths: tests/test_autopilot.py
-Cost: S
-Value: low
-Raised by: 231-autopilot-goals (correctness)
 
 ## [2026-11-22-35] [idea] Widen `EVIDENCE_EXIT_RE` in sdlc.py to accept a note after the exit code
 
@@ -926,13 +616,6 @@ Raised by the retrospective of 2026-11-22.
 
 14 `docs` nits are open, past the process doc's threshold of 5, the oldest from 2026-11-19. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
 Theme: docs
-Raised by the retrospective of 2026-11-22.
-
-## [2026-11-22-50] [idea] Pay down the tests and robustness nits
-
-24 `tests` nits and 7 `robustness` nits are open, both past the threshold of 5, the oldest from 2026-11-20. Pay them down in one change: check each against the code first, and retire as stale any the code has moved past.
-Theme: tests
-Priority: high
 Raised by the retrospective of 2026-11-22.
 
 ## [2026-11-22-51] [idea] Pay down the style and refactor nits
