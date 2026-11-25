@@ -87,9 +87,10 @@ def uncarried(
     folder: Path, ledger: list[dict], decision: str | None, sensitive: list[str], closes: str | None
 ) -> list[tuple[str, str]]:
     """The open defaults a READY decision may not carry to the landing, each (id, why): one the
-    approver gave no `- CONFIRM:` line alone (none at all, an ESCALATED one, or both), and every
-    CONFIRMed one when `factory.no_confirm_why()` bars it (a sensitive path the diff touches, an
-    issue the change closes). [] for any other decision, which carries nothing."""
+    approver gave no `- CONFIRM:` line alone (none at all, a SETTLED one the ledger never ticked,
+    an ESCALATED one, or both), and every CONFIRMed one when `factory.no_confirm_why()` bars it
+    (a sensitive path the diff touches, an issue the change closes). [] for any other decision,
+    which carries nothing."""
     if decision != "READY":
         return []
     settles, escalated, confirms = factory.approver_weighing(folder)
@@ -101,6 +102,12 @@ def uncarried(
             continue
         if d["id"] in escalated:
             found.append((d["id"], "it is ESCALATED, which READY can't carry"))
+        elif d["id"] not in confirms and d["id"] in named:
+            # `decisions` was skipped or refused the settle, so the ledger never ticked it.
+            why = (
+                "it is `- SETTLED:` but still open, so READY carries it only on a `- CONFIRM:` line"
+            )
+            found.append((d["id"], why))
         elif d["id"] not in confirms:
             found.append((d["id"], "no `- CONFIRM:` line"))
         elif d["id"] in named:

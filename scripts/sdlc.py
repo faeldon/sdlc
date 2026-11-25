@@ -8074,7 +8074,7 @@ def cmd_intake(root: Path) -> int:
             "filed": (records.get(i["number"]) or {}).get("filed"),
             "uncommitted": i["number"] in records and i["number"] not in committed,
             # Filed upstream by a host's `/sdlc:bug`: triage writes `Origin: host` on its entry.
-            "from_host": UPSTREAM_MARKER in (i.get("body") or ""),
+            "from_host": (i.get("body") or "").lstrip().startswith(UPSTREAM_MARKER),
         }
         for i in issues
     ]
@@ -8554,16 +8554,23 @@ def cli_preflight(root: Path, home: Path, args) -> int:
             file=sys.stderr,
         )
         return 1
+    given = [
+        f"--{name}" for name in ("context", "nits", "bugs", "closing", "split")
+        if getattr(args, name)
+    ]  # fmt: skip
+    if args.preview and given:
+        print(
+            f"⚠  preflight: {', '.join(given)} only word ship's question, which --preview "
+            "doesn't ask; run --question for it.",
+            file=sys.stderr,
+        )
+        return 1
     if args.preview:
         return cmd_ship_preview(root, args.id)
     if args.question:
         return cmd_ship_question(
             root, args.id, args.context, args.nits, args.closing, args.split, args.bugs
         )
-    given = [
-        f"--{name}" for name in ("context", "nits", "bugs", "closing", "split")
-        if getattr(args, name)
-    ]  # fmt: skip
     if given:
         print(
             f"⚠  preflight: {', '.join(given)} only word ship's question; add --question.",

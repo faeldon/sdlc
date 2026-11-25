@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 TESTS = Path(__file__).resolve().parent
-# pytest's own fixtures, which a test asks for only to use: never for a side effect.
+# pytest's own fixtures, which a test asks for only to use: never for a side effect. Kept by hand,
+# since a list taken from pytest would sweep in those asked for their effect (`recwarn`, `request`).
 BUILT_IN = {"tmp_path", "tmp_path_factory", "capsys", "capfd", "caplog", "monkeypatch"}
 
 
@@ -26,7 +27,7 @@ def unused_fixtures(source: str) -> list[str]:
         named = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         found += [
             f"{node.name}: {a.arg}"
-            for a in node.args.args
+            for a in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
             if a.arg in BUILT_IN and a.arg not in named
         ]
     return found
@@ -38,9 +39,10 @@ def test_the_check_finds_a_fixture_never_used() -> None:
         "def test_one(tmp_path, capsys):\n    print(tmp_path)\n\n"
         "def test_two(monkeypatch):\n    def inner():\n        monkeypatch.setenv('A', '1')\n"
         "    inner()\n\n"
-        "def helper(tmp_path):\n    pass\n"
+        "def helper(tmp_path):\n    pass\n\n"
+        "def test_three(*, capsys):\n    pass\n"
     )
-    assert unused_fixtures(source) == ["test_one: capsys"]
+    assert unused_fixtures(source) == ["test_one: capsys", "test_three: capsys"]
 
 
 @pytest.mark.portable

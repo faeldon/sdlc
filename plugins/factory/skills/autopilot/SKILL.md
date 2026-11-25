@@ -96,8 +96,9 @@ tier it may open (1 or 2, default 2). Then read the run they describe:
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --preview --usd <usd> --hours <hours> --goal <goal> --themes <theme…> --seeds <id…> --level <tier>
 ```
 
-Leave out `--goal`, `--themes`, `--seeds` and `--level` where the person named none; quote a goal in
-their own words. `--preview` writes nothing. A `--goal` id the direction doc doesn't hold open is
+Leave out `--goal`, `--themes`, `--seeds` and `--level` where the person named none. Pass a goal in
+their own words single-quoted (`--goal '<goal>'`), each `'` in it written as `'\''`, so a `$`, a
+backtick or a `"` in it stays literal. `--preview` writes nothing. A `--goal` id the direction doc doesn't hold open is
 refused: show the refusal and ask again. It prints `goal` (its `source`, `arg`, `title`, `serves`
 and `count`, the candidates in its scope within the bounds: the one stated, or the one proposed,
 the first open milestone with a candidate, else the theme with the most), `alternatives` (up to
@@ -130,8 +131,8 @@ different bounds are a new `--preview` and the question asked again.
 
 ## Step 3 — Begin, and start the loop
 
-On the yes, with the same bounds the preview read and the goal it named, its `goal.arg` (quoted
-when it is the person's own words):
+On the yes, with the same bounds the preview read and the goal it named, its `goal.arg`, single-quoted
+when it is the person's own words, each `'` in it written as `'\''`, as at the preview:
 
 ```bash
 uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}"/scripts/factory.py autopilot --begin --usd <usd> --hours <hours> --goal <goal.arg> --themes <theme…> --seeds <id…> --level <tier>

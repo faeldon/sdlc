@@ -919,7 +919,7 @@ def test_a_nit_a_later_round_raises_reworded_is_filed_once(tmp_path) -> None:
     assert filed == [(2, "src/a.py:4: X, reworded")]
 
 
-def test_a_nit_no_later_round_raises_is_fixed_whatever_its_weights(tmp_path) -> None:
+def test_a_nit_no_later_round_raises_is_fixed_whatever_its_weights(tmp_path, capsys) -> None:
     """230 R2 (reversing 129 R5): a nit a later complete round of its role doesn't raise again is
     never filed, whatever its weights and whether or not a rework was handed it, a restart's first
     round counting as a later round."""
@@ -940,11 +940,19 @@ def test_a_nit_no_later_round_raises_is_fixed_whatever_its_weights(tmp_path) -> 
     _round(root, 2)
     rounds = _carried_rounds(root)
     assert _nit_rows(rounds) == unfiled, "no rework was handed them"
-    rounds[1]["start"] = True
-    assert _nit_rows(rounds) == unfiled, "a restart's first round is a later round"
     assert [r[1:] for r in _nit_rows(rounds[:1])] == [
         ("minor", False), ("minor", False), ("recorded", True), ("recorded", True)
     ], "with no later round, filed by their weights"  # fmt: skip
+
+    # 235 R27: the restart made by `cmd_restart`, as the loop makes one, never set by hand.
+    root = _change(tmp_path / "restarted", 2, "test")
+    _escalated(root)
+    _nits(root, 3, "code", *weighed)
+    assert _restart(root, capsys)[0] == 0
+    _round(root, 4)
+    rounds = _carried_rounds(root)
+    assert [(r["round"], r["start"]) for r in rounds][-1] == (4, True), rounds
+    assert _nit_rows(rounds) == unfiled, "a restart's first round is a later round"
 
 
 def test_a_nit_not_filed_says_why(tmp_path, capsys) -> None:

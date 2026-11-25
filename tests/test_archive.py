@@ -1855,12 +1855,42 @@ def test_intake_flags_an_issue_from_a_host(tmp_path, gh, capsys) -> None:
     root = _repo(tmp_path)
     _filed(gh, 52)
     _filed(gh, 53)
+    _filed(gh, 54)
     state = gh()
     state["issues"][1]["body"] = "<!-- sdlc:host-bug:0123456789ab -->\nFiled from a host."
+    # 235 R4: the marker counts only as the body's opening, never quoted further down.
+    state["issues"][2]["body"] = "Seen here:\n<!-- sdlc:host-bug:0123456789ab -->\nquoted."
     Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps(state), encoding="utf-8")
     code, out = _json(capsys, lambda: sdlc.cmd_intake(root))
     assert code == 0, out
-    assert [(i["number"], i["from_host"]) for i in out["issues"]] == [(52, False), (53, True)]
+    assert [(i["number"], i["from_host"]) for i in out["issues"]] == [
+        (52, False),
+        (53, True),
+        (54, False),
+    ]
+
+
+def test_trailer_builders_swallow_only_git_and_read_failures(tmp_path, monkeypatch) -> None:
+    """235 R2: `fix_trailers()` and `origin_trailer()` give `[]` when git can't run or prints a
+    blob that isn't UTF-8, so a close never fails on them, and let a coding error raise."""
+    root = _repo(tmp_path)
+
+    def raising(error: BaseException):
+        def stand_in(*args, **kwargs):
+            raise error
+
+        return stand_in
+
+    undecodable = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+    for error in (OSError("no git"), undecodable):
+        monkeypatch.setattr(sdlc, "_git", raising(error))
+        assert sdlc.closing.fix_trailers(root, "001-x") == []
+        assert sdlc.closing.origin_trailer(root, "001-x") == []
+    monkeypatch.setattr(sdlc, "_git", raising(TypeError("a coding error")))
+    with pytest.raises(TypeError):
+        sdlc.closing.fix_trailers(root, "001-x")
+    with pytest.raises(TypeError):
+        sdlc.closing.origin_trailer(root, "001-x")
 
 
 def test_intake_never_says_nothing_waits_when_it_can_t_read_the_unpushed_commits(

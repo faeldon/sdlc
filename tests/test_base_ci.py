@@ -351,3 +351,38 @@ def test_ship_question_command_reads_ci_itself(tmp_path, gh, capsys) -> None:
     assert sdlc.cmd_ship_question(root, "001", False, False, [], []) == 0
     out = capsys.readouterr().out
     assert f"on a base whose CI is red at {sha[:7]} " in out, out
+
+
+def test_base_ci_outside_a_repo_is_unknown_and_writes_nothing(tmp_path, gh, monkeypatch) -> None:
+    """235 R24: a home that is no repo gives `unknown` and leaves the folder as it was, and the
+    cache's writer, with no git common dir to write into, writes nothing."""
+    cfg = _cfg(_repo(tmp_path))
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    got = sdlc.base_ci(plain, cfg, sdlc.CI_EVERY)
+    assert got["state"] == "unknown", got
+    assert list(plain.iterdir()) == []
+    sdlc._write_ci_cache(plain, "main", "0" * 40, {"state": "green"})
+    assert list(plain.iterdir()) == []
+    assert _run_calls(gh) == []
+
+
+def test_the_cache_is_moved_into_place_whole(tmp_path, gh, monkeypatch) -> None:
+    """235 R25: the reading is written to a temp file beside the cache and moved into place, none
+    left behind, its line endings `\n` on every platform."""
+    root = _repo(tmp_path)
+    _runs(_run(_tip(root)))
+    moves = []
+    real = sdlc.os.replace
+
+    def recording(src, dst):
+        moves.append((Path(src).name, Path(dst).name))
+        return real(src, dst)
+
+    monkeypatch.setattr(sdlc.os, "replace", recording)
+    assert sdlc.base_ci(root, _cfg(root), sdlc.CI_EVERY)["state"] == "green"
+    cache = root / ".git" / sdlc.CI_CACHE
+    assert (f"{sdlc.CI_CACHE}.{os.getpid()}.tmp", sdlc.CI_CACHE) in moves, moves
+    assert list(cache.parent.glob("*.tmp")) == []
+    assert b"\r\n" not in cache.read_bytes()

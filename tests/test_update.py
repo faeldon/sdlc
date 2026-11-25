@@ -13,6 +13,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -106,12 +107,19 @@ def plugin(tmp_path: Path, releases: Path, monkeypatch) -> Path:
 
 FAKE_CLAUDE = r"""#!/usr/bin/env python3
 import json, os, sys
-with open(os.environ["FAKE_CLAUDE_LOG"], "a") as f:
+with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
 if sys.argv[1:] != ["plugin", "list", "--json"]:
     sys.exit(2)
-print(open(os.environ["FAKE_CLAUDE_ROWS"]).read())
+print(open(os.environ["FAKE_CLAUDE_ROWS"], encoding="utf-8").read())
 """
+
+
+@pytest.mark.portable
+def test_the_fake_claude_opens_its_files_as_utf8() -> None:
+    """235 R13: every `open(` in the fake names its encoding, never the locale's code page."""
+    calls = re.findall(r"\bopen\(([^)]*\))", FAKE_CLAUDE)
+    assert calls and all('encoding="utf-8"' in c for c in calls), calls
 
 
 @pytest.fixture

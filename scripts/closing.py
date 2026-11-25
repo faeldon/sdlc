@@ -518,8 +518,8 @@ def measure_change(main: Path, branch: str, cfg: dict) -> tuple[dict, list[str]]
 def fix_trailers(main: Path, branch: str) -> list[str]:
     """An `Sdlc-Fixes:` line for each bug the change's intent names on `fixes:`, with its
     severity, reported date and introducing change as the register held them in the newest commit
-    on the branch that still had the entry; `unknown` where none did. Never raises: a fix that
-    can't be described is still recorded."""
+    on the branch that still had the entry; `unknown` where none did. Never raises on a git or
+    read failure: a fix that can't be described is still recorded. A coding error raises."""
     try:
         rel = sdlc.work_rel(main)
         intent = sdlc._git(main, "show", f"{branch}:{rel}/{branch}/intent.md") or ""
@@ -552,14 +552,14 @@ def fix_trailers(main: Path, branch: str) -> list[str]:
                 f"introduced_by={introduced} paths={paths or 'unknown'}"
             )
         return lines
-    except Exception:
+    except (OSError, ValueError):
         return []
 
 
 def origin_trailer(main: Path, branch: str) -> list[str]:
     """An `Sdlc-Origin:` line for where the change's finding came from, its intent's `origin:`
-    on the branch; none for no line or a word outside `ORIGINS`, never one guessed. Never raises:
-    an origin that can't be read is unknown."""
+    on the branch; none for no line or a word outside `ORIGINS`, never one guessed. Never raises
+    on a git or read failure: an origin that can't be read is unknown. A coding error raises."""
     try:
         rel = sdlc.work_rel(main)
         intent = sdlc._git(main, "show", f"{branch}:{rel}/{branch}/intent.md") or ""
@@ -567,7 +567,7 @@ def origin_trailer(main: Path, branch: str) -> list[str]:
         if len(origin) == 1 and origin[0] in sdlc.ORIGINS:
             return [f"Sdlc-Origin: {origin[0]}"]
         return []
-    except Exception:
+    except (OSError, ValueError):
         return []
 
 

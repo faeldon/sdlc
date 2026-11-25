@@ -737,11 +737,13 @@ def test_a_doc_drift_cannot_read_keeps_the_nudge(repo, plugin, monkeypatch, caps
     assert sdlc.setup_nudge(repo) == line
     assert f"■ Setup: {line}" in _status(repo, capsys)
 
-    def broken(root):
-        raise OSError("unreadable")
+    for error in (OSError("unreadable"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad")):
 
-    monkeypatch.setattr(sdlc, "drift", broken)
-    assert sdlc.setup_nudge(repo) == line
+        def broken(root, error=error):
+            raise error
+
+        monkeypatch.setattr(sdlc, "drift", broken)
+        assert sdlc.setup_nudge(repo) == line, type(error).__name__
 
 
 def test_check_strict_ignores_drift(repo: Path, plugin: Path, monkeypatch) -> None:

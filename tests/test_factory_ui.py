@@ -533,3 +533,18 @@ def test_a_server_that_fails_on_its_own_is_started_once(tmp_path, monkeypatch) -
     assert starts.read_text().splitlines() == ["started"], "started once"
     assert len(ports) == 1 and record["retries"] == [], record
     assert "exited 1 before answering" in record["problem"], record
+
+
+@pytest.mark.portable
+def test_a_refused_bind_is_lost_only_when_more_than_a_time_wait_holds_it(monkeypatch) -> None:
+    """235 R22: `_lost()` asks the table only when the bind is refused: a TIME_WAIT alone is not
+    lost, a listener is, and a port that binds is never lost, whatever the table says."""
+    for binds, time_wait, lost in [
+        (False, True, False),
+        (False, False, True),
+        (True, True, False),
+        (True, False, False),
+    ]:
+        monkeypatch.setattr(factory, "_binds", lambda host, port, binds=binds: binds)
+        monkeypatch.setattr(factory, "_only_time_wait", lambda port, tw=time_wait: tw)
+        assert factory._lost("127.0.0.1", 49152) is lost, (binds, time_wait)

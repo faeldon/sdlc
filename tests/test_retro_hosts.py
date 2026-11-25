@@ -322,18 +322,21 @@ def test_an_unreadable_host_is_counted_not_fatal(tmp_path: Path, monkeypatch, ca
 def _listed(tmp_path: Path) -> tuple[Path, Path, Path]:
     a, b = _host_a(tmp_path), _host_b(tmp_path)
     own = tmp_path / "plugin"
-    lines = [f"{a}", f"{b}", f"{own}", f"{a}/", f"{tmp_path / 'gone'}", f"!{tmp_path / 'never'}"]
+    worktree = own / ".claude" / "worktrees" / "001-reopen-drafts"
+    lines = [f"{a}", f"{b}", f"{own}", f"{worktree}", f"{a}/", f"{tmp_path / 'gone'}",
+             f"!{tmp_path / 'never'}"]  # fmt: skip
     return _own(tmp_path, "\n".join(lines) + "\n"), a, b
 
 
 def test_two_fixture_hosts_give_known_counts(tmp_path: Path) -> None:
-    """R6: every count, over two hosts with known `Close`/`Drop` commits and trailers."""
+    """R6: every count, over two hosts with known `Close`/`Drop` commits and trailers. 235 R14:
+    a path under this repo's `.claude/worktrees/` is `own`, as the main checkout is."""
     root, _, _ = _listed(tmp_path)
     h = _retro(root)["hosts"]
     assert h["state"] == "read"
     read = h["read"]
     assert {k: read[k] for k in ("listed", "read", "own", "repeated", "excluded")} == {
-        "listed": 5, "read": 2, "own": 1, "repeated": 1, "excluded": 1,
+        "listed": 6, "read": 2, "own": 2, "repeated": 1, "excluded": 1,
     }  # fmt: skip
     assert read["unreadable"] == {"missing": 1}
     assert read["unlisted"] == 0 and read["discovery"] == "read"
@@ -424,14 +427,42 @@ def test_the_last_guard_drops_a_name_the_filter_missed() -> None:
 
 
 def test_host_figures_never_move_this_repos_figures(tmp_path: Path) -> None:
-    """R12: everything outside `hosts` is the same with a list as without one."""
+    """R12: everything outside `hosts` is the same with a list as without one, the report's
+    `## Indicators` block included (235 R16), which holds rows here, not the no-rows sentence."""
     root, _, _ = _listed(tmp_path)
-    with_list = _retro(root)
+    (root / "rows.jsonl").write_text(
+        '{"name": "cycles", "value": 2}\n', encoding="utf-8", newline="\n"
+    )
+    (root / ".sdlc" / "config.toml").write_text(
+        '[retro]\nindicators = ["cat rows.jsonl"]\n', encoding="utf-8", newline="\n"
+    )
+
+    def indicators() -> str:
+        report = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], TODAY)
+        return report.split("## Indicators\n", 1)[1].split("\n## ", 1)[0]
+
+    with_list, with_block = _retro(root), indicators()
     (root / ".sdlc" / "hosts.local").unlink()
-    without = _retro(root)
+    without, without_block = _retro(root), indicators()
     assert with_list.pop("hosts")["state"] == "read"
     assert without.pop("hosts")["state"] == "unmeasured"
     assert _dumped(with_list) == _dumped(without)
+    assert "| cycles | — | 2 |" in with_block and sdlc.retro.NO_INDICATORS not in with_block
+    assert with_block == without_block
+
+
+def test_an_excluded_host_is_never_read(tmp_path: Path) -> None:
+    """235 R15: of two real hosts listed, the one a `!` line excludes is counted `excluded` and
+    never read: the figures are the other's alone."""
+    a, b = _host_a(tmp_path), _host_b(tmp_path)
+    root = _own(tmp_path, f"{a}\n{b}\n!{b}\n")
+    h = _retro(root)["hosts"]
+    assert (h["read"]["read"], h["read"]["excluded"]) == (1, 1), h["read"]
+    (root / ".sdlc" / "hosts.local").write_text(f"{a}\n", encoding="utf-8", newline="\n")
+    alone = _retro(root)["hosts"]
+    assert alone["read"]["read"] == 1
+    assert _dumped(h["window"]) == _dumped(alone["window"])
+    assert _dumped(h["all"]) == _dumped(alone["all"])
 
 
 # ---------------------------------------------------------------- discovery (R9)
@@ -510,7 +541,7 @@ def test_the_report_has_a_hosts_section(tmp_path: Path) -> None:
     root, _, _ = _listed(tmp_path)
     text = sdlc.retro.retro_report(root, sdlc.load_config(root)[0], TODAY)
     section = text.split("## Hosts\n", 1)[1]
-    assert "2 host repos read of 5 listed" in section
+    assert "2 host repos read of 6 listed" in section
     assert "1 couldn't be read" in section and "0 installed repos not in the host list" in section
     assert sdlc.retro.HOST_NOTE in section
     assert "| By hand |" in section and "| Factory |" in section

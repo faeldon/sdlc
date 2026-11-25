@@ -4486,7 +4486,8 @@ def _discover(home: Path, known: set[str]) -> tuple[list[str] | None, str]:
 def _read_hosts(home: Path) -> dict | None:
     """The host list read and each host's state, for `hosts_figures()` and `cmd_hosts()`; None
     when there is no list. Each row is `(path, state, records)`, `state` one of `read`, `own`,
-    `repeated` or an `UNREADABLE` word."""
+    `repeated` or an `UNREADABLE` word. A listed path a `!` line also excludes has no row and is
+    never read (208 R3)."""
     path = home / HOSTS_FILE
     if not path.is_file():
         return None
@@ -4494,6 +4495,8 @@ def _read_hosts(home: Path) -> dict | None:
     rows: list[tuple[Path, str, dict | None]] = []
     mains: set[str] = set()
     for p in paths:
+        if p in excluded:
+            continue
         if _own_path(p, home):
             rows.append((p, "own", None))
             continue

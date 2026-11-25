@@ -690,11 +690,11 @@ def _preview(root: Path, capsys, *flags: str) -> tuple[int, str, str]:
 def test_preflight_preview_lists_findings_paths_and_stamp(change, capsys) -> None:
     """210 R7: what ship's yes commits, by the script: each finding with its id, rank and
     disposition, every path the diff touches against the merge base (a rename by both), and the
-    stamp line, plain text, whatever clause flags `--question` was given."""
+    stamp line, plain text. A clause flag with it is refused (235 R6)."""
     root, folder = change
     (folder / "findings.md").write_text(TWO_FINDINGS, encoding="utf-8")
     _git(root, "mv", "README.md", "READ.md")
-    code, out, err = _preview(root, capsys, "--preview", "--context", "--closing", "12")
+    code, out, err = _preview(root, capsys, "--preview")
     assert code == 0, err
     assert out.splitlines() == [
         "Findings:",
@@ -836,3 +836,16 @@ def test_preflight_names_no_docs_pass_on_a_factory_run(tmp_path, capsys) -> None
     (folder / "decision.md").write_text("DECISION: READY\n", encoding="utf-8")
     out = _passes_of(capsys, root)
     assert out["passes"]["docs"]["applies"] is False and "docs.md" not in out["branches"]
+
+
+def test_preview_refuses_the_question_s_flags_rather_than_ignoring_them(
+    change, capsys, monkeypatch
+) -> None:
+    """235 R6: `--preview` asks no question, so a clause flag given with it is refused."""
+    root, _ = change
+    monkeypatch.chdir(root)
+    monkeypatch.setattr("sys.argv", ["sdlc.py", "preflight", "001", "--preview", "--nits"])
+    assert sdlc.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--nits only word ship's question, which --preview doesn't ask" in captured.err

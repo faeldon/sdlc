@@ -534,28 +534,36 @@ def _carried(tmp_path: Path, capsys, *lines: str, head: str = "DECISION: READY",
     return root
 
 
-@pytest.mark.parametrize("case", ["unlined", "escalated", "sensitive", "closes"])
+@pytest.mark.parametrize("case", ["unlined", "escalated", "sensitive", "closes", "settled"])
 def test_ready_with_an_uncarried_default_is_mended(tmp_path, capsys, case) -> None:
     """202 R3: a READY resting on an open default it may not carry (no CONFIRM line, an ESCALATED
     one, a CONFIRM on a sensitive path or on a `closes:` change) is a stop the approver mends,
-    each id named with why; a CONFIRM on a plain change is done."""
-    line = {"unlined": "", "escalated": "- ESCALATED: D1: the person's call\n"}.get(
+    each id named with why; a CONFIRM on a plain change is done. 235 R1: a default SETTLED but
+    still open (`decisions` never ticked it) says so, not "no `- CONFIRM:` line"."""
+    line = {"unlined": "", "settled": "", "escalated": "- ESCALATED: D1: the person's call\n"}.get(
         case, "- CONFIRM: D1: 50 a page; the landing's yes is enough\n"
     )
     root = _carried(tmp_path, capsys, line, config=LISTED if case == "sensitive" else None)
+    folder = root / ".sdlc" / "work" / NAME
     if case == "sensitive":
         _touch(root, "src/secret/key.py")
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "-m", "touch")
     if case == "closes":
-        intent = root / ".sdlc" / "work" / NAME / "intent.md"
-        intent.write_text(intent.read_text().replace("idea:", "closes: [12]\nidea:"))
+        _closing(root, "[12]")
+        assert factory.intent_closes(folder) == "[12]", "the fixture must take the line"
+    if case == "settled":
+        # Written after `_carried()` ran `decisions`, so the ledger never ticks D1.
+        with (folder / "decision.md").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("- SETTLED: D1: spec R4 shows 50 a page\n")
     out = _verdicts(root, capsys)
     assert (out["next"], out["way"], out["mend"]) == ("stop", "mend", ["approver"]), out
     [problem] = [p for p in out["problems"] if p.startswith(factory.UNCARRIED)]
-    why = {"unlined": "no `- CONFIRM:`", "escalated": "ESCALATED",
+    why = {"unlined": "no `- CONFIRM:`", "escalated": "ESCALATED", "settled": "SETTLED",
            "sensitive": "src/secret/key.py", "closes": "closes: [12]"}[case]  # fmt: skip
     assert "D1" in problem and why in problem, problem
+    if case == "settled":
+        assert "no `- CONFIRM:` line" not in problem, problem
 
 
 def _closes_rows(root: Path) -> list[dict]:

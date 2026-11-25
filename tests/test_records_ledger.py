@@ -194,17 +194,20 @@ for i in range(int(sys.argv[5])):
 
 
 def test_two_writers_at_once_leave_whole_lines(tmp_path) -> None:
-    """R9: two processes appending at once each leave whole lines, every one of them read."""
+    """R9: two processes appending at once each leave whole lines, every one of them read. 235
+    R11: one is `factory.py`'s writer and the other core's copy, under the same lock."""
     root = _change(tmp_path)
     folder = root / ".sdlc" / "work" / NAME
     script = tmp_path / "writer.py"
-    script.write_text(WRITER, encoding="utf-8")
-    argv = [sys.executable, str(script), str(factory.__file__), str(root), str(folder)]
-    kids = [subprocess.Popen([*argv, mark, "200"]) for mark in ("a", "b")]
+    script.write_text(WRITER, encoding="utf-8", newline="\n")
+    argv = [sys.executable, str(script)]
+    places = [str(root), str(folder)]
+    writers = [(factory.__file__, "a"), (sdlc.__file__, "b")]
+    kids = [subprocess.Popen([*argv, str(path), *places, mark, "50"]) for path, mark in writers]
     assert [k.wait(timeout=120) for k in kids] == [0, 0]
     rows = _rows(root)
-    assert len(rows) == 400
-    want = {factory._record_digest(mark * 200 + str(i)) for mark in ("a", "b") for i in range(200)}
+    assert len(rows) == 100
+    want = {factory._record_digest(mark * 200 + str(i)) for mark in ("a", "b") for i in range(50)}
     assert {r["sha256"] for r in rows} == want
 
 

@@ -1587,10 +1587,12 @@ ONE_SEED = (
     f"## [{SEED}] [bug] The drafts list crashes\n\nSeverity: high\n\nIt crashes.\n"
 )
 PLAN = f"## Drafts crash\n\n- WAVE: {SEED} — tier 1 — it shares no file with the rest\n"
+# The option the builder recommends, which autopilot answers on its own.
+RECOMMENDED = "keep it"
 BUILDER_RAISES = (
     "Built it.\n\n"
-    "- DECISION: [blocking] Keep a crashed draft, or drop it? Recommend keep it.\n"
-    "  - OPTION: keep it — nothing lost; the list holds a broken entry\n"
+    f"- DECISION: [blocking] Keep a crashed draft, or drop it? Recommend {RECOMMENDED}.\n"
+    f"  - OPTION: {RECOMMENDED} — nothing lost; the list holds a broken entry\n"
     "  - OPTION: drop it — a clean list; the draft is gone\n"
     "  - WHY: the intent says nothing is lost\n\n"
     "## Evidence\n\n$ true\nexit: 0\n"
@@ -1674,7 +1676,8 @@ def test_autopilot_run_lands_a_seed_through_real_subprocesses(tmp_path, monkeypa
     intent = _git(root, "show", f"{last}^:.sdlc/work/{name}/intent.md")
     ledger = _git(root, "show", f"{last}^:.sdlc/work/{name}/decisions.md")
     assert re.search(r"^opened_by: autopilot$", intent, re.M), intent
-    assert "→ decided by autopilot: keep it" in ledger and " → decided: " not in ledger, ledger
+    assert f"{factory.DECIDED_AUTOPILOT}{RECOMMENDED}" in ledger, ledger
+    assert factory.DECIDED not in ledger, ledger
     agents = {c["agent"] for c in calls()}
     assert {"autopilot-planner", "intent-writer", "builder", "approver"} <= agents, agents
 
@@ -1960,6 +1963,14 @@ def test_the_planner_places_every_candidate(tmp_path) -> None:
     ]
     assert plan["leave"] == [{"seed": S3, "kind": "fixed", "why": "`src/logs.py` trims already"}]
     assert [g["risk"] for g in plan["groups"]] == ["The drafts list crashing loses work"]
+    # 235 R29: a LEAVE line before any group is read as any other.
+    first = f"- LEAVE: {S3} — fixed — `src/logs.py` trims already\n\n" + GOOD_PLAN.replace(
+        f"- LEAVE: {S3} — fixed — `src/logs.py` trims already\n", ""
+    )
+    assert first.index("- LEAVE:") < first.index("## ")
+    plan, why = ap.read_plan(tmp_path, _reply(tmp_path, first), found, 2, 2)
+    assert why is None, why
+    assert [e["seed"] for e in plan["leave"]] == [S3]
     empty = GOOD_PLAN.replace(f"- WAVE: {S1} — tier 1 —", f"- WAITS: {S1} —")
     plan, why = ap.read_plan(tmp_path, _reply(tmp_path, empty), found, 2, 2)
     assert why is None and plan["wave"] == [], "an empty wave is no WAVE line"
@@ -1980,6 +1991,10 @@ def test_the_planner_places_every_candidate(tmp_path) -> None:
         "not a candidate": GOOD_PLAN + "- LEAVE: 2026-01-01-9 — off-goal — not ours\n",
         "past the room": GOOD_PLAN.replace(f"- WAITS: {S2} —", f"- WAVE: {S2} — tier 1 —"),
         "NONE": "NONE\n",
+        "empty WAVE reason": GOOD_PLAN.replace(
+            f"tier 1 — first: `src/drafts.py` is shared with {S2}", "tier 1 —"),
+        "empty LEAVE reason": GOOD_PLAN.replace("— fixed — `src/logs.py` trims already",
+                                                "— fixed —"),
     }  # fmt: skip
     said = {"placed nowhere": f"placed in no line: {S2}", "placed twice": f"placed twice: {S2}",
             "outside a group": "outside a `## <risk>` group", "no tier": "has no `tier <1|2>`",
@@ -1987,7 +2002,9 @@ def test_the_planner_places_every_candidate(tmp_path) -> None:
             "no path": "names no repo path", "a path not there": "names no repo path",
             "a path outside": "names no repo path", "no kind": "needs a kind",
             "not a candidate": "not candidates: 2026-01-01-9",
-            "past the room": "past the room for 1", "NONE": f"placed in no line: {S1}"}  # fmt: skip
+            "past the room": "past the room for 1", "NONE": f"placed in no line: {S1}",
+            "empty WAVE reason": "gives no reason",
+            "empty LEAVE reason": "gives no reason"}  # fmt: skip
     for case, text in bad.items():
         level, room = (
             (1, 2) if case == "past the level" else (2, 1 if case == "past the room" else 2)

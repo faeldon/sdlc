@@ -315,7 +315,22 @@ def test_every_wait_names_its_preview(name: str) -> None:
     renders it, the skill asks the script's output as printed."""
     holds = _preview_holds(name)
     for word in PREVIEW_NAMES[name]:
-        assert word in holds, f"{name}: its preview names no {word!r}: {holds!r}"
+        assert _names(holds, word), f"{name}: its preview names no {word!r}: {holds!r}"
+
+
+def _names(text: str, word: str) -> bool:
+    """Whether `text` holds `word` whole, never inside a longer word (235 R20)."""
+    return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text) is not None
+
+
+@pytest.mark.portable
+def test_a_preview_word_matches_only_whole() -> None:
+    """235 R20: `path` is not named by "the paths shown", nor `tag` by "stage"."""
+    assert not _names("the paths shown", "path")
+    assert not _names("an xpath here", "path")
+    assert not _names("the stage", "tag")
+    assert _names("each path, then the tag.", "path") and _names("each path, then the tag.", "tag")
+    assert _names("its `Issue:` line", "`Issue:`")
 
 
 def test_retros_rating_has_no_preview() -> None:
@@ -2313,12 +2328,34 @@ def test_intent_proposes_an_origin() -> None:
     assert "`origin:` line" in steps["5"]
 
 
+# Every `Origin:` value a skill writes: `Origin: <word>`, or a `<…>` prompt's first word.
+ORIGIN_VALUE_RE = re.compile(r"Origin: (?:<\s*)?([\w-]+)")
+
+
 def test_idea_and_bug_offer_an_origin_line() -> None:
-    """R11: each entry shape holds `Origin: host`, only when the account says so, never `self`."""
+    """R11: each entry shape holds `Origin: host`, only when the account says so, never `self`.
+    235 R12: only an account of another repo gets the line, one found here gets none, and every
+    `Origin:` value the step writes is `host`."""
     for skill in ("idea", "bug"):
         step = _steps(skill)["3"]
         assert "Origin: host" in step, skill
         assert "Origin: self" not in _skill_text(ROOT / "skills" / skill / "SKILL.md"), skill
+        assert (
+            "Origin: <host, only when the person's account says it was found in another repo>"
+        ) in step, skill
+        assert re.search(r"found here gets no line", step), skill
+        values = ORIGIN_VALUE_RE.findall(step)
+        assert values and set(values) == {"host"}, (skill, values)
+
+
+def test_triage_files_a_host_issue_with_origin_host() -> None:
+    """235 R18: triage's entry shape offers `Origin:` only for an issue intake flags `from_host`,
+    and says the entry filed from one carries `Origin: host`."""
+    text = " ".join(_skill_text(ROOT / "skills" / "triage" / "SKILL.md").split())
+    assert "Origin: <host, only for an issue intake flags `from_host`>" in text
+    assert "flags `from_host` was filed upstream" in text
+    assert "the entry filed from it carries `Origin: host`" in text
+    assert set(ORIGIN_VALUE_RE.findall(text)) == {"host"}
 
 
 @pytest.mark.portable
@@ -2386,3 +2423,15 @@ def test_ship_s_context_pass_leaves_false_docs_to_the_docs_review() -> None:
     step3 = " ".join(text.split("## Step 3")[1].split("\n## ")[0].split())
     assert "the docs review in `docs.md`" in step3
     assert "its `sdlc:docs` reviewer answers the first" in step3
+
+
+def test_autopilot_single_quotes_the_goal() -> None:
+    """235 R7: a goal in the person's own words goes single-quoted, each `'` as `'\\''`, so `$`,
+    backticks and `"` in it stay literal, at the preview and again at `--begin`."""
+    text = (ROOT / "plugins" / "factory" / "skills" / "autopilot" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    steps = {p.split(None, 1)[0]: " ".join(p.split()) for p in text.split("\n## Step ")[1:]}
+    for n in ("1", "3"):
+        assert "single-quoted" in steps[n], n
+        assert "`'\\''`" in steps[n], n

@@ -1222,12 +1222,16 @@ def test_a_staged_path_the_replayed_commit_doesnt_own_is_refused(tmp_path, capsy
         stray = head_only
         _git(tree, "rm", "-q", stray)
     else:
-        stray = ".gitignore"
+        # 235 R8: not the `edit` case's file, so this case alone pins that a rename's old path is
+        # named when only its new path is the replayed commit's own.
+        stray = INBOX
         _git(tree, "mv", "-f", stray, "notes.txt")
     code, out = _run(capsys, factory.landing.cmd_resolve, tree, "002", True)
     assert code == 1 and out["state"] == "refused", out
     why = out["refusals"][0]
     assert stray in why and "outside its conflicted files" in why, why
+    if how == "mv":
+        assert "notes.txt" not in why, why
     assert not (folder / "runs" / "land-resolved").exists(), "no marker"
     assert factory._rebasing(tree), "the rebase is left under way"
     assert factory._conflicted(tree) == ["README.md"], "nothing staged"
@@ -2389,6 +2393,9 @@ READ_ONLY_REFUSALS = [
     ("grep -ddereference-recurse keep .", "-ddereference-recurse"),
     ("grep -d dereference-recurse keep .", "dereference-recurse"),
     ("grep -rd dereference-recurse keep .", "dereference-recurse"),
+    # 235 R19: the word as grep's pattern, not `-d`'s value, is refused too: the trade-off D2
+    # accepts, since telling the two apart means parsing grep's options.
+    ("grep -n dereference-recurse README.md", "dereference-recurse"),
     # 212: ugrep's options that run a program, write a file or read options from one.
     ("grep --filter='txt:touch ran' -q keep README.md", "--filter"),
     ("grep --pager=less keep README.md", "--pager"),

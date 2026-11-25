@@ -6,6 +6,8 @@ plugin is cached on its own. The copies are pinned to `factory.py` here.
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -786,6 +788,55 @@ def test_the_factorys_hand_build_is_sdlcs(repo) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "built")
     assert factory.hand_build(repo, "main") == sdlc.hand_build(repo, "main")
+
+
+def _body(path: Path, name: str) -> str:
+    """Top-level function `name` in `path`, docstring dropped, as `test_windows.py` compares."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    (fn,) = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name]
+    if ast.get_docstring(fn) is not None:
+        fn.body = fn.body[1:]
+    return ast.unparse(fn)
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("name", ["_hand_digests", "_hand_hash"])
+def test_the_factorys_hand_digests_are_sdlcs_word_for_word(name: str) -> None:
+    """235 R21: `factory.py` can't import `sdlc.py`, so its copies are pinned body for body."""
+    assert _body(Path(factory.__file__), name) == _body(Path(sdlc.__file__), name)
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+@pytest.mark.parametrize("mod", [sdlc, factory], ids=["sdlc", "factory"])
+def test_a_path_no_line_can_hold_is_hashed_by_its_bytes(tmp_path: Path, mod) -> None:
+    """235 R23: a path holding a newline can't go on `--stdin-paths`: it is the sha256 of its
+    bytes, beside the blob id of a plain path. Not portable: Windows has no such path."""
+    _git(tmp_path, "init", "-q")
+    _write(tmp_path / "a\nb.txt", "odd\n")
+    _write(tmp_path / "plain.txt", "plain\n")
+    got = mod._hand_digests(tmp_path, ["a\nb.txt", "plain.txt"])
+    assert got["a\nb.txt"] == _sha(b"odd\n")
+    assert got["plain.txt"] == _git(tmp_path, "hash-object", "plain.txt")
+
+
+@pytest.mark.portable
+@pytest.mark.parametrize("mod", [sdlc, factory], ids=["sdlc", "factory"])
+def test_a_failed_hash_object_falls_back_to_the_bytes(tmp_path: Path, monkeypatch, mod) -> None:
+    """235 R23: with `hash-object` failing, every present path is the sha256 of its bytes, and a
+    deleted one stays `deleted`."""
+    (tmp_path / "one.txt").write_bytes(b"one\r\n")
+    (tmp_path / "two.txt").write_bytes(b"two\n")
+
+    def failing(argv, *args, **kwargs):
+        assert "hash-object" in argv, argv
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="fatal")
+
+    monkeypatch.setattr(mod.subprocess, "run", failing)
+    got = mod._hand_digests(tmp_path, ["one.txt", "two.txt", "gone.txt"])
+    assert got == {"one.txt": _sha(b"one\r\n"), "two.txt": _sha(b"two\n"), "gone.txt": "deleted"}
 
 
 # ---------------------------------------------------------------- the records ledger (199)
